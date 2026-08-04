@@ -39,3 +39,7 @@ volt_share_page.png
 .env
 *.env
 !*.example.env
+
+# ---- local sync helpers (per-machine, not part of the project) ----
+publish.sh
+*.bundle
