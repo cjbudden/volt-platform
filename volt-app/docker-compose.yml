@@ -1,0 +1,34 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: volt
+      POSTGRES_PASSWORD: volt
+      POSTGRES_DB: volt
+    ports:
+      - "5432:5432"
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d   # auto-applies 0001_init.sql on first boot
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U volt"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://volt:volt@db:5432/volt
+      JWT_ACCESS_SECRET: dev-access
+      JWT_REFRESH_SECRET: dev-refresh
+      PORT: "8080"
+      CORS_ORIGIN: http://localhost:5173
+    ports:
+      - "8080:8080"
+
+volumes:
+  dbdata:

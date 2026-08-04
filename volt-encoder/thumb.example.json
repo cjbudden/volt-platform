@@ -1,0 +1,20 @@
+{
+  "_comment": "Thumbnailer job. Runs on event end / recording completion as a CPU-only task (override the image command: python3 /app/bin/thumbnailer.py, THUMB_CONFIG=/job/thumb.json). Reads the hi-res source from S3, writes poster + storyboard sheets + WebVTT to out_s3, and registers the keys with the control plane. No GPU, no re-encode.",
+
+  "target": "recording",
+  "id": "11111111-0000-0000-0000-000000000001",
+  "source": "s3://volt-live-origin/rtm/news/2026-07-19/1080p/index.m3u8",
+  "duration_sec": 86400,
+
+  "out_s3": "s3://volt-live-origin/rtm/news/2026-07-19/thumbs",
+  "grid": { "cols": 5, "rows": 5 },
+  "interval_sec": 10,
+  "thumb_width": 320,
+  "aspect": [16, 9],
+  "poster_at_sec": 30,
+
+  "report": {
+    "url": "https://api.ols.internal/api/media/thumbnails",
+    "token": "INGEST_TOKEN"
+  }
+}

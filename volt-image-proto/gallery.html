@@ -1,0 +1,46 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Volt — on-the-fly image service (prototype)</title>
+<style>
+ :root{--bg:#0b0c10;--card:#14161d;--ink:#e7e9ee;--mut:#98a0ad;--line:#242833;--brand:#2563eb}
+ *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,system-ui,Segoe UI,Roboto,sans-serif}
+ .wrap{max-width:1180px;margin:0 auto;padding:22px}
+ h1{font-size:18px;margin:0 0 2px}h1 span{color:#818cf8}.sub{color:var(--mut);font-size:12px;margin-bottom:16px}
+ .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}@media(max-width:820px){.grid{grid-template-columns:1fr 1fr}}
+ .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+ .card img{width:100%;background:#000;border-radius:8px;display:block;border:1px solid #000}
+ .t{font-weight:700;margin:8px 0 2px}
+ code{color:#8ab4ff;font-size:11.5px;word-break:break-all}
+ .meta{color:var(--mut);font-size:11px;margin-top:4px}
+ .hit{color:#22c55e}.miss{color:#f59e0b}
+</style></head><body>
+<div class=wrap>
+ <h1><span>⚡</span> Volt — on-the-fly image service <span style="color:#98a0ad;font-weight:400;font-size:12px">(prototype · sharp)</span></h1>
+ <div class=sub>One source (2400×1350). Every image below is generated on request from the URL and cached. Grammar: <code>/{fit}/{WxH}/filter(...)/{path}</code> — width or height 0 = keep aspect.</div>
+ <div class=grid id=grid></div>
+</div>
+<script>
+const items=[
+ ['fit-in / 1920x0 (keep aspect)','/unsafe/fit-in/1920x0/live_channel/TV1.png'],
+ ['fit-in / 1920x0 / sharpen:100','/unsafe/fit-in/1920x0/filter(sharpen:100)/live_channel/TV1.png'],
+ ['fit-in / 0x360 (from height)','/unsafe/fit-in/0x360/live_channel/TV1.png'],
+ ['fill / 500x500 · focus center','/unsafe/fill/500x500/live_channel/TV1.png'],
+ ['fill / 500x500 · focus top-right','/unsafe/fill/500x500/filter(focus:top-right)/live_channel/TV1.png'],
+ ['fill / 500x500 · focus smart','/unsafe/fill/500x500/filter(focus:smart)/live_channel/TV1.png'],
+ ['stretch / 500x500 (distorts)','/unsafe/stretch/500x500/live_channel/TV1.png'],
+ ['fill / 640x360 · grayscale + webp','/unsafe/fill/640x360/filter(grayscale,format:webp)/live_channel/TV1.png'],
+ ['fit-in / 640x360 · blur:6','/unsafe/fit-in/640x360/filter(blur:6)/live_channel/TV1.png'],
+];
+const grid=document.getElementById('grid');
+for(const [title,url] of items){
+ const card=document.createElement('div');card.className='card';
+ card.innerHTML=`<img src="${url}" alt=""><div class=t>${title}</div><code>${url}</code><div class=meta" data-m>…</div>`;
+ grid.appendChild(card);
+ // fetch headers to show cache + size + render time
+ fetch(url).then(async r=>{
+   const m=card.querySelector('[data-m]');
+   const cache=r.headers.get('x-cache')||'?';
+   m.innerHTML=`<span class="${cache==='HIT'?'hit':'miss'}">${cache}</span> · ${r.headers.get('x-image-size')||''} · ${r.headers.get('x-render-ms')||'?'} ms · ${(r.headers.get('content-type')||'')}`;
+ });
+}
+</script>
+</body></html>

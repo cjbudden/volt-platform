@@ -1,0 +1,122 @@
+{
+  "updated": "2026-08-04",
+  "features": [
+    {
+      "id": "image-resize",
+      "name": "Image resize service",
+      "summary": "On-the-fly resize / crop / filter by URL, cached. fit-in / fill / stretch, focus incl. smart, sharpen / blur / grayscale / webp / avif, signed URLs.",
+      "status": "ready_to_test",
+      "test": { "how": "Open the test view, drop in your own logo/image and try fit / size / focus / filters, or attach an image in chat for true sharp-service renders.", "artifact": "volt-image-api-validator" },
+      "checks": "14/14 automated contract checks pass",
+      "feedback": []
+    },
+    {
+      "id": "frame-access",
+      "name": "Frame-accurate scrub & clip",
+      "summary": "Pull any frame on demand from the chunked origin, scrub via sprite + I-frame trick-play, cut a frame-accurate clip. No proxies.",
+      "status": "ready_to_test",
+      "test": { "how": "Run the prototype (volt-frame-proto.zip): npm install → node test.mjs → node server.mjs → open /scrub. 15/15 assertions.", "artifact": null },
+      "checks": "15/15 assertions (frame-accuracy MAD 0.02, exact clip, sprite, trick-play)",
+      "feedback": []
+    },
+    {
+      "id": "share-page",
+      "name": "Secure share page",
+      "summary": "Time-boxed standalone preview link for one asset. Revoke, expiry, max-views, optional PIN, watermarked preview, allow-download, notify-on-open.",
+      "status": "ready_to_test",
+      "test": { "how": "Say the word and I'll spin up a live sample share link + page from the local console so you can click expiry / PIN / revoke. Backend is 20/20 e2e.", "artifact": null },
+      "checks": "20/20 e2e (isolation, PIN, revoke→410, expiry→410, download gating)",
+      "feedback": []
+    },
+    {
+      "id": "captions",
+      "name": "Live captions + translation",
+      "summary": "Optional per account. Self-hosted whisper + NLLB (en↔ms/zh/ta and more) or Gladia. Whisper runs as a separate GPU add-on only when needed.",
+      "status": "ready_to_test",
+      "test": { "how": "Attach a short audio/video clip in chat and I'll caption + translate it and return the WebVTT tracks, or run the encoder unit tests.", "artifact": null },
+      "checks": "33 + 9 + 6 tests; proven end-to-end espeak → whisper → NLLB",
+      "feedback": []
+    },
+    {
+      "id": "console",
+      "name": "Local test console (login + all tabs)",
+      "summary": "Browser console over the live API: overview, channels (start/stop), events, EPG, VOD, analytics, tickets, notifications + SaaS admin tab.",
+      "status": "ready_to_test",
+      "test": { "how": "In volt-app: ./run-local.sh, open /console, sign in (admin@rtm.example / saas@volt.example, pw volt1234). Flip between logins to see tenant isolation.", "artifact": null },
+      "checks": "verified end-to-end in browser",
+      "feedback": []
+    },
+    {
+      "id": "edit-audit",
+      "name": "Record edit API + audit trail",
+      "summary": "Edit channels/events/schemas with PATCH (send only changed fields; null clears), optimistic concurrency (If-Match/version, 409 on stale write), and a full audit trail: who created/changed each record, field-level diffs, and per-record history.",
+      "status": "ready_to_test",
+      "test": { "how": "PATCH /api/channels/:id (or events / metadata-schemas), then GET /api/channels/:id/history. Try a stale If-Match to see the 409. Postman collection covers it; or attach me a scenario and I'll run it.", "artifact": null },
+      "checks": "23 e2e (partial patch, version bump, 409 conflict, null-clear, create/update/delete audit, history) + verify.sh 38/38",
+      "feedback": []
+    },
+    {
+      "id": "live-updates",
+      "name": "Live updates (admin)",
+      "summary": "When one admin changes a field, others viewing the same record see it update live, over the existing SSE hub. Public front-end live kept minimal (EPG served from CDN + client boundary advance) so 500k viewers add no per-viewer load.",
+      "status": "building",
+      "test": { "how": "Designed, builds on the edit+audit foundation just shipped. Not testable yet.", "artifact": null },
+      "checks": "design agreed; admin SSE + Postgres NOTIFY",
+      "feedback": []
+    },
+    {
+      "id": "epg",
+      "name": "EPG & scheduling",
+      "summary": "Programme store, RRULE recurrence, materialised instances, now/next, conflict detection.",
+      "status": "in_review",
+      "test": { "how": "Exercisable via the console EPG tab and /api/epg. 7 pure + 6 HTTP tests.", "artifact": null },
+      "checks": "13 tests pass",
+      "feedback": []
+    },
+    {
+      "id": "analytics",
+      "name": "Analytics & reporting",
+      "summary": "Server-side audience / QoS / realtime from CDN logs; by-app + device; realtime concurrency.",
+      "status": "in_review",
+      "test": { "how": "View in the console Analytics tab (seeded data) or hit /api/analytics/*.", "artifact": null },
+      "checks": "6 tests pass",
+      "feedback": []
+    },
+    {
+      "id": "saas-admin",
+      "name": "SaaS admin dashboard",
+      "summary": "Cross-tenant overview: active servers, projected instances, channels, viewers, tickets; MFA 2-step login; impersonation (deferred).",
+      "status": "in_review",
+      "test": { "how": "Sign in to the console as saas@volt.example to see the SaaS Admin tab across tenants.", "artifact": null },
+      "checks": "auth + dashboard tests pass",
+      "feedback": []
+    },
+    {
+      "id": "social-publish",
+      "name": "Publish a clip to social media",
+      "summary": "Push a clip to YouTube / Facebook / X / TikTok / Dailymotion. Data model + APIs exist; real upload adapters pending.",
+      "status": "building",
+      "test": { "how": "Not testable yet — needs each platform's OAuth app credentials from you before the upload adapters go live.", "artifact": null },
+      "checks": "foundation built; adapters stubbed",
+      "feedback": []
+    },
+    {
+      "id": "file-manager",
+      "name": "File manager",
+      "summary": "Upload / organise watermarks, slates, logos, source media. S3-backed with direct-to-S3 upload.",
+      "status": "building",
+      "test": { "how": "Designed only — see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.", "artifact": null },
+      "checks": "design complete",
+      "feedback": []
+    },
+    {
+      "id": "watchfolder",
+      "name": "Watchfolder ingest",
+      "summary": "Assign a folder or S3 bucket/prefix as an auto ingest source; new files become assets / VOD / slates / playlist items.",
+      "status": "building",
+      "test": { "how": "Designed only — see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.", "artifact": null },
+      "checks": "design complete",
+      "feedback": []
+    }
+  ]
+}

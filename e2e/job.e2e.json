@@ -1,0 +1,21 @@
+{
+  "_comment": "E2E job: package_only, 2 pre-encoded renditions pushed by the source container over SRT. The encoder relays them to the bus, Shaka packages CMAF -> HLS+DASH into MinIO, and status is reported to the control plane. channel_id matches seed.sql.",
+  "channel_id": "00000000-0000-0000-0000-0000000000c1",
+  "workflow": "package_only",
+  "segment_seconds": 2,
+  "fps": 25,
+  "dvr_seconds": 60,
+  "upload_interval_seconds": 2,
+
+  "inputs": [
+    { "rendition_label": "480p", "role": "primary", "protocol": "srt", "url": "srt://source:9000", "has_audio": true },
+    { "rendition_label": "240p", "role": "primary", "protocol": "srt", "url": "srt://source:9001" }
+  ],
+
+  "s3": { "bucket": "volt-e2e", "prefix": "e2e/00000000-0000-0000-0000-0000000000c1" },
+
+  "status_report": {
+    "url": "http://api:8080/api/streams/00000000-0000-0000-0000-0000000000c1/report",
+    "token": "e2e-ingest-token"
+  }
+}

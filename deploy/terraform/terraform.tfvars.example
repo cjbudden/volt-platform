@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars and adjust. Anything left out uses the defaults in
+# variables.tf. Secrets left blank are generated and stored in Secrets Manager.
+
+project = "volt"
+env     = "staging"
+region  = "us-east-1"
+
+# Encoder nodes. For GPU transcode density, use a g-family type AND switch the
+# ECS AMI in ecs_cluster.tf to the GPU-recommended parameter.
+# encoder_instance_types = ["g4dn.xlarge"]
+
+spot_max     = 6
+ondemand_min = 1   # base=1 fallback for Spot interruptions
+ondemand_max = 2
+
+db_instance_class = "db.t4g.medium"
+db_multi_az       = false   # true for prod
+
+control_plane_desired   = 2
+control_plane_image_tag = "latest"

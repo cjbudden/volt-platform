@@ -1,0 +1,99 @@
+# Volt local end-to-end harness — proves the CORE ENCODING + control plane + admin
+# data path on a laptop, no cloud and no GPU.
+#
+#   FFmpeg test-pattern ladder ──SRT──▶ encoder ──CMAF/HLS/DASH──▶ MinIO (S3)
+#                                          │
+#                                          └── status/events ──▶ control-plane API
+#
+# MinIO stands in for S3 (the encoder writes exactly as it would to real S3);
+# the control plane runs against Postgres; a fixed account/channel is seeded so
+# the run is deterministic. Bring it up with ./run-e2e.sh (which also asserts).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: volt
+      POSTGRES_PASSWORD: volt
+      POSTGRES_DB: volt
+    volumes:
+      # migrations + seed run alphabetically on first init
+      - ../volt-app/migrations/0001_init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U volt"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: volt
+      MINIO_ROOT_PASSWORD: voltsecret
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # console
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # one-shot: create the origin bucket
+  createbucket:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 volt voltsecret; do sleep 1; done;
+      mc mb -p local/volt-e2e || true;
+      mc anonymous set download local/volt-e2e || true;
+      echo bucket-ready"
+
+  api:
+    build: ../volt-app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://volt:volt@db:5432/volt
+      JWT_ACCESS_SECRET: e2e-access
+      JWT_REFRESH_SECRET: e2e-refresh
+      INGEST_TOKEN: e2e-ingest-token
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+
+  # the client: a test-pattern ABR ladder pushed over SRT (listener mode)
+  source:
+    build: ../volt-encoder            # reuse the image (has ffmpeg + libsrt)
+    entrypoint: ["/bin/bash", "/src/source-ladder.sh"]
+    volumes:
+      - ./source-ladder.sh:/src/source-ladder.sh:ro
+    expose:
+      - "9000"
+      - "9001"
+
+  # the Volt encoder/packager under test
+  encoder:
+    build: ../volt-encoder
+    depends_on:
+      createbucket:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+      source:
+        condition: service_started
+    environment:
+      WORK_DIR: /work
+      JOB_CONFIG: /job/config.json
+      AWS_ACCESS_KEY_ID: volt
+      AWS_SECRET_ACCESS_KEY: voltsecret
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://minio:9000   # <-- points the uploader at MinIO
+    volumes:
+      - ./job.e2e.json:/job/config.json:ro
+    restart: on-failure                     # SRT caller retries until source is up

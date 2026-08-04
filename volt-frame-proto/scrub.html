@@ -1,0 +1,115 @@
+<!doctype html><html lang=en><head>
+<meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Volt — frame-addressable scrub (prototype)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js"></script>
+<style>
+ :root{--bg:#0b0c10;--card:#14161d;--ink:#e7e9ee;--mut:#98a0ad;--line:#242833;--brand:#2563eb}
+ *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,system-ui,Segoe UI,Roboto,sans-serif}
+ .wrap{max-width:1080px;margin:0 auto;padding:22px}
+ h1{font-size:18px;margin:0 0 2px}h1 span{color:#818cf8}.sub{color:var(--mut);font-size:12px;margin-bottom:16px}
+ .cols{display:grid;grid-template-columns:1fr 380px;gap:18px}@media(max-width:860px){.cols{grid-template-columns:1fr}}
+ .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+ video{width:100%;border-radius:10px;background:#000;display:block}
+ .frameimg{width:100%;border-radius:10px;background:#000;display:block;aspect-ratio:16/9;object-fit:contain}
+ .scrubwrap{position:relative;margin:14px 0 4px}
+ input[type=range]{width:100%}
+ .thumb{position:absolute;bottom:26px;width:240px;height:135px;border:2px solid var(--brand);border-radius:8px;background-repeat:no-repeat;box-shadow:0 6px 20px #000a;display:none;pointer-events:none}
+ .thumb b{position:absolute;left:0;right:0;bottom:-22px;text-align:center;font-size:11px;color:var(--mut)}
+ .lbl{color:var(--mut);font-size:12px}.big{font-size:22px;font-weight:700}
+ .row{display:flex;gap:8px;align-items:center;margin:8px 0}
+ button,.btn{background:var(--brand);border:0;color:#fff;border-radius:9px;padding:9px 13px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-block}
+ button.ghost{background:#10131a;border:1px solid var(--line)}
+ input[type=number]{width:88px;background:#10131a;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px}
+ code{color:#8ab4ff}
+ .pill{display:inline-block;background:#10131a;border:1px solid var(--line);border-radius:20px;padding:3px 10px;color:var(--mut);font-size:12px;margin-right:6px}
+</style></head><body>
+<div class=wrap>
+ <h1><span>⚡</span> Volt — frame-addressable scrub <span style="color:#98a0ad;font-weight:400;font-size:12px">(prototype)</span></h1>
+ <div class=sub>Every frame is pulled on demand from the chunked S3-style origin. No per-frame files, no proxies. Standards used: HLS segments + I-frame trick-play playlist + WebVTT thumbnail sprite + JIT decode/clip.</div>
+ <div class=cols>
+  <div>
+   <div class=card>
+    <div class=lbl>Live preview (HLS)</div>
+    <video id=v controls muted></video>
+    <div class=scrubwrap>
+     <input id=scr type=range min=0 max=0 value=0 step=1>
+     <div id=th class=thumb><b id=thlbl></b></div>
+    </div>
+    <div class=row>
+     <span class=pill id=meta>…</span>
+     <span class=pill>sprite scrub</span>
+     <span class=pill>I-frame trick-play: <code>/api/iframes.m3u8</code></span>
+    </div>
+   </div>
+  </div>
+  <div>
+   <div class=card>
+    <div class=lbl>Frame pulled just-in-time</div>
+    <div class=big id=fnum>frame 0</div>
+    <img id=fimg class=frameimg alt="">
+    <div class=row>
+     <button class=ghost id=prev>◀ frame</button>
+     <button class=ghost id=next>frame ▶</button>
+     <span class=lbl id=furl></span>
+    </div>
+   </div>
+   <div class=card style="margin-top:14px">
+    <div class=lbl>Cut a clip (frame-accurate, JIT from segments)</div>
+    <div class=row>in <input id=in type=number value=110> out <input id=out type=number value=185>
+     <button id=cut>Cut</button></div>
+    <div id=clipout class=lbl></div>
+   </div>
+  </div>
+ </div>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+let META={fps:25,totalFrames:1}, sprite='/sprite.jpg', cues=[];
+async function boot(){
+ META=await (await fetch('/api/meta')).json();
+ $('#meta').textContent=`${META.totalFrames} frames · ${META.fps}fps · ${META.durationSec.toFixed(1)}s`;
+ $('#scr').max=META.totalFrames-1;
+ // load sprite VTT for hover thumbs
+ const vtt=await (await fetch('/sprite.vtt')).text();
+ cues=parseVtt(vtt);
+ setFrame(0);
+ // HLS preview
+ const v=$('#v');
+ if(window.Hls&&Hls.isSupported()){const h=new Hls();h.loadSource('/media/index.m3u8');h.attachMedia(v);}
+ else v.src='/media/index.m3u8';
+}
+function parseVtt(t){const out=[];const b=t.split(/\n\n+/);for(const blk of b){const m=blk.match(/(\d\d:\d\d:\d\d\.\d\d\d) --> (\d\d:\d\d:\d\d\.\d\d\d)\n(.+)/);if(m){out.push({a:hms(m[1]),b:hms(m[2]),xywh:m[3].split('#xywh=')[1].split(',').map(Number)});}}return out;}
+function hms(s){const[h,m,rest]=s.split(':');return (+h)*3600+(+m)*60+parseFloat(rest);}
+function setFrame(n){
+ n=Math.max(0,Math.min(META.totalFrames-1,n|0));
+ $('#scr').value=n;$('#fnum').textContent='frame '+n+'  ·  '+(n/META.fps).toFixed(3)+'s';
+ $('#fimg').src='/api/frame?n='+n+'&w=640';
+ $('#furl').innerHTML='<code>/api/frame?n='+n+'</code>';
+}
+$('#scr').addEventListener('input',e=>{
+ const n=+e.target.value;showThumb(n);
+});
+$('#scr').addEventListener('change',e=>{hideThumb();setFrame(+e.target.value);});
+function showThumb(n){
+ const t=n/META.fps;const cue=cues.find(c=>t>=c.a&&t<c.b)||cues[cues.length-1];if(!cue)return;
+ const th=$('#th');const[x,y,w,h]=cue.xywh;
+ th.style.display='block';
+ th.style.backgroundImage=`url(${sprite})`;
+ th.style.backgroundPosition=`-${x}px -${y}px`;
+ th.style.width=w+'px';th.style.height=h+'px';
+ const pct=n/(META.totalFrames-1);
+ th.style.left=`calc(${pct*100}% - ${w/2}px)`;
+ $('#thlbl').textContent='frame '+n;
+}
+function hideThumb(){$('#th').style.display='none';}
+$('#prev').onclick=()=>setFrame(+$('#scr').value-1);
+$('#next').onclick=()=>setFrame(+$('#scr').value+1);
+$('#cut').onclick=async()=>{
+ const inN=+$('#in').value,outN=+$('#out').value;
+ $('#clipout').textContent='rendering…';
+ const r=await fetch('/api/clip?in='+inN+'&out='+outN);const j=await r.json();
+ $('#clipout').innerHTML=`clip <code>${j.frames}</code> frames (${(j.frames/META.fps).toFixed(2)}s) · <a class=btn href="${j.url}" target=_blank>open clip</a>`;
+};
+boot();
+</script>
+</body></html>

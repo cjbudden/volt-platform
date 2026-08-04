@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Volt Streaming — Console</title>
+<style>
+ :root{--bg:#0b0c10;--panel:#14161d;--ink:#e7e9ee;--mut:#98a0ad;--line:#242833;--accent:#818cf8;--green:#16a34a;--red:#dc2626;--amber:#d97706}
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,system-ui,Segoe UI,Roboto,sans-serif}
+ a{color:var(--accent)}
+ .brand{font-weight:700} .brand span{color:var(--accent)}
+ header{display:flex;align-items:center;gap:16px;padding:12px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#0b0c10ee;backdrop-filter:blur(6px);z-index:5}
+ header .who{margin-left:auto;color:var(--mut);font-size:12px}
+ button{cursor:pointer;border:1px solid var(--line);background:#10131a;color:var(--ink);padding:6px 12px;border-radius:7px;font-size:13px}
+ button.primary{background:var(--accent);border-color:var(--accent);color:#0b0c10;font-weight:600}
+ button:hover{border-color:var(--accent)}
+ input,select{background:#0f1116;border:1px solid var(--line);border-radius:7px;color:var(--ink);padding:8px 10px;font-size:13px}
+ nav{display:flex;gap:6px;flex-wrap:wrap;padding:10px 20px;border-bottom:1px solid var(--line)}
+ nav button.active{background:var(--accent);border-color:var(--accent);color:#0b0c10;font-weight:600}
+ main{max-width:1100px;margin:0 auto;padding:18px 20px 80px}
+ .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+ h2{font-size:15px;margin:0 0 10px} h3{font-size:13px;color:var(--mut);margin:14px 0 6px;text-transform:uppercase;letter-spacing:.04em}
+ table{width:100%;border-collapse:collapse;font-size:13px}
+ th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+ th{color:var(--mut);font-weight:600;font-size:11px;text-transform:uppercase}
+ .pill{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:600}
+ .live{background:var(--green);color:#fff}.down{background:var(--red);color:#fff}.warn{background:var(--amber);color:#fff}.mut{background:#2a2f3a;color:var(--mut)}
+ .kpi{display:flex;gap:12px;flex-wrap:wrap}
+ .kpi .box{flex:1;min-width:130px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+ .kpi .n{font-size:26px;font-weight:700} .kpi .l{color:var(--mut);font-size:12px}
+ pre{background:#0c0f16;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:12px}
+ .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+ .err{color:var(--red);font-size:13px} .muted{color:var(--mut)}
+ #login{max-width:360px;margin:12vh auto;text-align:center}
+ #login input{width:100%;margin:6px 0}
+ .hide{display:none}
+</style>
+</head>
+<body>
+<div id="login" class="card">
+  <div class="brand" style="font-size:20px;margin-bottom:6px"><span>⚡</span> Volt <b>Streaming</b></div>
+  <div class="muted" style="margin-bottom:14px">Test console</div>
+  <input id="email" placeholder="email" value="admin@rtm.example" />
+  <input id="password" type="password" placeholder="password" value="volt1234" />
+  <button class="primary" style="width:100%;margin-top:8px" onclick="login()">Sign in</button>
+  <div id="loginErr" class="err" style="margin-top:8px"></div>
+  <div class="muted" style="margin-top:14px;font-size:12px">Seeded logins are printed by <code>run-local.sh</code>.</div>
+</div>
+
+<div id="app" class="hide">
+  <header>
+    <div class="brand" style="font-size:16px"><span>⚡</span> Volt <b>Streaming</b></div>
+    <div class="who" id="who"></div>
+    <button onclick="logout()">Sign out</button>
+  </header>
+  <nav id="tabs"></nav>
+  <main id="view"></main>
+</div>
+
+<script>
+const API = location.origin;
+let TOKEN = null, IS_PLATFORM = false, ME = {};
+const $ = (s,el=document)=>el.querySelector(s);
+const el = (h)=>{const d=document.createElement('div');d.innerHTML=h.trim();return d.firstChild;};
+const esc = (s)=> String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function api(path, opts={}){
+  const r = await fetch(API+path, {...opts, headers:{'Content-Type':'application/json', ...(TOKEN?{Authorization:'Bearer '+TOKEN}:{}), ...(opts.headers||{})}});
+  const txt = await r.text(); let body; try{body=JSON.parse(txt)}catch{body=txt}
+  if(!r.ok) throw new Error((body&&body.error)||r.status+' '+r.statusText);
+  return body;
+}
+
+async function login(){
+  $('#loginErr').textContent='';
+  try{
+    const r = await api('/api/auth/login',{method:'POST',body:JSON.stringify({email:$('#email').value,password:$('#password').value})});
+    TOKEN = r.access;
+    ME = JSON.parse(atob(TOKEN.split('.')[1]));
+    try{ await api('/api/platform/overview'); IS_PLATFORM=true; }catch{ IS_PLATFORM=false; }
+    $('#login').classList.add('hide'); $('#app').classList.remove('hide');
+    $('#who').textContent = $('#email').value + '  ·  account '+ME.account_id.slice(0,8) + (IS_PLATFORM?'  ·  SaaS admin':'');
+    buildTabs(); go(IS_PLATFORM?'saas':'overview');
+  }catch(e){ $('#loginErr').textContent = e.message; }
+}
+function logout(){ TOKEN=null; location.reload(); }
+
+const TABS = [
+  ['overview','Overview'],['channels','Channels'],['events','Events'],['epg','EPG'],
+  ['vod','VOD'],['analytics','Analytics'],['tickets','Tickets'],['notifications','Notifications'],
+];
+function buildTabs(){
+  const nav = $('#tabs'); nav.innerHTML='';
+  const tabs = IS_PLATFORM ? [['saas','SaaS Admin'],...TABS] : TABS;
+  tabs.forEach(([id,label])=>{ const b=el('<button data-t="'+id+'">'+label+'</button>'); b.onclick=()=>go(id); nav.appendChild(b); });
+}
+function setActive(id){ document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('active',b.dataset.t===id)); }
+
+async function go(tab){
+  setActive(tab); const v=$('#view'); v.innerHTML='<div class="muted">Loading…</div>';
+  try{ await VIEWS[tab](v); }catch(e){ v.innerHTML='<div class="card err">'+esc(e.message)+'</div>'; }
+}
+
+const statusPill = s => s==='live'?'<span class="pill live">LIVE</span>':s==='error'?'<span class="pill down">ERROR</span>':'<span class="pill mut">'+esc(s)+'</span>';
+
+const VIEWS = {
+  async overview(v){
+    const [status, rt] = await Promise.all([api('/api/status').catch(()=>[]), api('/api/analytics/realtime').catch(()=>({total_concurrent:0,streams:[]}))]);
+    const chans = await api('/api/channels');
+    const live = chans.filter(c=>c.status==='live').length;
+    v.innerHTML = `
+      <div class="kpi">
+        <div class="box"><div class="n">${chans.length}</div><div class="l">Channels</div></div>
+        <div class="box"><div class="n">${live}</div><div class="l">Live now</div></div>
+        <div class="box"><div class="n">${rt.total_concurrent||0}</div><div class="l">Active viewers</div></div>
+        <div class="box"><div class="n">${(status||[]).length}</div><div class="l">Streams reporting</div></div>
+      </div>
+      <div class="card"><h2>Live status</h2><table><thead><tr><th>Stream</th><th>Output</th><th>Source</th><th>Fallback</th></tr></thead><tbody>
+      ${(status||[]).map(s=>`<tr><td>${esc(s.channel_id||s.event_id||'')}</td><td>${s.output_available?'<span class="pill live">AVAILABLE</span>':'<span class="pill down">DOWN</span>'}</td><td>${esc(s.active_source||'-')}</td><td>${s.fallback_in_use?'<span class="pill warn">FALLBACK</span>':'<span class="pill mut">direct</span>'}</td></tr>`).join('')||'<tr><td colspan=4 class="muted">No live status yet — start a channel.</td></tr>'}
+      </tbody></table></div>`;
+  },
+  async channels(v){
+    const chans = await api('/api/channels');
+    v.innerHTML = `<div class="card"><h2>Channels</h2><table><thead><tr><th>Name</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+      ${chans.map(c=>`<tr><td>${esc(c.name)}</td><td>${statusPill(c.status)}</td>
+        <td><button data-id="${c.id}" data-act="start">Start</button>
+            <button data-id="${c.id}" data-act="stop">Stop</button></td></tr>`).join('')
+        || '<tr><td colspan=3 class="muted">No channels.</td></tr>'}
+      </tbody></table></div>`;
+    v.querySelectorAll('button[data-act]').forEach(b=>{ b.onclick=async()=>{
+      b.disabled=true; await api('/api/channels/'+b.dataset.id+'/'+b.dataset.act,{method:'POST',body:'{}'}); go('channels');
+    };});
+  },
+  async events(v){
+    const ev = await api('/api/events');
+    v.innerHTML = `<div class="card"><h2>Events</h2><table><thead><tr><th>Name</th><th>Start</th><th>End</th><th>Status</th></tr></thead><tbody>
+      ${ev.map(e=>`<tr><td>${esc(e.name)}</td><td>${esc((e.scheduled_start||'').slice(0,16).replace('T',' '))}</td><td>${esc((e.scheduled_end||'').slice(0,16).replace('T',' '))}</td><td>${statusPill(e.status)}</td></tr>`).join('')||'<tr><td colspan=4 class="muted">No events.</td></tr>'}
+      </tbody></table></div>`;
+  },
+  async epg(v){
+    const chans = await api('/api/channels');
+    v.innerHTML = `<div class="card"><h2>EPG — now / next</h2><div class="row"><select id="epgch">${chans.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div id="nn"></div></div>`;
+    const load=async()=>{ const id=$('#epgch',v).value; const nn=await api('/api/epg/now-next?channelId='+id); const win=await api('/api/epg?channelId='+id);
+      $('#nn',v).innerHTML = `<h3>Now</h3>${nn.now?esc(nn.now.title)+' <span class="muted">('+nn.now.starts_at.slice(11,16)+'–'+nn.now.ends_at.slice(11,16)+')</span>':'<span class="muted">nothing on now</span>'}
+        <h3>Next</h3>${nn.next?esc(nn.next.title)+' <span class="muted">('+nn.next.starts_at.slice(11,16)+')</span>':'<span class="muted">nothing scheduled</span>'}
+        <h3>Guide (${win.length})</h3><table><tbody>${win.map(p=>`<tr><td>${p.starts_at.slice(5,16).replace('T',' ')}</td><td>${esc(p.title)}</td></tr>`).join('')||'<tr><td class="muted">empty</td></tr>'}</tbody></table>`; };
+    $('#epgch',v).onchange=load; load();
+  },
+  async vod(v){
+    const vods = await api('/api/vod');
+    v.innerHTML = `<div class="card"><h2>VOD library (${vods.length})</h2><table><thead><tr><th>Title</th><th>Kind</th><th>Duration</th><th>Published</th></tr></thead><tbody>
+      ${vods.map(x=>`<tr><td>${esc(x.title||'(untitled)')}</td><td>${esc(x.kind)}</td><td>${Math.round((x.duration_ms||0)/1000)}s</td><td>${x.published?'<span class="pill live">yes</span>':'<span class="pill mut">no</span>'}</td></tr>`).join('')||'<tr><td colspan=4 class="muted">No VOD assets.</td></tr>'}
+      </tbody></table></div>`;
+  },
+  async analytics(v){
+    const [rt, aud] = await Promise.all([api('/api/analytics/realtime'), api('/api/analytics/audience')]);
+    const bars = o => Object.entries(o||{}).map(([k,n])=>`<tr><td>${esc(k)}</td><td>${n}</td></tr>`).join('')||'<tr><td class="muted">no data</td></tr>';
+    v.innerHTML = `<div class="kpi">
+        <div class="box"><div class="n">${rt.total_concurrent||0}</div><div class="l">Concurrent viewers</div></div>
+        <div class="box"><div class="n">${aud.total_views||0}</div><div class="l">Views (30d)</div></div>
+        <div class="box"><div class="n">${aud.watch_hours||0}</div><div class="l">Watch hours (30d)</div></div>
+      </div>
+      <div class="card"><h2>By app</h2><table>${bars(aud.by_app)}</table></div>
+      <div class="card"><h2>By device</h2><table>${bars(aud.by_device)}</table></div>`;
+  },
+  async tickets(v){
+    const t = await api('/api/tickets');
+    v.innerHTML = `<div class="card"><h2>Support tickets</h2>
+      <div class="row"><input id="tsub" placeholder="subject"/><select id="tpri"><option>normal</option><option>high</option><option>urgent</option><option>low</option></select><button class="primary" id="tadd">File ticket</button></div>
+      <table><thead><tr><th>Subject</th><th>Priority</th><th>Status</th></tr></thead><tbody>
+      ${t.map(x=>`<tr><td>${esc(x.subject)}</td><td>${esc(x.priority)}</td><td>${statusPill(x.status)}</td></tr>`).join('')||'<tr><td colspan=3 class="muted">No tickets.</td></tr>'}
+      </tbody></table></div>`;
+    $('#tadd',v).onclick=async()=>{ await api('/api/tickets',{method:'POST',body:JSON.stringify({subject:$('#tsub',v).value||'(no subject)',priority:$('#tpri',v).value})}); go('tickets'); };
+  },
+  async notifications(v){
+    const n = await api('/api/notifications');
+    v.innerHTML = `<div class="card"><h2>Notifications</h2>
+      <div class="row"><input id="nsub" placeholder="subject"/><input id="nrec" placeholder="recipient(s), comma-sep" value="ops@rtm.example"/><button class="primary" id="nsend">Send (in-app+email)</button></div>
+      <table><thead><tr><th>Topic</th><th>Subject</th><th>When</th></tr></thead><tbody>
+      ${n.map(x=>`<tr><td>${esc(x.topic)}</td><td>${esc(x.subject)}</td><td>${esc((x.created_at||'').slice(0,16).replace('T',' '))}</td></tr>`).join('')||'<tr><td colspan=3 class="muted">None.</td></tr>'}
+      </tbody></table></div>`;
+    $('#nsend',v).onclick=async()=>{ await api('/api/notifications',{method:'POST',body:JSON.stringify({topic:'manual',subject:$('#nsub',v).value||'Test',recipients:$('#nrec',v).value.split(',').map(s=>s.trim()).filter(Boolean),channels:['in_app','email']})}); go('notifications'); };
+  },
+  async saas(v){
+    const o = await api('/api/platform/overview');
+    v.innerHTML = `<div class="kpi">
+        <div class="box"><div class="n">${o.servers.active}</div><div class="l">Active servers</div></div>
+        <div class="box"><div class="n">${o.servers.projected_today}</div><div class="l">Projected today</div></div>
+        <div class="box"><div class="n">${o.channels.active}</div><div class="l">Active channels</div></div>
+        <div class="box"><div class="n">${o.viewers.active}</div><div class="l">Active viewers</div></div>
+        <div class="box"><div class="n">${o.admins.active}</div><div class="l">Active admins</div></div>
+      </div>
+      <div class="card"><h2>API / system status</h2><div class="row">${Object.entries(o.api_status).map(([k,s])=>`<span class="pill ${s==='ok'?'live':'down'}">${esc(k)}: ${esc(s)}</span>`).join(' ')}</div></div>
+      <div class="card"><h2>Active channels (all tenants)</h2><table><thead><tr><th>Channel</th><th>Account</th></tr></thead><tbody>${o.channels.list.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.account_name)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none live</td></tr>'}</tbody></table></div>
+      <div class="card"><h2>Upcoming events (24h)</h2><table><tbody>${o.upcoming_events.map(e=>`<tr><td>${esc(e.account_name)}</td><td>${esc(e.name)}</td><td>${esc((e.scheduled_start||'').slice(0,16).replace('T',' '))}</td></tr>`).join('')||'<tr><td class="muted">none</td></tr>'}</tbody></table></div>
+      <div class="card"><h2>Open tickets</h2><table><tbody>${(o.tickets.open||[]).map(t=>`<tr><td>${esc(t.account_name)}</td><td>${esc(t.subject)}</td><td>${esc(t.priority)}</td></tr>`).join('')||'<tr><td class="muted">none</td></tr>'}</tbody></table></div>`;
+  },
+};
+
+// enter submits login
+document.addEventListener('keydown',e=>{ if(e.key==='Enter' && !$('#login').classList.contains('hide')) login(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+# Volt Captions add-on (Whisper + NLLB)
+# ============================================================================
+# This is a SEPARATE image from the base encoder, launched by the control plane
+# as its own ECS task ONLY when a channel/event runs with the `whisper` caption
+# engine and target languages selected (see volt-app/src/services/captionsPlan.ts).
+# The base encoder image stays lean and model-free; the ~2GB model weight and the
+# GPU requirement live here and are paid for only when transcription is actually on.
+#
+#   engine=gladia  -> does NOT use this image (thin websocket sidecar in the encoder)
+#   engine=whisper -> this image, on a GPU capacity provider, one task per stream
+#
+# Sizing is decided by the control plane (sizeWhisper): a single T4 (g4dn.xlarge)
+# covers up to large-v3 + NLLB-200 MT.
+FROM nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/models/hf \
+    WHISPER_MODEL=small \
+    WHISPER_DEVICE=cuda \
+    WHISPER_COMPUTE=int8_float16 \
+    NLLB_MODEL=facebook/nllb-200-distilled-600M \
+    WORK_DIR=/work
+
+# ffmpeg to pull/decode the program audio tap; python3 for the sidecar + models.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg python3 python3-pip curl ca-certificates tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Inference stack. CTranslate2-backed faster-whisper is much lighter than
+# reference Whisper; transformers+torch host the NLLB MT model.
+RUN pip3 install --no-cache-dir \
+        faster-whisper==1.0.3 \
+        transformers==4.44.2 \
+        sentencepiece==0.2.0 \
+        torch --extra-index-url https://download.pytorch.org/whl/cu121
+
+# Pre-bake the models into the image so a cold task does NOT download ~2GB at
+# launch (keeps scale-up fast). Model choice is fixed at build via the ARGs; to
+# ship a different default, rebuild with --build-arg.
+ARG BAKE_WHISPER=small
+ARG BAKE_NLLB=facebook/nllb-200-distilled-600M
+RUN python3 - <<'PY'
+import os
+from faster_whisper import WhisperModel
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+# faster-whisper downloads + converts on first construct; do it now.
+WhisperModel(os.environ.get("BAKE_WHISPER", "small"), device="cpu", compute_type="int8")
+name = os.environ.get("BAKE_NLLB", "facebook/nllb-200-distilled-600M")
+AutoTokenizer.from_pretrained(name)
+AutoModelForSeq2SeqLM.from_pretrained(name)
+print("models baked:", os.environ.get("BAKE_WHISPER"), name)
+PY
+
+WORKDIR /app
+COPY bin/captions.py /app/bin/captions.py
+
+# Reads CAPTIONS_CONFIG_JSON (engine, audio_source, source_lang, targets,
+# offset_sec, model_size, out_prefix), transcribes + translates, writes segmented
+# WebVTT renditions to the S3 origin prefix the packager references.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python3", "/app/bin/captions.py"]

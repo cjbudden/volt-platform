@@ -1,0 +1,2422 @@
+{
+  "info": {
+    "name": "Volt Streaming API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Control-plane API for Volt Streaming. Bearer-auth (JWT) unless noted; the encoder ingest route uses X-Volt-Ingest-Token. Each request ships with a **saved example response** captured from a live run \u2014 open the request and pick the example to see the exact output. Set baseUrl/token/ids in the environment, or run api/verify.sh which seeds them."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Liveness probe.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/health",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "health"
+                  ]
+                },
+                "description": "Liveness probe.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"ok\": true,\n  \"service\": \"volt-control-plane\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Metadata Schemas",
+      "item": [
+        {
+          "name": "List schemas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/metadata-schemas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "metadata-schemas"
+              ]
+            },
+            "description": "Named, typed metadata field sets for VOD assets."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/metadata-schemas",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "metadata-schemas"
+                  ]
+                },
+                "description": "Named, typed metadata field sets for VOD assets."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
+        },
+        {
+          "name": "Create schema",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201',()=>pm.response.to.have.status(201));",
+                  "pm.environment.set('schemaId',pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/metadata-schemas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "metadata-schemas"
+              ]
+            },
+            "description": "Create a metadata schema. Fields: string|text|number|boolean|date|enum|url|tags.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Match {{$timestamp}}\",\n  \"fields\": [\n    {\n      \"key\": \"competition\",\n      \"type\": \"string\",\n      \"required\": true\n    },\n    {\n      \"key\": \"sport\",\n      \"type\": \"string\"\n    },\n    {\n      \"key\": \"rating\",\n      \"type\": \"enum\",\n      \"options\": [\n        \"G\",\n        \"PG\",\n        \"M\"\n      ]\n    }\n  ]\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "201 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/metadata-schemas",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "metadata-schemas"
+                  ]
+                },
+                "description": "Create a metadata schema. Fields: string|text|number|boolean|date|enum|url|tags.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Match {{$timestamp}}\",\n  \"fields\": [\n    {\n      \"key\": \"competition\",\n      \"type\": \"string\",\n      \"required\": true\n    },\n    {\n      \"key\": \"sport\",\n      \"type\": \"string\"\n    },\n    {\n      \"key\": \"rating\",\n      \"type\": \"enum\",\n      \"options\": [\n        \"G\",\n        \"PG\",\n        \"M\"\n      ]\n    }\n  ]\n}"
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"867623d9-fac2-4496-8c9d-7ed7193b06e0\",\n  \"account_id\": \"00000000-0000-0000-0000-0000000000a1\",\n  \"name\": \"Match 1730000000\",\n  \"description\": null,\n  \"fields\": [\n    {\n      \"key\": \"competition\",\n      \"type\": \"string\",\n      \"required\": true\n    },\n    {\n      \"key\": \"sport\",\n      \"type\": \"string\"\n    },\n    {\n      \"key\": \"rating\",\n      \"type\": \"enum\",\n      \"options\": [\n        \"G\",\n        \"PG\",\n        \"M\"\n      ]\n    }\n  ],\n  \"created_at\": \"2026-08-02T14:24:12.122Z\",\n  \"updated_at\": \"2026-08-02T14:24:12.122Z\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Channels",
+      "item": [
+        {
+          "name": "List channels",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/channels",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "channels"
+              ]
+            },
+            "description": "Channels for the tenant."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/channels",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "channels"
+                  ]
+                },
+                "description": "Channels for the tenant."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[\n  {\n    \"id\": \"00000000-0000-0000-0000-0000000000c1\",\n    \"group_id\": \"00000000-0000-0000-0000-0000000000b1\",\n    \"name\": \"api-news\",\n    \"status\": \"scheduled\",\n    \"enabled\": true,\n    \"purchasing_mode\": \"reserved\",\n    \"resilience_tier\": \"standard\",\n    \"input_failover_enabled\": false,\n    \"auto_failback\": true,\n    \"input_loss_behavior\": \"none\",\n    \"filler_asset_id\": null,\n    \"filler_slate_ref\": null,\n    \"recording_retention_days\": null,\n    \"created_at\": \"2026-08-02T14:24:09.856Z\",\n    \"updated_at\": \"2026-08-02T14:24:09.856Z\",\n    \"group_name\": \"g\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Get channel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/channels/{{channelId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                "{{channelId}}"
+              ]
+            },
+            "description": "One channel + its inputs & instances."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/channels/{{channelId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "channels",
+                    "{{channelId}}"
+                  ]
+                },
+                "description": "One channel + its inputs & instances."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"00000000-0000-0000-0000-0000000000c1\",\n  \"group_id\": \"00000000-0000-0000-0000-0000000000b1\",\n  \"name\": \"api-news\",\n  \"status\": \"scheduled\",\n  \"enabled\": true,\n  \"purchasing_mode\": \"reserved\",\n  \"resilience_tier\": \"standard\",\n  \"input_failover_enabled\": false,\n  \"auto_failback\": true,\n  \"input_loss_behavior\": \"none\",\n  \"filler_asset_id\": null,\n  \"filler_slate_ref\": null,\n  \"recording_retention_days\": null,\n  \"created_at\": \"2026-08-02T14:24:09.856Z\",\n  \"updated_at\": \"2026-08-02T14:24:09.856Z\",\n  \"inputs\": [],\n  \"instances\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "Start channel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));",
+                  "pm.test('live',()=>pm.expect(pm.response.json().status).to.eql('live'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/channels/{{channelId}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                "{{channelId}}",
+                "start"
+              ]
+            },
+            "description": "Orchestrator launches the encoder task + opens a recording.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/channels/{{channelId}}/start",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "channels",
+                    "{{channelId}}",
+                    "start"
+                  ]
+                },
+                "description": "Orchestrator launches the encoder task + opens a recording.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"00000000-0000-0000-0000-0000000000c1\",\n  \"group_id\": \"00000000-0000-0000-0000-0000000000b1\",\n  \"name\": \"api-news\",\n  \"status\": \"live\",\n  \"enabled\": true,\n  \"purchasing_mode\": \"reserved\",\n  \"resilience_tier\": \"standard\",\n  \"input_failover_enabled\": false,\n  \"auto_failback\": true,\n  \"input_loss_behavior\": \"none\",\n  \"filler_asset_id\": null,\n  \"filler_slate_ref\": null,\n  \"recording_retention_days\": null,\n  \"created_at\": \"2026-08-02T14:24:09.856Z\",\n  \"updated_at\": \"2026-08-02T14:24:12.151Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Stop channel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/channels/{{channelId}}/stop",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                "{{channelId}}",
+                "stop"
+              ]
+            },
+            "description": "Terminates the task, closes the recording, fires the thumbnailer.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/channels/{{channelId}}/stop",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "channels",
+                    "{{channelId}}",
+                    "stop"
+                  ]
+                },
+                "description": "Terminates the task, closes the recording, fires the thumbnailer.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"00000000-0000-0000-0000-0000000000c1\",\n  \"group_id\": \"00000000-0000-0000-0000-0000000000b1\",\n  \"name\": \"api-news\",\n  \"status\": \"ended\",\n  \"enabled\": true,\n  \"purchasing_mode\": \"reserved\",\n  \"resilience_tier\": \"standard\",\n  \"input_failover_enabled\": false,\n  \"auto_failback\": true,\n  \"input_loss_behavior\": \"none\",\n  \"filler_asset_id\": null,\n  \"filler_slate_ref\": null,\n  \"recording_retention_days\": null,\n  \"created_at\": \"2026-08-02T14:24:09.856Z\",\n  \"updated_at\": \"2026-08-02T14:24:12.167Z\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Events",
+      "item": [
+        {
+          "name": "List events",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ]
+            },
+            "description": "Events for the tenant."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/events",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "events"
+                  ]
+                },
+                "description": "Events for the tenant."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
+        },
+        {
+          "name": "Create event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201',()=>pm.response.to.have.status(201));",
+                  "pm.environment.set('eventId',pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ]
+            },
+            "description": "Schedule an event; the orchestrator provisions it at server_start.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"name\": \"Test Event\",\n  \"scheduledStart\": \"2027-01-01T10:00:00Z\",\n  \"scheduledEnd\": \"2027-01-01T12:00:00Z\",\n  \"recordingRetentionDays\": 14\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "201 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/events",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "events"
+                  ]
+                },
+                "description": "Schedule an event; the orchestrator provisions it at server_start.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"name\": \"Test Event\",\n  \"scheduledStart\": \"2027-01-01T10:00:00Z\",\n  \"scheduledEnd\": \"2027-01-01T12:00:00Z\",\n  \"recordingRetentionDays\": 14\n}"
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"6d3c65d7-419c-4c56-876d-2f9aa0355c4c\",\n  \"group_id\": \"00000000-0000-0000-0000-0000000000b1\",\n  \"name\": \"Test Event\",\n  \"status\": \"scheduled\",\n  \"scheduled_start\": \"2027-01-01T10:00:00.000Z\",\n  \"scheduled_end\": \"2027-01-01T12:00:00.000Z\",\n  \"server_start\": \"2027-01-01T10:00:00.000Z\",\n  \"server_stop\": \"2027-01-01T12:00:00.000Z\",\n  \"public_start\": \"2027-01-01T10:00:00.000Z\",\n  \"public_end\": \"2027-01-01T12:00:00.000Z\",\n  \"actual_start\": null,\n  \"actual_end\": null,\n  \"purchasing_mode\": \"spot_fallback\",\n  \"resilience_tier\": \"standard\",\n  \"input_failover_enabled\": false,\n  \"auto_failback\": true,\n  \"input_loss_behavior\": \"none\",\n  \"filler_asset_id\": null,\n  \"filler_slate_ref\": null,\n  \"recording_retention_days\": 14,\n  \"created_at\": \"2026-08-02T14:24:12.179Z\",\n  \"updated_at\": \"2026-08-02T14:24:12.179Z\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Live Timeline",
+      "item": [
+        {
+          "name": "List scheduled clips",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/scheduled-clips?channelId={{channelId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "scheduled-clips"
+              ],
+              "query": [
+                {
+                  "key": "channelId",
+                  "value": "{{channelId}}"
+                }
+              ]
+            },
+            "description": "Clipping windows on the live timeline."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/scheduled-clips?channelId={{channelId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "scheduled-clips"
+                  ],
+                  "query": [
+                    {
+                      "key": "channelId",
+                      "value": "{{channelId}}"
+                    }
+                  ]
+                },
+                "description": "Clipping windows on the live timeline."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
+        },
+        {
+          "name": "Schedule a clip",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201',()=>pm.response.to.have.status(201));",
+                  "pm.environment.set('scheduledClipId',pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/scheduled-clips",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "scheduled-clips"
+              ]
+            },
+            "description": "When end_epoch_ms is reached the orchestrator cuts a VOD asset. outputKind: manifest|progressive|both.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channelId\": \"{{channelId}}\",\n  \"title\": \"Scheduled highlight\",\n  \"startMs\": 1000,\n  \"endMs\": 6000,\n  \"outputKind\": \"both\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "201 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/scheduled-clips",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "scheduled-clips"
+                  ]
+                },
+                "description": "When end_epoch_ms is reached the orchestrator cuts a VOD asset. outputKind: manifest|progressive|both.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"channelId\": \"{{channelId}}\",\n  \"title\": \"Scheduled highlight\",\n  \"startMs\": 1000,\n  \"endMs\": 6000,\n  \"outputKind\": \"both\"\n}"
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"21ff386c-4715-4de0-88cd-2065a545917d\",\n  \"channel_id\": \"00000000-0000-0000-0000-0000000000c1\",\n  \"event_id\": null,\n  \"title\": \"Scheduled highlight\",\n  \"start_epoch_ms\": \"1000\",\n  \"end_epoch_ms\": \"6000\",\n  \"output_kind\": \"both\",\n  \"status\": \"scheduled\",\n  \"vod_asset_id\": null,\n  \"created_at\": \"2026-08-02T14:24:12.190Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Cancel scheduled clip",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204',()=>pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/scheduled-clips/{{scheduledClipId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "scheduled-clips",
+                "{{scheduledClipId}}"
+              ]
+            },
+            "description": "Cancel while still scheduled."
+          },
+          "response": [
+            {
+              "name": "204 example",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/scheduled-clips/{{scheduledClipId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "scheduled-clips",
+                    "{{scheduledClipId}}"
+                  ]
+                },
+                "description": "Cancel while still scheduled."
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Recordings",
+      "item": [
+        {
+          "name": "List recordings",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/recordings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recordings"
+              ]
+            },
+            "description": "Filter by ?kind=channel_day|event & ?channelId=."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/recordings",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "recordings"
+                  ]
+                },
+                "description": "Filter by ?kind=channel_day|event & ?channelId=."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[\n  {\n    \"id\": \"a95a6c38-08fb-4578-96fc-46696207884c\",\n    \"kind\": \"channel_day\",\n    \"event_id\": null,\n    \"channel_id\": \"00000000-0000-0000-0000-0000000000c1\",\n    \"title\": null,\n    \"day_utc\": \"2026-08-02T00:00:00.000Z\",\n    \"status\": \"complete\",\n    \"hi_res_rendition\": \"source\",\n    \"master_key\": \"channel/00000000-0000-0000-0000-0000000000c1/2026-08-02\",\n    \"start_epoch_ms\": \"1785680652151\",\n    \"end_epoch_ms\": \"1785680652164\",\n    \"duration_ms\": \"13\",\n    \"retention_days\": null,\n    \"expires_at\": null,\n    \"poster_key\": null,\n    \"storyboard_key\": null,\n    \"thumbs_vtt_key\": null,\n    \"thumb_status\": \"processing\",\n    \"created_at\": \"2026-08-02T14:24:12.151Z\",\n    \"source_name\": \"api-news\",\n    \"vod_count\": 0\n  },\n  {\n    \"id\": \"00000000-0000-0000-0000-0000000000e1\",\n    \"kind\": \"channel_day\",\n    \"event_id\": null,\n    \"channel_id\": \"00000000-0000-0000-0000-0000000000c1\",\n    \"title\": null,\n    \"day_utc\": \"2026-07-30T00:00:00.000Z\",\n    \"status\": \"complete\",\n    \"hi_res_rendition\": \"1080p\",\n    \"master_key\": \"channel/00000000-0000-0000-0000-0000000000c1\",\n    \"start_epoch_ms\": \"0\",\n    \"end_epoch_ms\": \"1785680652164\",\n    \"duration_ms\": \"1785680652164\",\n    \"retention_days\": null,\n    \"expires_at\": null,\n    \"poster_key\": null,\n    \"storyboard_key\": null,\n    \"thumbs_vtt_key\": null,\n    \"thumb_status\": \"processing\",\n    \"created_at\": \"2026-08-02T14:24:09.859Z\",\n    \"source_name\": \"api-news\",\n    \"vod_count\": 0\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Channel roll-up",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/recordings/channels",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recordings",
+                "channels"
+              ]
+            },
+            "description": "Channels with recording counts + next expiry."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/recordings/channels",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "recordings",
+                    "channels"
+                  ]
+                },
+                "description": "Channels with recording counts + next expiry."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[\n  {\n    \"channel_id\": \"00000000-0000-0000-0000-0000000000c1\",\n    \"name\": \"api-news\",\n    \"recording_retention_days\": null,\n    \"recording_count\": 2,\n    \"last_recording_ms\": \"1785680652151\",\n    \"next_expiry\": null\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Get recording",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/recordings/{{recordingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recordings",
+                "{{recordingId}}"
+              ]
+            },
+            "description": "One recording + its derived VOD assets."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/recordings/{{recordingId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "recordings",
+                    "{{recordingId}}"
+                  ]
+                },
+                "description": "One recording + its derived VOD assets."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"00000000-0000-0000-0000-0000000000e1\",\n  \"kind\": \"channel_day\",\n  \"event_id\": null,\n  \"channel_id\": \"00000000-0000-0000-0000-0000000000c1\",\n  \"title\": null,\n  \"day_utc\": \"2026-07-30T00:00:00.000Z\",\n  \"status\": \"complete\",\n  \"hi_res_rendition\": \"1080p\",\n  \"master_key\": \"channel/00000000-0000-0000-0000-0000000000c1\",\n  \"start_epoch_ms\": \"0\",\n  \"end_epoch_ms\": \"1785680652164\",\n  \"duration_ms\": \"1785680652164\",\n  \"retention_days\": null,\n  \"expires_at\": null,\n  \"poster_key\": null,\n  \"storyboard_key\": null,\n  \"thumbs_vtt_key\": null,\n  \"thumb_status\": \"processing\",\n  \"created_at\": \"2026-08-02T14:24:09.859Z\",\n  \"vod_assets\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "Clip a recording",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201',()=>pm.response.to.have.status(201));",
+                  "pm.environment.set('vodId',pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/recordings/{{recordingId}}/clip",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recordings",
+                "{{recordingId}}",
+                "clip"
+              ]
+            },
+            "description": "Create a VOD from a time range. outputKind sets HLS/DASH and/or progressive MP4.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Manual clip\",\n  \"startMs\": 1000,\n  \"endMs\": 9000,\n  \"outputKind\": \"both\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "201 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/recordings/{{recordingId}}/clip",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "recordings",
+                    "{{recordingId}}",
+                    "clip"
+                  ]
+                },
+                "description": "Create a VOD from a time range. outputKind sets HLS/DASH and/or progressive MP4.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"Manual clip\",\n  \"startMs\": 1000,\n  \"endMs\": 9000,\n  \"outputKind\": \"both\"\n}"
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n  \"event_id\": null,\n  \"channel_id\": \"00000000-0000-0000-0000-0000000000c1\",\n  \"recording_id\": \"00000000-0000-0000-0000-0000000000e1\",\n  \"kind\": \"clip\",\n  \"title\": \"Manual clip\",\n  \"master_key\": \"channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/master.m3u8\",\n  \"start_epoch_ms\": \"1000\",\n  \"end_epoch_ms\": \"9000\",\n  \"duration_ms\": \"8000\",\n  \"export_mp4_key\": null,\n  \"output_kind\": \"both\",\n  \"progressive_key\": \"channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4\",\n  \"formats\": {\n    \"hls\": true,\n    \"dash\": true,\n    \"progressive\": true\n  },\n  \"portal_visible\": false,\n  \"clip_spec\": null,\n  \"schema_id\": null,\n  \"metadata\": {},\n  \"poster_key\": null,\n  \"storyboard_key\": null,\n  \"thumbs_vtt_key\": null,\n  \"thumb_status\": \"processing\",\n  \"published\": false,\n  \"created_at\": \"2026-08-02T14:24:12.217Z\",\n  \"updated_at\": \"2026-08-02T14:24:12.217Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Download recording",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ok',()=>pm.expect([200,202]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/recordings/{{recordingId}}/download",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recordings",
+                "{{recordingId}}",
+                "download"
+              ]
+            },
+            "description": "Presigned MP4 URL (202 while exporting)."
+          },
+          "response": [
+            {
+              "name": "202 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/recordings/{{recordingId}}/download",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "recordings",
+                    "{{recordingId}}",
+                    "download"
+                  ]
+                },
+                "description": "Presigned MP4 URL (202 while exporting)."
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"exporting\",\n  \"message\": \"MP4 export queued; poll this endpoint until a url is returned.\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "VOD",
+      "item": [
+        {
+          "name": "List VOD",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/vod",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "vod"
+              ]
+            },
+            "description": "Derived assets. ?published=true|false."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/vod",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "vod"
+                  ]
+                },
+                "description": "Derived assets. ?published=true|false."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[\n  {\n    \"id\": \"23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n    \"event_id\": null,\n    \"channel_id\": \"00000000-0000-0000-0000-0000000000c1\",\n    \"recording_id\": \"00000000-0000-0000-0000-0000000000e1\",\n    \"kind\": \"clip\",\n    \"title\": \"Manual clip\",\n    \"master_key\": \"channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/master.m3u8\",\n    \"start_epoch_ms\": \"1000\",\n    \"end_epoch_ms\": \"9000\",\n    \"duration_ms\": \"8000\",\n    \"export_mp4_key\": null,\n    \"output_kind\": \"both\",\n    \"progressive_key\": \"channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4\",\n    \"formats\": {\n      \"hls\": true,\n      \"dash\": true,\n      \"progressive\": true\n    },\n    \"portal_visible\": false,\n    \"clip_spec\": null,\n    \"schema_id\": null,\n    \"metadata\": {},\n    \"poster_key\": null,\n    \"storyboard_key\": null,\n    \"thumbs_vtt_key\": null,\n    \"thumb_status\": \"processing\",\n    \"published\": false,\n    \"created_at\": \"2026-08-02T14:24:12.217Z\",\n    \"updated_at\": \"2026-08-02T14:24:12.217Z\",\n    \"schema_name\": null,\n    \"source_name\": \"api-news\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Get VOD (+ schema.org)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));",
+                  "pm.test('has jsonld VideoObject',()=>pm.expect(pm.response.json().jsonld['@context']).to.eql('https://schema.org'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/vod/{{vodId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "vod",
+                "{{vodId}}"
+              ]
+            },
+            "description": "Asset + assigned schema + publications + schema.org JSON-LD."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/vod/{{vodId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "vod",
+                    "{{vodId}}"
+                  ]
+                },
+                "description": "Asset + assigned schema + publications + schema.org JSON-LD."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n  \"event_id\": null,\n  \"channel_id\": \"00000000-0000-0000-0000-0000000000c1\",\n  \"recording_id\": \"00000000-0000-0000-0000-0000000000e1\",\n  \"kind\": \"clip\",\n  \"title\": \"Manual clip\",\n  \"master_key\": \"channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/master.m3u8\",\n  \"start_epoch_ms\": \"1000\",\n  \"end_epoch_ms\": \"9000\",\n  \"duration_ms\": \"8000\",\n  \"export_mp4_key\": null,\n  \"output_kind\": \"both\",\n  \"progressive_key\": \"channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4\",\n  \"formats\": {\n    \"hls\": true,\n    \"dash\": true,\n    \"progressive\": true\n  },\n  \"portal_visible\": false,\n  \"clip_spec\": null,\n  \"schema_id\": null,\n  \"metadata\": {},\n  \"poster_key\": null,\n  \"storyboard_key\": null,\n  \"thumbs_vtt_key\": null,\n  \"thumb_status\": \"processing\",\n  \"published\": false,\n  \"created_at\": \"2026-08-02T14:24:12.217Z\",\n  \"updated_at\": \"2026-08-02T14:24:12.217Z\",\n  \"schema\": null,\n  \"publications\": [],\n  \"jsonld\": {\n    \"@context\": \"https://schema.org\",\n    \"@type\": \"Clip\",\n    \"@id\": \"http://localhost:8080/api/vod/23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n    \"name\": \"Manual clip\",\n    \"uploadDate\": \"2026-08-02T14:24:12.217Z\",\n    \"duration\": \"PT8S\",\n    \"contentUrl\": \"https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4\",\n    \"embedUrl\": \"https://cdn.example.com/portal/watch/23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n    \"isLiveBroadcast\": false,\n    \"associatedMedia\": [\n      {\n        \"@type\": \"MediaObject\",\n        \"encodingFormat\": \"application/vnd.apple.mpegurl\",\n        \"contentUrl\": \"https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/master.m3u8\"\n      },\n      {\n        \"@type\": \"MediaObject\",\n        \"encodingFormat\": \"application/dash+xml\",\n        \"contentUrl\": \"https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/manifest.mpd\"\n      },\n      {\n        \"@type\": \"MediaObject\",\n        \"encodingFormat\": \"video/mp4\",\n        \"contentUrl\": \"https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4\"\n      }\n    ],\n    \"startOffset\": 1,\n    \"endOffset\": 9,\n    \"potentialAction\": {\n      \"@type\": \"WatchAction\",\n      \"target\": \"https://cdn.example.com/portal/watch/23360d6a-32a0-494d-a2ed-14e9e34fba41\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update VOD metadata",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/vod/{{vodId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "vod",
+                "{{vodId}}"
+              ]
+            },
+            "description": "Set title/metadata (validated vs the assigned schema) & published.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Manual clip (tagged)\",\n  \"schemaId\": \"{{schemaId}}\",\n  \"metadata\": {\n    \"competition\": \"Grand Final\",\n    \"rating\": \"PG\"\n  }\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/vod/{{vodId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "vod",
+                    "{{vodId}}"
+                  ]
+                },
+                "description": "Set title/metadata (validated vs the assigned schema) & published.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"Manual clip (tagged)\",\n  \"schemaId\": \"{{schemaId}}\",\n  \"metadata\": {\n    \"competition\": \"Grand Final\",\n    \"rating\": \"PG\"\n  }\n}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n  \"event_id\": null,\n  \"channel_id\": \"00000000-0000-0000-0000-0000000000c1\",\n  \"recording_id\": \"00000000-0000-0000-0000-0000000000e1\",\n  \"kind\": \"clip\",\n  \"title\": \"Manual clip (tagged)\",\n  \"master_key\": \"channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/master.m3u8\",\n  \"start_epoch_ms\": \"1000\",\n  \"end_epoch_ms\": \"9000\",\n  \"duration_ms\": \"8000\",\n  \"export_mp4_key\": null,\n  \"output_kind\": \"both\",\n  \"progressive_key\": \"channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4\",\n  \"formats\": {\n    \"hls\": true,\n    \"dash\": true,\n    \"progressive\": true\n  },\n  \"portal_visible\": false,\n  \"clip_spec\": null,\n  \"schema_id\": \"867623d9-fac2-4496-8c9d-7ed7193b06e0\",\n  \"metadata\": {\n    \"rating\": \"PG\",\n    \"competition\": \"Grand Final\"\n  },\n  \"poster_key\": null,\n  \"storyboard_key\": null,\n  \"thumbs_vtt_key\": null,\n  \"thumb_status\": \"processing\",\n  \"published\": false,\n  \"created_at\": \"2026-08-02T14:24:12.217Z\",\n  \"updated_at\": \"2026-08-02T14:24:12.236Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "schema.org VideoObject",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));",
+                  "pm.test('VideoObject/Clip',()=>pm.expect(['VideoObject','Clip']).to.include(pm.response.json()['@type']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/vod/{{vodId}}/schema.org",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "vod",
+                "{{vodId}}",
+                "schema.org"
+              ]
+            },
+            "description": "JSON-LD for the portal / SEO / social metadata."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/vod/{{vodId}}/schema.org",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "vod",
+                    "{{vodId}}",
+                    "schema.org"
+                  ]
+                },
+                "description": "JSON-LD for the portal / SEO / social metadata."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"@context\": \"https://schema.org\",\n  \"@type\": \"Clip\",\n  \"@id\": \"http://localhost:8080/api/vod/23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n  \"name\": \"Manual clip (tagged)\",\n  \"uploadDate\": \"2026-08-02T14:24:12.217Z\",\n  \"duration\": \"PT8S\",\n  \"contentUrl\": \"https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4\",\n  \"embedUrl\": \"https://cdn.example.com/portal/watch/23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n  \"isLiveBroadcast\": false,\n  \"associatedMedia\": [\n    {\n      \"@type\": \"MediaObject\",\n      \"encodingFormat\": \"application/vnd.apple.mpegurl\",\n      \"contentUrl\": \"https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/master.m3u8\"\n    },\n    {\n      \"@type\": \"MediaObject\",\n      \"encodingFormat\": \"application/dash+xml\",\n      \"contentUrl\": \"https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/manifest.mpd\"\n    },\n    {\n      \"@type\": \"MediaObject\",\n      \"encodingFormat\": \"video/mp4\",\n      \"contentUrl\": \"https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4\"\n    }\n  ],\n  \"startOffset\": 1,\n  \"endOffset\": 9,\n  \"potentialAction\": {\n    \"@type\": \"WatchAction\",\n    \"target\": \"https://cdn.example.com/portal/watch/23360d6a-32a0-494d-a2ed-14e9e34fba41\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Slates & Loops",
+      "item": [
+        {
+          "name": "List filler",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/filler-assets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "filler-assets"
+              ]
+            },
+            "description": "Uploaded slate/loop assets."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/filler-assets",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "filler-assets"
+                  ]
+                },
+                "description": "Uploaded slate/loop assets."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
+        },
+        {
+          "name": "Register filler",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201',()=>pm.response.to.have.status(201));",
+                  "pm.environment.set('fillerId',pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/filler-assets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "filler-assets"
+              ]
+            },
+            "description": "Register + get a presigned upload URL.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"slate\",\n  \"name\": \"Test slate\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "201 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/filler-assets",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "filler-assets"
+                  ]
+                },
+                "description": "Register + get a presigned upload URL.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"kind\": \"slate\",\n  \"name\": \"Test slate\"\n}"
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"401a534d-1e68-4e26-ad85-24afdf1d0f3c\",\n  \"account_id\": \"00000000-0000-0000-0000-0000000000a1\",\n  \"kind\": \"slate\",\n  \"name\": \"Test slate\",\n  \"source_key\": \"filler/00000000-0000-0000-0000-0000000000a1/401a534d-1e68-4e26-ad85-24afdf1d0f3c\",\n  \"width\": null,\n  \"height\": null,\n  \"duration_ms\": null,\n  \"poster_key\": null,\n  \"status\": \"uploading\",\n  \"created_at\": \"2026-08-02T14:24:12.248Z\",\n  \"updated_at\": \"2026-08-02T14:24:12.248Z\",\n  \"upload\": {\n    \"method\": \"PUT\",\n    \"url\": \"https://volt-origin.s3.ap-southeast-1.amazonaws.com/filler/00000000-0000-0000-0000-0000000000a1/401a534d-1e68-4e26-ad85-24afdf1d0f3c\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete filler",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204',()=>pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/filler-assets/{{fillerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "filler-assets",
+                "{{fillerId}}"
+              ]
+            },
+            "description": "Remove a filler asset."
+          },
+          "response": [
+            {
+              "name": "204 example",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/filler-assets/{{fillerId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "filler-assets",
+                    "{{fillerId}}"
+                  ]
+                },
+                "description": "Remove a filler asset."
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Distribution",
+      "item": [
+        {
+          "name": "List publish targets",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/publish-targets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "publish-targets"
+              ]
+            },
+            "description": "Configured social accounts."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/publish-targets",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "publish-targets"
+                  ]
+                },
+                "description": "Configured social accounts."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
+        },
+        {
+          "name": "Link account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201',()=>pm.response.to.have.status(201));",
+                  "pm.environment.set('targetId',pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/publish-targets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "publish-targets"
+              ]
+            },
+            "description": "platform: youtube|facebook|x|tiktok|dailymotion|portal.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"platform\": \"youtube\",\n  \"name\": \"RTM YouTube\",\n  \"externalAccount\": \"UC_rtm\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "201 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/publish-targets",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "publish-targets"
+                  ]
+                },
+                "description": "platform: youtube|facebook|x|tiktok|dailymotion|portal.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"platform\": \"youtube\",\n  \"name\": \"RTM YouTube\",\n  \"externalAccount\": \"UC_rtm\"\n}"
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"f23465cd-57d4-4a40-a0b7-85906c84fcd0\",\n  \"platform\": \"youtube\",\n  \"name\": \"RTM YouTube\",\n  \"external_account\": \"UC_rtm\",\n  \"enabled\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "Publish to portal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201',()=>pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/publications/vod/{{vodId}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "publications",
+                "vod",
+                "{{vodId}}",
+                "publish"
+              ]
+            },
+            "description": "Make portal-visible + create a publication record.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"platform\": \"portal\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "201 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/publications/vod/{{vodId}}/publish",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "publications",
+                    "vod",
+                    "{{vodId}}",
+                    "publish"
+                  ]
+                },
+                "description": "Make portal-visible + create a publication record.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"platform\": \"portal\"\n}"
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"9b9f9245-090f-47d4-bb26-f914eca591a4\",\n  \"vod_asset_id\": \"23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n  \"platform\": \"portal\",\n  \"target_id\": null,\n  \"external_id\": null,\n  \"external_url\": \"/portal/watch/23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n  \"status\": \"published\",\n  \"views\": \"0\",\n  \"error\": null,\n  \"published_at\": \"2026-08-02T14:24:12.275Z\",\n  \"last_synced_at\": null,\n  \"created_at\": \"2026-08-02T14:24:12.275Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Publish to social",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201',()=>pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/publications/vod/{{vodId}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "publications",
+                "vod",
+                "{{vodId}}",
+                "publish"
+              ]
+            },
+            "description": "Push to a linked social account (adapter). Tracks external id/url + views.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"platform\": \"youtube\",\n  \"targetId\": \"{{targetId}}\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "201 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/publications/vod/{{vodId}}/publish",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "publications",
+                    "vod",
+                    "{{vodId}}",
+                    "publish"
+                  ]
+                },
+                "description": "Push to a linked social account (adapter). Tracks external id/url + views.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"platform\": \"youtube\",\n  \"targetId\": \"{{targetId}}\"\n}"
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"3698c8ba-2212-48f8-8882-dc3ae8a31d47\",\n  \"vod_asset_id\": \"23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n  \"platform\": \"youtube\",\n  \"target_id\": \"f23465cd-57d4-4a40-a0b7-85906c84fcd0\",\n  \"external_id\": \"stub-3698c8ba\",\n  \"external_url\": \"https://youtube.example/watch/3698c8ba\",\n  \"status\": \"published\",\n  \"views\": \"0\",\n  \"error\": null,\n  \"published_at\": \"2026-08-02T14:24:12.288Z\",\n  \"last_synced_at\": null,\n  \"created_at\": \"2026-08-02T14:24:12.285Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List publications",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));",
+                  "pm.test('>=2',()=>pm.expect(pm.response.json().length).to.be.at.least(2));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/publications?assetId={{vodId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "publications"
+              ],
+              "query": [
+                {
+                  "key": "assetId",
+                  "value": "{{vodId}}"
+                }
+              ]
+            },
+            "description": "Per-asset publications + synced view counts."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/publications?assetId={{vodId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "publications"
+                  ],
+                  "query": [
+                    {
+                      "key": "assetId",
+                      "value": "{{vodId}}"
+                    }
+                  ]
+                },
+                "description": "Per-asset publications + synced view counts."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[\n  {\n    \"id\": \"3698c8ba-2212-48f8-8882-dc3ae8a31d47\",\n    \"vod_asset_id\": \"23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n    \"platform\": \"youtube\",\n    \"target_id\": \"f23465cd-57d4-4a40-a0b7-85906c84fcd0\",\n    \"external_id\": \"stub-3698c8ba\",\n    \"external_url\": \"https://youtube.example/watch/3698c8ba\",\n    \"status\": \"published\",\n    \"views\": \"0\",\n    \"error\": null,\n    \"published_at\": \"2026-08-02T14:24:12.288Z\",\n    \"last_synced_at\": null,\n    \"created_at\": \"2026-08-02T14:24:12.285Z\",\n    \"target_name\": \"RTM YouTube\"\n  },\n  {\n    \"id\": \"9b9f9245-090f-47d4-bb26-f914eca591a4\",\n    \"vod_asset_id\": \"23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n    \"platform\": \"portal\",\n    \"target_id\": null,\n    \"external_id\": null,\n    \"external_url\": \"/portal/watch/23360d6a-32a0-494d-a2ed-14e9e34fba41\",\n    \"status\": \"published\",\n    \"views\": \"0\",\n    \"error\": null,\n    \"published_at\": \"2026-08-02T14:24:12.275Z\",\n    \"last_synced_at\": null,\n    \"created_at\": \"2026-08-02T14:24:12.275Z\",\n    \"target_name\": null\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Sync view counts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/publications/sync-views",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "publications",
+                "sync-views"
+              ]
+            },
+            "description": "Pull latest view counts from platforms (adapter).",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/publications/sync-views",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "publications",
+                    "sync-views"
+                  ]
+                },
+                "description": "Pull latest view counts from platforms (adapter).",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"synced\": 2\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Status",
+      "item": [
+        {
+          "name": "Encoder report (ingest)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202',()=>pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Volt-Ingest-Token",
+                "value": "{{ingestToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/streams/{{channelId}}/report",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "streams",
+                "{{channelId}}",
+                "report"
+              ]
+            },
+            "description": "The encoder posts events + status snapshots (ingest-token auth).",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"channel\",\n  \"event\": {\n    \"ts_ms\": 1730000000000,\n    \"seq\": 1,\n    \"type\": \"channel.start\",\n    \"detail\": {}\n  },\n  \"status\": {\n    \"output_available\": true,\n    \"active_source\": \"primary\",\n    \"fallback_in_use\": false,\n    \"filler_in_use\": false,\n    \"packager_ok\": true,\n    \"sources\": {\n      \"primary\": {\n        \"state\": \"up\"\n      }\n    },\n    \"seq\": 1\n  }\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "202 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "X-Volt-Ingest-Token",
+                    "value": "{{ingestToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/streams/{{channelId}}/report",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "streams",
+                    "{{channelId}}",
+                    "report"
+                  ]
+                },
+                "description": "The encoder posts events + status snapshots (ingest-token auth).",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"kind\": \"channel\",\n  \"event\": {\n    \"ts_ms\": 1730000000000,\n    \"seq\": 1,\n    \"type\": \"channel.start\",\n    \"detail\": {}\n  },\n  \"status\": {\n    \"output_available\": true,\n    \"active_source\": \"primary\",\n    \"fallback_in_use\": false,\n    \"filler_in_use\": false,\n    \"packager_ok\": true,\n    \"sources\": {\n      \"primary\": {\n        \"state\": \"up\"\n      }\n    },\n    \"seq\": 1\n  }\n}"
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"ok\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "All stream status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "status"
+              ]
+            },
+            "description": "Latest status per stream (dashboard poll)."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "status"
+                  ]
+                },
+                "description": "Latest status per stream (dashboard poll)."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[\n  {\n    \"channel_id\": \"00000000-0000-0000-0000-0000000000c1\",\n    \"event_id\": null,\n    \"output_available\": true,\n    \"active_source\": \"primary\",\n    \"fallback_in_use\": false,\n    \"filler_in_use\": false,\n    \"packager_ok\": true,\n    \"sources\": {\n      \"primary\": {\n        \"state\": \"up\"\n      }\n    },\n    \"updated_at\": \"2026-08-02T14:24:12.307Z\",\n    \"name\": \"api-news\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Channel status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ok',()=>pm.expect([200,404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/status/channel/{{channelId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "status",
+                "channel",
+                "{{channelId}}"
+              ]
+            },
+            "description": "One stream snapshot."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/status/channel/{{channelId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "status",
+                    "channel",
+                    "{{channelId}}"
+                  ]
+                },
+                "description": "One stream snapshot."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"df12fa1f-ad5c-4689-a498-72e68915cb58\",\n  \"event_id\": null,\n  \"channel_id\": \"00000000-0000-0000-0000-0000000000c1\",\n  \"output_available\": true,\n  \"active_source\": \"primary\",\n  \"fallback_in_use\": false,\n  \"filler_in_use\": false,\n  \"packager_ok\": true,\n  \"sources\": {\n    \"primary\": {\n      \"state\": \"up\"\n    }\n  },\n  \"last_seq\": \"1\",\n  \"updated_at\": \"2026-08-02T14:24:12.307Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Channel events",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/status/channel/{{channelId}}/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "status",
+                "channel",
+                "{{channelId}}",
+                "events"
+              ]
+            },
+            "description": "Per-stream event log."
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/status/channel/{{channelId}}/events",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "status",
+                    "channel",
+                    "{{channelId}}",
+                    "events"
+                  ]
+                },
+                "description": "Per-stream event log."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[\n  {\n    \"id\": \"1\",\n    \"seq\": \"1\",\n    \"type\": \"channel.start\",\n    \"detail\": {},\n    \"ts\": \"2024-10-27T03:33:20.000Z\"\n  }\n]"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

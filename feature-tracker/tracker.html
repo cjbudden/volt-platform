@@ -1,0 +1,172 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Volt — Product Feature Tracker</title><style>
+ :root{--bg:#0b0c10;--card:#14161d;--ink:#e7e9ee;--mut:#98a0ad;--line:#242833}
+ *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,system-ui,Segoe UI,Roboto,sans-serif}
+ .wrap{max-width:920px;margin:0 auto;padding:22px 22px 80px}
+ h1{font-size:19px;margin:0 0 2px}h1 span{color:#818cf8}
+ .sub{color:var(--mut);font-size:12px;margin-bottom:12px}
+ .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+ .chip{border:1px solid var(--line);background:#10131a;border-radius:20px;padding:5px 11px;font-size:12px;color:var(--ink)}
+ .how-to{background:#101827;border:1px solid #1e2b45;border-radius:10px;padding:11px 14px;color:#cdd7ea;font-size:12.5px;margin:12px 0 18px}
+ .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 16px;margin:12px 0}
+ .top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+ .name{font-weight:700;font-size:15.5px}
+ .pill{color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
+ .summary{color:#cdd2db;font-size:13px;margin:6px 0}
+ .meta{color:var(--mut);font-size:12px}
+ .how{font-size:12.5px;margin-top:8px;color:#cdd2db}
+ .note{font-size:12px;color:var(--mut);margin-top:6px}
+ .actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+ .btn{border:0;border-radius:9px;padding:9px 14px;font-weight:600;cursor:pointer;font-size:13px}
+ .btn.ok{background:#16a34a;color:#fff}.btn.warn{background:#10131a;border:1px solid #f59e0b;color:#f59e0b}
+ .approved-line{color:#22c55e;font-weight:600;margin-top:10px}
+ .fblog{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}.fb{color:var(--mut);font-size:12px}
+ #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#16a34a;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
+ #toast.show{opacity:1}
+</style></head><body>
+<div class=wrap>
+ <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-04.</div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>6</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>4</b> 🔨 Building</span></div>
+ <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. I update this tracker as things get approved or sent back.</div>
+ <div class=card data-status="ready_to_test">
+    <div class=top><div class=name>Image resize service</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+    <div class=summary>On-the-fly resize / crop / filter by URL, cached. fit-in / fill / stretch, focus incl. smart, sharpen / blur / grayscale / webp / avif, signed URLs.</div>
+    <div class=meta>14/14 automated contract checks pass</div>
+    <div class=how><b>How to test:</b> Open the test view, drop in your own logo/image and try fit / size / focus / filters, or attach an image in chat for true sharp-service renders.</div>
+    <div class=note>Test tool: open <b>“volt-image-api-validator”</b> in your artifacts gallery.</div>
+    <div class=actions>
+         <button class="btn ok" data-approve="Image resize service">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Image resize service">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test">
+    <div class=top><div class=name>Frame-accurate scrub &amp; clip</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+    <div class=summary>Pull any frame on demand from the chunked origin, scrub via sprite + I-frame trick-play, cut a frame-accurate clip. No proxies.</div>
+    <div class=meta>15/15 assertions (frame-accuracy MAD 0.02, exact clip, sprite, trick-play)</div>
+    <div class=how><b>How to test:</b> Run the prototype (volt-frame-proto.zip): npm install → node test.mjs → node server.mjs → open /scrub. 15/15 assertions.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Frame-accurate scrub &amp; clip">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Frame-accurate scrub &amp; clip">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test">
+    <div class=top><div class=name>Secure share page</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+    <div class=summary>Time-boxed standalone preview link for one asset. Revoke, expiry, max-views, optional PIN, watermarked preview, allow-download, notify-on-open.</div>
+    <div class=meta>20/20 e2e (isolation, PIN, revoke→410, expiry→410, download gating)</div>
+    <div class=how><b>How to test:</b> Say the word and I'll spin up a live sample share link + page from the local console so you can click expiry / PIN / revoke. Backend is 20/20 e2e.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Secure share page">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Secure share page">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test">
+    <div class=top><div class=name>Live captions + translation</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+    <div class=summary>Optional per account. Self-hosted whisper + NLLB (en↔ms/zh/ta and more) or Gladia. Whisper runs as a separate GPU add-on only when needed.</div>
+    <div class=meta>33 + 9 + 6 tests; proven end-to-end espeak → whisper → NLLB</div>
+    <div class=how><b>How to test:</b> Attach a short audio/video clip in chat and I'll caption + translate it and return the WebVTT tracks, or run the encoder unit tests.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Live captions + translation">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Live captions + translation">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test">
+    <div class=top><div class=name>Local test console (login + all tabs)</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+    <div class=summary>Browser console over the live API: overview, channels (start/stop), events, EPG, VOD, analytics, tickets, notifications + SaaS admin tab.</div>
+    <div class=meta>verified end-to-end in browser</div>
+    <div class=how><b>How to test:</b> In volt-app: ./run-local.sh, open /console, sign in (admin@rtm.example / saas@volt.example, pw volt1234). Flip between logins to see tenant isolation.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Local test console (login + all tabs)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Local test console (login + all tabs)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test">
+    <div class=top><div class=name>Record edit API + audit trail</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+    <div class=summary>Edit channels/events/schemas with PATCH (send only changed fields; null clears), optimistic concurrency (If-Match/version, 409 on stale write), and a full audit trail: who created/changed each record, field-level diffs, and per-record history.</div>
+    <div class=meta>23 e2e (partial patch, version bump, 409 conflict, null-clear, create/update/delete audit, history) + verify.sh 38/38</div>
+    <div class=how><b>How to test:</b> PATCH /api/channels/:id (or events / metadata-schemas), then GET /api/channels/:id/history. Try a stale If-Match to see the 409. Postman collection covers it; or attach me a scenario and I'll run it.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Record edit API + audit trail">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Record edit API + audit trail">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="in_review">
+    <div class=top><div class=name>EPG &amp; scheduling</div><span class=pill style="background:#6366f1">👀 In review</span></div>
+    <div class=summary>Programme store, RRULE recurrence, materialised instances, now/next, conflict detection.</div>
+    <div class=meta>13 tests pass</div>
+    <div class=how><b>How to test:</b> Exercisable via the console EPG tab and /api/epg. 7 pure + 6 HTTP tests.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="EPG &amp; scheduling">✓ Approve as working</button>
+         <button class="btn warn" data-changes="EPG &amp; scheduling">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="in_review">
+    <div class=top><div class=name>Analytics &amp; reporting</div><span class=pill style="background:#6366f1">👀 In review</span></div>
+    <div class=summary>Server-side audience / QoS / realtime from CDN logs; by-app + device; realtime concurrency.</div>
+    <div class=meta>6 tests pass</div>
+    <div class=how><b>How to test:</b> View in the console Analytics tab (seeded data) or hit /api/analytics/*.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Analytics &amp; reporting">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Analytics &amp; reporting">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="in_review">
+    <div class=top><div class=name>SaaS admin dashboard</div><span class=pill style="background:#6366f1">👀 In review</span></div>
+    <div class=summary>Cross-tenant overview: active servers, projected instances, channels, viewers, tickets; MFA 2-step login; impersonation (deferred).</div>
+    <div class=meta>auth + dashboard tests pass</div>
+    <div class=how><b>How to test:</b> Sign in to the console as saas@volt.example to see the SaaS Admin tab across tenants.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="SaaS admin dashboard">✓ Approve as working</button>
+         <button class="btn warn" data-changes="SaaS admin dashboard">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="building">
+    <div class=top><div class=name>Live updates (admin)</div><span class=pill style="background:#64748b">🔨 Building</span></div>
+    <div class=summary>When one admin changes a field, others viewing the same record see it update live, over the existing SSE hub. Public front-end live kept minimal (EPG served from CDN + client boundary advance) so 500k viewers add no per-viewer load.</div>
+    <div class=meta>design agreed; admin SSE + Postgres NOTIFY</div>
+    <div class=how><b>How to test:</b> Designed, builds on the edit+audit foundation just shipped. Not testable yet.</div>
+    
+    
+    
+  </div><div class=card data-status="building">
+    <div class=top><div class=name>Publish a clip to social media</div><span class=pill style="background:#64748b">🔨 Building</span></div>
+    <div class=summary>Push a clip to YouTube / Facebook / X / TikTok / Dailymotion. Data model + APIs exist; real upload adapters pending.</div>
+    <div class=meta>foundation built; adapters stubbed</div>
+    <div class=how><b>How to test:</b> Not testable yet — needs each platform's OAuth app credentials from you before the upload adapters go live.</div>
+    
+    
+    
+  </div><div class=card data-status="building">
+    <div class=top><div class=name>File manager</div><span class=pill style="background:#64748b">🔨 Building</span></div>
+    <div class=summary>Upload / organise watermarks, slates, logos, source media. S3-backed with direct-to-S3 upload.</div>
+    <div class=meta>design complete</div>
+    <div class=how><b>How to test:</b> Designed only — see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.</div>
+    
+    
+    
+  </div><div class=card data-status="building">
+    <div class=top><div class=name>Watchfolder ingest</div><span class=pill style="background:#64748b">🔨 Building</span></div>
+    <div class=summary>Assign a folder or S3 bucket/prefix as an auto ingest source; new files become assets / VOD / slates / playlist items.</div>
+    <div class=meta>design complete</div>
+    <div class=how><b>How to test:</b> Designed only — see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.</div>
+    
+    
+    
+  </div>
+</div>
+<div id=toast></div>
+<script>
+function toast(t){var el=document.getElementById('toast');el.textContent=t;el.className='show';setTimeout(function(){el.className=''},2200);}
+function copy(t){if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){toast('Copied — paste into chat: '+t)},function(){toast('Say in chat: '+t)});}else{toast('Say in chat: '+t);}}
+document.querySelectorAll('[data-approve]').forEach(function(b){b.onclick=function(){copy('Approve: '+b.getAttribute('data-approve'));};});
+document.querySelectorAll('[data-changes]').forEach(function(b){b.onclick=function(){copy('Changes: '+b.getAttribute('data-changes')+' — ');};});
+</script>
+</body></html>

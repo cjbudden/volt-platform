@@ -1,0 +1,1061 @@
+<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Volt Streaming — API Playground</title>
+<style>
+ :root{--bg:#0b0c10;--card:#15171e;--ink:#e7e9ee;--mut:#9aa0ad;--line:#252833;--blue:#818cf8}
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,system-ui,Segoe UI,Roboto,sans-serif}
+ header{position:sticky;top:0;background:linear-gradient(#0b0c10,#0b0c10ee);border-bottom:1px solid var(--line);padding:18px 24px;backdrop-filter:blur(6px)}
+ h1{margin:0 0 2px;font-size:18px} h1 span{color:var(--blue)}
+ .sub{color:var(--mut);font-size:12px}
+ .wrap{max-width:1000px;margin:0 auto;padding:18px 24px 80px}
+ input{width:100%;margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#0f1116;color:var(--ink);font-size:14px}
+ .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
+ .head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+ .m{color:#fff;font-weight:700;font-size:11px;padding:2px 8px;border-radius:5px;letter-spacing:.03em}
+ .path{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--ink)}
+ .folder{color:var(--mut);font-size:11px;border:1px solid var(--line);padding:1px 7px;border-radius:20px}
+ .code{margin-left:auto;font-weight:700;font-family:ui-monospace,monospace}
+ .desc{color:var(--mut);font-size:12.5px;margin:8px 0 4px}
+ .lbl{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px}
+ pre{margin:0;padding:12px;border-radius:8px;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;border:1px solid var(--line)}
+ pre.req{background:#0f1320} pre.resp{background:#0c1512}
+ .count{color:var(--mut);font-size:12px;margin-top:6px}
+</style></head><body>
+<header>
+  <h1><span>⚡</span> Volt Streaming — API Playground</h1>
+  <div class=sub>34 endpoints · live request/response scratch pad · captured from api/capture_api.sh</div>
+  <input id=q placeholder="Filter endpoints — method, path, or name…" oninput="flt()">
+  <div class=count id=cnt></div>
+</header>
+<div class=wrap id=list>
+
+    <div class="card" data-s="health health get /health">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/health</code>
+        <span class="folder">Health</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Liveness probe.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;ok&quot;: true,
+  &quot;service&quot;: &quot;volt-control-plane&quot;
+}</pre>
+    </div>
+    <div class="card" data-s="metadata schemas list schemas get /api/metadata-schemas">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/metadata-schemas</code>
+        <span class="folder">Metadata Schemas</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Named, typed metadata field sets for VOD assets.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">[]</pre>
+    </div>
+    <div class="card" data-s="metadata schemas create schema post /api/metadata-schemas">
+      <div class="head">
+        <span class="m" style="background:#16a34a">POST</span>
+        <code class="path">/api/metadata-schemas</code>
+        <span class="folder">Metadata Schemas</span>
+        <span class="code" style="color:#16a34a">201</span>
+      </div>
+      <div class="desc">Create a metadata schema. Fields: string|text|number|boolean|date|enum|url|tags.</div>
+      <div class=lbl>Request body</div><pre class=req>{
+  &quot;name&quot;: &quot;Match 1730000000&quot;,
+  &quot;fields&quot;: [
+    {
+      &quot;key&quot;: &quot;competition&quot;,
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;required&quot;: true
+    },
+    {
+      &quot;key&quot;: &quot;sport&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    {
+      &quot;key&quot;: &quot;rating&quot;,
+      &quot;type&quot;: &quot;enum&quot;,
+      &quot;options&quot;: [
+        &quot;G&quot;,
+        &quot;PG&quot;,
+        &quot;M&quot;
+      ]
+    }
+  ]
+}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;867623d9-fac2-4496-8c9d-7ed7193b06e0&quot;,
+  &quot;account_id&quot;: &quot;00000000-0000-0000-0000-0000000000a1&quot;,
+  &quot;name&quot;: &quot;Match 1730000000&quot;,
+  &quot;description&quot;: null,
+  &quot;fields&quot;: [
+    {
+      &quot;key&quot;: &quot;competition&quot;,
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;required&quot;: true
+    },
+    {
+      &quot;key&quot;: &quot;sport&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    {
+      &quot;key&quot;: &quot;rating&quot;,
+      &quot;type&quot;: &quot;enum&quot;,
+      &quot;options&quot;: [
+        &quot;G&quot;,
+        &quot;PG&quot;,
+        &quot;M&quot;
+      ]
+    }
+  ],
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:12.122Z&quot;,
+  &quot;updated_at&quot;: &quot;2026-08-02T14:24:12.122Z&quot;
+}</pre>
+    </div>
+    <div class="card" data-s="channels list channels get /api/channels">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/channels</code>
+        <span class="folder">Channels</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Channels for the tenant.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">[
+  {
+    &quot;id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+    &quot;group_id&quot;: &quot;00000000-0000-0000-0000-0000000000b1&quot;,
+    &quot;name&quot;: &quot;api-news&quot;,
+    &quot;status&quot;: &quot;scheduled&quot;,
+    &quot;enabled&quot;: true,
+    &quot;purchasing_mode&quot;: &quot;reserved&quot;,
+    &quot;resilience_tier&quot;: &quot;standard&quot;,
+    &quot;input_failover_enabled&quot;: false,
+    &quot;auto_failback&quot;: true,
+    &quot;input_loss_behavior&quot;: &quot;none&quot;,
+    &quot;filler_asset_id&quot;: null,
+    &quot;filler_slate_ref&quot;: null,
+    &quot;recording_retention_days&quot;: null,
+    &quot;created_at&quot;: &quot;2026-08-02T14:24:09.856Z&quot;,
+    &quot;updated_at&quot;: &quot;2026-08-02T14:24:09.856Z&quot;,
+    &quot;group_name&quot;: &quot;g&quot;
+  }
+]</pre>
+    </div>
+    <div class="card" data-s="channels get channel get /api/channels/{{channelid}}">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/channels/00000000-0000-0000-0000-0000000000c1</code>
+        <span class="folder">Channels</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">One channel + its inputs &amp; instances.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+  &quot;group_id&quot;: &quot;00000000-0000-0000-0000-0000000000b1&quot;,
+  &quot;name&quot;: &quot;api-news&quot;,
+  &quot;status&quot;: &quot;scheduled&quot;,
+  &quot;enabled&quot;: true,
+  &quot;purchasing_mode&quot;: &quot;reserved&quot;,
+  &quot;resilience_tier&quot;: &quot;standard&quot;,
+  &quot;input_failover_enabled&quot;: false,
+  &quot;auto_failback&quot;: true,
+  &quot;input_loss_behavior&quot;: &quot;none&quot;,
+  &quot;filler_asset_id&quot;: null,
+  &quot;filler_slate_ref&quot;: null,
+  &quot;recording_retention_days&quot;: null,
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:09.856Z&quot;,
+  &quot;updated_at&quot;: &quot;2026-08-02T14:24:09.856Z&quot;,
+  &quot;inputs&quot;: [],
+  &quot;instances&quot;: []
+}</pre>
+    </div>
+    <div class="card" data-s="channels start channel post /api/channels/{{channelid}}/start">
+      <div class="head">
+        <span class="m" style="background:#16a34a">POST</span>
+        <code class="path">/api/channels/00000000-0000-0000-0000-0000000000c1/start</code>
+        <span class="folder">Channels</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Orchestrator launches the encoder task + opens a recording.</div>
+      <div class=lbl>Request body</div><pre class=req>{}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+  &quot;group_id&quot;: &quot;00000000-0000-0000-0000-0000000000b1&quot;,
+  &quot;name&quot;: &quot;api-news&quot;,
+  &quot;status&quot;: &quot;live&quot;,
+  &quot;enabled&quot;: true,
+  &quot;purchasing_mode&quot;: &quot;reserved&quot;,
+  &quot;resilience_tier&quot;: &quot;standard&quot;,
+  &quot;input_failover_enabled&quot;: false,
+  &quot;auto_failback&quot;: true,
+  &quot;input_loss_behavior&quot;: &quot;none&quot;,
+  &quot;filler_asset_id&quot;: null,
+  &quot;filler_slate_ref&quot;: null,
+  &quot;recording_retention_days&quot;: null,
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:09.856Z&quot;,
+  &quot;updated_at&quot;: &quot;2026-08-02T14:24:12.151Z&quot;
+}</pre>
+    </div>
+    <div class="card" data-s="channels stop channel post /api/channels/{{channelid}}/stop">
+      <div class="head">
+        <span class="m" style="background:#16a34a">POST</span>
+        <code class="path">/api/channels/00000000-0000-0000-0000-0000000000c1/stop</code>
+        <span class="folder">Channels</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Terminates the task, closes the recording, fires the thumbnailer.</div>
+      <div class=lbl>Request body</div><pre class=req>{}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+  &quot;group_id&quot;: &quot;00000000-0000-0000-0000-0000000000b1&quot;,
+  &quot;name&quot;: &quot;api-news&quot;,
+  &quot;status&quot;: &quot;ended&quot;,
+  &quot;enabled&quot;: true,
+  &quot;purchasing_mode&quot;: &quot;reserved&quot;,
+  &quot;resilience_tier&quot;: &quot;standard&quot;,
+  &quot;input_failover_enabled&quot;: false,
+  &quot;auto_failback&quot;: true,
+  &quot;input_loss_behavior&quot;: &quot;none&quot;,
+  &quot;filler_asset_id&quot;: null,
+  &quot;filler_slate_ref&quot;: null,
+  &quot;recording_retention_days&quot;: null,
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:09.856Z&quot;,
+  &quot;updated_at&quot;: &quot;2026-08-02T14:24:12.167Z&quot;
+}</pre>
+    </div>
+    <div class="card" data-s="events list events get /api/events">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/events</code>
+        <span class="folder">Events</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Events for the tenant.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">[]</pre>
+    </div>
+    <div class="card" data-s="events create event post /api/events">
+      <div class="head">
+        <span class="m" style="background:#16a34a">POST</span>
+        <code class="path">/api/events</code>
+        <span class="folder">Events</span>
+        <span class="code" style="color:#16a34a">201</span>
+      </div>
+      <div class="desc">Schedule an event; the orchestrator provisions it at server_start.</div>
+      <div class=lbl>Request body</div><pre class=req>{
+  &quot;groupId&quot;: &quot;00000000-0000-0000-0000-0000000000b1&quot;,
+  &quot;name&quot;: &quot;Test Event&quot;,
+  &quot;scheduledStart&quot;: &quot;2027-01-01T10:00:00Z&quot;,
+  &quot;scheduledEnd&quot;: &quot;2027-01-01T12:00:00Z&quot;,
+  &quot;recordingRetentionDays&quot;: 14
+}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;6d3c65d7-419c-4c56-876d-2f9aa0355c4c&quot;,
+  &quot;group_id&quot;: &quot;00000000-0000-0000-0000-0000000000b1&quot;,
+  &quot;name&quot;: &quot;Test Event&quot;,
+  &quot;status&quot;: &quot;scheduled&quot;,
+  &quot;scheduled_start&quot;: &quot;2027-01-01T10:00:00.000Z&quot;,
+  &quot;scheduled_end&quot;: &quot;2027-01-01T12:00:00.000Z&quot;,
+  &quot;server_start&quot;: &quot;2027-01-01T10:00:00.000Z&quot;,
+  &quot;server_stop&quot;: &quot;2027-01-01T12:00:00.000Z&quot;,
+  &quot;public_start&quot;: &quot;2027-01-01T10:00:00.000Z&quot;,
+  &quot;public_end&quot;: &quot;2027-01-01T12:00:00.000Z&quot;,
+  &quot;actual_start&quot;: null,
+  &quot;actual_end&quot;: null,
+  &quot;purchasing_mode&quot;: &quot;spot_fallback&quot;,
+  &quot;resilience_tier&quot;: &quot;standard&quot;,
+  &quot;input_failover_enabled&quot;: false,
+  &quot;auto_failback&quot;: true,
+  &quot;input_loss_behavior&quot;: &quot;none&quot;,
+  &quot;filler_asset_id&quot;: null,
+  &quot;filler_slate_ref&quot;: null,
+  &quot;recording_retention_days&quot;: 14,
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:12.179Z&quot;,
+  &quot;updated_at&quot;: &quot;2026-08-02T14:24:12.179Z&quot;
+}</pre>
+    </div>
+    <div class="card" data-s="live timeline list scheduled clips get /api/scheduled-clips?channelid={{channelid}}">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/scheduled-clips?channelId=00000000-0000-0000-0000-0000000000c1</code>
+        <span class="folder">Live Timeline</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Clipping windows on the live timeline.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">[]</pre>
+    </div>
+    <div class="card" data-s="live timeline schedule a clip post /api/scheduled-clips">
+      <div class="head">
+        <span class="m" style="background:#16a34a">POST</span>
+        <code class="path">/api/scheduled-clips</code>
+        <span class="folder">Live Timeline</span>
+        <span class="code" style="color:#16a34a">201</span>
+      </div>
+      <div class="desc">When end_epoch_ms is reached the orchestrator cuts a VOD asset. outputKind: manifest|progressive|both.</div>
+      <div class=lbl>Request body</div><pre class=req>{
+  &quot;channelId&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+  &quot;title&quot;: &quot;Scheduled highlight&quot;,
+  &quot;startMs&quot;: 1000,
+  &quot;endMs&quot;: 6000,
+  &quot;outputKind&quot;: &quot;both&quot;
+}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;21ff386c-4715-4de0-88cd-2065a545917d&quot;,
+  &quot;channel_id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+  &quot;event_id&quot;: null,
+  &quot;title&quot;: &quot;Scheduled highlight&quot;,
+  &quot;start_epoch_ms&quot;: &quot;1000&quot;,
+  &quot;end_epoch_ms&quot;: &quot;6000&quot;,
+  &quot;output_kind&quot;: &quot;both&quot;,
+  &quot;status&quot;: &quot;scheduled&quot;,
+  &quot;vod_asset_id&quot;: null,
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:12.190Z&quot;
+}</pre>
+    </div>
+    <div class="card" data-s="live timeline cancel scheduled clip delete /api/scheduled-clips/{{scheduledclipid}}">
+      <div class="head">
+        <span class="m" style="background:#dc2626">DELETE</span>
+        <code class="path">/api/scheduled-clips/21ff386c-4715-4de0-88cd-2065a545917d</code>
+        <span class="folder">Live Timeline</span>
+        <span class="code" style="color:#16a34a">204</span>
+      </div>
+      <div class="desc">Cancel while still scheduled.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp"></pre>
+    </div>
+    <div class="card" data-s="recordings list recordings get /api/recordings">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/recordings</code>
+        <span class="folder">Recordings</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Filter by ?kind=channel_day|event &amp; ?channelId=.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">[
+  {
+    &quot;id&quot;: &quot;a95a6c38-08fb-4578-96fc-46696207884c&quot;,
+    &quot;kind&quot;: &quot;channel_day&quot;,
+    &quot;event_id&quot;: null,
+    &quot;channel_id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+    &quot;title&quot;: null,
+    &quot;day_utc&quot;: &quot;2026-08-02T00:00:00.000Z&quot;,
+    &quot;status&quot;: &quot;complete&quot;,
+    &quot;hi_res_rendition&quot;: &quot;source&quot;,
+    &quot;master_key&quot;: &quot;channel/00000000-0000-0000-0000-0000000000c1/2026-08-02&quot;,
+    &quot;start_epoch_ms&quot;: &quot;1785680652151&quot;,
+    &quot;end_epoch_ms&quot;: &quot;1785680652164&quot;,
+    &quot;duration_ms&quot;: &quot;13&quot;,
+    &quot;retention_days&quot;: null,
+    &quot;expires_at&quot;: null,
+    &quot;poster_key&quot;: null,
+    &quot;storyboard_key&quot;: null,
+    &quot;thumbs_vtt_key&quot;: null,
+    &quot;thumb_status&quot;: &quot;processing&quot;,
+    &quot;created_at&quot;: &quot;2026-08-02T14:24:12.151Z&quot;,
+    &quot;source_name&quot;: &quot;api-news&quot;,
+    &quot;vod_count&quot;: 0
+  },
+  {
+    &quot;id&quot;: &quot;00000000-0000-0000-0000-0000000000e1&quot;,
+    &quot;kind&quot;: &quot;channel_day&quot;,
+    &quot;event_id&quot;: null,
+    &quot;channel_id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+    &quot;title&quot;: null,
+    &quot;day_utc&quot;: &quot;2026-07-30T00:00:00.000Z&quot;,
+    &quot;status&quot;: &quot;complete&quot;,
+    &quot;hi_res_rendition&quot;: &quot;1080p&quot;,
+    &quot;master_key&quot;: &quot;channel/00000000-0000-0000-0000-0000000000c1&quot;,
+    &quot;start_epoch_ms&quot;: &quot;0&quot;,
+    &quot;end_epoch_ms&quot;: &quot;1785680652164&quot;,
+    &quot;duration_ms&quot;: &quot;1785680652164&quot;,
+    &quot;retention_days&quot;: null,
+    &quot;expires_at&quot;: null,
+    &quot;poster_key&quot;: null,
+    &quot;storyboard_key&quot;: null,
+    &quot;thumbs_vtt_key&quot;: null,
+    &quot;thumb_status&quot;: &quot;processing&quot;,
+    &quot;created_at&quot;: &quot;2026-08-02T14:24:09.859Z&quot;,
+    &quot;source_name&quot;: &quot;api-news&quot;,
+    &quot;vod_count&quot;: 0
+  }
+]</pre>
+    </div>
+    <div class="card" data-s="recordings channel roll-up get /api/recordings/channels">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/recordings/channels</code>
+        <span class="folder">Recordings</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Channels with recording counts + next expiry.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">[
+  {
+    &quot;channel_id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+    &quot;name&quot;: &quot;api-news&quot;,
+    &quot;recording_retention_days&quot;: null,
+    &quot;recording_count&quot;: 2,
+    &quot;last_recording_ms&quot;: &quot;1785680652151&quot;,
+    &quot;next_expiry&quot;: null
+  }
+]</pre>
+    </div>
+    <div class="card" data-s="recordings get recording get /api/recordings/{{recordingid}}">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/recordings/00000000-0000-0000-0000-0000000000e1</code>
+        <span class="folder">Recordings</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">One recording + its derived VOD assets.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;00000000-0000-0000-0000-0000000000e1&quot;,
+  &quot;kind&quot;: &quot;channel_day&quot;,
+  &quot;event_id&quot;: null,
+  &quot;channel_id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+  &quot;title&quot;: null,
+  &quot;day_utc&quot;: &quot;2026-07-30T00:00:00.000Z&quot;,
+  &quot;status&quot;: &quot;complete&quot;,
+  &quot;hi_res_rendition&quot;: &quot;1080p&quot;,
+  &quot;master_key&quot;: &quot;channel/00000000-0000-0000-0000-0000000000c1&quot;,
+  &quot;start_epoch_ms&quot;: &quot;0&quot;,
+  &quot;end_epoch_ms&quot;: &quot;1785680652164&quot;,
+  &quot;duration_ms&quot;: &quot;1785680652164&quot;,
+  &quot;retention_days&quot;: null,
+  &quot;expires_at&quot;: null,
+  &quot;poster_key&quot;: null,
+  &quot;storyboard_key&quot;: null,
+  &quot;thumbs_vtt_key&quot;: null,
+  &quot;thumb_status&quot;: &quot;processing&quot;,
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:09.859Z&quot;,
+  &quot;vod_assets&quot;: []
+}</pre>
+    </div>
+    <div class="card" data-s="recordings clip a recording post /api/recordings/{{recordingid}}/clip">
+      <div class="head">
+        <span class="m" style="background:#16a34a">POST</span>
+        <code class="path">/api/recordings/00000000-0000-0000-0000-0000000000e1/clip</code>
+        <span class="folder">Recordings</span>
+        <span class="code" style="color:#16a34a">201</span>
+      </div>
+      <div class="desc">Create a VOD from a time range. outputKind sets HLS/DASH and/or progressive MP4.</div>
+      <div class=lbl>Request body</div><pre class=req>{
+  &quot;title&quot;: &quot;Manual clip&quot;,
+  &quot;startMs&quot;: 1000,
+  &quot;endMs&quot;: 9000,
+  &quot;outputKind&quot;: &quot;both&quot;
+}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+  &quot;event_id&quot;: null,
+  &quot;channel_id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+  &quot;recording_id&quot;: &quot;00000000-0000-0000-0000-0000000000e1&quot;,
+  &quot;kind&quot;: &quot;clip&quot;,
+  &quot;title&quot;: &quot;Manual clip&quot;,
+  &quot;master_key&quot;: &quot;channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/master.m3u8&quot;,
+  &quot;start_epoch_ms&quot;: &quot;1000&quot;,
+  &quot;end_epoch_ms&quot;: &quot;9000&quot;,
+  &quot;duration_ms&quot;: &quot;8000&quot;,
+  &quot;export_mp4_key&quot;: null,
+  &quot;output_kind&quot;: &quot;both&quot;,
+  &quot;progressive_key&quot;: &quot;channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4&quot;,
+  &quot;formats&quot;: {
+    &quot;hls&quot;: true,
+    &quot;dash&quot;: true,
+    &quot;progressive&quot;: true
+  },
+  &quot;portal_visible&quot;: false,
+  &quot;clip_spec&quot;: null,
+  &quot;schema_id&quot;: null,
+  &quot;metadata&quot;: {},
+  &quot;poster_key&quot;: null,
+  &quot;storyboard_key&quot;: null,
+  &quot;thumbs_vtt_key&quot;: null,
+  &quot;thumb_status&quot;: &quot;processing&quot;,
+  &quot;published&quot;: false,
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:12.217Z&quot;,
+  &quot;updated_at&quot;: &quot;2026-08-02T14:24:12.217Z&quot;
+}</pre>
+    </div>
+    <div class="card" data-s="recordings download recording get /api/recordings/{{recordingid}}/download">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/recordings/00000000-0000-0000-0000-0000000000e1/download</code>
+        <span class="folder">Recordings</span>
+        <span class="code" style="color:#16a34a">202</span>
+      </div>
+      <div class="desc">Presigned MP4 URL (202 while exporting).</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;status&quot;: &quot;exporting&quot;,
+  &quot;message&quot;: &quot;MP4 export queued; poll this endpoint until a url is returned.&quot;
+}</pre>
+    </div>
+    <div class="card" data-s="vod list vod get /api/vod">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/vod</code>
+        <span class="folder">VOD</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Derived assets. ?published=true|false.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">[
+  {
+    &quot;id&quot;: &quot;23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+    &quot;event_id&quot;: null,
+    &quot;channel_id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+    &quot;recording_id&quot;: &quot;00000000-0000-0000-0000-0000000000e1&quot;,
+    &quot;kind&quot;: &quot;clip&quot;,
+    &quot;title&quot;: &quot;Manual clip&quot;,
+    &quot;master_key&quot;: &quot;channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/master.m3u8&quot;,
+    &quot;start_epoch_ms&quot;: &quot;1000&quot;,
+    &quot;end_epoch_ms&quot;: &quot;9000&quot;,
+    &quot;duration_ms&quot;: &quot;8000&quot;,
+    &quot;export_mp4_key&quot;: null,
+    &quot;output_kind&quot;: &quot;both&quot;,
+    &quot;progressive_key&quot;: &quot;channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4&quot;,
+    &quot;formats&quot;: {
+      &quot;hls&quot;: true,
+      &quot;dash&quot;: true,
+      &quot;progressive&quot;: true
+    },
+    &quot;portal_visible&quot;: false,
+    &quot;clip_spec&quot;: null,
+    &quot;schema_id&quot;: null,
+    &quot;metadata&quot;: {},
+    &quot;poster_key&quot;: null,
+    &quot;storyboard_key&quot;: null,
+    &quot;thumbs_vtt_key&quot;: null,
+    &quot;thumb_status&quot;: &quot;processing&quot;,
+    &quot;published&quot;: false,
+    &quot;created_at&quot;: &quot;2026-08-02T14:24:12.217Z&quot;,
+    &quot;updated_at&quot;: &quot;2026-08-02T14:24:12.217Z&quot;,
+    &quot;schema_name&quot;: null,
+    &quot;source_name&quot;: &quot;api-news&quot;
+  }
+]</pre>
+    </div>
+    <div class="card" data-s="vod get vod (+ schema.org) get /api/vod/{{vodid}}">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/vod/23360d6a-32a0-494d-a2ed-14e9e34fba41</code>
+        <span class="folder">VOD</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Asset + assigned schema + publications + schema.org JSON-LD.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+  &quot;event_id&quot;: null,
+  &quot;channel_id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+  &quot;recording_id&quot;: &quot;00000000-0000-0000-0000-0000000000e1&quot;,
+  &quot;kind&quot;: &quot;clip&quot;,
+  &quot;title&quot;: &quot;Manual clip&quot;,
+  &quot;master_key&quot;: &quot;channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/master.m3u8&quot;,
+  &quot;start_epoch_ms&quot;: &quot;1000&quot;,
+  &quot;end_epoch_ms&quot;: &quot;9000&quot;,
+  &quot;duration_ms&quot;: &quot;8000&quot;,
+  &quot;export_mp4_key&quot;: null,
+  &quot;output_kind&quot;: &quot;both&quot;,
+  &quot;progressive_key&quot;: &quot;channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4&quot;,
+  &quot;formats&quot;: {
+    &quot;hls&quot;: true,
+    &quot;dash&quot;: true,
+    &quot;progressive&quot;: true
+  },
+  &quot;portal_visible&quot;: false,
+  &quot;clip_spec&quot;: null,
+  &quot;schema_id&quot;: null,
+  &quot;metadata&quot;: {},
+  &quot;poster_key&quot;: null,
+  &quot;storyboard_key&quot;: null,
+  &quot;thumbs_vtt_key&quot;: null,
+  &quot;thumb_status&quot;: &quot;processing&quot;,
+  &quot;published&quot;: false,
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:12.217Z&quot;,
+  &quot;updated_at&quot;: &quot;2026-08-02T14:24:12.217Z&quot;,
+  &quot;schema&quot;: null,
+  &quot;publications&quot;: [],
+  &quot;jsonld&quot;: {
+    &quot;@context&quot;: &quot;https://schema.org&quot;,
+    &quot;@type&quot;: &quot;Clip&quot;,
+    &quot;@id&quot;: &quot;http://localhost:8080/api/vod/23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+    &quot;name&quot;: &quot;Manual clip&quot;,
+    &quot;uploadDate&quot;: &quot;2026-08-02T14:24:12.217Z&quot;,
+    &quot;duration&quot;: &quot;PT8S&quot;,
+    &quot;contentUrl&quot;: &quot;https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4&quot;,
+    &quot;embedUrl&quot;: &quot;https://cdn.example.com/portal/watch/23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+    &quot;isLiveBroadcast&quot;: false,
+    &quot;associatedMedia&quot;: [
+      {
+        &quot;@type&quot;: &quot;MediaObject&quot;,
+        &quot;encodingFormat&quot;: &quot;application/vnd.apple.mpegurl&quot;,
+        &quot;contentUrl&quot;: &quot;https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/master.m3u8&quot;
+      },
+      {
+        &quot;@type&quot;: &quot;MediaObject&quot;,
+        &quot;encodingFormat&quot;: &quot;application/dash+xml&quot;,
+        &quot;contentUrl&quot;: &quot;https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/manifest.mpd&quot;
+      },
+      {
+        &quot;@type&quot;: &quot;MediaObject&quot;,
+        &quot;encodingFormat&quot;: &quot;video/mp4&quot;,
+        &quot;contentUrl&quot;: &quot;https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4&quot;
+      }
+    ],
+    &quot;startOffset&quot;: 1,
+    &quot;endOffset&quot;: 9,
+    &quot;potentialAction&quot;: {
+      &quot;@type&quot;: &quot;WatchAction&quot;,
+      &quot;target&quot;: &quot;https://cdn.example.com/portal/watch/23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;
+    }
+  }
+}</pre>
+    </div>
+    <div class="card" data-s="vod update vod metadata put /api/vod/{{vodid}}">
+      <div class="head">
+        <span class="m" style="background:#d97706">PUT</span>
+        <code class="path">/api/vod/23360d6a-32a0-494d-a2ed-14e9e34fba41</code>
+        <span class="folder">VOD</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Set title/metadata (validated vs the assigned schema) &amp; published.</div>
+      <div class=lbl>Request body</div><pre class=req>{
+  &quot;title&quot;: &quot;Manual clip (tagged)&quot;,
+  &quot;schemaId&quot;: &quot;867623d9-fac2-4496-8c9d-7ed7193b06e0&quot;,
+  &quot;metadata&quot;: {
+    &quot;competition&quot;: &quot;Grand Final&quot;,
+    &quot;rating&quot;: &quot;PG&quot;
+  }
+}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+  &quot;event_id&quot;: null,
+  &quot;channel_id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+  &quot;recording_id&quot;: &quot;00000000-0000-0000-0000-0000000000e1&quot;,
+  &quot;kind&quot;: &quot;clip&quot;,
+  &quot;title&quot;: &quot;Manual clip (tagged)&quot;,
+  &quot;master_key&quot;: &quot;channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/master.m3u8&quot;,
+  &quot;start_epoch_ms&quot;: &quot;1000&quot;,
+  &quot;end_epoch_ms&quot;: &quot;9000&quot;,
+  &quot;duration_ms&quot;: &quot;8000&quot;,
+  &quot;export_mp4_key&quot;: null,
+  &quot;output_kind&quot;: &quot;both&quot;,
+  &quot;progressive_key&quot;: &quot;channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4&quot;,
+  &quot;formats&quot;: {
+    &quot;hls&quot;: true,
+    &quot;dash&quot;: true,
+    &quot;progressive&quot;: true
+  },
+  &quot;portal_visible&quot;: false,
+  &quot;clip_spec&quot;: null,
+  &quot;schema_id&quot;: &quot;867623d9-fac2-4496-8c9d-7ed7193b06e0&quot;,
+  &quot;metadata&quot;: {
+    &quot;rating&quot;: &quot;PG&quot;,
+    &quot;competition&quot;: &quot;Grand Final&quot;
+  },
+  &quot;poster_key&quot;: null,
+  &quot;storyboard_key&quot;: null,
+  &quot;thumbs_vtt_key&quot;: null,
+  &quot;thumb_status&quot;: &quot;processing&quot;,
+  &quot;published&quot;: false,
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:12.217Z&quot;,
+  &quot;updated_at&quot;: &quot;2026-08-02T14:24:12.236Z&quot;
+}</pre>
+    </div>
+    <div class="card" data-s="vod schema.org videoobject get /api/vod/{{vodid}}/schema.org">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/vod/23360d6a-32a0-494d-a2ed-14e9e34fba41/schema.org</code>
+        <span class="folder">VOD</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">JSON-LD for the portal / SEO / social metadata.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;@context&quot;: &quot;https://schema.org&quot;,
+  &quot;@type&quot;: &quot;Clip&quot;,
+  &quot;@id&quot;: &quot;http://localhost:8080/api/vod/23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+  &quot;name&quot;: &quot;Manual clip (tagged)&quot;,
+  &quot;uploadDate&quot;: &quot;2026-08-02T14:24:12.217Z&quot;,
+  &quot;duration&quot;: &quot;PT8S&quot;,
+  &quot;contentUrl&quot;: &quot;https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4&quot;,
+  &quot;embedUrl&quot;: &quot;https://cdn.example.com/portal/watch/23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+  &quot;isLiveBroadcast&quot;: false,
+  &quot;associatedMedia&quot;: [
+    {
+      &quot;@type&quot;: &quot;MediaObject&quot;,
+      &quot;encodingFormat&quot;: &quot;application/vnd.apple.mpegurl&quot;,
+      &quot;contentUrl&quot;: &quot;https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/master.m3u8&quot;
+    },
+    {
+      &quot;@type&quot;: &quot;MediaObject&quot;,
+      &quot;encodingFormat&quot;: &quot;application/dash+xml&quot;,
+      &quot;contentUrl&quot;: &quot;https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/manifest.mpd&quot;
+    },
+    {
+      &quot;@type&quot;: &quot;MediaObject&quot;,
+      &quot;encodingFormat&quot;: &quot;video/mp4&quot;,
+      &quot;contentUrl&quot;: &quot;https://cdn.example.com/channel/00000000-0000-0000-0000-0000000000c1/clip-1000-9000/progressive.mp4&quot;
+    }
+  ],
+  &quot;startOffset&quot;: 1,
+  &quot;endOffset&quot;: 9,
+  &quot;potentialAction&quot;: {
+    &quot;@type&quot;: &quot;WatchAction&quot;,
+    &quot;target&quot;: &quot;https://cdn.example.com/portal/watch/23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;
+  }
+}</pre>
+    </div>
+    <div class="card" data-s="slates &amp; loops list filler get /api/filler-assets">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/filler-assets</code>
+        <span class="folder">Slates &amp; Loops</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Uploaded slate/loop assets.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">[]</pre>
+    </div>
+    <div class="card" data-s="slates &amp; loops register filler post /api/filler-assets">
+      <div class="head">
+        <span class="m" style="background:#16a34a">POST</span>
+        <code class="path">/api/filler-assets</code>
+        <span class="folder">Slates &amp; Loops</span>
+        <span class="code" style="color:#16a34a">201</span>
+      </div>
+      <div class="desc">Register + get a presigned upload URL.</div>
+      <div class=lbl>Request body</div><pre class=req>{
+  &quot;kind&quot;: &quot;slate&quot;,
+  &quot;name&quot;: &quot;Test slate&quot;
+}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;401a534d-1e68-4e26-ad85-24afdf1d0f3c&quot;,
+  &quot;account_id&quot;: &quot;00000000-0000-0000-0000-0000000000a1&quot;,
+  &quot;kind&quot;: &quot;slate&quot;,
+  &quot;name&quot;: &quot;Test slate&quot;,
+  &quot;source_key&quot;: &quot;filler/00000000-0000-0000-0000-0000000000a1/401a534d-1e68-4e26-ad85-24afdf1d0f3c&quot;,
+  &quot;width&quot;: null,
+  &quot;height&quot;: null,
+  &quot;duration_ms&quot;: null,
+  &quot;poster_key&quot;: null,
+  &quot;status&quot;: &quot;uploading&quot;,
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:12.248Z&quot;,
+  &quot;updated_at&quot;: &quot;2026-08-02T14:24:12.248Z&quot;,
+  &quot;upload&quot;: {
+    &quot;method&quot;: &quot;PUT&quot;,
+    &quot;url&quot;: &quot;https://volt-origin.s3.ap-southeast-1.amazonaws.com/filler/00000000-0000-0000-0000-0000000000a1/401a534d-1e68-4e26-ad85-24afdf1d0f3c&quot;
+  }
+}</pre>
+    </div>
+    <div class="card" data-s="slates &amp; loops delete filler delete /api/filler-assets/{{fillerid}}">
+      <div class="head">
+        <span class="m" style="background:#dc2626">DELETE</span>
+        <code class="path">/api/filler-assets/401a534d-1e68-4e26-ad85-24afdf1d0f3c</code>
+        <span class="folder">Slates &amp; Loops</span>
+        <span class="code" style="color:#16a34a">204</span>
+      </div>
+      <div class="desc">Remove a filler asset.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp"></pre>
+    </div>
+    <div class="card" data-s="distribution list publish targets get /api/publish-targets">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/publish-targets</code>
+        <span class="folder">Distribution</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Configured social accounts.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">[]</pre>
+    </div>
+    <div class="card" data-s="distribution link account post /api/publish-targets">
+      <div class="head">
+        <span class="m" style="background:#16a34a">POST</span>
+        <code class="path">/api/publish-targets</code>
+        <span class="folder">Distribution</span>
+        <span class="code" style="color:#16a34a">201</span>
+      </div>
+      <div class="desc">platform: youtube|facebook|x|tiktok|dailymotion|portal.</div>
+      <div class=lbl>Request body</div><pre class=req>{
+  &quot;platform&quot;: &quot;youtube&quot;,
+  &quot;name&quot;: &quot;RTM YouTube&quot;,
+  &quot;externalAccount&quot;: &quot;UC_rtm&quot;
+}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;f23465cd-57d4-4a40-a0b7-85906c84fcd0&quot;,
+  &quot;platform&quot;: &quot;youtube&quot;,
+  &quot;name&quot;: &quot;RTM YouTube&quot;,
+  &quot;external_account&quot;: &quot;UC_rtm&quot;,
+  &quot;enabled&quot;: true
+}</pre>
+    </div>
+    <div class="card" data-s="distribution publish to portal post /api/publications/vod/{{vodid}}/publish">
+      <div class="head">
+        <span class="m" style="background:#16a34a">POST</span>
+        <code class="path">/api/publications/vod/23360d6a-32a0-494d-a2ed-14e9e34fba41/publish</code>
+        <span class="folder">Distribution</span>
+        <span class="code" style="color:#16a34a">201</span>
+      </div>
+      <div class="desc">Make portal-visible + create a publication record.</div>
+      <div class=lbl>Request body</div><pre class=req>{
+  &quot;platform&quot;: &quot;portal&quot;
+}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;9b9f9245-090f-47d4-bb26-f914eca591a4&quot;,
+  &quot;vod_asset_id&quot;: &quot;23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+  &quot;platform&quot;: &quot;portal&quot;,
+  &quot;target_id&quot;: null,
+  &quot;external_id&quot;: null,
+  &quot;external_url&quot;: &quot;/portal/watch/23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+  &quot;status&quot;: &quot;published&quot;,
+  &quot;views&quot;: &quot;0&quot;,
+  &quot;error&quot;: null,
+  &quot;published_at&quot;: &quot;2026-08-02T14:24:12.275Z&quot;,
+  &quot;last_synced_at&quot;: null,
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:12.275Z&quot;
+}</pre>
+    </div>
+    <div class="card" data-s="distribution publish to social post /api/publications/vod/{{vodid}}/publish">
+      <div class="head">
+        <span class="m" style="background:#16a34a">POST</span>
+        <code class="path">/api/publications/vod/23360d6a-32a0-494d-a2ed-14e9e34fba41/publish</code>
+        <span class="folder">Distribution</span>
+        <span class="code" style="color:#16a34a">201</span>
+      </div>
+      <div class="desc">Push to a linked social account (adapter). Tracks external id/url + views.</div>
+      <div class=lbl>Request body</div><pre class=req>{
+  &quot;platform&quot;: &quot;youtube&quot;,
+  &quot;targetId&quot;: &quot;f23465cd-57d4-4a40-a0b7-85906c84fcd0&quot;
+}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;3698c8ba-2212-48f8-8882-dc3ae8a31d47&quot;,
+  &quot;vod_asset_id&quot;: &quot;23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+  &quot;platform&quot;: &quot;youtube&quot;,
+  &quot;target_id&quot;: &quot;f23465cd-57d4-4a40-a0b7-85906c84fcd0&quot;,
+  &quot;external_id&quot;: &quot;stub-3698c8ba&quot;,
+  &quot;external_url&quot;: &quot;https://youtube.example/watch/3698c8ba&quot;,
+  &quot;status&quot;: &quot;published&quot;,
+  &quot;views&quot;: &quot;0&quot;,
+  &quot;error&quot;: null,
+  &quot;published_at&quot;: &quot;2026-08-02T14:24:12.288Z&quot;,
+  &quot;last_synced_at&quot;: null,
+  &quot;created_at&quot;: &quot;2026-08-02T14:24:12.285Z&quot;
+}</pre>
+    </div>
+    <div class="card" data-s="distribution list publications get /api/publications?assetid={{vodid}}">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/publications?assetId=23360d6a-32a0-494d-a2ed-14e9e34fba41</code>
+        <span class="folder">Distribution</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Per-asset publications + synced view counts.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">[
+  {
+    &quot;id&quot;: &quot;3698c8ba-2212-48f8-8882-dc3ae8a31d47&quot;,
+    &quot;vod_asset_id&quot;: &quot;23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+    &quot;platform&quot;: &quot;youtube&quot;,
+    &quot;target_id&quot;: &quot;f23465cd-57d4-4a40-a0b7-85906c84fcd0&quot;,
+    &quot;external_id&quot;: &quot;stub-3698c8ba&quot;,
+    &quot;external_url&quot;: &quot;https://youtube.example/watch/3698c8ba&quot;,
+    &quot;status&quot;: &quot;published&quot;,
+    &quot;views&quot;: &quot;0&quot;,
+    &quot;error&quot;: null,
+    &quot;published_at&quot;: &quot;2026-08-02T14:24:12.288Z&quot;,
+    &quot;last_synced_at&quot;: null,
+    &quot;created_at&quot;: &quot;2026-08-02T14:24:12.285Z&quot;,
+    &quot;target_name&quot;: &quot;RTM YouTube&quot;
+  },
+  {
+    &quot;id&quot;: &quot;9b9f9245-090f-47d4-bb26-f914eca591a4&quot;,
+    &quot;vod_asset_id&quot;: &quot;23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+    &quot;platform&quot;: &quot;portal&quot;,
+    &quot;target_id&quot;: null,
+    &quot;external_id&quot;: null,
+    &quot;external_url&quot;: &quot;/portal/watch/23360d6a-32a0-494d-a2ed-14e9e34fba41&quot;,
+    &quot;status&quot;: &quot;published&quot;,
+    &quot;views&quot;: &quot;0&quot;,
+    &quot;error&quot;: null,
+    &quot;published_at&quot;: &quot;2026-08-02T14:24:12.275Z&quot;,
+    &quot;last_synced_at&quot;: null,
+    &quot;created_at&quot;: &quot;2026-08-02T14:24:12.275Z&quot;,
+    &quot;target_name&quot;: null
+  }
+]</pre>
+    </div>
+    <div class="card" data-s="distribution sync view counts post /api/publications/sync-views">
+      <div class="head">
+        <span class="m" style="background:#16a34a">POST</span>
+        <code class="path">/api/publications/sync-views</code>
+        <span class="folder">Distribution</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Pull latest view counts from platforms (adapter).</div>
+      <div class=lbl>Request body</div><pre class=req>{}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;synced&quot;: 2
+}</pre>
+    </div>
+    <div class="card" data-s="status encoder report (ingest) post /api/streams/{{channelid}}/report">
+      <div class="head">
+        <span class="m" style="background:#16a34a">POST</span>
+        <code class="path">/api/streams/00000000-0000-0000-0000-0000000000c1/report</code>
+        <span class="folder">Status</span>
+        <span class="code" style="color:#16a34a">202</span>
+      </div>
+      <div class="desc">The encoder posts events + status snapshots (ingest-token auth).</div>
+      <div class=lbl>Request body</div><pre class=req>{
+  &quot;kind&quot;: &quot;channel&quot;,
+  &quot;event&quot;: {
+    &quot;ts_ms&quot;: 1730000000000,
+    &quot;seq&quot;: 1,
+    &quot;type&quot;: &quot;channel.start&quot;,
+    &quot;detail&quot;: {}
+  },
+  &quot;status&quot;: {
+    &quot;output_available&quot;: true,
+    &quot;active_source&quot;: &quot;primary&quot;,
+    &quot;fallback_in_use&quot;: false,
+    &quot;filler_in_use&quot;: false,
+    &quot;packager_ok&quot;: true,
+    &quot;sources&quot;: {
+      &quot;primary&quot;: {
+        &quot;state&quot;: &quot;up&quot;
+      }
+    },
+    &quot;seq&quot;: 1
+  }
+}</pre>
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;ok&quot;: true
+}</pre>
+    </div>
+    <div class="card" data-s="status all stream status get /api/status">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/status</code>
+        <span class="folder">Status</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Latest status per stream (dashboard poll).</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">[
+  {
+    &quot;channel_id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+    &quot;event_id&quot;: null,
+    &quot;output_available&quot;: true,
+    &quot;active_source&quot;: &quot;primary&quot;,
+    &quot;fallback_in_use&quot;: false,
+    &quot;filler_in_use&quot;: false,
+    &quot;packager_ok&quot;: true,
+    &quot;sources&quot;: {
+      &quot;primary&quot;: {
+        &quot;state&quot;: &quot;up&quot;
+      }
+    },
+    &quot;updated_at&quot;: &quot;2026-08-02T14:24:12.307Z&quot;,
+    &quot;name&quot;: &quot;api-news&quot;
+  }
+]</pre>
+    </div>
+    <div class="card" data-s="status channel status get /api/status/channel/{{channelid}}">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/status/channel/00000000-0000-0000-0000-0000000000c1</code>
+        <span class="folder">Status</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">One stream snapshot.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">{
+  &quot;id&quot;: &quot;df12fa1f-ad5c-4689-a498-72e68915cb58&quot;,
+  &quot;event_id&quot;: null,
+  &quot;channel_id&quot;: &quot;00000000-0000-0000-0000-0000000000c1&quot;,
+  &quot;output_available&quot;: true,
+  &quot;active_source&quot;: &quot;primary&quot;,
+  &quot;fallback_in_use&quot;: false,
+  &quot;filler_in_use&quot;: false,
+  &quot;packager_ok&quot;: true,
+  &quot;sources&quot;: {
+    &quot;primary&quot;: {
+      &quot;state&quot;: &quot;up&quot;
+    }
+  },
+  &quot;last_seq&quot;: &quot;1&quot;,
+  &quot;updated_at&quot;: &quot;2026-08-02T14:24:12.307Z&quot;
+}</pre>
+    </div>
+    <div class="card" data-s="status channel events get /api/status/channel/{{channelid}}/events">
+      <div class="head">
+        <span class="m" style="background:#2563eb">GET</span>
+        <code class="path">/api/status/channel/00000000-0000-0000-0000-0000000000c1/events</code>
+        <span class="folder">Status</span>
+        <span class="code" style="color:#16a34a">200</span>
+      </div>
+      <div class="desc">Per-stream event log.</div>
+      
+      <div class=lbl>Response</div>
+      <pre class="resp">[
+  {
+    &quot;id&quot;: &quot;1&quot;,
+    &quot;seq&quot;: &quot;1&quot;,
+    &quot;type&quot;: &quot;channel.start&quot;,
+    &quot;detail&quot;: {},
+    &quot;ts&quot;: &quot;2024-10-27T03:33:20.000Z&quot;
+  }
+]</pre>
+    </div>
+</div>
+<script>
+ const cards=[...document.querySelectorAll('.card')],cnt=document.getElementById('cnt');
+ function flt(){const v=document.getElementById('q').value.toLowerCase().trim();let n=0;
+   cards.forEach(c=>{const m=!v||c.dataset.s.includes(v);c.style.display=m?'':'none';if(m)n++;});
+   cnt.textContent=n+' / '+cards.length+' shown';}
+ flt();
+</script></body></html>

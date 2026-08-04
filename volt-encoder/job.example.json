@@ -1,0 +1,68 @@
+{
+  "_comment": "Volt encoder job config. One file == one channel/event. The control plane renders this per activation and mounts it at /job/config.json (or passes it via JOB_CONFIG_JSON). This example is the RTM packaging workflow with Axinom DRM.",
+
+  "channel_id": "rtm-news-24x7",
+  "workflow": "package_only",
+  "segment_seconds": 4,
+  "fps": 25,
+
+  "dvr_seconds": 300,
+  "preserved_segments": 0,
+  "upload_interval_seconds": 2,
+
+  "inputs": [
+    { "rendition_label": "1080p", "role": "primary", "protocol": "srt", "url": "srt://0.0.0.0:9000?mode=listener&streamid=rtm-news-1080p&passphrase=REDACTED", "bitrate_kbps": 5000, "has_audio": true },
+    { "rendition_label": "720p",  "role": "primary", "protocol": "srt", "url": "srt://0.0.0.0:9001?mode=listener&streamid=rtm-news-720p&passphrase=REDACTED",  "bitrate_kbps": 2800 },
+    { "rendition_label": "480p",  "role": "primary", "protocol": "srt", "url": "srt://0.0.0.0:9002?mode=listener&streamid=rtm-news-480p&passphrase=REDACTED",  "bitrate_kbps": 1400 },
+    { "rendition_label": "360p",  "role": "primary", "protocol": "srt", "url": "srt://0.0.0.0:9003?mode=listener&streamid=rtm-news-360p&passphrase=REDACTED",  "bitrate_kbps": 800  }
+  ],
+
+  "_redundancy_comment": "OPTIONAL, chosen at setup. Omit the whole block for no redundancy (the default). input_failover uses the role='backup' inputs below. input_loss_behavior is what the OUTPUT shows when ALL live inputs are down (slate | vod_loop | last_frame | black); we hold there until a live input returns so the output never stalls. There is NO backup output.",
+  "redundancy": {
+    "input_failover": true,
+    "auto_failback": true,
+    "input_loss_behavior": "slate",
+    "filler": {
+      "slate_ref": "s3://volt-assets/rtm/slate-1080.png",
+      "vod_loop_url": null
+    }
+  },
+  "_backup_inputs_example": [
+    { "rendition_label": "1080p", "role": "backup", "protocol": "srt", "url": "srt://0.0.0.0:9100?mode=listener&streamid=rtm-news-1080p-bak&passphrase=REDACTED", "bitrate_kbps": 5000, "has_audio": true },
+    { "rendition_label": "720p",  "role": "backup", "protocol": "srt", "url": "srt://0.0.0.0:9101?mode=listener&streamid=rtm-news-720p-bak&passphrase=REDACTED",  "bitrate_kbps": 2800 }
+  ],
+
+  "s3": {
+    "bucket": "volt-live-origin",
+    "prefix": "rtm/rtm-news-24x7"
+  },
+
+  "_status_report_comment": "Where the encoder POSTs its live status snapshot on every change (source up/down, failover, filler). The control plane exposes it to the admin. Token authenticates the container to the ingest endpoint (from Secrets Manager). Omit to only log events to stdout/CloudWatch + the local status file.",
+  "status_report": {
+    "url": "https://api.ols.internal/api/streams/rtm-news-24x7/report",
+    "token": "INGEST_TOKEN"
+  },
+
+  "drm": {
+    "mode": "cbcs",
+    "speke_url": "https://key-server-management.axprod.net/api/SpekeV2",
+    "content_id": "rtm-news-24x7",
+    "auth": "TENANT_ID:MANAGEMENT_KEY",
+    "systems": ["widevine", "playready", "fairplay"]
+  },
+
+  "_transcode_example": {
+    "_comment": "For the transcode workflow instead: workflow=transcode, one mezzanine input, and a ladder array. gpu=true selects NVENC on a g5/g6 node.",
+    "workflow": "transcode",
+    "gpu": true,
+    "inputs": [
+      { "rendition_label": "mezzanine", "protocol": "srt", "url": "srt://0.0.0.0:9000?mode=listener&streamid=rtm-mezz&passphrase=REDACTED", "has_audio": true }
+    ],
+    "ladder": [
+      { "height": 1080, "bitrate_kbps": 5000 },
+      { "height": 720,  "bitrate_kbps": 2800 },
+      { "height": 480,  "bitrate_kbps": 1400 },
+      { "height": 360,  "bitrate_kbps": 800  }
+    ]
+  }
+}
