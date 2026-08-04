@@ -4,6 +4,7 @@ import { config } from './config';
 import { errorHandler } from './util/http';
 import { authRouter } from './auth/routes';
 import { channelsRouter } from './modules/channels';
+import { groupsRouter } from './modules/groups';
 import { eventsRouter } from './modules/events';
 import { profilesRouter } from './modules/outputProfiles';
 import { statusRouter, ingestRouter } from './modules/status';
@@ -50,6 +51,7 @@ export function createServer() {
 
   app.use('/api/auth', authRouter);
   app.use('/api/channels', channelsRouter);
+  app.use('/api/groups', groupsRouter);
   app.use('/api/events', eventsRouter);
   app.use('/api/output-profiles', profilesRouter);
   app.use('/api/status', statusRouter);   // admin: polling REST + SSE live push
