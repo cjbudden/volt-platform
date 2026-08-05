@@ -1,16 +1,20 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { query, one } from '../db';
+import { query, one, tx } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, conflict } from '../util/http';
 import { orchestrator } from '../services/orchestrator';
 import { validateEntityMetadata } from './metadataSchemas';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
+import { buildChannelDetail, DVR_MAX_SEC } from '../services/channelDetail';
 
 export const channelsRouter = Router();
 channelsRouter.use(requireAuth);
 
-const CHANNEL_EDITABLE = ['name', 'enabled', 'recording_retention_days', 'schema_id', 'metadata'];
+const CHANNEL_EDITABLE = [
+  'name', 'enabled', 'recording_retention_days', 'schema_id', 'metadata',
+  'dvr_window_sec', 'dvr_mode', 'geo_mode', 'geo_countries',
+];
 
 /** List channels for the tenant (scoped via group -> account). */
 channelsRouter.get(
@@ -36,9 +40,9 @@ channelsRouter.get(
       [req.params.id, accountId(req)]
     );
     if (!row) throw notFound('Channel not found');
-    const inputs = await query('SELECT * FROM stream_inputs WHERE channel_id = $1', [req.params.id]);
     const instances = await query('SELECT * FROM instances WHERE channel_id = $1 AND terminated_at IS NULL', [req.params.id]);
-    res.json({ ...row, inputs, instances });
+    const detail = await buildChannelDetail(row, Date.now());
+    res.json({ ...row, instances, ...detail });
   })
 );
 
@@ -48,6 +52,8 @@ const createSchema = z.object({
   purchasingMode: z.enum(['on_demand', 'reserved', 'spot_fallback']).default('reserved'),
   resilienceTier: z.enum(['standard', 'resilient_input', 'full_redundancy']).default('standard'),
   recordingRetentionDays: z.number().int().positive().nullable().optional(), // retention rule
+  dvrWindowSec: z.number().int().min(30).max(DVR_MAX_SEC).nullable().optional(), // ≤4h for 24x7
+  dvrMode: z.enum(['sliding', 'event_start']).default('sliding'),
 });
 
 /** Create a channel — enforces the group's max_channels entitlement. */
@@ -65,9 +71,10 @@ channelsRouter.post(
 
     const who = actor(req);
     const row = await one<any>(
-      `INSERT INTO channels(group_id, name, purchasing_mode, resilience_tier, recording_retention_days, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$6) RETURNING *`,
-      [body.groupId, body.name, body.purchasingMode, body.resilienceTier, body.recordingRetentionDays ?? null, who.userId]
+      `INSERT INTO channels(group_id, name, purchasing_mode, resilience_tier, recording_retention_days, dvr_window_sec, dvr_mode, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING *`,
+      [body.groupId, body.name, body.purchasingMode, body.resilienceTier, body.recordingRetentionDays ?? null,
+       body.dvrWindowSec ?? null, body.dvrMode, who.userId]
     );
     await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
       action: 'create', entityType: 'channel', entityId: row.id,
@@ -88,6 +95,26 @@ const editSchema = z.object({
   recordingRetentionDays: z.number().int().positive().nullable().optional(),
   schemaId: z.string().uuid().nullable().optional(),
   metadata: z.record(z.any()).optional(),
+  // DVR: per-channel catch-up window. 24x7 sliding window is capped at 4h; events
+  // scrub back to the event start (dvr_mode = 'event_start', no fixed cap needed).
+  dvrWindowSec: z.number().int().min(30).max(DVR_MAX_SEC).nullable().optional(),
+  dvrMode: z.enum(['sliding', 'event_start']).optional(),
+  // source geo rules (edge-evaluated)
+  geoMode: z.enum(['worldwide', 'allow', 'block']).optional(),
+  geoCountries: z.array(z.string().length(2)).optional(),
+  // sources (primary/backup ingest) — replaces this channel's inputs when provided
+  sources: z.array(z.object({
+    role: z.enum(['primary', 'backup']),
+    protocol: z.enum(['srt', 'rtmp', 'rtp', 'hls', 'rist', 'zixi']),
+    ingestUrl: z.string().optional(),
+    streamKey: z.string().optional(),
+  })).optional(),
+  // subtitles / live captions (persisted to the group's shared output profile)
+  captions: z.object({
+    enabled: z.boolean().optional(),
+    sourceLang: z.string().optional(),
+    targets: z.array(z.string()).optional(),
+  }).optional(),
   version: z.number().int().optional(),
 });
 const editChannel = asyncHandler(async (req, res) => {
@@ -106,6 +133,10 @@ const editChannel = asyncHandler(async (req, res) => {
   if (has('name')) patch.name = body.name;
   if (has('enabled')) patch.enabled = body.enabled;
   if (has('recordingRetentionDays')) patch.recording_retention_days = body.recordingRetentionDays ?? null;
+  if (has('dvrWindowSec')) patch.dvr_window_sec = body.dvrWindowSec ?? null;
+  if (has('dvrMode')) patch.dvr_mode = body.dvrMode;
+  if (has('geoMode')) patch.geo_mode = body.geoMode;
+  if (has('geoCountries')) patch.geo_countries = body.geoCountries ?? [];
   const touchMeta = has('schemaId') || has('metadata');
   if (touchMeta) {
     const md = await validateEntityMetadata(accountId(req), body.schemaId ?? null,
@@ -122,7 +153,49 @@ const editChannel = asyncHandler(async (req, res) => {
       table: 'channels', id: req.params.id, accountId: accountId(req),
       current, patch, allowed: CHANNEL_EDITABLE, entityType: 'channel',
       userId: who.userId, label: who.label, expectedVersion,
+      arrayColumns: ['geo_countries'],
     });
+
+    // --- cross-entity side effects (audited separately) ---------------------
+    // Sources: replace this channel's ingest inputs.
+    if (has('sources') && body.sources) {
+      await tx(async (c) => {
+        await c.query('DELETE FROM stream_inputs WHERE channel_id = $1', [req.params.id]);
+        for (const s of body.sources!) {
+          await c.query(
+            `INSERT INTO stream_inputs(channel_id, role, protocol, ingest_url, stream_key)
+             VALUES ($1,$2,$3,$4,$5)`,
+            [req.params.id, s.role, s.protocol, s.ingestUrl ?? null, s.streamKey ?? null]
+          );
+        }
+      });
+      await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
+        action: 'update', entityType: 'channel', entityId: req.params.id,
+        snapshot: { sources: body.sources.map((s) => `${s.role}:${s.protocol}`) } });
+    }
+
+    // Subtitles/captions live on the group's shared output profile.
+    if (has('captions') && body.captions) {
+      const grp = await one<any>(
+        `SELECT g.output_profile_id FROM channels ch JOIN groups g ON g.id = ch.group_id WHERE ch.id = $1`,
+        [req.params.id]
+      );
+      if (grp?.output_profile_id) {
+        const cap = body.captions;
+        const sets: string[] = []; const vals: any[] = [];
+        if (cap.enabled !== undefined) { sets.push(`captions_enabled = $${sets.length + 1}`); vals.push(cap.enabled); }
+        if (cap.sourceLang !== undefined) { sets.push(`caption_source_lang = $${sets.length + 1}`); vals.push(cap.sourceLang); }
+        if (cap.targets !== undefined) { sets.push(`caption_targets = $${sets.length + 1}::jsonb`); vals.push(JSON.stringify(cap.targets)); }
+        if (sets.length) {
+          vals.push(grp.output_profile_id);
+          await query(`UPDATE output_profiles SET ${sets.join(', ')}, updated_at = now() WHERE id = $${vals.length}`, vals);
+          await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
+            action: 'update', entityType: 'output_profile', entityId: grp.output_profile_id,
+            snapshot: { captions: cap } });
+        }
+      }
+    }
+
     res.set('ETag', String(row.version));
     res.json({ ...row, _changed: changed });
   } catch (e) {

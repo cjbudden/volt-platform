@@ -6,9 +6,9 @@ const LANGS = [
   { code: 'zh', label: 'Chinese' }, { code: 'ta', label: 'Tamil' },
 ]
 
-type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void }
+type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
 
-export default function Channels({ createOpen, setCreateOpen }: Props) {
+export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
   const [channels, setChannels] = useState<any[] | null>(null)
   const [groups, setGroups] = useState<Group[]>([])
   const [filter, setFilter] = useState<'all' | 'transcode' | 'package_only'>('all')
@@ -61,7 +61,7 @@ export default function Channels({ createOpen, setCreateOpen }: Props) {
             <FChip label="Transcode" n={counts.transcode} on={filter === 'transcode'} onClick={() => setFilter('transcode')} />
             <FChip label="Packaging" n={counts.package_only} on={filter === 'package_only'} onClick={() => setFilter('package_only')} />
           </div>
-          <ChannelTable channels={shown || []} onChanged={load} />
+          <ChannelTable channels={shown || []} onChanged={load} onOpen={onOpen} />
         </>
       )}
 
@@ -101,7 +101,7 @@ function initials(name: string) {
   return name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'
 }
 
-function ChannelTable({ channels, onChanged }: { channels: any[]; onChanged: () => void }) {
+function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChanged: () => void; onOpen?: (id: string) => void }) {
   const [busy, setBusy] = useState<string | null>(null)
   async function toggle(c: any) {
     setBusy(c.id)
@@ -126,7 +126,7 @@ function ChannelTable({ channels, onChanged }: { channels: any[]; onChanged: () 
             const wt = c._g?.workflow_type
             const live = c.status === 'live'
             return (
-              <tr key={c.id}>
+              <tr key={c.id} onClick={() => onOpen?.(c.id)} style={onOpen ? { cursor: 'pointer' } : undefined}>
                 <td>
                   <div className="cell-name">
                     <div className="thumb" style={{ background: THUMB_BG[i % THUMB_BG.length] }}>{initials(c.name)}</div>
@@ -153,7 +153,7 @@ function ChannelTable({ channels, onChanged }: { channels: any[]; onChanged: () 
                   </span>
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{c.recording_retention_days ? `${c.recording_retention_days}d` : '—'}</td>
-                <td style={{ textAlign: 'right' }}>
+                <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                   <button className={`btn ${live ? 'ghost' : 'primary'}`} disabled={busy === c.id} onClick={() => toggle(c)}>
                     {busy === c.id ? '…' : live ? 'Stop' : 'Start'}
                   </button>
@@ -178,8 +178,10 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   const [retention, setRetention] = useState<string>('7')
   const [captions, setCaptions] = useState(false)
   const [langs, setLangs] = useState<string[]>(['en'])
+  const [dvrMin, setDvrMin] = useState(60) // minutes; 24x7 sliding window
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const DVR_MAX_MIN = 240
 
   const group = byType[type]
 
@@ -192,6 +194,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
       await api.createChannel({
         groupId: group.id, name: name.trim(), purchasingMode: purchasing,
         resilienceTier: 'standard', recordingRetentionDays: retention ? Number(retention) : null,
+        dvrWindowSec: Math.max(30, dvrMin * 60), dvrMode: 'sliding',
       })
       onCreated()
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
@@ -235,6 +238,12 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
             <label>Recording retention (days)</label>
             <input className="inp" value={retention} onChange={e => setRetention(e.target.value.replace(/[^0-9]/g, ''))} />
             <div className="hintxt">Recorded assets are kept this long before lifecycle cleanup.</div>
+          </div>
+
+          <div className="field">
+            <label>DVR catch-up window — {dvrMin} min{dvrMin >= 60 ? ` (${(dvrMin / 60).toFixed(dvrMin % 60 ? 1 : 0)}h)` : ''}</label>
+            <input type="range" min={1} max={DVR_MAX_MIN} step={1} value={dvrMin} onChange={e => setDvrMin(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
+            <div className="hintxt">How far back viewers can scrub from the live edge. Max 4h for 24×7 channels; event streams scrub back to the event start.</div>
           </div>
 
           <div className="toggle-row">

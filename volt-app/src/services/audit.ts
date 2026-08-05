@@ -73,6 +73,7 @@ export async function patchEntity(o: {
   table: string; id: string; accountId: string | null;
   current: Record<string, any>; patch: Record<string, any>; allowed: string[];
   entityType: string; userId: string | null; label: string; expectedVersion?: number | null;
+  arrayColumns?: string[]; // columns that are native SQL arrays (text[]), NOT jsonb
 }): Promise<{ row: any; changed: string[] }> {
   if (!IDENT.test(o.table)) throw new Error(`bad table name: ${o.table}`);
   if (o.expectedVersion != null && Number(o.current.version) !== Number(o.expectedVersion)) {
@@ -85,8 +86,11 @@ export async function patchEntity(o: {
 
   return tx(async (client) => {
     const params: any[] = [];
+    const arrayCols = o.arrayColumns ?? [];
     const assignments = cols.map((col) => {
       const v = set[col];
+      // native SQL array (text[]) — let node-pg serialize the JS array to an array literal
+      if (arrayCols.includes(col)) { params.push(v ?? []); return `"${col}"=$${params.length}`; }
       if (isJson(v)) { params.push(JSON.stringify(v)); return `"${col}"=$${params.length}::jsonb`; }
       params.push(v); return `"${col}"=$${params.length}`;
     });

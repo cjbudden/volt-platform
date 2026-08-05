@@ -926,3 +926,33 @@ BEGIN
     EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS updated_by UUID REFERENCES users(id) ON DELETE SET NULL', t);
   END LOOP;
 END $$;
+
+-- ============================================================================
+-- CHANNEL DVR WINDOW + SOURCE GEO RULES
+-- ----------------------------------------------------------------------------
+-- Per-channel DVR (catch-up / scrub-back) window, overriding the output profile's
+-- default sliding window. Capped at 4h (14400s) for 24x7 channels — the encoder
+-- keeps at most this much live archive addressable for scrub-back. `dvr_mode`:
+--   'sliding'      -> rolling window of dvr_window_sec ending at the live edge (24x7)
+--   'event_start'  -> scrub back to the start of the event stream (events; the
+--                     window grows with the event, no fixed cap)
+-- Source geo rules gate where the *source/output* may be consumed, evaluated at the
+-- edge (same worldwide|allow|block grammar used per-programme).
+DO $$
+BEGIN
+  ALTER TABLE channels ADD COLUMN IF NOT EXISTS dvr_window_sec INTEGER;              -- NULL -> use profile default
+  ALTER TABLE channels ADD COLUMN IF NOT EXISTS dvr_mode       TEXT NOT NULL DEFAULT 'sliding';
+  ALTER TABLE channels ADD COLUMN IF NOT EXISTS geo_mode       TEXT NOT NULL DEFAULT 'worldwide';
+  ALTER TABLE channels ADD COLUMN IF NOT EXISTS geo_countries  TEXT[] NOT NULL DEFAULT '{}';
+  -- guard rails
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'channels_dvr_window_max') THEN
+    ALTER TABLE channels ADD CONSTRAINT channels_dvr_window_max
+      CHECK (dvr_window_sec IS NULL OR (dvr_window_sec BETWEEN 30 AND 14400));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'channels_dvr_mode_chk') THEN
+    ALTER TABLE channels ADD CONSTRAINT channels_dvr_mode_chk CHECK (dvr_mode IN ('sliding','event_start'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'channels_geo_mode_chk') THEN
+    ALTER TABLE channels ADD CONSTRAINT channels_geo_mode_chk CHECK (geo_mode IN ('worldwide','allow','block'));
+  END IF;
+END $$;

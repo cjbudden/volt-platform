@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import { api, setToken } from './api'
 import Channels from './pages/Channels'
+import ChannelDetail from './pages/ChannelDetail'
 
 const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z" /></svg>
 
@@ -46,6 +47,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [section, setSection] = useState('channels')
   const [createOpen, setCreateOpen] = useState(false)
+  const [channelId, setChannelId] = useState<string | null>(null)
 
   const account = email.split('@')[1]?.split('.')[0]?.toUpperCase() || 'RTM'
   const label = NAV.flatMap(g => g.items).find(i => i.key === section)?.label || 'Channels'
@@ -85,7 +87,7 @@ export default function App() {
             <div key={g.group}>
               <div className="nav-group">{g.group}</div>
               {g.items.map(it => (
-                <div key={it.key} className={`nav-item ${section === it.key ? 'active' : ''}`} onClick={() => setSection(it.key)}>
+                <div key={it.key} className={`nav-item ${section === it.key ? 'active' : ''}`} onClick={() => { setSection(it.key); setChannelId(null) }}>
                   {it.icon}{it.label}{it.badge && <span className="badge live">{it.badge}</span>}
                 </div>
               ))}
@@ -107,7 +109,7 @@ export default function App() {
           </div>
           <div className="top-actions">
             <div className="icon-btn"><span className="dot"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" /></svg></div>
-            <button className="btn primary" onClick={() => { setSection('channels'); setCreateOpen(true) }}>
+            <button className="btn primary" onClick={() => { setSection('channels'); setChannelId(null); setCreateOpen(true) }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>New Stream
             </button>
             <div className="icon-btn" title="Sign out" onClick={() => { setAuthed(false); setToken('') }}>
@@ -117,7 +119,9 @@ export default function App() {
         </div>
         <div className="content">
           {section === 'channels'
-            ? <Channels createOpen={createOpen} setCreateOpen={setCreateOpen} />
+            ? (channelId
+                ? <ChannelDetail id={channelId} onBack={() => setChannelId(null)} />
+                : <Channels createOpen={createOpen} setCreateOpen={setCreateOpen} onOpen={setChannelId} />)
             : <Placeholder title={label} />}
         </div>
       </div>
