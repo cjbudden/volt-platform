@@ -8,6 +8,8 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    // allow the public tunnel hostname (cloudflared quick tunnel) to reach the dev server
+    allowedHosts: true,
     // talk to the control plane same-origin (no CORS) during dev
     proxy: { '/api': 'http://localhost:8080' },
   },
