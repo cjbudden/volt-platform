@@ -63,6 +63,8 @@ export interface TestStreamStatus {
   dash: string | null
   subtitles: Record<string, string>
   options: { name: string; dvrSec: number; langs: string[]; dash: boolean; captionInterval: number } | null
+  sourceKind: 'ingest' | 'testcard' | null
+  sourceUrl: string | null
 }
 
 export interface ChannelSettingsPatch {

@@ -183,27 +183,35 @@ function HlsVideo({ src }: { src: string }) {
   return <video ref={ref} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
 }
 
+function hostOf(url?: string | null) { try { return url ? new URL(url).host : '' } catch { return '' } }
+
 function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: boolean; onSendSource: () => void; busy: boolean }) {
-  const proto = (d.sources[0]?.protocol || 'SRT').toUpperCase()
+  const configured = d.sources.find(s => s.role === 'primary' && s.ingest_url) || d.sources.find(s => s.ingest_url)
+  const proto = (configured?.protocol || d.sources[0]?.protocol || 'SRT').toUpperCase()
+  const ts = d.testStream
+  const isIngest = ts.sourceKind === 'ingest'
+  const srcHost = hostOf(ts.sourceUrl || configured?.ingest_url)
+  const sendLabel = configured ? `Send source (${proto})` : 'Send test source'
   return (
     <div className="player">
       <div className="video">
-        {sourceUp
-          ? <HlsVideo src={d.testStream.hls} />
-          : <div className="grad" />}
-        <div className="plabel"><span className="pt" style={{ color: '#a5b4fc' }}>SOURCE · raw ingest</span></div>
+        {sourceUp ? <HlsVideo src={ts.hls} /> : <div className="grad" />}
+        <div className="plabel"><span className="pt" style={{ color: '#a5b4fc' }}>SOURCE · {isIngest ? proto + ' ingest' : sourceUp ? 'test card' : 'raw ingest'}</span></div>
         <div className="badge-live" style={{ background: sourceUp ? 'rgba(74,222,128,.85)' : 'rgba(99,102,241,.85)' }}><span className="d" />{sourceUp ? 'RECEIVING' : proto}</div>
         {!sourceUp && (
-          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
-            <button className="btn primary" onClick={onSendSource} disabled={busy} style={{ transform: 'scale(1.05)' }}>
-              {busy ? 'Sending source…' : '▶  Send test source'}
-            </button>
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center' }}>
+            <div>
+              <button className="btn primary" onClick={onSendSource} disabled={busy} style={{ transform: 'scale(1.05)' }}>
+                {busy ? 'Sending source…' : `▶  ${sendLabel}`}
+              </button>
+              {configured?.ingest_url && <div style={{ marginTop: 10, fontSize: 11, color: 'var(--faint)', maxWidth: 340, wordBreak: 'break-all' }}>{configured.ingest_url}</div>}
+            </div>
           </div>
         )}
-        <div className="ptime">{sourceUp ? 'test pattern · 720p50 · testsrc + tone' : '— no signal —'}</div>
+        <div className="ptime">{sourceUp ? (isIngest ? `${srcHost} · repackaged` : 'test pattern · testsrc + tone') : '— no signal —'}</div>
       </div>
       <div className="pfoot">
-        <span className={`dot-s ${sourceUp ? 'live' : 'idle'}`} /> {sourceUp ? 'Source receiving · 1080p50 · 18.4 Mbps · 0 drops' : 'No source — send one to enable output'}
+        <span className={`dot-s ${sourceUp ? 'live' : 'idle'}`} /> {sourceUp ? (isIngest ? `Ingesting ${srcHost} · repackaging` : 'Test generator · testsrc + tone') : configured ? `Source configured · ${proto} · ${srcHost || 'ingest'}` : 'No source — send one to enable output'}
         <select value={0} onChange={() => {}}>
           {d.sources.length ? d.sources.map((s, i) => <option key={s.id} value={i}>Source · {s.role}</option>)
             : <><option>Source · Primary</option><option>Source · Backup</option></>}

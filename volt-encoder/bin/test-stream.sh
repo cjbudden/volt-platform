@@ -25,7 +25,7 @@
 # ============================================================================
 set -euo pipefail
 
-OUT=""; NAME="VOLT TEST"; DVR_SEC=60; SEG=4; DASH=0; SOURCE=""; PIDFILE=""
+OUT=""; NAME="VOLT TEST"; DVR_SEC=60; SEG=4; DASH=0; SOURCE=""; INPUT_URL=""; PIDFILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --out) OUT="$2"; shift 2;;
@@ -34,6 +34,7 @@ while [ $# -gt 0 ]; do
     --seg) SEG="$2"; shift 2;;
     --dash) DASH=1; shift;;
     --source) SOURCE="$2"; shift 2;;
+    --input-url) INPUT_URL="$2"; shift 2;;   # ingest an external live HLS/URL source
     --pid) PIDFILE="$2"; shift 2;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
@@ -45,27 +46,33 @@ mkdir -p "$OUT"
 # HLS list size: number of segments kept live. 0 => keep all (event DVR).
 if [ "$DVR_SEC" = "0" ]; then LIST_SIZE=0; else LIST_SIZE=$(( DVR_SEC / SEG )); [ "$LIST_SIZE" -lt 1 ] && LIST_SIZE=1; fi
 
-# ---- source: synthetic test card + running clock + tone, OR a looped file ----
-if [ -n "$SOURCE" ]; then
+# ---- source: external live URL, a looped file, OR the synthetic test card -----
+# AMAP = which input carries audio (source input 0, or the sine on input 1).
+if [ -n "$INPUT_URL" ]; then
+  # ingest an external live HLS (or any ffmpeg-readable URL); reconnect on drop.
+  IN=(-reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 -i "$INPUT_URL")
+  VF="null,drawtext=text='$NAME':x=24:y=24:fontsize=30:fontcolor=white:box=1:boxcolor=black@0.4:boxborderw=8,drawtext=text='%{localtime\:%X}':x=24:y=h-52:fontsize=32:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=8"
+  AMAP="0:a"
+elif [ -n "$SOURCE" ]; then
   IN=(-stream_loop -1 -re -i "$SOURCE")
-  VF="scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,drawtext=text='%{localtime\:%X}':x=(w-tw)/2:y=h-80:fontsize=54:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10"
-  AIN=()
+  VF="scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,drawtext=text='%{localtime\:%X}':x=(w-tw)/2:y=h-70:fontsize=44:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10"
+  AMAP="0:a"
 else
-  # testsrc2 (color pattern that changes) at 1080p50 + a sine tone.
+  # testsrc2 (color pattern that changes) + a sine tone.
   IN=(-re -f lavfi -i "testsrc2=size=1280x720:rate=25" -f lavfi -i "sine=frequency=440:sample_rate=48000")
   VF="drawtext=text='$NAME':x=(w-tw)/2:y=120:fontsize=64:fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=16,drawtext=text='%{localtime\:%X}':x=(w-tw)/2:y=h-90:fontsize=72:fontcolor=white:box=1:boxcolor=black@0.55:boxborderw=14,drawtext=text='LIVE TEST \\= frame %{n}':x=(w-tw)/2:y=h-180:fontsize=34:fontcolor=0x99aadd:box=1:boxcolor=black@0.4:boxborderw=8"
-  AIN=()
+  AMAP="1:a"
 fi
 
 echo "== Volt test stream =="
-echo "   out=$OUT  name='$NAME'  dvr=${DVR_SEC}s (list=$LIST_SIZE)  seg=${SEG}s  dash=$DASH  source=${SOURCE:-testcard}"
+echo "   out=$OUT  name='$NAME'  dvr=${DVR_SEC}s (list=$LIST_SIZE)  seg=${SEG}s  dash=$DASH  source=${INPUT_URL:-${SOURCE:-testcard}}"
 
 # three-rendition ladder via -filter_complex split+scale; map to var_stream_map
 ffmpeg -hide_banner -loglevel warning -y \
   "${IN[@]}" \
   -filter_complex "[0:v]${VF},split=3[v1][v2][v3];\
 [v1]scale=1280:720[v1o];[v2]scale=854:480[v2o];[v3]scale=640:360[v3o]" \
-  -map "[v1o]" -map "[v2o]" -map "[v3o]" -map 1:a -map 1:a -map 1:a \
+  -map "[v1o]" -map "[v2o]" -map "[v3o]" -map "$AMAP" -map "$AMAP" -map "$AMAP" \
   -c:v libx264 -preset ultrafast -tune zerolatency -g $((SEG*25)) -keyint_min $((SEG*25)) -sc_threshold 0 \
   -b:v:0 2800k -maxrate:v:0 3000k -bufsize:v:0 4200k \
   -b:v:1 2800k -maxrate:v:1 3000k -bufsize:v:1 4200k \
@@ -87,7 +94,7 @@ echo "   ffmpeg pid $FFPID"
 if [ "$DASH" = "1" ]; then
   ffmpeg -hide_banner -loglevel warning -y "${IN[@]}" \
     -filter_complex "[0:v]${VF},split=3[d1][d2][d3];[d1]scale=1280:720[d1o];[d2]scale=854:480[d2o];[d3]scale=640:360[d3o]" \
-    -map "[d1o]" -map "[d2o]" -map "[d3o]" -map 1:a \
+    -map "[d1o]" -map "[d2o]" -map "[d3o]" -map "$AMAP" \
     -c:v libx264 -preset ultrafast -tune zerolatency -g $((SEG*25)) -keyint_min $((SEG*25)) -sc_threshold 0 \
     -b:v:0 5000k -b:v:1 2800k -b:v:2 1200k -c:a aac -b:a 128k -ac 2 \
     -f dash -seg_duration "$SEG" -window_size "${LIST_SIZE:-12}" -streaming 1 -ldash 1 \

@@ -259,6 +259,7 @@ const testStreamSchema = z.object({
   langs: z.array(z.string()).optional(),
   dvrSec: z.number().int().min(0).max(DVR_MAX_SEC).optional(),
   dash: z.boolean().optional(),
+  inputUrl: z.string().url().nullable().optional(), // ingest external HLS instead of test card
 });
 channelsRouter.post(
   '/:id/test-stream',
@@ -274,6 +275,7 @@ channelsRouter.post(
     const dvrSec = body.dvrSec ?? (chan.dvr_mode === 'event_start' ? 0 : (chan.dvr_window_sec ?? 60));
     const status = await startTestStream(req.params.id, chan.name, {
       langs: body.langs ?? ['en', 'ms', 'zh', 'ta'], dvrSec, dash: body.dash ?? false,
+      inputUrl: body.inputUrl ?? null,
     });
     res.json(status);
   })
