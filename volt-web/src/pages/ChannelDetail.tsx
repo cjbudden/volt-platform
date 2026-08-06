@@ -1,18 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
-import { api, type ChannelDetail as CD, type ChannelSettingsPatch } from '../api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { api, originUrl, type ChannelDetail as CD, type ChannelSettingsPatch } from '../api'
 
 const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z" /></svg>
 const LANGS = [
   { code: 'en', label: 'English' }, { code: 'ms', label: 'Malay' },
   { code: 'zh', label: 'Chinese' }, { code: 'ta', label: 'Tamil' },
 ]
-const SUB_SAMPLE: Record<string, string> = {
-  en: 'Good afternoon — here are today’s top stories.',
-  ms: 'Selamat tengah hari — berikut berita utama hari ini.',
-  zh: '下午好，以下是今天的头条新闻。',
-  ta: 'மதிய வணக்கம் — இன்றைய முக்கிய செய்திகள்.',
-}
-
 function fmtOffset(sec: number) {
   if (sec <= 0) return 'LIVE'
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60)
@@ -34,11 +27,19 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id])
 
+  // In the test build, Start/Stop drives a real local test stream (FFmpeg → HLS/DASH
+  // + live WebVTT) so playback + subtitles + DVR can actually be exercised.
   async function toggle() {
     if (!d) return
     setBusy(true)
-    try { await api.startStop(d.id, d.status === 'live' ? 'stop' : 'start'); await load() }
-    finally { setBusy(false) }
+    try {
+      if (d.testStream?.running) { await api.testStreamStop(d.id); await load() }
+      else {
+        await api.testStreamStart(d.id, { langs: ['en', 'ms', 'zh', 'ta'], dvrSec: d.dvr_mode === 'event_start' ? 0 : d.dvr.effective_sec })
+        // give ffmpeg a moment to emit the first segments, then refresh a few times
+        for (let i = 0; i < 4; i++) { await new Promise(r => setTimeout(r, 1500)); await load() }
+      }
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
 
   if (err) return <div className="err" style={{ margin: 20 }}>Couldn’t load channel: {err}</div>
@@ -75,12 +76,12 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         <button className="btn ghost" onClick={() => { setSettingsOpen(true); onOpenSettings?.() }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>Settings
         </button>
-        <button className={`btn ${live ? 'ghost' : 'primary'}`} disabled={busy} onClick={toggle} style={live ? { color: '#fca5a5' } : undefined}>
-          {busy ? '…' : live ? 'Stop' : 'Start'}
+        <button className={`btn ${d.testStream?.running ? 'ghost' : 'primary'}`} disabled={busy} onClick={toggle} style={d.testStream?.running ? { color: '#fca5a5' } : undefined}>
+          {busy ? (d.testStream?.running ? 'Stopping…' : 'Starting…') : d.testStream?.running ? 'Stop stream' : 'Start test stream'}
         </button>
       </div>
 
-      <DualPlayers d={d} live={live} captionLangs={captionLangs} />
+      <DualPlayers d={d} live={live} captionLangs={captionLangs} onStart={toggle} starting={busy} />
 
       <EpgStrip d={d} />
 
@@ -100,23 +101,26 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
 }
 
 /* ------------------------------------------------------------------ players */
-function DualPlayers({ d, live, captionLangs }: { d: CD; live: boolean; captionLangs: string[] }) {
-  const [rendition, setRendition] = useState(0)
-  const [subOn, setSubOn] = useState(false)
+interface Cue { start: number; end: number; text: string }
+function parseVtt(txt: string): Cue[] {
+  const cues: Cue[] = []
+  const toSec = (s: string) => { const m = s.trim().match(/(?:(\d+):)?(\d+):(\d+)[.,](\d+)/); if (!m) return 0; const h = +(m[1] || 0), mi = +m[2], se = +m[3], ms = +m[4]; return h * 3600 + mi * 60 + se + ms / 1000 }
+  for (const block of txt.split(/\r?\n\r?\n/)) {
+    const lines = block.split(/\r?\n/).filter(Boolean)
+    const tl = lines.find(l => l.includes('-->'))
+    if (!tl) continue
+    const [a, b] = tl.split('-->')
+    const text = lines.slice(lines.indexOf(tl) + 1).join('\n')
+    if (text) cues.push({ start: toSec(a), end: toSec(b), text })
+  }
+  return cues
+}
+
+function DualPlayers({ d, live, captionLangs, onStart, starting }: { d: CD; live: boolean; captionLangs: string[]; onStart: () => void; starting: boolean }) {
+  const ts = d.testStream
+  const playing = ts?.running && ts?.hls
+  const [subOn, setSubOn] = useState(true)
   const [subLang, setSubLang] = useState(captionLangs[0] || 'en')
-  // DVR scrub: offset in seconds behind the live edge (0 = live)
-  const windowSec = d.dvr_mode === 'event_start' ? Math.max(d.dvr.effective_sec, 3600) : d.dvr.effective_sec
-  const [offset, setOffset] = useState(0)
-  const atLive = offset <= 0
-
-  const ladder = d.ladder.length ? d.ladder : [{ height: 1080, bitrate_kbps: 6000 }]
-
-  // a moving-ish timecode for flavour (kept deterministic wrt offset)
-  const tc = useMemo(() => {
-    const total = 12 * 3600 + 44 * 60 + 7 - offset
-    const h = Math.floor(total / 3600) % 24, m = Math.floor((total % 3600) / 60), s = total % 60
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-  }, [offset])
 
   return (
     <div className="player-grid" style={{ marginBottom: 18 }}>
@@ -127,10 +131,10 @@ function DualPlayers({ d, live, captionLangs }: { d: CD; live: boolean; captionL
           <div className="plabel"><span className="pt" style={{ color: '#a5b4fc' }}>SOURCE · raw ingest</span></div>
           <div className="badge-live" style={{ background: 'rgba(99,102,241,.85)' }}><span className="d" />{(d.sources[0]?.protocol || 'SRT').toUpperCase()}</div>
           <div className="play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z" /></svg></div>
-          <div className="ptime">{live ? '00:12:44:07' : '— no signal —'}</div>
+          <div className="ptime">{playing ? 'test pattern · 1080p50' : live ? '00:12:44:07' : '— no signal —'}</div>
         </div>
         <div className="pfoot">
-          <span className={`dot-s ${live ? 'live' : 'idle'}`} /> {live ? 'Primary source · 1080p50 · 18.4 Mbps' : 'Primary source · offline'}
+          <span className={`dot-s ${playing || live ? 'live' : 'idle'}`} /> {playing ? 'Test generator · testsrc + tone' : live ? 'Primary source · 1080p50 · 18.4 Mbps' : 'Primary source · offline'}
           <select value={0} onChange={() => {}}>
             {d.sources.length ? d.sources.map((s, i) => <option key={s.id} value={i}>Source · {s.role}</option>)
               : <><option>Source · Primary</option><option>Source · Backup</option></>}
@@ -138,64 +142,176 @@ function DualPlayers({ d, live, captionLangs }: { d: CD; live: boolean; captionL
         </div>
       </div>
 
-      {/* OUTPUT with DVR + subtitle */}
-      <div className="player">
-        <div className="video">
-          <div className="grad" style={{ background: 'radial-gradient(120% 120% at 70% 20%,#20304a 0%,#0b0f16 70%)' }} />
-          <div className="plabel"><span className="pt" style={{ color: atLive ? '#4ade80' : '#fbbf24' }}>OUTPUT · {atLive ? 'as delivered' : 'DVR catch-up'}</span></div>
-          <div className="badge-live" style={atLive ? undefined : { background: 'rgba(251,191,36,.9)' }}>
-            <span className="d" />{atLive ? (live ? 'LIVE' : 'IDLE') : 'DVR'}
-          </div>
-          <div className="play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z" /></svg></div>
-          <div className="bug"><span className="lg">{BOLT}</span>{d.name.toUpperCase()}</div>
-          {/* subtitle sample overlay */}
-          {subOn && (
-            <div style={{
-              position: 'absolute', left: '50%', bottom: 46, transform: 'translateX(-50%)',
-              background: 'rgba(0,0,0,.72)', color: '#fff', padding: '5px 12px', borderRadius: 6,
-              fontSize: 14, fontWeight: 600, maxWidth: '86%', textAlign: 'center', lineHeight: 1.3,
-            }}>{SUB_SAMPLE[subLang] || SUB_SAMPLE.en}</div>
-          )}
-          <div className="ptime">{tc} {atLive ? '· live edge' : `· ${fmtOffset(offset)} behind`}</div>
-        </div>
+      {/* OUTPUT — real HLS playback when a test stream is running */}
+      {playing
+        ? <HlsOutput d={d} captionLangs={captionLangs} subOn={subOn} setSubOn={setSubOn} subLang={subLang} setSubLang={setSubLang} />
+        : <IdleOutput onStart={onStart} starting={starting} />}
+    </div>
+  )
+}
 
-        {/* DVR scrubber */}
-        <div style={{ padding: '10px 12px 4px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 7 }}>
-            <span className={`tag ${atLive ? 'live' : 'warn'}`} style={{ minWidth: 62, justifyContent: 'center' }}>
-              {atLive ? <><span className="dot-s live" />LIVE</> : fmtOffset(offset)}
-            </span>
-            <input type="range" min={0} max={windowSec} step={1} value={windowSec - offset}
-              onChange={e => setOffset(windowSec - Number(e.target.value))}
-              style={{ flex: 1, accentColor: atLive ? 'var(--live)' : 'var(--warn)' }}
-              aria-label="DVR timeline" />
-            <button className="chip" style={{ padding: '5px 10px' }} disabled={atLive} onClick={() => setOffset(0)}>Go live</button>
-          </div>
-          <div style={{ display: 'flex', gap: 6, justifyContent: 'space-between', fontSize: 11, color: 'var(--faint)' }}>
-            <span>{d.dvr_mode === 'event_start' ? 'Event start' : `-${fmtWindow(windowSec)}`}</span>
-            <span style={{ display: 'flex', gap: 6 }}>
-              <button className="chip" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => setOffset(Math.min(windowSec, offset + 30))}>« 30s</button>
-              <button className="chip" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => setOffset(Math.min(windowSec, offset + 300))}>« 5m</button>
-            </span>
-            <span>Live</span>
-          </div>
+function IdleOutput({ onStart, starting }: { onStart: () => void; starting: boolean }) {
+  return (
+    <div className="player">
+      <div className="video">
+        <div className="grad" style={{ background: 'radial-gradient(120% 120% at 70% 20%,#20304a 0%,#0b0f16 70%)' }} />
+        <div className="plabel"><span className="pt" style={{ color: '#98a1b6' }}>OUTPUT · idle</span></div>
+        <div className="badge-live" style={{ background: 'rgba(102,112,138,.7)' }}><span className="d" />IDLE</div>
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+          <button className="btn primary" onClick={onStart} disabled={starting} style={{ transform: 'scale(1.05)' }}>
+            {starting ? 'Starting encoder…' : '▶  Start test stream'}
+          </button>
         </div>
+        <div className="ptime">no output</div>
+      </div>
+      <div className="pfoot">
+        <span className="dot-s idle" /> Start a test stream to package a live HLS/DASH ladder and play it back here
+      </div>
+    </div>
+  )
+}
 
-        <div className="pfoot">
-          <span className={`dot-s ${live ? 'live' : 'idle'}`} /> Packaged output · overlay burned-in
-          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>
-            <button className={`chip ${subOn ? 'active' : ''}`} style={{ padding: '5px 10px' }} onClick={() => setSubOn(v => !v)}>CC</button>
-            {subOn && (
-              <select value={subLang} onChange={e => setSubLang(e.target.value)}>
-                {(captionLangs).map(c => <option key={c} value={c}>{LANGS.find(l => l.code === c)?.label || c}</option>)}
-              </select>
-            )}
-            <select value={rendition} onChange={e => setRendition(Number(e.target.value))}>
-              {ladder.map((r, i) => <option key={i} value={i}>{r.height}p · {(r.bitrate_kbps / 1000).toFixed(1)} Mbps</option>)}
-              <option value={ladder.length}>Auto (ABR)</option>
-            </select>
+function HlsOutput({ d, captionLangs, subOn, setSubOn, subLang, setSubLang }: {
+  d: CD; captionLangs: string[]; subOn: boolean; setSubOn: (v: boolean) => void; subLang: string; setSubLang: (v: string) => void
+}) {
+  const ts = d.testStream
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const hlsRef = useRef<any>(null)
+  const [levels, setLevels] = useState<{ height: number; bitrate: number }[]>([])
+  const [level, setLevel] = useState(-1) // -1 = auto (ABR)
+  const [atLive, setAtLive] = useState(true)
+  const [behind, setBehind] = useState(0)
+  const [winSec, setWinSec] = useState(d.dvr.effective_sec)
+  const [cue, setCue] = useState('')
+  const cuesRef = useRef<Cue[]>([])
+
+  // attach hls.js
+  useEffect(() => {
+    let cancelled = false
+    const video = videoRef.current
+    if (!video || !ts.hls) return
+    async function attach() {
+      const Hls = (await import('hls.js')).default
+      if (cancelled) return
+      if (Hls.isSupported()) {
+        const hls = new Hls({ lowLatencyMode: true, backBufferLength: d.dvr.effective_sec, liveSyncDurationCount: 3 })
+        hlsRef.current = hls
+        hls.loadSource(originUrl(ts.hls))
+        hls.attachMedia(video!)
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          setLevels(hls.levels.map((l: any) => ({ height: l.height, bitrate: l.bitrate })))
+          video!.muted = true; video!.play().catch(() => {})
+        })
+        hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
+          if (data.fatal) { // segments may not exist yet right after start — retry
+            setTimeout(() => { try { hls.startLoad() } catch {} }, 1500)
+          }
+        })
+      } else if (video!.canPlayType('application/vnd.apple.mpegurl')) {
+        video!.src = originUrl(ts.hls); video!.muted = true; video!.play().catch(() => {})
+      }
+    }
+    attach()
+    return () => { cancelled = true; try { hlsRef.current?.destroy() } catch {} }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ts.hls])
+
+  // apply rendition selection
+  useEffect(() => { if (hlsRef.current) hlsRef.current.currentLevel = level }, [level])
+
+  // track live-edge vs DVR position
+  useEffect(() => {
+    const v = videoRef.current; if (!v) return
+    const onT = () => {
+      const sk = v.seekable
+      if (sk.length) {
+        const end = sk.end(sk.length - 1), start = sk.start(0)
+        setWinSec(Math.max(1, Math.round(end - start)))
+        const b = Math.max(0, Math.round(end - v.currentTime))
+        setBehind(b); setAtLive(b <= 3)
+      }
+    }
+    v.addEventListener('timeupdate', onT)
+    return () => v.removeEventListener('timeupdate', onT)
+  }, [])
+
+  // poll the live subtitle track and pick the current cue
+  useEffect(() => {
+    if (!subOn) { setCue(''); return }
+    const url = ts.subtitles[subLang]; if (!url) return
+    let stop = false
+    async function poll() {
+      try { const r = await fetch(originUrl(url) + '?_=' + Math.floor(Date.now() / 1000)); cuesRef.current = parseVtt(await r.text()) } catch { /* ignore */ }
+    }
+    poll(); const iv = setInterval(() => { if (!stop) poll() }, 2000)
+    const tick = setInterval(() => {
+      const v = videoRef.current; if (!v || !cuesRef.current.length) return
+      const t = v.currentTime
+      const hit = cuesRef.current.find(c => t >= c.start && t < c.end) || cuesRef.current[cuesRef.current.length - 1]
+      setCue(hit?.text || '')
+    }, 300)
+    return () => { stop = true; clearInterval(iv); clearInterval(tick) }
+  }, [subOn, subLang, ts.subtitles])
+
+  function seekBehind(sec: number) {
+    const v = videoRef.current; if (!v || !v.seekable.length) return
+    const end = v.seekable.end(v.seekable.length - 1)
+    v.currentTime = Math.max(v.seekable.start(0), end - sec)
+  }
+  function goLive() { const v = videoRef.current; if (!v || !v.seekable.length) return; v.currentTime = v.seekable.end(v.seekable.length - 1) - 0.5 }
+
+  return (
+    <div className="player">
+      <div className="video">
+        <video ref={videoRef} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
+        <div className="plabel"><span className="pt" style={{ color: atLive ? '#4ade80' : '#fbbf24' }}>OUTPUT · {atLive ? 'as delivered' : 'DVR catch-up'}</span></div>
+        <div className="badge-live" style={atLive ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{atLive ? 'LIVE' : 'DVR'}</div>
+        <div className="bug"><span className="lg">{BOLT}</span>{d.name.toUpperCase()}</div>
+        {subOn && cue && (
+          <div style={{
+            position: 'absolute', left: '50%', bottom: 20, transform: 'translateX(-50%)',
+            background: 'rgba(0,0,0,.72)', color: '#fff', padding: '6px 14px', borderRadius: 6,
+            fontSize: 15, fontWeight: 600, maxWidth: '88%', textAlign: 'center', lineHeight: 1.35, whiteSpace: 'pre-line',
+          }}>{cue}</div>
+        )}
+        <div className="ptime">{atLive ? 'live edge' : `${fmtOffset(behind)} behind`}</div>
+      </div>
+
+      {/* DVR scrubber — seeks the real HLS timeline */}
+      <div style={{ padding: '10px 12px 4px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 7 }}>
+          <span className={`tag ${atLive ? 'live' : 'warn'}`} style={{ minWidth: 62, justifyContent: 'center' }}>
+            {atLive ? <><span className="dot-s live" />LIVE</> : fmtOffset(behind)}
           </span>
+          <input type="range" min={0} max={winSec} step={1} value={winSec - behind}
+            onChange={e => seekBehind(winSec - Number(e.target.value))}
+            style={{ flex: 1, accentColor: atLive ? 'var(--live)' : 'var(--warn)' }} aria-label="DVR timeline" />
+          <button className="chip" style={{ padding: '5px 10px' }} disabled={atLive} onClick={goLive}>Go live</button>
         </div>
+        <div style={{ display: 'flex', gap: 6, justifyContent: 'space-between', fontSize: 11, color: 'var(--faint)' }}>
+          <span>{d.dvr_mode === 'event_start' ? 'Event start' : `-${fmtWindow(winSec)} window`}</span>
+          <span style={{ display: 'flex', gap: 6 }}>
+            <button className="chip" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => seekBehind(behind + 15)}>« 15s</button>
+            <button className="chip" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => seekBehind(behind + 60)}>« 1m</button>
+          </span>
+          <span>Live</span>
+        </div>
+      </div>
+
+      <div className="pfoot">
+        <span className="dot-s live" /> HLS · overlay burned-in
+        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>
+          <button className={`chip ${subOn ? 'active' : ''}`} style={{ padding: '5px 10px' }} onClick={() => setSubOn(!subOn)}>CC</button>
+          {subOn && (
+            <select value={subLang} onChange={e => setSubLang(e.target.value)}>
+              {captionLangs.map(c => <option key={c} value={c}>{LANGS.find(l => l.code === c)?.label || c}</option>)}
+            </select>
+          )}
+          <select value={level} onChange={e => setLevel(Number(e.target.value))}>
+            <option value={-1}>Auto (ABR)</option>
+            {levels.map((l, i) => <option key={i} value={i}>{l.height}p · {(l.bitrate / 1e6).toFixed(1)} Mbps</option>)}
+          </select>
+        </span>
       </div>
     </div>
   )

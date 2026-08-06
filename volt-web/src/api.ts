@@ -52,6 +52,17 @@ export interface ChannelDetail extends Channel {
   epg: { now: any; next: { name: string; start: string } | null; lane: any[] }
   statusBoard: { output: string; activeSource: string; fallback: string; packager: string; inputs: any[] }
   log: { ts: string; level: string; title: string; detail: string }[]
+  testStream: TestStreamStatus
+}
+
+export interface TestStreamStatus {
+  available: boolean
+  running: boolean
+  startedAt: number | null
+  hls: string
+  dash: string | null
+  subtitles: Record<string, string>
+  options: { name: string; dvrSec: number; langs: string[]; dash: boolean; captionInterval: number } | null
 }
 
 export interface ChannelSettingsPatch {
@@ -81,4 +92,11 @@ export const api = {
   channel: (id: string): Promise<ChannelDetail> => req(`/channels/${id}`),
   updateChannel: (id: string, patch: ChannelSettingsPatch): Promise<any> =>
     req(`/channels/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  testStreamStart: (id: string, opts: { langs?: string[]; dvrSec?: number; dash?: boolean } = {}): Promise<TestStreamStatus> =>
+    req(`/channels/${id}/test-stream`, { method: 'POST', body: JSON.stringify({ action: 'start', ...opts }) }),
+  testStreamStop: (id: string): Promise<{ running: boolean }> =>
+    req(`/channels/${id}/test-stream`, { method: 'POST', body: JSON.stringify({ action: 'stop' }) }),
 }
+
+// origin URLs are same-origin under /origin (proxied by Vite to the API in dev)
+export function originUrl(path: string) { return path.startsWith('/origin') ? path : `/origin${path}` }

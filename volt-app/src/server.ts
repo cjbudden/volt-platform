@@ -39,6 +39,22 @@ export function createServer() {
   app.use(express.static('public'));
   app.get('/console', (_req, res) => res.redirect('/console.html'));
 
+  // TEST BUILD origin: serve the locally-generated HLS/DASH/WebVTT so the app player
+  // can play back a real live test stream. Playlists must not be cached; segments can.
+  app.use('/origin', (req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (/\.(m3u8|mpd)$/.test(req.path)) res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    else if (/\.(m4s|mp4|ts|vtt)$/.test(req.path)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    next();
+  }, express.static(config.testStream.originDir, {
+    setHeaders: (res, p) => {
+      if (p.endsWith('.m3u8')) res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      else if (p.endsWith('.mpd')) res.setHeader('Content-Type', 'application/dash+xml');
+      else if (p.endsWith('.m4s') || p.endsWith('.mp4')) res.setHeader('Content-Type', 'video/mp4');
+      else if (p.endsWith('.vtt')) res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    },
+  }));
+
   // Public share surface (NO admin auth): the standalone /share/:token page and its
   // resolve/download endpoints. Mounted before the authed /api routers; it only ever
   // exposes the single shared resource.

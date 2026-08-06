@@ -7,6 +7,7 @@ import { orchestrator } from '../services/orchestrator';
 import { validateEntityMetadata } from './metadataSchemas';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
 import { buildChannelDetail, DVR_MAX_SEC } from '../services/channelDetail';
+import { startTestStream, stopTestStream, testStreamStatus, isTestStreamAvailable } from '../services/testStream';
 
 export const channelsRouter = Router();
 channelsRouter.use(requireAuth);
@@ -42,7 +43,8 @@ channelsRouter.get(
     if (!row) throw notFound('Channel not found');
     const instances = await query('SELECT * FROM instances WHERE channel_id = $1 AND terminated_at IS NULL', [req.params.id]);
     const detail = await buildChannelDetail(row, Date.now());
-    res.json({ ...row, instances, ...detail });
+    const testStream = { available: isTestStreamAvailable(), ...testStreamStatus(req.params.id) };
+    res.json({ ...row, instances, ...detail, testStream });
   })
 );
 
@@ -233,6 +235,47 @@ channelsRouter.delete(
     await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
       action: 'delete', entityType: 'channel', entityId: row.id, snapshot: { name: row.name } });
     res.status(204).end();
+  })
+);
+
+/**
+ * TEST BUILD — spin up a real local test stream (FFmpeg test card + live WebVTT)
+ * for this channel and play it back in the app. GET returns playback URLs + state.
+ */
+channelsRouter.get(
+  '/:id/test-stream',
+  asyncHandler(async (req, res) => {
+    const owned = await one<any>(
+      `SELECT c.id FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id=$1 AND g.account_id=$2`,
+      [req.params.id, accountId(req)]
+    );
+    if (!owned) throw notFound('Channel not found');
+    res.json({ available: isTestStreamAvailable(), ...testStreamStatus(req.params.id) });
+  })
+);
+
+const testStreamSchema = z.object({
+  action: z.enum(['start', 'stop']),
+  langs: z.array(z.string()).optional(),
+  dvrSec: z.number().int().min(0).max(DVR_MAX_SEC).optional(),
+  dash: z.boolean().optional(),
+});
+channelsRouter.post(
+  '/:id/test-stream',
+  asyncHandler(async (req, res) => {
+    const chan = await one<any>(
+      `SELECT c.* FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id=$1 AND g.account_id=$2`,
+      [req.params.id, accountId(req)]
+    );
+    if (!chan) throw notFound('Channel not found');
+    const body = testStreamSchema.parse(req.body);
+    if (body.action === 'stop') { res.json(await stopTestStream(req.params.id)); return; }
+    if (!isTestStreamAvailable()) throw conflict('Test stream generator not available (ffmpeg/encoder scripts missing on the API host)');
+    const dvrSec = body.dvrSec ?? (chan.dvr_mode === 'event_start' ? 0 : (chan.dvr_window_sec ?? 60));
+    const status = await startTestStream(req.params.id, chan.name, {
+      langs: body.langs ?? ['en', 'ms', 'zh', 'ta'], dvrSec, dash: body.dash ?? false,
+    });
+    res.json(status);
   })
 );
 

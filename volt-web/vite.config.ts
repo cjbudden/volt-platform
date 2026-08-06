@@ -11,6 +11,9 @@ export default defineConfig({
     // allow the public tunnel hostname (cloudflared quick tunnel) to reach the dev server
     allowedHosts: true,
     // talk to the control plane same-origin (no CORS) during dev
-    proxy: { '/api': 'http://localhost:8080' },
+    proxy: {
+      '/api': 'http://localhost:8080',
+      '/origin': 'http://localhost:8080', // test-stream HLS/DASH/WebVTT
+    },
   },
 })

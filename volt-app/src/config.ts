@@ -44,4 +44,10 @@ export const config = {
     retentionSweepSeconds: Number(process.env.RETENTION_SWEEP_SECONDS ?? 3600),
   },
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
+  // TEST BUILD: local FFmpeg test-stream origin. ORIGIN_DIR holds the generated
+  // HLS/DASH/WebVTT; ENCODER_BIN is where test-stream.sh / test-captions.mjs live.
+  testStream: {
+    originDir: process.env.ORIGIN_DIR ?? `${process.cwd()}/origin`,
+    encoderBin: process.env.ENCODER_BIN ?? `${process.cwd()}/../volt-encoder/bin`,
+  },
 };

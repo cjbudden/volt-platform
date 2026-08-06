@@ -43,3 +43,7 @@ volt_share_page.png
 # ---- local sync helpers (per-machine, not part of the project) ----
 publish.sh
 *.bundle
+
+# test-stream generated origin (HLS/DASH/VTT)
+volt-app/origin/
+origin/

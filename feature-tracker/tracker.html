@@ -26,8 +26,8 @@
 </style></head><body>
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
- <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-04.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>6</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>4</b> 🔨 Building</span></div>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-06.</div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>7</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>4</b> 🔨 Building</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. I update this tracker as things get approved or sent back.</div>
  <div class=card data-status="ready_to_test">
     <div class=top><div class=name>Image resize service</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
@@ -93,6 +93,17 @@
     <div class=actions>
          <button class="btn ok" data-approve="Record edit API + audit trail">✓ Approve as working</button>
          <button class="btn warn" data-changes="Record edit API + audit trail">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test">
+    <div class=top><div class=name>Test stream, playback &amp; live subtitles</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+    <div class=summary>One-click test stream per channel: FFmpeg generates a real live HLS/DASH ladder from a test card, the app plays it back for real (hls.js) with working DVR scrub-back, and a live WebVTT caption track renders over the video with EN/MS/ZH/TA switching (sample now; real Whisper mode available).</div>
+    <div class=meta>generator + captions + /origin serving + start/stop API validated; player is hls.js (H.264 plays in Chrome/Safari on Mac)</div>
+    <div class=how><b>How to test:</b> Run the app on your Mac (bash run-on-mac.sh, needs ffmpeg), open a channel, click 'Start test stream'. The output player plays the live HLS; toggle CC and switch languages; drag the DVR bar back and hit Go live.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Test stream, playback &amp; live subtitles">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Test stream, playback &amp; live subtitles">Request changes</button>
        </div>
     
   </div><div class=card data-status="in_review">
