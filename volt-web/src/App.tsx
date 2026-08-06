@@ -1,7 +1,8 @@
-import { useState, type ReactElement } from 'react'
+import { useState, useEffect, type ReactElement } from 'react'
 import { api, setToken } from './api'
 import Channels from './pages/Channels'
 import ChannelDetail from './pages/ChannelDetail'
+import { useRoute, navigate, hrefFor } from './router'
 
 const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z" /></svg>
 
@@ -45,12 +46,22 @@ export default function App() {
   const [pw, setPw] = useState('volt1234')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [section, setSection] = useState('channels')
-  const [createOpen, setCreateOpen] = useState(false)
-  const [channelId, setChannelId] = useState<string | null>(null)
+
+  // URL is the source of truth for section / open channel / create drawer
+  const route = useRoute()
+  const section = route.section
+  const channelId = route.channelId
+  const createOpen = route.create
+  const setCreateOpen = (open: boolean) => navigate(open ? '/channels/new' : '/channels', { replace: true })
+  const openChannel = (id: string) => navigate(`/channels/${id}`)
 
   const account = email.split('@')[1]?.split('.')[0]?.toUpperCase() || 'RTM'
-  const label = NAV.flatMap(g => g.items).find(i => i.key === section)?.label || 'Channels'
+  const label = NAV.flatMap(g => g.items).find(i => i.key === section)?.label
+    || (section ? section.charAt(0).toUpperCase() + section.slice(1) : 'Channels')
+
+  useEffect(() => {
+    document.title = channelId ? `VOLT · Channel` : `VOLT · ${label}`
+  }, [channelId, label])
 
   async function login(e: React.FormEvent) {
     e.preventDefault(); setErr(''); setBusy(true)
@@ -86,11 +97,16 @@ export default function App() {
           {NAV.map(g => (
             <div key={g.group}>
               <div className="nav-group">{g.group}</div>
-              {g.items.map(it => (
-                <div key={it.key} className={`nav-item ${section === it.key ? 'active' : ''}`} onClick={() => { setSection(it.key); setChannelId(null) }}>
-                  {it.icon}{it.label}{it.badge && <span className="badge live">{it.badge}</span>}
-                </div>
-              ))}
+              {g.items.map(it => {
+                const href = hrefFor({ section: it.key })
+                return (
+                  <a key={it.key} href={href} className={`nav-item ${section === it.key ? 'active' : ''}`}
+                    style={{ textDecoration: 'none', color: 'inherit' }}
+                    onClick={e => { if (e.metaKey || e.ctrlKey || e.button === 1) return; e.preventDefault(); navigate(href) }}>
+                    {it.icon}{it.label}{it.badge && <span className="badge live">{it.badge}</span>}
+                  </a>
+                )
+              })}
             </div>
           ))}
         </nav>
@@ -109,7 +125,7 @@ export default function App() {
           </div>
           <div className="top-actions">
             <div className="icon-btn"><span className="dot"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" /></svg></div>
-            <button className="btn primary" onClick={() => { setSection('channels'); setChannelId(null); setCreateOpen(true) }}>
+            <button className="btn primary" onClick={() => navigate('/channels/new')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>New Stream
             </button>
             <div className="icon-btn" title="Sign out" onClick={() => { setAuthed(false); setToken('') }}>
@@ -120,8 +136,8 @@ export default function App() {
         <div className="content">
           {section === 'channels'
             ? (channelId
-                ? <ChannelDetail id={channelId} onBack={() => setChannelId(null)} />
-                : <Channels createOpen={createOpen} setCreateOpen={setCreateOpen} onOpen={setChannelId} />)
+                ? <ChannelDetail key={channelId} id={channelId} onBack={() => navigate('/channels')} />
+                : <Channels createOpen={createOpen} setCreateOpen={setCreateOpen} onOpen={openChannel} />)
             : <Placeholder title={label} />}
         </div>
       </div>
