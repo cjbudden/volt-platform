@@ -50,4 +50,11 @@ export const config = {
     originDir: process.env.ORIGIN_DIR ?? `${process.cwd()}/origin`,
     encoderBin: process.env.ENCODER_BIN ?? `${process.cwd()}/../volt-encoder/bin`,
   },
+  // Image library store: local base dir for local runs, S3 bucket+prefix in cloud.
+  imageStore: {
+    driver: (process.env.IMAGE_STORE_DRIVER ?? 'local') as 'local' | 's3',
+    localDir: process.env.IMAGE_STORE_DIR ?? `${process.cwd()}/image-store`,
+    s3Bucket: process.env.IMAGE_S3_BUCKET ?? (process.env.S3_BUCKET ?? 'volt-origin-dev'),
+    s3Prefix: process.env.IMAGE_S3_PREFIX ?? '',
+  },
 };

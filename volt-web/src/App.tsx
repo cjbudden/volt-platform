@@ -2,6 +2,7 @@ import { useState, useEffect, type ReactElement } from 'react'
 import { api, setToken } from './api'
 import Channels from './pages/Channels'
 import ChannelDetail from './pages/ChannelDetail'
+import ImageLibrary from './pages/ImageLibrary'
 import { useRoute, navigate, hrefFor } from './router'
 
 const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z" /></svg>
@@ -15,6 +16,7 @@ const I = {
   loops: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 2l4 4-4 4" /><path d="M3 11v-1a4 4 0 014-4h14M7 22l-4-4 4-4" /><path d="M21 13v1a4 4 0 01-4 4H3" /></svg>,
   rec: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" /></svg>,
   vod: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m22 8-6 4 6 4V8z" /><rect x="2" y="6" width="14" height="12" rx="2" /></svg>,
+  images: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></svg>,
   multiview: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>,
   analytics: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18" /><path d="m7 14 4-4 3 3 5-6" /></svg>,
 }
@@ -33,6 +35,7 @@ const NAV: { group: string; items: { key: string; label: string; icon: ReactElem
   { group: 'Media', items: [
     { key: 'recordings', label: 'Recordings', icon: I.rec },
     { key: 'vod', label: 'VOD Library', icon: I.vod },
+    { key: 'images', label: 'Image Library', icon: I.images },
     { key: 'multiview', label: 'Multiview', icon: I.multiview },
   ] },
   { group: 'Insight', items: [
@@ -138,6 +141,8 @@ export default function App() {
             ? (channelId
                 ? <ChannelDetail key={channelId} id={channelId} onBack={() => navigate('/channels')} />
                 : <Channels createOpen={createOpen} setCreateOpen={setCreateOpen} onOpen={openChannel} />)
+            : section === 'images'
+            ? <ImageLibrary />
             : <Placeholder title={label} />}
         </div>
       </div>

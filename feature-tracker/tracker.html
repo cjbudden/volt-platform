@@ -28,8 +28,8 @@
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
  <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-06.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>11</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>5</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>4</b> 📱 In app</span><span class=chip><b>4</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>12</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>4</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>5</b> 📱 In app</span><span class=chip><b>4</b> 📱 Partial</span><span class=chip><b>9</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="none">
     <div class=top><div class=name>Image resize service</div>
@@ -107,6 +107,19 @@
     <div class=actions>
          <button class="btn ok" data-approve="Record edit API + audit trail">✓ Approve as working</button>
          <button class="btn warn" data-changes="Record edit API + audit trail">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Image Library (file manager)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Hierarchical, searchable image store for watermarks, slates, posters and channel brands. Storage-driver abstraction: local base dir for local runs, S3 bucket+prefix in cloud. Upload + folder tree + search + kind filter + move/rename + guarded, audit-logged delete (confirm + in-use guard). Generated keyframes/storyboards live under a separate derived/ prefix. Serves /library/* as the image-resize origin.</div>
+    <div class=meta>backend verified end-to-end (upload/probe/list/search/folders/move/serve/guarded-delete); browser UI type-checked</div>
+    <div class=how><b>How to test:</b> Media → Image Library. Create a folder (slates/watermarks/brands/posters), upload images, search/filter, delete (asks to confirm; blocks if a channel uses it as a slate).</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Image Library (file manager)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Image Library (file manager)">Request changes</button>
        </div>
     
   </div><div class=card data-status="ready_to_test" data-app="full">
@@ -230,16 +243,6 @@
     <div class=summary>Push a clip to YouTube / Facebook / X / TikTok / Dailymotion. Data model + APIs exist; real upload adapters pending.</div>
     <div class=meta>foundation built; adapters stubbed</div>
     <div class=how><b>How to test:</b> Not testable yet — needs each platform's OAuth app credentials from you before the upload adapters go live.</div>
-    
-    
-    
-  </div><div class=card data-status="building" data-app="none">
-    <div class=top><div class=name>File manager</div>
-      <span class=pill style="background:#64748b">🔨 Building</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
-    <div class=summary>Upload / organise watermarks, slates, logos, source media. S3-backed with direct-to-S3 upload.</div>
-    <div class=meta>design complete</div>
-    <div class=how><b>How to test:</b> Designed only — see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.</div>
     
     
     

@@ -971,3 +971,43 @@ BEGIN
   ALTER TABLE channels ADD COLUMN IF NOT EXISTS output_ladder      JSONB;
   ALTER TABLE channels ADD COLUMN IF NOT EXISTS fallback_transcode BOOLEAN NOT NULL DEFAULT false;
 END $$;
+
+-- ============================================================================
+-- IMAGE LIBRARY (file manager) — curated images: watermarks, slates, posters,
+-- channel brands. Hierarchical (path/folder), searchable (name/tags/kind), backed
+-- by the image store (local dir or S3). Bytes live in the store; this is the index.
+-- Generated keyframes/storyboards live under a separate 'derived/' store prefix,
+-- not here.
+CREATE TABLE IF NOT EXISTS media_files (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id   UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL DEFAULT 'other',   -- watermark | slate | poster | brand | keyframe | other
+    path         TEXT NOT NULL,                   -- hierarchical key, e.g. 'slates/news/evening.png'
+    folder       TEXT NOT NULL DEFAULT '',        -- parent folder ('' = root), e.g. 'slates/news'
+    name         TEXT NOT NULL,
+    content_type TEXT,
+    size_bytes   BIGINT,
+    width        INTEGER,
+    height       INTEGER,
+    tags         TEXT[] NOT NULL DEFAULT '{}',
+    store_key    TEXT NOT NULL,                   -- key within the image store backend
+    status       asset_media_status NOT NULL DEFAULT 'ready',
+    version      INTEGER NOT NULL DEFAULT 1,
+    created_by   UUID REFERENCES users(id) ON DELETE SET NULL,
+    updated_by   UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (account_id, path)
+);
+CREATE INDEX IF NOT EXISTS idx_media_files_account ON media_files(account_id);
+CREATE INDEX IF NOT EXISTS idx_media_files_folder  ON media_files(account_id, folder);
+CREATE INDEX IF NOT EXISTS idx_media_files_kind    ON media_files(account_id, kind);
+
+-- explicit (possibly empty) folders, so a hierarchy can exist before it has files
+CREATE TABLE IF NOT EXISTS media_folders (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id  UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    path        TEXT NOT NULL,                    -- 'slates/news'
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (account_id, path)
+);

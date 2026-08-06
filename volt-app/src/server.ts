@@ -27,6 +27,8 @@ import { hypermediaRouter } from './modules/hypermedia';
 import { hypermediaNegotiation } from './middleware/hypermedia';
 import { heartbeat } from './services/statusHub';
 import { INGEST_PROTOCOLS } from './services/ingestProtocols';
+import { mediaFilesRouter } from './modules/mediaFiles';
+import { imageStore } from './services/imageStore';
 
 export function createServer() {
   const app = express();
@@ -72,6 +74,24 @@ export function createServer() {
   app.use('/api/events', eventsRouter);
   app.use('/api/output-profiles', profilesRouter);
   app.get('/api/ingest-protocols', (_req, res) => res.json({ protocols: INGEST_PROTOCOLS }));
+  app.use('/api/files', mediaFilesRouter);   // image library (file manager)
+
+  // Serve image-library bytes from the store (local dir or S3). Public read so <img>
+  // tags + the resize service can fetch by path (keys carry the opaque account id;
+  // production gates with the image service's signed URLs). This is the resize origin.
+  app.get('/library/*', async (req, res) => {
+    try {
+      const key = decodeURIComponent(req.path.replace(/^\//, '')); // 'library/<account>/<path>'
+      const stream = await imageStore().getStream(key);
+      if (!stream) return res.status(404).end();
+      const ext = (key.split('.').pop() || '').toLowerCase();
+      const ct: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', avif: 'image/avif' };
+      if (ct[ext]) res.setHeader('Content-Type', ct[ext]);
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      (stream as any).pipe(res);
+    } catch { res.status(400).end(); }
+  });
   app.use('/api/status', statusRouter);   // admin: polling REST + SSE live push
   app.use('/api/streams', ingestRouter);  // encoder -> POST /api/streams/:id/report
   app.use('/api/media', mediaIngestRouter); // thumbnailer -> POST /api/media/thumbnails

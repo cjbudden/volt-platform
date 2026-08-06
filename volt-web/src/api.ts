@@ -105,6 +105,39 @@ export const api = {
   testStreamStop: (id: string): Promise<{ running: boolean }> =>
     req(`/channels/${id}/test-stream`, { method: 'POST', body: JSON.stringify({ action: 'stop' }) }),
   ingestProtocols: (): Promise<{ protocols: IngestProtocol[] }> => req('/ingest-protocols'),
+
+  // image library (file manager)
+  files: (p: { folder?: string; kind?: string; q?: string; recursive?: boolean } = {}): Promise<MediaFile[]> => {
+    const qs = new URLSearchParams()
+    if (p.folder !== undefined) qs.set('folder', p.folder)
+    if (p.kind) qs.set('kind', p.kind)
+    if (p.q) qs.set('q', p.q)
+    if (p.recursive) qs.set('recursive', '1')
+    return req('/files' + (qs.toString() ? '?' + qs : ''))
+  },
+  fileFolders: (): Promise<{ folders: { path: string; name: string; count: number }[] }> => req('/files/folders'),
+  createFolder: (path: string): Promise<{ path: string }> => req('/files/folders', { method: 'POST', body: JSON.stringify({ path }) }),
+  uploadFile: (b: { folder?: string; name: string; kind?: string; contentType?: string; tags?: string[]; dataBase64: string }): Promise<MediaFile> =>
+    req('/files', { method: 'POST', body: JSON.stringify(b) }),
+  patchFile: (id: string, b: { name?: string; folder?: string; kind?: string; tags?: string[]; version?: number }): Promise<MediaFile> =>
+    req(`/files/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteFile: async (id: string, opts: { confirm?: boolean; force?: boolean } = {}): Promise<{ ok: boolean; status: number; body?: any }> => {
+    const qs = new URLSearchParams()
+    if (opts.confirm) qs.set('confirm', 'true')
+    if (opts.force) qs.set('force', 'true')
+    const r = await fetch('/api/files/' + id + (qs.toString() ? '?' + qs : ''), {
+      method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` },
+    })
+    if (r.status === 204) return { ok: true, status: 204 }
+    let body: any = null; try { body = await r.json() } catch { /* */ }
+    return { ok: false, status: r.status, body }
+  },
+}
+
+export interface MediaFile {
+  id: string; account_id: string; kind: string; path: string; folder: string; name: string
+  content_type: string | null; size_bytes: number | null; width: number | null; height: number | null
+  tags: string[]; store_key: string; status: string; version: number; created_at: string; url: string
 }
 
 export interface IngestProtocol {

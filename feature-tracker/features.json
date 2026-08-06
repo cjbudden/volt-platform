@@ -146,16 +146,16 @@
     },
     {
       "id": "file-manager",
-      "name": "File manager",
-      "summary": "Upload / organise watermarks, slates, logos, source media. S3-backed with direct-to-S3 upload.",
-      "status": "building",
+      "name": "Image Library (file manager)",
+      "summary": "Hierarchical, searchable image store for watermarks, slates, posters and channel brands. Storage-driver abstraction: local base dir for local runs, S3 bucket+prefix in cloud. Upload + folder tree + search + kind filter + move/rename + guarded, audit-logged delete (confirm + in-use guard). Generated keyframes/storyboards live under a separate derived/ prefix. Serves /library/* as the image-resize origin.",
+      "status": "ready_to_test",
       "test": {
-        "how": "Designed only — see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.",
+        "how": "Media → Image Library. Create a folder (slates/watermarks/brands/posters), upload images, search/filter, delete (asks to confirm; blocks if a channel uses it as a slate).",
         "artifact": null
       },
-      "checks": "design complete",
+      "checks": "backend verified end-to-end (upload/probe/list/search/folders/move/serve/guarded-delete); browser UI type-checked",
       "feedback": [],
-      "app_surface": "none"
+      "app_surface": "full"
     },
     {
       "id": "watchfolder",
