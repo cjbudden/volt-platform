@@ -31,6 +31,7 @@ export default function ImageLibrary() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [confirm, setConfirm] = useState<{ file: MediaFile; inUse?: any[] } | null>(null)
+  const [folderModal, setFolderModal] = useState<null | string>(null) // holds the input value while open
   const fileInput = useRef<HTMLInputElement | null>(null)
 
   async function loadFolders() { try { setFolders((await api.fileFolders()).folders) } catch { /* */ } }
@@ -44,20 +45,27 @@ export default function ImageLibrary() {
   async function onUpload(list: FileList | null) {
     if (!list?.length) return
     setBusy(true); setErr('')
+    let ok = 0
     try {
       for (const f of Array.from(list)) {
-        if (!f.type.startsWith('image/')) continue
-        const dataUrl = await fileToDataURL(f)
-        await api.uploadFile({ folder, name: f.name, kind: inferKind(folder), contentType: f.type, dataBase64: dataUrl })
+        if (!f.type.startsWith('image/')) { setErr(`Skipped ${f.name}: not an image`); continue }
+        if (f.size > 28 * 1024 * 1024) { setErr(`${f.name} is too large (${(f.size / 1048576).toFixed(1)} MB; max ~28 MB)`); continue }
+        try {
+          const dataUrl = await fileToDataURL(f)
+          await api.uploadFile({ folder, name: f.name, kind: inferKind(folder), contentType: f.type, dataBase64: dataUrl })
+          ok++
+        } catch (e: any) { setErr(`Couldn’t upload ${f.name}: ${e.message}`) }
       }
-      await loadFolders(); await load()
-    } catch (e: any) { setErr(e.message) } finally { setBusy(false); if (fileInput.current) fileInput.current.value = '' }
+      if (ok) await loadFolders()
+      if (ok) await load()
+    } finally { setBusy(false); if (fileInput.current) fileInput.current.value = '' }
   }
 
-  async function newFolder() {
-    const name = window.prompt('New folder name (e.g. slates/news):', folder ? folder + '/' : '')
-    if (!name) return
-    try { await api.createFolder(name); await loadFolders(); setFolder(name.replace(/^\/|\/$/g, '')) } catch (e: any) { setErr(e.message) }
+  async function createFolder(name: string) {
+    const clean = name.trim().replace(/^\/|\/$/g, '')
+    if (!clean) return
+    try { await api.createFolder(clean); await loadFolders(); setFolder(clean); setFolderModal(null) }
+    catch (e: any) { setErr(e.message) }
   }
 
   async function doDelete(f: MediaFile, force = false) {
@@ -74,7 +82,7 @@ export default function ImageLibrary() {
       <div className="page-head">
         <div><h1>Image Library</h1><p>Watermarks, slates, posters and channel brands. Hierarchical, searchable, backed by the image store.</p></div>
         <div className="spacer" />
-        <button className="btn ghost" onClick={newFolder}>+ New folder</button>
+        <button className="btn ghost" onClick={() => setFolderModal(folder ? folder + '/' : '')}>+ New folder</button>
         <button className="btn primary" disabled={busy} onClick={() => fileInput.current?.click()}>{busy ? 'Uploading…' : 'Upload images'}</button>
         <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={e => onUpload(e.target.files)} />
       </div>
@@ -136,6 +144,21 @@ export default function ImageLibrary() {
             )}
         </div>
       </div>
+
+      {folderModal !== null && (
+        <div className="drawer-scrim" onClick={() => setFolderModal(null)} style={{ alignItems: 'center', justifyContent: 'center' }}>
+          <form className="card" onClick={e => e.stopPropagation()} style={{ width: 420, padding: 20 }}
+            onSubmit={e => { e.preventDefault(); createFolder(folderModal) }}>
+            <h3 style={{ margin: '0 0 4px' }}>New folder</h3>
+            <p style={{ color: 'var(--muted)', fontSize: 12.5, margin: '0 0 12px' }}>Use “/” for nested folders, e.g. <span style={{ fontFamily: 'ui-monospace,monospace' }}>slates/news</span>.</p>
+            <input className="inp" autoFocus value={folderModal} onChange={e => setFolderModal(e.target.value)} placeholder="slates/news" />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+              <button type="button" className="btn ghost" onClick={() => setFolderModal(null)}>Cancel</button>
+              <button type="submit" className="btn primary" disabled={!folderModal.trim()}>Create folder</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {confirm && (
         <div className="drawer-scrim" onClick={() => setConfirm(null)} style={{ alignItems: 'center', justifyContent: 'center' }}>

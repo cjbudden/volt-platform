@@ -34,6 +34,10 @@ export function createServer() {
   const app = express();
   app.set('trust proxy', true); // correct protocol/host behind the ALB for absolute link IRIs
   app.use(cors({ origin: config.corsOrigin, credentials: true }));
+  // Image uploads arrive base64 in JSON (base64 inflates ~33%), so the library route
+  // needs a larger body limit than the 1mb default. This parser runs first for
+  // /api/files and consumes the stream, so the global 1mb parser below skips it.
+  app.use('/api/files', express.json({ limit: '30mb' }));
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/health', (_req, res) => res.json({ ok: true, service: 'volt-control-plane' }));
