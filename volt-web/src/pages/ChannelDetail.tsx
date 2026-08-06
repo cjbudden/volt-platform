@@ -27,25 +27,38 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id])
 
-  // In the test build, Start/Stop drives a real local test stream (FFmpeg → HLS/DASH
-  // + live WebVTT) so playback + subtitles + DVR can actually be exercised.
-  async function toggle() {
+  // "On air" (public output) is decoupled from the source, matching the broadcast
+  // workflow: you bring the SOURCE up first, confirm it's arriving, and only THEN can
+  // you take the output live. In this test build, sending the source = starting the
+  // FFmpeg test generator (real HLS/DASH + live WebVTT); going live reveals it as the
+  // public output with playback, subtitles and DVR.
+  const [onAir, setOnAir] = useState(false)
+  const sourceUp = !!d?.testStream?.running
+
+  // if the source drops (or is stopped elsewhere), we can't be on air
+  useEffect(() => { if (!sourceUp && onAir) setOnAir(false) }, [sourceUp, onAir])
+
+  async function sendSource() {
     if (!d) return
     setBusy(true)
     try {
-      if (d.testStream?.running) { await api.testStreamStop(d.id); await load() }
-      else {
-        await api.testStreamStart(d.id, { langs: ['en', 'ms', 'zh', 'ta'], dvrSec: d.dvr_mode === 'event_start' ? 0 : d.dvr.effective_sec })
-        // give ffmpeg a moment to emit the first segments, then refresh a few times
-        for (let i = 0; i < 4; i++) { await new Promise(r => setTimeout(r, 1500)); await load() }
-      }
+      await api.testStreamStart(d.id, { langs: ['en', 'ms', 'zh', 'ta'], dvrSec: d.dvr_mode === 'event_start' ? 0 : d.dvr.effective_sec })
+      // give ffmpeg a moment to emit the first segments, then refresh a few times
+      for (let i = 0; i < 4; i++) { await new Promise(r => setTimeout(r, 1500)); await load() }
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  async function dropSource() {
+    if (!d) return
+    setBusy(true); setOnAir(false)
+    try { await api.testStreamStop(d.id); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
 
   if (err) return <div className="err" style={{ margin: 20 }}>Couldn’t load channel: {err}</div>
   if (!d) return <div className="loading">Loading channel…</div>
 
-  const live = d.status === 'live'
+  const live = onAir && sourceUp
+  const stateLabel = onAir ? 'ON AIR' : sourceUp ? 'SOURCE OK' : 'IDLE'
+  const stateCls = onAir ? 'live' : sourceUp ? 'sched' : 'idle'
   const isEvent = d.dvr_mode === 'event_start'
   const wt = d.profile?.workflow_type
   const captionLangs = d.captions.targets.length ? d.captions.targets : ['en']
@@ -62,7 +75,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
             <span className="dthumb" style={{ background: 'linear-gradient(135deg,#1d4ed8,#3b82f6)' }}>{d.name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()}</span>
             {d.name}
             <span className={`tag type ${wt === 'transcode' ? 'chan' : 'event'}`}>{wt === 'transcode' ? 'TRANSCODE' : 'PACKAGING'}</span>
-            <span className={`tag ${live ? 'live' : 'idle'}`}><span className={`dot-s ${live ? 'live' : 'idle'}`} />{live ? 'OUTPUT LIVE' : 'IDLE'}</span>
+            <span className={`tag ${stateCls}`}><span className={`dot-s ${stateCls}`} />{stateLabel}</span>
           </h1>
           <p>
             {isEvent ? 'Event' : '24/7'} · DVR {isEvent ? 'to event start' : fmtWindow(d.dvr.effective_sec)}
@@ -76,12 +89,26 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         <button className="btn ghost" onClick={() => { setSettingsOpen(true); onOpenSettings?.() }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>Settings
         </button>
-        <button className={`btn ${d.testStream?.running ? 'ghost' : 'primary'}`} disabled={busy} onClick={toggle} style={d.testStream?.running ? { color: '#fca5a5' } : undefined}>
-          {busy ? (d.testStream?.running ? 'Stopping…' : 'Starting…') : d.testStream?.running ? 'Stop stream' : 'Start test stream'}
-        </button>
+        {!sourceUp ? (
+          <button className="btn primary" disabled={busy} onClick={sendSource}>
+            {busy ? 'Sending source…' : 'Send test source'}
+          </button>
+        ) : !onAir ? (
+          <>
+            <button className="btn ghost" disabled={busy} onClick={dropSource}>Drop source</button>
+            <button className="btn primary" onClick={() => setOnAir(true)} title="Source is receiving — take the output live">
+              <span className="dot-s live" style={{ marginRight: 6 }} />Go live
+            </button>
+          </>
+        ) : (
+          <button className="btn ghost" disabled={busy} onClick={dropSource} style={{ color: '#fca5a5' }}>
+            {busy ? 'Stopping…' : 'Take off air'}
+          </button>
+        )}
       </div>
 
-      <DualPlayers d={d} live={live} captionLangs={captionLangs} onStart={toggle} starting={busy} />
+      <DualPlayers d={d} captionLangs={captionLangs} sourceUp={sourceUp} onAir={onAir}
+        onSendSource={sendSource} onGoLive={() => setOnAir(true)} busy={busy} />
 
       <EpgStrip d={d} />
 
@@ -116,56 +143,102 @@ function parseVtt(txt: string): Cue[] {
   return cues
 }
 
-function DualPlayers({ d, live, captionLangs, onStart, starting }: { d: CD; live: boolean; captionLangs: string[]; onStart: () => void; starting: boolean }) {
-  const ts = d.testStream
-  const playing = ts?.running && ts?.hls
+function DualPlayers({ d, captionLangs, sourceUp, onAir, onSendSource, onGoLive, busy }: {
+  d: CD; captionLangs: string[]; sourceUp: boolean; onAir: boolean; onSendSource: () => void; onGoLive: () => void; busy: boolean
+}) {
   const [subOn, setSubOn] = useState(true)
   const [subLang, setSubLang] = useState(captionLangs[0] || 'en')
 
   return (
     <div className="player-grid" style={{ marginBottom: 18 }}>
-      {/* SOURCE */}
-      <div className="player">
-        <div className="video">
-          <div className="grad" />
-          <div className="plabel"><span className="pt" style={{ color: '#a5b4fc' }}>SOURCE · raw ingest</span></div>
-          <div className="badge-live" style={{ background: 'rgba(99,102,241,.85)' }}><span className="d" />{(d.sources[0]?.protocol || 'SRT').toUpperCase()}</div>
-          <div className="play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z" /></svg></div>
-          <div className="ptime">{playing ? 'test pattern · 1080p50' : live ? '00:12:44:07' : '— no signal —'}</div>
-        </div>
-        <div className="pfoot">
-          <span className={`dot-s ${playing || live ? 'live' : 'idle'}`} /> {playing ? 'Test generator · testsrc + tone' : live ? 'Primary source · 1080p50 · 18.4 Mbps' : 'Primary source · offline'}
-          <select value={0} onChange={() => {}}>
-            {d.sources.length ? d.sources.map((s, i) => <option key={s.id} value={i}>Source · {s.role}</option>)
-              : <><option>Source · Primary</option><option>Source · Backup</option></>}
-          </select>
-        </div>
-      </div>
+      {/* SOURCE — shows the real incoming feed once a source is sent */}
+      <SourcePlayer d={d} sourceUp={sourceUp} onSendSource={onSendSource} busy={busy} />
 
-      {/* OUTPUT — real HLS playback when a test stream is running */}
-      {playing
+      {/* OUTPUT — gated on a working source, then goes live on demand */}
+      {onAir
         ? <HlsOutput d={d} captionLangs={captionLangs} subOn={subOn} setSubOn={setSubOn} subLang={subLang} setSubLang={setSubLang} />
-        : <IdleOutput onStart={onStart} starting={starting} />}
+        : <IdleOutput sourceUp={sourceUp} onGoLive={onGoLive} />}
     </div>
   )
 }
 
-function IdleOutput({ onStart, starting }: { onStart: () => void; starting: boolean }) {
+// A minimal hls.js video element (used for the source preview).
+function HlsVideo({ src }: { src: string }) {
+  const ref = useRef<HTMLVideoElement | null>(null)
+  useEffect(() => {
+    let cancelled = false; let hls: any
+    const v = ref.current; if (!v || !src) return
+    ;(async () => {
+      const Hls = (await import('hls.js')).default
+      if (cancelled) return
+      if (Hls.isSupported()) {
+        hls = new Hls({ lowLatencyMode: true })
+        hls.loadSource(originUrl(src)); hls.attachMedia(v)
+        hls.on(Hls.Events.MANIFEST_PARSED, () => { v.muted = true; v.play().catch(() => {}) })
+        hls.on(Hls.Events.ERROR, (_e: any, data: any) => { if (data.fatal) setTimeout(() => { try { hls.startLoad() } catch {} }, 1500) })
+      } else if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = originUrl(src); v.muted = true; v.play().catch(() => {}) }
+    })()
+    return () => { cancelled = true; try { hls?.destroy() } catch {} }
+  }, [src])
+  return <video ref={ref} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
+}
+
+function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: boolean; onSendSource: () => void; busy: boolean }) {
+  const proto = (d.sources[0]?.protocol || 'SRT').toUpperCase()
+  return (
+    <div className="player">
+      <div className="video">
+        {sourceUp
+          ? <HlsVideo src={d.testStream.hls} />
+          : <div className="grad" />}
+        <div className="plabel"><span className="pt" style={{ color: '#a5b4fc' }}>SOURCE · raw ingest</span></div>
+        <div className="badge-live" style={{ background: sourceUp ? 'rgba(74,222,128,.85)' : 'rgba(99,102,241,.85)' }}><span className="d" />{sourceUp ? 'RECEIVING' : proto}</div>
+        {!sourceUp && (
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+            <button className="btn primary" onClick={onSendSource} disabled={busy} style={{ transform: 'scale(1.05)' }}>
+              {busy ? 'Sending source…' : '▶  Send test source'}
+            </button>
+          </div>
+        )}
+        <div className="ptime">{sourceUp ? 'test pattern · 720p50 · testsrc + tone' : '— no signal —'}</div>
+      </div>
+      <div className="pfoot">
+        <span className={`dot-s ${sourceUp ? 'live' : 'idle'}`} /> {sourceUp ? 'Source receiving · 1080p50 · 18.4 Mbps · 0 drops' : 'No source — send one to enable output'}
+        <select value={0} onChange={() => {}}>
+          {d.sources.length ? d.sources.map((s, i) => <option key={s.id} value={i}>Source · {s.role}</option>)
+            : <><option>Source · Primary</option><option>Source · Backup</option></>}
+        </select>
+      </div>
+    </div>
+  )
+}
+
+function IdleOutput({ sourceUp, onGoLive }: { sourceUp: boolean; onGoLive: () => void }) {
   return (
     <div className="player">
       <div className="video">
         <div className="grad" style={{ background: 'radial-gradient(120% 120% at 70% 20%,#20304a 0%,#0b0f16 70%)' }} />
-        <div className="plabel"><span className="pt" style={{ color: '#98a1b6' }}>OUTPUT · idle</span></div>
-        <div className="badge-live" style={{ background: 'rgba(102,112,138,.7)' }}><span className="d" />IDLE</div>
-        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
-          <button className="btn primary" onClick={onStart} disabled={starting} style={{ transform: 'scale(1.05)' }}>
-            {starting ? 'Starting encoder…' : '▶  Start test stream'}
-          </button>
+        <div className="plabel"><span className="pt" style={{ color: sourceUp ? '#38bdf8' : '#98a1b6' }}>OUTPUT · {sourceUp ? 'ready' : 'idle'}</span></div>
+        <div className="badge-live" style={{ background: sourceUp ? 'rgba(56,189,248,.8)' : 'rgba(102,112,138,.7)' }}><span className="d" />{sourceUp ? 'READY' : 'IDLE'}</div>
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
+          {sourceUp ? (
+            <div>
+              <button className="btn primary" onClick={onGoLive} style={{ transform: 'scale(1.05)' }}>
+                <span className="dot-s live" style={{ marginRight: 6 }} />Go live
+              </button>
+              <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>Source is receiving — take the output live.</div>
+            </div>
+          ) : (
+            <div style={{ color: 'var(--faint)', fontSize: 13, maxWidth: 300 }}>
+              <div style={{ fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>Waiting for source</div>
+              Send a source first — the output can only go live once the source is arriving.
+            </div>
+          )}
         </div>
-        <div className="ptime">no output</div>
+        <div className="ptime">{sourceUp ? 'ready to go live' : 'no source'}</div>
       </div>
       <div className="pfoot">
-        <span className="dot-s idle" /> Start a test stream to package a live HLS/DASH ladder and play it back here
+        <span className={`dot-s ${sourceUp ? 'sched' : 'idle'}`} /> {sourceUp ? 'Encoder warm · output held private until you go live' : 'Output disabled until a source is connected'}
       </div>
     </div>
   )
