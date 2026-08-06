@@ -9,7 +9,7 @@
 //  ECS tasks via the orchestrator). Enabled when ffmpeg is present locally.
 // ============================================================================
 import { spawn, ChildProcess } from 'node:child_process';
-import { existsSync, rmSync, mkdirSync } from 'node:fs';
+import { existsSync, rmSync, mkdirSync, openSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { config } from '../config';
 import { query, one } from '../db';
@@ -31,7 +31,13 @@ interface Running {
   opts: Required<TestStreamOptions>;
   sourceKind: 'ingest' | 'testcard';
   sourceUrl: string | null;
+  sourceNote: string | null;
 }
+
+// Protocols the generator can PULL (it reads the URL). Push protocols (srt/rtmp/…)
+// need a live publisher + a listener the test generator doesn't run, so we can't
+// ingest them here — we fall back to the synthetic test card instead of hanging.
+const PULL_PROTOCOLS = new Set(['hls', 'dash']);
 
 const running = new Map<string, Running>();
 
@@ -52,6 +58,7 @@ export function testStreamStatus(channelId: string) {
     options: r?.opts ?? null,
     sourceKind: r?.sourceKind ?? null,
     sourceUrl: r?.sourceUrl ?? null,
+    sourceNote: r?.sourceNote ?? null,
   };
 }
 
@@ -64,8 +71,9 @@ export async function startTestStream(channelId: string, name: string, opts: Tes
   if (running.has(channelId)) return testStreamStatus(channelId);
 
   // Resolve the source: an explicit inputUrl wins; otherwise use the channel's
-  // configured primary HLS ingest input if it has one; else the synthetic test card.
+  // configured primary PULL (HLS/DASH) ingest input; else the synthetic test card.
   let inputUrl: string | null = opts.inputUrl ?? null;
+  let sourceNote: string | null = null;
   if (inputUrl === null) {
     const primary = await one<any>(
       `SELECT ingest_url, protocol FROM stream_inputs
@@ -73,7 +81,15 @@ export async function startTestStream(channelId: string, name: string, opts: Tes
         ORDER BY (role = 'primary') DESC, created_at ASC LIMIT 1`,
       [channelId]
     ).catch(() => null);
-    if (primary?.ingest_url) inputUrl = primary.ingest_url;
+    if (primary?.ingest_url) {
+      const proto = String(primary.protocol || '').toLowerCase();
+      if (PULL_PROTOCOLS.has(proto)) {
+        inputUrl = primary.ingest_url;
+      } else {
+        // push endpoint (srt/rtmp/rtmps/ndi/st2110) — no live publisher/listener here
+        sourceNote = `Source is a ${proto.toUpperCase()} push endpoint; the test generator can't listen for a push, so it's running the synthetic test card. Push a feed to that endpoint, or set an HLS/DASH pull URL, to transcode the real source.`;
+      }
+    }
   }
 
   const o: Required<TestStreamOptions> = {
@@ -95,12 +111,14 @@ export async function startTestStream(channelId: string, name: string, opts: Tes
   if (o.dash) genArgs.push('--dash');
   if (inputUrl) genArgs.push('--input-url', inputUrl);
 
-  const ff = spawn('bash', [join(bin, 'test-stream.sh'), ...genArgs], { stdio: 'ignore', detached: false });
+  // capture the encoder's stdout/stderr to a per-channel log for diagnosis
+  const logFd = openSync(join(out, 'encoder.log'), 'a');
+  const ff = spawn('bash', [join(bin, 'test-stream.sh'), ...genArgs], { stdio: ['ignore', logFd, logFd], detached: false });
   const cap = spawn('node', [join(bin, 'test-captions.mjs'), '--out', out, '--langs', o.langs.join(','), '--interval', String(o.captionInterval)], { stdio: 'ignore', detached: false });
 
   const rec: Running = {
     channelId, ff, cap, startedAt: Date.now(), opts: o,
-    sourceKind: inputUrl ? 'ingest' : 'testcard', sourceUrl: inputUrl,
+    sourceKind: inputUrl ? 'ingest' : 'testcard', sourceUrl: inputUrl, sourceNote,
   };
   running.set(channelId, rec);
 

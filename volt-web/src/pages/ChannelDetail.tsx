@@ -219,6 +219,11 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
             : <><option>Source · Primary</option><option>Source · Backup</option></>}
         </select>
       </div>
+      {sourceUp && ts.sourceNote && (
+        <div style={{ padding: '9px 12px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--warn)', display: 'flex', gap: 8 }}>
+          <span>⚠</span><span>{ts.sourceNote}</span>
+        </div>
+      )}
     </div>
   )
 }

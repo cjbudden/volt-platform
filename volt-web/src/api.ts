@@ -67,6 +67,7 @@ export interface TestStreamStatus {
   options: { name: string; dvrSec: number; langs: string[]; dash: boolean; captionInterval: number } | null
   sourceKind: 'ingest' | 'testcard' | null
   sourceUrl: string | null
+  sourceNote: string | null
 }
 
 export interface ChannelSettingsPatch {
