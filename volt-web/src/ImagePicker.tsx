@@ -2,7 +2,7 @@
 // the channel create + settings forms so you choose from the Image Library instead of
 // pasting a URL. Returns the picked image's /library URL.
 import { useEffect, useState } from 'react'
-import { api, type MediaFile } from './api'
+import { api, thumbUrl, type MediaFile } from './api'
 
 export function ImagePicker({ open, onClose, onPick, kinds, title }: {
   open: boolean
@@ -41,7 +41,7 @@ export function ImagePicker({ open, onClose, onPick, kinds, title }: {
                 {shown.map(f => (
                   <div key={f.id} className="card" style={{ overflow: 'hidden', cursor: 'pointer' }} onClick={() => onPick(f.url, f)}>
                     <div style={{ aspectRatio: '16/10', background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 14px 14px', display: 'grid', placeItems: 'center' }}>
-                      <img src={f.url} alt={f.name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                      <img src={thumbUrl(f.url, 240, 150)} alt={f.name} loading="lazy" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
                     </div>
                     <div style={{ padding: '7px 9px' }}>
                       <div style={{ fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={f.path}>{f.name}</div>

@@ -29,13 +29,13 @@
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
  <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-06.</div>
  <div class=chips><span class=chip style="border-color:#0891b2"><b>12</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>4</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>5</b> 📱 In app</span><span class=chip><b>4</b> 📱 Partial</span><span class=chip><b>9</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>5</b> 📱 In app</span><span class=chip><b>5</b> 📱 Partial</span><span class=chip><b>8</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
- <div class=card data-status="ready_to_test" data-app="none">
+ <div class=card data-status="ready_to_test" data-app="partial">
     <div class=top><div class=name>Image resize service</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
-    <div class=summary>On-the-fly resize / crop / filter by URL, cached. fit-in / fill / stretch, focus incl. smart, sharpen / blur / grayscale / webp / avif, signed URLs.</div>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>On-the-fly resize / crop / filter by URL, cached. fit-in / fill / stretch, focus incl. smart, sharpen / blur / grayscale / webp / avif, signed URLs. Now wired to the Image Library: grid/picker/preview thumbnails render via /img/&lt;WxH&gt;/library/... (WebP, cached under derived/thumbs/).</div>
     <div class=meta>14/14 automated contract checks pass</div>
     <div class=how><b>How to test:</b> Open the test view, drop in your own logo/image and try fit / size / focus / filters, or attach an image in chat for true sharp-service renders.</div>
     <div class=note>Test tool: open <b>“volt-image-api-validator”</b> in your artifacts gallery.</div>

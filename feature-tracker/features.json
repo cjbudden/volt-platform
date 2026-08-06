@@ -4,7 +4,7 @@
     {
       "id": "image-resize",
       "name": "Image resize service",
-      "summary": "On-the-fly resize / crop / filter by URL, cached. fit-in / fill / stretch, focus incl. smart, sharpen / blur / grayscale / webp / avif, signed URLs.",
+      "summary": "On-the-fly resize / crop / filter by URL, cached. fit-in / fill / stretch, focus incl. smart, sharpen / blur / grayscale / webp / avif, signed URLs. Now wired to the Image Library: grid/picker/preview thumbnails render via /img/<WxH>/library/... (WebP, cached under derived/thumbs/).",
       "status": "ready_to_test",
       "test": {
         "how": "Open the test view, drop in your own logo/image and try fit / size / focus / filters, or attach an image in chat for true sharp-service renders.",
@@ -12,7 +12,7 @@
       },
       "checks": "14/14 automated contract checks pass",
       "feedback": [],
-      "app_surface": "none"
+      "app_surface": "partial"
     },
     {
       "id": "frame-access",

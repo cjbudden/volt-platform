@@ -29,6 +29,7 @@ import { heartbeat } from './services/statusHub';
 import { INGEST_PROTOCOLS } from './services/ingestProtocols';
 import { mediaFilesRouter } from './modules/mediaFiles';
 import { imageStore } from './services/imageStore';
+import { parseSpec, resizeFromStore } from './services/imageResize';
 
 export function createServer() {
   const app = express();
@@ -79,6 +80,25 @@ export function createServer() {
   app.use('/api/output-profiles', profilesRouter);
   app.get('/api/ingest-protocols', (_req, res) => res.json({ protocols: INGEST_PROTOCOLS }));
   app.use('/api/files', mediaFilesRouter);   // image library (file manager)
+
+  // Resized preview derivatives (WebP), cached under the store's derived/ prefix.
+  //   /img/<WxH>[,fit]/<store-key>   e.g. /img/320x200/library/<acct>/slates/x.png
+  app.get('/img/*', async (req, res) => {
+    try {
+      const rest = req.path.replace(/^\/img\//, '');
+      const slash = rest.indexOf('/');
+      if (slash < 0) return res.status(400).end();
+      const spec = parseSpec(decodeURIComponent(rest.slice(0, slash)));
+      const key = decodeURIComponent(rest.slice(slash + 1));
+      if (!spec || !/^(library|derived)\//.test(key)) return res.status(400).end();
+      const out = await resizeFromStore(key, spec);
+      if (!out) return res.status(404).end();
+      res.setHeader('Content-Type', out.contentType);
+      res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.end(out.buffer);
+    } catch { res.status(400).end(); }
+  });
 
   // Serve image-library bytes from the store (local dir or S3). Public read so <img>
   // tags + the resize service can fetch by path (keys carry the opaque account id;

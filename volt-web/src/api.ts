@@ -154,3 +154,11 @@ export interface IngestProtocol {
 
 // origin URLs are same-origin under /origin (proxied by Vite to the API in dev)
 export function originUrl(path: string) { return path.startsWith('/origin') ? path : `/origin${path}` }
+
+// Resized preview via the image service: /img/<WxH>[,fit]/<store-key>. `url` is a
+// library URL like '/library/<acct>/<path>'; the store key is that without the slash.
+export function thumbUrl(libraryUrl: string, w: number, h: number, fit: 'cover' | 'inside' = 'cover') {
+  const key = libraryUrl.replace(/^\//, '')
+  if (!key.startsWith('library/')) return libraryUrl
+  return `/img/${w}x${h},${fit}/${key}`
+}

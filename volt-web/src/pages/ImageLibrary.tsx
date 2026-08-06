@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type MediaFile } from '../api'
+import { api, thumbUrl, type MediaFile } from '../api'
 import { enqueueUploads, useUploads } from '../uploads'
 
 const KINDS = ['all', 'slate', 'watermark', 'poster', 'brand', 'other'] as const
@@ -145,7 +145,7 @@ export default function ImageLibrary() {
                 {shown.map(f => (
                   <div key={f.id} className="card" style={{ overflow: 'hidden', cursor: 'pointer' }} onClick={() => setPreview(f)}>
                     <div style={{ aspectRatio: '16/10', background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 16px 16px', display: 'grid', placeItems: 'center' }}>
-                      <img src={f.url} alt={f.name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                      <img src={thumbUrl(f.url, 300, 190)} alt={f.name} loading="lazy" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
                     </div>
                     <div style={{ padding: '9px 11px' }}>
                       <div style={{ fontWeight: 650, fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={f.path}>{f.name}</div>
@@ -215,7 +215,7 @@ export default function ImageLibrary() {
         <div className="drawer-scrim" onClick={() => setPreview(null)} style={{ alignItems: 'center', justifyContent: 'center' }}>
           <div className="card" onClick={e => e.stopPropagation()} style={{ width: 560, maxWidth: '95vw', padding: 0, overflow: 'hidden' }}>
             <div style={{ background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 18px 18px', display: 'grid', placeItems: 'center', maxHeight: 360 }}>
-              <img src={preview.url} alt={preview.name} style={{ maxWidth: '100%', maxHeight: 360, objectFit: 'contain' }} />
+              <img src={thumbUrl(preview.url, 1000, 720, 'inside')} alt={preview.name} style={{ maxWidth: '100%', maxHeight: 360, objectFit: 'contain' }} />
             </div>
             <div style={{ padding: 18 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

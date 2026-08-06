@@ -14,7 +14,8 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:8080',
       '/origin': 'http://localhost:8080',  // test-stream HLS/DASH/WebVTT
-      '/library': 'http://localhost:8080', // image-library bytes (previews)
+      '/library': 'http://localhost:8080', // image-library original bytes
+      '/img': 'http://localhost:8080',     // resized preview derivatives
     },
   },
 })

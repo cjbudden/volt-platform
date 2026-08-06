@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, originUrl, type ChannelDetail as CD, type ChannelSettingsPatch } from '../api'
+import { api, originUrl, thumbUrl, type ChannelDetail as CD, type ChannelSettingsPatch } from '../api'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 
@@ -598,7 +598,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           {lossBehavior === 'slate' && (
             <div className="field"><label>Slate image</label>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {slateRef && <img src={slateRef} alt="" style={{ width: 46, height: 34, objectFit: 'cover', borderRadius: 6, background: '#000', flex: 'none' }} />}
+                {slateRef && <img src={thumbUrl(slateRef, 92, 68)} alt="" style={{ width: 46, height: 34, objectFit: 'cover', borderRadius: 6, background: '#000', flex: 'none' }} />}
                 <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick from library or paste a URL" />
                 <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse…</button>
               </div>

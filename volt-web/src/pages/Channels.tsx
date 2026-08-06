@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, type Group } from '../api'
+import { api, thumbUrl, type Group } from '../api'
 import { useProtocols, protoOf, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 
@@ -353,7 +353,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
           {lossBehavior === 'slate' && (
             <div className="field"><label>Slate image</label>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {slateRef && <img src={slateRef} alt="" style={{ width: 46, height: 34, objectFit: 'cover', borderRadius: 6, background: '#000', flex: 'none' }} />}
+                {slateRef && <img src={thumbUrl(slateRef, 92, 68)} alt="" style={{ width: 46, height: 34, objectFit: 'cover', borderRadius: 6, background: '#000', flex: 'none' }} />}
                 <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick from library or paste a URL" />
                 <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse…</button>
               </div>
