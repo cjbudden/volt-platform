@@ -13,7 +13,8 @@ export default defineConfig({
     // talk to the control plane same-origin (no CORS) during dev
     proxy: {
       '/api': 'http://localhost:8080',
-      '/origin': 'http://localhost:8080', // test-stream HLS/DASH/WebVTT
+      '/origin': 'http://localhost:8080',  // test-stream HLS/DASH/WebVTT
+      '/library': 'http://localhost:8080', // image-library bytes (previews)
     },
   },
 })
