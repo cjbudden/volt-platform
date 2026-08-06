@@ -40,6 +40,9 @@ import events as events_mod
 WORK_DIR = os.environ.get("WORK_DIR", "/work")
 OUT_DIR = os.path.join(WORK_DIR, "out")
 UDP_BASE_PORT = int(os.environ.get("UDP_BASE_PORT", "20000"))  # rendition i -> 127.0.0.1:(UDP_BASE_PORT + i)
+# Shaka Packager binary name/path. Distros/installs vary (`packager`,
+# `shaka-packager`, or a downloaded `packager-osx-arm64`), so allow an override.
+PACKAGER_BIN = os.environ.get("PACKAGER_BIN", "packager")
 
 _children = []   # (name, Popen, critical)
 _selectors = []  # SourceSelector instances (own their own poller threads)
@@ -269,7 +272,7 @@ def build_shaka(cfg, keys):
     else:
         rends = [(i, f"{r['height']}p", i == 0) for i, r in enumerate(cfg["ladder"])]
 
-    cmd = ["packager"]
+    cmd = [PACKAGER_BIN]
     for idx, label, has_audio in rends:
         vseg = f"{OUT_DIR}/{label}/seg_$Number$.m4s"
         vinit = f"{OUT_DIR}/{label}/init.mp4"
