@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, originUrl, type ChannelDetail as CD, type ChannelSettingsPatch } from '../api'
+import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 
 const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z" /></svg>
 const LANGS = [
@@ -520,12 +521,12 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   // DVR
   const [dvrMode, setDvrMode] = useState<'sliding' | 'event_start'>(d.dvr_mode)
   const [dvrMin, setDvrMin] = useState<string>(String(Math.round((d.dvr_window_sec ?? d.dvr.effective_sec) / 60)))
-  // source
+  // source (protocol-aware, per input)
+  const protocols = useProtocols()
   const src0 = d.sources.find(s => s.role === 'primary') || d.sources[0]
   const src1 = d.sources.find(s => s.role === 'backup')
-  const [proto, setProto] = useState((src0?.protocol || 'srt').toLowerCase())
-  const [primaryUrl, setPrimaryUrl] = useState(src0?.ingest_url || '')
-  const [backupUrl, setBackupUrl] = useState(src1?.ingest_url || '')
+  const [primary, setPrimary] = useState<SourceValue>({ protocol: (src0?.protocol || 'srt').toLowerCase(), url: src0?.ingest_url || '' })
+  const [backup, setBackup] = useState<SourceValue>({ protocol: (src1?.protocol || src0?.protocol || 'srt').toLowerCase(), url: src1?.ingest_url || '' })
   // geo
   const [geoMode, setGeoMode] = useState(d.geo_mode)
   const [geoCountries, setGeoCountries] = useState(d.geo_countries.join(', '))
@@ -551,8 +552,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     else patch.geoCountries = []
     // sources
     const sources: ChannelSettingsPatch['sources'] = []
-    if (primaryUrl.trim()) sources.push({ role: 'primary', protocol: proto, ingestUrl: primaryUrl.trim() })
-    if (backupUrl.trim()) sources.push({ role: 'backup', protocol: proto, ingestUrl: backupUrl.trim() })
+    if (primary.url.trim()) sources.push({ role: 'primary', protocol: primary.protocol, ingestUrl: primary.url.trim(), streamKey: primary.streamKey?.trim() || undefined })
+    if (backup.url.trim()) sources.push({ role: 'backup', protocol: backup.protocol, ingestUrl: backup.url.trim(), streamKey: backup.streamKey?.trim() || undefined })
     if (sources.length) patch.sources = sources
     // captions
     patch.captions = { enabled: capOn, targets: capOn ? capLangs : [] }
@@ -573,13 +574,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           <div className="field"><label>Channel name</label><input className="inp" value={name} onChange={e => setName(e.target.value)} /></div>
 
           <div style={SEC}>Source</div>
-          <div className="field"><label>Ingest protocol</label>
-            <select className="inp" value={proto} onChange={e => setProto(e.target.value)}>
-              {['srt', 'rtmp', 'rtp', 'rist', 'zixi', 'hls'].map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}
-            </select>
-          </div>
-          <div className="field"><label>Primary ingest URL</label><input className="inp" value={primaryUrl} onChange={e => setPrimaryUrl(e.target.value)} placeholder="srt://ingest.volt…:9000?streamid=primary" /></div>
-          <div className="field"><label>Backup ingest URL <span style={{ color: 'var(--faint)' }}>(optional)</span></label><input className="inp" value={backupUrl} onChange={e => setBackupUrl(e.target.value)} placeholder="srt://ingest.volt…:9000?streamid=backup" /></div>
+          <SourceInput protocols={protocols} value={primary} onChange={setPrimary} label="Primary source" />
+          <SourceInput protocols={protocols} value={backup} onChange={setBackup} label="Backup source (optional)" />
 
           <div style={SEC}>DVR / catch-up</div>
           <div className="field"><label>DVR mode</label>

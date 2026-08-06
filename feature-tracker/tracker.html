@@ -28,8 +28,8 @@
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
  <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-06.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>10</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>5</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>4</b> 📱 In app</span><span class=chip><b>3</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>11</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>5</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>4</b> 📱 In app</span><span class=chip><b>4</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="none">
     <div class=top><div class=name>Image resize service</div>
@@ -159,6 +159,19 @@
     <div class=actions>
          <button class="btn ok" data-approve="Deep-linking &amp; routing (hashless)">✓ Approve as working</button>
          <button class="btn warn" data-changes="Deep-linking &amp; routing (hashless)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="partial">
+    <div class=top><div class=name>Form &amp; field management (protocol-aware sources)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Hybrid plan (no general form builder): source fields change to suit the selected protocol via a typed descriptor registry served at GET /api/ingest-protocols (srt/rtmp/rtmps/hls/dash/ndi/st2110 — label, placeholder, example, hint, stream-key field, push|pull). Wired into the create form and settings drawer. i18n label catalogs + a metadata_schemas custom-field renderer are the next phases.</div>
+    <div class=meta>registry + endpoint verified; forms + settings type-checked and wired; enum aligned to DB</div>
+    <div class=how><b>How to test:</b> New channel → change the source protocol; the URL example/placeholder + hint change, and RTMP/RTMPS show a Stream key field. Same in a channel's Settings drawer.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Form &amp; field management (protocol-aware sources)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Form &amp; field management (protocol-aware sources)">Request changes</button>
        </div>
     
   </div><div class=card data-status="in_review" data-app="none">

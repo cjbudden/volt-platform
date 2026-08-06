@@ -104,6 +104,15 @@ export const api = {
     req(`/channels/${id}/test-stream`, { method: 'POST', body: JSON.stringify({ action: 'start', ...opts }) }),
   testStreamStop: (id: string): Promise<{ running: boolean }> =>
     req(`/channels/${id}/test-stream`, { method: 'POST', body: JSON.stringify({ action: 'stop' }) }),
+  ingestProtocols: (): Promise<{ protocols: IngestProtocol[] }> => req('/ingest-protocols'),
+}
+
+export interface IngestProtocol {
+  id: string; label: string; ingest: 'push' | 'pull'
+  urlLabel: string; urlPlaceholder: string; urlExample: string; urlPattern?: string
+  streamKey: { show: boolean; label?: string; placeholder?: string }
+  extraFields?: { key: string; label: string; type: string; required?: boolean; placeholder?: string; hint?: string }[]
+  hint: string; packageFriendly: boolean
 }
 
 // origin URLs are same-origin under /origin (proxied by Vite to the API in dev)

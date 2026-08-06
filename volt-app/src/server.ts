@@ -26,6 +26,7 @@ import { shareLinksRouter, publicShareRouter } from './modules/shareLinks';
 import { hypermediaRouter } from './modules/hypermedia';
 import { hypermediaNegotiation } from './middleware/hypermedia';
 import { heartbeat } from './services/statusHub';
+import { INGEST_PROTOCOLS } from './services/ingestProtocols';
 
 export function createServer() {
   const app = express();
@@ -70,6 +71,7 @@ export function createServer() {
   app.use('/api/groups', groupsRouter);
   app.use('/api/events', eventsRouter);
   app.use('/api/output-profiles', profilesRouter);
+  app.get('/api/ingest-protocols', (_req, res) => res.json({ protocols: INGEST_PROTOCOLS }));
   app.use('/api/status', statusRouter);   // admin: polling REST + SSE live push
   app.use('/api/streams', ingestRouter);  // encoder -> POST /api/streams/:id/report
   app.use('/api/media', mediaIngestRouter); // thumbnailer -> POST /api/media/thumbnails

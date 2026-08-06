@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type Group } from '../api'
+import { useProtocols, protoOf, SourceInput, type SourceValue } from '../protocols'
 
 type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
 
@@ -162,7 +163,6 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
   )
 }
 
-const PROTOCOLS = ['srt', 'rtmp', 'rtmps', 'hls', 'dash', 'ndi', 'st2110']
 const RUNG_PRESETS = [
   { height: 1080, bitrateKbps: 5000 }, { height: 720, bitrateKbps: 2800 },
   { height: 480, bitrateKbps: 1200 }, { height: 360, bitrateKbps: 800 }, { height: 240, bitrateKbps: 400 },
@@ -182,12 +182,11 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   const [dvrMin, setDvrMin] = useState(60)
   const DVR_MAX_MIN = 240
 
+  const protocols = useProtocols()
   // transcode: single source + optional backup + selectable ladder
-  const [tProto, setTProto] = useState('srt')
-  const [tUrl, setTUrl] = useState('')
+  const [tSrc, setTSrc] = useState<SourceValue>({ protocol: 'srt', url: '' })
   const [tBackupOn, setTBackupOn] = useState(false)
-  const [tBackupProto, setTBackupProto] = useState('srt')
-  const [tBackupUrl, setTBackupUrl] = useState('')
+  const [tBackup, setTBackup] = useState<SourceValue>({ protocol: 'srt', url: '' })
   const [ladder, setLadder] = useState(() => RUNG_PRESETS.map(r => ({ ...r, on: [1080, 720, 480].includes(r.height) })))
 
   // package: per-rendition input rows + fallback
@@ -197,8 +196,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
     { label: '480p', bitrateKbps: 1200, protocol: 'hls', url: '', backupUrl: '' },
   ])
   const [fallbackMode, setFallbackMode] = useState<'none' | 'matching' | 'single'>('none')
-  const [fbProto, setFbProto] = useState('hls')
-  const [fbUrl, setFbUrl] = useState('')
+  const [fbSrc, setFbSrc] = useState<SourceValue>({ protocol: 'hls', url: '' })
 
   // filler on total loss (both flows)
   const [lossBehavior, setLossBehavior] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>('slate')
@@ -223,12 +221,12 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
     let fallbackTranscode = false
 
     if (type === 'transcode') {
-      if (!tUrl.trim()) { setErr('Add the primary source URL'); return }
+      if (!tSrc.url.trim()) { setErr('Add the primary source URL'); return }
       const rungs = ladder.filter(r => r.on)
       if (!rungs.length) { setErr('Select at least one output rendition'); return }
       outputLadder = rungs.map(r => ({ height: r.height, bitrateKbps: r.bitrateKbps }))
-      sources.push({ role: 'primary', protocol: tProto, ingestUrl: tUrl.trim() })
-      if (tBackupOn && tBackupUrl.trim()) sources.push({ role: 'backup', protocol: tBackupProto, ingestUrl: tBackupUrl.trim() })
+      sources.push({ role: 'primary', protocol: tSrc.protocol, ingestUrl: tSrc.url.trim(), streamKey: tSrc.streamKey?.trim() || undefined })
+      if (tBackupOn && tBackup.url.trim()) sources.push({ role: 'backup', protocol: tBackup.protocol, ingestUrl: tBackup.url.trim(), streamKey: tBackup.streamKey?.trim() || undefined })
     } else {
       const filled = rows.filter(r => r.url.trim() && r.label.trim())
       if (!filled.length) { setErr('Add at least one rendition input (label + URL)'); return }
@@ -237,8 +235,8 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
       if (fallbackMode === 'matching') {
         for (const r of filled) if (r.backupUrl.trim()) sources.push({ role: 'backup', protocol: r.protocol, ingestUrl: r.backupUrl.trim(), renditionLabel: r.label.trim(), renditionBitrateKbps: r.bitrateKbps })
       } else if (fallbackMode === 'single') {
-        if (!fbUrl.trim()) { setErr('Add the single fallback source URL'); return }
-        sources.push({ role: 'backup', protocol: fbProto, ingestUrl: fbUrl.trim() })
+        if (!fbSrc.url.trim()) { setErr('Add the single fallback source URL'); return }
+        sources.push({ role: 'backup', protocol: fbSrc.protocol, ingestUrl: fbSrc.url.trim(), streamKey: fbSrc.streamKey?.trim() || undefined })
         fallbackTranscode = true // one source, transcoded up to all matching bitrates
       }
     }
@@ -280,24 +278,12 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
           {type === 'transcode' ? (
             <>
               <div style={SEC}>Source</div>
-              <div className="field"><label>Primary source</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <select className="inp" style={{ width: 120 }} value={tProto} onChange={e => setTProto(e.target.value)}>{PROTOCOLS.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}</select>
-                  <input className="inp" value={tUrl} onChange={e => setTUrl(e.target.value)} placeholder="srt://ingest…:9000?streamid=primary" />
-                </div>
-              </div>
+              <SourceInput protocols={protocols} value={tSrc} onChange={setTSrc} label="Primary source" />
               <div className="toggle-row">
                 <div><div className="tt">Backup source</div><div className="td">Optional failover input of the same feed.</div></div>
                 <div className={`sw ${tBackupOn ? '' : 'off'}`} onClick={() => setTBackupOn(v => !v)}><i /></div>
               </div>
-              {tBackupOn && (
-                <div className="field"><label>Backup source</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <select className="inp" style={{ width: 120 }} value={tBackupProto} onChange={e => setTBackupProto(e.target.value)}>{PROTOCOLS.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}</select>
-                    <input className="inp" value={tBackupUrl} onChange={e => setTBackupUrl(e.target.value)} placeholder="srt://ingest…:9000?streamid=backup" />
-                  </div>
-                </div>
-              )}
+              {tBackupOn && <SourceInput protocols={protocols} value={tBackup} onChange={setTBackup} label="Backup source" />}
 
               <div style={SEC}>Output rendition ladder</div>
               <div className="field">
@@ -322,10 +308,10 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
                     <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                       <input className="inp" style={{ width: 90 }} value={r.label} onChange={e => setRow(i, { label: e.target.value })} placeholder="1080p" />
                       <input className="inp" style={{ width: 110 }} value={r.bitrateKbps} onChange={e => setRow(i, { bitrateKbps: Number(e.target.value.replace(/[^0-9]/g, '')) || 0 })} placeholder="kbps" />
-                      <select className="inp" style={{ width: 100 }} value={r.protocol} onChange={e => setRow(i, { protocol: e.target.value })}>{PROTOCOLS.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}</select>
+                      <select className="inp" style={{ width: 100 }} value={r.protocol} onChange={e => setRow(i, { protocol: e.target.value })}>{protocols.filter(p => p.packageFriendly).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select>
                       {rows.length > 1 && <button className="xbtn" onClick={() => delRow(i)} title="Remove">✕</button>}
                     </div>
-                    <input className="inp" value={r.url} onChange={e => setRow(i, { url: e.target.value })} placeholder="https://…/1080p.m3u8" />
+                    <input className="inp" value={r.url} onChange={e => setRow(i, { url: e.target.value })} placeholder={protoOf(protocols, r.protocol).urlPlaceholder} />
                     {fallbackMode === 'matching' && (
                       <input className="inp" style={{ marginTop: 8 }} value={r.backupUrl} onChange={e => setRow(i, { backupUrl: e.target.value })} placeholder="backup https://…/1080p.m3u8" />
                     )}
@@ -344,13 +330,10 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
                 </select>
               </div>
               {fallbackMode === 'single' && (
-                <div className="field"><label>Fallback source</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <select className="inp" style={{ width: 120 }} value={fbProto} onChange={e => setFbProto(e.target.value)}>{PROTOCOLS.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}</select>
-                    <input className="inp" value={fbUrl} onChange={e => setFbUrl(e.target.value)} placeholder="https://…/fallback.m3u8" />
-                  </div>
-                  <div className="hintxt">Transcoded up to every rendition bitrate so all outputs stay continuous.</div>
-                </div>
+                <>
+                  <SourceInput protocols={protocols} value={fbSrc} onChange={setFbSrc} label="Fallback source" />
+                  <div className="hintxt" style={{ marginTop: -6 }}>Transcoded up to every rendition bitrate so all outputs stay continuous.</div>
+                </>
               )}
             </>
           )}

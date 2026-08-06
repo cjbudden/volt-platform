@@ -234,6 +234,19 @@
         "artifact": null
       },
       "feedback": []
+    },
+    {
+      "id": "form-field-mgmt",
+      "name": "Form & field management (protocol-aware sources)",
+      "app_surface": "partial",
+      "status": "ready_to_test",
+      "summary": "Hybrid plan (no general form builder): source fields change to suit the selected protocol via a typed descriptor registry served at GET /api/ingest-protocols (srt/rtmp/rtmps/hls/dash/ndi/st2110 — label, placeholder, example, hint, stream-key field, push|pull). Wired into the create form and settings drawer. i18n label catalogs + a metadata_schemas custom-field renderer are the next phases.",
+      "checks": "registry + endpoint verified; forms + settings type-checked and wired; enum aligned to DB",
+      "test": {
+        "how": "New channel → change the source protocol; the URL example/placeholder + hint change, and RTMP/RTMPS show a Stream key field. Same in a channel's Settings drawer.",
+        "artifact": null
+      },
+      "feedback": []
     }
   ]
 }
