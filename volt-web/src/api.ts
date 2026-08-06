@@ -34,6 +34,8 @@ export interface Channel {
   created_at: string; version: number; group_name?: string
   dvr_window_sec: number | null; dvr_mode: 'sliding' | 'event_start'
   geo_mode: 'worldwide' | 'allow' | 'block'; geo_countries: string[]
+  input_loss_behavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
+  filler_slate_ref?: string | null
 }
 
 export interface ChannelDetail extends Channel {
@@ -76,6 +78,8 @@ export interface ChannelSettingsPatch {
   geoCountries?: string[]
   sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string }[]
   captions?: { enabled?: boolean; sourceLang?: string; targets?: string[] }
+  inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
+  fillerSlateRef?: string | null
   version?: number
 }
 

@@ -4,6 +4,7 @@ import Channels from './pages/Channels'
 import ChannelDetail from './pages/ChannelDetail'
 import ImageLibrary from './pages/ImageLibrary'
 import { useRoute, navigate, hrefFor } from './router'
+import { UploadIndicator } from './uploads'
 
 const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z" /></svg>
 
@@ -127,6 +128,7 @@ export default function App() {
             <input placeholder="Search streams, events, recordings…" />
           </div>
           <div className="top-actions">
+            <UploadIndicator />
             <div className="icon-btn"><span className="dot"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" /></svg></div>
             <button className="btn primary" onClick={() => navigate('/channels/new')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>New Stream

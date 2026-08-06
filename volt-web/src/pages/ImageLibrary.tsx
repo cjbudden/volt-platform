@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type MediaFile } from '../api'
+import { enqueueUploads, useUploads } from '../uploads'
 
 const KINDS = ['all', 'slate', 'watermark', 'poster', 'brand', 'other'] as const
 const ASSIGNABLE = ['slate', 'watermark', 'poster', 'brand', 'other'] // user-assignable usage types
@@ -13,9 +14,6 @@ function inferKind(folder: string): string {
   if (top === 'posters') return 'poster'
   return 'other'
 }
-function fileToDataURL(file: File): Promise<string> {
-  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(file) })
-}
 function human(bytes: number | null) {
   if (!bytes) return '—'
   if (bytes < 1024) return bytes + ' B'
@@ -23,8 +21,7 @@ function human(bytes: number | null) {
   return (bytes / 1024 / 1024).toFixed(1) + ' MB'
 }
 
-type UpStatus = 'queued' | 'uploading' | 'done' | 'error'
-interface Staged { file: File; name: string; kind: string; preview: string; status: UpStatus; error?: string }
+interface Staged { file: File; name: string; kind: string; preview: string }
 
 export default function ImageLibrary() {
   const [folders, setFolders] = useState<{ path: string; name: string; count: number }[]>([])
@@ -32,7 +29,6 @@ export default function ImageLibrary() {
   const [kind, setKind] = useState<string>('all')
   const [q, setQ] = useState('')
   const [files, setFiles] = useState<MediaFile[] | null>(null)
-  const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [confirm, setConfirm] = useState<{ file: MediaFile; inUse?: any[] } | null>(null)
   const [folderModal, setFolderModal] = useState<null | string>(null)
@@ -41,8 +37,12 @@ export default function ImageLibrary() {
   const [dragging, setDragging] = useState(false)
   const [toast, setToast] = useState('')
   const fileInput = useRef<HTMLInputElement | null>(null)
+  const uploads = useUploads()
 
   function flash(msg: string) { setToast(msg); window.setTimeout(() => setToast(t => (t === msg ? '' : t)), 3200) }
+
+  // refresh the grid as background uploads complete (seq bumps per success)
+  useEffect(() => { if (uploads.seq) { loadFolders(); load() } /* eslint-disable-next-line */ }, [uploads.seq])
 
   async function loadFolders() { try { setFolders((await api.fileFolders()).folders) } catch { /* */ } }
   async function load() {
@@ -56,31 +56,21 @@ export default function ImageLibrary() {
   function stageFiles(list: FileList | File[]) {
     const arr = Array.from(list).filter(f => f.type.startsWith('image/'))
     if (!arr.length) { setErr('No image files in that selection'); return }
-    const items: Staged[] = arr.map(file => ({ file, name: file.name, kind: inferKind(folder), preview: URL.createObjectURL(file), status: 'queued' }))
+    const items: Staged[] = arr.map(file => ({ file, name: file.name, kind: inferKind(folder), preview: URL.createObjectURL(file) }))
     setStaged({ items, folder })
   }
   function updateStaged(i: number, patch: Partial<Staged>) {
     setStaged(s => s ? { ...s, items: s.items.map((it, j) => j === i ? { ...it, ...patch } : it) } : s)
   }
-  async function commitUpload() {
+  // hand off to the background uploader and close the review panel; progress shows in
+  // the topbar indicator and the grid refreshes as each item completes.
+  function commitUpload() {
     if (!staged) return
-    setBusy(true); setErr('')
-    const total = staged.items.length
-    let ok = 0, fail = 0
-    for (let i = 0; i < staged.items.length; i++) {
-      const it = staged.items[i]
-      updateStaged(i, { status: 'uploading', error: undefined })
-      if (it.file.size > 28 * 1024 * 1024) { updateStaged(i, { status: 'error', error: `too large (${(it.file.size / 1048576).toFixed(1)} MB)` }); fail++; continue }
-      try {
-        const dataUrl = await fileToDataURL(it.file)
-        await api.uploadFile({ folder: staged.folder, name: it.name, kind: it.kind, contentType: it.file.type, dataBase64: dataUrl })
-        updateStaged(i, { status: 'done' }); ok++
-      } catch (e: any) { updateStaged(i, { status: 'error', error: e.message }); fail++ }
-    }
-    setBusy(false)
-    if (ok) { await loadFolders(); await load() }
-    flash(fail ? `Uploaded ${ok} of ${total} — ${fail} failed` : `Uploaded ${ok} image${ok > 1 ? 's' : ''}`)
-    if (!fail) { staged.items.forEach(it => URL.revokeObjectURL(it.preview)); setStaged(null) } // all good → close; else keep open to show errors
+    enqueueUploads(staged.items.map(it => ({ file: it.file, folder: staged.folder, name: it.name, kind: it.kind })))
+    const n = staged.items.length
+    staged.items.forEach(it => URL.revokeObjectURL(it.preview))
+    setStaged(null)
+    flash(`Uploading ${n} image${n > 1 ? 's' : ''} in the background…`)
   }
 
   async function createFolder(name: string) {
@@ -115,7 +105,7 @@ export default function ImageLibrary() {
         <div><h1>Image Library</h1><p>Watermarks, slates, posters and channel brands. Drag &amp; drop or upload; assign a usage type on the way in.</p></div>
         <div className="spacer" />
         <button className="btn ghost" onClick={() => setFolderModal(folder ? folder + '/' : '')}>+ New folder</button>
-        <button className="btn primary" disabled={busy} onClick={() => fileInput.current?.click()}>Upload images</button>
+        <button className="btn primary" onClick={() => fileInput.current?.click()}>Upload images</button>
         <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={e => { if (e.target.files) stageFiles(e.target.files); if (fileInput.current) fileInput.current.value = '' }} />
       </div>
 
@@ -201,29 +191,20 @@ export default function ImageLibrary() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {staged.items.map((it, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 11, alignItems: 'center', border: '1px solid var(--border)', borderRadius: 11, padding: 9, opacity: it.status === 'done' ? 0.6 : 1 }}>
+                  <div key={i} style={{ display: 'flex', gap: 11, alignItems: 'center', border: '1px solid var(--border)', borderRadius: 11, padding: 9 }}>
                     <img src={it.preview} alt="" style={{ width: 56, height: 42, objectFit: 'cover', borderRadius: 7, background: '#000', flex: 'none' }} />
-                    <input className="inp" value={it.name} onChange={e => updateStaged(i, { name: e.target.value })} style={{ flex: 1 }} disabled={busy} />
-                    <select className="inp" style={{ width: 116 }} value={it.kind} onChange={e => updateStaged(i, { kind: e.target.value })} disabled={busy}>
+                    <input className="inp" value={it.name} onChange={e => updateStaged(i, { name: e.target.value })} style={{ flex: 1 }} />
+                    <select className="inp" style={{ width: 116 }} value={it.kind} onChange={e => updateStaged(i, { kind: e.target.value })}>
                       {ASSIGNABLE.map(k => <option key={k} value={k}>{k}</option>)}
                     </select>
-                    <span style={{ width: 22, textAlign: 'center', flex: 'none' }} title={it.error || it.status}>
-                      {it.status === 'uploading' ? <span className="dot-s warn" /> : it.status === 'done' ? <span style={{ color: 'var(--live)' }}>✓</span> : it.status === 'error' ? <span style={{ color: 'var(--down)' }}>!</span> : ''}
-                    </span>
-                    {!busy && it.status !== 'done' && <button className="xbtn" title="Remove" onClick={() => { URL.revokeObjectURL(it.preview); setStaged(s => s ? { ...s, items: s.items.filter((_, j) => j !== i) } : s) }}>✕</button>}
+                    <button className="xbtn" title="Remove" onClick={() => { URL.revokeObjectURL(it.preview); setStaged(s => s ? { ...s, items: s.items.filter((_, j) => j !== i) } : s) }}>✕</button>
                   </div>
                 ))}
               </div>
-              {staged.items.some(it => it.status === 'error') && <div className="err" style={{ marginTop: 10 }}>Some uploads failed — fix or remove them and retry. Successful ones are already saved.</div>}
             </div>
             <div className="drawer-f">
-              {busy
-                ? <div style={{ marginRight: 'auto', fontSize: 12.5, color: 'var(--muted)' }}>Uploading {staged.items.filter(it => it.status === 'done').length} of {staged.items.length}…</div>
-                : null}
-              <button className="btn ghost" disabled={busy} onClick={() => { staged.items.forEach(it => URL.revokeObjectURL(it.preview)); setStaged(null) }}>{staged.items.every(it => it.status === 'done') ? 'Close' : 'Cancel'}</button>
-              <button className="btn primary" disabled={busy || !staged.items.some(it => it.status !== 'done')} onClick={commitUpload}>
-                {busy ? 'Uploading…' : `Upload ${staged.items.filter(it => it.status !== 'done').length}`}
-              </button>
+              <button className="btn ghost" onClick={() => { staged.items.forEach(it => URL.revokeObjectURL(it.preview)); setStaged(null) }}>Cancel</button>
+              <button className="btn primary" disabled={!staged.items.length} onClick={commitUpload}>Upload {staged.items.length}</button>
             </div>
           </div>
         </div>

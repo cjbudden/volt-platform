@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type Group } from '../api'
 import { useProtocols, protoOf, SourceInput, type SourceValue } from '../protocols'
+import { ImagePicker } from '../ImagePicker'
 
 type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
 
@@ -201,6 +202,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   // filler on total loss (both flows)
   const [lossBehavior, setLossBehavior] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>('slate')
   const [slateRef, setSlateRef] = useState('')
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -349,10 +351,17 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
             </select>
           </div>
           {lossBehavior === 'slate' && (
-            <div className="field"><label>Slate image URL</label>
-              <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="https://cdn/slate.png" />
+            <div className="field"><label>Slate image</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {slateRef && <img src={slateRef} alt="" style={{ width: 46, height: 34, objectFit: 'cover', borderRadius: 6, background: '#000', flex: 'none' }} />}
+                <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick from library or paste a URL" />
+                <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse…</button>
+              </div>
+              <div className="hintxt">Choose a slate from the Image Library (Media → Image Library) or paste a URL.</div>
             </div>
           )}
+          <ImagePicker open={pickerOpen} kinds={['slate', 'brand', 'other']} title="Choose a slate image"
+            onClose={() => setPickerOpen(false)} onPick={(url) => { setSlateRef(url); setPickerOpen(false) }} />
           {lossBehavior === 'vod_loop' && <div className="hintxt" style={{ marginTop: -6 }}>Pick a loop asset from the file manager after creating (asset library wiring is a follow-up).</div>}
 
           <div style={SEC}>Delivery</div>

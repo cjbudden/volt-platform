@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, originUrl, type ChannelDetail as CD, type ChannelSettingsPatch } from '../api'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
+import { ImagePicker } from '../ImagePicker'
 
 const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z" /></svg>
 const LANGS = [
@@ -533,6 +534,10 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   // subtitles
   const [capOn, setCapOn] = useState(d.captions.enabled)
   const [capLangs, setCapLangs] = useState<string[]>(d.captions.targets.length ? d.captions.targets : ['en'])
+  // filler on loss
+  const [lossBehavior, setLossBehavior] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>(d.input_loss_behavior || 'none')
+  const [slateRef, setSlateRef] = useState(d.filler_slate_ref || '')
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -557,6 +562,9 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     if (sources.length) patch.sources = sources
     // captions
     patch.captions = { enabled: capOn, targets: capOn ? capLangs : [] }
+    // filler on loss
+    patch.inputLossBehavior = lossBehavior
+    patch.fillerSlateRef = lossBehavior === 'slate' && slateRef.trim() ? slateRef.trim() : null
 
     setBusy(true)
     try { await api.updateChannel(d.id, patch); onSaved() }
@@ -576,6 +584,28 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           <div style={SEC}>Source</div>
           <SourceInput protocols={protocols} value={primary} onChange={setPrimary} label="Primary source" />
           <SourceInput protocols={protocols} value={backup} onChange={setBackup} label="Backup source (optional)" />
+
+          <div style={SEC}>Filler on total loss</div>
+          <div className="field"><label>When no source is available</label>
+            <select className="inp" value={lossBehavior} onChange={e => setLossBehavior(e.target.value as any)}>
+              <option value="none">None (output stops)</option>
+              <option value="slate">Slate image</option>
+              <option value="vod_loop">Loop video</option>
+              <option value="last_frame">Freeze last frame</option>
+              <option value="black">Black</option>
+            </select>
+          </div>
+          {lossBehavior === 'slate' && (
+            <div className="field"><label>Slate image</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {slateRef && <img src={slateRef} alt="" style={{ width: 46, height: 34, objectFit: 'cover', borderRadius: 6, background: '#000', flex: 'none' }} />}
+                <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick from library or paste a URL" />
+                <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse…</button>
+              </div>
+            </div>
+          )}
+          <ImagePicker open={pickerOpen} kinds={['slate', 'brand', 'other']} title="Choose a slate image"
+            onClose={() => setPickerOpen(false)} onPick={(url) => { setSlateRef(url); setPickerOpen(false) }} />
 
           <div style={SEC}>DVR / catch-up</div>
           <div className="field"><label>DVR mode</label>
