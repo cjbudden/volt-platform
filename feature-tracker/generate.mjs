@@ -35,8 +35,17 @@ const card = (f) => {
          <button class="btn warn" data-changes="${esc(f.name)}">Request changes</button>
        </div>`
     : (f.status === 'approved' ? `<div class=approved-line>✅ Approved by you</div>` : '');
-  return `<div class=card data-status="${f.status}">
-    <div class=top><div class=name>${esc(f.name)}</div><span class=pill style="background:${s.color}">${s.label}</span></div>
+  const APP = {
+    full:    { label: '📱 In app',              color: '#2563eb' },
+    partial: { label: '📱 Partial in app',      color: '#7c3aed' },
+    none:    { label: '⚙︎ Backend only — not in app', color: '#6b7280' },
+    na:      { label: '— no UI needed',          color: '#3f4656' },
+  };
+  const a = APP[f.app_surface] || APP.none;
+  return `<div class=card data-status="${f.status}" data-app="${esc(f.app_surface || 'none')}">
+    <div class=top><div class=name>${esc(f.name)}</div>
+      <span class=pill style="background:${s.color}">${s.label}</span>
+      <span class=apill style="border-color:${a.color};color:${a.color}">${a.label}</span></div>
     <div class=summary>${esc(f.summary)}</div>
     <div class=meta>${esc(f.checks || '')}</div>
     <div class=how><b>How to test:</b> ${esc(f.test.how)}</div>
@@ -48,6 +57,13 @@ const card = (f) => {
 
 const chips = ORDER.filter(k => counts[k]).map(k =>
   `<span class=chip style="border-color:${STATUS[k].color}"><b>${counts[k]}</b> ${STATUS[k].label}</span>`).join('');
+
+// app-surfacing coverage: which built features are actually in the app yet
+const appCounts = {};
+for (const f of data.features) appCounts[f.app_surface || 'none'] = (appCounts[f.app_surface || 'none'] || 0) + 1;
+const APPLBL = { full: '📱 In app', partial: '📱 Partial', none: '⚙︎ Backend only', na: '— no UI' };
+const appChips = ['full', 'partial', 'none', 'na'].filter(k => appCounts[k]).map(k =>
+  `<span class=chip><b>${appCounts[k]}</b> ${APPLBL[k]}</span>`).join('');
 
 const html = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Volt — Product Feature Tracker</title><style>
@@ -63,6 +79,7 @@ const html = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=
  .top{display:flex;justify-content:space-between;align-items:center;gap:12px}
  .name{font-weight:700;font-size:15.5px}
  .pill{color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
+ .apill{border:1px solid;background:transparent;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
  .summary{color:#cdd2db;font-size:13px;margin:6px 0}
  .meta{color:var(--mut);font-size:12px}
  .how{font-size:12.5px;margin-top:8px;color:#cdd2db}
@@ -79,7 +96,8 @@ const html = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
  <div class=sub>Separate from the build status. This is what you can test and sign off. Updated ${esc(data.updated)}.</div>
  <div class=chips>${chips}</div>
- <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. I update this tracker as things get approved or sent back.</div>
+ <div class=chips style="margin-bottom:12px">${appChips}</div>
+ <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  ${feats.map(card).join('')}
 </div>
 <div id=toast></div>

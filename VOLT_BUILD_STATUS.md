@@ -108,6 +108,8 @@ implemented.** Design is ~2 chats ahead of build.
 
 ## 9. Frontend
 
+> **App-surfacing coverage** (tracked per-feature in `feature-tracker/features.json` via the `app_surface` field → the *volt-feature-tracker* artifact). Many capabilities below are ✅ *at the API/engine level* but **not yet wired into the React app**. In-app now: Channels list + create (transcode/package), Channel detail/control page, Test stream + playback + subtitles, Deep-link routing; Ladder profiles (in build). Backend-built but **not in app yet** (do not lose): share-link admin, image service, frame-accurate access, social publishing, EPG, analytics, file manager, watchfolder, SaaS admin, live-updates, full captions settings. These are carried as `app_surface: none` in the tracker so the gap stays visible; removals require a formal confirmation and are struck from both this doc and the tracker.
+
 | Capability | Status | Notes / source |
 |---|---|---|
 | Admin prototype (single-file HTML) | 🧪 | `volt_admin_prototype.html` — mock, not the app |

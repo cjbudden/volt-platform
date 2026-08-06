@@ -12,6 +12,7 @@
  .top{display:flex;justify-content:space-between;align-items:center;gap:12px}
  .name{font-weight:700;font-size:15.5px}
  .pill{color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
+ .apill{border:1px solid;background:transparent;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
  .summary{color:#cdd2db;font-size:13px;margin:6px 0}
  .meta{color:var(--mut);font-size:12px}
  .how{font-size:12.5px;margin-top:8px;color:#cdd2db}
@@ -27,10 +28,13 @@
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
  <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-06.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>7</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>4</b> 🔨 Building</span></div>
- <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. I update this tracker as things get approved or sent back.</div>
- <div class=card data-status="ready_to_test">
-    <div class=top><div class=name>Image resize service</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>10</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>5</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>4</b> 📱 In app</span><span class=chip><b>3</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
+ <div class=card data-status="ready_to_test" data-app="none">
+    <div class=top><div class=name>Image resize service</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
     <div class=summary>On-the-fly resize / crop / filter by URL, cached. fit-in / fill / stretch, focus incl. smart, sharpen / blur / grayscale / webp / avif, signed URLs.</div>
     <div class=meta>14/14 automated contract checks pass</div>
     <div class=how><b>How to test:</b> Open the test view, drop in your own logo/image and try fit / size / focus / filters, or attach an image in chat for true sharp-service renders.</div>
@@ -40,8 +44,10 @@
          <button class="btn warn" data-changes="Image resize service">Request changes</button>
        </div>
     
-  </div><div class=card data-status="ready_to_test">
-    <div class=top><div class=name>Frame-accurate scrub &amp; clip</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+  </div><div class=card data-status="ready_to_test" data-app="none">
+    <div class=top><div class=name>Frame-accurate scrub &amp; clip</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
     <div class=summary>Pull any frame on demand from the chunked origin, scrub via sprite + I-frame trick-play, cut a frame-accurate clip. No proxies.</div>
     <div class=meta>15/15 assertions (frame-accuracy MAD 0.02, exact clip, sprite, trick-play)</div>
     <div class=how><b>How to test:</b> Run the prototype (volt-frame-proto.zip): npm install → node test.mjs → node server.mjs → open /scrub. 15/15 assertions.</div>
@@ -51,8 +57,10 @@
          <button class="btn warn" data-changes="Frame-accurate scrub &amp; clip">Request changes</button>
        </div>
     
-  </div><div class=card data-status="ready_to_test">
-    <div class=top><div class=name>Secure share page</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+  </div><div class=card data-status="ready_to_test" data-app="none">
+    <div class=top><div class=name>Secure share page</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
     <div class=summary>Time-boxed standalone preview link for one asset. Revoke, expiry, max-views, optional PIN, watermarked preview, allow-download, notify-on-open.</div>
     <div class=meta>20/20 e2e (isolation, PIN, revoke→410, expiry→410, download gating)</div>
     <div class=how><b>How to test:</b> Say the word and I'll spin up a live sample share link + page from the local console so you can click expiry / PIN / revoke. Backend is 20/20 e2e.</div>
@@ -62,8 +70,10 @@
          <button class="btn warn" data-changes="Secure share page">Request changes</button>
        </div>
     
-  </div><div class=card data-status="ready_to_test">
-    <div class=top><div class=name>Live captions + translation</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+  </div><div class=card data-status="ready_to_test" data-app="partial">
+    <div class=top><div class=name>Live captions + translation</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
     <div class=summary>Optional per account. Self-hosted whisper + NLLB (en↔ms/zh/ta and more) or Gladia. Whisper runs as a separate GPU add-on only when needed.</div>
     <div class=meta>33 + 9 + 6 tests; proven end-to-end espeak → whisper → NLLB</div>
     <div class=how><b>How to test:</b> Attach a short audio/video clip in chat and I'll caption + translate it and return the WebVTT tracks, or run the encoder unit tests.</div>
@@ -73,8 +83,10 @@
          <button class="btn warn" data-changes="Live captions + translation">Request changes</button>
        </div>
     
-  </div><div class=card data-status="ready_to_test">
-    <div class=top><div class=name>Local test console (login + all tabs)</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+  </div><div class=card data-status="ready_to_test" data-app="na">
+    <div class=top><div class=name>Local test console (login + all tabs)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#3f4656;color:#3f4656">— no UI needed</span></div>
     <div class=summary>Browser console over the live API: overview, channels (start/stop), events, EPG, VOD, analytics, tickets, notifications + SaaS admin tab.</div>
     <div class=meta>verified end-to-end in browser</div>
     <div class=how><b>How to test:</b> In volt-app: ./run-local.sh, open /console, sign in (admin@rtm.example / saas@volt.example, pw volt1234). Flip between logins to see tenant isolation.</div>
@@ -84,8 +96,10 @@
          <button class="btn warn" data-changes="Local test console (login + all tabs)">Request changes</button>
        </div>
     
-  </div><div class=card data-status="ready_to_test">
-    <div class=top><div class=name>Record edit API + audit trail</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+  </div><div class=card data-status="ready_to_test" data-app="partial">
+    <div class=top><div class=name>Record edit API + audit trail</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
     <div class=summary>Edit channels/events/schemas with PATCH (send only changed fields; null clears), optimistic concurrency (If-Match/version, 409 on stale write), and a full audit trail: who created/changed each record, field-level diffs, and per-record history.</div>
     <div class=meta>23 e2e (partial patch, version bump, 409 conflict, null-clear, create/update/delete audit, history) + verify.sh 38/38</div>
     <div class=how><b>How to test:</b> PATCH /api/channels/:id (or events / metadata-schemas), then GET /api/channels/:id/history. Try a stale If-Match to see the 409. Postman collection covers it; or attach me a scenario and I'll run it.</div>
@@ -95,8 +109,10 @@
          <button class="btn warn" data-changes="Record edit API + audit trail">Request changes</button>
        </div>
     
-  </div><div class=card data-status="ready_to_test">
-    <div class=top><div class=name>Test stream, playback &amp; live subtitles</div><span class=pill style="background:#0891b2">🧪 Ready to test</span></div>
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Test stream, playback &amp; live subtitles</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
     <div class=summary>One-click test stream per channel: FFmpeg generates a real live HLS/DASH ladder from a test card, the app plays it back for real (hls.js) with working DVR scrub-back, and a live WebVTT caption track renders over the video with EN/MS/ZH/TA switching (sample now; real Whisper mode available).</div>
     <div class=meta>generator + captions + /origin serving + start/stop API validated; player is hls.js (H.264 plays in Chrome/Safari on Mac)</div>
     <div class=how><b>How to test:</b> Run the app on your Mac (bash run-on-mac.sh, needs ffmpeg), open a channel, click 'Start test stream'. The output player plays the live HLS; toggle CC and switch languages; drag the DVR bar back and hit Go live.</div>
@@ -106,8 +122,49 @@
          <button class="btn warn" data-changes="Test stream, playback &amp; live subtitles">Request changes</button>
        </div>
     
-  </div><div class=card data-status="in_review">
-    <div class=top><div class=name>EPG &amp; scheduling</div><span class=pill style="background:#6366f1">👀 In review</span></div>
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Channels — list &amp; create (transcode/package)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Channels list (empty state, filter chips, start/stop) + a create drawer that branches by type: transcode = one source + optional backup + selectable output ladder + filler-on-loss; package = per-rendition input rows + fallback (matching URLs or a single source transcoded to all bitrates).</div>
+    <div class=meta>create inserts channel + stream_inputs + ladder + filler (both flows) verified via API</div>
+    <div class=how><b>How to test:</b> Channels → New channel. Pick Transcode or Packaging; fill the type-specific fields; Create. It appears in the list.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Channels — list &amp; create (transcode/package)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Channels — list &amp; create (transcode/package)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Channel detail / control page</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Per-channel control page: dual source/output players, EPG now/next, realtime viewers chart, output+source status board with rendition ladder, event log, and an editable settings drawer (source, geo rules, DVR window ≤4h/mode, subtitles, retention). Source-gated go-live.</div>
+    <div class=meta>detail endpoint + optimistic-concurrency PATCH + audit diff verified</div>
+    <div class=how><b>How to test:</b> Click a channel in the list. Send source → Go live; toggle CC; drag the DVR bar; open Settings and save a change.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Channel detail / control page">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Channel detail / control page">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Deep-linking &amp; routing (hashless)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Clean History-API URLs: /channels, /channels/:id, /channels/new, /:section. Bookmarkable, reloadable, back/forward work; sidebar items are real links.</div>
+    <div class=meta>type-checked; Vite SPA fallback (live browser check blocked by sandbox)</div>
+    <div class=how><b>How to test:</b> Open /channels/&lt;id&gt; directly, reload a channel page, use browser back/forward.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Deep-linking &amp; routing (hashless)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Deep-linking &amp; routing (hashless)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="in_review" data-app="none">
+    <div class=top><div class=name>EPG &amp; scheduling</div>
+      <span class=pill style="background:#6366f1">👀 In review</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
     <div class=summary>Programme store, RRULE recurrence, materialised instances, now/next, conflict detection.</div>
     <div class=meta>13 tests pass</div>
     <div class=how><b>How to test:</b> Exercisable via the console EPG tab and /api/epg. 7 pure + 6 HTTP tests.</div>
@@ -117,8 +174,10 @@
          <button class="btn warn" data-changes="EPG &amp; scheduling">Request changes</button>
        </div>
     
-  </div><div class=card data-status="in_review">
-    <div class=top><div class=name>Analytics &amp; reporting</div><span class=pill style="background:#6366f1">👀 In review</span></div>
+  </div><div class=card data-status="in_review" data-app="none">
+    <div class=top><div class=name>Analytics &amp; reporting</div>
+      <span class=pill style="background:#6366f1">👀 In review</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
     <div class=summary>Server-side audience / QoS / realtime from CDN logs; by-app + device; realtime concurrency.</div>
     <div class=meta>6 tests pass</div>
     <div class=how><b>How to test:</b> View in the console Analytics tab (seeded data) or hit /api/analytics/*.</div>
@@ -128,8 +187,10 @@
          <button class="btn warn" data-changes="Analytics &amp; reporting">Request changes</button>
        </div>
     
-  </div><div class=card data-status="in_review">
-    <div class=top><div class=name>SaaS admin dashboard</div><span class=pill style="background:#6366f1">👀 In review</span></div>
+  </div><div class=card data-status="in_review" data-app="none">
+    <div class=top><div class=name>SaaS admin dashboard</div>
+      <span class=pill style="background:#6366f1">👀 In review</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
     <div class=summary>Cross-tenant overview: active servers, projected instances, channels, viewers, tickets; MFA 2-step login; impersonation (deferred).</div>
     <div class=meta>auth + dashboard tests pass</div>
     <div class=how><b>How to test:</b> Sign in to the console as saas@volt.example to see the SaaS Admin tab across tenants.</div>
@@ -139,35 +200,53 @@
          <button class="btn warn" data-changes="SaaS admin dashboard">Request changes</button>
        </div>
     
-  </div><div class=card data-status="building">
-    <div class=top><div class=name>Live updates (admin)</div><span class=pill style="background:#64748b">🔨 Building</span></div>
+  </div><div class=card data-status="building" data-app="none">
+    <div class=top><div class=name>Live updates (admin)</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
     <div class=summary>When one admin changes a field, others viewing the same record see it update live, over the existing SSE hub. Public front-end live kept minimal (EPG served from CDN + client boundary advance) so 500k viewers add no per-viewer load.</div>
     <div class=meta>design agreed; admin SSE + Postgres NOTIFY</div>
     <div class=how><b>How to test:</b> Designed, builds on the edit+audit foundation just shipped. Not testable yet.</div>
     
     
     
-  </div><div class=card data-status="building">
-    <div class=top><div class=name>Publish a clip to social media</div><span class=pill style="background:#64748b">🔨 Building</span></div>
+  </div><div class=card data-status="building" data-app="none">
+    <div class=top><div class=name>Publish a clip to social media</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
     <div class=summary>Push a clip to YouTube / Facebook / X / TikTok / Dailymotion. Data model + APIs exist; real upload adapters pending.</div>
     <div class=meta>foundation built; adapters stubbed</div>
     <div class=how><b>How to test:</b> Not testable yet — needs each platform's OAuth app credentials from you before the upload adapters go live.</div>
     
     
     
-  </div><div class=card data-status="building">
-    <div class=top><div class=name>File manager</div><span class=pill style="background:#64748b">🔨 Building</span></div>
+  </div><div class=card data-status="building" data-app="none">
+    <div class=top><div class=name>File manager</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
     <div class=summary>Upload / organise watermarks, slates, logos, source media. S3-backed with direct-to-S3 upload.</div>
     <div class=meta>design complete</div>
     <div class=how><b>How to test:</b> Designed only — see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.</div>
     
     
     
-  </div><div class=card data-status="building">
-    <div class=top><div class=name>Watchfolder ingest</div><span class=pill style="background:#64748b">🔨 Building</span></div>
+  </div><div class=card data-status="building" data-app="none">
+    <div class=top><div class=name>Watchfolder ingest</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
     <div class=summary>Assign a folder or S3 bucket/prefix as an auto ingest source; new files become assets / VOD / slates / playlist items.</div>
     <div class=meta>design complete</div>
     <div class=how><b>How to test:</b> Designed only — see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.</div>
+    
+    
+    
+  </div><div class=card data-status="building" data-app="partial">
+    <div class=top><div class=name>Bitrate ladder profiles (library + CRUD)</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Managed library of output ladder profiles (reuses output_profiles): list, create from scratch or copy an existing profile, rename, edit; delete with an API-level confirmation workflow + in-use guard + audit log. Assign a profile to a transcode channel's output.</div>
+    <div class=meta>in progress — schema + seed + CRUD + UI + assign</div>
+    <div class=how><b>How to test:</b> Profiles → New (or copy an existing) → edit rungs → save. Assign it when creating a transcode channel. Try deleting one in use (blocked) and an unused one (confirm required).</div>
     
     
     

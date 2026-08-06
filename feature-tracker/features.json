@@ -11,7 +11,8 @@
         "artifact": "volt-image-api-validator"
       },
       "checks": "14/14 automated contract checks pass",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "none"
     },
     {
       "id": "frame-access",
@@ -23,7 +24,8 @@
         "artifact": null
       },
       "checks": "15/15 assertions (frame-accuracy MAD 0.02, exact clip, sprite, trick-play)",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "none"
     },
     {
       "id": "share-page",
@@ -35,7 +37,8 @@
         "artifact": null
       },
       "checks": "20/20 e2e (isolation, PIN, revoke→410, expiry→410, download gating)",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "none"
     },
     {
       "id": "captions",
@@ -47,7 +50,8 @@
         "artifact": null
       },
       "checks": "33 + 9 + 6 tests; proven end-to-end espeak → whisper → NLLB",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "partial"
     },
     {
       "id": "console",
@@ -59,7 +63,8 @@
         "artifact": null
       },
       "checks": "verified end-to-end in browser",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "na"
     },
     {
       "id": "edit-audit",
@@ -71,7 +76,8 @@
         "artifact": null
       },
       "checks": "23 e2e (partial patch, version bump, 409 conflict, null-clear, create/update/delete audit, history) + verify.sh 38/38",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "partial"
     },
     {
       "id": "live-updates",
@@ -83,7 +89,8 @@
         "artifact": null
       },
       "checks": "design agreed; admin SSE + Postgres NOTIFY",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "none"
     },
     {
       "id": "epg",
@@ -95,7 +102,8 @@
         "artifact": null
       },
       "checks": "13 tests pass",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "none"
     },
     {
       "id": "analytics",
@@ -107,7 +115,8 @@
         "artifact": null
       },
       "checks": "6 tests pass",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "none"
     },
     {
       "id": "saas-admin",
@@ -119,7 +128,8 @@
         "artifact": null
       },
       "checks": "auth + dashboard tests pass",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "none"
     },
     {
       "id": "social-publish",
@@ -131,7 +141,8 @@
         "artifact": null
       },
       "checks": "foundation built; adapters stubbed",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "none"
     },
     {
       "id": "file-manager",
@@ -143,7 +154,8 @@
         "artifact": null
       },
       "checks": "design complete",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "none"
     },
     {
       "id": "watchfolder",
@@ -155,7 +167,8 @@
         "artifact": null
       },
       "checks": "design complete",
-      "feedback": []
+      "feedback": [],
+      "app_surface": "none"
     },
     {
       "id": "test-stream-playback",
@@ -167,6 +180,59 @@
         "artifact": null
       },
       "checks": "generator + captions + /origin serving + start/stop API validated; player is hls.js (H.264 plays in Chrome/Safari on Mac)",
+      "feedback": [],
+      "app_surface": "full"
+    },
+    {
+      "id": "channels-ui",
+      "name": "Channels — list & create (transcode/package)",
+      "app_surface": "full",
+      "status": "ready_to_test",
+      "summary": "Channels list (empty state, filter chips, start/stop) + a create drawer that branches by type: transcode = one source + optional backup + selectable output ladder + filler-on-loss; package = per-rendition input rows + fallback (matching URLs or a single source transcoded to all bitrates).",
+      "checks": "create inserts channel + stream_inputs + ladder + filler (both flows) verified via API",
+      "test": {
+        "how": "Channels → New channel. Pick Transcode or Packaging; fill the type-specific fields; Create. It appears in the list.",
+        "artifact": null
+      },
+      "feedback": []
+    },
+    {
+      "id": "channel-detail",
+      "name": "Channel detail / control page",
+      "app_surface": "full",
+      "status": "ready_to_test",
+      "summary": "Per-channel control page: dual source/output players, EPG now/next, realtime viewers chart, output+source status board with rendition ladder, event log, and an editable settings drawer (source, geo rules, DVR window ≤4h/mode, subtitles, retention). Source-gated go-live.",
+      "checks": "detail endpoint + optimistic-concurrency PATCH + audit diff verified",
+      "test": {
+        "how": "Click a channel in the list. Send source → Go live; toggle CC; drag the DVR bar; open Settings and save a change.",
+        "artifact": null
+      },
+      "feedback": []
+    },
+    {
+      "id": "deep-linking",
+      "name": "Deep-linking & routing (hashless)",
+      "app_surface": "full",
+      "status": "ready_to_test",
+      "summary": "Clean History-API URLs: /channels, /channels/:id, /channels/new, /:section. Bookmarkable, reloadable, back/forward work; sidebar items are real links.",
+      "checks": "type-checked; Vite SPA fallback (live browser check blocked by sandbox)",
+      "test": {
+        "how": "Open /channels/<id> directly, reload a channel page, use browser back/forward.",
+        "artifact": null
+      },
+      "feedback": []
+    },
+    {
+      "id": "ladder-profiles",
+      "name": "Bitrate ladder profiles (library + CRUD)",
+      "app_surface": "partial",
+      "status": "building",
+      "summary": "Managed library of output ladder profiles (reuses output_profiles): list, create from scratch or copy an existing profile, rename, edit; delete with an API-level confirmation workflow + in-use guard + audit log. Assign a profile to a transcode channel's output.",
+      "checks": "in progress — schema + seed + CRUD + UI + assign",
+      "test": {
+        "how": "Profiles → New (or copy an existing) → edit rungs → save. Assign it when creating a transcode channel. Try deleting one in use (blocked) and an unused one (confirm required).",
+        "artifact": null
+      },
       "feedback": []
     }
   ]
