@@ -62,7 +62,10 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     capped: rawEffective > DVR_MAX_SEC,
   };
 
-  const ladder: { height: number; bitrate_kbps: number }[] = Array.isArray(profile?.rungs) ? profile.rungs : [];
+  // per-channel ladder wins (set at create for transcode / mirror for package); else the profile's
+  const ladder: { height: number; bitrate_kbps: number }[] =
+    Array.isArray(channel.output_ladder) ? channel.output_ladder
+    : Array.isArray(profile?.rungs) ? profile.rungs : [];
   const captions = {
     enabled: !!profile?.captions_enabled,
     targets: Array.isArray(profile?.caption_targets) ? profile.caption_targets : [],

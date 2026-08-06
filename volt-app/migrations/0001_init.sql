@@ -956,3 +956,18 @@ BEGIN
     ALTER TABLE channels ADD CONSTRAINT channels_geo_mode_chk CHECK (geo_mode IN ('worldwide','allow','block'));
   END IF;
 END $$;
+
+-- ============================================================================
+-- PER-CHANNEL OUTPUT LADDER + FALLBACK TRANSCODE
+-- ----------------------------------------------------------------------------
+-- output_ladder: the rendition ladder for THIS channel.
+--   transcode    -> the rungs we encode the single source into (user-selected).
+--   package_only -> mirror of the sent renditions (for reference/validation).
+-- fallback_transcode: package_only only — when the sent ladder is lost and the
+--   fallback is a single source/slate/loop, transcode it up to ALL matching
+--   bitrates so every output rendition stays continuous.
+DO $$
+BEGIN
+  ALTER TABLE channels ADD COLUMN IF NOT EXISTS output_ladder      JSONB;
+  ALTER TABLE channels ADD COLUMN IF NOT EXISTS fallback_transcode BOOLEAN NOT NULL DEFAULT false;
+END $$;

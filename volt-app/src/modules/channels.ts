@@ -15,6 +15,8 @@ channelsRouter.use(requireAuth);
 const CHANNEL_EDITABLE = [
   'name', 'enabled', 'recording_retention_days', 'schema_id', 'metadata',
   'dvr_window_sec', 'dvr_mode', 'geo_mode', 'geo_countries',
+  'output_ladder', 'input_failover_enabled', 'auto_failback', 'input_loss_behavior',
+  'filler_slate_ref', 'filler_asset_id', 'fallback_transcode',
 ];
 
 /** List channels for the tenant (scoped via group -> account). */
@@ -48,6 +50,27 @@ channelsRouter.get(
   })
 );
 
+// ingest protocols must match the DB `ingest_protocol` enum exactly.
+const PROTOCOL = z.enum(['srt', 'rtmp', 'rtmps', 'hls', 'dash', 'ndi', 'st2110']);
+const RUNG = z.object({ height: z.number().int().positive(), bitrateKbps: z.number().int().positive() });
+const SOURCE = z.object({
+  role: z.enum(['primary', 'backup']).default('primary'),
+  protocol: PROTOCOL,
+  ingestUrl: z.string().optional(),
+  streamKey: z.string().optional(),
+  renditionLabel: z.string().optional(),        // package_only: which rung this input carries
+  renditionBitrateKbps: z.number().int().optional(),
+});
+// filler-on-total-loss + input-failover (backup source) config shared by create/edit.
+const FILLER = {
+  inputFailoverEnabled: z.boolean().optional(),
+  autoFailback: z.boolean().optional(),
+  inputLossBehavior: z.enum(['none', 'slate', 'vod_loop', 'last_frame', 'black']).optional(),
+  fillerSlateRef: z.string().nullable().optional(),   // image URL/ref for a slate
+  fillerAssetId: z.string().uuid().nullable().optional(), // loop asset -> filler_assets
+  fallbackTranscode: z.boolean().optional(),          // package_only: transcode fallback to all rungs
+};
+
 const createSchema = z.object({
   groupId: z.string().uuid(),
   name: z.string().min(1),
@@ -56,6 +79,10 @@ const createSchema = z.object({
   recordingRetentionDays: z.number().int().positive().nullable().optional(), // retention rule
   dvrWindowSec: z.number().int().min(30).max(DVR_MAX_SEC).nullable().optional(), // ≤4h for 24x7
   dvrMode: z.enum(['sliding', 'event_start']).default('sliding'),
+  // NEW — source + ladder + fallback captured at setup
+  outputLadder: z.array(RUNG).optional(),  // transcode: rungs to encode; package: mirror of inputs
+  sources: z.array(SOURCE).optional(),     // primary (+ optional backup / per-rendition rows)
+  ...FILLER,
 });
 
 /** Create a channel — enforces the group's max_channels entitlement. */
@@ -72,15 +99,37 @@ channelsRouter.post(
     if (count.n >= group.max_channels) throw conflict(`Channel limit reached (${group.max_channels})`);
 
     const who = actor(req);
-    const row = await one<any>(
-      `INSERT INTO channels(group_id, name, purchasing_mode, resilience_tier, recording_retention_days, dvr_window_sec, dvr_mode, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING *`,
-      [body.groupId, body.name, body.purchasingMode, body.resilienceTier, body.recordingRetentionDays ?? null,
-       body.dvrWindowSec ?? null, body.dvrMode, who.userId]
-    );
+    const ladder = body.outputLadder?.length
+      ? JSON.stringify(body.outputLadder.map((r) => ({ height: r.height, bitrate_kbps: r.bitrateKbps })))
+      : null;
+
+    const row = await tx(async (c) => {
+      const ch = (await c.query(
+        `INSERT INTO channels(group_id, name, purchasing_mode, resilience_tier, recording_retention_days,
+           dvr_window_sec, dvr_mode, output_ladder,
+           input_failover_enabled, auto_failback, input_loss_behavior, filler_slate_ref, filler_asset_id, fallback_transcode,
+           created_by, updated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$15) RETURNING *`,
+        [body.groupId, body.name, body.purchasingMode, body.resilienceTier, body.recordingRetentionDays ?? null,
+         body.dvrWindowSec ?? null, body.dvrMode, ladder,
+         body.inputFailoverEnabled ?? false, body.autoFailback ?? true, body.inputLossBehavior ?? 'none',
+         body.fillerSlateRef ?? null, body.fillerAssetId ?? null, body.fallbackTranscode ?? false,
+         who.userId]
+      )).rows[0];
+      for (const s of body.sources ?? []) {
+        await c.query(
+          `INSERT INTO stream_inputs(channel_id, role, protocol, ingest_url, stream_key, rendition_label, rendition_bitrate_kbps)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [ch.id, s.role ?? 'primary', s.protocol, s.ingestUrl ?? null, s.streamKey ?? null,
+           s.renditionLabel ?? null, s.renditionBitrateKbps ?? null]
+        );
+      }
+      return ch;
+    });
+
     await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
       action: 'create', entityType: 'channel', entityId: row.id,
-      snapshot: { name: row.name, group_id: row.group_id } });
+      snapshot: { name: row.name, group_id: row.group_id, sources: (body.sources ?? []).length, ladder: body.outputLadder?.length ?? 0 } });
     res.status(201).json(row);
   })
 );
@@ -104,13 +153,12 @@ const editSchema = z.object({
   // source geo rules (edge-evaluated)
   geoMode: z.enum(['worldwide', 'allow', 'block']).optional(),
   geoCountries: z.array(z.string().length(2)).optional(),
-  // sources (primary/backup ingest) — replaces this channel's inputs when provided
-  sources: z.array(z.object({
-    role: z.enum(['primary', 'backup']),
-    protocol: z.enum(['srt', 'rtmp', 'rtp', 'hls', 'rist', 'zixi']),
-    ingestUrl: z.string().optional(),
-    streamKey: z.string().optional(),
-  })).optional(),
+  // sources (primary/backup ingest, per-rendition for package) — replaces inputs when provided
+  sources: z.array(SOURCE).optional(),
+  // output ladder (transcode rungs; package mirror)
+  outputLadder: z.array(RUNG).nullable().optional(),
+  // filler-on-loss + input failover
+  ...FILLER,
   // subtitles / live captions (persisted to the group's shared output profile)
   captions: z.object({
     enabled: z.boolean().optional(),
@@ -139,6 +187,14 @@ const editChannel = asyncHandler(async (req, res) => {
   if (has('dvrMode')) patch.dvr_mode = body.dvrMode;
   if (has('geoMode')) patch.geo_mode = body.geoMode;
   if (has('geoCountries')) patch.geo_countries = body.geoCountries ?? [];
+  if (has('outputLadder')) patch.output_ladder = body.outputLadder
+    ? body.outputLadder.map((r) => ({ height: r.height, bitrate_kbps: r.bitrateKbps })) : null;
+  if (has('inputFailoverEnabled')) patch.input_failover_enabled = body.inputFailoverEnabled;
+  if (has('autoFailback')) patch.auto_failback = body.autoFailback;
+  if (has('inputLossBehavior')) patch.input_loss_behavior = body.inputLossBehavior;
+  if (has('fillerSlateRef')) patch.filler_slate_ref = body.fillerSlateRef ?? null;
+  if (has('fillerAssetId')) patch.filler_asset_id = body.fillerAssetId ?? null;
+  if (has('fallbackTranscode')) patch.fallback_transcode = body.fallbackTranscode;
   const touchMeta = has('schemaId') || has('metadata');
   if (touchMeta) {
     const md = await validateEntityMetadata(accountId(req), body.schemaId ?? null,
@@ -165,9 +221,10 @@ const editChannel = asyncHandler(async (req, res) => {
         await c.query('DELETE FROM stream_inputs WHERE channel_id = $1', [req.params.id]);
         for (const s of body.sources!) {
           await c.query(
-            `INSERT INTO stream_inputs(channel_id, role, protocol, ingest_url, stream_key)
-             VALUES ($1,$2,$3,$4,$5)`,
-            [req.params.id, s.role, s.protocol, s.ingestUrl ?? null, s.streamKey ?? null]
+            `INSERT INTO stream_inputs(channel_id, role, protocol, ingest_url, stream_key, rendition_label, rendition_bitrate_kbps)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [req.params.id, s.role ?? 'primary', s.protocol, s.ingestUrl ?? null, s.streamKey ?? null,
+             s.renditionLabel ?? null, s.renditionBitrateKbps ?? null]
           );
         }
       });

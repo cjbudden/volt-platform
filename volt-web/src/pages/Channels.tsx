@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type Group } from '../api'
 
-const LANGS = [
-  { code: 'en', label: 'English' }, { code: 'ms', label: 'Malay' },
-  { code: 'zh', label: 'Chinese' }, { code: 'ta', label: 'Tamil' },
-]
-
 type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
 
 export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
@@ -167,6 +162,14 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
   )
 }
 
+const PROTOCOLS = ['srt', 'rtmp', 'rtmps', 'hls', 'dash', 'ndi', 'st2110']
+const RUNG_PRESETS = [
+  { height: 1080, bitrateKbps: 5000 }, { height: 720, bitrateKbps: 2800 },
+  { height: 480, bitrateKbps: 1200 }, { height: 360, bitrateKbps: 800 }, { height: 240, bitrateKbps: 400 },
+]
+const SEC: React.CSSProperties = { fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', margin: '20px 0 10px', fontWeight: 700 }
+type PkgRow = { label: string; bitrateKbps: number; protocol: string; url: string; backupUrl: string }
+
 function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClose: () => void; onCreated: () => void }) {
   const byType = useMemo(() => ({
     transcode: groups.find(g => g.workflow_type === 'transcode'),
@@ -176,25 +179,81 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   const [name, setName] = useState('')
   const [purchasing, setPurchasing] = useState('reserved')
   const [retention, setRetention] = useState<string>('7')
-  const [captions, setCaptions] = useState(false)
-  const [langs, setLangs] = useState<string[]>(['en'])
-  const [dvrMin, setDvrMin] = useState(60) // minutes; 24x7 sliding window
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
+  const [dvrMin, setDvrMin] = useState(60)
   const DVR_MAX_MIN = 240
 
+  // transcode: single source + optional backup + selectable ladder
+  const [tProto, setTProto] = useState('srt')
+  const [tUrl, setTUrl] = useState('')
+  const [tBackupOn, setTBackupOn] = useState(false)
+  const [tBackupProto, setTBackupProto] = useState('srt')
+  const [tBackupUrl, setTBackupUrl] = useState('')
+  const [ladder, setLadder] = useState(() => RUNG_PRESETS.map(r => ({ ...r, on: [1080, 720, 480].includes(r.height) })))
+
+  // package: per-rendition input rows + fallback
+  const [rows, setRows] = useState<PkgRow[]>([
+    { label: '1080p', bitrateKbps: 5000, protocol: 'hls', url: '', backupUrl: '' },
+    { label: '720p', bitrateKbps: 2800, protocol: 'hls', url: '', backupUrl: '' },
+    { label: '480p', bitrateKbps: 1200, protocol: 'hls', url: '', backupUrl: '' },
+  ])
+  const [fallbackMode, setFallbackMode] = useState<'none' | 'matching' | 'single'>('none')
+  const [fbProto, setFbProto] = useState('hls')
+  const [fbUrl, setFbUrl] = useState('')
+
+  // filler on total loss (both flows)
+  const [lossBehavior, setLossBehavior] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>('slate')
+  const [slateRef, setSlateRef] = useState('')
+
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
   const group = byType[type]
+
+  function setRow(i: number, patch: Partial<PkgRow>) { setRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r)) }
+  function addRow() { setRows(rs => [...rs, { label: '', bitrateKbps: 1000, protocol: 'hls', url: '', backupUrl: '' }]) }
+  function delRow(i: number) { setRows(rs => rs.filter((_, j) => j !== i)) }
+  const heightFromLabel = (l: string) => parseInt(l, 10) || 0
 
   async function submit() {
     setErr('')
     if (!name.trim()) { setErr('Give the channel a name'); return }
     if (!group) { setErr(`No ${type === 'transcode' ? 'transcode' : 'packaging'} group set up yet`); return }
+
+    const sources: NonNullable<Parameters<typeof api.createChannel>[0]['sources']> = []
+    let outputLadder: { height: number; bitrateKbps: number }[] = []
+    let fallbackTranscode = false
+
+    if (type === 'transcode') {
+      if (!tUrl.trim()) { setErr('Add the primary source URL'); return }
+      const rungs = ladder.filter(r => r.on)
+      if (!rungs.length) { setErr('Select at least one output rendition'); return }
+      outputLadder = rungs.map(r => ({ height: r.height, bitrateKbps: r.bitrateKbps }))
+      sources.push({ role: 'primary', protocol: tProto, ingestUrl: tUrl.trim() })
+      if (tBackupOn && tBackupUrl.trim()) sources.push({ role: 'backup', protocol: tBackupProto, ingestUrl: tBackupUrl.trim() })
+    } else {
+      const filled = rows.filter(r => r.url.trim() && r.label.trim())
+      if (!filled.length) { setErr('Add at least one rendition input (label + URL)'); return }
+      outputLadder = filled.map(r => ({ height: heightFromLabel(r.label), bitrateKbps: r.bitrateKbps }))
+      for (const r of filled) sources.push({ role: 'primary', protocol: r.protocol, ingestUrl: r.url.trim(), renditionLabel: r.label.trim(), renditionBitrateKbps: r.bitrateKbps })
+      if (fallbackMode === 'matching') {
+        for (const r of filled) if (r.backupUrl.trim()) sources.push({ role: 'backup', protocol: r.protocol, ingestUrl: r.backupUrl.trim(), renditionLabel: r.label.trim(), renditionBitrateKbps: r.bitrateKbps })
+      } else if (fallbackMode === 'single') {
+        if (!fbUrl.trim()) { setErr('Add the single fallback source URL'); return }
+        sources.push({ role: 'backup', protocol: fbProto, ingestUrl: fbUrl.trim() })
+        fallbackTranscode = true // one source, transcoded up to all matching bitrates
+      }
+    }
+
     setBusy(true)
     try {
       await api.createChannel({
         groupId: group.id, name: name.trim(), purchasingMode: purchasing,
         resilienceTier: 'standard', recordingRetentionDays: retention ? Number(retention) : null,
         dvrWindowSec: Math.max(30, dvrMin * 60), dvrMode: 'sliding',
+        outputLadder, sources,
+        inputFailoverEnabled: sources.some(s => s.role === 'backup'),
+        inputLossBehavior: lossBehavior,
+        fillerSlateRef: lossBehavior === 'slate' && slateRef.trim() ? slateRef.trim() : null,
+        fallbackTranscode,
       })
       onCreated()
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
@@ -203,74 +262,132 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   return (
     <div className="drawer-scrim" onClick={onClose}>
       <div className="drawer" onClick={e => e.stopPropagation()}>
-        <div className="drawer-h">
-          <div className="t">New channel</div>
-          <button className="xbtn" onClick={onClose}>✕</button>
-        </div>
+        <div className="drawer-h"><div className="t">New channel</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
-          <div className="field">
-            <label>Channel name</label>
+          <div className="field"><label>Channel name</label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. RTM News 24" />
           </div>
 
-          <div className="field">
-            <label>Type</label>
+          <div className="field"><label>Type</label>
             <div className="presets">
-              <Preset sel={type === 'transcode'} onClick={() => setType('transcode')}
-                title="Transcode" desc="We build the ABR ladder with FFmpeg."
-                meta={byType.transcode ? (byType.transcode.rungs || []).map(r => `${r.height}p`).join(' · ') : 'no group configured'} />
-              <Preset sel={type === 'package_only'} onClick={() => setType('package_only')}
-                title="Packaging" desc="You send a pre-encoded ladder; we package."
-                meta={byType.package_only ? 'source ladder' : 'no group configured'} />
+              <Preset sel={type === 'transcode'} onClick={() => setType('transcode')} title="Transcode"
+                desc="One source in. We build the ABR ladder with FFmpeg." meta="1 input → many outputs" />
+              <Preset sel={type === 'package_only'} onClick={() => setType('package_only')} title="Packaging"
+                desc="You send a pre-encoded ladder; we just package it." meta="N inputs → N outputs" />
             </div>
           </div>
 
-          <div className="field">
-            <label>Purchasing mode</label>
+          {type === 'transcode' ? (
+            <>
+              <div style={SEC}>Source</div>
+              <div className="field"><label>Primary source</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <select className="inp" style={{ width: 120 }} value={tProto} onChange={e => setTProto(e.target.value)}>{PROTOCOLS.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}</select>
+                  <input className="inp" value={tUrl} onChange={e => setTUrl(e.target.value)} placeholder="srt://ingest…:9000?streamid=primary" />
+                </div>
+              </div>
+              <div className="toggle-row">
+                <div><div className="tt">Backup source</div><div className="td">Optional failover input of the same feed.</div></div>
+                <div className={`sw ${tBackupOn ? '' : 'off'}`} onClick={() => setTBackupOn(v => !v)}><i /></div>
+              </div>
+              {tBackupOn && (
+                <div className="field"><label>Backup source</label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <select className="inp" style={{ width: 120 }} value={tBackupProto} onChange={e => setTBackupProto(e.target.value)}>{PROTOCOLS.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}</select>
+                    <input className="inp" value={tBackupUrl} onChange={e => setTBackupUrl(e.target.value)} placeholder="srt://ingest…:9000?streamid=backup" />
+                  </div>
+                </div>
+              )}
+
+              <div style={SEC}>Output rendition ladder</div>
+              <div className="field">
+                {ladder.map((r, i) => (
+                  <div key={r.height} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <div className={`selchip ${r.on ? 'sel' : ''}`} style={{ minWidth: 78, justifyContent: 'center' }}
+                      onClick={() => setLadder(l => l.map((x, j) => j === i ? { ...x, on: !x.on } : x))}>{r.height}p</div>
+                    <input className="inp" style={{ maxWidth: 130, opacity: r.on ? 1 : 0.45 }} disabled={!r.on}
+                      value={r.bitrateKbps} onChange={e => setLadder(l => l.map((x, j) => j === i ? { ...x, bitrateKbps: Number(e.target.value.replace(/[^0-9]/g, '')) || 0 } : x))} />
+                    <span style={{ fontSize: 12, color: 'var(--faint)' }}>kbps</span>
+                  </div>
+                ))}
+                <div className="hintxt">We encode the single source into every selected rendition.</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={SEC}>Sent renditions (your pre-encoded ladder)</div>
+              <div className="field">
+                {rows.map((r, i) => (
+                  <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 11, padding: 11, marginBottom: 10 }}>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                      <input className="inp" style={{ width: 90 }} value={r.label} onChange={e => setRow(i, { label: e.target.value })} placeholder="1080p" />
+                      <input className="inp" style={{ width: 110 }} value={r.bitrateKbps} onChange={e => setRow(i, { bitrateKbps: Number(e.target.value.replace(/[^0-9]/g, '')) || 0 })} placeholder="kbps" />
+                      <select className="inp" style={{ width: 100 }} value={r.protocol} onChange={e => setRow(i, { protocol: e.target.value })}>{PROTOCOLS.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}</select>
+                      {rows.length > 1 && <button className="xbtn" onClick={() => delRow(i)} title="Remove">✕</button>}
+                    </div>
+                    <input className="inp" value={r.url} onChange={e => setRow(i, { url: e.target.value })} placeholder="https://…/1080p.m3u8" />
+                    {fallbackMode === 'matching' && (
+                      <input className="inp" style={{ marginTop: 8 }} value={r.backupUrl} onChange={e => setRow(i, { backupUrl: e.target.value })} placeholder="backup https://…/1080p.m3u8" />
+                    )}
+                  </div>
+                ))}
+                <button className="chip" onClick={addRow}>+ Add rendition</button>
+                <div className="hintxt">Each rendition is packaged 1:1 to the matching output. Height is read from the label (e.g. 1080p).</div>
+              </div>
+
+              <div style={SEC}>Fallback</div>
+              <div className="field"><label>On source loss</label>
+                <select className="inp" value={fallbackMode} onChange={e => setFallbackMode(e.target.value as any)}>
+                  <option value="none">None</option>
+                  <option value="matching">Matching backup URLs (per rendition)</option>
+                  <option value="single">Single fallback source → transcode to all bitrates</option>
+                </select>
+              </div>
+              {fallbackMode === 'single' && (
+                <div className="field"><label>Fallback source</label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <select className="inp" style={{ width: 120 }} value={fbProto} onChange={e => setFbProto(e.target.value)}>{PROTOCOLS.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}</select>
+                    <input className="inp" value={fbUrl} onChange={e => setFbUrl(e.target.value)} placeholder="https://…/fallback.m3u8" />
+                  </div>
+                  <div className="hintxt">Transcoded up to every rendition bitrate so all outputs stay continuous.</div>
+                </div>
+              )}
+            </>
+          )}
+
+          <div style={SEC}>Filler on total loss</div>
+          <div className="field"><label>When no source is available</label>
+            <select className="inp" value={lossBehavior} onChange={e => setLossBehavior(e.target.value as any)}>
+              <option value="none">None (output stops)</option>
+              <option value="slate">Slate image</option>
+              <option value="vod_loop">Loop video</option>
+              <option value="last_frame">Freeze last frame</option>
+              <option value="black">Black</option>
+            </select>
+          </div>
+          {lossBehavior === 'slate' && (
+            <div className="field"><label>Slate image URL</label>
+              <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="https://cdn/slate.png" />
+            </div>
+          )}
+          {lossBehavior === 'vod_loop' && <div className="hintxt" style={{ marginTop: -6 }}>Pick a loop asset from the file manager after creating (asset library wiring is a follow-up).</div>}
+
+          <div style={SEC}>Delivery</div>
+          <div className="field"><label>Purchasing mode</label>
             <select className="inp" value={purchasing} onChange={e => setPurchasing(e.target.value)}>
               <option value="reserved">Reserved</option>
               <option value="spot_fallback">Spot with on-demand fallback</option>
               <option value="on_demand">On demand</option>
             </select>
           </div>
-
-          <div className="field">
-            <label>Recording retention (days)</label>
+          <div className="field"><label>Recording retention (days)</label>
             <input className="inp" value={retention} onChange={e => setRetention(e.target.value.replace(/[^0-9]/g, ''))} />
-            <div className="hintxt">Recorded assets are kept this long before lifecycle cleanup.</div>
           </div>
-
           <div className="field">
             <label>DVR catch-up window — {dvrMin} min{dvrMin >= 60 ? ` (${(dvrMin / 60).toFixed(dvrMin % 60 ? 1 : 0)}h)` : ''}</label>
             <input type="range" min={1} max={DVR_MAX_MIN} step={1} value={dvrMin} onChange={e => setDvrMin(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
-            <div className="hintxt">How far back viewers can scrub from the live edge. Max 4h for 24×7 channels; event streams scrub back to the event start.</div>
+            <div className="hintxt">Max 4h for 24×7 channels; event streams scrub back to the event start.</div>
           </div>
-
-          <div className="toggle-row">
-            <div>
-              <div className="tt">Live captions (Whisper)</div>
-              <div className="td">Self-hosted transcription + translation. No per-minute fee.</div>
-            </div>
-            <div className={`sw ${captions ? '' : 'off'}`} onClick={() => setCaptions(!captions)}><i /></div>
-          </div>
-
-          {captions && (
-            <div className="field">
-              <label>Target languages</label>
-              <div className="chipset">
-                {LANGS.map(l => {
-                  const on = langs.includes(l.code)
-                  return (
-                    <div key={l.code} className={`selchip ${on ? 'sel' : ''}`}
-                      onClick={() => setLangs(on ? langs.filter(x => x !== l.code) : [...langs, l.code])}>
-                      {l.label}
-                    </div>
-                  )
-                })}
-              </div>
-              <div className="hintxt">Runs as a GPU add-on only while this channel is live. Validated end-to-end in the media tests.</div>
-            </div>
-          )}
 
           {err && <div className="err">{err}</div>}
         </div>

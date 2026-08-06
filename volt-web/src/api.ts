@@ -88,6 +88,12 @@ export const api = {
     groupId: string; name: string; purchasingMode?: string
     resilienceTier?: string; recordingRetentionDays?: number | null
     dvrWindowSec?: number | null; dvrMode?: 'sliding' | 'event_start'
+    outputLadder?: { height: number; bitrateKbps: number }[]
+    sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string; renditionLabel?: string; renditionBitrateKbps?: number }[]
+    inputFailoverEnabled?: boolean; autoFailback?: boolean
+    inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
+    fillerSlateRef?: string | null; fillerAssetId?: string | null
+    fallbackTranscode?: boolean
   }): Promise<Channel> => req('/channels', { method: 'POST', body: JSON.stringify(b) }),
   startStop: (id: string, action: 'start' | 'stop') =>
     req(`/channels/${id}/${action}`, { method: 'POST' }),
