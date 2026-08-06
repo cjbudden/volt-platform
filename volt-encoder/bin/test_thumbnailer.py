@@ -30,6 +30,15 @@ def test_storyboard_cmd():
     check("tiles 5x5", "tile=5x5" in j)
     check("no audio", "-an" in cmd)
 
+def test_accurate_variants():
+    # local CMAF path: accurate poster seeks after -i and drops skip_frame
+    p = t.build_poster_cmd("/o/master.m3u8", "/o/poster.jpg", 320, [16, 9], at_sec=8, accurate=True)
+    check("accurate poster: no skip_frame", "-skip_frame" not in p)
+    check("accurate poster: -ss after -i", p.index("-i") < p.index("-ss"))
+    sb = t.build_storyboard_cmd("/o/master.m3u8", "/o/sb_%03d.jpg", 320, [16, 9], 4, 5, 5, accurate=True)
+    check("accurate storyboard: no skip_frame", "-skip_frame" not in sb)
+    check("accurate storyboard: still tiles 5x5", "tile=5x5" in " ".join(sb))
+
 def test_vtt_structure():
     # 25s duration, 10s interval -> 3 cues (0-10,10-20,20-25)
     vtt = t.build_webvtt(25, 10, 5, 5, 320, [16, 9], lambda i: f"sb_{i:03d}.jpg")

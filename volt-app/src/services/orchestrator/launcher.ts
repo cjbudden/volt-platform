@@ -1,4 +1,5 @@
 import { config } from '../../config';
+import { makeLocalLauncher } from './localLauncher';
 
 /**
  * TaskLauncher abstracts "run/stop an encoder or thumbnailer container" so the
@@ -126,5 +127,13 @@ export class EcsTaskLauncher implements TaskLauncher {
 }
 
 export function makeLauncher(): TaskLauncher {
-  return config.orchestrator.launcher === 'ecs' ? new EcsTaskLauncher() : new MockTaskLauncher();
+  switch (config.orchestrator.launcher) {
+    case 'ecs':
+      return new EcsTaskLauncher();
+    case 'local':
+      // real on-box encoder.py / thumbnailer.py child processes (no AWS)
+      return makeLocalLauncher();
+    default:
+      return new MockTaskLauncher();
+  }
 }

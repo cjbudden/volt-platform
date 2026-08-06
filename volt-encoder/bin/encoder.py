@@ -39,7 +39,7 @@ import events as events_mod
 
 WORK_DIR = os.environ.get("WORK_DIR", "/work")
 OUT_DIR = os.path.join(WORK_DIR, "out")
-UDP_BASE_PORT = 20000  # rendition i -> 127.0.0.1:(UDP_BASE_PORT + i)
+UDP_BASE_PORT = int(os.environ.get("UDP_BASE_PORT", "20000"))  # rendition i -> 127.0.0.1:(UDP_BASE_PORT + i)
 
 _children = []   # (name, Popen, critical)
 _selectors = []  # SourceSelector instances (own their own poller threads)
@@ -67,6 +67,28 @@ def load_config():
             cfg = json.load(fh)
     validate_config(cfg)
     return cfg
+
+
+def is_local(cfg):
+    """Local-storage mode: write CMAF straight to a local origin dir the control
+    plane serves, and skip the S3 uploader. Enabled by output.mode=="local" in
+    the job config (or LOCAL_MODE=1 in the env). This is the on-box path used by
+    the local encoder service; production still mirrors OUT_DIR to S3."""
+    out = cfg.get("output") or {}
+    if str(out.get("mode", "")).lower() == "local":
+        return True
+    return os.environ.get("LOCAL_MODE") == "1"
+
+
+def resolve_out_dir(cfg):
+    """Where Shaka writes the packaged CMAF + manifests. In local mode this is
+    the origin directory the control plane exposes at /origin/<channel>; the
+    directory IS the live edge + DVR + recording (no S3 hop)."""
+    out = cfg.get("output") or {}
+    d = out.get("dir") or os.environ.get("OUTPUT_DIR")
+    if is_local(cfg) and d:
+        return os.path.abspath(d)
+    return os.path.join(WORK_DIR, "out")
 
 
 def primary_inputs(cfg):
@@ -99,14 +121,17 @@ def redundancy_on(cfg):
 
 
 def validate_config(cfg):
-    for key in ("channel_id", "workflow", "segment_seconds", "s3", "inputs"):
+    required = ["channel_id", "workflow", "segment_seconds", "inputs"]
+    if not is_local(cfg):
+        required.append("s3")  # S3 destination only required when uploading
+    for key in required:
         if key not in cfg:
             die(f"job config missing required field: {key}")
     if cfg["workflow"] not in ("package_only", "transcode"):
         die(f"workflow must be package_only or transcode, got {cfg['workflow']!r}")
     if not cfg["inputs"]:
         die("job config has no inputs")
-    if "bucket" not in cfg["s3"]:
+    if not is_local(cfg) and "bucket" not in cfg["s3"]:
         die("s3.bucket is required")
     # renditions cap (primary ladder) mirrors accounts.max_renditions (hard max 8)
     n = len(primary_inputs(cfg)) if cfg["workflow"] == "package_only" \
@@ -319,12 +344,14 @@ def main():
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
-    global _events
+    global _events, OUT_DIR
     cfg = load_config()
+    OUT_DIR = resolve_out_dir(cfg)
     os.makedirs(OUT_DIR, exist_ok=True)
     nrend = len(primary_inputs(cfg)) if cfg["workflow"] == "package_only" \
         else len(cfg.get("ladder", []))
-    log(f"channel={cfg['channel_id']} workflow={cfg['workflow']} renditions={nrend}")
+    log(f"channel={cfg['channel_id']} workflow={cfg['workflow']} "
+        f"renditions={nrend} out={OUT_DIR} local={is_local(cfg)}")
 
     # Event log + live status snapshot. Reports to the control plane's ingest
     # endpoint (if configured) and writes a local status file every change.
@@ -381,7 +408,10 @@ def main():
         start_transcode(cfg, keys)
         _events.source_state("primary", True, renditions=nrend)
 
-    start_uploader(cfg)
+    if is_local(cfg):
+        log(f"local mode: writing directly to {OUT_DIR}; S3 uploader skipped")
+    else:
+        start_uploader(cfg)
 
     # Supervise: if any critical child dies, tear the whole channel down so
     # ECS restarts a clean container (renditions must stay in lockstep).

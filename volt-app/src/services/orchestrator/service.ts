@@ -194,6 +194,7 @@ export class Orchestrator {
       kind: 'recording',
       source_master: `s3://${config.aws.s3Bucket}/${rec.master_key}/${rec.hi_res_rendition}/index.m3u8`,
       duration_sec: Math.max(1, Math.round(dur / 1000)),
+      stream_id: rec.channel_id ?? rec.event_id,
     });
     try {
       await this.launcher.launchThumbnailer(job);

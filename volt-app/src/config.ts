@@ -28,8 +28,9 @@ export const config = {
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://localhost:8080',   // origin used in share links
   // orchestrator: how channel/event start launches encoder tasks
   orchestrator: {
-    // 'ecs' launches real Fargate/EC2 tasks; 'mock' just records intent (local/dev/tests)
-    launcher: (process.env.ORCH_LAUNCHER ?? 'mock') as 'ecs' | 'mock',
+    // 'ecs' launches real Fargate/EC2 tasks; 'local' spawns the real encoder.py /
+    // thumbnailer.py as on-box child processes (no AWS); 'mock' records intent (tests).
+    launcher: (process.env.ORCH_LAUNCHER ?? 'mock') as 'ecs' | 'mock' | 'local',
     ecsCluster: process.env.ECS_CLUSTER ?? 'volt',
     encoderTaskDef: process.env.ENCODER_TASK_DEF ?? 'volt-encoder',
     thumbnailerTaskDef: process.env.THUMBNAILER_TASK_DEF ?? 'volt-thumbnailer',
@@ -49,6 +50,7 @@ export const config = {
   testStream: {
     originDir: process.env.ORIGIN_DIR ?? `${process.cwd()}/origin`,
     encoderBin: process.env.ENCODER_BIN ?? `${process.cwd()}/../volt-encoder/bin`,
+    pythonBin: process.env.PYTHON_BIN ?? 'python3',
   },
   // Image library store: local base dir for local runs, S3 bucket+prefix in cloud.
   imageStore: {

@@ -49,9 +49,19 @@ def thumb_height(width, aspect):
     return h - (h % 2)  # keep even for scalers
 
 
-def build_poster_cmd(source, out_path, width, aspect, at_sec=0):
-    """One representative still. -ss before -i seeks fast on keyframes."""
+def build_poster_cmd(source, out_path, width, aspect, at_sec=0, accurate=False):
+    """One representative still. Fast path: -ss before -i seeks on keyframes of a
+    long mezzanine (cheap). `accurate` path (local CMAF fMP4 origin): -ss AFTER -i
+    and no -skip_frame — fragmented MP4 keyframe-seek/skip is unreliable, so we
+    decode to the timestamp instead. The origin is short, so this stays cheap."""
     h = thumb_height(width, aspect)
+    if accurate:
+        return [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", source, "-ss", str(at_sec),
+            "-frames:v", "1", "-vf", f"scale={width}:{h}", "-q:v", "3",
+            out_path,
+        ]
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-ss", str(at_sec), "-skip_frame", "nokey", "-i", source,
@@ -60,19 +70,20 @@ def build_poster_cmd(source, out_path, width, aspect, at_sec=0):
     ]
 
 
-def build_storyboard_cmd(source, out_pattern, width, aspect, interval_sec, cols, rows):
+def build_storyboard_cmd(source, out_pattern, width, aspect, interval_sec, cols, rows, accurate=False):
     """Tile keyframes into CxR sprite sheets. `fps=1/interval` picks one frame
     every interval_sec; `tile` packs them; the muxer rolls to a new file each
-    time a full sheet is emitted."""
+    time a full sheet is emitted. `accurate` (local CMAF) drops -skip_frame nokey
+    so the fps filter samples real frames rather than sparse fMP4 keyframes."""
     h = thumb_height(width, aspect)
     vf = f"fps=1/{interval_sec},scale={width}:{h},tile={cols}x{rows}"
-    return [
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-        "-skip_frame", "nokey", "-i", source,
-        "-vf", vf, "-an", "-q:v", "4",
-        "-start_number", "0",   # first sheet is sb_000.jpg to match the WebVTT
-        out_pattern,
-    ]
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
+    if not accurate:
+        cmd += ["-skip_frame", "nokey"]
+    cmd += ["-i", source, "-vf", vf, "-an", "-q:v", "4",
+            "-start_number", "0",   # first sheet is sb_000.jpg to match the WebVTT
+            out_pattern]
+    return cmd
 
 
 def _ts(seconds):
@@ -147,7 +158,6 @@ def main():
             cfg = json.load(fh)
 
     workdir = os.environ.get("WORK_DIR", "/work")
-    os.makedirs(workdir, exist_ok=True)
     src = cfg["source"]
     width = cfg.get("thumb_width", 320)
     aspect = cfg.get("aspect", [16, 9])
@@ -155,24 +165,40 @@ def main():
     cols, rows = grid["cols"], grid["rows"]
     interval = cfg.get("interval_sec", 10)
     duration = cfg["duration_sec"]
-    out_s3 = cfg["out_s3"].rstrip("/")
+
+    # Local mode: write the poster/sheets/VTT straight into out_dir (served by
+    # the control plane at /origin/<channel>/thumbs) and skip the S3 upload.
+    out_dir = cfg.get("out_dir")
+    local = bool(out_dir)
+    workdir = os.path.abspath(out_dir) if local else workdir
+    os.makedirs(workdir, exist_ok=True)
 
     poster = os.path.join(workdir, "poster.jpg")
     sb_pattern = os.path.join(workdir, "sb_%03d.jpg")
     vtt = os.path.join(workdir, "thumbs.vtt")
 
-    run(build_poster_cmd(src, poster, width, aspect, cfg.get("poster_at_sec", 0)))
-    run(build_storyboard_cmd(src, sb_pattern, width, aspect, interval, cols, rows))
+    run(build_poster_cmd(src, poster, width, aspect, cfg.get("poster_at_sec", 0), accurate=local))
+    if not cfg.get("poster_only"):
+        run(build_storyboard_cmd(src, sb_pattern, width, aspect, interval, cols, rows, accurate=local))
+        with open(vtt, "w") as fh:
+            fh.write(build_webvtt(duration, interval, cols, rows, width, aspect,
+                                  lambda i: f"sb_{i:03d}.jpg"))
 
-    with open(vtt, "w") as fh:
-        fh.write(build_webvtt(duration, interval, cols, rows, width, aspect,
-                              lambda i: f"sb_{i:03d}.jpg"))
+    if local:
+        register(cfg, {
+            "poster_key": poster,
+            "storyboard_key": os.path.join(workdir, "sb_000.jpg"),
+            "thumbs_vtt_key": vtt,
+        })
+        log(f"done (local -> {workdir})")
+        return
 
-    # upload
+    out_s3 = cfg["out_s3"].rstrip("/")
     s3_cp(poster, f"{out_s3}/poster.jpg")
-    s3_cp(vtt, f"{out_s3}/thumbs.vtt")
-    run(["aws", "s3", "cp", workdir, out_s3, "--recursive",
-         "--exclude", "*", "--include", "sb_*.jpg", "--only-show-errors"])
+    if not cfg.get("poster_only"):
+        s3_cp(vtt, f"{out_s3}/thumbs.vtt")
+        run(["aws", "s3", "cp", workdir, out_s3, "--recursive",
+             "--exclude", "*", "--include", "sb_*.jpg", "--only-show-errors"])
 
     register(cfg, {
         "poster_key": f"{out_s3}/poster.jpg",

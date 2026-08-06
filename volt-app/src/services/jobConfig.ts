@@ -181,10 +181,14 @@ export function buildThumbnailerJobConfig(rec: {
   kind: 'recording' | 'vod';
   source_master: string; // s3 URL of the hi-res source manifest
   duration_sec: number;
+  stream_id?: string;    // owning channel/event id — lets the local launcher find the origin dir
+  segment_seconds?: number;
 }): Record<string, any> {
   return {
     target: rec.kind,
     id: rec.id,
+    stream_id: rec.stream_id,       // ignored by the ECS thumbnailer; used by the local launcher
+    segment_seconds: rec.segment_seconds ?? 4,
     source: rec.source_master,
     duration_sec: rec.duration_sec,
     out_s3: `s3://${config.aws.s3Bucket}/thumbs/${rec.id}`,

@@ -200,6 +200,9 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
         {sourceUp ? <HlsVideo src={ts.hls} /> : <div className="grad" />}
         <div className="plabel"><span className="pt" style={{ color: '#a5b4fc' }}>SOURCE · {isIngest ? proto + ' ingest' : sourceUp ? 'test card' : 'raw ingest'}</span></div>
         <div className="badge-live" style={{ background: sourceUp ? 'rgba(74,222,128,.85)' : 'rgba(99,102,241,.85)' }}><span className="d" />{sourceUp ? 'RECEIVING' : proto}</div>
+        {sourceUp && ts.producer === 'encoder' && (
+          <div className="tag" style={{ position: 'absolute', top: 10, right: 10, background: 'rgba(16,185,129,.9)', color: '#052e1a', fontWeight: 700 }}>REAL ENCODER · x264 → CMAF</div>
+        )}
         {!sourceUp && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center' }}>
             <div>

@@ -60,10 +60,13 @@ export interface ChannelDetail extends Channel {
 export interface TestStreamStatus {
   available: boolean
   running: boolean
+  producer?: 'test' | 'encoder' | null
   startedAt: number | null
   hls: string
   dash: string | null
   subtitles: Record<string, string>
+  poster?: string | null
+  thumbsVtt?: string | null
   options: { name: string; dvrSec: number; langs: string[]; dash: boolean; captionInterval: number } | null
   sourceKind: 'ingest' | 'testcard' | null
   sourceUrl: string | null

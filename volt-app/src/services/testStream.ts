@@ -9,7 +9,7 @@
 //  ECS tasks via the orchestrator). Enabled when ffmpeg is present locally.
 // ============================================================================
 import { spawn, ChildProcess } from 'node:child_process';
-import { existsSync, rmSync, mkdirSync, openSync } from 'node:fs';
+import { existsSync, rmSync, mkdirSync, openSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { config } from '../config';
 import { query, one } from '../db';
@@ -45,18 +45,50 @@ function originFor(channelId: string) {
   return resolve(config.testStream.originDir, channelId);
 }
 
+// A live origin (master.m3u8 written/refreshed within this window) counts as
+// "playing" even if this process didn't spawn the test stub — the REAL local
+// encoder (orchestrator local launcher) writes to the same origin dir, so the
+// player can pick up either producer transparently.
+const ORIGIN_FRESH_MS = 45_000;
+
+function probeOrigin(channelId: string): { live: boolean; mtime: number | null; dash: boolean; poster: boolean } {
+  const dir = originFor(channelId);
+  const master = join(dir, 'master.m3u8');
+  try {
+    const st = statSync(master);
+    const age = Date.now() - st.mtimeMs;
+    return {
+      live: age <= ORIGIN_FRESH_MS,
+      mtime: st.mtimeMs,
+      dash: existsSync(join(dir, 'manifest.mpd')) || existsSync(join(dir, 'stream.mpd')),
+      poster: existsSync(join(dir, 'thumbs', 'poster.jpg')),
+    };
+  } catch {
+    return { live: false, mtime: null, dash: false, poster: false };
+  }
+}
+
 export function testStreamStatus(channelId: string) {
   const r = running.get(channelId);
   const base = `/origin/${channelId}`;
   const langs = r?.opts.langs ?? ['en'];
+  // Shaka (real encoder) emits manifest.mpd; the test stub emits stream.mpd.
+  const origin = probeOrigin(channelId);
+  const dashName = existsSync(join(originFor(channelId), 'manifest.mpd')) ? 'manifest.mpd' : 'stream.mpd';
+  // producer: this process's test stub, else a live origin from the real encoder
+  const producer: 'test' | 'encoder' | null = r ? 'test' : origin.live ? 'encoder' : null;
+  const isRunning = !!r || origin.live;
   return {
-    running: !!r,
-    startedAt: r?.startedAt ?? null,
+    running: isRunning,
+    producer,
+    startedAt: r?.startedAt ?? origin.mtime ?? null,
     hls: `${base}/master.m3u8`,
-    dash: r?.opts.dash ? `${base}/stream.mpd` : null,
+    dash: r ? (r.opts.dash ? `${base}/stream.mpd` : null) : origin.dash ? `${base}/${dashName}` : null,
     subtitles: Object.fromEntries(langs.map((l) => [l, `${base}/subs/${l}.vtt`])),
+    poster: origin.poster ? `${base}/thumbs/poster.jpg` : null,
+    thumbsVtt: existsSync(join(originFor(channelId), 'thumbs', 'thumbs.vtt')) ? `${base}/thumbs/thumbs.vtt` : null,
     options: r?.opts ?? null,
-    sourceKind: r?.sourceKind ?? null,
+    sourceKind: r?.sourceKind ?? (origin.live ? 'ingest' : null),
     sourceUrl: r?.sourceUrl ?? null,
     sourceNote: r?.sourceNote ?? null,
   };
