@@ -5,9 +5,10 @@
   "fps": 25,
   "dvr_seconds": 60,
   "s3": { "bucket": "local-disabled" },
+  "_comment": "EXAMPLE for a REAL feed. run-local.sh/validate.sh generate their own synthetic job; copy this, set real SRT/RTMP/HLS input URLs, then: WORK_DIR=./_local_out JOB_CONFIG=./job.local-synth.json python3 bin/run_local_live.py",
   "inputs": [
-    { "rendition_label": "720p", "protocol": "srt", "url": "srt://127.0.0.1:9000", "has_audio": true, "bitrate_kbps": 2500 },
-    { "rendition_label": "480p", "protocol": "srt", "url": "srt://127.0.0.1:9001", "bitrate_kbps": 1200 },
-    { "rendition_label": "360p", "protocol": "srt", "url": "srt://127.0.0.1:9002", "bitrate_kbps": 800 }
+    { "rendition_label": "720p", "protocol": "srt", "url": "srt://YOUR-SOURCE-HOST:9000", "has_audio": true, "bitrate_kbps": 2500 },
+    { "rendition_label": "480p", "protocol": "srt", "url": "srt://YOUR-SOURCE-HOST:9001", "bitrate_kbps": 1200 },
+    { "rendition_label": "360p", "protocol": "srt", "url": "srt://YOUR-SOURCE-HOST:9002", "bitrate_kbps": 800 }
   ]
 }
