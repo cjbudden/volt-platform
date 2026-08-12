@@ -988,3 +988,168 @@ Per-stream event log.
   }
 ]
 ```
+
+---
+
+## Image Service
+
+On-the-fly image rendering (resize / crop / format / filter) for account media: poster art,
+thumbnails, channel logos, slate stills, portal artwork. One source image is stored once,
+every derivative (size, crop, format) is produced on request from a URL and then cached, so
+you never pre-generate or store variants. Built on `sharp` (libvips).
+
+The service has two surfaces:
+
+1. A **control-plane method** (`POST /api/images/sign`, JWT) that turns a set of transform
+   options into a signed, ready-to-use URL. Backend and app callers use this so they never
+   compute the HMAC themselves.
+2. A **public render endpoint** (signed URL grammar, no JWT) that the browser / CDN hits to
+   get the actual image bytes. In production this is served at the image host / CloudFront in
+   front of an S3 derivative cache; in local dev it is the image service process.
+
+> **Build status (12 Aug 2026): prototype, not yet mounted in the control plane at `:8080`.**
+> The URL grammar, signing and render pipeline are proven in the `volt-image-proto` prototype
+> (14/14 tests, cache HIT ~1.4ms vs ~150ms cold render). The endpoints below are the agreed
+> contract. They are documented and shipped in the Postman collection now (folder **Image
+> Service**, pointed at `{{imgBase}}`) so the interface can be reviewed and frozen. Mounting
+> `src/modules/images.ts` into volt-app so `POST /api/images/sign` answers on `:8080` and the
+> render endpoint runs locally is the next build step; the `api/verify.sh` assertions are added
+> at that point.
+
+### URL grammar (render endpoint)
+
+```
+{imgBase}/{sig}/{fit}/{WxH}/filter(<f1>,<f2>,...)/{path}
+```
+
+The `filter(...)` segment is optional. `{path}` is the source object key, scoped to the
+caller's account prefix. Example (signed):
+
+```
+https://img.volt.example/Q3k9_2ba8Xr/fit-in/1280x720/filter(format:webp,quality:82,sharpen:60)/posters/grand-final.jpg
+```
+
+Example (dev only, signing disabled):
+
+```
+http://localhost:8090/unsafe/fill/640x360/filter(focus:smart,format:webp)/posters/grand-final.jpg
+```
+
+### Path parameters
+
+| Segment | Required | Values | Purpose |
+|---|---|---|---|
+| `sig` | yes (prod) | base64url HMAC-SHA256 of the canonical path, or the literal `unsafe` in dev | Prevents callers requesting arbitrary size/filter combos (cost / DoS control). `unsafe` is rejected unless the service runs with `IMG_ALLOW_UNSAFE=1`. |
+| `fit` | yes | `fit-in` \| `fill` \| `stretch` | `fit-in`: scale to fit inside WxH, keep aspect, no crop. `fill`: cover the box then crop, crop anchored by `focus`. `stretch`: force exact WxH, may distort. |
+| `WxH` | yes | `1280x720` (exact), `1280x0` (width, auto height), `0x720` (height, auto width) | Target box. A `0` on one axis means "derive from aspect ratio". Both axes are bounded by the max-dimension guard. |
+| `filter(...)` | no | comma-separated list, see below | Post-resize operations. Order is normalised into the cache key. |
+| `path` | yes | source object key, e.g. `posters/grand-final.jpg` | Resolved against the account's S3 origin prefix. |
+
+### Filters
+
+| Filter | Argument | Notes |
+|---|---|---|
+| `format:` | `webp` \| `avif` \| `jpeg` \| `png` | Output encoding. Omitted: keep source format (or content-negotiate webp/avif if `Accept` allows). |
+| `quality:` | `1`–`100` | Encoder quality. Default 82. Ignored for `png`. |
+| `sharpen:` | `0`–`100` | Unsharp amount. |
+| `blur:` | `0`–`100` | Gaussian blur sigma scaled to 0–100. |
+| `grayscale` | (none) | Desaturate. |
+| `background:` | `RRGGBB` | Flatten transparency onto this colour (e.g. jpeg output of a png). |
+| `focus:` | `center` \| `top` \| `bottom` \| `left` \| `right` \| `top-left` \| `top-right` \| `bottom-left` \| `bottom-right` \| `smart` | Crop anchor for `fill`. `smart` uses libvips attention detection. Coordinate focus (`0.8x0.2`) is planned. |
+
+### `POST` `/api/images/sign`
+Turn transform options into a signed render URL. This is the method backend/app code calls.
+*Auth: JWT*
+
+**Request headers**
+
+| Header | Value | Notes |
+|---|---|---|
+| `Authorization` | `Bearer <jwt>` | Tenant-scoped by the token `account_id`. |
+| `Content-Type` | `application/json` | |
+
+**Request body**
+
+| Field | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `path` | string | yes | | Source object key within the account prefix. |
+| `fit` | string | no | `fit-in` | `fit-in` \| `fill` \| `stretch`. |
+| `width` | integer | one of width/height | | `0` / omitted = auto from aspect. |
+| `height` | integer | one of width/height | | `0` / omitted = auto from aspect. |
+| `filters` | object | no | `{}` | e.g. `{ "format": "webp", "quality": 82, "sharpen": 60, "focus": "smart" }`. |
+| `expiresIn` | integer (seconds) | no | null (non-expiring) | If set, the signature carries an expiry and the URL 401s after it. |
+
+```json
+{
+  "path": "posters/grand-final.jpg",
+  "fit": "fit-in",
+  "width": 1280,
+  "height": 720,
+  "filters": { "format": "webp", "quality": 82, "sharpen": 60 },
+  "expiresIn": 3600
+}
+```
+
+**Example response `200`**
+```json
+{
+  "url": "https://img.volt.example/Q3k9_2ba8Xr/fit-in/1280x720/filter(format:webp,quality:82,sharpen:60)/posters/grand-final.jpg",
+  "canonicalPath": "/fit-in/1280x720/filter(format:webp,quality:82,sharpen:60)/posters/grand-final.jpg",
+  "expiresAt": "2026-08-12T05:33:20.000Z",
+  "cacheKey": "sha256:5f2e...b91c",
+  "_links": {
+    "self": { "href": "/api/images/sign" },
+    "render": { "href": "https://img.volt.example/Q3k9_2ba8Xr/fit-in/1280x720/filter(format:webp,quality:82,sharpen:60)/posters/grand-final.jpg", "type": "image/webp" },
+    "source": { "href": "/api/files/posters%2Fgrand-final.jpg", "rel": "source" }
+  }
+}
+```
+
+**Error responses**
+
+| Code | When | Body |
+|---|---|---|
+| `400` | Unknown `fit`/filter, or both width and height are 0 | `{ "error": "bad_request", "message": "..." }` |
+| `401` | Missing/invalid JWT | `{ "error": "unauthorized" }` |
+| `413` | Requested dimensions exceed the max-dimension guard | `{ "error": "dimensions_too_large", "maxPixels": 25000000 }` |
+
+### `GET` `{imgBase}/{sig}/{fit}/{WxH}/filter(...)/{path}`
+Render (or serve from cache) the derivative. Returns the image bytes, not JSON.
+*Auth: signed URL (HMAC), public*
+
+**Request headers**
+
+| Header | Value | Notes |
+|---|---|---|
+| `Accept` | e.g. `image/avif,image/webp,*/*` | Used for content negotiation when no explicit `format:` filter is set. |
+| `If-None-Match` | prior `ETag` | Returns `304` when the derivative is unchanged. |
+
+**Example response `200`** (headers shown; body is the encoded image)
+```
+Content-Type: image/webp
+Content-Length: 48210
+Cache-Control: public, max-age=31536000, immutable
+ETag: "5f2e...b91c"
+X-Volt-Cache: MISS
+X-Volt-Render-ms: 146
+Vary: Accept
+Link: </Q3k9_2ba8Xr/fit-in/1280x720/filter(format:webp,quality:82,sharpen:60)/posters/grand-final.jpg>; rel="self",
+      </api/files/posters%2Fgrand-final.jpg>; rel="source"
+```
+
+On a subsequent hit the same request returns `X-Volt-Cache: HIT` and `X-Volt-Render-ms: 1`.
+
+**Error responses**
+
+| Code | When |
+|---|---|
+| `400` | Malformed geometry or filter segment. |
+| `401` | Bad or expired signature (and `unsafe` not permitted). |
+| `404` | Source `path` not found in the account origin. |
+| `413` | Dimensions exceed the max-dimension guard. |
+
+### Caching and delivery
+Derivatives are immutable and keyed by `sha256(canonical path)`. In production the render host
+sits behind CloudFront with an S3 derivative cache; the first request renders and stores, all
+later requests are edge/cache hits. Purge a source by invalidating the cache tag for its `path`
+when the underlying object is replaced.

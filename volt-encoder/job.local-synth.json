@@ -1,0 +1,13 @@
+{
+  "channel_id": "volt-local",
+  "workflow": "package_only",
+  "segment_seconds": 2,
+  "fps": 25,
+  "dvr_seconds": 60,
+  "s3": { "bucket": "local-disabled" },
+  "inputs": [
+    { "rendition_label": "720p", "protocol": "srt", "url": "srt://127.0.0.1:9000", "has_audio": true, "bitrate_kbps": 2500 },
+    { "rendition_label": "480p", "protocol": "srt", "url": "srt://127.0.0.1:9001", "bitrate_kbps": 1200 },
+    { "rendition_label": "360p", "protocol": "srt", "url": "srt://127.0.0.1:9002", "bitrate_kbps": 800 }
+  ]
+}

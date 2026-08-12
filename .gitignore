@@ -47,3 +47,7 @@ publish.sh
 # test-stream generated origin (HLS/DASH/VTT)
 volt-app/origin/
 origin/
+
+# ---- local encoder run harness (per-machine: output + auto-downloaded Shaka) ----
+volt-encoder/_local_out/
+volt-encoder/.bin/

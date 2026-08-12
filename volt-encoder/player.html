@@ -1,0 +1,41 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Volt — local live</title>
+<style>
+ :root{color-scheme:dark}
+ body{margin:0;background:#0b0e14;color:#e6e9ef;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif}
+ header{padding:14px 20px;border-bottom:1px solid #1e2430;display:flex;align-items:center;gap:12px}
+ .dot{width:10px;height:10px;border-radius:50%;background:#ff3b30;box-shadow:0 0 0 0 rgba(255,59,48,.6);animation:p 1.6s infinite}
+ @keyframes p{70%{box-shadow:0 0 0 8px rgba(255,59,48,0)}100%{box-shadow:0 0 0 0 rgba(255,59,48,0)}}
+ main{max-width:960px;margin:22px auto;padding:0 16px}
+ video{width:100%;background:#000;border-radius:10px;aspect-ratio:16/9}
+ .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+ .card{background:#131824;border:1px solid #1e2430;border-radius:10px;padding:10px 14px;font-size:13px}
+ .card b{display:block;color:#9aa4b2;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+ code{color:#7ee0c0}
+</style></head><body>
+<header><span class="dot"></span><strong>Volt local live channel</strong>
+ <span style="color:#9aa4b2">real encoder · synthetic source · fully offline</span></header>
+<main>
+ <video id="v" controls autoplay muted playsinline></video>
+ <div class="row">
+   <div class="card"><b>Playing rung</b><span id="lvl">-</span></div>
+   <div class="card"><b>Segments loaded</b><span id="segs">0</span></div>
+   <div class="card"><b>HLS</b><code>out/master.m3u8</code></div>
+   <div class="card"><b>DASH</b><code>out/manifest.mpd</code></div>
+ </div>
+ <p style="color:#9aa4b2">This page is served by <code>run-local.sh</code>. It plays the live HLS
+ output produced by the real Volt encoder from a synthetic SRT ladder. No cloud, no external stream.</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+<script>
+ var v=document.getElementById('v'), src='out/master.m3u8', segs=0;
+ function setLvl(h){document.getElementById('lvl').textContent=h?h+'p':'-';}
+ if(window.Hls && Hls.isSupported()){
+   var hls=new Hls({lowLatencyMode:true});
+   hls.loadSource(src); hls.attachMedia(v);
+   hls.on(Hls.Events.LEVEL_SWITCHED,function(_,d){var l=hls.levels[d.level];setLvl(l&&l.height);});
+   hls.on(Hls.Events.FRAG_LOADED,function(){document.getElementById('segs').textContent=++segs;});
+   hls.on(Hls.Events.ERROR,function(_,d){if(d.fatal){setTimeout(function(){hls.startLoad();},1500);}});
+ } else { v.src=src; } // Safari native HLS
+</script></body></html>

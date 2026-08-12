@@ -1673,6 +1673,283 @@
       ]
     },
     {
+      "name": "Image Service",
+      "description": "On-the-fly image resize/crop/format/filter on sharp. Two surfaces: POST /api/images/sign (JWT, control plane) returns a signed URL; the render endpoint (signed URL grammar, public) returns image bytes from {{imgBase}}. STATUS (12 Aug 2026): prototype, not yet mounted in the control plane at :8080, so these are not part of api/verify.sh yet. Set imgBase/imgPath/imgSig in the environment.",
+      "item": [
+        {
+          "name": "Sign image URL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200',()=>pm.response.to.have.status(200));",
+                  "var j=pm.response.json();",
+                  "if(j.url){pm.environment.set('imgSignedUrl',j.url);}",
+                  "// canonicalPath starts with the transform; the sig is the first path seg of j.url after imgBase"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/images/sign",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "images",
+                "sign"
+              ]
+            },
+            "description": "Turn transform options (path, fit, width/height, filters, expiresIn) into a signed render URL. Backend/app callers use this so they never compute the HMAC themselves. Auth: JWT. NOTE: Image Service is a prototype not yet mounted in the control plane at :8080; mounting src/modules/images.ts makes this answer locally.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"posters/grand-final.jpg\",\n  \"fit\": \"fit-in\",\n  \"width\": 1280,\n  \"height\": 720,\n  \"filters\": {\n    \"format\": \"webp\",\n    \"quality\": 82,\n    \"sharpen\": 60\n  },\n  \"expiresIn\": 3600\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/images/sign",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "images",
+                    "sign"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"path\": \"posters/grand-final.jpg\",\n  \"fit\": \"fit-in\",\n  \"width\": 1280,\n  \"height\": 720,\n  \"filters\": {\n    \"format\": \"webp\",\n    \"quality\": 82,\n    \"sharpen\": 60\n  },\n  \"expiresIn\": 3600\n}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"url\": \"https://img.volt.example/Q3k9_2ba8Xr/fit-in/1280x720/filter(format:webp,quality:82,sharpen:60)/posters/grand-final.jpg\",\n  \"canonicalPath\": \"/fit-in/1280x720/filter(format:webp,quality:82,sharpen:60)/posters/grand-final.jpg\",\n  \"expiresAt\": \"2026-08-12T05:33:20.000Z\",\n  \"cacheKey\": \"sha256:5f2e...b91c\",\n  \"_links\": {\n    \"self\": {\n      \"href\": \"/api/images/sign\"\n    },\n    \"render\": {\n      \"href\": \"https://img.volt.example/Q3k9_2ba8Xr/fit-in/1280x720/filter(format:webp,quality:82,sharpen:60)/posters/grand-final.jpg\",\n      \"type\": \"image/webp\"\n    },\n    \"source\": {\n      \"href\": \"/api/files/posters%2Fgrand-final.jpg\",\n      \"rel\": \"source\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Render (signed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 image',()=>pm.response.to.have.status(200));",
+                  "pm.test('is an image',()=>pm.expect(pm.response.headers.get('Content-Type')||'').to.include('image'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "image/avif,image/webp,*/*"
+              }
+            ],
+            "url": {
+              "raw": "{{imgBase}}/{{imgSig}}/fit-in/1280x720/filter(format:webp,quality:82,sharpen:60)/{{imgPath}}",
+              "host": [
+                "{{imgBase}}"
+              ],
+              "path": [
+                "{{imgSig}}",
+                "fit-in",
+                "1280x720",
+                "filter(format:webp,quality:82,sharpen:60)",
+                "{{imgPath}}"
+              ]
+            },
+            "description": "Fetch (or serve from cache) the derivative via a signed URL. Grammar: {imgBase}/{sig}/{fit}/{WxH}/filter(...)/{path}. Set imgSig from the Sign image URL response. Auth: signed URL (HMAC), public. Prototype: served by the image service host ({{imgBase}}), not the control plane."
+          },
+          "response": [
+            {
+              "name": "200 example (headers)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "image/avif,image/webp,*/*"
+                  }
+                ],
+                "url": {
+                  "raw": "{{imgBase}}/{{imgSig}}/fit-in/1280x720/filter(format:webp,quality:82,sharpen:60)/{{imgPath}}",
+                  "host": [
+                    "{{imgBase}}"
+                  ],
+                  "path": [
+                    "{{imgSig}}",
+                    "fit-in",
+                    "1280x720",
+                    "filter(format:webp,quality:82,sharpen:60)",
+                    "{{imgPath}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "text",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "image/webp"
+                },
+                {
+                  "key": "Cache-Control",
+                  "value": "public, max-age=31536000, immutable"
+                },
+                {
+                  "key": "ETag",
+                  "value": "\"5f2e...b91c\""
+                },
+                {
+                  "key": "X-Volt-Cache",
+                  "value": "MISS"
+                },
+                {
+                  "key": "X-Volt-Render-ms",
+                  "value": "146"
+                },
+                {
+                  "key": "Vary",
+                  "value": "Accept"
+                }
+              ],
+              "body": "<binary image bytes: the rendered WebP>. This request returns image data, not JSON. See the response Headers tab for Content-Type, Cache-Control (immutable), ETag, X-Volt-Cache (HIT|MISS) and X-Volt-Render-ms. A repeat request returns X-Volt-Cache: HIT with X-Volt-Render-ms ~1."
+            }
+          ]
+        },
+        {
+          "name": "Render (dev, unsafe)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 image',()=>pm.response.to.have.status(200));",
+                  "pm.test('is an image',()=>pm.expect(pm.response.headers.get('Content-Type')||'').to.include('image'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "image/avif,image/webp,*/*"
+              }
+            ],
+            "url": {
+              "raw": "{{imgBase}}/unsafe/fill/640x360/filter(focus:smart,format:webp)/{{imgPath}}",
+              "host": [
+                "{{imgBase}}"
+              ],
+              "path": [
+                "unsafe",
+                "fill",
+                "640x360",
+                "filter(focus:smart,format:webp)",
+                "{{imgPath}}"
+              ]
+            },
+            "description": "Same render endpoint with signing disabled (only when the service runs with IMG_ALLOW_UNSAFE=1). Handy for local testing without signing. fill + focus:smart crops to 640x360 anchored by libvips attention."
+          },
+          "response": [
+            {
+              "name": "200 example (headers)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "image/avif,image/webp,*/*"
+                  }
+                ],
+                "url": {
+                  "raw": "{{imgBase}}/unsafe/fill/640x360/filter(focus:smart,format:webp)/{{imgPath}}",
+                  "host": [
+                    "{{imgBase}}"
+                  ],
+                  "path": [
+                    "unsafe",
+                    "fill",
+                    "640x360",
+                    "filter(focus:smart,format:webp)",
+                    "{{imgPath}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "text",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "image/webp"
+                },
+                {
+                  "key": "Cache-Control",
+                  "value": "public, max-age=31536000, immutable"
+                },
+                {
+                  "key": "ETag",
+                  "value": "\"5f2e...b91c\""
+                },
+                {
+                  "key": "X-Volt-Cache",
+                  "value": "MISS"
+                },
+                {
+                  "key": "X-Volt-Render-ms",
+                  "value": "146"
+                },
+                {
+                  "key": "Vary",
+                  "value": "Accept"
+                }
+              ],
+              "body": "<binary image bytes: the rendered WebP>. This request returns image data, not JSON. See the response Headers tab for Content-Type, Cache-Control (immutable), ETag, X-Volt-Cache (HIT|MISS) and X-Volt-Render-ms. A repeat request returns X-Volt-Cache: HIT with X-Volt-Render-ms ~1."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Distribution",
       "item": [
         {
