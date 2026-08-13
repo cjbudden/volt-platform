@@ -115,7 +115,7 @@ else echo "    NOTE: ffmpeg not found — 'Start test stream' will be disabled. 
 # HLS+DASH → DVR + recording → thumbnails) needs ffmpeg + python3 + Shaka 'packager'.
 # When all three are present we run the real encoder; otherwise Start just records
 # intent (mock) and the app still runs. This decides ORCH_LAUNCHER below.
-ENCODER_MODE="mock"; MISSING=""
+REQ_MODE="${ENCODER_MODE:-}"; ENCODER_MODE="mock"; MISSING=""
 # Shaka Packager ships under a few names depending on how it was installed.
 PACKAGER_BIN=""
 for cand in packager shaka-packager packager-osx-arm64 packager-osx-x64; do
@@ -138,6 +138,37 @@ else
     echo "                       — or download '$ASSET' from https://github.com/shaka-project/shaka-packager/releases/latest ,"
     echo "                         then:  chmod +x $ASSET && sudo mv $ASSET /usr/local/bin/packager" ;;
   esac
+fi
+
+
+# ---- Layer 2: run the encoder INSIDE Docker (production-identical ffmpeg WITH
+# SRT + drawtext + Shaka Packager), instead of the Mac's Homebrew ffmpeg which
+# has no SRT/drawtext. Opt in with:  ENCODER_MODE=docker bash run-on-mac.sh
+# It also auto-activates when the native encoder tools are missing but Docker is
+# up, so a Mac without Shaka/SRT still gets a real, working encoder.
+# NB: Docker still uses your Mac's CPU, so keep test ladders light (720p/480p).
+WANT_DOCKER=0
+[ "${REQ_MODE:-}" = "docker" ] && WANT_DOCKER=1
+if [ "$WANT_DOCKER" = "0" ] && [ "$ENCODER_MODE" = "mock" ] && have docker && docker info >/dev/null 2>&1; then
+  echo "    native encoder tools missing, but Docker is running — using the Docker encoder."
+  WANT_DOCKER=1
+fi
+if [ "$WANT_DOCKER" = "1" ]; then
+  if ! have docker || ! docker info >/dev/null 2>&1; then
+    echo "    ENCODER_MODE=docker requested but Docker isn't running. Start Docker Desktop and re-run."
+    exit 1
+  fi
+  IMG="${ENCODER_IMAGE:-volt-encoder:local}"
+  if docker image inspect "$IMG" >/dev/null 2>&1; then
+    echo "    encoder image '$IMG' present."
+  else
+    echo "    building encoder image '$IMG' (first run only — a few minutes)..."
+    docker build -t "$IMG" "$ROOT/volt-encoder"
+  fi
+  ENCODER_MODE="docker"
+  export ENCODER_IMAGE="$IMG"
+  echo "    real encoder: DOCKER ('$IMG') — production-identical ffmpeg (SRT + drawtext) + Shaka."
+  echo "      NB: Docker uses your Mac's CPU; keep ladders light (720p/480p) for smooth realtime."
 fi
 
 echo "==> 4/4  Starting API (:8080) and the app (:5173)..."

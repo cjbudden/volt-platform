@@ -30,11 +30,12 @@ export const config = {
   orchestrator: {
     // 'ecs' launches real Fargate/EC2 tasks; 'local' spawns the real encoder.py /
     // thumbnailer.py as on-box child processes (no AWS); 'mock' records intent (tests).
-    launcher: (process.env.ORCH_LAUNCHER ?? 'mock') as 'ecs' | 'mock' | 'local',
+    launcher: (process.env.ORCH_LAUNCHER ?? 'mock') as 'ecs' | 'mock' | 'local' | 'docker',
     ecsCluster: process.env.ECS_CLUSTER ?? 'volt',
     encoderTaskDef: process.env.ENCODER_TASK_DEF ?? 'volt-encoder',
     thumbnailerTaskDef: process.env.THUMBNAILER_TASK_DEF ?? 'volt-thumbnailer',
     captionsTaskDef: process.env.CAPTIONS_TASK_DEF ?? 'volt-captions',   // GPU add-on task (whisper+NLLB)
+    encoderImage: process.env.ENCODER_IMAGE ?? 'volt-encoder:local',   // docker-launcher image (local dev)
     // networking + placement (from Terraform outputs)
     subnets: (process.env.ECS_SUBNETS ?? '').split(',').filter(Boolean),
     securityGroups: (process.env.ECS_SECURITY_GROUPS ?? '').split(',').filter(Boolean),

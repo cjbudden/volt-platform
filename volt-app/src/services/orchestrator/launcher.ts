@@ -1,5 +1,6 @@
 import { config } from '../../config';
 import { makeLocalLauncher } from './localLauncher';
+import { makeDockerLauncher } from './dockerLauncher';
 
 /**
  * TaskLauncher abstracts "run/stop an encoder or thumbnailer container" so the
@@ -133,6 +134,9 @@ export function makeLauncher(): TaskLauncher {
     case 'local':
       // real on-box encoder.py / thumbnailer.py child processes (no AWS)
       return makeLocalLauncher();
+    case 'docker':
+      // real encoder inside the Linux image (ffmpeg+SRT+Shaka), production-identical
+      return makeDockerLauncher();
     default:
       return new MockTaskLauncher();
   }
