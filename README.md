@@ -42,6 +42,21 @@ present (`ORCH_LAUNCHER=local`). Open http://localhost:5173 and sign in:
 Test data PERSISTS between runs (channels, sources you create stay). To wipe and reload
 the demo snapshot: `RESET_DB=1 bash run-on-mac.sh`.
 
+### Two encoder layers for feature testing
+- **Layer 1 — app/UI + native encoder (default).** `bash run-on-mac.sh` runs the React app
+  and control plane on your Mac and, when ffmpeg + python3 + Shaka are present, the real
+  encoder as an on-box process (`ORCH_LAUNCHER=local`). Fast, but uses your Mac's ffmpeg —
+  Homebrew builds usually have **no SRT and no drawtext**, so SRT ingest won't work here.
+- **Layer 2 — encoder in Docker (production parity).** `ENCODER_MODE=docker bash run-on-mac.sh`
+  builds the `volt-encoder:local` image (first run only) and runs each channel's encoder
+  inside it (`ORCH_LAUNCHER=docker`). That image has ffmpeg **with SRT + drawtext** and Shaka,
+  so it matches production and removes the macOS ffmpeg gaps. The container writes CMAF into
+  the same origin dir and POSTs live status back to the host (`host.docker.internal`), so the
+  UI, status board and event log behave identically to Layer 1. Requires Docker Desktop
+  running. NB: Docker still uses your Mac's CPU, so keep test ladders light (720p + 480p) for
+  smooth realtime. If native encoder tools are missing but Docker is up, run-on-mac.sh selects
+  Docker automatically.
+
 ### Test a working stream end to end
 1. Channels -> New channel. Type = Transcode. Primary source = an HLS pull URL, e.g.
    `https://d1sq2slp9afh7o.cloudfront.net/smil:jr/chunklist_b2596000_slENG.m3u8`.
