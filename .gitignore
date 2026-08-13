@@ -51,3 +51,5 @@ origin/
 # ---- local encoder run harness (per-machine: output + auto-downloaded Shaka) ----
 volt-encoder/_local_out/
 volt-encoder/.bin/
+
+volt-app/origin/_control-plane.log

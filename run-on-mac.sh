@@ -100,6 +100,12 @@ else
   echo "    existing database detected — keeping your data (no reload). Use RESET_DB=1 to reset."
 fi
 
+# Clean state: any channel/event left 'live' from a previous run has NO encoder running
+# now. Mark them ended so the list is truthful and a fresh Send source can't collide
+# with a stale launch.
+run_psql -q -c "UPDATE channels SET status='ended' WHERE status='live'; UPDATE events SET status='ended' WHERE status='live';" >/dev/null 2>&1 || true
+echo "    reset any stale 'live' streams to ended (clean start)."
+
 # the test-stream feature (Start test stream → real HLS playback + live subtitles)
 # needs ffmpeg on PATH; the app still runs without it, just no live playback.
 if have ffmpeg; then echo "    ffmpeg: $(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f1-3) — test streams enabled"
@@ -148,11 +154,11 @@ export DATABASE_URL="$DBURL" JWT_ACCESS_SECRET=dev-access-secret JWT_REFRESH_SEC
        INGEST_TOKEN=dev-ingest PORT=8080 ORCH_LAUNCHER="$ENCODER_MODE" CORS_ORIGIN='*' \
        ENCODER_BIN="$ROOT/volt-encoder/bin" ORIGIN_DIR="$ROOT/volt-app/origin" \
        PACKAGER_BIN="${PACKAGER_BIN:-packager}"
-( cd volt-app && { echo "    installing API deps…"; npm install --no-audit --no-fund >/dev/null 2>&1 || npm install; }; npx tsx src/index.ts > /tmp/volt-api.log 2>&1 ) &
+( cd volt-app && { echo "    installing API deps…"; npm install --no-audit --no-fund >/dev/null 2>&1 || npm install; }; mkdir -p "$ROOT/volt-app/origin"; npx tsx src/index.ts > "$ROOT/volt-app/origin/_control-plane.log" 2>&1 ) &
 API_PID=$!
 echo "    waiting for API..."
 for i in $(seq 1 40); do curl -sf localhost:8080/health >/dev/null 2>&1 && break; sleep 1; done
-curl -sf localhost:8080/health >/dev/null 2>&1 || { echo "    API failed — see /tmp/volt-api.log"; tail -20 /tmp/volt-api.log; kill $API_PID 2>/dev/null; exit 1; }
+curl -sf localhost:8080/health >/dev/null 2>&1 || { echo "    API failed — see volt-app/origin/_control-plane.log"; tail -20 "$ROOT/volt-app/origin/_control-plane.log"; kill $API_PID 2>/dev/null; exit 1; }
 echo "    API up."
 
 cleanup() { echo; echo "Shutting down..."; kill $API_PID 2>/dev/null || true; }
