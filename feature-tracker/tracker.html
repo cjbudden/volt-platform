@@ -27,11 +27,24 @@
 </style></head><body>
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
- <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-06.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>12</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>4</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>5</b> 📱 In app</span><span class=chip><b>5</b> 📱 Partial</span><span class=chip><b>8</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-13.</div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>14</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>6</b> 📱 In app</span><span class=chip><b>6</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
- <div class=card data-status="ready_to_test" data-app="partial">
+ <div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Live stream end to end (create → transcode → play)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Create a Transcode channel with an HLS/RTMP/SRT pull source, Send source, and the real encoder ingests + builds the ABR ladder (x264) + packages CMAF (HLS+DASH) to the origin, played back in the app with real status + event log. Verified in a full local stack against the JR HLS source: 1080/720/480 ABR served + playable.</div>
+    <div class=meta>Verified end-to-end in a local stack (postgres+control plane+encoder); origin serves a 3-rendition master; tsc + vite build clean.</div>
+    <div class=how><b>How to test:</b> run-on-mac.sh → Channels → New channel (Transcode, HLS source) → open channel → Send source → watch Source/Output play.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Live stream end to end (create → transcode → play)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Live stream end to end (create → transcode → play)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="partial">
     <div class=top><div class=name>Image resize service</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
@@ -122,17 +135,30 @@
          <button class="btn warn" data-changes="Image Library (file manager)">Request changes</button>
        </div>
     
-  </div><div class=card data-status="ready_to_test" data-app="full">
+  </div><div class=card data-status="ready_to_test" data-app="partial">
     <div class=top><div class=name>Test stream, playback &amp; live subtitles</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
-      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
-    <div class=summary>One-click test stream per channel: FFmpeg generates a real live HLS/DASH ladder from a test card, the app plays it back for real (hls.js) with working DVR scrub-back, and a live WebVTT caption track renders over the video with EN/MS/ZH/TA switching (sample now; real Whisper mode available).</div>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Synthetic test-card generator (test-stream.sh) for a quick demo without a real feed. Secondary/demo path only; the primary flow now uses the real encoder. Note: relies on ffmpeg drawtext which can fail on macOS Homebrew ffmpeg.</div>
     <div class=meta>generator + captions + /origin serving + start/stop API validated; player is hls.js (H.264 plays in Chrome/Safari on Mac)</div>
     <div class=how><b>How to test:</b> Run the app on your Mac (bash run-on-mac.sh, needs ffmpeg), open a channel, click 'Start test stream'. The output player plays the live HLS; toggle CC and switch languages; drag the DVR bar back and hit Go live.</div>
     
     <div class=actions>
          <button class="btn ok" data-approve="Test stream, playback &amp; live subtitles">✓ Approve as working</button>
          <button class="btn warn" data-changes="Test stream, playback &amp; live subtitles">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Local encoder service (real encode/package/DVR/record/thumbnails, no AWS)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Runs the REAL encode/package/DVR/record/thumbnail pipeline on-box (no AWS), ORCH_LAUNCHER=local. Now WIRED to the channel UI: Send source starts the real encoder against the channel's configured source and the page plays the real output.</div>
+    <div class=meta>12/12 TS integration test drives the real encoder end-to-end (ingest→720/480/360 ladder→CMAF HLS+DASH, decodable; clean stop; poster+5x5 sheet+VTT). Encoder+thumbnailer unit tests pass; real local e2e verified.</div>
+    <div class=how><b>How to test:</b> On the Mac (with ffmpeg+python3+Shaka packager installed) run run-on-mac.sh — it prints 'real local encoder: ENABLED'. Open a channel with an HLS pull source, click Start; the output player shows the REAL ENCODER · x264 → CMAF badge and plays the live CMAF with DVR scrub. Stop the channel to generate the poster/storyboard/VTT.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Local encoder service (real encode/package/DVR/record/thumbnails, no AWS)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Local encoder service (real encode/package/DVR/record/thumbnails, no AWS)">Request changes</button>
        </div>
     
   </div><div class=card data-status="ready_to_test" data-app="full">
@@ -152,7 +178,7 @@
     <div class=top><div class=name>Channel detail / control page</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
-    <div class=summary>Per-channel control page: dual source/output players, EPG now/next, realtime viewers chart, output+source status board with rendition ladder, event log, and an editable settings drawer (source, geo rules, DVR window ≤4h/mode, subtitles, retention). Source-gated go-live.</div>
+    <div class=summary>Channel control page. Now shows REAL data only: source + output players play the live encoder output (/origin/&lt;id&gt;/master.m3u8), status board + event log come from the real encoder report (stream_status/stream_events) incl. the actual encoder/ffmpeg error lines so you can see WHY a source/output failed. EPG shows the real programmes table (empty state when none); viewers empty until real analytics. No fabricated telemetry.</div>
     <div class=meta>detail endpoint + optimistic-concurrency PATCH + audit diff verified</div>
     <div class=how><b>How to test:</b> Click a channel in the list. Send source → Go live; toggle CC; drag the DVR bar; open Settings and save a change.</div>
     
@@ -263,6 +289,26 @@
     <div class=summary>Managed library of output ladder profiles (reuses output_profiles): list, create from scratch or copy an existing profile, rename, edit; delete with an API-level confirmation workflow + in-use guard + audit log. Assign a profile to a transcode channel's output.</div>
     <div class=meta>in progress — schema + seed + CRUD + UI + assign</div>
     <div class=how><b>How to test:</b> Profiles → New (or copy an existing) → edit rungs → save. Assign it when creating a transcode channel. Try deleting one in use (blocked) and an unused one (confirm required).</div>
+    
+    
+    
+  </div><div class=card data-status="building" data-app="none">
+    <div class=top><div class=name>Source validate + info (probe)</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
+    <div class=summary>Validate button in the create form + detail that ffprobes the source and shows video/audio codec, resolution, fps, bitrate, metadata (timed-ID3) and subtitle tracks; used to cap output rungs to the source. DESIGNED/next (ffprobe proven; UI + endpoint pending).</div>
+    <div class=meta></div>
+    <div class=how><b>How to test:</b> </div>
+    
+    
+    
+  </div><div class=card data-status="building" data-app="none">
+    <div class=top><div class=name>Settings lock while running</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
+    <div class=summary>Channel settings fields read-only (still copyable) while the transcoder is running; editable only when stopped. Next.</div>
+    <div class=meta></div>
+    <div class=how><b>How to test:</b> </div>
     
     
     

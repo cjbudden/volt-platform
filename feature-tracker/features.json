@@ -1,6 +1,19 @@
 {
-  "updated": "2026-08-06",
+  "updated": "2026-08-13",
   "features": [
+    {
+      "id": "live-stream-e2e",
+      "name": "Live stream end to end (create \u2192 transcode \u2192 play)",
+      "summary": "Create a Transcode channel with an HLS/RTMP/SRT pull source, Send source, and the real encoder ingests + builds the ABR ladder (x264) + packages CMAF (HLS+DASH) to the origin, played back in the app with real status + event log. Verified in a full local stack against the JR HLS source: 1080/720/480 ABR served + playable.",
+      "status": "ready_to_test",
+      "test": {
+        "how": "run-on-mac.sh \u2192 Channels \u2192 New channel (Transcode, HLS source) \u2192 open channel \u2192 Send source \u2192 watch Source/Output play.",
+        "artifact": ""
+      },
+      "checks": "Verified end-to-end in a local stack (postgres+control plane+encoder); origin serves a 3-rendition master; tsc + vite build clean.",
+      "feedback": [],
+      "app_surface": "full"
+    },
     {
       "id": "image-resize",
       "name": "Image resize service",
@@ -173,7 +186,7 @@
     {
       "id": "test-stream-playback",
       "name": "Test stream, playback & live subtitles",
-      "summary": "One-click test stream per channel: FFmpeg generates a real live HLS/DASH ladder from a test card, the app plays it back for real (hls.js) with working DVR scrub-back, and a live WebVTT caption track renders over the video with EN/MS/ZH/TA switching (sample now; real Whisper mode available).",
+      "summary": "Synthetic test-card generator (test-stream.sh) for a quick demo without a real feed. Secondary/demo path only; the primary flow now uses the real encoder. Note: relies on ffmpeg drawtext which can fail on macOS Homebrew ffmpeg.",
       "status": "ready_to_test",
       "test": {
         "how": "Run the app on your Mac (bash run-on-mac.sh, needs ffmpeg), open a channel, click 'Start test stream'. The output player plays the live HLS; toggle CC and switch languages; drag the DVR bar back and hit Go live.",
@@ -181,12 +194,12 @@
       },
       "checks": "generator + captions + /origin serving + start/stop API validated; player is hls.js (H.264 plays in Chrome/Safari on Mac)",
       "feedback": [],
-      "app_surface": "full"
+      "app_surface": "partial"
     },
     {
       "id": "local-encoder-service",
       "name": "Local encoder service (real encode/package/DVR/record/thumbnails, no AWS)",
-      "summary": "The real encoder.py + thumbnailer.py run as on-box child processes via orchestrator/localLauncher.ts (ORCH_LAUNCHER=local). Channel Start \u2192 ingest \u2192 x264 ladder \u2192 Shaka CMAF (HLS+DASH) written straight to /origin/<id> (S3 uploader skipped), with DVR window (time_shift_buffer_depth) + recording (preserved_segments=0). On stop the real thumbnailer generates poster + storyboard sheets + thumbs.vtt. Reuses ALL orchestrator wiring (recordings, retention, day-roll). run-on-mac.sh auto-enables when ffmpeg+python3+Shaka packager present.",
+      "summary": "Runs the REAL encode/package/DVR/record/thumbnail pipeline on-box (no AWS), ORCH_LAUNCHER=local. Now WIRED to the channel UI: Send source starts the real encoder against the channel's configured source and the page plays the real output.",
       "status": "ready_to_test",
       "test": {
         "how": "On the Mac (with ffmpeg+python3+Shaka packager installed) run run-on-mac.sh \u2014 it prints 'real local encoder: ENABLED'. Open a channel with an HLS pull source, click Start; the output player shows the REAL ENCODER \u00b7 x264 \u2192 CMAF badge and plays the live CMAF with DVR scrub. Stop the channel to generate the poster/storyboard/VTT.",
@@ -214,7 +227,7 @@
       "name": "Channel detail / control page",
       "app_surface": "full",
       "status": "ready_to_test",
-      "summary": "Per-channel control page: dual source/output players, EPG now/next, realtime viewers chart, output+source status board with rendition ladder, event log, and an editable settings drawer (source, geo rules, DVR window \u22644h/mode, subtitles, retention). Source-gated go-live.",
+      "summary": "Channel control page. Now shows REAL data only: source + output players play the live encoder output (/origin/<id>/master.m3u8), status board + event log come from the real encoder report (stream_status/stream_events) incl. the actual encoder/ffmpeg error lines so you can see WHY a source/output failed. EPG shows the real programmes table (empty state when none); viewers empty until real analytics. No fabricated telemetry.",
       "checks": "detail endpoint + optimistic-concurrency PATCH + audit diff verified",
       "test": {
         "how": "Click a channel in the list. Send source \u2192 Go live; toggle CC; drag the DVR bar; open Settings and save a change.",
@@ -260,6 +273,32 @@
         "artifact": null
       },
       "feedback": []
+    },
+    {
+      "id": "source-validate",
+      "name": "Source validate + info (probe)",
+      "summary": "Validate button in the create form + detail that ffprobes the source and shows video/audio codec, resolution, fps, bitrate, metadata (timed-ID3) and subtitle tracks; used to cap output rungs to the source. DESIGNED/next (ffprobe proven; UI + endpoint pending).",
+      "status": "building",
+      "test": {
+        "how": "",
+        "artifact": ""
+      },
+      "checks": "",
+      "feedback": [],
+      "app_surface": "none"
+    },
+    {
+      "id": "settings-lock",
+      "name": "Settings lock while running",
+      "summary": "Channel settings fields read-only (still copyable) while the transcoder is running; editable only when stopped. Next.",
+      "status": "building",
+      "test": {
+        "how": "",
+        "artifact": ""
+      },
+      "checks": "",
+      "feedback": [],
+      "app_surface": "none"
     }
   ]
 }
