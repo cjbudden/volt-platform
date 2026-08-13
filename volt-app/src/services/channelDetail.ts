@@ -1,30 +1,15 @@
-// Builds the rich detail payload for a channel's control page: effective DVR window,
-// sources, rendition ladder, captions, plus representative-but-DETERMINISTIC realtime
-// telemetry (viewers timeseries, EPG now/next, status board, event log). Deterministic
-// so the same channel renders stably (seeded from the channel id + the current 5-min
-// bucket) rather than jumping on every poll — in production these come from
-// stream_status / analytics_rollups / stream_events.
+// Builds the detail payload for a channel's control page from REAL state only:
+// effective DVR window, sources, rendition ladder, captions, plus telemetry read
+// from the actual tables — stream_status (encoder health/signal), stream_events
+// (event log) and programmes (EPG). No fabricated data: when nothing is reporting
+// yet, the fields are empty/idle so the UI shows honest "no signal / no EPG /
+// no data" states rather than invented numbers.
 import { one, query } from '../db';
+import { config } from '../config';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const DVR_MAX_SEC = 14400; // 4h cap for 24x7 channels
-
-// --- tiny deterministic PRNG (mulberry32) seeded from a string ---------------
-function seedFrom(s: string): number {
-  let h = 1779033703 ^ s.length;
-  for (let i = 0; i < s.length; i++) {
-    h = Math.imul(h ^ s.charCodeAt(i), 3432918353);
-    h = (h << 13) | (h >>> 19);
-  }
-  return h >>> 0;
-}
-function mulberry32(a: number) {
-  return function () {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 export interface ChannelDetail {
   kind: 'channel';
@@ -40,6 +25,34 @@ export interface ChannelDetail {
   log: { ts: string; level: string; title: string; detail: string }[];
 }
 
+function pad(n: number) { return String(n).padStart(2, '0'); }
+function hhmm(ms: number) { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function packagingLabel(profile: any): string {
+  const p = profile?.packaging;
+  if (p === 'hls') return 'HLS';
+  if (p === 'dash') return 'DASH';
+  return 'HLS + DASH';
+}
+
+// Surface the REAL encoder failures (ffmpeg / source / packager errors) from the
+// on-box encoder.log so the event log shows WHY a source or output failed, not just
+// lifecycle events. Local mode writes this file into the origin dir; ignored otherwise.
+function encoderLogTail(channelId: string): { ts: string; level: string; title: string; detail: string }[] {
+  try {
+    const p = join(config.testStream.originDir, channelId, 'encoder.log');
+    if (!existsSync(p)) return [];
+    const lines = readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean);
+    const rx = /FATAL|error|Error|Unknown|Could not|No such|Invalid|failed|Connection|Server returned|Immediate exit|not found|Unsupported|Cannot|denied|refused|timed out|timeout/i;
+    const bad = /FATAL|Could not|No such|failed|Server returned|Unsupported|Invalid|not found|denied|refused/i;
+    return lines.filter((l) => rx.test(l)).slice(-10).map((l) => ({
+      ts: 'encoder',
+      level: bad.test(l) ? 'down' : 'warn',
+      title: 'Encoder',
+      detail: l.replace(/^\[volt-encoder\]\s*/, '').slice(0, 300),
+    }));
+  } catch { return []; }
+}
+
 export async function buildChannelDetail(channel: any, nowMs: number): Promise<ChannelDetail> {
   const group = channel.group_id
     ? await one<any>('SELECT id, name, output_profile_id FROM groups WHERE id = $1', [channel.group_id])
@@ -47,7 +60,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   const profile = group?.output_profile_id
     ? await one<any>('SELECT * FROM output_profiles WHERE id = $1', [group.output_profile_id])
     : null;
-  const sources = await query('SELECT * FROM stream_inputs WHERE channel_id = $1 ORDER BY role', [channel.id]);
+  const sources = await query<any>('SELECT * FROM stream_inputs WHERE channel_id = $1 ORDER BY role', [channel.id]);
 
   // effective DVR window: per-channel override wins, else profile default, capped at 4h
   const profDefault = profile?.dvr_window_sec ?? 300;
@@ -62,7 +75,6 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     capped: rawEffective > DVR_MAX_SEC,
   };
 
-  // per-channel ladder wins (set at create for transcode / mirror for package); else the profile's
   const ladder: { height: number; bitrate_kbps: number }[] =
     Array.isArray(channel.output_ladder) ? channel.output_ladder
     : Array.isArray(profile?.rungs) ? profile.rungs : [];
@@ -72,107 +84,78 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     source_lang: profile?.caption_source_lang || 'auto',
   };
 
-  const live = channel.status === 'live';
+  // ---- REAL status (latest encoder report), REAL events, REAL EPG -----------
+  const st = await one<any>(
+    `SELECT output_available, active_source, fallback_in_use, filler_in_use, packager_ok, sources, updated_at
+       FROM stream_status WHERE channel_id = $1`, [channel.id]);
+  const reporting = !!st;
+  const outputAvailable = !!st?.output_available;
+  const seg = Number(profile?.segment_dur ?? 4).toFixed(1);
+  const sstates: Record<string, any> = (st && st.sources && typeof st.sources === 'object') ? st.sources : {};
 
-  // ---- deterministic telemetry (seeded per channel + 5-min bucket) ----------
-  const bucket = Math.floor(nowMs / (5 * 60 * 1000));
-  const rnd = mulberry32(seedFrom(channel.id + ':' + bucket));
-
-  // viewers curve: 60 points over the last hour with a smooth base + noise
-  const base = live ? 8000 + Math.floor(rnd() * 12000) : Math.floor(rnd() * 400);
-  const series: { t: number; v: number }[] = [];
-  let peak = 0; let peakIdx = 0;
-  for (let i = 0; i < 60; i++) {
-    const wave = Math.sin((i / 60) * Math.PI * 2 + rnd() * 0.4) * 0.12 + 1;
-    const drift = 1 + (i / 60) * (live ? 0.15 : 0);
-    const v = Math.max(0, Math.round(base * wave * drift + (rnd() - 0.5) * base * 0.06));
-    series.push({ t: nowMs - (59 - i) * 60 * 1000, v });
-    if (v > peak) { peak = v; peakIdx = i; }
-  }
-  const current = series[series.length - 1].v;
-  const hourAgo = series[0].v || 1;
-  const trendPct = Math.round(((current - hourAgo) / hourAgo) * 1000) / 10;
-  const peakAt = new Date(series[peakIdx].t).toISOString();
-  const viewers = { current, peak, peakAt, trendPct, series };
-
-  // ---- EPG now/next lane (representative, aligned to real clock) -------------
-  const epg = buildEpg(nowMs, rnd);
-
-  // ---- status board ---------------------------------------------------------
-  const primaryUp = live;
-  const status = {
-    output: live ? 'Available · ' + packagingLabel(profile) : 'Idle',
-    activeSource: primaryUp ? 'Primary (direct)' : '—',
-    fallback: 'Not engaged',
-    packager: live ? `Healthy · ${Number(profile?.segment_dur ?? 4).toFixed(1)}s segments` : 'Stopped',
-    inputs: sources.length
-      ? sources.map((s: any) => ({
-          role: s.role,
-          protocol: (s.protocol || '').toUpperCase(),
-          state: s.role === 'primary' ? (live ? 'live' : 'idle') : 'standby',
-          detail: s.role === 'primary'
-            ? (live ? '1080p50 · 18.4 Mbps · 0 drops' : 'offline')
-            : 'ready · standby',
-        }))
-      : [
-          { role: 'primary', protocol: 'SRT', state: live ? 'live' : 'idle', detail: live ? '1080p50 · 18.4 Mbps · 0 drops' : 'no source configured' },
-        ],
+  const statusBoard = {
+    output: outputAvailable ? `Available · ${packagingLabel(profile)}`
+          : channel.status === 'live' ? 'Starting…' : 'Idle',
+    activeSource: st?.active_source || '—',
+    fallback: st?.fallback_in_use ? 'Engaged' : 'Not engaged',
+    packager: st?.packager_ok ? `Healthy · ${seg}s segments`
+            : channel.status === 'live' ? 'Starting…' : 'Stopped',
+    inputs: (sources.length ? sources : []).map((s: any) => {
+      const ss = sstates[s.role] || sstates[s.rendition_label] || null;
+      const up = ss?.state === 'up';
+      return {
+        role: s.role,
+        protocol: (s.protocol || '').toUpperCase(),
+        state: up ? 'live' : (reporting ? 'down' : 'idle'),
+        detail: up ? (ss?.detail || 'receiving')
+              : reporting ? (ss?.detail || 'no signal')
+              : (s.ingest_url ? 'configured · idle' : 'no source configured'),
+      };
+    }),
   };
 
-  // ---- event log ------------------------------------------------------------
-  const log = buildLog(nowMs, live, dvr, rnd);
+  // event log — real stream_events, newest first; empty when none
+  const evs = await query<any>(
+    `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]);
+  const levelFor = (t: string) =>
+    /down|error|fail|loss/i.test(t) ? 'down'
+    : /warn|drop|spike|degrad/i.test(t) ? 'warn'
+    : /up|start|recover|live|packager/i.test(t) ? 'live' : 'sched';
+  const eventsLog = evs.map((e: any) => {
+    let detail = '';
+    try { detail = typeof e.detail === 'string' ? e.detail : JSON.stringify(e.detail ?? {}); } catch { detail = ''; }
+    if (detail === '{}') detail = '';
+    return { ts: hhmm(new Date(e.ts).getTime()), level: levelFor(String(e.type)), title: String(e.type), detail };
+  });
 
-  return { kind: 'channel', group: group ? { id: group.id, name: group.name } : null, profile, dvr, captions, ladder, sources, viewers, epg, statusBoard: status, log };
-}
+  const log = [...encoderLogTail(channel.id), ...eventsLog];
 
-function packagingLabel(profile: any): string {
-  const p = profile?.packaging;
-  if (p === 'hls') return 'HLS';
-  if (p === 'dash') return 'DASH';
-  return 'HLS + DASH';
-}
-
-function pad(n: number) { return String(n).padStart(2, '0'); }
-function hhmm(ms: number) { const d = new Date(ms); return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`; }
-
-function buildEpg(nowMs: number, rnd: () => number) {
-  const titles = ['Sunrise', 'Morning News', 'Midday Report', 'Afternoon Wrap', 'Drive Time', 'Evening News', 'Prime Feature', 'Late Wrap'];
-  const slotMin = 60;
-  const nowSlot = Math.floor(nowMs / (slotMin * 60 * 1000));
-  const lane: any[] = [];
+  // EPG — real programmes around now; empty when the channel has no schedule
+  const progs = await query<any>(
+    `SELECT id, title, starts_at, ends_at FROM programmes
+       WHERE channel_id = $1 AND ends_at > now() - interval '2 hours' AND starts_at < now() + interval '8 hours'
+       ORDER BY starts_at`, [channel.id]);
   let nowObj: any = null; let nextObj: any = null;
-  for (let i = -2; i <= 5; i++) {
-    const startMs = (nowSlot + i) * slotMin * 60 * 1000;
-    const endMs = startMs + slotMin * 60 * 1000;
-    const name = titles[((nowSlot + i) % titles.length + titles.length) % titles.length];
-    const state = i < 0 ? 'past' : i === 0 ? 'now' : '';
-    const entry: any = { name, start: hhmm(startMs), end: hhmm(endMs), mins: slotMin, state };
-    if (i === 0) {
-      const elapsed = (nowMs - startMs) / (slotMin * 60 * 1000);
-      entry.progress = Math.round(elapsed * 100);
-      nowObj = { ...entry, elapsedMin: Math.floor((nowMs - startMs) / 60000) };
-    }
-    if (i === 1) nextObj = { name, start: hhmm(startMs) };
-    lane.push(entry);
-  }
-  return { now: nowObj, next: nextObj, lane };
-}
+  const lane = progs.map((p: any) => {
+    const s = new Date(p.starts_at).getTime(); const en = new Date(p.ends_at).getTime();
+    const mins = Math.max(1, Math.round((en - s) / 60000));
+    const isNow = nowMs >= s && nowMs < en;
+    const state = en <= nowMs ? 'past' : isNow ? 'now' : '';
+    const entry: any = { name: p.title, start: hhmm(s), end: hhmm(en), mins, state };
+    if (isNow) { entry.progress = Math.round(((nowMs - s) / (en - s)) * 100); nowObj = { ...entry, elapsedMin: Math.floor((nowMs - s) / 60000) }; }
+    return entry;
+  });
+  const nextRow = progs.find((p: any) => new Date(p.starts_at).getTime() > nowMs);
+  if (nextRow) nextObj = { name: nextRow.title, start: hhmm(new Date(nextRow.starts_at).getTime()) };
+  const epg = { now: nowObj, next: nextObj, lane };
 
-function buildLog(nowMs: number, live: boolean, dvr: any, rnd: () => number) {
-  if (!live) {
-    return [
-      { ts: 'Now', level: 'sched', title: 'Channel idle', detail: 'Encoder not running · start to go live' },
-      { ts: 'Earlier', level: 'sched', title: 'Channel created', detail: 'Awaiting first start' },
-    ];
-  }
-  const t = (minsAgo: number) => hhmm(nowMs - minsAgo * 60000);
-  return [
-    { ts: t(4), level: 'live', title: 'Primary source recovered', detail: 'SRT reconnected · failback from backup' },
-    { ts: t(6), level: 'warn', title: 'Failover → backup source', detail: 'Primary RTT spike 480ms · 6 pkt loss/s' },
-    { ts: t(180), level: 'sched', title: 'DVR window rolled', detail: `Sliding ${Math.round(dvr.effective_sec / 60)}m catch-up archive` },
-    { ts: t(320), level: 'warn', title: 'Brief bitrate dip on ingest', detail: 'Recovered in 3s · no output impact' },
-    { ts: 'Yesterday', level: 'live', title: 'Channel started', detail: 'g4dn-host · encoder packed' },
-  ];
+  // viewers — real analytics only; empty until wired/there is live data (no fabrication)
+  const viewers = { current: 0, peak: 0, peakAt: '', trendPct: 0, series: [] as { t: number; v: number }[] };
+
+  return {
+    kind: 'channel', group: group ? { id: group.id, name: group.name } : null, profile, dvr, captions,
+    ladder, sources, viewers, epg, statusBoard, log,
+  };
 }
 
 export { DVR_MAX_SEC };
