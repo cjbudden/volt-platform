@@ -35,7 +35,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   // FFmpeg test generator (real HLS/DASH + live WebVTT); going live reveals it as the
   // public output with playback, subtitles and DVR.
   const [onAir, setOnAir] = useState(false)
-  const sourceUp = !!d?.testStream?.running
+  const sourceUp = d?.status === 'live'
 
   // if the source drops (or is stopped elsewhere), we can't be on air
   useEffect(() => { if (!sourceUp && onAir) setOnAir(false) }, [sourceUp, onAir])
@@ -44,7 +44,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
     if (!d) return
     setBusy(true)
     try {
-      await api.testStreamStart(d.id, { langs: ['en', 'ms', 'zh', 'ta'], dvrSec: d.dvr_mode === 'event_start' ? 0 : d.dvr.effective_sec })
+      await api.startStop(d.id, 'start')
       // give ffmpeg a moment to emit the first segments, then refresh a few times
       for (let i = 0; i < 4; i++) { await new Promise(r => setTimeout(r, 1500)); await load() }
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
@@ -52,7 +52,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   async function dropSource() {
     if (!d) return
     setBusy(true); setOnAir(false)
-    try { await api.testStreamStop(d.id); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+    try { await api.startStop(d.id, 'stop'); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
 
   if (err) return <div className="err" style={{ margin: 20 }}>Couldn’t load channel: {err}</div>
@@ -93,7 +93,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         </button>
         {!sourceUp ? (
           <button className="btn primary" disabled={busy} onClick={sendSource}>
-            {busy ? 'Sending source…' : 'Send test source'}
+            {busy ? 'Sending source…' : 'Send source'}
           </button>
         ) : !onAir ? (
           <>
@@ -197,7 +197,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   return (
     <div className="player">
       <div className="video">
-        {sourceUp ? <HlsVideo src={ts.hls} /> : <div className="grad" />}
+        {sourceUp ? <HlsVideo src={`/origin/${d.id}/master.m3u8`} /> : <div className="grad" />}
         <div className="plabel"><span className="pt" style={{ color: '#a5b4fc' }}>SOURCE · {isIngest ? proto + ' ingest' : sourceUp ? 'test card' : 'raw ingest'}</span></div>
         <div className="badge-live" style={{ background: sourceUp ? 'rgba(74,222,128,.85)' : 'rgba(99,102,241,.85)' }}><span className="d" />{sourceUp ? 'RECEIVING' : proto}</div>
         {sourceUp && ts.producer === 'encoder' && (
@@ -213,7 +213,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
             </div>
           </div>
         )}
-        <div className="ptime">{sourceUp ? (isIngest ? `${srcHost} · repackaged` : 'test pattern · testsrc + tone') : '— no signal —'}</div>
+        <div className="ptime">{sourceUp ? `${srcHost || 'source'} · live` : '— no signal —'}</div>
       </div>
       <div className="pfoot">
         <span className={`dot-s ${sourceUp ? 'live' : 'idle'}`} /> {sourceUp ? (isIngest ? `Ingesting ${srcHost} · repackaging` : 'Test generator · testsrc + tone') : configured ? `Source configured · ${proto} · ${srcHost || 'ingest'}` : 'No source — send one to enable output'}
@@ -280,14 +280,14 @@ function HlsOutput({ d, captionLangs, subOn, setSubOn, subLang, setSubLang }: {
   useEffect(() => {
     let cancelled = false
     const video = videoRef.current
-    if (!video || !ts.hls) return
+    if (!video) return
     async function attach() {
       const Hls = (await import('hls.js')).default
       if (cancelled) return
       if (Hls.isSupported()) {
         const hls = new Hls({ lowLatencyMode: true, backBufferLength: d.dvr.effective_sec, liveSyncDurationCount: 3 })
         hlsRef.current = hls
-        hls.loadSource(originUrl(ts.hls))
+        hls.loadSource(originUrl(`/origin/${d.id}/master.m3u8`))
         hls.attachMedia(video!)
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           setLevels(hls.levels.map((l: any) => ({ height: l.height, bitrate: l.bitrate })))
@@ -299,13 +299,13 @@ function HlsOutput({ d, captionLangs, subOn, setSubOn, subLang, setSubLang }: {
           }
         })
       } else if (video!.canPlayType('application/vnd.apple.mpegurl')) {
-        video!.src = originUrl(ts.hls); video!.muted = true; video!.play().catch(() => {})
+        video!.src = originUrl(`/origin/${d.id}/master.m3u8`); video!.muted = true; video!.play().catch(() => {})
       }
     }
     attach()
     return () => { cancelled = true; try { hlsRef.current?.destroy() } catch {} }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ts.hls])
+  }, [d.id])
 
   // apply rendition selection
   useEffect(() => { if (hlsRef.current) hlsRef.current.currentLevel = level }, [level])
