@@ -23,6 +23,7 @@ export interface ChannelDetail {
   epg: { now: any; next: any; lane: any[] };
   statusBoard: { output: string; activeSource: string; fallback: string; packager: string; inputs: any[] };
   log: { ts: string; level: string; title: string; detail: string }[];
+  degraded?: boolean;
 }
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
@@ -93,12 +94,22 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   const seg = Number(profile?.segment_dur ?? 4).toFixed(1);
   const sstates: Record<string, any> = (st && st.sources && typeof st.sources === 'object') ? st.sources : {};
 
+  // event log — real stream_events, newest first; empty when none
+  const evs = await query<any>(
+    `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]);
+  // degraded/error: newest event indicates a failure while the channel is still "live"
+  const latestEv = evs[0];
+  const degraded = channel.status === 'live' && !outputAvailable &&
+    !!latestEv && /error|stalled|\.down|\.stop/i.test(String(latestEv.type));
+
   const statusBoard = {
     output: outputAvailable ? `Available · ${packagingLabel(profile)}`
+          : degraded ? 'Error · output stopped — see log'
           : channel.status === 'live' ? 'Starting…' : 'Idle',
     activeSource: st?.active_source || '—',
     fallback: st?.fallback_in_use ? 'Engaged' : 'Not engaged',
     packager: st?.packager_ok ? `Healthy · ${seg}s segments`
+            : degraded ? 'Stopped — see log'
             : channel.status === 'live' ? 'Starting…' : 'Stopped',
     inputs: (sources.length ? sources : []).map((s: any) => {
       const ss = sstates[s.role] || sstates[s.rendition_label] || null;
@@ -114,9 +125,6 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     }),
   };
 
-  // event log — real stream_events, newest first; empty when none
-  const evs = await query<any>(
-    `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]);
   const levelFor = (t: string) =>
     /down|error|fail|loss/i.test(t) ? 'down'
     : /warn|drop|spike|degrad/i.test(t) ? 'warn'
@@ -154,7 +162,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
 
   return {
     kind: 'channel', group: group ? { id: group.id, name: group.name } : null, profile, dvr, captions,
-    ladder, sources, viewers, epg, statusBoard, log,
+    ladder, sources, viewers, epg, statusBoard, log, degraded,
   };
 }
 
