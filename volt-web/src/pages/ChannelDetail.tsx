@@ -39,6 +39,8 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
 
   // if the source drops (or is stopped elsewhere), we can't be on air
   useEffect(() => { if (!sourceUp && onAir) setOnAir(false) }, [sourceUp, onAir])
+  // once the channel is live (real encoder producing output), reveal the output preview automatically
+  useEffect(() => { if (sourceUp) setOnAir(true) }, [sourceUp])
 
   async function sendSource() {
     if (!d) return
