@@ -87,9 +87,18 @@ load_file() {
   else PGPASSWORD=volt psql -U volt -h localhost -d volt -v ON_ERROR_STOP=1 -q -f "$1"; fi
 }
 if [ ! -f "$SNAP" ]; then echo "    Snapshot $SNAP not found. Tell Claude."; exit 1; fi
-run_psql -q -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" >/dev/null
-load_file "$SNAP"
-echo "    loaded $(run_psql -tAc 'select count(*) from channels') channels."
+# Persist test data across runs: only load the demo snapshot on a FRESH database
+# (or when RESET_DB=1 is set). If the schema already exists, keep whatever you
+# entered during testing so you can build up real test data build-to-build.
+HAS=$(run_psql -tAc "SELECT to_regclass('public.channels') IS NOT NULL" 2>/dev/null | tr -d '[:space:]')
+if [ "${RESET_DB:-0}" = "1" ] || [ "$HAS" != "t" ]; then
+  [ "${RESET_DB:-0}" = "1" ] && echo "    RESET_DB=1 — reloading the demo snapshot (your data will be replaced)."                              || echo "    fresh database — loading the demo snapshot once..."
+  run_psql -q -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" >/dev/null
+  load_file "$SNAP"
+  echo "    loaded $(run_psql -tAc 'select count(*) from channels') channels."
+else
+  echo "    existing database detected — keeping your data (no reload). Use RESET_DB=1 to reset."
+fi
 
 # the test-stream feature (Start test stream → real HLS playback + live subtitles)
 # needs ffmpeg on PATH; the app still runs without it, just no live playback.
