@@ -4,6 +4,7 @@ import { config } from './config';
 import { errorHandler } from './util/http';
 import { authRouter } from './auth/routes';
 import { channelsRouter } from './modules/channels';
+import { sourcesRouter } from './modules/sources';
 import { groupsRouter } from './modules/groups';
 import { eventsRouter } from './modules/events';
 import { profilesRouter } from './modules/outputProfiles';
@@ -75,6 +76,7 @@ export function createServer() {
 
   app.use('/api/auth', authRouter);
   app.use('/api/channels', channelsRouter);
+  app.use('/api/sources', sourcesRouter);
   app.use('/api/groups', groupsRouter);
   app.use('/api/events', eventsRouter);
   app.use('/api/output-profiles', profilesRouter);
