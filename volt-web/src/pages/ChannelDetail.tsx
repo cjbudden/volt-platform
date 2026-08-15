@@ -32,6 +32,15 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
     try { setD(await api.channel(id)) } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id])
+  // LIVE STATUS: keep the detail payload fresh so gates/output/actions reflect reality
+  // (output flips Starting -> Available, Stop appears, errors surface) instead of
+  // freezing on the first snapshot. Polls every 4s while the page is open; the shared
+  // SSE client will later replace this with push, but polling makes status correct now.
+  useEffect(() => {
+    const iv = setInterval(() => { load() }, 4000)
+    return () => clearInterval(iv)
+    // eslint-disable-next-line
+  }, [id])
   // tick the billing clock once a second while the server is up (metering)
   useEffect(() => {
     if (!d?.billing?.billable) return
@@ -90,8 +99,10 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   const captionLangs = d.captions.targets.length ? d.captions.targets : ['en']
   const billingElapsed = d.billing?.since ? Math.max(0, Math.round((nowMs - d.billing.since) / 1000)) : (d.billing?.elapsedSec || 0)
   const billingEst = d.billing ? Math.round((billingElapsed / 3600) * d.billing.rateUsdPerHour * 100) / 100 : 0
-  // the encoder server is up (live, warming, or erroring-but-not-yet-ended) -> a Stop must always be available
-  const serverUp = sourceUp || !!d.billing?.billable || health?.gates.find(g => g.gate === 'server')?.status === 'healthy'
+  // the encoder server is up (live, warming, or erroring-but-not-yet-ended) -> a Stop must
+  // always be available. A running instance is the authoritative signal.
+  const hasRunningInstance = Array.isArray((d as any).instances) && (d as any).instances.length > 0
+  const serverUp = sourceUp || hasRunningInstance || !!d.billing?.billable || health?.gates.find(g => g.gate === 'server')?.status === 'healthy'
 
   return (
     <>
@@ -581,7 +592,9 @@ function HlsOutput({ d, captionLangs, subOn, setSubOn, subLang, setSubLang }: {
         const end = sk.end(sk.length - 1), start = sk.start(0)
         setWinSec(Math.max(1, Math.round(end - start)))
         const b = Math.max(0, Math.round(end - v.currentTime))
-        setBehind(b); setAtLive(b <= 3)
+        // "LIVE" while within the live-sync window (~one live window). Only when the
+        // user scrubs further back than that do we show DVR catch-up.
+        setBehind(b); setAtLive(b <= 12)
       }
     }
     v.addEventListener('timeupdate', onT)
