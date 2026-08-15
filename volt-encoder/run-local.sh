@@ -16,7 +16,20 @@ if [ "$MODE" = srt ] && ! volt_have_srt; then
 echo "  ffmpeg=$(command -v ffmpeg)  packager=$(command -v packager)"
 rm -rf "$WORK"; mkdir -p "$OUT" "$SRC"; cp "$ENC/player.html" "$WORK/index.html"
 volt_write_job "$MODE" "$SRC" "$WORK/job.json"
-cleanup(){ echo; echo "stopping channel..."; kill -INT "${ENCP:-0}" 2>/dev/null; sleep 1; kill "${SRCP:-0}" "${HTTPD:-0}" 2>/dev/null; wait 2>/dev/null; echo stopped.; }
+cleanup(){
+  echo; echo "stopping channel..."
+  # 1) ask the encoder to shut down gracefully (runs encoder.py's child teardown)
+  kill -INT "${ENCP:-0}" 2>/dev/null
+  for _ in 1 2 3 4 5; do kill -0 "${ENCP:-0}" 2>/dev/null || break; sleep 1; done
+  # 2) hard-stop anything left from THIS run. Every ffmpeg/packager for this run
+  #    references the unique _local_out work dir, so matching on it is safe and
+  #    will not touch unrelated ffmpeg on your machine.
+  pkill -f "run_local_live.py" 2>/dev/null
+  pkill -f "$WORK" 2>/dev/null
+  [ -n "${SRCP:-}" ] && pkill -P "$SRCP" 2>/dev/null   # synth_source ffmpeg child
+  kill "${SRCP:-0}" "${HTTPD:-0}" "${TAILP:-0}" 2>/dev/null
+  wait 2>/dev/null; echo "stopped."
+}
 trap cleanup INT TERM EXIT
 echo "  starting synthetic $MODE contribution source..."
 "$ENC/bin/synth_source.sh" "$SRC" "$MODE" >"$WORK/source.log" 2>&1 & SRCP=$!
@@ -35,4 +48,5 @@ cat <<TXT
   Ctrl+C to stop.
 ==================================================================
 TXT
-tail -n +1 -f "$WORK/encoder.log" & wait "$ENCP"
+tail -n +1 -f "$WORK/encoder.log" & TAILP=$!
+wait "$ENCP"

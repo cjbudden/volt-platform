@@ -192,7 +192,15 @@ for i in $(seq 1 40); do curl -sf localhost:8080/health >/dev/null 2>&1 && break
 curl -sf localhost:8080/health >/dev/null 2>&1 || { echo "    API failed — see volt-app/origin/_control-plane.log"; tail -20 "$ROOT/volt-app/origin/_control-plane.log"; kill $API_PID 2>/dev/null; exit 1; }
 echo "    API up."
 
-cleanup() { echo; echo "Shutting down..."; kill $API_PID 2>/dev/null || true; }
+cleanup() {
+  echo; echo "Shutting down..."
+  kill $API_PID 2>/dev/null || true
+  # kill any encoder + ffmpeg/packager children this run spawned, so nothing orphans.
+  # These reference our unique bin/origin paths, so the match is safe.
+  pkill -f "$ROOT/volt-encoder/bin/encoder.py" 2>/dev/null || true
+  pkill -f "$ROOT/volt-app/origin" 2>/dev/null || true
+  docker ps -q --filter "name=volt-enc-" 2>/dev/null | xargs -r docker rm -f >/dev/null 2>&1 || true
+}
 trap cleanup EXIT INT TERM
 
 cd volt-web
