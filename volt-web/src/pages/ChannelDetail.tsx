@@ -24,11 +24,19 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   const [busy, setBusy] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [qcOpen, setQcOpen] = useState(false)
+  const [confirmStart, setConfirmStart] = useState(false)
+  const [nowMs, setNowMs] = useState(Date.now())
 
   async function load() {
     try { setD(await api.channel(id)) } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id])
+  // tick the billing clock once a second while the server is up (metering)
+  useEffect(() => {
+    if (!d?.billing?.billable) return
+    const iv = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => clearInterval(iv)
+  }, [d?.billing?.billable])
 
   // "On air" (public output) is decoupled from the source, matching the broadcast
   // workflow: you bring the SOURCE up first, confirm it's arriving, and only THEN can
@@ -79,6 +87,8 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   const isEvent = d.dvr_mode === 'event_start'
   const wt = d.profile?.workflow_type
   const captionLangs = d.captions.targets.length ? d.captions.targets : ['en']
+  const billingElapsed = d.billing?.since ? Math.max(0, Math.round((nowMs - d.billing.since) / 1000)) : (d.billing?.elapsedSec || 0)
+  const billingEst = d.billing ? Math.round((billingElapsed / 3600) * d.billing.rateUsdPerHour * 100) / 100 : 0
 
   return (
     <>
@@ -93,6 +103,12 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
             {d.name}
             <span className={`tag type ${wt === 'transcode' ? 'chan' : 'event'}`}>{wt === 'transcode' ? 'TRANSCODE' : 'PACKAGING'}</span>
             <span className={`tag ${stateCls}`}><span className={`dot-s ${stateCls}`} />{stateLabel}</span>
+            {d.billing?.billable && (
+              <span title={`Encoder up (${d.billing.instance}) · indicative ${d.billing.rateUsdPerHour.toFixed(3)}/hr`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 9px', borderRadius: 999, background: 'rgba(251,191,36,.14)', border: '1px solid rgba(251,191,36,.4)', color: '#fbbf24' }}>
+                ● billable · {fmtDur(billingElapsed)} · ~${billingEst.toFixed(2)}
+              </span>
+            )}
           </h1>
           <p>
             {isEvent ? 'Event' : '24/7'} · DVR {isEvent ? 'to event start' : fmtWindow(d.dvr.effective_sec)}
@@ -111,7 +127,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>Settings
         </button>
         {!sourceUp ? (
-          <button className="btn primary" disabled={busy} onClick={sendSource}>
+          <button className="btn primary" disabled={busy} onClick={() => setConfirmStart(true)}>
             {busy ? 'Sending source…' : 'Send source'}
           </button>
         ) : !onAir ? (
@@ -143,8 +159,10 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         </div>
       )}
 
+      <PipelineStrip d={d} onQc={() => setQcOpen(true)} />
+
       <DualPlayers d={d} captionLangs={captionLangs} sourceUp={sourceUp} onAir={onAir}
-        onSendSource={sendSource} onGoLive={() => setOnAir(true)} busy={busy} />
+        onSendSource={() => setConfirmStart(true)} onGoLive={() => setOnAir(true)} busy={busy} />
 
       <EpgStrip d={d} />
 
@@ -161,7 +179,68 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
       )}
 
       {qcOpen && <QcPanel d={d} onClose={() => setQcOpen(false)} onRefresh={load} />}
+
+      {confirmStart && (
+        <StartConfirm d={d} onCancel={() => setConfirmStart(false)}
+          onConfirm={() => { setConfirmStart(false); sendSource() }} />
+      )}
     </>
+  )
+}
+
+/* --------------------------------------------------------- billing helpers */
+function fmtDur(sec: number): string {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60
+  return (h ? `${h}:${String(m).padStart(2, '0')}` : `${m}`) + ':' + String(s).padStart(2, '0')
+}
+
+/* Confirm that starting the encoder begins billing (the server is the meter). */
+function StartConfirm({ d, onCancel, onConfirm }: { d: CD; onCancel: () => void; onConfirm: () => void }) {
+  const b = d.billing
+  return (
+    <div onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 60, display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 'min(460px,94vw)', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
+        <h2 style={{ margin: '0 0 6px' }}>Bring the encoder up?</h2>
+        <p style={{ color: 'var(--muted)', marginTop: 0 }}>
+          This starts the encoder for <b>{d.name}</b> and begins the source ingest. The encoder
+          is the billable unit, so metering starts now and runs until you stop the channel.
+        </p>
+        {b && (
+          <div style={{ margin: '12px 0', padding: '10px 12px', borderRadius: 10, background: 'rgba(251,191,36,.10)', border: '1px solid rgba(251,191,36,.35)', fontSize: 13 }}>
+            <div style={{ color: '#fbbf24', fontWeight: 700 }}>● billing starts now</div>
+            <div style={{ color: 'var(--muted)' }}>{b.instance} · indicative ~${b.rateUsdPerHour.toFixed(3)}/hr <span style={{ color: 'var(--faint)' }}>({b.basis})</span></div>
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+          <button className="btn ghost" onClick={onCancel}>Cancel</button>
+          <button className="btn primary" onClick={onConfirm}>Start encoder</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* Always-visible five-gate pipeline strip: the model as the primary status view. */
+function PipelineStrip({ d, onQc }: { d: CD; onQc: () => void }) {
+  const gates = d.health?.gates || []
+  if (!gates.length) return null
+  return (
+    <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 0 14px', flexWrap: 'wrap' }}>
+      {gates.map((g, i) => (
+        <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 6, flex: '1 1 130px' }}>
+          <div title={g.detail} style={{ flex: 1, border: `1px solid ${GATE_COLOR[g.status]}55`, background: `${GATE_COLOR[g.status]}12`, borderRadius: 9, padding: '7px 10px', minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)' }}>
+              <span className="dot-s" style={{ background: GATE_COLOR[g.status] }} />{g.label}
+              {g.billable && <span style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 9 }}>●</span>}
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 11.5, color: GATE_COLOR[g.status], textTransform: 'uppercase' }}>{g.status}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.detail}</div>
+          </div>
+          {i < gates.length - 1 && <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 12 }}>→</div>}
+        </div>
+      ))}
+      <button className="btn ghost" onClick={onQc} style={{ alignSelf: 'center' }}>Diagnose</button>
+    </div>
   )
 }
 
@@ -198,6 +277,17 @@ function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefr
           <div style={{ margin: '10px 0 16px', padding: '12px 14px', borderRadius: 10, background: 'rgba(248,113,113,.10)', border: '1px solid rgba(248,113,113,.4)' }}>
             <div style={{ fontWeight: 700, color: '#fca5a5' }}>Primary issue — {h.primaryError.label}</div>
             <div style={{ fontSize: 13, color: 'var(--muted)' }}>{h.primaryError.message}</div>
+          </div>
+        )}
+
+        {/* billing window (the server is the meter) */}
+        {d.billing && (
+          <div style={{ margin: '4px 0 14px', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 13 }}>
+            <span><span style={{ color: 'var(--faint)' }}>Billing </span>{d.billing.billable ? <b style={{ color: '#fbbf24' }}>● metering</b> : <b style={{ color: 'var(--muted)' }}>idle (£0)</b>}</span>
+            <span><span style={{ color: 'var(--faint)' }}>This run </span>{fmtDur(d.billing.elapsedSec)}</span>
+            <span><span style={{ color: 'var(--faint)' }}>Instance </span>{d.billing.instance}</span>
+            <span><span style={{ color: 'var(--faint)' }}>Rate </span>~${d.billing.rateUsdPerHour.toFixed(3)}/hr <span style={{ color: 'var(--faint)' }}>(indicative)</span></span>
+            <span><span style={{ color: 'var(--faint)' }}>Est. this run </span>~${d.billing.estRunUsd.toFixed(2)}</span>
           </div>
         )}
 

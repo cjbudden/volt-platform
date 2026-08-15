@@ -36,6 +36,20 @@ export interface Channel {
   geo_mode: 'worldwide' | 'allow' | 'block'; geo_countries: string[]
   input_loss_behavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
   filler_slate_ref?: string | null
+  pipelineState?: 'idle' | 'starting' | 'onair' | 'error' | 'stopped'
+  billable?: boolean
+  serverSince?: number | null
+}
+
+export interface Billing {
+  billable: boolean
+  since: number | null
+  elapsedSec: number
+  instance: string
+  rateUsdPerHour: number
+  estRunUsd: number
+  indicative: true
+  basis: string
 }
 
 export interface ChannelDetail extends Channel {
@@ -55,6 +69,7 @@ export interface ChannelDetail extends Channel {
   statusBoard: { output: string; activeSource: string; fallback: string; packager: string; inputs: any[] }
   log: { ts: string; level: string; title: string; detail: string }[]
   health: PipelineHealth
+  billing: Billing
   testStream: TestStreamStatus
 }
 

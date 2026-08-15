@@ -23,14 +23,39 @@ const CHANNEL_EDITABLE = [
 channelsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const rows = await query(
+    const rows = await query<any>(
       `SELECT c.*, g.name AS group_name
          FROM channels c JOIN groups g ON g.id = c.group_id
         WHERE g.account_id = $1
         ORDER BY c.created_at DESC`,
       [accountId(req)]
     );
-    res.json(rows);
+    // Lightweight pipeline state + billing for the LIST (no per-channel event scan):
+    // reflects the five-gate model at a glance without the full detail build.
+    const ids = rows.map((r) => r.id);
+    const stMap = new Map<string, any>();
+    const sinceMap = new Map<string, number>();
+    if (ids.length) {
+      const sts = await query<any>(
+        `SELECT channel_id, output_available, packager_ok FROM stream_status WHERE channel_id = ANY($1)`, [ids]);
+      for (const s of sts) stMap.set(s.channel_id, s);
+      const insts = await query<any>(
+        `SELECT channel_id, min(launched_at) AS since FROM instances
+          WHERE channel_id = ANY($1) AND terminated_at IS NULL GROUP BY channel_id`, [ids]);
+      for (const i of insts) if (i.since) sinceMap.set(i.channel_id, new Date(i.since).getTime());
+    }
+    const enriched = rows.map((c) => {
+      const st = stMap.get(c.id);
+      const live = c.status === 'live';
+      const billable = live;
+      const serverSince = live ? (sinceMap.get(c.id) ?? null) : null;
+      // state: idle | starting | onair | stopped  (error needs the detail build)
+      const state = !live
+        ? (c.status === 'ended' ? 'stopped' : 'idle')
+        : st?.output_available ? 'onair' : 'starting';
+      return { ...c, pipelineState: state, billable, serverSince };
+    });
+    res.json(enriched);
   })
 );
 

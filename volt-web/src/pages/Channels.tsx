@@ -144,10 +144,23 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
                     : 'source ladder'}
                 </td>
                 <td>
-                  <span className={`tag ${live ? 'live' : 'idle'}`}>
-                    <span className={`dot-s ${live ? 'live' : 'idle'}`} />
-                    {live ? 'Live' : c.status === 'scheduled' ? 'Scheduled' : 'Idle'}
-                  </span>
+                  {(() => {
+                    const ps = c.pipelineState
+                    const map: Record<string, { label: string; cls: string }> = {
+                      onair: { label: 'On air', cls: 'live' },
+                      starting: { label: 'Starting', cls: 'sched' },
+                      error: { label: 'Error', cls: 'down' },
+                      stopped: { label: 'Stopped', cls: 'idle' },
+                      idle: { label: 'Idle', cls: 'idle' },
+                    }
+                    const m = (ps && map[ps]) || (live ? map.onair : c.status === 'scheduled' ? { label: 'Scheduled', cls: 'sched' } : map.idle)
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span className={`tag ${m.cls}`}><span className={`dot-s ${m.cls}`} />{m.label}</span>
+                        {c.billable && <span title="encoder up (billable)" style={{ fontSize: 10, color: '#fbbf24' }}>● billable</span>}
+                      </div>
+                    )
+                  })()}
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{c.recording_retention_days ? `${c.recording_retention_days}d` : '—'}</td>
                 <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>

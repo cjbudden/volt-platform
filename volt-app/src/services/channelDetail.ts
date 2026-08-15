@@ -9,6 +9,7 @@ import { config } from '../config';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { computePipelineHealth, type PipelineHealth } from './pipelineHealth';
+import { recommendInstance, buildBilling, type Billing } from './billing';
 
 const DVR_MAX_SEC = 14400; // 4h cap for 24x7 channels
 
@@ -25,6 +26,7 @@ export interface ChannelDetail {
   statusBoard: { output: string; activeSource: string; fallback: string; packager: string; inputs: any[] };
   log: { ts: string; level: string; title: string; detail: string }[];
   health: PipelineHealth;
+  billing: Billing;
   degraded?: boolean;
 }
 
@@ -121,6 +123,15 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   // not merely 'starting'). This kills the false OUTPUT ERROR during warm-up.
   const degraded = !!health.primaryError;
 
+  // billing: the encoder SERVER is the billable unit. Metering runs while the
+  // channel is live; `since` = when the running encoder task launched.
+  const inst = await one<any>(
+    `SELECT min(launched_at) AS since FROM instances WHERE channel_id = $1 AND terminated_at IS NULL`,
+    [channel.id]);
+  const serverUp = channel.status === 'live';
+  const sinceMs = inst?.since ? new Date(inst.since).getTime() : null;
+  const billing = buildBilling(serverUp, sinceMs, nowMs, recommendInstance(profile?.workflow_type, ladder));
+
   const outGate = health.gates.find((g) => g.gate === 'output')!;
   const encGate = health.gates.find((g) => g.gate === 'encoder')!;
   const statusBoard = {
@@ -186,7 +197,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
 
   return {
     kind: 'channel', group: group ? { id: group.id, name: group.name } : null, profile, dvr, captions,
-    ladder, sources, viewers, epg, statusBoard, log, health, degraded,
+    ladder, sources, viewers, epg, statusBoard, log, health, billing, degraded,
   };
 }
 
