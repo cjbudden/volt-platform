@@ -181,6 +181,13 @@ free_port() {
 }
 free_port 8080
 free_port 5173
+# Reap any orphaned encoder/ffmpeg/packager from a previous run BEFORE starting.
+# If they are still holding the internal bus UDP ports (20000+), the packager cannot
+# bind them and fails with "Could not bind UDP socket, error = 48", so the channel
+# produces no output. These match our unique bin/origin paths, so it is safe.
+pkill -f "$ROOT/volt-encoder/bin/encoder.py" 2>/dev/null || true
+pkill -f "$ROOT/volt-app/origin" 2>/dev/null || true
+if command -v docker >/dev/null 2>&1; then docker ps -q --filter "name=volt-enc-" 2>/dev/null | xargs -r docker rm -f >/dev/null 2>&1 || true; fi
 export DATABASE_URL="$DBURL" JWT_ACCESS_SECRET=dev-access-secret JWT_REFRESH_SECRET=dev-refresh-secret \
        INGEST_TOKEN=dev-ingest PORT=8080 ORCH_LAUNCHER="$ENCODER_MODE" CORS_ORIGIN='*' \
        ENCODER_BIN="$ROOT/volt-encoder/bin" ORIGIN_DIR="$ROOT/volt-app/origin" \

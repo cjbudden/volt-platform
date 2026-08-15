@@ -6,6 +6,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { verifyAccess } from '../auth/jwt';
 import { asyncHandler, notFound, unauthorized, badRequest } from '../util/http';
 import { subscribe, publish } from '../services/statusHub';
+import { orchestrator } from '../services/orchestrator';
 
 /**
  * Live stream status + event log.
@@ -82,6 +83,23 @@ ingestRouter.post(
          VALUES ($1,$2,$3,$4, COALESCE(to_timestamp($5::double precision / 1000.0), now()))`,
         [body.id, e.seq ?? null, e.type, e.detail ?? {}, e.ts_ms ?? null]
       );
+      // The encoder can DIE on its own (e.g. packager crash) without the control
+      // plane knowing. When it reports channel.stop while we still think it's live,
+      // run the real teardown so status stops lying (instances terminated, channel
+      // ended, recordings closed). Guarded on status='live' so a normal operator
+      // stop (which already set 'ended') is not double-processed.
+      if (e.type === 'channel.stop') {
+        const tbl = body.kind === 'channel' ? 'channels' : 'events';
+        const owner = await one<{ status: string }>(`SELECT status FROM ${tbl} WHERE id = $1`, [body.id]);
+        if (owner?.status === 'live') {
+          const reason = String((e.detail as any)?.reason ?? 'stop');
+          try {
+            await orchestrator.stopStream(body.kind, body.id, `encoder-reported: ${reason}`);
+          } catch (err) {
+            console.error('[ingest] encoder-reported stop teardown failed', body.id, err);
+          }
+        }
+      }
     }
 
     if (body.status) {

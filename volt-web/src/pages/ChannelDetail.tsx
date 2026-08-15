@@ -347,15 +347,47 @@ function DualPlayers({ d, captionLangs, sourceUp, onAir, onSendSource, onGoLive,
   const [subOn, setSubOn] = useState(true)
   const [subLang, setSubLang] = useState(captionLangs[0] || 'en')
 
+  const outGate = d.health?.gates.find(g => g.gate === 'output')
+  const outErr = outGate && (outGate.status === 'failed' || outGate.status === 'degraded')
   return (
     <div className="player-grid" style={{ marginBottom: 18 }}>
       {/* SOURCE — shows the real incoming feed once a source is sent */}
       <SourcePlayer d={d} sourceUp={sourceUp} onSendSource={onSendSource} busy={busy} />
 
-      {/* OUTPUT — gated on a working source, then goes live on demand */}
-      {onAir
-        ? <HlsOutput d={d} captionLangs={captionLangs} subOn={subOn} setSubOn={setSubOn} subLang={subLang} setSubLang={setSubLang} />
-        : <IdleOutput sourceUp={sourceUp} onGoLive={onGoLive} />}
+      {/* OUTPUT — an error panel wins over everything (never show a fake LIVE);
+          otherwise the live player when on air, else the idle/go-live panel. */}
+      {outErr
+        ? <OutputError d={d} />
+        : onAir
+          ? <HlsOutput d={d} captionLangs={captionLangs} subOn={subOn} setSubOn={setSubOn} subLang={subLang} setSubLang={setSubLang} />
+          : <IdleOutput sourceUp={sourceUp} onGoLive={onGoLive} />}
+    </div>
+  )
+}
+
+/* Output is failed/degraded: never show a green LIVE. Neutral panel + real reason. */
+function OutputError({ d }: { d: CD }) {
+  const g = d.health?.gates.find(x => x.gate === 'output')
+  const degraded = g?.status === 'degraded'
+  const col = degraded ? '#fbbf24' : '#f87171'
+  return (
+    <div className="player">
+      <div className="video">
+        <div className="grad" style={{ background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' }} />
+        <div className="plabel"><span className="pt" style={{ color: col }}>OUTPUT</span></div>
+        {/* not LIVE: a neutral status badge that matches the real state */}
+        <div className="badge-live" style={{ background: 'rgba(148,163,184,.25)', color: '#e5e7eb' }}><span className="d" style={{ background: col }} />{degraded ? 'DEGRADED' : 'NOT LIVE'}</div>
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
+          <div style={{ maxWidth: 360 }}>
+            <div style={{ fontWeight: 700, color: col, marginBottom: 6 }}>{degraded ? 'Output degraded' : 'Output is not being produced'}</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', wordBreak: 'break-word' }}>{g?.detail || 'the encoder is not delivering output'}</div>
+          </div>
+        </div>
+        <div className="ptime">{degraded ? 'degraded' : 'no output'}</div>
+      </div>
+      <div className="pfoot">
+        <span className="dot-s down" /> {d.health?.primaryError ? `${d.health.primaryError.label}: ${d.health.primaryError.message}` : 'output error'}
+      </div>
     </div>
   )
 }
@@ -390,12 +422,35 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   const isIngest = ts.sourceKind === 'ingest'
   const srcHost = hostOf(ts.sourceUrl || configured?.ingest_url)
   const sendLabel = configured ? `Send source (${proto})` : 'Send test source'
+  // Reflect the pipeline: the source can only be previewed via the encoder output,
+  // so if the input gate failed, or the source is valid but the ENCODER failed, we
+  // must NOT show a green RECEIVING. Show the real error instead.
+  const h = d.health
+  const inGate = h?.gates.find(g => g.gate === 'input')
+  const inputFailed = inGate?.status === 'failed'
+  const encFailed = !!h?.primaryError && (h.primaryError.gate === 'encoder' || h.primaryError.gate === 'output')
+  const srcErrored = inputFailed || (sourceUp && encFailed)
+  const badgeText = inputFailed ? 'SOURCE ERROR' : (sourceUp && encFailed) ? 'ENCODER FAILED' : sourceUp ? 'RECEIVING' : proto
+  const badgeBg = srcErrored ? 'rgba(248,113,113,.85)' : sourceUp ? 'rgba(74,222,128,.85)' : 'rgba(99,102,241,.85)'
+  const canPreview = sourceUp && !srcErrored
   return (
     <div className="player">
       <div className="video">
-        {sourceUp ? <HlsVideo src={`/origin/${d.id}/master.m3u8`} /> : <div className="grad" />}
-        <div className="plabel"><span className="pt" style={{ color: '#a5b4fc' }}>SOURCE · {isIngest ? proto + ' ingest' : sourceUp ? 'test card' : 'raw ingest'}</span></div>
-        <div className="badge-live" style={{ background: sourceUp ? 'rgba(74,222,128,.85)' : 'rgba(99,102,241,.85)' }}><span className="d" />{sourceUp ? 'RECEIVING' : proto}</div>
+        {canPreview ? <HlsVideo src={`/origin/${d.id}/master.m3u8`} /> : <div className="grad" style={srcErrored ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
+        <div className="plabel"><span className="pt" style={{ color: srcErrored ? '#fca5a5' : '#a5b4fc' }}>SOURCE · {isIngest ? proto + ' ingest' : sourceUp ? 'test card' : 'raw ingest'}</span></div>
+        <div className="badge-live" style={{ background: badgeBg }}><span className="d" />{badgeText}</div>
+        {srcErrored && (
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
+            <div style={{ maxWidth: 360 }}>
+              <div style={{ fontWeight: 700, color: '#fca5a5', marginBottom: 6 }}>
+                {inputFailed ? 'Source error' : 'Source is valid, but the encoder has failed'}
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', wordBreak: 'break-word' }}>
+                {inputFailed ? (inGate?.detail || 'no signal') : 'nothing can be previewed until the encoder recovers'}
+              </div>
+            </div>
+          </div>
+        )}
         {!sourceUp && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center' }}>
             <div>
@@ -406,10 +461,10 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
             </div>
           </div>
         )}
-        <div className="ptime">{sourceUp ? `${srcHost || 'source'} · live` : '— no signal —'}</div>
+        <div className="ptime">{srcErrored ? '— error —' : sourceUp ? `${srcHost || 'source'} · live` : '— no signal —'}</div>
       </div>
       <div className="pfoot">
-        <span className={`dot-s ${sourceUp ? 'live' : 'idle'}`} /> {sourceUp ? (isIngest ? `Ingesting ${srcHost} · repackaging` : 'Test generator · testsrc + tone') : configured ? `Source configured · ${proto} · ${srcHost || 'ingest'}` : 'No source — send one to enable output'}
+        <span className={`dot-s ${srcErrored ? 'down' : sourceUp ? 'live' : 'idle'}`} /> {srcErrored ? (inputFailed ? 'Source not arriving' : 'Source OK · encoder failed downstream') : sourceUp ? (isIngest ? `Ingesting ${srcHost} · repackaging` : 'Test generator · testsrc + tone') : configured ? `Source configured · ${proto} · ${srcHost || 'ingest'}` : 'No source — send one to enable output'}
         <select value={0} onChange={() => {}}>
           {d.sources.length ? d.sources.map((s, i) => <option key={s.id} value={i}>Source · {s.role}</option>)
             : <><option>Source · Primary</option><option>Source · Backup</option></>}
@@ -548,7 +603,7 @@ function HlsOutput({ d, captionLangs, subOn, setSubOn, subLang, setSubLang }: {
     <div className="player">
       <div className="video">
         <video ref={videoRef} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
-        <div className="plabel"><span className="pt" style={{ color: atLive ? '#4ade80' : '#fbbf24' }}>OUTPUT · {atLive ? 'as delivered' : 'DVR catch-up'}</span></div>
+        <div className="plabel"><span className="pt" style={{ color: atLive ? '#4ade80' : '#fbbf24' }}>OUTPUT{atLive ? '' : ' · DVR catch-up'}</span></div>
         <div className="badge-live" style={atLive ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{atLive ? 'LIVE' : 'DVR'}</div>
         <div className="bug"><span className="lg">{BOLT}</span>{d.name.toUpperCase()}</div>
         {subOn && cue && (
