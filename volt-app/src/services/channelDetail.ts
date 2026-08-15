@@ -19,6 +19,7 @@ export interface ChannelDetail {
   profile: any | null;
   dvr: { effective_sec: number; max_sec: number; mode: string; source: 'channel' | 'profile'; capped: boolean };
   captions: { enabled: boolean; targets: string[]; source_lang: string };
+  epgEnabled: boolean;
   ladder: { height: number; bitrate_kbps: number }[];
   sources: any[];
   viewers: { current: number; peak: number; peakAt: string; trendPct: number; series: { t: number; v: number }[] };
@@ -197,6 +198,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
 
   return {
     kind: 'channel', group: group ? { id: group.id, name: group.name } : null, profile, dvr, captions,
+    epgEnabled: channel.epg_enabled !== false,
     ladder, sources, viewers, epg, statusBoard, log, health, billing, degraded,
   };
 }

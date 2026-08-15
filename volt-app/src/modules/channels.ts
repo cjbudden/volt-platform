@@ -14,7 +14,7 @@ channelsRouter.use(requireAuth);
 
 const CHANNEL_EDITABLE = [
   'name', 'enabled', 'recording_retention_days', 'schema_id', 'metadata',
-  'dvr_window_sec', 'dvr_mode', 'geo_mode', 'geo_countries',
+  'dvr_window_sec', 'dvr_mode', 'geo_mode', 'geo_countries', 'epg_enabled',
   'output_ladder', 'input_failover_enabled', 'auto_failback', 'input_loss_behavior',
   'filler_slate_ref', 'filler_asset_id', 'fallback_transcode',
 ];
@@ -178,6 +178,8 @@ const editSchema = z.object({
   // source geo rules (edge-evaluated)
   geoMode: z.enum(['worldwide', 'allow', 'block']).optional(),
   geoCountries: z.array(z.string().length(2)).optional(),
+  // show/hide the programme guide (EPG) panel for this channel
+  epgEnabled: z.boolean().optional(),
   // sources (primary/backup ingest, per-rendition for package) — replaces inputs when provided
   sources: z.array(SOURCE).optional(),
   // output ladder (transcode rungs; package mirror)
@@ -212,6 +214,7 @@ const editChannel = asyncHandler(async (req, res) => {
   if (has('dvrMode')) patch.dvr_mode = body.dvrMode;
   if (has('geoMode')) patch.geo_mode = body.geoMode;
   if (has('geoCountries')) patch.geo_countries = body.geoCountries ?? [];
+  if (has('epgEnabled')) patch.epg_enabled = body.epgEnabled;
   if (has('outputLadder')) patch.output_ladder = body.outputLadder
     ? body.outputLadder.map((r) => ({ height: r.height, bitrate_kbps: r.bitrateKbps })) : null;
   if (has('inputFailoverEnabled')) patch.input_failover_enabled = body.inputFailoverEnabled;

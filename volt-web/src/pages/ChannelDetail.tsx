@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, originUrl, thumbUrl, type ChannelDetail as CD, type ChannelSettingsPatch } from '../api'
+import { navigate } from '../router'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 
@@ -164,7 +165,9 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
       <DualPlayers d={d} captionLangs={captionLangs} sourceUp={sourceUp} onAir={onAir}
         onSendSource={() => setConfirmStart(true)} onGoLive={() => setOnAir(true)} busy={busy} />
 
-      <EpgStrip d={d} />
+      <EpgStrip d={d}
+        onAddEpg={() => navigate('events')}
+        onHideEpg={async () => { try { await api.updateChannel(d.id, { epgEnabled: false }); await load() } catch (e: any) { setErr(e.message) } }} />
 
       <ViewersCard d={d} live={live} />
 
@@ -657,8 +660,29 @@ function HlsOutput({ d, captionLangs, subOn, setSubOn, subLang, setSubLang }: {
 }
 
 /* --------------------------------------------------------------------- EPG */
-function EpgStrip({ d }: { d: CD }) {
+function EpgStrip({ d, onAddEpg, onHideEpg }: { d: CD; onAddEpg: () => void; onHideEpg: () => void }) {
+  // Hidden entirely when the channel has the guide turned off (Settings).
+  if (d.epgEnabled === false) return null
+
   const now = d.epg.now
+  const hasEpg = (d.epg.lane?.length ?? 0) > 0
+
+  // No programmes: don't show a dead "ON NOW —" strip. Offer a call to action to
+  // add a guide, or to hide the panel for this channel.
+  if (!hasEpg) {
+    return (
+      <div className="card" style={{ marginBottom: 18, display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px' }}>
+        <span className="tag idle"><span className="dot-s idle" />NO EPG</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600 }}>No programme guide for this channel</div>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Add programmes to show now/next and a schedule, or hide this panel.</div>
+        </div>
+        <button className="btn primary" onClick={onAddEpg}>Add EPG</button>
+        <button className="btn ghost" onClick={onHideEpg}>Hide</button>
+      </div>
+    )
+  }
+
   return (
     <div className="card" style={{ marginBottom: 18 }}>
       <div className="epg-head">
@@ -787,6 +811,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   // geo
   const [geoMode, setGeoMode] = useState(d.geo_mode)
   const [geoCountries, setGeoCountries] = useState(d.geo_countries.join(', '))
+  // programme guide (EPG) panel visibility
+  const [epgOn, setEpgOn] = useState(d.epgEnabled !== false)
   // subtitles
   const [capOn, setCapOn] = useState(d.captions.enabled)
   const [capLangs, setCapLangs] = useState<string[]>(d.captions.targets.length ? d.captions.targets : ['en'])
@@ -816,6 +842,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     if (primary.url.trim()) sources.push({ role: 'primary', protocol: primary.protocol, ingestUrl: primary.url.trim(), streamKey: primary.streamKey?.trim() || undefined })
     if (backup.url.trim()) sources.push({ role: 'backup', protocol: backup.protocol, ingestUrl: backup.url.trim(), streamKey: backup.streamKey?.trim() || undefined })
     if (sources.length) patch.sources = sources
+    // programme guide panel
+    if (epgOn !== (d.epgEnabled !== false)) patch.epgEnabled = epgOn
     // captions
     patch.captions = { enabled: capOn, targets: capOn ? capLangs : [] }
     // filler on loss
@@ -893,6 +921,12 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           {geoMode !== 'worldwide' && (
             <div className="field"><label>Countries (ISO-2, comma-separated)</label><input className="inp" value={geoCountries} onChange={e => setGeoCountries(e.target.value)} placeholder="MY, SG, ID" /></div>
           )}
+
+          <div style={SEC}>Programme guide (EPG)</div>
+          <div className="toggle-row">
+            <div><div className="tt">Show programme guide panel</div><div className="td">Off hides the EPG / now-next panel for this channel.</div></div>
+            <div className={`sw ${epgOn ? '' : 'off'}`} onClick={() => setEpgOn(v => !v)}><i /></div>
+          </div>
 
           <div style={SEC}>Subtitles</div>
           <div className="toggle-row">

@@ -5,8 +5,13 @@ import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { verifyAccess } from '../auth/jwt';
 import { asyncHandler, notFound, unauthorized, badRequest } from '../util/http';
-import { subscribe, publish } from '../services/statusHub';
+import { subscribe, publish, subscriberCount } from '../services/statusHub';
 import { orchestrator } from '../services/orchestrator';
+
+// Guardrail: one SSE connection per admin VIEWER (fanned out by tenant), NOT per
+// channel — so channel count never multiplies sockets. This hard cap protects the
+// process from runaway/leaked connections regardless.
+const MAX_SSE_CLIENTS = Number(process.env.MAX_SSE_CLIENTS ?? 2000);
 
 /**
  * Live stream status + event log.
@@ -182,6 +187,12 @@ statusRouter.get(
       acct = verifyAccess(token).account_id;
     } catch {
       throw unauthorized('Invalid token');
+    }
+
+    // refuse new streams past the cap rather than exhaust memory/FDs
+    if (subscriberCount() >= MAX_SSE_CLIENTS) {
+      res.status(503).json({ error: 'Too many live connections; retry shortly' });
+      return;
     }
 
     res.writeHead(200, {

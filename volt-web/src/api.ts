@@ -62,6 +62,7 @@ export interface ChannelDetail extends Channel {
   } | null
   dvr: { effective_sec: number; max_sec: number; mode: string; source: 'channel' | 'profile'; capped: boolean }
   captions: { enabled: boolean; targets: string[]; source_lang: string }
+  epgEnabled: boolean
   ladder: { height: number; bitrate_kbps: number }[]
   sources: { id: string; role: string; protocol: string; ingest_url: string | null; status: string }[]
   viewers: { current: number; peak: number; peakAt: string; trendPct: number; series: { t: number; v: number }[] }
@@ -111,6 +112,7 @@ export interface ChannelSettingsPatch {
   dvrMode?: 'sliding' | 'event_start'
   geoMode?: 'worldwide' | 'allow' | 'block'
   geoCountries?: string[]
+  epgEnabled?: boolean
   sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string }[]
   captions?: { enabled?: boolean; sourceLang?: string; targets?: string[] }
   inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
