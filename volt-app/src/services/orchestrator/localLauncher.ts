@@ -18,19 +18,31 @@ import { existsSync, mkdirSync, rmSync, readdirSync, writeFileSync, openSync } f
 import { join, resolve } from 'node:path';
 import { config } from '../../config';
 import type { TaskLauncher, LaunchResult } from './launcher';
+import { reserveUdpBase, releaseUdpBase } from './encoderPorts';
 
 interface Proc {
   taskArn: string;
   child: ChildProcess;
   kind: 'encoder' | 'thumbnailer' | 'captions';
   streamId?: string;
+  udpBase?: number;   // reserved bus-port block, released on stop
 }
 
-const PORT_STEP = 100; // each stream reserves a block (≤8 renditions) so ports never collide
+/**
+ * Kill a child AND its whole process group (ffmpeg + Shaka packager are its
+ * children). The child is spawned detached (its own group leader), so signalling
+ * -pid reaps the entire tree and nothing orphans to hold the bus ports. Falls
+ * back to a plain child kill if the group signal is unavailable.
+ */
+function killTree(child: ChildProcess, sig: NodeJS.Signals): void {
+  const pid = child.pid;
+  if (pid == null) return;
+  try { process.kill(-pid, sig); }
+  catch { try { child.kill(sig); } catch { /* ignore */ } }
+}
 
 export class LocalTaskLauncher implements TaskLauncher {
   private procs = new Map<string, Proc>();
-  private portBase = new Map<string, number>(); // streamId -> UDP base port
   private n = 0;
 
   private originFor(streamId: string) {
@@ -48,16 +60,6 @@ export class LocalTaskLauncher implements TaskLauncher {
     return existsSync(join(config.testStream.encoderBin, 'encoder.py'));
   }
 
-  // ---- port allocation -----------------------------------------------------
-  private allocPort(streamId: string): number {
-    if (this.portBase.has(streamId)) return this.portBase.get(streamId)!;
-    const used = new Set(this.portBase.values());
-    let base = 20000;
-    while (used.has(base)) base += PORT_STEP;
-    this.portBase.set(streamId, base);
-    return base;
-  }
-
   // ---- encoder -------------------------------------------------------------
   async launchEncoder(streamId: string, job: Record<string, any>): Promise<LaunchResult> {
     const out = this.originFor(streamId);
@@ -67,7 +69,9 @@ export class LocalTaskLauncher implements TaskLauncher {
 
     // Inject local-storage mode: write CMAF to the origin dir, skip the S3 uploader.
     const localJob = { ...job, output: { mode: 'local', dir: out } };
-    const port = this.allocPort(streamId);
+    // PROBE for a free UDP bus block (never reuse a busy port -> no EADDRINUSE on
+    // restart, even if a previous run's ffmpeg/packager is still dying).
+    const udpBase = await reserveUdpBase(8);
     const taskArn = `local:encoder:${streamId}:${++this.n}`;
 
     const logFd = openSync(join(out, 'encoder.log'), 'a');
@@ -77,18 +81,18 @@ export class LocalTaskLauncher implements TaskLauncher {
         ...process.env,
         JOB_CONFIG_JSON: JSON.stringify(localJob),
         WORK_DIR: out,
-        UDP_BASE_PORT: String(port),
+        UDP_BASE_PORT: String(udpBase),
       },
       stdio: ['ignore', logFd, logFd],
-      detached: false,
+      detached: true,   // own process group so we can reap ffmpeg + packager together
     });
-    this.procs.set(taskArn, { taskArn, child, kind: 'encoder', streamId });
+    this.procs.set(taskArn, { taskArn, child, kind: 'encoder', streamId, udpBase });
     child.on('exit', (code) => {
       this.procs.delete(taskArn);
-      this.portBase.delete(streamId);
-      console.log(`[local-launcher] encoder ${streamId} exited rc=${code}`);
+      releaseUdpBase(udpBase);
+      console.log(`[local-launcher] encoder ${streamId} exited rc=${code} (udpBase ${udpBase} released)`);
     });
-    console.log(`[local-launcher] encoder ${streamId} pid=${child.pid} out=${out} udpBase=${port}`);
+    console.log(`[local-launcher] encoder ${streamId} pid=${child.pid} out=${out} udpBase=${udpBase}`);
     return { taskArn, lifecycle: 'on_demand' };
   }
 
@@ -197,19 +201,23 @@ export class LocalTaskLauncher implements TaskLauncher {
     const p = this.procs.get(taskArn);
     if (!p) return; // already gone (thumbnailer that finished, or an unknown arn)
     console.log(`[local-launcher] stop ${taskArn} (${reason})`);
-    try { p.child.kill('SIGTERM'); } catch { /* ignore */ }
-    // hard-kill after a grace period if it ignores SIGTERM
     const child = p.child;
-    setTimeout(() => { try { if (child.exitCode === null) child.kill('SIGKILL'); } catch { /* ignore */ } }, 8000).unref?.();
-    if (p.streamId) this.portBase.delete(p.streamId);
+    // graceful: SIGTERM the whole group so the encoder runs its own teardown and
+    // ffmpeg + packager go down with it (no orphans holding the bus ports).
+    killTree(child, 'SIGTERM');
+    // hard-kill the group after a grace period if it ignores SIGTERM
+    setTimeout(() => { if (child.exitCode === null) killTree(child, 'SIGKILL'); }, 8000).unref?.();
+    if (p.udpBase != null) releaseUdpBase(p.udpBase);
     this.procs.delete(taskArn);
   }
 
-  /** Force-kill every tracked child (used on control-plane shutdown). */
+  /** Force-kill every tracked process TREE (used on control-plane shutdown). */
   killAll(): void {
-    for (const p of this.procs.values()) { try { p.child.kill('SIGKILL'); } catch { /* ignore */ } }
+    for (const p of this.procs.values()) {
+      killTree(p.child, 'SIGKILL');
+      if (p.udpBase != null) releaseUdpBase(p.udpBase);
+    }
     this.procs.clear();
-    this.portBase.clear();
   }
 }
 
