@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, originUrl, thumbUrl, type ChannelDetail as CD, type ChannelSettingsPatch } from '../api'
 import { navigate } from '../router'
+import { subscribeLive } from '../liveStatus'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 
@@ -32,13 +33,15 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
     try { setD(await api.channel(id)) } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id])
-  // LIVE STATUS: keep the detail payload fresh so gates/output/actions reflect reality
-  // (output flips Starting -> Available, Stop appears, errors surface) instead of
-  // freezing on the first snapshot. Polls every 4s while the page is open; the shared
-  // SSE client will later replace this with push, but polling makes status correct now.
+  // LIVE STATUS via SSE (production path): the shared client pushes a change for this
+  // channel (or a resync on (re)connect); we refetch the detail so gates/output/actions
+  // reflect reality (Starting -> Available, Stop appears, errors surface). One socket
+  // for the whole app, debounced refetch. No polling.
   useEffect(() => {
-    const iv = setInterval(() => { load() }, 4000)
-    return () => clearInterval(iv)
+    let t: ReturnType<typeof setTimeout> | null = null
+    const refetch = () => { if (t) return; t = setTimeout(() => { t = null; load() }, 350) }
+    const unsub = subscribeLive(`channel:${id}`, refetch)
+    return () => { if (t) clearTimeout(t); unsub() }
     // eslint-disable-next-line
   }, [id])
   // tick the billing clock once a second while the server is up (metering)

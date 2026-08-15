@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, thumbUrl, type Group } from '../api'
+import { subscribeLive } from '../liveStatus'
 import { useProtocols, protoOf, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 
@@ -17,6 +18,13 @@ export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
     setGroups(gs)
   }
   useEffect(() => { load() }, [])
+  // live: refresh the list on any stream status/event change (one shared SSE socket)
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | null = null
+    const refetch = () => { if (t) return; t = setTimeout(() => { t = null; load() }, 500) }
+    const unsub = subscribeLive('*', refetch)
+    return () => { if (t) clearTimeout(t); unsub() }
+  }, [])
 
   const shown = useMemo(() => {
     if (!channels) return channels

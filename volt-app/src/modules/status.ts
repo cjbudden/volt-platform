@@ -88,6 +88,9 @@ ingestRouter.post(
          VALUES ($1,$2,$3,$4, COALESCE(to_timestamp($5::double precision / 1000.0), now()))`,
         [body.id, e.seq ?? null, e.type, e.detail ?? {}, e.ts_ms ?? null]
       );
+      // push every event to live admins too (not just status snapshots), so the UI
+      // refreshes on channel.start/stop, source.up/down, input.error, output.stalled…
+      publish(acct, 'event', { kind: body.kind, id: body.id, type: e.type });
       // The encoder can DIE on its own (e.g. packager crash) without the control
       // plane knowing. When it reports channel.stop while we still think it's live,
       // run the real teardown so status stops lying (instances terminated, channel
