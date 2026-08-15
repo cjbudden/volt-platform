@@ -10,6 +10,9 @@ const app = createServer();
 // is safe to re-run on every boot and covers both fresh and long-lived dev DBs.
 async function ensureSchema(): Promise<void> {
   await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS epg_enabled BOOLEAN NOT NULL DEFAULT true`);
+  // output retention as SECONDS (any unit from the UI: minutes..months). The coarse
+  // recordings sweep still uses recording_retention_days, kept derived in sync.
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS recording_retention_sec BIGINT`);
 }
 
 const server = app.listen(config.port, () => {

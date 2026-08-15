@@ -446,7 +446,6 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   const configured = d.sources.find(s => s.role === 'primary' && s.ingest_url) || d.sources.find(s => s.ingest_url)
   const proto = (configured?.protocol || d.sources[0]?.protocol || 'SRT').toUpperCase()
   const ts = d.testStream
-  const isIngest = ts.sourceKind === 'ingest'
   const srcHost = hostOf(ts.sourceUrl || configured?.ingest_url)
   const sendLabel = configured ? `Send source (${proto})` : 'Send test source'
   // Reflect the pipeline: the source can only be previewed via the encoder output,
@@ -464,7 +463,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
     <div className="player">
       <div className="video">
         {canPreview ? <HlsVideo src={`/origin/${d.id}/master.m3u8`} /> : <div className="grad" style={srcErrored ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
-        <div className="plabel"><span className="pt" style={{ color: srcErrored ? '#fca5a5' : '#a5b4fc' }}>SOURCE · {isIngest ? proto + ' ingest' : sourceUp ? 'test card' : 'raw ingest'}</span></div>
+        <div className="plabel"><span className="pt" style={{ color: srcErrored ? '#fca5a5' : '#a5b4fc' }}>SOURCE · {proto} ingest</span></div>
         <div className="badge-live" style={{ background: badgeBg }}><span className="d" />{badgeText}</div>
         {srcErrored && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
@@ -491,7 +490,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
         <div className="ptime">{srcErrored ? '— error —' : sourceUp ? `${srcHost || 'source'} · live` : '— no signal —'}</div>
       </div>
       <div className="pfoot">
-        <span className={`dot-s ${srcErrored ? 'down' : sourceUp ? 'live' : 'idle'}`} /> {srcErrored ? (inputFailed ? 'Source not arriving' : 'Source OK · encoder failed downstream') : sourceUp ? (isIngest ? `Ingesting ${srcHost} · repackaging` : 'Test generator · testsrc + tone') : configured ? `Source configured · ${proto} · ${srcHost || 'ingest'}` : 'No source — send one to enable output'}
+        <span className={`dot-s ${srcErrored ? 'down' : sourceUp ? 'live' : 'idle'}`} /> {srcErrored ? (inputFailed ? 'Source not arriving' : 'Source OK · encoder failed downstream') : sourceUp ? `Ingesting ${srcHost || proto} · repackaging` : configured ? `Source configured · ${proto} · ${srcHost || 'ingest'}` : 'No source — send one to enable output'}
         <select value={0} onChange={() => {}}>
           {d.sources.length ? d.sources.map((s, i) => <option key={s.id} value={i}>Source · {s.role}</option>)
             : <><option>Source · Primary</option><option>Source · Backup</option></>}
@@ -822,10 +821,28 @@ function EventLog({ d }: { d: CD }) {
   )
 }
 
+/* -------------------------------------------------------- retention units */
+type RetUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
+const RET_UNIT_SEC: Record<RetUnit, number> = { minutes: 60, hours: 3600, days: 86400, weeks: 604800, months: 2592000 }
+/** Seconds -> {number, unit} picking the largest whole unit (minutes and up). */
+function splitDuration(sec: number | null): { n: string; unit: RetUnit } {
+  if (sec == null || sec <= 0) return { n: '', unit: 'days' }
+  const order: RetUnit[] = ['months', 'weeks', 'days', 'hours', 'minutes']
+  for (const u of order) { const s = RET_UNIT_SEC[u]; if (sec % s === 0 && sec >= s) return { n: String(sec / s), unit: u } }
+  return { n: String(Math.max(1, Math.round(sec / 60))), unit: 'minutes' }
+}
+
 /* ------------------------------------------------------------ settings drawer */
 function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(d.name)
-  const [retention, setRetention] = useState<string>(d.recording_retention_days != null ? String(d.recording_retention_days) : '')
+  // retention as number + unit dropdown (minutes..months). Seed from seconds if set,
+  // else from the legacy days field. Blank number = keep forever.
+  const initRetSec = (d as any).recording_retention_sec != null
+    ? Number((d as any).recording_retention_sec)
+    : (d.recording_retention_days != null ? d.recording_retention_days * 86400 : null)
+  const initRet = splitDuration(initRetSec)
+  const [retNum, setRetNum] = useState<string>(initRet.n)
+  const [retUnit, setRetUnit] = useState<RetUnit>(initRet.unit)
   // DVR
   const [dvrMode, setDvrMode] = useState<'sliding' | 'event_start'>(d.dvr_mode)
   const [dvrMin, setDvrMin] = useState<string>(String(Math.round((d.dvr_window_sec ?? d.dvr.effective_sec) / 60)))
@@ -860,10 +877,12 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     setErr('')
     const patch: ChannelSettingsPatch = { version: d.version }
     if (name.trim() && name.trim() !== d.name) patch.name = name.trim()
-    const retNum = retention ? Number(retention) : null
-    if (retNum !== d.recording_retention_days) patch.recordingRetentionDays = retNum
     patch.dvrMode = dvrMode
     if (dvrMode === 'sliding') patch.dvrWindowSec = Math.max(30, dvrMinNum * 60)
+    // retention: number × unit -> seconds; never below the DVR window while DVR is on
+    let retSec = retNum ? Number(retNum) * RET_UNIT_SEC[retUnit] : null
+    if (retSec != null && dvrMode === 'sliding') retSec = Math.max(retSec, dvrMinNum * 60)
+    if (retSec !== initRetSec) patch.recordingRetentionSec = retSec
     patch.geoMode = geoMode
     if (geoMode !== 'worldwide') patch.geoCountries = geoCountries.split(',').map(s => s.trim().toUpperCase()).filter(s => s.length === 2)
     else patch.geoCountries = []
@@ -1000,7 +1019,23 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           )}
 
           <div style={SEC}>Recording</div>
-          <div className="field"><label>Retention (days) <span style={{ color: 'var(--faint)' }}>— blank = keep forever</span></label><input className="inp" value={retention} onChange={e => setRetention(e.target.value.replace(/[^0-9]/g, ''))} /></div>
+          <div className="field">
+            <label>Retention <span style={{ color: 'var(--faint)' }}>— blank number = keep forever</span></label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input className="inp" style={{ width: 110 }} inputMode="numeric" placeholder="keep forever"
+                value={retNum} onChange={e => setRetNum(e.target.value.replace(/[^0-9]/g, ''))} />
+              <select className="inp" value={retUnit} onChange={e => setRetUnit(e.target.value as RetUnit)}>
+                <option value="minutes">minutes</option>
+                <option value="hours">hours</option>
+                <option value="days">days</option>
+                <option value="weeks">weeks</option>
+                <option value="months">months</option>
+              </select>
+            </div>
+            {dvrMode === 'sliding' && retNum && Number(retNum) * RET_UNIT_SEC[retUnit] < dvrMinNum * 60 && (
+              <div className="td" style={{ color: 'var(--warn)', marginTop: 6 }}>Will be raised to the DVR window ({fmtWindow(dvrMinNum * 60)}) — retention can’t be shorter than DVR.</div>
+            )}
+          </div>
 
           {err && <div className="err">{err}</div>}
         </div>

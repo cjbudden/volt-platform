@@ -13,7 +13,7 @@ export const channelsRouter = Router();
 channelsRouter.use(requireAuth);
 
 const CHANNEL_EDITABLE = [
-  'name', 'enabled', 'recording_retention_days', 'schema_id', 'metadata',
+  'name', 'enabled', 'recording_retention_days', 'recording_retention_sec', 'schema_id', 'metadata',
   'dvr_window_sec', 'dvr_mode', 'geo_mode', 'geo_countries', 'epg_enabled',
   'output_ladder', 'input_failover_enabled', 'auto_failback', 'input_loss_behavior',
   'filler_slate_ref', 'filler_asset_id', 'fallback_transcode',
@@ -102,7 +102,7 @@ const createSchema = z.object({
   purchasingMode: z.enum(['on_demand', 'reserved', 'spot_fallback']).default('reserved'),
   resilienceTier: z.enum(['standard', 'resilient_input', 'full_redundancy']).default('standard'),
   recordingRetentionDays: z.number().int().positive().nullable().optional(), // retention rule
-  dvrWindowSec: z.number().int().min(30).max(DVR_MAX_SEC).nullable().optional(), // ≤4h for 24x7
+  dvrWindowSec: z.number().int().min(30).max(DVR_MAX_SEC).nullable().optional().default(3600), // DVR on, default 1h for 24x7 (≤4h)
   dvrMode: z.enum(['sliding', 'event_start']).default('sliding'),
   // NEW — source + ladder + fallback captured at setup
   outputLadder: z.array(RUNG).optional(),  // transcode: rungs to encode; package: mirror of inputs
@@ -180,6 +180,8 @@ const editSchema = z.object({
   geoCountries: z.array(z.string().length(2)).optional(),
   // show/hide the programme guide (EPG) panel for this channel
   epgEnabled: z.boolean().optional(),
+  // output retention as seconds (UI picks a number + unit minutes..months). null = keep forever.
+  recordingRetentionSec: z.number().int().positive().nullable().optional(),
   // sources (primary/backup ingest, per-rendition for package) — replaces inputs when provided
   sources: z.array(SOURCE).optional(),
   // output ladder (transcode rungs; package mirror)
@@ -210,6 +212,16 @@ const editChannel = asyncHandler(async (req, res) => {
   if (has('name')) patch.name = body.name;
   if (has('enabled')) patch.enabled = body.enabled;
   if (has('recordingRetentionDays')) patch.recording_retention_days = body.recordingRetentionDays ?? null;
+  if (has('recordingRetentionSec')) {
+    let sec = body.recordingRetentionSec ?? null;
+    // DVR floor: retention can never be shorter than the DVR window when DVR is on.
+    const dvrOn = (has('dvrMode') ? body.dvrMode : current.dvr_mode) !== 'event_start' ? true : true; // DVR always has a window
+    const dvrWin = (has('dvrWindowSec') ? body.dvrWindowSec : current.dvr_window_sec) ?? null;
+    if (sec != null && dvrOn && dvrWin && sec < dvrWin) sec = dvrWin;
+    patch.recording_retention_sec = sec;
+    // keep the coarse day-based sweep field in sync (>=1 day) so recordings still expire
+    patch.recording_retention_days = sec == null ? null : Math.max(1, Math.ceil(sec / 86400));
+  }
   if (has('dvrWindowSec')) patch.dvr_window_sec = body.dvrWindowSec ?? null;
   if (has('dvrMode')) patch.dvr_mode = body.dvrMode;
   if (has('geoMode')) patch.geo_mode = body.geoMode;
