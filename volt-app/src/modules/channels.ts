@@ -350,7 +350,7 @@ channelsRouter.post(
     );
     if (!owned) throw notFound('Channel not found');
     if (req.params.action === 'start') await orchestrator.startStream('channel', req.params.id);
-    else await orchestrator.stopStream('channel', req.params.id);
+    else await orchestrator.stopStream('channel', req.params.id, `api:operator (user ${accountId(req)})`);
     const row = await one('SELECT * FROM channels WHERE id = $1', [req.params.id]);
     res.json(row);
   })

@@ -191,7 +191,7 @@ eventsRouter.post(
     );
     if (!owned) throw notFound('Event not found');
     if (req.params.action === 'start') await orchestrator.startStream('event', req.params.id);
-    else await orchestrator.stopStream('event', req.params.id);
+    else await orchestrator.stopStream('event', req.params.id, `api:operator (user ${accountId(req)})`);
     const row = await one('SELECT * FROM events WHERE id = $1', [req.params.id]);
     res.json(row);
   })

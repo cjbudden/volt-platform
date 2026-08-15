@@ -8,6 +8,7 @@ import { one, query } from '../db';
 import { config } from '../config';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { computePipelineHealth, type PipelineHealth } from './pipelineHealth';
 
 const DVR_MAX_SEC = 14400; // 4h cap for 24x7 channels
 
@@ -23,6 +24,7 @@ export interface ChannelDetail {
   epg: { now: any; next: any; lane: any[] };
   statusBoard: { output: string; activeSource: string; fallback: string; packager: string; inputs: any[] };
   log: { ts: string; level: string; title: string; detail: string }[];
+  health: PipelineHealth;
   degraded?: boolean;
 }
 
@@ -97,19 +99,41 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   // event log — real stream_events, newest first; empty when none
   const evs = await query<any>(
     `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]);
-  // degraded/error: newest event indicates a failure while the channel is still "live"
-  const latestEv = evs[0];
-  const degraded = channel.status === 'live' && !outputAvailable &&
-    !!latestEv && /error|stalled|\.down|\.stop/i.test(String(latestEv.type));
 
+  // real encoder-log error lines (newest-first), shared by the log view + health model
+  const encTail = encoderLogTail(channel.id);
+  const logTailErrors = encTail
+    .filter((l) => l.level === 'down' || l.level === 'warn')
+    .map((l) => l.detail)
+    .reverse(); // encTail is oldest→newest; health wants newest-first
+
+  // FIVE-GATE HEALTH (server → input → encoder → output → public): the single
+  // source of truth for the badge, the primary error banner, and the QC page.
+  const health = computePipelineHealth({
+    ownerStatus: channel.status,
+    st,
+    events: evs,
+    logTailErrors,
+    hasPrimarySource: sources.some((s: any) => s.role === 'primary' && s.ingest_url) || sources.length > 0,
+    packagingLabel: packagingLabel(profile),
+  });
+  // back-compat: `degraded` now means "a gate is failed or degraded" (a REAL problem,
+  // not merely 'starting'). This kills the false OUTPUT ERROR during warm-up.
+  const degraded = !!health.primaryError;
+
+  const outGate = health.gates.find((g) => g.gate === 'output')!;
+  const encGate = health.gates.find((g) => g.gate === 'encoder')!;
   const statusBoard = {
-    output: outputAvailable ? `Available · ${packagingLabel(profile)}`
-          : degraded ? 'Error · output stopped — see log'
-          : channel.status === 'live' ? 'Starting…' : 'Idle',
+    output: outGate.status === 'healthy' ? `Available · ${packagingLabel(profile)}`
+          : outGate.status === 'degraded' ? `Degraded · ${outGate.detail}`
+          : outGate.status === 'failed' ? `Error · ${outGate.detail}`
+          : outGate.status === 'starting' ? 'Starting…'
+          : outGate.status === 'stopped' ? 'Stopped' : 'Idle',
     activeSource: st?.active_source || '—',
     fallback: st?.fallback_in_use ? 'Engaged' : 'Not engaged',
-    packager: st?.packager_ok ? `Healthy · ${seg}s segments`
-            : degraded ? 'Stopped — see log'
+    packager: encGate.status === 'healthy' ? `Healthy · ${seg}s segments`
+            : encGate.status === 'failed' ? `Error · ${encGate.detail}`
+            : encGate.status === 'starting' ? 'Starting…'
             : channel.status === 'live' ? 'Starting…' : 'Stopped',
     inputs: (sources.length ? sources : []).map((s: any) => {
       const ss = sstates[s.role] || sstates[s.rendition_label] || null;
@@ -136,7 +160,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     return { ts: hhmm(new Date(e.ts).getTime()), level: levelFor(String(e.type)), title: String(e.type), detail };
   });
 
-  const log = [...encoderLogTail(channel.id), ...eventsLog];
+  const log = [...encTail, ...eventsLog];
 
   // EPG — real programmes around now; empty when the channel has no schedule
   const progs = await query<any>(
@@ -162,7 +186,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
 
   return {
     kind: 'channel', group: group ? { id: group.id, name: group.name } : null, profile, dvr, captions,
-    ladder, sources, viewers, epg, statusBoard, log, degraded,
+    ladder, sources, viewers, epg, statusBoard, log, health, degraded,
   };
 }
 

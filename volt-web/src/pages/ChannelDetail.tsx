@@ -23,6 +23,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [qcOpen, setQcOpen] = useState(false)
 
   async function load() {
     try { setD(await api.channel(id)) } catch (e: any) { setErr(e.message) }
@@ -61,10 +62,20 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   if (!d) return <div className="loading">Loading channel…</div>
 
   const live = onAir && sourceUp
-  const outputOk = /^Available/.test(d.statusBoard?.output || '')
-  const errored = (sourceUp && !outputOk) || !!(d as any).degraded
-  const stateLabel = errored ? 'OUTPUT ERROR' : onAir ? 'ON AIR' : sourceUp ? 'SOURCE OK' : 'IDLE'
-  const stateCls = errored ? 'down' : onAir ? 'live' : sourceUp ? 'sched' : 'idle'
+  // Badge + error now come from the five-gate health model — NOT from "output isn't
+  // Available yet" (which was warm-up, wrongly shown as an error). A badge only turns
+  // red when a gate is actually failed/degraded, and it names WHICH gate.
+  const health = d.health
+  const perr = health?.primaryError || null
+  const errored = !!perr
+  const outGate = health?.gates.find(g => g.gate === 'output')
+  const stateLabel = errored ? `${perr!.label.toUpperCase()} ERROR`
+    : health?.onAir || (onAir && outGate?.status === 'healthy') ? 'ON AIR'
+    : sourceUp ? (outGate?.status === 'healthy' ? 'READY' : 'STARTING')
+    : 'IDLE'
+  const stateCls = errored ? 'down'
+    : (health?.onAir || onAir) ? 'live'
+    : sourceUp ? 'sched' : 'idle'
   const isEvent = d.dvr_mode === 'event_start'
   const wt = d.profile?.workflow_type
   const captionLangs = d.captions.targets.length ? d.captions.targets : ['en']
@@ -92,6 +103,10 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
           </p>
         </div>
         <div className="spacer" />
+        <button className="btn ghost" onClick={() => setQcOpen(true)} title="Diagnose the pipeline (server → input → encoder → output)"
+          style={errored ? { color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' } : undefined}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>QC
+        </button>
         <button className="btn ghost" onClick={() => { setSettingsOpen(true); onOpenSettings?.() }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>Settings
         </button>
@@ -113,6 +128,21 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         )}
       </div>
 
+      {perr && (
+        <div style={{
+          margin: '0 0 14px', padding: '12px 14px', borderRadius: 10,
+          background: 'rgba(248,113,113,.10)', border: '1px solid rgba(248,113,113,.4)',
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <span style={{ fontSize: 18 }}>⚠</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, color: '#fca5a5' }}>{perr.label} {perr.gate === 'output' && outGate?.status === 'degraded' ? 'degraded' : 'failed'}</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', wordBreak: 'break-word' }}>{perr.message}</div>
+          </div>
+          <button className="btn ghost" onClick={() => setQcOpen(true)} style={{ color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }}>Diagnose →</button>
+        </div>
+      )}
+
       <DualPlayers d={d} captionLangs={captionLangs} sourceUp={sourceUp} onAir={onAir}
         onSendSource={sendSource} onGoLive={() => setOnAir(true)} busy={busy} />
 
@@ -129,7 +159,79 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         <SettingsDrawer d={d} onClose={() => setSettingsOpen(false)}
           onSaved={() => { setSettingsOpen(false); load() }} />
       )}
+
+      {qcOpen && <QcPanel d={d} onClose={() => setQcOpen(false)} onRefresh={load} />}
     </>
+  )
+}
+
+/* ------------------------------------------------------------- QC / diagnose */
+const GATE_META: Record<string, { icon: string; hint: string }> = {
+  server:  { icon: '▣', hint: 'Encoder compute (this is the billable unit)' },
+  input:   { icon: '⬇', hint: 'Is the source arriving?' },
+  encoder: { icon: '⚙', hint: 'Transcode/package running & keeping up?' },
+  output:  { icon: '⬆', hint: 'Are packaged segments advancing?' },
+  public:  { icon: '📡', hint: 'Is the output being served to viewers?' },
+}
+const GATE_COLOR: Record<string, string> = {
+  healthy: '#4ade80', degraded: '#fbbf24', failed: '#f87171',
+  starting: '#60a5fa', stopped: '#94a3b8', idle: '#64748b',
+}
+function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefresh: () => void }) {
+  const h = d.health
+  const gates = h?.gates || []
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 60, display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 'min(920px,96vw)', maxHeight: '92vh', overflow: 'auto', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+          <h2 style={{ margin: 0 }}>QC · pipeline diagnose</h2>
+          <div style={{ flex: 1 }} />
+          <button className="btn ghost" onClick={onRefresh} style={{ marginRight: 8 }}>Refresh</button>
+          <button className="btn ghost" onClick={onClose}>Close</button>
+        </div>
+        <p style={{ color: 'var(--muted)', marginTop: 4 }}>
+          Each stage is a gate — a later stage can only be healthy if the ones before it are.
+          Red/amber shows exactly where the workflow is failing and why.
+        </p>
+
+        {h?.primaryError && (
+          <div style={{ margin: '10px 0 16px', padding: '12px 14px', borderRadius: 10, background: 'rgba(248,113,113,.10)', border: '1px solid rgba(248,113,113,.4)' }}>
+            <div style={{ fontWeight: 700, color: '#fca5a5' }}>Primary issue — {h.primaryError.label}</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>{h.primaryError.message}</div>
+          </div>
+        )}
+
+        {/* the five gates, left to right */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0 18px' }}>
+          {gates.map((g, i) => (
+            <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 8, flex: '1 1 160px' }}>
+              <div style={{ flex: 1, border: `1px solid ${GATE_COLOR[g.status]}55`, background: `${GATE_COLOR[g.status]}12`, borderRadius: 10, padding: '10px 12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
+                  <span>{GATE_META[g.gate]?.icon}</span>{g.label}{g.billable && <span title="billable while up" style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 10 }}>● billable</span>}
+                </div>
+                <div style={{ fontWeight: 700, color: GATE_COLOR[g.status], textTransform: 'uppercase', fontSize: 13, marginTop: 4 }}>{g.status}</div>
+                <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 2, wordBreak: 'break-word' }}>{g.detail}</div>
+              </div>
+              {i < gates.length - 1 && <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)' }}>→</div>}
+            </div>
+          ))}
+        </div>
+
+        {/* the real logs behind the gates */}
+        <h3 style={{ margin: '10px 0 6px' }}>Real logs <span style={{ color: 'var(--faint)', fontWeight: 400, fontSize: 12 }}>· encoder + pipeline events</span></h3>
+        <div style={{ maxHeight: 320, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+          {(d.log || []).length === 0 && <div style={{ padding: 14, color: 'var(--faint)' }}>No log lines yet.</div>}
+          {(d.log || []).map((l, i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, padding: '7px 12px', borderTop: i ? '1px solid var(--border)' : undefined, fontSize: 12.5 }}>
+              <span className={`dot-s ${l.level}`} style={{ marginTop: 5 }} />
+              <span style={{ color: 'var(--faint)', width: 62, flexShrink: 0 }}>{l.ts}</span>
+              <span style={{ fontWeight: 600, width: 96, flexShrink: 0, color: l.level === 'down' ? '#fca5a5' : 'var(--muted)' }}>{l.title}</span>
+              <span style={{ color: 'var(--muted)', wordBreak: 'break-word' }}>{l.detail}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 

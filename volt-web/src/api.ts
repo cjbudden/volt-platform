@@ -54,7 +54,23 @@ export interface ChannelDetail extends Channel {
   epg: { now: any; next: { name: string; start: string } | null; lane: any[] }
   statusBoard: { output: string; activeSource: string; fallback: string; packager: string; inputs: any[] }
   log: { ts: string; level: string; title: string; detail: string }[]
+  health: PipelineHealth
   testStream: TestStreamStatus
+}
+
+export type GateStatus = 'idle' | 'starting' | 'healthy' | 'degraded' | 'failed' | 'stopped'
+export interface Gate {
+  gate: 'server' | 'input' | 'encoder' | 'output' | 'public'
+  label: string
+  status: GateStatus
+  detail: string
+  billable: boolean
+}
+export interface PipelineHealth {
+  gates: Gate[]
+  primaryError: { gate: string; label: string; message: string } | null
+  onAir: boolean
+  live: boolean
 }
 
 export interface TestStreamStatus {

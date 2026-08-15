@@ -147,7 +147,14 @@ export class Orchestrator {
     return { taskArn: res.taskArn };
   }
 
-  async stopStream(kind: 'channel' | 'event', id: string): Promise<void> {
+  /**
+   * Stop a stream's encoder task(s). `origin` records WHO/WHY (operator click,
+   * scheduler window, failover, shutdown) so the control-plane log and the
+   * encoder's channel.stop reason are self-explaining instead of a mystery. This
+   * is the difference between "the operator stopped it" and "it failed".
+   */
+  async stopStream(kind: 'channel' | 'event', id: string, origin = 'unknown'): Promise<void> {
+    console.log(`[orchestrator] stopStream ${kind} ${id} — origin=${origin}`);
     const running = await query<any>(
       `SELECT * FROM instances WHERE ${kind === 'channel' ? 'channel_id' : 'event_id'}=$1 AND terminated_at IS NULL`,
       [id]
@@ -155,7 +162,7 @@ export class Orchestrator {
     for (const inst of running) {
       if (inst.task_arn) {
         try {
-          await this.launcher.stopTask(inst.task_arn, `${kind} ${id} stopped`);
+          await this.launcher.stopTask(inst.task_arn, `${kind} ${id} stopped (${origin})`);
         } catch (e) {
           console.error('stopTask failed', inst.task_arn, e);
         }
@@ -246,7 +253,7 @@ export class Orchestrator {
         WHERE e.status='live' AND COALESCE(e.server_stop, e.scheduled_end) <= now()`
     );
     for (const e of over) {
-      try { await this.stopStream('event', e.id); } catch (err) { console.error('event stop failed', e.id, err); }
+      try { await this.stopStream('event', e.id, 'scheduler:event-window-ended'); } catch (err) { console.error('event stop failed', e.id, err); }
     }
     // 3) roll channel recordings at the UTC day boundary (close stale, open today's)
     await this.rollChannelRecordings();

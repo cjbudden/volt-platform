@@ -348,7 +348,7 @@ def _newest_output_mtime(out_dir):
     return newest
 
 
-def shutdown(*_, reason="server_window_closed"):
+def shutdown(*_, reason="stopped"):
     log("shutdown: terminating children")
     if _events:
         _events.channel_stop(reason)
@@ -368,8 +368,8 @@ def shutdown(*_, reason="server_window_closed"):
 
 
 def main():
-    signal.signal(signal.SIGTERM, shutdown)
-    signal.signal(signal.SIGINT, shutdown)
+    signal.signal(signal.SIGTERM, lambda *_a: shutdown(reason="signal:SIGTERM"))
+    signal.signal(signal.SIGINT, lambda *_a: shutdown(reason="signal:SIGINT"))
 
     global _events, OUT_DIR
     cfg = load_config()
