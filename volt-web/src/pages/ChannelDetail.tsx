@@ -90,6 +90,8 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   const captionLangs = d.captions.targets.length ? d.captions.targets : ['en']
   const billingElapsed = d.billing?.since ? Math.max(0, Math.round((nowMs - d.billing.since) / 1000)) : (d.billing?.elapsedSec || 0)
   const billingEst = d.billing ? Math.round((billingElapsed / 3600) * d.billing.rateUsdPerHour * 100) / 100 : 0
+  // the encoder server is up (live, warming, or erroring-but-not-yet-ended) -> a Stop must always be available
+  const serverUp = sourceUp || !!d.billing?.billable || health?.gates.find(g => g.gate === 'server')?.status === 'healthy'
 
   return (
     <>
@@ -127,21 +129,22 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         <button className="btn ghost" onClick={() => { setSettingsOpen(true); onOpenSettings?.() }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>Settings
         </button>
-        {!sourceUp ? (
+        {!serverUp ? (
           <button className="btn primary" disabled={busy} onClick={() => setConfirmStart(true)}>
             {busy ? 'Sending source…' : 'Send source'}
           </button>
-        ) : !onAir ? (
+        ) : (
           <>
-            <button className="btn ghost" disabled={busy} onClick={dropSource}>Drop source</button>
-            <button className="btn primary" onClick={() => setOnAir(true)} title="Source is receiving — take the output live">
-              <span className="dot-s live" style={{ marginRight: 6 }} />Go live
+            {sourceUp && !onAir && !errored && (
+              <button className="btn primary" onClick={() => setOnAir(true)} title="Source is receiving — take the output live">
+                <span className="dot-s live" style={{ marginRight: 6 }} />Go live
+              </button>
+            )}
+            {/* Stop is ALWAYS available while the server is up (live, warming, or erroring) */}
+            <button className="btn ghost" disabled={busy} onClick={dropSource} style={{ color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }}>
+              {busy ? 'Stopping…' : 'Stop channel'}
             </button>
           </>
-        ) : (
-          <button className="btn ghost" disabled={busy} onClick={dropSource} style={{ color: '#fca5a5' }}>
-            {busy ? 'Stopping…' : 'Take off air'}
-          </button>
         )}
       </div>
 
@@ -405,10 +408,17 @@ function HlsVideo({ src }: { src: string }) {
       const Hls = (await import('hls.js')).default
       if (cancelled) return
       if (Hls.isSupported()) {
-        hls = new Hls({ lowLatencyMode: true })
+        // NOT lowLatency: the origin is a standard Shaka LIVE playlist. Be patient on
+        // warm-up: the manifest 404s for the first few seconds until the packager
+        // writes it, so retry the manifest/level loads instead of giving up.
+        hls = new Hls({ lowLatencyMode: false, liveSyncDurationCount: 3, manifestLoadingMaxRetry: 12, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 12 })
         hls.loadSource(originUrl(src)); hls.attachMedia(v)
         hls.on(Hls.Events.MANIFEST_PARSED, () => { v.muted = true; v.play().catch(() => {}) })
-        hls.on(Hls.Events.ERROR, (_e: any, data: any) => { if (data.fatal) setTimeout(() => { try { hls.startLoad() } catch {} }, 1500) })
+        hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
+          if (!data.fatal) return
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {} }
+          else { setTimeout(() => { try { hls.loadSource(originUrl(src)); hls.startLoad() } catch {} }, 1500) } // manifest not ready yet -> reload
+        })
       } else if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = originUrl(src); v.muted = true; v.play().catch(() => {}) }
     })()
     return () => { cancelled = true; try { hls?.destroy() } catch {} }
@@ -536,18 +546,19 @@ function HlsOutput({ d, captionLangs, subOn, setSubOn, subLang, setSubLang }: {
       const Hls = (await import('hls.js')).default
       if (cancelled) return
       if (Hls.isSupported()) {
-        const hls = new Hls({ lowLatencyMode: true, backBufferLength: d.dvr.effective_sec, liveSyncDurationCount: 3 })
+        const src = originUrl(`/origin/${d.id}/master.m3u8`)
+        const hls = new Hls({ lowLatencyMode: false, backBufferLength: d.dvr.effective_sec, liveSyncDurationCount: 3, manifestLoadingMaxRetry: 12, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 12 })
         hlsRef.current = hls
-        hls.loadSource(originUrl(`/origin/${d.id}/master.m3u8`))
+        hls.loadSource(src)
         hls.attachMedia(video!)
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           setLevels(hls.levels.map((l: any) => ({ height: l.height, bitrate: l.bitrate })))
           video!.muted = true; video!.play().catch(() => {})
         })
         hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
-          if (data.fatal) { // segments may not exist yet right after start — retry
-            setTimeout(() => { try { hls.startLoad() } catch {} }, 1500)
-          }
+          if (!data.fatal) return
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {} }
+          else { setTimeout(() => { try { hls.loadSource(src); hls.startLoad() } catch {} }, 1500) } // manifest/segments not ready yet -> reload
         })
       } else if (video!.canPlayType('application/vnd.apple.mpegurl')) {
         video!.src = originUrl(`/origin/${d.id}/master.m3u8`); video!.muted = true; video!.play().catch(() => {})
@@ -811,6 +822,9 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   // geo
   const [geoMode, setGeoMode] = useState(d.geo_mode)
   const [geoCountries, setGeoCountries] = useState(d.geo_countries.join(', '))
+  // output ABR ladder (transcode rungs) — add / remove / edit bitrates
+  const [rungs, setRungs] = useState<{ height: number; bitrateKbps: number }[]>(
+    (d.ladder || []).map(r => ({ height: r.height, bitrateKbps: r.bitrate_kbps })))
   // programme guide (EPG) panel visibility
   const [epgOn, setEpgOn] = useState(d.epgEnabled !== false)
   // subtitles
@@ -842,6 +856,10 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     if (primary.url.trim()) sources.push({ role: 'primary', protocol: primary.protocol, ingestUrl: primary.url.trim(), streamKey: primary.streamKey?.trim() || undefined })
     if (backup.url.trim()) sources.push({ role: 'backup', protocol: backup.protocol, ingestUrl: backup.url.trim(), streamKey: backup.streamKey?.trim() || undefined })
     if (sources.length) patch.sources = sources
+    // output ladder (transcode): only send when changed
+    const origLadder = JSON.stringify((d.ladder || []).map(r => ({ height: r.height, bitrateKbps: r.bitrate_kbps })))
+    const cleanRungs = rungs.filter(r => r.height > 0 && r.bitrateKbps > 0).sort((a, b) => b.height - a.height)
+    if (JSON.stringify(cleanRungs) !== origLadder) patch.outputLadder = cleanRungs
     // programme guide panel
     if (epgOn !== (d.epgEnabled !== false)) patch.epgEnabled = epgOn
     // captions
@@ -920,6 +938,27 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           </div>
           {geoMode !== 'worldwide' && (
             <div className="field"><label>Countries (ISO-2, comma-separated)</label><input className="inp" value={geoCountries} onChange={e => setGeoCountries(e.target.value)} placeholder="MY, SG, ID" /></div>
+          )}
+
+          {d.profile?.workflow_type === 'transcode' && (
+            <>
+              <div style={SEC}>Output bitrates (ABR ladder)</div>
+              <div className="td" style={{ marginBottom: 8 }}>Rungs the encoder produces. Keep the top rung at or below the source resolution — don’t upscale.</div>
+              {rungs.map((r, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                  <input className="inp" style={{ width: 90 }} type="number" value={r.height}
+                    onChange={e => setRungs(rs => rs.map((x, j) => j === i ? { ...x, height: Number(e.target.value) } : x))} />
+                  <span style={{ color: 'var(--faint)' }}>p ·</span>
+                  <input className="inp" style={{ width: 110 }} type="number" value={r.bitrateKbps}
+                    onChange={e => setRungs(rs => rs.map((x, j) => j === i ? { ...x, bitrateKbps: Number(e.target.value) } : x))} />
+                  <span style={{ color: 'var(--faint)' }}>kbps</span>
+                  <div style={{ flex: 1 }} />
+                  <button className="btn ghost" onClick={() => setRungs(rs => rs.filter((_, j) => j !== i))}>Remove</button>
+                </div>
+              ))}
+              {rungs.length === 0 && <div className="td" style={{ marginBottom: 8, color: 'var(--warn)' }}>No rungs — add at least one, or the channel has no output.</div>}
+              <button className="btn ghost" onClick={() => setRungs(rs => [...rs, { height: 720, bitrateKbps: 2800 }])}>+ Add rung</button>
+            </>
           )}
 
           <div style={SEC}>Programme guide (EPG)</div>
