@@ -56,6 +56,7 @@ export interface HealthInput {
   logTailErrors: string[];    // recent error lines from encoder.log (newest-first)
   hasPrimarySource: boolean;
   packagingLabel: string;
+  outputFresh?: boolean;      // GROUND TRUTH: the origin manifest is advancing on disk now
 }
 
 export function computePipelineHealth(inp: HealthInput): PipelineHealth {
@@ -132,11 +133,13 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   gates.push({ gate: 'encoder', label: 'Encoder', billable: false, status: encStatus, detail: encDetail });
 
   // ---- 4) OUTPUT (segments advancing?) -------------------------------------
+  // GROUND TRUTH first: if the origin manifest is actually advancing on disk, the
+  // output IS healthy — don't trust a stale/optimistic encoder flag over reality.
   let outStatus: GateStatus; let outDetail: string;
   if (crashed) { outStatus = 'failed'; outDetail = `no output — ${stopReason}`; }
   else if (!live) { outStatus = ended ? 'stopped' : 'idle'; outDetail = 'no output'; }
+  else if (inp.outputFresh || outputAvailable) { outStatus = 'healthy'; outDetail = `advancing · ${inp.packagingLabel}`; }
   else if (stall) { outStatus = 'degraded'; outDetail = String(d(stall.detail).message || 'output stalled — no new segments'); }
-  else if (outputAvailable) { outStatus = 'healthy'; outDetail = `advancing · ${inp.packagingLabel}`; }
   else if (inputStatus === 'failed' || encStatus === 'failed') { outStatus = 'idle'; outDetail = 'waiting on the upstream gate'; }
   else { outStatus = 'starting'; outDetail = 'waiting for the first segments'; }
   gates.push({ gate: 'output', label: 'Output', billable: false, status: outStatus, detail: outDetail });

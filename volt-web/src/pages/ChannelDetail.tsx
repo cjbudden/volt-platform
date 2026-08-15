@@ -44,6 +44,14 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
     return () => { if (t) clearTimeout(t); unsub() }
     // eslint-disable-next-line
   }, [id])
+  // SSE pushes on state CHANGES; segment writes are not a change event, so a slow
+  // reconcile keeps continuous signals fresh (output-advancing, billing) without a
+  // per-second poll. 6s is gentle and steady.
+  useEffect(() => {
+    const iv = setInterval(() => { load() }, 6000)
+    return () => clearInterval(iv)
+    // eslint-disable-next-line
+  }, [id])
   // tick the billing clock once a second while the server is up (metering)
   useEffect(() => {
     if (!d?.billing?.billable) return
@@ -61,8 +69,8 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
 
   // if the source drops (or is stopped elsewhere), we can't be on air
   useEffect(() => { if (!sourceUp && onAir) setOnAir(false) }, [sourceUp, onAir])
-  // once the channel is live (real encoder producing output), reveal the output preview automatically
-  useEffect(() => { if (sourceUp) setOnAir(true) }, [sourceUp])
+  // NOTE: on air is now an EXPLICIT operator action (Go live), not automatic — the
+  // source preview confirms the feed first, then you take the output to air.
 
   async function sendSource() {
     if (!d) return
@@ -149,9 +157,15 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
           </button>
         ) : (
           <>
-            {sourceUp && !onAir && !errored && (
-              <button className="btn primary" onClick={() => setOnAir(true)} title="Source is receiving — take the output live">
-                <span className="dot-s live" style={{ marginRight: 6 }} />Go live
+            {/* On air is an explicit operator action; Take off air stops publishing but
+                keeps the encoder up. Stop channel brings the whole encoder down. */}
+            {!onAir ? (
+              <button className="btn primary" disabled={errored} onClick={() => setOnAir(true)} title={errored ? 'Resolve the error first' : 'Take the output to air'}>
+                <span className="dot-s live" style={{ marginRight: 6 }} />Go on air
+              </button>
+            ) : (
+              <button className="btn ghost" onClick={() => setOnAir(false)} title="Stop publishing the output (encoder stays up)">
+                Take off air
               </button>
             )}
             {/* Stop is ALWAYS available while the server is up (live, warming, or erroring) */}
@@ -594,9 +608,11 @@ function HlsOutput({ d, captionLangs, subOn, setSubOn, subLang, setSubLang }: {
         const end = sk.end(sk.length - 1), start = sk.start(0)
         setWinSec(Math.max(1, Math.round(end - start)))
         const b = Math.max(0, Math.round(end - v.currentTime))
-        // "LIVE" while within the live-sync window (~one live window). Only when the
-        // user scrubs further back than that do we show DVR catch-up.
-        setBehind(b); setAtLive(b <= 12)
+        setBehind(b)
+        // HYSTERESIS so the LIVE/DVR badge doesn't flap around the threshold. Normal
+        // live latency is ~8-15s, so stay GREEN (live) up to 20s behind; only flip to
+        // DVR when clearly scrubbed back (>20s), and re-acquire live under 8s.
+        setAtLive(prev => b > 20 ? false : (prev ? true : b <= 8))
       }
     }
     v.addEventListener('timeupdate', onT)

@@ -6,7 +6,7 @@
 // no data" states rather than invented numbers.
 import { one, query } from '../db';
 import { config } from '../config';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { computePipelineHealth, type PipelineHealth } from './pipelineHealth';
 import { recommendInstance, buildBilling, type Billing } from './billing';
@@ -57,6 +57,21 @@ function encoderLogTail(channelId: string): { ts: string; level: string; title: 
       detail: l.replace(/^\[volt-encoder\]\s*/, '').slice(0, 300),
     }));
   } catch { return []; }
+}
+
+/** Newest HLS/DASH manifest mtime (ms) under the channel's origin — 0 if none.
+ *  Shaka rewrites these every new segment, so a recent mtime = output is advancing. */
+function newestManifestMtimeMs(channelId: string): number {
+  try {
+    const dir = join(config.testStream.originDir, channelId);
+    let newest = 0;
+    for (const f of readdirSync(dir)) {
+      if (f.endsWith('.m3u8') || f.endsWith('.mpd')) {
+        try { const m = statSync(join(dir, f)).mtimeMs; if (m > newest) newest = m; } catch { /* ignore */ }
+      }
+    }
+    return newest;
+  } catch { return 0; }
 }
 
 export async function buildChannelDetail(channel: any, nowMs: number): Promise<ChannelDetail> {
@@ -112,6 +127,10 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
 
   // FIVE-GATE HEALTH (server → input → encoder → output → public): the single
   // source of truth for the badge, the primary error banner, and the QC page.
+  // ground truth: is the origin manifest advancing right now? (within ~3 segments)
+  const segDur = Number(profile?.segment_dur ?? 4) || 4;
+  const outMtime = newestManifestMtimeMs(channel.id);
+  const outputFresh = outMtime > 0 && (nowMs - outMtime) < Math.max(15000, segDur * 3 * 1000);
   const health = computePipelineHealth({
     ownerStatus: channel.status,
     st,
@@ -119,6 +138,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     logTailErrors,
     hasPrimarySource: sources.some((s: any) => s.role === 'primary' && s.ingest_url) || sources.length > 0,
     packagingLabel: packagingLabel(profile),
+    outputFresh,
   });
   // back-compat: `degraded` now means "a gate is failed or degraded" (a REAL problem,
   // not merely 'starting'). This kills the false OUTPUT ERROR during warm-up.
