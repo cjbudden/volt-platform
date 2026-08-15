@@ -212,11 +212,16 @@ def input_args(inp):
     if proto in ("rtmp", "rtmps"):
         return ["-i", url]
     if proto == "hls":
-        # Resilient pull: reconnect on drops/EOF so a transient source hiccup does
-        # NOT kill the encode. A live source must keep going as long as we run.
-        # HLS: only reconnect on connection errors. -reconnect_at_eof/streamed are for
-        # continuous HTTP and BREAK segmented HLS (every segment end looks like EOF).
-        flags = ["-reconnect", "1", "-reconnect_delay_max", "5", "-fflags", "+genpts"]
+        # Resilient pull for HTTP(S) sources: reconnect on drops/EOF so a transient
+        # hiccup does NOT kill the encode. IMPORTANT: -reconnect is an HTTP-only ffmpeg
+        # option; ffmpeg rejects it for a local-file/other-scheme input ("Option
+        # reconnect not found", rc=8), so only add it for http(s) URLs. Do NOT use
+        # -reconnect_at_eof/-reconnect_streamed: they treat every HLS segment end as
+        # EOF and break segmented HLS.
+        is_http = url.lower().startswith(("http://", "https://"))
+        flags = ["-fflags", "+genpts"]
+        if is_http:
+            flags = ["-reconnect", "1", "-reconnect_delay_max", "5"] + flags
         if inp.get("realtime"):
             flags = ["-re"] + flags
         return flags + ["-i", url]
