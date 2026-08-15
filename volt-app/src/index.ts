@@ -2,6 +2,7 @@ import { createServer } from './server';
 import { config } from './config';
 import { pool, query } from './db';
 import { startScheduler } from './services/orchestrator';
+import { reapAllEncoders } from './services/orchestrator/encoderCleanup';
 
 const app = createServer();
 
@@ -14,6 +15,13 @@ async function ensureSchema(): Promise<void> {
 const server = app.listen(config.port, () => {
   console.log(`Volt control plane listening on :${config.port} (${config.env})`);
   ensureSchema().catch((e) => console.error('[schema] ensure failed', e));
+  // BOOT CLEANUP: a control-plane (re)start reaps any orphaned encoder/ffmpeg/
+  // packager from a previous run so nothing is left holding the bus ports. Only
+  // meaningful for the local/docker launcher; a no-op with mock/ecs.
+  if (config.orchestrator.launcher === 'local' || config.orchestrator.launcher === 'docker') {
+    try { reapAllEncoders(config.testStream.encoderBin, config.testStream.originDir); }
+    catch (e) { console.error('[encoder-cleanup] boot reap failed', e); }
+  }
 });
 
 // orchestrator background scheduler (event provisioning, recording roll, retention sweep)

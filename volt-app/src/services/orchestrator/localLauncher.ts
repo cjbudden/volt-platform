@@ -19,6 +19,7 @@ import { join, resolve } from 'node:path';
 import { config } from '../../config';
 import type { TaskLauncher, LaunchResult } from './launcher';
 import { reserveUdpBase, releaseUdpBase } from './encoderPorts';
+import { reapStreamEncoder } from './encoderCleanup';
 
 interface Proc {
   taskArn: string;
@@ -63,6 +64,9 @@ export class LocalTaskLauncher implements TaskLauncher {
   // ---- encoder -------------------------------------------------------------
   async launchEncoder(streamId: string, job: Record<string, any>): Promise<LaunchResult> {
     const out = this.originFor(streamId);
+    // ACTIVE CLEANUP first: reap any leftover encoder/ffmpeg/packager for THIS stream
+    // from a previous run so we start clean (not merely relocate the port).
+    reapStreamEncoder(config.testStream.originDir, streamId);
     // fresh timeline: clear any stale output so the player doesn't replay an old edge
     try { rmSync(out, { recursive: true, force: true }); } catch { /* ignore */ }
     mkdirSync(out, { recursive: true });
@@ -89,8 +93,10 @@ export class LocalTaskLauncher implements TaskLauncher {
     this.procs.set(taskArn, { taskArn, child, kind: 'encoder', streamId, udpBase });
     child.on('exit', (code) => {
       this.procs.delete(taskArn);
+      // sweep any lingering media child, then release the reserved bus block
+      reapStreamEncoder(config.testStream.originDir, streamId);
       releaseUdpBase(udpBase);
-      console.log(`[local-launcher] encoder ${streamId} exited rc=${code} (udpBase ${udpBase} released)`);
+      console.log(`[local-launcher] encoder ${streamId} exited rc=${code} (udpBase ${udpBase} released, swept)`);
     });
     console.log(`[local-launcher] encoder ${streamId} pid=${child.pid} out=${out} udpBase=${udpBase}`);
     return { taskArn, lifecycle: 'on_demand' };
