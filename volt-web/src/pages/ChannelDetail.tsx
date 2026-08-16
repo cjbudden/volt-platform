@@ -683,7 +683,7 @@ function HlsOutput({ d, captionLangs, subOn, setSubOn, subLang, setSubLang }: {
       </div>
 
       <div className="pfoot">
-        <span className="dot-s live" /> HLS · overlay burned-in
+        <span className="dot-s live" /> {d.profile?.packaging === 'both' ? 'HLS + DASH' : (d.profile?.packaging || 'HLS').toUpperCase()}{d.captions?.enabled ? ' · live subtitles (WebVTT)' : ''}
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>
           <button className={`chip ${subOn ? 'active' : ''}`} style={{ padding: '5px 10px' }} onClick={() => setSubOn(!subOn)}>CC</button>
           {subOn && (
