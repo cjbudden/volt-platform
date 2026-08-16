@@ -598,8 +598,16 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   d: CD; onAir: boolean; captionLangs: string[]; subOn: boolean; setSubOn: (v: boolean) => void; subLang: string; setSubLang: (v: string) => void
 }) {
   const ts = d.testStream
+  // Which packagings the channel produces. Shaka emits master.m3u8 (HLS) and
+  // manifest.mpd (DASH); the profile says which are intended. We let the operator
+  // preview EITHER so both outputs can be verified before going on air.
+  const pkg = (d.profile?.packaging || 'hls').toLowerCase()
+  const hasHls = pkg === 'hls' || pkg === 'both'
+  const hasDash = pkg === 'dash' || pkg === 'both'
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const hlsRef = useRef<any>(null)
+  const dashRef = useRef<any>(null)
+  const [fmt, setFmt] = useState<'hls' | 'dash'>(pkg === 'dash' ? 'dash' : 'hls')
   const [levels, setLevels] = useState<{ height: number; bitrate: number }[]>([])
   const [level, setLevel] = useState(-1) // -1 = auto (ABR)
   const [atLive, setAtLive] = useState(true)
@@ -609,44 +617,75 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   const cuesRef = useRef<Cue[]>([])
   const didSnapRef = useRef(false)   // snap to live edge once on initial load
 
-  // attach hls.js
+  // attach the playback engine for the chosen format. HLS -> hls.js on master.m3u8;
+  // DASH -> dash.js on manifest.mpd. Both populate the ladder list, autoplay, and
+  // snap to the live edge on load. Switching format tears down the previous engine.
   useEffect(() => {
     let cancelled = false
     const video = videoRef.current
     if (!video) return
-    async function attach() {
+    didSnapRef.current = false
+    setLevels([]); setLevel(-1)
+    // LIVE IS THE DEFAULT: jump to the live edge shortly after load (once).
+    const snapSoon = () => {
+      const snap = () => { try { const sk = video.seekable; if (sk.length && !didSnapRef.current) { video.currentTime = sk.end(sk.length - 1) - 0.5; didSnapRef.current = true } } catch {} }
+      setTimeout(snap, 300); setTimeout(snap, 1200)
+    }
+    async function attachHls() {
       const Hls = (await import('hls.js')).default
       if (cancelled) return
       if (Hls.isSupported()) {
         const src = originUrl(`/origin/${d.id}/master.m3u8`)
         const hls = new Hls({ lowLatencyMode: false, backBufferLength: d.dvr.effective_sec, liveSyncDurationCount: 3, manifestLoadingMaxRetry: 12, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 12 })
         hlsRef.current = hls
-        hls.loadSource(src)
-        hls.attachMedia(video!)
+        hls.loadSource(src); hls.attachMedia(video!)
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           setLevels(hls.levels.map((l: any) => ({ height: l.height, bitrate: l.bitrate })))
-          video!.muted = true; video!.play().catch(() => {})
-          // LIVE IS THE DEFAULT: jump to the live edge on load. The user only leaves
-          // live by dragging the DVR timeline back; a fresh load always starts live.
-          const snap = () => { try { const sk = video!.seekable; if (sk.length && !didSnapRef.current) { video!.currentTime = sk.end(sk.length - 1) - 0.5; didSnapRef.current = true } } catch {} }
-          setTimeout(snap, 300); setTimeout(snap, 1200)
+          video!.muted = true; video!.play().catch(() => {}); snapSoon()
         })
         hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
           if (!data.fatal) return
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {} }
-          else { setTimeout(() => { try { hls.loadSource(src); hls.startLoad() } catch {} }, 1500) } // manifest/segments not ready yet -> reload
+          else { setTimeout(() => { try { hls.loadSource(src); hls.startLoad() } catch {} }, 1500) } // not ready yet -> reload
         })
       } else if (video!.canPlayType('application/vnd.apple.mpegurl')) {
-        video!.src = originUrl(`/origin/${d.id}/master.m3u8`); video!.muted = true; video!.play().catch(() => {})
+        video!.src = originUrl(`/origin/${d.id}/master.m3u8`); video!.muted = true; video!.play().catch(() => {}); snapSoon()
       }
     }
-    attach()
-    return () => { cancelled = true; try { hlsRef.current?.destroy() } catch {} }
+    async function attachDash() {
+      const dashjs: any = (await import('dashjs')).default
+      if (cancelled) return
+      const url = originUrl(`/origin/${d.id}/manifest.mpd`)
+      const player = dashjs.MediaPlayer().create()
+      dashRef.current = player
+      // start on the live edge, ABR on by default
+      player.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: true } }, retryAttempts: { MPD: 12 } } })
+      player.initialize(video, url, true)
+      const onInit = () => {
+        try {
+          const bs = player.getBitrateInfoListFor('video') || []
+          setLevels(bs.map((b: any) => ({ height: b.height, bitrate: b.bitrate })))
+        } catch { /* ignore */ }
+        video.muted = true; video.play().catch(() => {}); snapSoon()
+      }
+      try { player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, onInit) } catch { /* ignore */ }
+    }
+    if (fmt === 'dash') attachDash(); else attachHls()
+    return () => {
+      cancelled = true
+      try { hlsRef.current?.destroy(); hlsRef.current = null } catch { /* ignore */ }
+      try { dashRef.current?.reset?.(); dashRef.current?.destroy?.(); dashRef.current = null } catch { /* ignore */ }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d.id])
+  }, [d.id, fmt])
 
-  // apply rendition selection
-  useEffect(() => { if (hlsRef.current) hlsRef.current.currentLevel = level }, [level])
+  // apply rendition selection (Auto = ABR, else pin a ladder rung) for either engine
+  useEffect(() => {
+    if (fmt === 'hls') { if (hlsRef.current) hlsRef.current.currentLevel = level; return }
+    const p = dashRef.current; if (!p) return
+    if (level < 0) { try { p.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: true } } } }) } catch { /* ignore */ } }
+    else { try { p.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } }); p.setQualityFor('video', level) } catch { /* ignore */ } }
+  }, [level, fmt])
 
   // track live-edge vs DVR position
   useEffect(() => {
@@ -697,7 +736,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
     <div className="player">
       <div className="video">
         <video ref={videoRef} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
-        <div className="plabel"><span className="pt" style={{ color: atLive ? '#4ade80' : '#fbbf24' }}>OUTPUT{atLive ? '' : ' · DVR catch-up'}</span></div>
+        <div className="plabel"><span className="pt" style={{ color: atLive ? '#4ade80' : '#fbbf24' }}>OUTPUT · {fmt.toUpperCase()}{atLive ? '' : ' · DVR catch-up'}</span></div>
         {/* On-air state: green ON AIR when published to the public, blue PREVIEW when the
             packaged output is playing but held private (verify DASH/HLS before going on air).
             Centered at the top so it never sits behind the OUTPUT label or the LIVE badge. */}
@@ -743,8 +782,16 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
       </div>
 
       <div className="pfoot">
-        <span className="dot-s live" /> {d.profile?.packaging === 'both' ? 'HLS + DASH' : (d.profile?.packaging || 'HLS').toUpperCase()}{d.captions?.enabled ? ' · live subtitles (WebVTT)' : ''}
+        <span className="dot-s live" /> Playing {fmt.toUpperCase()}{hasHls && hasDash ? ' · HLS + DASH produced' : ''}{d.captions?.enabled ? ' · live subtitles (WebVTT)' : ''}
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>
+          {/* HLS / DASH toggle — verify BOTH packagings play. Only shown when the
+              channel produces both; otherwise there is only one output to preview. */}
+          {hasHls && hasDash && (
+            <span style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+              <button className={`chip ${fmt === 'hls' ? 'active' : ''}`} style={{ padding: '5px 10px', borderRadius: 0 }} onClick={() => setFmt('hls')}>HLS</button>
+              <button className={`chip ${fmt === 'dash' ? 'active' : ''}`} style={{ padding: '5px 10px', borderRadius: 0 }} onClick={() => setFmt('dash')}>DASH</button>
+            </span>
+          )}
           <button className={`chip ${subOn ? 'active' : ''}`} style={{ padding: '5px 10px' }} onClick={() => setSubOn(!subOn)}>CC</button>
           {subOn && (
             <select value={subLang} onChange={e => setSubLang(e.target.value)}>
