@@ -883,6 +883,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   const [lossBehavior, setLossBehavior] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>(d.input_loss_behavior || 'none')
   const [slateRef, setSlateRef] = useState(d.filler_slate_ref || '')
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [loopPickerOpen, setLoopPickerOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -917,7 +918,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     patch.captions = { enabled: capOn, targets: capOn ? capLangs : [] }
     // filler on loss
     patch.inputLossBehavior = lossBehavior
-    patch.fillerSlateRef = lossBehavior === 'slate' && slateRef.trim() ? slateRef.trim() : null
+    patch.fillerSlateRef = (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && slateRef.trim() ? slateRef.trim() : null
 
     setBusy(true)
     try { await api.updateChannel(d.id, patch); onSaved() }
@@ -952,13 +953,25 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             <div className="field"><label>Slate image</label>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {slateRef && <img src={thumbUrl(slateRef, 92, 68)} alt="" style={{ width: 46, height: 34, objectFit: 'cover', borderRadius: 6, background: '#000', flex: 'none' }} />}
-                <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick from library or paste a URL" />
-                <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse…</button>
+                <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick from library, upload, or paste a URL" />
+                <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse / upload…</button>
               </div>
             </div>
           )}
-          <ImagePicker open={pickerOpen} kinds={['slate', 'brand', 'other']} title="Choose a slate image"
+          {lossBehavior === 'vod_loop' && (
+            <div className="field"><label>Loop video</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick an existing loop asset or paste a URL" />
+                <button type="button" className="btn ghost" onClick={() => setLoopPickerOpen(true)}>Browse…</button>
+              </div>
+            </div>
+          )}
+          <ImagePicker open={pickerOpen} kinds={['slate', 'brand', 'other']} title="Choose or upload a slate image"
+            uploadKind="slate" uploadFolder="slates"
             onClose={() => setPickerOpen(false)} onPick={(url) => { setSlateRef(url); setPickerOpen(false) }} />
+          <ImagePicker open={loopPickerOpen} kinds={['loop', 'clip', 'vod', 'other']} title="Choose a loop video"
+            allowUpload={false} uploadHint="Uploading video loops arrives with Broadcast videos; pick an existing asset for now"
+            onClose={() => setLoopPickerOpen(false)} onPick={(url) => { setSlateRef(url); setLoopPickerOpen(false) }} />
 
           <div style={SEC}>DVR / catch-up</div>
           <div className="field"><label>DVR mode</label>
