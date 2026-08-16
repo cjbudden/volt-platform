@@ -1033,7 +1033,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
       </div>
 
       <div className="pfoot">
-        <span className="dot-s live" /> Playing {fmt.toUpperCase()}{d.captions?.enabled ? ' · live subtitles (WebVTT)' : ''}
+        <span className="dot-s live" /> Playing {fmt.toUpperCase()}
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>
           {/* HLS / DASH toggle — verify BOTH packagings play. Only shown when the
               channel produces both; otherwise there is only one output to preview. */}
