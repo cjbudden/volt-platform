@@ -25,6 +25,7 @@ One process == one channel/event. It reads a job config (JSON), then:
 The job config schema is documented in ../job.example.json.
 """
 
+import glob
 import json
 import os
 import re
@@ -32,6 +33,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import source_selector
@@ -338,6 +340,192 @@ def start_uploader(cfg):
     return spawn("s3-uploader", cmd)
 
 
+# ---------------------------------------------------------------------------
+# Live captions integration.
+#
+# The captions ENGINE (whisper transcribe + NLLB translate + WebVTT segmentation)
+# is built and unit-tested in captions.py. This is the LIVE INTEGRATION: a
+# dedicated ffmpeg segments the program audio into fixed chunks; each completed
+# chunk is transcribed (+ translated) via the captions adapters; cues are shifted
+# to program time; and per-language LIVE WebVTT renditions plus a captions-aware
+# companion HLS master (master_cc.m3u8) and DASH manifest (manifest_cc.mpd) are
+# written — because Shaka owns and rewrites master.m3u8 / manifest.mpd every
+# segment, so we cannot patch those in place. Players that want subtitles load the
+# _cc manifest.
+#
+# ESTIMATED LIVE OFFSET: whisper is not streaming, so each chunk is transcribed as
+# a finite clip. The offset needed to keep subs aligned is chunk_seconds + the
+# measured transcribe+translate time + a small margin. We measure it per chunk and
+# report caption.offset (with realtime=proc<chunk) so the UI shows the real value.
+# ---------------------------------------------------------------------------
+def _captions_audio_url(cfg):
+    """The audio-bearing input to transcribe (has_audio primary, else the first)."""
+    ins = primary_inputs(cfg) or cfg["inputs"]
+    for i in ins:
+        if i.get("has_audio"):
+            return i["url"]
+    return ins[0]["url"]
+
+
+def _live_sub_playlist(indices, chunk, media_seq):
+    """A LIVE WebVTT media playlist (no ENDLIST) over a sliding window of segments."""
+    lines = ["#EXTM3U", "#EXT-X-VERSION:7",
+             f"#EXT-X-TARGETDURATION:{int(round(chunk))}",
+             f"#EXT-X-MEDIA-SEQUENCE:{media_seq}"]
+    for i in indices:
+        lines.append(f"#EXTINF:{chunk:.3f},")
+        lines.append(f"sub_{i}.vtt")
+    return "\n".join(lines) + "\n"
+
+
+def _write_sub_segment(path, cues, seg_start, seg_end):
+    """One HLS WebVTT segment; cues in absolute program time, anchored via X-TIMESTAMP-MAP."""
+    from captions import cue_block
+    body = ["WEBVTT", "X-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000", ""]
+    for c in cues:
+        if c.end > seg_start and c.start < seg_end:
+            body.append(cue_block(c))
+            body.append("")
+    with open(path, "w") as fh:
+        fh.write("\n".join(body).rstrip() + "\n")
+
+
+def _write_companion_master(out_dir, langs, default_lang):
+    """Copy Shaka's master.m3u8 and add a SUBTITLES group referencing the live subs."""
+    src_path = os.path.join(out_dir, "master.m3u8")
+    if not os.path.exists(src_path):
+        return
+    try:
+        src = open(src_path).read().splitlines()
+    except OSError:
+        return
+    media = [
+        f'#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="{l.upper()}",'
+        f'LANGUAGE="{l}",AUTOSELECT=YES,DEFAULT={"YES" if l == default_lang else "NO"},'
+        f'URI="subtitles/{l}/subs.m3u8"'
+        for l in langs
+    ]
+    out, inserted = [], False
+    for line in src:
+        if line.startswith("#EXT-X-STREAM-INF"):
+            if not inserted:
+                out.extend(media)
+                inserted = True
+            if "SUBTITLES=" not in line:
+                line = line + ',SUBTITLES="subs"'
+        out.append(line)
+    with open(os.path.join(out_dir, "master_cc.m3u8"), "w") as fh:
+        fh.write("\n".join(out) + "\n")
+
+
+def _write_companion_mpd(out_dir, langs, chunk, first_idx):
+    """Best-effort: copy Shaka's manifest.mpd and add a text AdaptationSet per language.
+    DASH live text alignment likely needs tuning against a real player (flagged)."""
+    src_path = os.path.join(out_dir, "manifest.mpd")
+    if not os.path.exists(src_path):
+        return
+    try:
+        mpd = open(src_path).read()
+    except OSError:
+        return
+    if "</Period>" not in mpd:
+        return
+    blocks = []
+    for l in langs:
+        blocks.append(
+            f'<AdaptationSet contentType="text" mimeType="text/vtt" lang="{l}">'
+            f'<Representation id="sub_{l}" bandwidth="256">'
+            f'<SegmentTemplate media="subtitles/{l}/sub_$Number$.vtt" '
+            f'startNumber="{first_idx}" duration="{int(round(chunk))}" timescale="1"/>'
+            f'</Representation></AdaptationSet>'
+        )
+    mpd = mpd.replace("</Period>", "".join(blocks) + "</Period>")
+    with open(os.path.join(out_dir, "manifest_cc.mpd"), "w") as fh:
+        fh.write(mpd)
+
+
+def start_captions(cfg, out_dir):
+    cap = cfg.get("captions")
+    if not cap or not cap.get("enabled"):
+        return
+    seg = float(cfg.get("segment_seconds", 4))
+    chunk = float(cap.get("chunk_seconds") or max(8.0, seg * 2))
+    targets = cap.get("targets", []) or []
+    src_lang = cap.get("source_lang", "auto")
+    engine = cap.get("engine") or "whisper"
+    offset_cfg = float(cap.get("offset_sec", 0))
+    model_size = cap.get("model_size")
+    base_lang = src_lang if src_lang and src_lang != "auto" else "en"
+    langs = sorted({base_lang, *targets})
+    default_lang = "en" if "en" in langs else langs[0]
+    sub_root = os.path.join(out_dir, "subtitles")
+    for l in langs:
+        os.makedirs(os.path.join(sub_root, l), exist_ok=True)
+    tmp = os.path.join(WORK_DIR, "cap_audio")
+    os.makedirs(tmp, exist_ok=True)
+    audio_url = _captions_audio_url(cfg)
+
+    # continuous audio segmenter: fixed-length mono 16k WAV chunks for whisper
+    aseg = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+            "-fflags", "+genpts", "-live_start_index", "-1", "-http_persistent", "0",
+            "-i", audio_url, "-vn", "-ac", "1", "-ar", "16000",
+            "-f", "segment", "-segment_time", str(chunk), "-reset_timestamps", "1",
+            os.path.join(tmp, "cap_%05d.wav")]
+    spawn("caption-audio", aseg, critical=False)
+    log(f"captions: live worker engine={engine} chunk={chunk}s targets={targets} langs={langs}")
+
+    def worker():
+        try:
+            import captions as capmod
+        except Exception as e:  # noqa: BLE001
+            log(f"captions: engine import failed ({e}); worker not started")
+            return
+        seen = set()
+        store = {l: [] for l in langs}
+        win = max(3, int(round(float(cfg.get("dvr_seconds", 300)) / chunk)))
+        while True:
+            try:
+                wavs = sorted(glob.glob(os.path.join(tmp, "cap_*.wav")))
+                for w in wavs[:-1]:  # skip the chunk still being written
+                    if w in seen:
+                        continue
+                    seen.add(w)
+                    mo = re.search(r"cap_(\d+)\.wav", w)
+                    if not mo:
+                        continue
+                    idx = int(mo.group(1))
+                    base = idx * chunk
+                    t0 = time.time()
+                    try:
+                        ad = capmod.make_adapter({"engine": engine, "audio_path": w,
+                                                  "source_lang": src_lang, "targets": targets,
+                                                  "model_size": model_size})
+                        cues = capmod.apply_offset(ad.transcribe(targets), base + offset_cfg)
+                    except Exception as e:  # noqa: BLE001
+                        log(f"captions: chunk {idx} transcribe failed: {e}")
+                        continue
+                    proc = time.time() - t0
+                    est = round(chunk + proc + 1.0, 1)
+                    for c in cues:
+                        store.setdefault(c.lang, []).append(c)
+                    first = max(0, idx - win + 1)
+                    for l in langs:
+                        _write_sub_segment(os.path.join(sub_root, l, f"sub_{idx}.vtt"),
+                                           store.get(l, []), base, base + chunk)
+                        with open(os.path.join(sub_root, l, "subs.m3u8"), "w") as fh:
+                            fh.write(_live_sub_playlist(range(first, idx + 1), chunk, first))
+                    _write_companion_master(out_dir, langs, default_lang)
+                    _write_companion_mpd(out_dir, langs, chunk, first)
+                    if _events:
+                        _events.event("caption.offset", est_offset_sec=est, proc_sec=round(proc, 1),
+                                      chunk_sec=chunk, realtime=bool(proc < chunk), langs=langs)
+            except Exception as e:  # noqa: BLE001
+                log(f"captions worker error: {e}")
+            time.sleep(1)
+
+    threading.Thread(target=worker, name="captions", daemon=True).start()
+
+
 def shutdown(*_):
     log("shutdown: terminating children")
     if _events:
@@ -429,6 +617,13 @@ def main():
         log(f"local mode: writing directly to {OUT_DIR}; S3 uploader skipped")
     else:
         start_uploader(cfg)
+
+    # Live captions/translation sidecar (gated on cfg.captions.enabled). Non-critical:
+    # a caption failure must never tear the channel down.
+    try:
+        start_captions(cfg, OUT_DIR)
+    except Exception as e:  # noqa: BLE001
+        log(f"captions: failed to start ({e}); continuing without captions")
 
     # Supervise: if any critical child dies, tear the whole channel down so
     # ECS restarts a clean container (renditions must stay in lockstep).

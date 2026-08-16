@@ -784,12 +784,16 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
       const snap = () => { try { const sk = video.seekable; if (sk.length && !didSnapRef.current) { video.currentTime = sk.end(sk.length - 1) - 0.5; didSnapRef.current = true } } catch {} }
       setTimeout(snap, 300); setTimeout(snap, 1200)
     }
+    // With captions on, load the captions-aware companion manifest (subtitles in the
+    // manifest); fall back to the plain master if the companion isn't written yet.
+    const cc = !!d.captions?.enabled
     async function attachHls() {
       const Hls = (await import('hls.js')).default
       if (cancelled) return
       if (Hls.isSupported()) {
-        const src = originUrl(`/origin/${d.id}/master.m3u8`)
-        const hls = new Hls({ lowLatencyMode: false, backBufferLength: d.dvr.effective_sec, liveSyncDurationCount: 3, manifestLoadingMaxRetry: 12, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 12 })
+        let src = originUrl(`/origin/${d.id}/${cc ? 'master_cc.m3u8' : 'master.m3u8'}`)
+        let triedPlain = false
+        const hls = new Hls({ lowLatencyMode: false, backBufferLength: d.dvr.effective_sec, liveSyncDurationCount: 3, manifestLoadingMaxRetry: 12, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 12, subtitleDisplay: false })
         hlsRef.current = hls
         hls.loadSource(src); hls.attachMedia(video!)
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -798,17 +802,19 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         })
         hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
           if (!data.fatal) return
-          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {} }
-          else { setTimeout(() => { try { hls.loadSource(src); hls.startLoad() } catch {} }, 1500) } // not ready yet -> reload
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {}; return }
+          // captions companion not written yet -> fall back to the plain master once
+          if (cc && !triedPlain) { triedPlain = true; src = originUrl(`/origin/${d.id}/master.m3u8`); try { hls.loadSource(src); hls.startLoad() } catch {}; return }
+          setTimeout(() => { try { hls.loadSource(src); hls.startLoad() } catch {} }, 1500) // not ready yet -> reload
         })
       } else if (video!.canPlayType('application/vnd.apple.mpegurl')) {
-        video!.src = originUrl(`/origin/${d.id}/master.m3u8`); video!.muted = true; video!.play().catch(() => {}); snapSoon()
+        video!.src = originUrl(`/origin/${d.id}/${cc ? 'master_cc.m3u8' : 'master.m3u8'}`); video!.muted = true; video!.play().catch(() => {}); snapSoon()
       }
     }
     async function attachDash() {
       const dashjs: any = (await import('dashjs')).default
       if (cancelled) return
-      const url = originUrl(`/origin/${d.id}/manifest.mpd`)
+      const url = originUrl(`/origin/${d.id}/${cc ? 'manifest_cc.mpd' : 'manifest.mpd'}`)
       const player = dashjs.MediaPlayer().create()
       dashRef.current = player
       // start on the live edge, ABR on by default
@@ -890,6 +896,18 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   }
   function goLive() { const v = videoRef.current; scrubbedRef.current = false; setScrubbed(false); if (!v || !v.seekable.length) return; v.currentTime = v.seekable.end(v.seekable.length - 1) - 0.5 }
 
+  // estimated live offset from the latest caption.offset telemetry (chunk + measured
+  // transcribe/translate time). Shown so the operator sees how far captions lag live.
+  const capOffset = useMemo(() => {
+    if (!d.captions?.enabled) return null
+    try {
+      const e = (d.log || []).find(l => l.title === 'caption.offset')
+      if (!e) return null
+      const j = JSON.parse(e.detail)
+      return typeof j.est_offset_sec === 'number' ? { sec: j.est_offset_sec as number, realtime: j.realtime !== false } : null
+    } catch { return null }
+  }, [d.log, d.captions?.enabled])
+
   // live is the default: we are LIVE unless the operator has scrubbed back into the DVR.
   const liveNow = !scrubbed
   // slider position: pinned to the RIGHT (live) while live so it never bounces as new
@@ -959,6 +977,11 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
             <span style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
               <button className={`chip ${fmt === 'hls' ? 'active' : ''}`} style={{ padding: '5px 10px', borderRadius: 0 }} onClick={() => setFmt('hls')}>HLS</button>
               <button className={`chip ${fmt === 'dash' ? 'active' : ''}`} style={{ padding: '5px 10px', borderRadius: 0 }} onClick={() => setFmt('dash')}>DASH</button>
+            </span>
+          )}
+          {d.captions?.enabled && capOffset && (
+            <span title="Estimated live offset: chunk length + measured transcribe/translate time. Captions lag live by about this much; if not real-time the model can't keep up." style={{ fontSize: 11, color: capOffset.realtime ? 'var(--faint)' : '#fbbf24' }}>
+              captions ~{capOffset.sec}s{capOffset.realtime ? '' : ' (behind)'}
             </span>
           )}
           <button className={`chip ${subOn ? 'active' : ''}`} style={{ padding: '5px 10px' }} onClick={() => setSubOn(!subOn)}>CC</button>
