@@ -28,8 +28,8 @@
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
  <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-16.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>16</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>5</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>10</b> 📱 In app</span><span class=chip><b>6</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>17</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>5</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>8</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>10</b> 📱 In app</span><span class=chip><b>7</b> 📱 Partial</span><span class=chip><b>12</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>Live stream end to end (create → transcode → play)</div>
@@ -239,6 +239,19 @@
          <button class="btn warn" data-changes="Output preview: HLS/DASH toggle + ladder">Request changes</button>
        </div>
     
+  </div><div class=card data-status="ready_to_test" data-app="partial">
+    <div class=top><div class=name>Watermark / channel brand overlay</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Per-channel watermark: pick a brand image from the library, position (TL/TR/BL/BR/TC/BC), pixel offsets, size (% of frame height) and opacity. Burned into the TRANSCODE output via an ffmpeg overlay; packaged assets copy the source so it is not burned in there (the option is hidden for package channels). A live preview overlay renders the brand on the player so placement can be validated before burn-in. Persisted on the channel; create + edit share the same columns.</div>
+    <div class=meta>tsc + encoder syntax clean. NEEDS a transcode-channel run to confirm the burned-in overlay renders correctly (position/size/opacity).</div>
+    <div class=how><b>How to test:</b> Open a TRANSCODE channel =&gt; Settings =&gt; Watermark: pick a brand image, set position/offset/size/opacity, Save, and see the preview overlay. Burn-in shows on transcode output once running.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Watermark / channel brand overlay">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Watermark / channel brand overlay">Request changes</button>
+       </div>
+    
   </div><div class=card data-status="in_review" data-app="partial">
     <div class=top><div class=name>Live captions + translation</div>
       <span class=pill style="background:#6366f1">👀 In review</span>
@@ -361,6 +374,26 @@
     <div class=summary>Channel settings fields read-only (still copyable) while the transcoder is running; editable only when stopped. Next.</div>
     <div class=meta></div>
     <div class=how><b>How to test:</b> </div>
+    
+    
+    
+  </div><div class=card data-status="building" data-app="none">
+    <div class=top><div class=name>Channel branding image (near name)</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
+    <div class=summary>A per-channel brand/logo shown next to the channel name in the admin, with a clickable box to select/browse from the library and a default TV icon when unset. Distinct from the watermark overlay (this is the channel identity thumbnail).</div>
+    <div class=meta>Not started — next up.</div>
+    <div class=how><b>How to test:</b> Planned: click the brand box by the channel name to pick/upload a logo; default TV icon when none.</div>
+    
+    
+    
+  </div><div class=card data-status="building" data-app="none">
+    <div class=top><div class=name>Audio-only live (radio) + Icecast input + waveform</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
+    <div class=summary>Audio-only live channels (radio stations): a single input and single output, like a live channel but audio-only. Support Icecast as an input alongside SRT/RTMP/HLS. Admin details page shows a live audio waveform/level meter for what is received and broadcast.</div>
+    <div class=meta>Design stage — separate workstream from video channels.</div>
+    <div class=how><b>How to test:</b> Planned: create an audio-only channel with an Icecast (or other) source; watch the live waveform on the detail page.</div>
     
     
     
