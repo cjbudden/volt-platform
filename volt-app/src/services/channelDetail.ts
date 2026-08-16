@@ -32,6 +32,11 @@ export interface ChannelDetail {
   onAir: boolean;
   public: { url: string; dashUrl: string; available: boolean };
   watermark: { enabled: boolean; ref: string | null; position: string; offsetX: number; offsetY: number; opacity: number; scale: number };
+  /** Station identity — logo/artwork + accent + blurb. Shown in the console and the
+   *  programme guide, and used as the artwork for an audio-only channel. */
+  brand: { ref: string | null; colour: string | null; description: string | null };
+  audioOnly: boolean;
+  audioLadder: { label: string; bitrate_kbps: number }[];
 }
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
@@ -272,6 +277,13 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
       opacity: channel.watermark_opacity ?? 100,
       scale: channel.watermark_scale ?? 12,
     },
+    brand: {
+      ref: channel.brand_ref ?? null,
+      colour: channel.brand_colour ?? null,
+      description: channel.description ?? null,
+    },
+    audioOnly: channel.audio_only === true,
+    audioLadder: Array.isArray(channel.audio_ladder) ? channel.audio_ladder : [],
   };
 }
 

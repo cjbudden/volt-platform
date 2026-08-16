@@ -39,6 +39,33 @@ epgRouter.get(
   })
 );
 
+/**
+ * The guide's CHANNEL list: identity rather than schedule. A guide renderer needs the
+ * logo, accent and blurb next to each row, and XMLTV carries the same thing as
+ * <channel><display-name/><icon src/></channel>.
+ */
+epgRouter.get(
+  '/channels',
+  asyncHandler(async (req, res) => {
+    const rows = await query<any>(
+      `SELECT c.id, c.name, c.brand_ref, c.brand_colour, c.description, c.audio_only, c.epg_enabled
+         FROM channels c JOIN groups g ON g.id=c.group_id
+        WHERE g.account_id=$1 AND c.enabled=true
+        ORDER BY c.name`,
+      [accountId(req)]
+    );
+    res.json(rows.map((c) => ({
+      id: c.id,
+      name: c.name,
+      icon: c.brand_ref ?? null,
+      colour: c.brand_colour ?? null,
+      description: c.description ?? null,
+      medium: c.audio_only ? 'audio' : 'video',
+      guideEnabled: c.epg_enabled !== false,
+    })));
+  })
+);
+
 /** Now + next for a channel (O(1)-ish hot path). */
 epgRouter.get(
   '/now-next',

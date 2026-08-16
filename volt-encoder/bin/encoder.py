@@ -314,19 +314,50 @@ def start_transcode(cfg, keys_unused):
     return [spawn("transcode", cmd)]
 
 
+def audio_ladder(cfg):
+    """Audio renditions for an audio-only (radio) channel. Defaults to a sane
+    two-rung AAC ladder when the control plane sends none."""
+    lad = cfg.get("audio_ladder") or [{"label": "high", "bitrate_kbps": 128},
+                                      {"label": "low", "bitrate_kbps": 64}]
+    return [{"label": r.get("label") or f"{r['bitrate_kbps']}k",
+             "bitrate_kbps": int(r["bitrate_kbps"])} for r in lad]
+
+
+def start_audio(cfg):
+    """audio_only: one input -> N AAC renditions, no video anywhere in the chain.
+    Same UDP-bus shape as the video path so the packager stays identical."""
+    src = cfg["inputs"][0]
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin"]
+    cmd += input_args(src)
+    for i, r in enumerate(audio_ladder(cfg)):
+        cmd += ["-map", "0:a:0", "-vn",
+                "-c:a", "aac", "-b:a", f"{r['bitrate_kbps']}k", "-ac", "2", "-ar", "48000",
+                "-f", "mpegts", udp_out(i)]
+    return [spawn("audio-encode", cmd)]
+
+
 # ---------------------------------------------------------------------------
 # Shaka Packager: consume the UDP renditions, emit CMAF + HLS + DASH to OUT_DIR.
 # ---------------------------------------------------------------------------
 def build_shaka(cfg, keys):
     seg = cfg["segment_seconds"]
     channel = cfg["channel_id"]
-    if cfg["workflow"] == "package_only":
+    if cfg.get("audio_only"):
+        rends = []                                   # radio: no video stream at all
+    elif cfg["workflow"] == "package_only":
         rends = [(i, inp.get("rendition_label", f"r{i}"), inp.get("has_audio", i == 0))
                  for i, inp in enumerate(primary_inputs(cfg))]
     else:
         rends = [(i, f"{r['height']}p", i == 0) for i, r in enumerate(cfg["ladder"])]
 
     cmd = [PACKAGER_BIN]
+    for idx, r in enumerate(audio_ladder(cfg) if cfg.get("audio_only") else []):
+        label = r["label"]
+        cmd.append(
+            f"in={udp_out(idx)},stream=audio,"
+            f"init_segment={OUT_DIR}/{label}/init.mp4,"
+            f"segment_template={OUT_DIR}/{label}/seg_$Number$.m4s"
+        )
     for idx, label, has_audio in rends:
         vseg = f"{OUT_DIR}/{label}/seg_$Number$.m4s"
         vinit = f"{OUT_DIR}/{label}/init.mp4"
@@ -686,9 +717,14 @@ def main():
     cfg = load_config()
     OUT_DIR = resolve_out_dir(cfg)
     os.makedirs(OUT_DIR, exist_ok=True)
-    nrend = len(primary_inputs(cfg)) if cfg["workflow"] == "package_only" \
-        else len(cfg.get("ladder", []))
+    if cfg.get("audio_only"):
+        nrend = len(audio_ladder(cfg))
+    elif cfg["workflow"] == "package_only":
+        nrend = len(primary_inputs(cfg))
+    else:
+        nrend = len(cfg.get("ladder", []))
     log(f"channel={cfg['channel_id']} workflow={cfg['workflow']} "
+        f"{'audio-only ' if cfg.get('audio_only') else ''}"
         f"renditions={nrend} out={OUT_DIR} local={is_local(cfg)}")
 
     # Event log + live status snapshot. Reports to the control plane's ingest
@@ -715,7 +751,11 @@ def main():
     _events.packager(True)
 
     selector = None
-    if cfg["workflow"] == "package_only":
+    if cfg.get("audio_only"):
+        # radio: a single audio input, no ladder, no filler/failover hop yet
+        start_audio(cfg)
+        _events.source_state("primary", True, renditions=nrend)
+    elif cfg["workflow"] == "package_only":
         if redundancy_on(cfg):
             # The source-selector owns the bus ports Shaka reads: it runs the
             # primary + backup relays and the filler, and forwards the active

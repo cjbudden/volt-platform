@@ -48,6 +48,9 @@ export interface OwnerRow {
   filler_vod_url?: string | null;
   /** per-channel output ladder override; when set it wins over the profile rungs. */
   output_ladder?: Array<{ height: number; bitrate_kbps: number; fps?: number }> | null;
+  /** audio-only (radio): no video anywhere; audio_ladder replaces the video rungs */
+  audio_only?: boolean;
+  audio_ladder?: Array<{ label?: string; bitrate_kbps: number }> | null;
   /** watermark / channel brand overlay */
   watermark_enabled?: boolean;
   watermark_ref?: string | null;
@@ -99,6 +102,19 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
       token: config.ingestToken,
     },
   };
+
+  // AUDIO-ONLY (radio): one input, an AAC rendition list, no video ladder. This
+  // short-circuits the video workflows entirely — the encoder runs its audio path and
+  // the packager emits audio-only HLS/DASH.
+  if (owner.audio_only) {
+    cfg.audio_only = true;
+    cfg.inputs = inputs
+      .filter((i) => i.role === 'primary')
+      .map((i) => ({ rendition_label: i.rendition_label ?? 'source', role: i.role, protocol: i.protocol, url: inputUrl(i), has_audio: true }));
+    cfg.audio_ladder = (owner.audio_ladder?.length ? owner.audio_ladder : [{ label: 'high', bitrate_kbps: 128 }, { label: 'low', bitrate_kbps: 64 }])
+      .map((a) => ({ label: a.label ?? `${a.bitrate_kbps}k`, bitrate_kbps: a.bitrate_kbps }));
+    return cfg;
+  }
 
   if (profile.workflow_type === 'transcode') {
     // one mezzanine input; we build the ladder from the profile rungs

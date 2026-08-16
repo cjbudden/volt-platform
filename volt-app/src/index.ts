@@ -26,6 +26,15 @@ async function ensureSchema(): Promise<void> {
   await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark_offset_y INTEGER NOT NULL DEFAULT 24`);
   await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark_opacity INTEGER NOT NULL DEFAULT 100`);
   await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark_scale INTEGER NOT NULL DEFAULT 12`);
+  // Channel brand: the station logo/artwork. NOT burned into the video (that is the
+  // watermark above) — this is the identity used in the console, the programme guide
+  // and any public metadata, and the station art for an audio-only channel.
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS brand_ref TEXT`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS brand_colour TEXT`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS description TEXT`);
+  // Audio-only (radio) channels: one input, one audio output, no video anywhere.
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS audio_only BOOLEAN NOT NULL DEFAULT false`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS audio_ladder JSONB`);
 }
 
 const server = app.listen(config.port, () => {

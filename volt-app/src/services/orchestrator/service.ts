@@ -62,6 +62,8 @@ export class Orchestrator {
         filler_ref,
         filler_vod_url,
         output_ladder: owner.output_ladder,   // per-channel ladder override -> encoder
+        audio_only: owner.audio_only,         // radio: audio ladder, no video
+        audio_ladder: owner.audio_ladder,
         watermark_enabled: owner.watermark_enabled,
         watermark_ref: owner.watermark_ref,
         watermark_position: owner.watermark_position,
@@ -78,6 +80,10 @@ export class Orchestrator {
   }
 
   private topRendition(ctx: JobConfigCtx): string {
+    if (ctx.owner.audio_only) {
+      const top = (ctx.owner.audio_ladder ?? [])[0];
+      return top ? `${top.bitrate_kbps}k audio` : 'audio';
+    }
     if (ctx.profile.workflow_type === 'transcode' && ctx.profile.rungs?.length)
       return `${ctx.profile.rungs[0].height}p`;
     const primary = ctx.inputs.filter((i) => i.role === 'primary');

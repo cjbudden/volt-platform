@@ -20,6 +20,7 @@ const CHANNEL_EDITABLE = [
   'filler_slate_ref', 'filler_asset_id', 'fallback_transcode',
   'watermark_enabled', 'watermark_ref', 'watermark_position',
   'watermark_offset_x', 'watermark_offset_y', 'watermark_opacity', 'watermark_scale',
+  'brand_ref', 'brand_colour', 'description', 'audio_only', 'audio_ladder',
 ];
 
 // Watermark / channel brand overlay. `ref` is a library image URL (like filler_slate_ref);
@@ -105,6 +106,21 @@ const FILLER = {
   fallbackTranscode: z.boolean().optional(),          // package_only: transcode fallback to all rungs
 };
 
+/** Audio rendition for a radio channel: an AAC bitrate, optionally named. */
+const AUDIO_RUNG = z.object({
+  label: z.string().optional(),
+  bitrateKbps: z.number().int().min(24).max(512),
+});
+
+// Channel identity shared by create + edit. `brandRef` is a library image URL (like
+// filler_slate_ref / watermark ref); it is the logo shown in the console and the guide,
+// and the station art for audio-only channels. It is NEVER burned into the video.
+const BRAND = {
+  brandRef: z.string().nullable().optional(),
+  brandColour: z.string().max(32).nullable().optional(),
+  description: z.string().max(2000).nullable().optional(),
+};
+
 const createSchema = z.object({
   groupId: z.string().uuid(),
   name: z.string().min(1),
@@ -118,7 +134,11 @@ const createSchema = z.object({
   outputLadder: z.array(RUNG).optional(),  // transcode: rungs to encode; package: mirror of inputs
   sources: z.array(SOURCE).optional(),     // primary (+ optional backup / per-rendition rows)
   ...FILLER,
+  ...BRAND,
   watermark: WATERMARK,
+  // audio-only (radio): no video ladder, an audio rendition list instead
+  audioOnly: z.boolean().optional(),
+  audioLadder: z.array(AUDIO_RUNG).optional(),
 });
 
 /** Create a channel — enforces the group's max_channels entitlement. */
@@ -166,8 +186,8 @@ channelsRouter.post(
       return ch;
     });
 
-    // watermark (kept out of the positional insert): set it in one follow-up update so
-    // create and edit persist the exact same columns.
+    // watermark / brand / audio-only (kept out of the positional insert): set them in
+    // one follow-up update so create and edit persist the exact same columns.
     if (body.watermark) {
       const w = body.watermark;
       await query(
@@ -177,11 +197,27 @@ channelsRouter.post(
          w.offsetX ?? 24, w.offsetY ?? 24, w.opacity ?? 100, w.scale ?? 12]
       );
     }
+    if (body.brandRef !== undefined || body.brandColour !== undefined || body.description !== undefined) {
+      await query(
+        `UPDATE channels SET brand_ref=COALESCE($2, brand_ref), brand_colour=COALESCE($3, brand_colour),
+           description=COALESCE($4, description) WHERE id=$1`,
+        [row.id, body.brandRef ?? null, body.brandColour ?? null, body.description ?? null]
+      );
+    }
+    if (body.audioOnly) {
+      const audio = (body.audioLadder?.length ? body.audioLadder : [{ label: 'High', bitrateKbps: 128 }, { label: 'Low', bitrateKbps: 64 }])
+        .map((a) => ({ label: a.label ?? `${a.bitrateKbps}k`, bitrate_kbps: a.bitrateKbps }));
+      await query(`UPDATE channels SET audio_only=true, audio_ladder=$2::jsonb, output_ladder=NULL WHERE id=$1`,
+        [row.id, JSON.stringify(audio)]);
+    }
+    // return the row as it now stands, not the pre-update snapshot
+    const created = await one<any>(`SELECT * FROM channels WHERE id=$1`, [row.id]);
 
     await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
       action: 'create', entityType: 'channel', entityId: row.id,
-      snapshot: { name: row.name, group_id: row.group_id, sources: (body.sources ?? []).length, ladder: body.outputLadder?.length ?? 0 } });
-    res.status(201).json(row);
+      snapshot: { name: row.name, group_id: row.group_id, sources: (body.sources ?? []).length, ladder: body.outputLadder?.length ?? 0,
+                  audio_only: !!body.audioOnly } });
+    res.status(201).json(created ?? row);
   })
 );
 
@@ -214,8 +250,12 @@ const editSchema = z.object({
   outputLadder: z.array(RUNG).nullable().optional(),
   // filler-on-loss + input failover
   ...FILLER,
-  // watermark / channel brand overlay
+  // watermark / channel brand overlay (burned into the video)
   watermark: WATERMARK,
+  // channel identity (not burned in): logo, accent colour, description
+  ...BRAND,
+  audioOnly: z.boolean().optional(),
+  audioLadder: z.array(AUDIO_RUNG).optional(),
   // subtitles / live captions (persisted to the group's shared output profile)
   captions: z.object({
     enabled: z.boolean().optional(),
@@ -263,6 +303,13 @@ const editChannel = asyncHandler(async (req, res) => {
   if (has('fillerSlateRef')) patch.filler_slate_ref = body.fillerSlateRef ?? null;
   if (has('fillerAssetId')) patch.filler_asset_id = body.fillerAssetId ?? null;
   if (has('fallbackTranscode')) patch.fallback_transcode = body.fallbackTranscode;
+  if (has('brandRef')) patch.brand_ref = body.brandRef ?? null;
+  if (has('brandColour')) patch.brand_colour = body.brandColour ?? null;
+  if (has('description')) patch.description = body.description ?? null;
+  if (has('audioOnly')) patch.audio_only = body.audioOnly;
+  if (has('audioLadder') && body.audioLadder) {
+    patch.audio_ladder = JSON.stringify(body.audioLadder.map((a) => ({ label: a.label ?? `${a.bitrateKbps}k`, bitrate_kbps: a.bitrateKbps })));
+  }
   if (has('watermark') && body.watermark) {
     const w = body.watermark;
     if (w.enabled !== undefined) patch.watermark_enabled = w.enabled;

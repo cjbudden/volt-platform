@@ -4,11 +4,24 @@ import { subscribeLive } from '../liveStatus'
 import { useProtocols, protoOf, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 
-type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
+type Props = {
+  createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void
+  /** 'radio' is the same page at the audio-only scope: audio channels, audio ladder. */
+  mode?: 'video' | 'radio'
+}
+
+const WATERMARK_POS: { id: 'tl' | 'tr' | 'bl' | 'br' | 'tc' | 'bc'; label: string }[] = [
+  { id: 'tl', label: 'Top left' }, { id: 'tc', label: 'Top centre' }, { id: 'tr', label: 'Top right' },
+  { id: 'bl', label: 'Bottom left' }, { id: 'bc', label: 'Bottom centre' }, { id: 'br', label: 'Bottom right' },
+]
+const AUDIO_PRESETS = [
+  { label: 'High', bitrateKbps: 128 }, { label: 'Standard', bitrateKbps: 96 },
+  { label: 'Low', bitrateKbps: 64 }, { label: 'Mobile', bitrateKbps: 48 },
+]
 
 type RetUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
 const RET_UNIT_SEC: Record<RetUnit, number> = { minutes: 60, hours: 3600, days: 86400, weeks: 604800, months: 2592000 }
-function splitDuration(sec: number | null): { n: string; unit: RetUnit } {
+export function splitDuration(sec: number | null): { n: string; unit: RetUnit } {
   if (sec == null || sec <= 0) return { n: '', unit: 'days' }
   const order: RetUnit[] = ['months', 'weeks', 'days', 'hours', 'minutes']
   for (const u of order) { const s = RET_UNIT_SEC[u]; if (sec % s === 0 && sec >= s) return { n: String(sec / s), unit: u } }
@@ -27,7 +40,8 @@ function fmtRetention(sec?: number | null, days?: number | null): string {
   return days != null && days > 0 ? `${days}d` : '—'
 }
 
-export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
+export default function Channels({ createOpen, setCreateOpen, onOpen, mode = 'video' }: Props) {
+  const radio = mode === 'radio'
   const [channels, setChannels] = useState<any[] | null>(null)
   const [groups, setGroups] = useState<Group[]>([])
   const [filter, setFilter] = useState<'all' | 'transcode' | 'package_only'>('all')
@@ -35,10 +49,11 @@ export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
   async function load() {
     const [chs, gs] = await Promise.all([api.channels(), api.groups()])
     const gmap = new Map(gs.map(g => [g.id, g]))
-    setChannels(chs.map(c => ({ ...c, _g: gmap.get(c.group_id) })))
+    // one list, two lenses: Channels is video, Radio is audio-only
+    setChannels(chs.filter(c => !!c.audio_only === radio).map(c => ({ ...c, _g: gmap.get(c.group_id) })))
     setGroups(gs)
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() /* eslint-disable-next-line */ }, [radio])
   // live: refresh the list on any stream status/event change (one shared SSE socket)
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | null = null
@@ -72,33 +87,37 @@ export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
     <>
       <div className="page-head">
         <div>
-          <h1>Channels</h1>
-          <p>24×7 live channels. Transcode builds the rendition ladder for you; packaging takes a pre-encoded ladder.</p>
+          <h1>{radio ? 'Radio' : 'Channels'}</h1>
+          <p>{radio
+            ? 'Audio-only stations. One source in, an AAC ladder out — no video anywhere in the chain.'
+            : '24×7 live channels. Transcode builds the rendition ladder for you; packaging takes a pre-encoded ladder.'}</p>
         </div>
         <div className="spacer" />
         <button className="btn primary" onClick={() => setCreateOpen(true)}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>
-          New channel
+          {radio ? 'New station' : 'New channel'}
         </button>
       </div>
 
       {channels === null ? (
         <div className="loading">Loading channels…</div>
       ) : channels.length === 0 ? (
-        <EmptyState onCreate={() => setCreateOpen(true)} />
+        <EmptyState radio={radio} onCreate={() => setCreateOpen(true)} />
       ) : (
         <>
-          <div className="filters">
-            <FChip label="All" n={counts.all} on={filter === 'all'} onClick={() => setFilter('all')} />
-            <FChip label="Transcode" n={counts.transcode} on={filter === 'transcode'} onClick={() => setFilter('transcode')} />
-            <FChip label="Packaging" n={counts.package_only} on={filter === 'package_only'} onClick={() => setFilter('package_only')} />
-          </div>
-          <ChannelTable channels={shown || []} onChanged={load} onOpen={onOpen} />
+          {!radio && (
+            <div className="filters">
+              <FChip label="All" n={counts.all} on={filter === 'all'} onClick={() => setFilter('all')} />
+              <FChip label="Transcode" n={counts.transcode} on={filter === 'transcode'} onClick={() => setFilter('transcode')} />
+              <FChip label="Packaging" n={counts.package_only} on={filter === 'package_only'} onClick={() => setFilter('package_only')} />
+            </div>
+          )}
+          <ChannelTable channels={shown || []} radio={radio} onChanged={load} onOpen={onOpen} />
         </>
       )}
 
       {createOpen && (
-        <CreateChannel groups={groups} onClose={() => setCreateOpen(false)} onCreated={() => { setCreateOpen(false); load() }} />
+        <CreateChannel groups={groups} radio={radio} onClose={() => setCreateOpen(false)} onCreated={() => { setCreateOpen(false); load() }} />
       )}
     </>
   )
@@ -112,17 +131,21 @@ function FChip({ label, n, on, onClick }: { label: string; n: number; on: boolea
   )
 }
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState({ onCreate, radio }: { onCreate: () => void; radio?: boolean }) {
   return (
     <div className="empty">
       <div className="ic">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="13" rx="2" /><path d="m17 2-5 5-5-5" /></svg>
+        {radio
+          ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 11h16a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><circle cx="8" cy="15.5" r="2.5" /><path d="M17 14h2M17 17h2M18 3 7 8" /></svg>
+          : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="13" rx="2" /><path d="m17 2-5 5-5-5" /></svg>}
       </div>
-      <h3>No channels yet</h3>
-      <p>Create your first channel to start a live stream. You can make a transcode channel — we build the ABR ladder — or a packaging channel, where you send a pre-encoded ladder and we package it.</p>
+      <h3>{radio ? 'No stations yet' : 'No channels yet'}</h3>
+      <p>{radio
+        ? 'Create your first radio station. Point it at an audio source — Icecast, SRT, RTMP or HLS — and we encode an AAC ladder and package it for players. No video is produced.'
+        : 'Create your first channel to start a live stream. You can make a transcode channel — we build the ABR ladder — or a packaging channel, where you send a pre-encoded ladder and we package it.'}</p>
       <button className="btn primary" onClick={onCreate} style={{ margin: '0 auto' }}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>
-        Create your first channel
+        {radio ? 'Create your first station' : 'Create your first channel'}
       </button>
     </div>
   )
@@ -133,7 +156,7 @@ function initials(name: string) {
   return name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'
 }
 
-function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChanged: () => void; onOpen?: (id: string) => void }) {
+function ChannelTable({ channels, onChanged, onOpen, radio }: { channels: any[]; onChanged: () => void; onOpen?: (id: string) => void; radio?: boolean }) {
   const [busy, setBusy] = useState<string | null>(null)
   async function toggle(c: any) {
     setBusy(c.id)
@@ -145,9 +168,9 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
       <table>
         <thead>
           <tr>
-            <th>Channel</th>
+            <th>{radio ? 'Station' : 'Channel'}</th>
             <th>Type</th>
-            <th>Renditions</th>
+            <th>{radio ? 'Audio ladder' : 'Renditions'}</th>
             <th>Status</th>
             <th>Retention</th>
             <th></th>
@@ -161,7 +184,9 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
               <tr key={c.id} onClick={() => onOpen?.(c.id)} style={onOpen ? { cursor: 'pointer' } : undefined}>
                 <td>
                   <div className="cell-name">
-                    <div className="thumb" style={{ background: THUMB_BG[i % THUMB_BG.length] }}>{initials(c.name)}</div>
+                    {c.brand_ref
+                      ? <img className="thumb" src={thumbUrl(c.brand_ref, 80, 80)} alt="" style={{ objectFit: 'cover', background: '#0b0f16' }} />
+                      : <div className="thumb" style={{ background: THUMB_BG[i % THUMB_BG.length] }}>{initials(c.name)}</div>}
                     <div>
                       <div className="nm">{c.name}</div>
                       <div className="id">{c._g?.name || '—'}</div>
@@ -169,12 +194,16 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
                   </div>
                 </td>
                 <td>
-                  <span className={`tag type ${wt === 'transcode' ? 'chan' : 'event'}`}>
-                    {wt === 'transcode' ? 'Transcode' : wt === 'package_only' ? 'Packaging' : '—'}
-                  </span>
+                  {c.audio_only
+                    ? <span className="tag type loop">Radio</span>
+                    : <span className={`tag type ${wt === 'transcode' ? 'chan' : 'event'}`}>
+                        {wt === 'transcode' ? 'Transcode' : wt === 'package_only' ? 'Packaging' : '—'}
+                      </span>}
                 </td>
                 <td style={{ color: 'var(--muted)' }}>
-                  {wt === 'transcode'
+                  {c.audio_only
+                    ? (c.audio_ladder || []).map((r: any) => `${r.bitrate_kbps}k`).join(' · ') || '128k · 64k'
+                    : wt === 'transcode'
                     ? ((c.output_ladder && c.output_ladder.length ? c.output_ladder : c._g?.rungs) || []).map((r: any) => `${r.height}p`).join(' · ') || '—'
                     : 'source ladder'}
                 </td>
@@ -222,7 +251,7 @@ const RUNG_PRESETS = [
 const SEC: React.CSSProperties = { fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', margin: '20px 0 10px', fontWeight: 700 }
 type PkgRow = { label: string; bitrateKbps: number; protocol: string; url: string; backupUrl: string }
 
-function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClose: () => void; onCreated: () => void }) {
+function CreateChannel({ groups, onClose, onCreated, radio }: { groups: Group[]; onClose: () => void; onCreated: () => void; radio?: boolean }) {
   const byType = useMemo(() => ({
     transcode: groups.find(g => g.workflow_type === 'transcode'),
     package_only: groups.find(g => g.workflow_type === 'package_only'),
@@ -251,6 +280,25 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   const [fallbackMode, setFallbackMode] = useState<'none' | 'matching' | 'single'>('none')
   const [fbSrc, setFbSrc] = useState<SourceValue>({ protocol: 'hls', url: '' })
 
+  // brand: the station logo/artwork. Identity for the console, the guide and public
+  // metadata — and the artwork a radio player shows. NOT burned into the video.
+  const [brandRef, setBrandRef] = useState('')
+  const [description, setDescription] = useState('')
+  const [brandPickerOpen, setBrandPickerOpen] = useState(false)
+
+  // watermark: burned into the transcode output (a different thing to the brand above)
+  const [wmOn, setWmOn] = useState(false)
+  const [wmRef, setWmRef] = useState('')
+  const [wmPos, setWmPos] = useState<'tl' | 'tr' | 'bl' | 'br' | 'tc' | 'bc'>('br')
+  const [wmScale, setWmScale] = useState(12)
+  const [wmOpacity, setWmOpacity] = useState(100)
+  const [wmMargin, setWmMargin] = useState(24)
+  const [wmPickerOpen, setWmPickerOpen] = useState(false)
+
+  // audio-only (radio): an AAC ladder instead of a video one
+  const [audio, setAudio] = useState(() => AUDIO_PRESETS.map(a => ({ ...a, on: a.bitrateKbps === 128 || a.bitrateKbps === 64 })))
+  const [aSrc, setASrc] = useState<SourceValue>({ protocol: 'srt', url: '' })
+
   // filler on total loss (both flows)
   const [lossBehavior, setLossBehavior] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>('slate')
   const [slateRef, setSlateRef] = useState('')
@@ -259,7 +307,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
 
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const group = byType[type]
+  const group = radio ? (byType.transcode ?? byType.package_only ?? groups[0]) : byType[type]
 
   function setRow(i: number, patch: Partial<PkgRow>) { setRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r)) }
   function addRow() { setRows(rs => [...rs, { label: '', bitrateKbps: 1000, protocol: 'hls', url: '', backupUrl: '' }]) }
@@ -269,11 +317,32 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   async function submit() {
     setErr('')
     if (!name.trim()) { setErr('Give the channel a name'); return }
-    if (!group) { setErr(`No ${type === 'transcode' ? 'transcode' : 'packaging'} group set up yet`); return }
+    if (!group) { setErr(radio ? 'No group set up yet to hold stations' : `No ${type === 'transcode' ? 'transcode' : 'packaging'} group set up yet`); return }
 
     const sources: NonNullable<Parameters<typeof api.createChannel>[0]['sources']> = []
     let outputLadder: { height: number; bitrateKbps: number }[] = []
     let fallbackTranscode = false
+
+    if (radio) {
+      if (!aSrc.url.trim()) { setErr('Add the audio source URL'); return }
+      const rungs = audio.filter(a => a.on)
+      if (!rungs.length) { setErr('Select at least one audio rendition'); return }
+      sources.push({ role: 'primary', protocol: aSrc.protocol, ingestUrl: aSrc.url.trim(), streamKey: aSrc.streamKey?.trim() || undefined })
+      setBusy(true)
+      try {
+        await api.createChannel({
+          groupId: group!.id, name: name.trim(), purchasingMode: purchasing, resilienceTier: 'standard',
+          recordingRetentionSec: retNum ? Math.max(Number(retNum) * RET_UNIT_SEC[retUnit], dvrMin * 60) : null,
+          dvrWindowSec: Math.max(30, dvrMin * 60), dvrMode: 'sliding',
+          sources, audioOnly: true,
+          audioLadder: rungs.map(a => ({ label: a.label, bitrateKbps: a.bitrateKbps })),
+          brandRef: brandRef.trim() || null, description: description.trim() || null,
+          inputLossBehavior: lossBehavior === 'slate' || lossBehavior === 'last_frame' ? 'none' : lossBehavior,
+        })
+        onCreated()
+      } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+      return
+    }
 
     if (type === 'transcode') {
       if (!tSrc.url.trim()) { setErr('Add the primary source URL'); return }
@@ -308,6 +377,11 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
         inputLossBehavior: lossBehavior,
         fillerSlateRef: (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && slateRef.trim() ? slateRef.trim() : null,
         fallbackTranscode,
+        brandRef: brandRef.trim() || null,
+        description: description.trim() || null,
+        watermark: wmOn && wmRef.trim()
+          ? { enabled: true, ref: wmRef.trim(), position: wmPos, offsetX: wmMargin, offsetY: wmMargin, opacity: wmOpacity, scale: wmScale }
+          : undefined,
       })
       onCreated()
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
@@ -316,22 +390,72 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   return (
     <div className="drawer-scrim" onClick={onClose}>
       <div className="drawer" onClick={e => e.stopPropagation()}>
-        <div className="drawer-h"><div className="t">New channel</div><button className="xbtn" onClick={onClose}>✕</button></div>
+        <div className="drawer-h"><div className="t">{radio ? 'New radio station' : 'New channel'}</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
-          <div className="field"><label>Channel name</label>
-            <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. RTM News 24" />
+          <div className="field"><label>{radio ? 'Station name' : 'Channel name'}</label>
+            <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder={radio ? 'e.g. RTM Klasik FM' : 'e.g. RTM News 24'} />
           </div>
 
-          <div className="field"><label>Type</label>
-            <div className="presets">
-              <Preset sel={type === 'transcode'} onClick={() => setType('transcode')} title="Transcode"
-                desc="One source in. We build the ABR ladder with FFmpeg." meta="1 input → many outputs" />
-              <Preset sel={type === 'package_only'} onClick={() => setType('package_only')} title="Packaging"
-                desc="You send a pre-encoded ladder; we just package it." meta="N inputs → N outputs" />
+          {/* BRAND — the station's identity. Shown in the console, the programme guide
+              and public metadata, and used as the artwork on an audio-only player. */}
+          <div style={SEC}>Brand</div>
+          <div className="field">
+            <label>{radio ? 'Station artwork' : 'Channel logo'} <span style={{ color: 'var(--faint)', fontWeight: 500 }}>— shown in the guide and channel info</span></label>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <div style={{ width: 52, height: 52, borderRadius: 11, flex: 'none', overflow: 'hidden', background: 'var(--panel-2)', border: '1px solid var(--border)', display: 'grid', placeItems: 'center' }}>
+                {brandRef
+                  ? <img src={thumbUrl(brandRef, 104, 104)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : <svg viewBox="0 0 24 24" fill="none" stroke="var(--faint)" strokeWidth="1.7" style={{ width: 22, height: 22 }}><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="9" cy="9" r="1.8" /><path d="m21 15-5-5L5 21" /></svg>}
+              </div>
+              <input className="inp" value={brandRef} onChange={e => setBrandRef(e.target.value)} placeholder="Pick from the library, upload, or paste a URL" />
+              <button type="button" className="btn ghost" style={{ whiteSpace: 'nowrap' }} onClick={() => setBrandPickerOpen(true)}>Browse / upload…</button>
             </div>
+            <div className="hintxt">Not burned into the picture — this is identity, not an overlay.{!radio && ' Use the watermark below to burn a logo into the video.'}</div>
           </div>
+          <div className="field">
+            <label>Description <span style={{ color: 'var(--faint)', fontWeight: 500 }}>— optional</span></label>
+            <textarea className="inp" rows={2} style={{ resize: 'vertical' }} value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder={radio ? 'Classic hits, 24 hours a day.' : 'What this channel carries — shown in the guide.'} />
+          </div>
+          <ImagePicker open={brandPickerOpen} kinds={['brand', 'poster', 'slate', 'other']}
+            title={radio ? 'Choose or upload station artwork' : 'Choose or upload a channel logo'}
+            uploadKind="brand" uploadFolder="brands"
+            onClose={() => setBrandPickerOpen(false)} onPick={(url) => { setBrandRef(url); setBrandPickerOpen(false) }} />
 
-          {type === 'transcode' ? (
+          {!radio && (
+            <div className="field"><label>Type</label>
+              <div className="presets">
+                <Preset sel={type === 'transcode'} onClick={() => setType('transcode')} title="Transcode"
+                  desc="One source in. We build the ABR ladder with FFmpeg." meta="1 input → many outputs" />
+                <Preset sel={type === 'package_only'} onClick={() => setType('package_only')} title="Packaging"
+                  desc="You send a pre-encoded ladder; we just package it." meta="N inputs → N outputs" />
+              </div>
+            </div>
+          )}
+
+          {radio ? (
+            <>
+              <div style={SEC}>Source</div>
+              <SourceInput protocols={protocols} value={aSrc} onChange={setASrc} label="Audio source" />
+              <div className="hintxt" style={{ marginTop: -6 }}>Any audio-bearing input works — Icecast, SRT, RTMP or HLS. Video in the source is discarded.</div>
+
+              <div style={SEC}>Audio ladder</div>
+              <div className="field">
+                {audio.map((a, i) => (
+                  <div key={a.bitrateKbps} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <div className={`selchip ${a.on ? 'sel' : ''}`} style={{ minWidth: 96, justifyContent: 'center' }}
+                      onClick={() => setAudio(l => l.map((x, j) => j === i ? { ...x, on: !x.on } : x))}>{a.label}</div>
+                    <input className="inp" style={{ maxWidth: 130, opacity: a.on ? 1 : 0.45 }} disabled={!a.on} inputMode="numeric"
+                      value={a.bitrateKbps}
+                      onChange={e => setAudio(l => l.map((x, j) => j === i ? { ...x, bitrateKbps: Number(e.target.value.replace(/[^0-9]/g, '')) || 0 } : x))} />
+                    <span style={{ fontSize: 12, color: 'var(--faint)' }}>kbps AAC</span>
+                  </div>
+                ))}
+                <div className="hintxt">Each selected rung is encoded from the source and packaged as an audio-only HLS/DASH rendition.</div>
+              </div>
+            </>
+          ) : type === 'transcode' ? (
             <>
               <div style={SEC}>Source</div>
               <SourceInput protocols={protocols} value={tSrc} onChange={setTSrc} label="Primary source" />
@@ -389,6 +513,50 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
                 <>
                   <SourceInput protocols={protocols} value={fbSrc} onChange={setFbSrc} label="Fallback source" />
                   <div className="hintxt" style={{ marginTop: -6 }}>Transcoded up to every rendition bitrate so all outputs stay continuous.</div>
+                </>
+              )}
+            </>
+          )}
+
+          {!radio && (
+            <>
+              <div style={SEC}>Watermark</div>
+              <div className="toggle-row">
+                <div><div className="tt">Burn a logo into the output</div><div className="td">Transcode channels only — packaging copies the source untouched.</div></div>
+                <div className={`sw ${wmOn ? '' : 'off'}`} onClick={() => setWmOn(v => !v)}><i /></div>
+              </div>
+              {wmOn && (
+                <>
+                  <div className="field"><label>Watermark image</label>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      {wmRef && <img src={thumbUrl(wmRef, 92, 68)} alt="" style={{ width: 46, height: 34, objectFit: 'contain', borderRadius: 6, background: '#0b0f16', flex: 'none' }} />}
+                      <input className="inp" value={wmRef} onChange={e => setWmRef(e.target.value)} placeholder="Pick a logo, upload, or paste a URL" />
+                      <button type="button" className="btn ghost" onClick={() => setWmPickerOpen(true)}>Browse / upload…</button>
+                    </div>
+                    <div className="hintxt">A transparent PNG works best.</div>
+                  </div>
+                  <div className="field"><label>Position</label>
+                    <div className="chipset">
+                      {WATERMARK_POS.map(p => (
+                        <div key={p.id} className={`selchip ${wmPos === p.id ? 'sel' : ''}`} onClick={() => setWmPos(p.id)}>{p.label}</div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>Size — {wmScale}% of frame height</label>
+                    <input type="range" min={2} max={40} value={wmScale} onChange={e => setWmScale(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
+                  </div>
+                  <div className="field">
+                    <label>Opacity — {wmOpacity}%</label>
+                    <input type="range" min={10} max={100} value={wmOpacity} onChange={e => setWmOpacity(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
+                  </div>
+                  <div className="field">
+                    <label>Margin from the edge — {wmMargin}px</label>
+                    <input type="range" min={0} max={200} value={wmMargin} onChange={e => setWmMargin(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
+                  </div>
+                  <ImagePicker open={wmPickerOpen} kinds={['brand', 'watermark', 'other']} title="Choose or upload a watermark"
+                    uploadKind="brand" uploadFolder="brands"
+                    onClose={() => setWmPickerOpen(false)} onPick={(url) => { setWmRef(url); setWmPickerOpen(false) }} />
                 </>
               )}
             </>
@@ -464,7 +632,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
         </div>
         <div className="drawer-f">
           <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Creating…' : 'Create channel'}</button>
+          <button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Creating…' : radio ? 'Create station' : 'Create channel'}</button>
         </div>
       </div>
     </div>

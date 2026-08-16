@@ -4,6 +4,7 @@
 //   /:section             -> a nav section (channels, events, recordings, …)
 //   /channels/:id         -> a channel's detail/control page
 //   /channels/new         -> channels list with the create drawer open
+//   /radio, /radio/:id    -> the same pages at the audio-only (station) scope
 // Bookmark / reload / share of any of these restores app state; browser back and
 // forward work. In dev, Vite's SPA fallback serves index.html for these paths; in
 // production the control plane serves index.html for non-/api,/origin routes.
@@ -33,10 +34,12 @@ export function parseRoute(pathname: string, search = ''): Route {
   const parts = pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)
   const create = new URLSearchParams(search).has('new')
   if (parts.length === 0) return { section: 'channels', channelId: null, create, path: pathname }
-  if (parts[0] === 'channels') {
-    if (parts[1] === 'new') return { section: 'channels', channelId: null, create: true, path: pathname }
-    if (parts[1]) return { section: 'channels', channelId: decodeURIComponent(parts[1]), create: false, path: pathname }
-    return { section: 'channels', channelId: null, create, path: pathname }
+  // channels and radio are the same shape: list / :id / new
+  if (parts[0] === 'channels' || parts[0] === 'radio') {
+    const section = parts[0]
+    if (parts[1] === 'new') return { section, channelId: null, create: true, path: pathname }
+    if (parts[1]) return { section, channelId: decodeURIComponent(parts[1]), create: false, path: pathname }
+    return { section, channelId: null, create, path: pathname }
   }
   return { section: parts[0], channelId: null, create, path: pathname }
 }
