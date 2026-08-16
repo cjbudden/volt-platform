@@ -211,10 +211,18 @@ class WhisperAdapter:
         self.translator = translator
 
     def _model(self):
+        # Load ONCE and reuse. In live mode transcribe() is called per audio chunk;
+        # constructing a fresh WhisperModel each time would reload weights from disk
+        # every chunk and blow the real-time budget. Memoize on the instance so a
+        # reused adapter keeps one warm model.
+        m = getattr(self, "_m", None)
+        if m is not None:
+            return m
         from faster_whisper import WhisperModel  # lazy: heavy import
         device = os.environ.get("WHISPER_DEVICE", "cpu")
         compute = os.environ.get("WHISPER_COMPUTE", "int8")
-        return WhisperModel(self.model_size, device=device, compute_type=compute)
+        self._m = WhisperModel(self.model_size, device=device, compute_type=compute)
+        return self._m
 
     def _run_task(self, model, task: str, lang: str) -> list[Cue]:
         kw = {"task": task, "beam_size": 1}

@@ -480,6 +480,18 @@ def start_captions(cfg, out_dir):
         except Exception as e:  # noqa: BLE001
             log(f"captions: engine import failed ({e}); worker not started")
             return
+        # Build the engine ONCE and reuse across chunks (one warm whisper model + one
+        # NLLB translator), then just point it at each new audio chunk. Recreating per
+        # chunk would reload the models every time and never keep up live.
+        reuse = None
+        if engine == "whisper":
+            try:
+                mt = capmod.make_translator(targets, base_lang)
+                reuse = capmod.WhisperAdapter("", src_lang, model_size, translator=mt)
+                log("captions: whisper model + translator initialised (warming on first chunk)")
+            except Exception as e:  # noqa: BLE001
+                log(f"captions: engine init failed ({e}); worker not started")
+                return
         seen = set()
         store = {l: [] for l in langs}
         win = max(3, int(round(float(cfg.get("dvr_seconds", 300)) / chunk)))
@@ -497,10 +509,14 @@ def start_captions(cfg, out_dir):
                     base = idx * chunk
                     t0 = time.time()
                     try:
-                        ad = capmod.make_adapter({"engine": engine, "audio_path": w,
-                                                  "source_lang": src_lang, "targets": targets,
-                                                  "model_size": model_size})
-                        cues = capmod.apply_offset(ad.transcribe(targets), base + offset_cfg)
+                        if reuse is not None:
+                            reuse.audio_path = w
+                            cues = capmod.apply_offset(reuse.transcribe(targets), base + offset_cfg)
+                        else:
+                            ad = capmod.make_adapter({"engine": engine, "audio_path": w,
+                                                      "source_lang": src_lang, "targets": targets,
+                                                      "model_size": model_size})
+                            cues = capmod.apply_offset(ad.transcribe(targets), base + offset_cfg)
                     except Exception as e:  # noqa: BLE001
                         log(f"captions: chunk {idx} transcribe failed: {e}")
                         continue
