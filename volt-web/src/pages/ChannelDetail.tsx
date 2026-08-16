@@ -448,31 +448,46 @@ function OutputError({ d }: { d: CD }) {
   )
 }
 
-// A minimal hls.js video element (used for the source preview).
-function HlsVideo({ src }: { src: string }) {
+// A minimal hls.js video element (used for the source preview). `src` may be an
+// absolute URL (a real contribution feed) or an origin path. It ALWAYS plays at
+// the live edge and re-snaps to live if it drifts back, so the preview shows now,
+// not old content. If `fallbackSrc` is given and the primary source can't be
+// played (e.g. the contribution CDN blocks cross-origin playback), it switches to
+// the fallback so the pane is never dead.
+function HlsVideo({ src, fallbackSrc }: { src: string; fallbackSrc?: string }) {
   const ref = useRef<HTMLVideoElement | null>(null)
   useEffect(() => {
-    let cancelled = false; let hls: any
+    let cancelled = false; let hls: any; let usingFallback = false; let fails = 0
     const v = ref.current; if (!v || !src) return
+    const resolve = (s: string) => /^https?:\/\//i.test(s) ? s : originUrl(s)
+    // keep the preview pinned to the live edge; if it falls >20s behind, jump forward
+    const snapLive = () => { try { const sk = v.seekable; if (sk.length) { const end = sk.end(sk.length - 1); if (end - v.currentTime > 20) v.currentTime = end - 0.5 } } catch {} }
     ;(async () => {
       const Hls = (await import('hls.js')).default
       if (cancelled) return
-      if (Hls.isSupported()) {
-        // NOT lowLatency: the origin is a standard Shaka LIVE playlist. Be patient on
-        // warm-up: the manifest 404s for the first few seconds until the packager
-        // writes it, so retry the manifest/level loads instead of giving up.
-        hls = new Hls({ lowLatencyMode: false, liveSyncDurationCount: 3, manifestLoadingMaxRetry: 12, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 12 })
-        hls.loadSource(originUrl(src)); hls.attachMedia(v)
-        hls.on(Hls.Events.MANIFEST_PARSED, () => { v.muted = true; v.play().catch(() => {}) })
-        hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
-          if (!data.fatal) return
-          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {} }
-          else { setTimeout(() => { try { hls.loadSource(originUrl(src)); hls.startLoad() } catch {} }, 1500) } // manifest not ready yet -> reload
-        })
-      } else if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = originUrl(src); v.muted = true; v.play().catch(() => {}) }
+      const start = (s: string) => {
+        const url = resolve(s)
+        if (Hls.isSupported()) {
+          try { hls?.destroy() } catch {}
+          // liveSyncDurationCount:3 keeps us ~3 segments off the edge (normal live
+          // latency); NOT lowLatency because the origin is a standard LIVE playlist.
+          hls = new Hls({ lowLatencyMode: false, liveSyncDurationCount: 3, backBufferLength: 30, manifestLoadingMaxRetry: 8, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 8 })
+          hls.loadSource(url); hls.attachMedia(v)
+          hls.on(Hls.Events.MANIFEST_PARSED, () => { v.muted = true; v.play().catch(() => {}); setTimeout(snapLive, 400) })
+          hls.on(Hls.Events.LEVEL_LOADED, snapLive)
+          hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
+            if (!data.fatal) return
+            if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {}; return }
+            fails++
+            if (!usingFallback && fallbackSrc && fails >= 2) { usingFallback = true; fails = 0; start(fallbackSrc); return }
+            setTimeout(() => { try { hls.loadSource(url); hls.startLoad() } catch {} }, 1500) // not ready yet -> reload
+          })
+        } else if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = url; v.muted = true; v.play().catch(() => {}); v.addEventListener('loadeddata', snapLive, { once: true }) }
+      }
+      start(src)
     })()
     return () => { cancelled = true; try { hls?.destroy() } catch {} }
-  }, [src])
+  }, [src, fallbackSrc])
   return <video ref={ref} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
 }
 
@@ -495,11 +510,18 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   const badgeText = inputFailed ? 'SOURCE ERROR' : (sourceUp && encFailed) ? 'ENCODER FAILED' : sourceUp ? 'RECEIVING' : proto
   const badgeBg = srcErrored ? 'rgba(248,113,113,.85)' : sourceUp ? 'rgba(74,222,128,.85)' : 'rgba(99,102,241,.85)'
   const canPreview = sourceUp && !srcErrored
+  // If the contribution feed is a browser-playable HLS URL, preview the REAL source
+  // directly (so this pane is the true source, not our packaged output) and fall back
+  // to the packaged origin if the CDN blocks cross-origin playback. For SRT/RTMP the
+  // raw feed can't play in a browser, so we show the packaged origin as a proxy.
+  const directHls = (configured?.protocol || '').toLowerCase() === 'hls' && configured?.ingest_url ? configured.ingest_url : undefined
+  const srcVideoSrc = directHls ?? `/origin/${d.id}/master.m3u8`
+  const srcFallback = directHls ? `/origin/${d.id}/master.m3u8` : undefined
   return (
     <div className="player">
       <div className="video">
-        {canPreview ? <HlsVideo src={`/origin/${d.id}/master.m3u8`} /> : <div className="grad" style={srcErrored ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
-        <div className="plabel"><span className="pt" style={{ color: srcErrored ? '#fca5a5' : '#a5b4fc' }}>SOURCE · {proto} ingest</span></div>
+        {canPreview ? <HlsVideo src={srcVideoSrc} fallbackSrc={srcFallback} /> : <div className="grad" style={srcErrored ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
+        <div className="plabel"><span className="pt" style={{ color: srcErrored ? '#fca5a5' : '#a5b4fc' }}>SOURCE · {proto} {directHls ? 'contribution' : 'ingest'}</span></div>
         <div className="badge-live" style={{ background: badgeBg }}><span className="d" />{badgeText}</div>
         {srcErrored && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
@@ -585,6 +607,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   const [winSec, setWinSec] = useState(d.dvr.effective_sec)
   const [cue, setCue] = useState('')
   const cuesRef = useRef<Cue[]>([])
+  const didSnapRef = useRef(false)   // snap to live edge once on initial load
 
   // attach hls.js
   useEffect(() => {
@@ -603,6 +626,10 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           setLevels(hls.levels.map((l: any) => ({ height: l.height, bitrate: l.bitrate })))
           video!.muted = true; video!.play().catch(() => {})
+          // LIVE IS THE DEFAULT: jump to the live edge on load. The user only leaves
+          // live by dragging the DVR timeline back; a fresh load always starts live.
+          const snap = () => { try { const sk = video!.seekable; if (sk.length && !didSnapRef.current) { video!.currentTime = sk.end(sk.length - 1) - 0.5; didSnapRef.current = true } } catch {} }
+          setTimeout(snap, 300); setTimeout(snap, 1200)
         })
         hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
           if (!data.fatal) return
@@ -672,13 +699,15 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         <video ref={videoRef} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
         <div className="plabel"><span className="pt" style={{ color: atLive ? '#4ade80' : '#fbbf24' }}>OUTPUT{atLive ? '' : ' · DVR catch-up'}</span></div>
         {/* On-air state: green ON AIR when published to the public, blue PREVIEW when the
-            packaged output is playing but held private (verify DASH/HLS before going on air). */}
+            packaged output is playing but held private (verify DASH/HLS before going on air).
+            Centered at the top so it never sits behind the OUTPUT label or the LIVE badge. */}
         <div style={{
-          position: 'absolute', top: 10, left: 10, display: 'inline-flex', alignItems: 'center', gap: 6,
-          fontSize: 11, fontWeight: 700, letterSpacing: .4, padding: '4px 9px', borderRadius: 999,
-          background: onAir ? 'rgba(74,222,128,.16)' : 'rgba(56,189,248,.16)',
-          border: `1px solid ${onAir ? 'rgba(74,222,128,.5)' : 'rgba(56,189,248,.5)'}`,
-          color: onAir ? '#4ade80' : '#38bdf8',
+          position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
+          display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+          fontSize: 11, fontWeight: 700, letterSpacing: .4, padding: '4px 10px', borderRadius: 999,
+          background: onAir ? 'rgba(74,222,128,.18)' : 'rgba(56,189,248,.18)',
+          border: `1px solid ${onAir ? 'rgba(74,222,128,.55)' : 'rgba(56,189,248,.55)'}`,
+          color: onAir ? '#4ade80' : '#38bdf8', backdropFilter: 'blur(2px)',
         }}><span className="dot-s" style={{ background: onAir ? '#4ade80' : '#38bdf8' }} />{onAir ? 'ON AIR' : 'PREVIEW · not on air'}</div>
         <div className="badge-live" style={atLive ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{atLive ? 'LIVE' : 'DVR'}</div>
         <div className="bug"><span className="lg">{BOLT}</span>{d.name.toUpperCase()}</div>

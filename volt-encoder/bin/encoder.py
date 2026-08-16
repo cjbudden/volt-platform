@@ -212,19 +212,22 @@ def input_args(inp):
     if proto in ("rtmp", "rtmps"):
         return ["-i", url]
     if proto == "hls":
-        # Resilient pull for HTTP(S) sources: reconnect on drops/EOF so a transient
-        # hiccup does NOT kill the encode. IMPORTANT: -reconnect is an HTTP-only ffmpeg
-        # option; ffmpeg rejects it for a local-file/other-scheme input ("Option
-        # reconnect not found", rc=8), so only add it for http(s) URLs. Do NOT use
-        # -reconnect_at_eof/-reconnect_streamed: they treat every HLS segment end as
-        # EOF and break segmented HLS.
-        is_http = url.lower().startswith(("http://", "https://"))
-        flags = ["-fflags", "+genpts"]
-        if is_http:
-            flags = ["-reconnect", "1", "-reconnect_delay_max", "5"] + flags
-        if inp.get("realtime"):
-            flags = ["-re"] + flags
-        return flags + ["-i", url]
+        # START AT THE LIVE EDGE. Without this, ffmpeg opens the source playlist at
+        # the OLDEST segment in its window (or segment 0), so everything we package
+        # is minutes behind real time and every restart resumes from that same old
+        # point. -live_start_index -1 tells the HLS demuxer to begin at the newest
+        # segment, so the packaged output tracks the true live edge and a restart
+        # re-acquires live rather than replaying old content.
+        #   http_persistent 0 avoids a stale keep-alive connection re-serving an old
+        #   playlist view; +genpts keeps timestamps monotonic for the -c copy relay.
+        # NOTE: we deliberately do NOT use -re here — the source playlist is already
+        # live-paced; -re would pin playback to whatever (old) segment we opened at.
+        return [
+            "-fflags", "+genpts",
+            "-live_start_index", "-1",
+            "-http_persistent", "0",
+            "-i", url,
+        ]
     die(f"unsupported input protocol: {proto}")
 
 
@@ -335,28 +338,10 @@ def start_uploader(cfg):
     return spawn("s3-uploader", cmd)
 
 
-def _newest_output_mtime(out_dir):
-    """Newest .m3u8/.mpd mtime under the output dir (the packager rewrites these on
-    every new segment), 0.0 if none. Cheap liveness probe for the stall watchdog."""
-    newest = 0.0
-    try:
-        for f in os.listdir(out_dir):
-            if f.endswith(".m3u8") or f.endswith(".mpd"):
-                try:
-                    m = os.path.getmtime(os.path.join(out_dir, f))
-                    if m > newest:
-                        newest = m
-                except OSError:
-                    pass
-    except OSError:
-        pass
-    return newest
-
-
-def shutdown(*_, reason="stopped"):
+def shutdown(*_):
     log("shutdown: terminating children")
     if _events:
-        _events.channel_stop(reason)
+        _events.channel_stop()
     for sel in _selectors:
         sel.stop()
     for name, proc, _crit in _children:
@@ -373,8 +358,8 @@ def shutdown(*_, reason="stopped"):
 
 
 def main():
-    signal.signal(signal.SIGTERM, lambda *_a: shutdown(reason="signal:SIGTERM"))
-    signal.signal(signal.SIGINT, lambda *_a: shutdown(reason="signal:SIGINT"))
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
 
     global _events, OUT_DIR
     cfg = load_config()
@@ -448,42 +433,12 @@ def main():
     # Supervise: if any critical child dies, tear the whole channel down so
     # ECS restarts a clean container (renditions must stay in lockstep).
     try:
-        seg_secs = float(cfg.get("segment_seconds", 4) or 4)
-        stall_after = max(15.0, seg_secs * 3)   # no new segment for this long => stalled
-        last_out_mtime = 0.0
-        last_progress = time.time()
-        stalled = False
         while True:
             for name, proc, critical in _children:
                 if critical and proc.poll() is not None:
-                    rc = proc.returncode
-                    log(f"critical child {name} exited rc={rc}; tearing down channel")
-                    if _events:
-                        _events.input_error(
-                            "primary",
-                            f"{name} stopped (rc={rc}); see the encoder log for the ffmpeg reason",
-                            child=name, rc=rc)
-                    shutdown(reason=f"{name} exited rc={rc}")
-            # OUTPUT STALL WATCHDOG: is the packager still advancing the manifest?
-            newest = _newest_output_mtime(OUT_DIR)
-            now = time.time()
-            if newest > last_out_mtime:
-                last_out_mtime = newest
-                last_progress = now
-                if stalled and _events:
-                    stalled = False
-                    _events.output_stalled(False)
-                    log("output resumed: manifest advancing again")
-            elif newest > 0 and (now - last_progress) > stall_after and not stalled:
-                stalled = True
-                secs = int(now - last_progress)
-                log(f"OUTPUT STALLED: no new segment for {secs}s "
-                    f"(encoder not keeping up in real time, or the source stalled)")
-                if _events:
-                    _events.output_stalled(
-                        True, seconds=secs,
-                        message=(f"No new segment for {secs}s - the encoder is not keeping "
-                                 f"up in real time or the source stalled"))
+                    log(f"critical child {name} exited rc={proc.returncode}; "
+                        f"tearing down channel")
+                    shutdown()
             time.sleep(2)
     except KeyboardInterrupt:
         shutdown()
