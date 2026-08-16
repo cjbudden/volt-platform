@@ -1,13 +1,13 @@
 {
-  "updated": "2026-08-13",
+  "updated": "2026-08-16",
   "features": [
     {
       "id": "live-stream-e2e",
-      "name": "Live stream end to end (create \u2192 transcode \u2192 play)",
+      "name": "Live stream end to end (create → transcode → play)",
       "summary": "Create a Transcode channel with an HLS/RTMP/SRT pull source, Send source, and the real encoder ingests + builds the ABR ladder (x264) + packages CMAF (HLS+DASH) to the origin, played back in the app with real status + event log. Verified in a full local stack against the JR HLS source: 1080/720/480 ABR served + playable.",
       "status": "ready_to_test",
       "test": {
-        "how": "run-on-mac.sh \u2192 Channels \u2192 New channel (Transcode, HLS source) \u2192 open channel \u2192 Send source \u2192 watch Source/Output play.",
+        "how": "run-on-mac.sh → Channels → New channel (Transcode, HLS source) → open channel → Send source → watch Source/Output play.",
         "artifact": ""
       },
       "checks": "Verified end-to-end in a local stack (postgres+control plane+encoder); origin serves a 3-rendition master; tsc + vite build clean.",
@@ -33,7 +33,7 @@
       "summary": "Pull any frame on demand from the chunked origin, scrub via sprite + I-frame trick-play, cut a frame-accurate clip. No proxies.",
       "status": "ready_to_test",
       "test": {
-        "how": "Run the prototype (volt-frame-proto.zip): npm install \u2192 node test.mjs \u2192 node server.mjs \u2192 open /scrub. 15/15 assertions.",
+        "how": "Run the prototype (volt-frame-proto.zip): npm install → node test.mjs → node server.mjs → open /scrub. 15/15 assertions.",
         "artifact": null
       },
       "checks": "15/15 assertions (frame-accuracy MAD 0.02, exact clip, sprite, trick-play)",
@@ -49,20 +49,20 @@
         "how": "Say the word and I'll spin up a live sample share link + page from the local console so you can click expiry / PIN / revoke. Backend is 20/20 e2e.",
         "artifact": null
       },
-      "checks": "20/20 e2e (isolation, PIN, revoke\u2192410, expiry\u2192410, download gating)",
+      "checks": "20/20 e2e (isolation, PIN, revoke→410, expiry→410, download gating)",
       "feedback": [],
       "app_surface": "none"
     },
     {
       "id": "captions",
       "name": "Live captions + translation",
-      "summary": "Optional per account. Self-hosted whisper + NLLB (en\u2194ms/zh/ta and more) or Gladia. Whisper runs as a separate GPU add-on only when needed.",
+      "summary": "Optional per account. Self-hosted whisper + NLLB (en↔ms/zh/ta and more) or Gladia. Whisper runs as a separate GPU add-on only when needed.",
       "status": "ready_to_test",
       "test": {
         "how": "Attach a short audio/video clip in chat and I'll caption + translate it and return the WebVTT tracks, or run the encoder unit tests.",
         "artifact": null
       },
-      "checks": "33 + 9 + 6 tests; proven end-to-end espeak \u2192 whisper \u2192 NLLB",
+      "checks": "33 + 9 + 6 tests; proven end-to-end espeak → whisper → NLLB",
       "feedback": [],
       "app_surface": "partial"
     },
@@ -150,7 +150,7 @@
       "summary": "Push a clip to YouTube / Facebook / X / TikTok / Dailymotion. Data model + APIs exist; real upload adapters pending.",
       "status": "building",
       "test": {
-        "how": "Not testable yet \u2014 needs each platform's OAuth app credentials from you before the upload adapters go live.",
+        "how": "Not testable yet — needs each platform's OAuth app credentials from you before the upload adapters go live.",
         "artifact": null
       },
       "checks": "foundation built; adapters stubbed",
@@ -163,7 +163,7 @@
       "summary": "Hierarchical, searchable image store for watermarks, slates, posters and channel brands. Storage-driver abstraction: local base dir for local runs, S3 bucket+prefix in cloud. Upload + folder tree + search + kind filter + move/rename + guarded, audit-logged delete (confirm + in-use guard). Generated keyframes/storyboards live under a separate derived/ prefix. Serves /library/* as the image-resize origin.",
       "status": "ready_to_test",
       "test": {
-        "how": "Media \u2192 Image Library. Create a folder (slates/watermarks/brands/posters), upload images, search/filter, delete (asks to confirm; blocks if a channel uses it as a slate).",
+        "how": "Media → Image Library. Create a folder (slates/watermarks/brands/posters), upload images, search/filter, delete (asks to confirm; blocks if a channel uses it as a slate).",
         "artifact": null
       },
       "checks": "backend verified end-to-end (upload/probe/list/search/folders/move/serve/guarded-delete); browser UI type-checked",
@@ -176,7 +176,7 @@
       "summary": "Assign a folder or S3 bucket/prefix as an auto ingest source; new files become assets / VOD / slates / playlist items.",
       "status": "building",
       "test": {
-        "how": "Designed only \u2014 see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.",
+        "how": "Designed only — see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.",
         "artifact": null
       },
       "checks": "design complete",
@@ -202,22 +202,22 @@
       "summary": "Runs the REAL encode/package/DVR/record/thumbnail pipeline on-box (no AWS), ORCH_LAUNCHER=local. Now WIRED to the channel UI: Send source starts the real encoder against the channel's configured source and the page plays the real output.",
       "status": "ready_to_test",
       "test": {
-        "how": "On the Mac (with ffmpeg+python3+Shaka packager installed) run run-on-mac.sh \u2014 it prints 'real local encoder: ENABLED'. Open a channel with an HLS pull source, click Start; the output player shows the REAL ENCODER \u00b7 x264 \u2192 CMAF badge and plays the live CMAF with DVR scrub. Stop the channel to generate the poster/storyboard/VTT.",
+        "how": "On the Mac (with ffmpeg+python3+Shaka packager installed) run run-on-mac.sh — it prints 'real local encoder: ENABLED'. Open a channel with an HLS pull source, click Start; the output player shows the REAL ENCODER · x264 → CMAF badge and plays the live CMAF with DVR scrub. Stop the channel to generate the poster/storyboard/VTT.",
         "artifact": null
       },
-      "checks": "12/12 TS integration test drives the real encoder end-to-end (ingest\u2192720/480/360 ladder\u2192CMAF HLS+DASH, decodable; clean stop; poster+5x5 sheet+VTT). Encoder+thumbnailer unit tests pass; real local e2e verified.",
+      "checks": "12/12 TS integration test drives the real encoder end-to-end (ingest→720/480/360 ladder→CMAF HLS+DASH, decodable; clean stop; poster+5x5 sheet+VTT). Encoder+thumbnailer unit tests pass; real local e2e verified.",
       "feedback": [],
       "app_surface": "full"
     },
     {
       "id": "channels-ui",
-      "name": "Channels \u2014 list & create (transcode/package)",
+      "name": "Channels — list & create (transcode/package)",
       "app_surface": "full",
       "status": "ready_to_test",
       "summary": "Channels list (empty state, filter chips, start/stop) + a create drawer that branches by type: transcode = one source + optional backup + selectable output ladder + filler-on-loss; package = per-rendition input rows + fallback (matching URLs or a single source transcoded to all bitrates).",
       "checks": "create inserts channel + stream_inputs + ladder + filler (both flows) verified via API",
       "test": {
-        "how": "Channels \u2192 New channel. Pick Transcode or Packaging; fill the type-specific fields; Create. It appears in the list.",
+        "how": "Channels → New channel. Pick Transcode or Packaging; fill the type-specific fields; Create. It appears in the list.",
         "artifact": null
       },
       "feedback": []
@@ -230,7 +230,7 @@
       "summary": "Channel control page. Now shows REAL data only: source + output players play the live encoder output (/origin/<id>/master.m3u8), status board + event log come from the real encoder report (stream_status/stream_events) incl. the actual encoder/ffmpeg error lines so you can see WHY a source/output failed. EPG shows the real programmes table (empty state when none); viewers empty until real analytics. No fabricated telemetry.",
       "checks": "detail endpoint + optimistic-concurrency PATCH + audit diff verified",
       "test": {
-        "how": "Click a channel in the list. Send source \u2192 Go live; toggle CC; drag the DVR bar; open Settings and save a change.",
+        "how": "Click a channel in the list. Send source → Go live; toggle CC; drag the DVR bar; open Settings and save a change.",
         "artifact": null
       },
       "feedback": []
@@ -254,9 +254,9 @@
       "app_surface": "partial",
       "status": "building",
       "summary": "Managed library of output ladder profiles (reuses output_profiles): list, create from scratch or copy an existing profile, rename, edit; delete with an API-level confirmation workflow + in-use guard + audit log. Assign a profile to a transcode channel's output.",
-      "checks": "in progress \u2014 schema + seed + CRUD + UI + assign",
+      "checks": "in progress — schema + seed + CRUD + UI + assign",
       "test": {
-        "how": "Profiles \u2192 New (or copy an existing) \u2192 edit rungs \u2192 save. Assign it when creating a transcode channel. Try deleting one in use (blocked) and an unused one (confirm required).",
+        "how": "Profiles → New (or copy an existing) → edit rungs → save. Assign it when creating a transcode channel. Try deleting one in use (blocked) and an unused one (confirm required).",
         "artifact": null
       },
       "feedback": []
@@ -266,10 +266,10 @@
       "name": "Form & field management (protocol-aware sources)",
       "app_surface": "partial",
       "status": "ready_to_test",
-      "summary": "Hybrid plan (no general form builder): source fields change to suit the selected protocol via a typed descriptor registry served at GET /api/ingest-protocols (srt/rtmp/rtmps/hls/dash/ndi/st2110 \u2014 label, placeholder, example, hint, stream-key field, push|pull). Wired into the create form and settings drawer. i18n label catalogs + a metadata_schemas custom-field renderer are the next phases.",
+      "summary": "Hybrid plan (no general form builder): source fields change to suit the selected protocol via a typed descriptor registry served at GET /api/ingest-protocols (srt/rtmp/rtmps/hls/dash/ndi/st2110 — label, placeholder, example, hint, stream-key field, push|pull). Wired into the create form and settings drawer. i18n label catalogs + a metadata_schemas custom-field renderer are the next phases.",
       "checks": "registry + endpoint verified; forms + settings type-checked and wired; enum aligned to DB",
       "test": {
-        "how": "New channel \u2192 change the source protocol; the URL example/placeholder + hint change, and RTMP/RTMPS show a Stream key field. Same in a channel's Settings drawer.",
+        "how": "New channel → change the source protocol; the URL example/placeholder + hint change, and RTMP/RTMPS show a Stream key field. Same in a channel's Settings drawer.",
         "artifact": null
       },
       "feedback": []
@@ -299,6 +299,58 @@
       "checks": "",
       "feedback": [],
       "app_surface": "none"
+    },
+    {
+      "id": "on-air-public",
+      "name": "On air + public delivery URL",
+      "summary": "On air is a real backend state (channels.on_air), separate from the encoder being up. Going on air is refused until the packaged output has valid content; stopping the channel takes it off air. A gated public URL /live/:id/master.m3u8|manifest.mpd returns the stream ONLY when on air with valid content (off air => 404, on air but broken => 503, else 302 to CloudFront in prod / origin locally). The On-air gate is honest: READY (blue) private, ON AIR (green) when truly serving valid content, FAILED (red) when published but broken.",
+      "status": "ready_to_test",
+      "test": {
+        "how": "Start a channel, confirm output previews as READY, click Go on air (disabled until output is valid), open the public HLS/DASH links in the banner; Take off air => links 404.",
+        "artifact": ""
+      },
+      "checks": "tsc clean both apps; gate + route logic wired to ground-truth manifest freshness.",
+      "feedback": [],
+      "app_surface": "full"
+    },
+    {
+      "id": "share-preview-live",
+      "name": "Share preview link (live channel)",
+      "summary": "Create a private preview link for THIS channel from the detail page (label, expiry, optional PIN, optional max-views, note). Separate workflow from on air: plays the packaged output whenever the source is active, ignores geo/access rules, secured by PIN+expiry. Recipient sees a standalone page (LIVE PREVIEW badge, waiting state when not producing, live-edge playback). List + revoke existing links.",
+      "status": "ready_to_test",
+      "test": {
+        "how": "Channel detail => Share preview => create link => open in a private window (enter PIN if set). Works without going on air.",
+        "artifact": ""
+      },
+      "checks": "tsc clean; backend resolve skips geo/rights for channel; preview URL fixed to play origin locally.",
+      "feedback": [],
+      "app_surface": "full"
+    },
+    {
+      "id": "dual-format-preview",
+      "name": "Output preview: HLS/DASH toggle + ladder",
+      "summary": "Output player can preview BOTH packagings to verify each works: an HLS/DASH toggle (shown when the channel produces both) plus an Auto (ABR) / per-rung ladder selector that drives whichever engine is active (hls.js / dash.js). Output previews privately as soon as it is valid, before going on air.",
+      "status": "ready_to_test",
+      "test": {
+        "how": "Open a running channel => toggle HLS/DASH under the output player, and step through Auto + each ladder rung.",
+        "artifact": ""
+      },
+      "checks": "tsc clean; dashjs added; both engines autoplay + snap to live.",
+      "feedback": [],
+      "app_surface": "full"
+    },
+    {
+      "id": "live-trust",
+      "name": "Live output trust (live-edge ingest + live-lock)",
+      "summary": "HLS ingest starts at the live edge (-live_start_index -1) so the packaged output tracks the true source and restarts re-acquire live instead of replaying old content. The output player holds the live edge and self-heals after stalls (snaps back when it drifts >12s) so it stays honestly live; DVR only when the operator scrubs. KNOWN OPEN ITEM: the Wowza test source has irregular segment durations + non-monotonic audio DTS (Shaka logs overlapping-segment warnings) which can cause brief hiccups; needs a soak test to confirm content is consistently at the true live point.",
+      "status": "in_review",
+      "test": {
+        "how": "Run a channel for 20+ min; compare the SOURCE pane (true source) to the OUTPUT pane; confirm OUTPUT stays at live edge and content matches within normal latency.",
+        "artifact": ""
+      },
+      "checks": "encoder.log confirms live_start_index applied + real-time segment writes; player live-lock added. Content-age soak test still needed.",
+      "feedback": [],
+      "app_surface": "full"
     }
   ]
 }

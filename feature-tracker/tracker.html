@@ -27,9 +27,9 @@
 </style></head><body>
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
- <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-13.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>14</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>6</b> 📱 In app</span><span class=chip><b>6</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-16.</div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>17</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>4</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>10</b> 📱 In app</span><span class=chip><b>6</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>Live stream end to end (create → transcode → play)</div>
@@ -213,6 +213,45 @@
          <button class="btn warn" data-changes="Form &amp; field management (protocol-aware sources)">Request changes</button>
        </div>
     
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>On air + public delivery URL</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>On air is a real backend state (channels.on_air), separate from the encoder being up. Going on air is refused until the packaged output has valid content; stopping the channel takes it off air. A gated public URL /live/:id/master.m3u8|manifest.mpd returns the stream ONLY when on air with valid content (off air =&gt; 404, on air but broken =&gt; 503, else 302 to CloudFront in prod / origin locally). The On-air gate is honest: READY (blue) private, ON AIR (green) when truly serving valid content, FAILED (red) when published but broken.</div>
+    <div class=meta>tsc clean both apps; gate + route logic wired to ground-truth manifest freshness.</div>
+    <div class=how><b>How to test:</b> Start a channel, confirm output previews as READY, click Go on air (disabled until output is valid), open the public HLS/DASH links in the banner; Take off air =&gt; links 404.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="On air + public delivery URL">✓ Approve as working</button>
+         <button class="btn warn" data-changes="On air + public delivery URL">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Share preview link (live channel)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Create a private preview link for THIS channel from the detail page (label, expiry, optional PIN, optional max-views, note). Separate workflow from on air: plays the packaged output whenever the source is active, ignores geo/access rules, secured by PIN+expiry. Recipient sees a standalone page (LIVE PREVIEW badge, waiting state when not producing, live-edge playback). List + revoke existing links.</div>
+    <div class=meta>tsc clean; backend resolve skips geo/rights for channel; preview URL fixed to play origin locally.</div>
+    <div class=how><b>How to test:</b> Channel detail =&gt; Share preview =&gt; create link =&gt; open in a private window (enter PIN if set). Works without going on air.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Share preview link (live channel)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Share preview link (live channel)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Output preview: HLS/DASH toggle + ladder</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Output player can preview BOTH packagings to verify each works: an HLS/DASH toggle (shown when the channel produces both) plus an Auto (ABR) / per-rung ladder selector that drives whichever engine is active (hls.js / dash.js). Output previews privately as soon as it is valid, before going on air.</div>
+    <div class=meta>tsc clean; dashjs added; both engines autoplay + snap to live.</div>
+    <div class=how><b>How to test:</b> Open a running channel =&gt; toggle HLS/DASH under the output player, and step through Auto + each ladder rung.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Output preview: HLS/DASH toggle + ladder">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Output preview: HLS/DASH toggle + ladder">Request changes</button>
+       </div>
+    
   </div><div class=card data-status="in_review" data-app="none">
     <div class=top><div class=name>EPG &amp; scheduling</div>
       <span class=pill style="background:#6366f1">👀 In review</span>
@@ -250,6 +289,19 @@
     <div class=actions>
          <button class="btn ok" data-approve="SaaS admin dashboard">✓ Approve as working</button>
          <button class="btn warn" data-changes="SaaS admin dashboard">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="in_review" data-app="full">
+    <div class=top><div class=name>Live output trust (live-edge ingest + live-lock)</div>
+      <span class=pill style="background:#6366f1">👀 In review</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>HLS ingest starts at the live edge (-live_start_index -1) so the packaged output tracks the true source and restarts re-acquire live instead of replaying old content. The output player holds the live edge and self-heals after stalls (snaps back when it drifts &gt;12s) so it stays honestly live; DVR only when the operator scrubs. KNOWN OPEN ITEM: the Wowza test source has irregular segment durations + non-monotonic audio DTS (Shaka logs overlapping-segment warnings) which can cause brief hiccups; needs a soak test to confirm content is consistently at the true live point.</div>
+    <div class=meta>encoder.log confirms live_start_index applied + real-time segment writes; player live-lock added. Content-age soak test still needed.</div>
+    <div class=how><b>How to test:</b> Run a channel for 20+ min; compare the SOURCE pane (true source) to the OUTPUT pane; confirm OUTPUT stays at live edge and content matches within normal latency.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Live output trust (live-edge ingest + live-lock)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Live output trust (live-edge ingest + live-lock)">Request changes</button>
        </div>
     
   </div><div class=card data-status="building" data-app="none">
