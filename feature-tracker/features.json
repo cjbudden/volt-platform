@@ -56,13 +56,13 @@
     {
       "id": "captions",
       "name": "Live captions + translation",
-      "summary": "Optional per account. Self-hosted whisper + NLLB (en↔ms/zh/ta and more) or Gladia. Whisper runs as a separate GPU add-on only when needed.",
-      "status": "ready_to_test",
+      "summary": "Whisper transcribe + NLLB translate + WebVTT segmentation (built + unit-tested) now INTEGRATED into the live encoder: a rolling ffmpeg audio chunker feeds per-chunk transcribe/translate, writing per-language LIVE WebVTT renditions and captions-aware companion manifests (master_cc.m3u8 SUBTITLES group; manifest_cc.mpd text AdaptationSet, DASH best-effort). Reports an estimated live offset (chunk + measured transcribe/translate time). Output player loads the companion manifest when captions are on and shows the offset.",
+      "status": "in_review",
       "test": {
-        "how": "Attach a short audio/video clip in chat and I'll caption + translate it and return the WebVTT tracks, or run the encoder unit tests.",
-        "artifact": null
+        "how": "Enable captions on the account+profile, install faster-whisper, run a channel, toggle CC on the output; check the captions ~Ns offset chip and that subs render. Compare HLS vs DASH.",
+        "artifact": ""
       },
-      "checks": "33 + 9 + 6 tests; proven end-to-end espeak → whisper → NLLB",
+      "checks": "Engine unit-tested (test_captions.py); encoder + app integration syntax/type clean. NEEDS: faster-whisper on the encoder host, then a soak test to confirm cue alignment, real-time factor (offset stays bounded), and player rendering on HLS + DASH.",
       "feedback": [],
       "app_surface": "partial"
     },

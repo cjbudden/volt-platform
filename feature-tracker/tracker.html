@@ -28,7 +28,7 @@
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
  <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-16.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>17</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>4</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>16</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>5</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
  <div class=chips style="margin-bottom:12px"><span class=chip><b>10</b> 📱 In app</span><span class=chip><b>6</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="full">
@@ -81,19 +81,6 @@
     <div class=actions>
          <button class="btn ok" data-approve="Secure share page">✓ Approve as working</button>
          <button class="btn warn" data-changes="Secure share page">Request changes</button>
-       </div>
-    
-  </div><div class=card data-status="ready_to_test" data-app="partial">
-    <div class=top><div class=name>Live captions + translation</div>
-      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
-      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
-    <div class=summary>Optional per account. Self-hosted whisper + NLLB (en↔ms/zh/ta and more) or Gladia. Whisper runs as a separate GPU add-on only when needed.</div>
-    <div class=meta>33 + 9 + 6 tests; proven end-to-end espeak → whisper → NLLB</div>
-    <div class=how><b>How to test:</b> Attach a short audio/video clip in chat and I'll caption + translate it and return the WebVTT tracks, or run the encoder unit tests.</div>
-    
-    <div class=actions>
-         <button class="btn ok" data-approve="Live captions + translation">✓ Approve as working</button>
-         <button class="btn warn" data-changes="Live captions + translation">Request changes</button>
        </div>
     
   </div><div class=card data-status="ready_to_test" data-app="na">
@@ -250,6 +237,19 @@
     <div class=actions>
          <button class="btn ok" data-approve="Output preview: HLS/DASH toggle + ladder">✓ Approve as working</button>
          <button class="btn warn" data-changes="Output preview: HLS/DASH toggle + ladder">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="in_review" data-app="partial">
+    <div class=top><div class=name>Live captions + translation</div>
+      <span class=pill style="background:#6366f1">👀 In review</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Whisper transcribe + NLLB translate + WebVTT segmentation (built + unit-tested) now INTEGRATED into the live encoder: a rolling ffmpeg audio chunker feeds per-chunk transcribe/translate, writing per-language LIVE WebVTT renditions and captions-aware companion manifests (master_cc.m3u8 SUBTITLES group; manifest_cc.mpd text AdaptationSet, DASH best-effort). Reports an estimated live offset (chunk + measured transcribe/translate time). Output player loads the companion manifest when captions are on and shows the offset.</div>
+    <div class=meta>Engine unit-tested (test_captions.py); encoder + app integration syntax/type clean. NEEDS: faster-whisper on the encoder host, then a soak test to confirm cue alignment, real-time factor (offset stays bounded), and player rendering on HLS + DASH.</div>
+    <div class=how><b>How to test:</b> Enable captions on the account+profile, install faster-whisper, run a channel, toggle CC on the output; check the captions ~Ns offset chip and that subs render. Compare HLS vs DASH.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Live captions + translation">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Live captions + translation">Request changes</button>
        </div>
     
   </div><div class=card data-status="in_review" data-app="none">
