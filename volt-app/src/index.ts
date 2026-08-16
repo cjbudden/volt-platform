@@ -13,6 +13,11 @@ async function ensureSchema(): Promise<void> {
   // output retention as SECONDS (any unit from the UI: minutes..months). The coarse
   // recordings sweep still uses recording_retention_days, kept derived in sync.
   await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS recording_retention_sec BIGINT`);
+  // ON AIR (published to the public). Decoupled from the encoder being up: the encoder
+  // can be running with a valid, private preview output while on_air=false. Going on air
+  // is an explicit operator action; the public playback URL only serves when this is true
+  // AND the output has valid content.
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS on_air BOOLEAN NOT NULL DEFAULT false`);
 }
 
 const server = app.listen(config.port, () => {

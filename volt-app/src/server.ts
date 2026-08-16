@@ -24,6 +24,7 @@ import { platformAuthRouter } from './modules/platformAuth';
 import { ticketsRouter, platformTicketsRouter } from './modules/tickets';
 import { notificationsRouter, notificationTemplatesRouter } from './modules/notifications';
 import { shareLinksRouter, publicShareRouter } from './modules/shareLinks';
+import { publicLiveRouter } from './modules/publicLive';
 import { hypermediaRouter } from './modules/hypermedia';
 import { hypermediaNegotiation } from './middleware/hypermedia';
 import { heartbeat } from './services/statusHub';
@@ -68,6 +69,10 @@ export function createServer() {
   // resolve/download endpoints. Mounted before the authed /api routers; it only ever
   // exposes the single shared resource.
   app.use(publicShareRouter);
+
+  // Public live delivery (NO admin auth): /live/:id/master.m3u8|manifest.mpd. Only
+  // serves when the channel is on air with valid content; off air returns 404.
+  app.use(publicLiveRouter);
 
   // Content-negotiated JSON-LD + Hydra (Accept: application/ld+json). No-op for
   // plain-JSON clients, so the default contract is unchanged.

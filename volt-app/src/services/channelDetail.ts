@@ -29,6 +29,8 @@ export interface ChannelDetail {
   health: PipelineHealth;
   billing: Billing;
   degraded?: boolean;
+  onAir: boolean;
+  public: { url: string; dashUrl: string; available: boolean };
 }
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
@@ -139,6 +141,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     hasPrimarySource: sources.some((s: any) => s.role === 'primary' && s.ingest_url) || sources.length > 0,
     packagingLabel: packagingLabel(profile),
     outputFresh,
+    onAirPublished: channel.on_air === true,
   });
   // back-compat: `degraded` now means "a gate is failed or degraded" (a REAL problem,
   // not merely 'starting'). This kills the false OUTPUT ERROR during warm-up.
@@ -216,10 +219,20 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   // viewers — real analytics only; empty until wired/there is live data (no fabrication)
   const viewers = { current: 0, peak: 0, peakAt: '', trendPct: 0, series: [] as { t: number; v: number }[] };
 
+  // Public delivery: the on-air state + the public playback URL a viewer/app would use.
+  // available = the public URL would actually serve right now (published + valid content).
+  const onAir = channel.on_air === true;
+  const publicBlock = {
+    url: `/live/${channel.id}/master.m3u8`,
+    dashUrl: `/live/${channel.id}/manifest.mpd`,
+    available: onAir && health.onAir,
+  };
+
   return {
     kind: 'channel', group: group ? { id: group.id, name: group.name } : null, profile, dvr, captions,
     epgEnabled: channel.epg_enabled !== false,
     ladder, sources, viewers, epg, statusBoard, log, health, billing, degraded,
+    onAir, public: publicBlock,
   };
 }
 

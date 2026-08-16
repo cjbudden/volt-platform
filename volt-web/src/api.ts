@@ -39,6 +39,7 @@ export interface Channel {
   pipelineState?: 'idle' | 'starting' | 'onair' | 'error' | 'stopped'
   billable?: boolean
   serverSince?: number | null
+  on_air?: boolean
 }
 
 export interface Billing {
@@ -72,6 +73,8 @@ export interface ChannelDetail extends Channel {
   health: PipelineHealth
   billing: Billing
   testStream: TestStreamStatus
+  onAir: boolean
+  public: { url: string; dashUrl: string; available: boolean }
 }
 
 export type GateStatus = 'idle' | 'starting' | 'ready' | 'healthy' | 'degraded' | 'failed' | 'stopped'
@@ -138,6 +141,9 @@ export const api = {
   }): Promise<Channel> => req('/channels', { method: 'POST', body: JSON.stringify(b) }),
   startStop: (id: string, action: 'start' | 'stop') =>
     req(`/channels/${id}/${action}`, { method: 'POST' }),
+  // Go on air / take off air — the PUBLIC publish toggle (opens/closes /live/:id/...).
+  setAir: (id: string, on: boolean): Promise<Channel> =>
+    req(`/channels/${id}/air`, { method: 'POST', body: JSON.stringify({ on }) }),
   channel: (id: string): Promise<ChannelDetail> => req(`/channels/${id}`),
   updateChannel: (id: string, patch: ChannelSettingsPatch): Promise<any> =>
     req(`/channels/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),

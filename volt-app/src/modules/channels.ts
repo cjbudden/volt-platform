@@ -8,6 +8,7 @@ import { validateEntityMetadata } from './metadataSchemas';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
 import { buildChannelDetail, DVR_MAX_SEC } from '../services/channelDetail';
 import { startTestStream, stopTestStream, testStreamStatus, isTestStreamAvailable } from '../services/testStream';
+import { outputHasValidContent } from './publicLive';
 
 export const channelsRouter = Router();
 channelsRouter.use(requireAuth);
@@ -382,6 +383,30 @@ channelsRouter.post(
   })
 );
 
+/** Go on air / take off air — the PUBLIC publish toggle, decoupled from the encoder.
+ *  Going on air is only allowed once the output has valid content, so the public URL
+ *  never points at a dead stream. Taking off air keeps the encoder up (private preview
+ *  still plays); it just closes the public URL. */
+const airSchema = z.object({ on: z.boolean() });
+channelsRouter.post(
+  '/:id/air',
+  asyncHandler(async (req, res) => {
+    const chan = await one<any>(
+      `SELECT c.* FROM channels c JOIN groups g ON g.id = c.group_id
+        WHERE c.id = $1 AND g.account_id = $2`,
+      [req.params.id, accountId(req)]
+    );
+    if (!chan) throw notFound('Channel not found');
+    const { on } = airSchema.parse(req.body);
+    if (on && (chan.status !== 'live' || !outputHasValidContent(chan.id))) {
+      throw conflict('Output is not ready: cannot go on air until the packaged output is producing valid content.');
+    }
+    await query('UPDATE channels SET on_air = $1 WHERE id = $2', [on, chan.id]);
+    const row = await one('SELECT * FROM channels WHERE id = $1', [chan.id]);
+    res.json(row);
+  })
+);
+
 /** Start / stop — the orchestrator provisions/terminates the encoder task. */
 channelsRouter.post(
   '/:id/:action(start|stop)',
@@ -394,7 +419,11 @@ channelsRouter.post(
     );
     if (!owned) throw notFound('Channel not found');
     if (req.params.action === 'start') await orchestrator.startStream('channel', req.params.id);
-    else await orchestrator.stopStream('channel', req.params.id, `api:operator (user ${accountId(req)})`);
+    else {
+      await orchestrator.stopStream('channel', req.params.id, `api:operator (user ${accountId(req)})`);
+      // stopping the encoder also takes the channel off air (the public URL closes)
+      await query('UPDATE channels SET on_air = false WHERE id = $1', [req.params.id]);
+    }
     const row = await one('SELECT * FROM channels WHERE id = $1', [req.params.id]);
     res.json(row);
   })

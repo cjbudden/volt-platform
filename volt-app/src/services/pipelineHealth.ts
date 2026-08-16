@@ -57,6 +57,7 @@ export interface HealthInput {
   hasPrimarySource: boolean;
   packagingLabel: string;
   outputFresh?: boolean;      // GROUND TRUTH: the origin manifest is advancing on disk now
+  onAirPublished?: boolean;   // the operator has taken this channel ON AIR (public URL open)
 }
 
 export function computePipelineHealth(inp: HealthInput): PipelineHealth {
@@ -145,16 +146,30 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   gates.push({ gate: 'output', label: 'Output', billable: false, status: outStatus, detail: outDetail });
 
   // ---- 5) PUBLIC / ON AIR --------------------------------------------------
-  // "On air" means PUBLISHED to viewers. The control plane only knows the output is
-  // READY (packaged + advancing); whether it's actually taken to air is the operator's
-  // publish action (client), so the backend reports 'ready' (blue) and the client shows
-  // green ON AIR once published. Output being ready does NOT mean it's public.
-  const outputReady = effLive && outStatus === 'healthy';
-  gates.push({
-    gate: 'public', label: 'On air', billable: false,
-    status: !effLive ? (ended || crashed ? 'stopped' : 'idle') : outputReady ? 'ready' : 'starting',
-    detail: outputReady ? 'ready — private until you go on air' : crashed ? 'off air (pipeline failed)' : !live ? 'off air' : 'warming up',
-  });
+  // The model:
+  //   NOT published        -> READY (blue) when the output is valid but private, else
+  //                           idle/starting/stopped. Nothing is public.
+  //   published + valid    -> HEALTHY (green): the public URL is serving live content.
+  //   published + NOT valid-> FAILED (red): we are on air but the public stream has no
+  //                           valid content, so viewers can't watch — surface the error.
+  // "valid content" = the packaged output is actually advancing (outputFresh ground truth).
+  const outputValid = effLive && outStatus === 'healthy';
+  const published = !!inp.onAirPublished;
+  let pubStatus: GateStatus; let pubDetail: string;
+  if (published) {
+    if (outputValid) { pubStatus = 'healthy'; pubDetail = 'on air · public can watch'; }
+    else if (crashed) { pubStatus = 'failed'; pubDetail = `on air but the public stream failed: ${stopReason}`; }
+    else if (!effLive) { pubStatus = 'failed'; pubDetail = 'on air but the stream is down'; }
+    else { pubStatus = 'failed'; pubDetail = `on air but no valid content: ${outDetail}`; }
+  } else if (!effLive) {
+    pubStatus = ended || crashed ? 'stopped' : 'idle';
+    pubDetail = crashed ? 'off air (pipeline failed)' : 'off air';
+  } else if (outputValid) {
+    pubStatus = 'ready'; pubDetail = 'ready — private until you go on air';
+  } else {
+    pubStatus = 'starting'; pubDetail = 'warming up';
+  }
+  gates.push({ gate: 'public', label: 'On air', billable: false, status: pubStatus, detail: pubDetail });
 
   // ---- primary error: first failed/degraded gate, with its real reason ------
   const order: GateName[] = ['server', 'input', 'encoder', 'output', 'public'];
@@ -167,7 +182,7 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
     }
   }
 
-  // `onAir` here means "output is READY to serve" (packaged + advancing); the actual
-  // publish-to-public toggle is the operator's action in the client.
-  return { gates, primaryError, onAir: outputReady, live: effLive };
+  // `onAir` is TRUE only when actually live to the public: published AND serving valid
+  // content. `live` = the encoder run is up (billable), regardless of publish state.
+  return { gates, primaryError, onAir: published && outputValid, live: effLive };
 }

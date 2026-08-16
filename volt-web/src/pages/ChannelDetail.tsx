@@ -59,18 +59,21 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
     return () => clearInterval(iv)
   }, [d?.billing?.billable])
 
-  // "On air" (public output) is decoupled from the source, matching the broadcast
-  // workflow: you bring the SOURCE up first, confirm it's arriving, and only THEN can
-  // you take the output live. In this test build, sending the source = starting the
-  // FFmpeg test generator (real HLS/DASH + live WebVTT); going live reveals it as the
-  // public output with playback, subtitles and DVR.
-  const [onAir, setOnAir] = useState(false)
+  // "On air" is a REAL backend state now (channels.on_air), decoupled from the source:
+  // you bring the SOURCE up, confirm the packaged output is valid (private preview), and
+  // only THEN take it on air. Publishing opens the public URL /live/:id/...; the backend
+  // refuses to go on air until the output has valid content. `published` is the operator
+  // intent (button state); `d.onAir` is truly-live-to-public (published AND valid content).
+  const published = !!(d as any)?.on_air
   const sourceUp = d?.status === 'live'
-
-  // if the source drops (or is stopped elsewhere), we can't be on air
-  useEffect(() => { if (!sourceUp && onAir) setOnAir(false) }, [sourceUp, onAir])
-  // NOTE: on air is now an EXPLICIT operator action (Go live), not automatic — the
-  // source preview confirms the feed first, then you take the output to air.
+  const [pubBusy, setPubBusy] = useState(false)
+  async function setAir(on: boolean) {
+    if (!d) return
+    setPubBusy(true)
+    try { await api.setAir(d.id, on); await load() }
+    catch (e: any) { setErr(e.message) }
+    finally { setPubBusy(false) }
+  }
 
   async function sendSource() {
     if (!d) return
@@ -83,14 +86,15 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   }
   async function dropSource() {
     if (!d) return
-    setBusy(true); setOnAir(false)
+    setBusy(true)
+    // stopping the encoder also takes the channel off air on the backend
     try { await api.startStop(d.id, 'stop'); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
 
   if (err) return <div className="err" style={{ margin: 20 }}>Couldn’t load channel: {err}</div>
   if (!d) return <div className="loading">Loading channel…</div>
 
-  const live = onAir && sourceUp
+  const live = published && sourceUp
   // Badge + error now come from the five-gate health model — NOT from "output isn't
   // Available yet" (which was warm-up, wrongly shown as an error). A badge only turns
   // red when a gate is actually failed/degraded, and it names WHICH gate.
@@ -99,15 +103,16 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   const errored = !!perr
   const outGate = health?.gates.find(g => g.gate === 'output')
   const outputReady = outGate?.status === 'healthy'   // output packaged + advancing
-  // ON AIR (green) ONLY when the operator has published (onAir) AND output is ready.
-  // Output ready but not published = READY (blue). Not live = IDLE.
+  // ON AIR (green) ONLY when published AND the public stream is truly live (valid content).
+  // Output ready but not published = READY (blue). Not live = IDLE. An error always wins.
+  const trulyOnAir = published && d.onAir
   const stateLabel = errored ? `${perr!.label.toUpperCase()} ERROR`
-    : (onAir && outputReady) ? 'ON AIR'
+    : trulyOnAir ? 'ON AIR'
     : outputReady ? 'READY'
     : sourceUp ? 'STARTING'
     : 'IDLE'
   const stateCls = errored ? 'down'
-    : (onAir && outputReady) ? 'live'
+    : trulyOnAir ? 'live'
     : outputReady ? 'sched'   // READY = blue
     : sourceUp ? 'sched' : 'idle'
   const isEvent = d.dvr_mode === 'event_start'
@@ -163,14 +168,17 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         ) : (
           <>
             {/* On air is an explicit operator action; Take off air stops publishing but
-                keeps the encoder up. Stop channel brings the whole encoder down. */}
-            {!onAir ? (
-              <button className="btn primary" disabled={errored} onClick={() => setOnAir(true)} title={errored ? 'Resolve the error first' : 'Take the output to air'}>
-                <span className="dot-s live" style={{ marginRight: 6 }} />Go on air
+                keeps the encoder up. Stop channel brings the whole encoder down. You can
+                only go on air once the output is producing valid content. */}
+            {!published ? (
+              <button className="btn primary" disabled={errored || !outputReady || pubBusy}
+                onClick={() => setAir(true)}
+                title={errored ? 'Resolve the error first' : !outputReady ? 'Output must be producing valid content first' : 'Open the public URL and go on air'}>
+                <span className="dot-s live" style={{ marginRight: 6 }} />{pubBusy ? 'Going on air…' : 'Go on air'}
               </button>
             ) : (
-              <button className="btn ghost" onClick={() => setOnAir(false)} title="Stop publishing the output (encoder stays up)">
-                Take off air
+              <button className="btn ghost" disabled={pubBusy} onClick={() => setAir(false)} title="Close the public URL (encoder stays up, preview keeps playing)">
+                {pubBusy ? 'Taking off air…' : 'Take off air'}
               </button>
             )}
             {/* Stop is ALWAYS available while the server is up (live, warming, or erroring) */}
@@ -196,10 +204,24 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         </div>
       )}
 
-      <PipelineStrip d={d} onQc={() => setQcOpen(true)} onAir={onAir} />
+      <PipelineStrip d={d} onQc={() => setQcOpen(true)} onAir={published} />
 
-      <DualPlayers d={d} captionLangs={captionLangs} sourceUp={sourceUp} onAir={onAir}
-        onSendSource={() => setConfirmStart(true)} onGoLive={() => setOnAir(true)} busy={busy} />
+      {published && d.public?.url && (
+        <div style={{
+          margin: '0 0 14px', padding: '10px 14px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          background: d.onAir ? 'rgba(74,222,128,.10)' : 'rgba(248,113,113,.10)',
+          border: `1px solid ${d.onAir ? 'rgba(74,222,128,.4)' : 'rgba(248,113,113,.4)'}`,
+        }}>
+          <span className="dot-s" style={{ background: d.onAir ? '#4ade80' : '#f87171' }} />
+          <b style={{ color: d.onAir ? '#4ade80' : '#fca5a5' }}>{d.onAir ? 'ON AIR · public URL open' : 'ON AIR · public stream has no valid content'}</b>
+          <code style={{ fontSize: 12.5, color: 'var(--muted)', background: 'rgba(148,163,184,.12)', padding: '3px 8px', borderRadius: 6 }}>{d.public.url}</code>
+          <a className="btn ghost" href={d.public.url} target="_blank" rel="noreferrer" style={{ marginLeft: 'auto', padding: '5px 12px' }}>Open public HLS</a>
+          <a className="btn ghost" href={d.public.dashUrl} target="_blank" rel="noreferrer" style={{ padding: '5px 12px' }}>Open public DASH</a>
+        </div>
+      )}
+
+      <DualPlayers d={d} captionLangs={captionLangs} sourceUp={sourceUp} onAir={published}
+        onSendSource={() => setConfirmStart(true)} onGoLive={() => setAir(true)} busy={busy} />
 
       <EpgStrip d={d}
         onAddEpg={() => navigate('events')}
@@ -260,21 +282,21 @@ function StartConfirm({ d, onCancel, onConfirm }: { d: CD; onCancel: () => void;
 }
 
 /* Always-visible five-gate pipeline strip: the model as the primary status view.
-   The public gate is special: the backend reports READY (blue) once the output is
-   packaged + advancing, and only the operator's publish action (client `onAir`)
-   turns it into a green ON AIR. So we override the public gate's display locally. */
-function PipelineStrip({ d, onQc, onAir }: { d: CD; onQc: () => void; onAir: boolean }) {
+   The public gate now comes straight from the backend: READY (blue) when the output
+   is valid but private, HEALTHY (green) when published AND serving valid content — we
+   relabel that as ON AIR — and FAILED (red) when published but the public stream is
+   broken. `onAir` (published intent) is accepted for API stability but the status is
+   authoritative from the backend. */
+function PipelineStrip({ d, onQc }: { d: CD; onQc: () => void; onAir?: boolean }) {
   const gates = d.health?.gates || []
   if (!gates.length) return null
   return (
     <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 0 14px', flexWrap: 'wrap' }}>
       {gates.map((g, i) => {
-        // public gate: show green ON AIR only when the operator has published AND
-        // the backend says the output is ready; otherwise keep the backend status.
-        const onAirNow = g.gate === 'public' && onAir && g.status === 'ready'
-        const status = onAirNow ? 'healthy' : g.status
-        const label = onAirNow ? 'ON AIR' : g.status
-        const detail = onAirNow ? 'live — public can watch' : g.detail
+        // public gate: a green (healthy) public gate means we are truly on air.
+        const status = g.status
+        const label = (g.gate === 'public' && g.status === 'healthy') ? 'ON AIR' : g.status
+        const detail = g.detail
         const color = GATE_COLOR[status]
         return (
         <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 6, flex: '1 1 130px' }}>
