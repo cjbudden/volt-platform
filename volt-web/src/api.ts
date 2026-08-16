@@ -40,12 +40,10 @@ export interface Channel {
   billable?: boolean
   serverSince?: number | null
   on_air?: boolean
-  // identity (not burned into the video) + audio-only (radio) shape
-  brand_ref?: string | null; brand_colour?: string | null; description?: string | null
-  audio_only?: boolean
-  audio_ladder?: { label: string; bitrate_kbps: number }[] | null
-  output_ladder?: { height: number; bitrate_kbps: number }[] | null
+  brand_ref?: string | null
 }
+
+export interface SearchHit { kind: 'channel' | 'event' | 'recording'; id: string; name: string; href: string; sub?: string }
 
 export interface Billing {
   billable: boolean
@@ -81,9 +79,6 @@ export interface ChannelDetail extends Channel {
   onAir: boolean
   public: { url: string; dashUrl: string; available: boolean }
   watermark: WatermarkCfg
-  brand: { ref: string | null; colour: string | null; description: string | null }
-  audioOnly: boolean
-  audioLadder: { label: string; bitrate_kbps: number }[]
 }
 
 export interface WatermarkCfg {
@@ -136,8 +131,6 @@ export interface TestStreamStatus {
 export interface ChannelSettingsPatch {
   name?: string
   recordingRetentionDays?: number | null
-  recordingRetentionSec?: number | null
-  outputLadder?: { height: number; bitrateKbps: number }[]
   dvrWindowSec?: number | null
   dvrMode?: 'sliding' | 'event_start'
   geoMode?: 'worldwide' | 'allow' | 'block'
@@ -148,9 +141,7 @@ export interface ChannelSettingsPatch {
   inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
   fillerSlateRef?: string | null
   watermark?: WatermarkPatch
-  brandRef?: string | null; brandColour?: string | null; description?: string | null
-  audioOnly?: boolean
-  audioLadder?: { label?: string; bitrateKbps: number }[]
+  brandRef?: string | null
   version?: number
 }
 
@@ -170,12 +161,9 @@ export const api = {
     fillerSlateRef?: string | null; fillerAssetId?: string | null
     fallbackTranscode?: boolean
     watermark?: WatermarkPatch
-    // channel identity: logo/artwork, accent, blurb — guide + console, never burned in
-    brandRef?: string | null; brandColour?: string | null; description?: string | null
-    // audio-only (radio): AAC ladder instead of a video one
-    audioOnly?: boolean
-    audioLadder?: { label?: string; bitrateKbps: number }[]
+    brandRef?: string | null
   }): Promise<Channel> => req('/channels', { method: 'POST', body: JSON.stringify(b) }),
+  search: (q: string): Promise<{ results: SearchHit[] }> => req('/search?q=' + encodeURIComponent(q)),
   startStop: (id: string, action: 'start' | 'stop') =>
     req(`/channels/${id}/${action}`, { method: 'POST' }),
   // Go on air / take off air — the PUBLIC publish toggle (opens/closes /live/:id/...).
@@ -185,24 +173,11 @@ export const api = {
   // clients/reviewers to approve before go-live. Not on air, ignores geo/access rules.
   createShareLink: (b: {
     resourceKind: 'vod' | 'channel' | 'event'; resourceId: string
-    accessPeriod?: string; ttlSec?: number; expiresAt?: string; label?: string; message?: string
-    recipients?: string[]; sendEmail?: boolean
-    watermark?: boolean; notifyOnOpen?: boolean
+    accessPeriod?: string; ttlSec?: number; label?: string; message?: string
     pin?: string; maxViews?: number | null
-  }): Promise<ShareCreated> => req('/share-links', { method: 'POST', body: JSON.stringify(b) }),
-  shareLinks: (p: { resourceKind?: string; resourceId?: string } = {}): Promise<ShareLinkRow[]> => {
-    const qs = new URLSearchParams()
-    if (p.resourceKind) qs.set('resourceKind', p.resourceKind)
-    if (p.resourceId) qs.set('resourceId', p.resourceId)
-    const q = qs.toString()
-    return req(`/share-links${q ? `?${q}` : ''}`)
-  },
-  // edit a live link in place: extend/shorten, PIN, view cap, label, note, toggles
-  updateShareLink: (id: string, patch: ShareLinkPatch): Promise<ShareLinkRow> =>
-    req(`/share-links/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-  // re-issue the token — the URL already sent stops working, a new one is shown once
-  rotateShareLink: (id: string, sendEmail = false): Promise<ShareCreated> =>
-    req(`/share-links/${id}/rotate`, { method: 'POST', body: JSON.stringify({ sendEmail }) }),
+  }): Promise<{ id: string; url: string; token: string; expiresAt: string }> =>
+    req('/share-links', { method: 'POST', body: JSON.stringify(b) }),
+  shareLinks: (): Promise<ShareLinkRow[]> => req('/share-links'),
   revokeShareLink: (id: string): Promise<{ id: string; revoked: boolean }> =>
     req(`/share-links/${id}/revoke`, { method: 'POST' }),
   channel: (id: string): Promise<ChannelDetail> => req(`/channels/${id}`),
@@ -244,19 +219,9 @@ export const api = {
 
 export interface ShareLinkRow {
   id: string; resource_kind: 'vod' | 'channel' | 'event'; resource_id: string
-  label: string | null; message: string | null; recipients: string[]; access_type: string
-  expires_at: string; max_views: number | null; view_count: number; first_opened_at: string | null
-  last_viewed_at: string | null; revoked: boolean; watermark: boolean; notify_on_open: boolean
-  has_pin: boolean; created_at: string; token_prefix: string
-}
-
-/** A one-time URL: returned by create and rotate, never retrievable again. */
-export interface ShareCreated { id: string; url: string; token: string; expiresAt: string; sent: number }
-
-export interface ShareLinkPatch {
-  label?: string | null; message?: string | null; recipients?: string[]
-  expiresAt?: string; extendSec?: number; maxViews?: number | null
-  pin?: string | null; watermark?: boolean; notifyOnOpen?: boolean; revoked?: boolean
+  label: string | null; access_type: string; expires_at: string
+  max_views: number | null; view_count: number; first_opened_at: string | null
+  last_viewed_at: string | null; revoked: boolean; created_at: string; token_prefix: string
 }
 
 export interface MediaFile {
