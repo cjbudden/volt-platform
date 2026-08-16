@@ -120,7 +120,6 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   const wt = d.profile?.workflow_type
   const captionLangs = d.captions.targets.length ? d.captions.targets : ['en']
   const billingElapsed = d.billing?.since ? Math.max(0, Math.round((nowMs - d.billing.since) / 1000)) : (d.billing?.elapsedSec || 0)
-  const billingEst = d.billing ? Math.round((billingElapsed / 3600) * d.billing.rateUsdPerHour * 100) / 100 : 0
   // the encoder server is up (live, warming, or erroring-but-not-yet-ended) -> a Stop must
   // always be available. A running instance is the authoritative signal.
   const hasRunningInstance = Array.isArray((d as any).instances) && (d as any).instances.length > 0
@@ -140,9 +139,9 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
             <span className={`tag type ${wt === 'transcode' ? 'chan' : 'event'}`}>{wt === 'transcode' ? 'TRANSCODE' : 'PACKAGING'}</span>
             <span className={`tag ${stateCls}`}><span className={`dot-s ${stateCls}`} />{stateLabel}</span>
             {d.billing?.billable && (
-              <span title={`Encoder up (${d.billing.instance}) · indicative ${d.billing.rateUsdPerHour.toFixed(3)}/hr`}
+              <span title={`Encoder up (${d.billing.instance}) — live time metering`}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 9px', borderRadius: 999, background: 'rgba(251,191,36,.14)', border: '1px solid rgba(251,191,36,.4)', color: '#fbbf24' }}>
-                ● billable · {fmtDur(billingElapsed)} · ~${billingEst.toFixed(2)}
+                ● billable · {fmtDur(billingElapsed)}
               </span>
             )}
           </h1>
@@ -274,8 +273,8 @@ function StartConfirm({ d, onCancel, onConfirm }: { d: CD; onCancel: () => void;
         </p>
         {b && (
           <div style={{ margin: '12px 0', padding: '10px 12px', borderRadius: 10, background: 'rgba(251,191,36,.10)', border: '1px solid rgba(251,191,36,.35)', fontSize: 13 }}>
-            <div style={{ color: '#fbbf24', fontWeight: 700 }}>● billing starts now</div>
-            <div style={{ color: 'var(--muted)' }}>{b.instance} · indicative ~${b.rateUsdPerHour.toFixed(3)}/hr <span style={{ color: 'var(--faint)' }}>({b.basis})</span></div>
+            <div style={{ color: '#fbbf24', fontWeight: 700 }}>● live time metering starts now</div>
+            <div style={{ color: 'var(--muted)' }}>{b.instance} · runs until you stop the channel</div>
           </div>
         )}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
@@ -362,11 +361,9 @@ function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefr
         {/* billing window (the server is the meter) */}
         {d.billing && (
           <div style={{ margin: '4px 0 14px', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 13 }}>
-            <span><span style={{ color: 'var(--faint)' }}>Billing </span>{d.billing.billable ? <b style={{ color: '#fbbf24' }}>● metering</b> : <b style={{ color: 'var(--muted)' }}>idle (£0)</b>}</span>
-            <span><span style={{ color: 'var(--faint)' }}>This run </span>{fmtDur(d.billing.elapsedSec)}</span>
+            <span><span style={{ color: 'var(--faint)' }}>Billing </span>{d.billing.billable ? <b style={{ color: '#fbbf24' }}>● metering</b> : <b style={{ color: 'var(--muted)' }}>idle</b>}</span>
+            <span><span style={{ color: 'var(--faint)' }}>Live time this run </span>{fmtDur(d.billing.elapsedSec)}</span>
             <span><span style={{ color: 'var(--faint)' }}>Instance </span>{d.billing.instance}</span>
-            <span><span style={{ color: 'var(--faint)' }}>Rate </span>~${d.billing.rateUsdPerHour.toFixed(3)}/hr <span style={{ color: 'var(--faint)' }}>(indicative)</span></span>
-            <span><span style={{ color: 'var(--faint)' }}>Est. this run </span>~${d.billing.estRunUsd.toFixed(2)}</span>
           </div>
         )}
 
@@ -772,9 +769,9 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   const [fmt, setFmt] = useState<'hls' | 'dash'>(pkg === 'dash' ? 'dash' : 'hls')
   const [levels, setLevels] = useState<{ height: number; bitrate: number }[]>([])
   const [level, setLevel] = useState(-1) // -1 = auto (ABR)
-  const [atLive, setAtLive] = useState(true)
-  const [behind, setBehind] = useState(0)
-  const [winSec, setWinSec] = useState(d.dvr.effective_sec)
+  const [scrubbed, setScrubbed] = useState(false) // operator dragged into DVR (else live)
+  const [behind, setBehind] = useState(0)          // seconds behind the live edge
+  const [winSec, setWinSec] = useState(0)          // available DVR depth NOW (grows as it fills, capped at the window)
   const [cue, setCue] = useState('')
   const cuesRef = useRef<Cue[]>([])
   const didSnapRef = useRef(false)   // snap to live edge once on initial load
@@ -860,7 +857,9 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
       const sk = v.seekable
       if (sk.length) {
         const end = sk.end(sk.length - 1), start = sk.start(0)
-        setWinSec(Math.max(1, Math.round(end - start)))
+        // available DVR depth right now (grows from ~0 up to the window cap). The live
+        // edge is ALWAYS the right end of the bar; this is just how far left you can drag.
+        setWinSec(Math.min(d.dvr.effective_sec, Math.max(1, Math.round(end - start))))
         // LIVE LOCK: if the operator hasn't scrubbed, keep pulling back to the live
         // edge. Messy source timing makes hls.js stall and resume behind; without this
         // it silently accumulates minutes of lag (the "-5:29 behind" we saw). Snapping
@@ -868,12 +867,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         if (!scrubbedRef.current && end - v.currentTime > 12) {
           try { v.currentTime = end - 0.5 } catch { /* ignore */ }
         }
-        const b = Math.max(0, Math.round(end - v.currentTime))
-        setBehind(b)
-        // HYSTERESIS so the LIVE/DVR badge doesn't flap around the threshold. Normal
-        // live latency is ~8-15s, so stay GREEN (live) up to 20s behind; only flip to
-        // DVR when clearly scrubbed back (>20s), and re-acquire live under 8s.
-        setAtLive(prev => b > 20 ? false : (prev ? true : b <= 8))
+        setBehind(Math.max(0, Math.round(end - v.currentTime)))
       }
     }
     v.addEventListener('timeupdate', onT)
@@ -900,17 +894,24 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
 
   function seekBehind(sec: number) {
     const v = videoRef.current; if (!v || !v.seekable.length) return
-    scrubbedRef.current = true   // deliberate DVR scrub: release the live lock
+    scrubbedRef.current = true; setScrubbed(true)   // deliberate DVR scrub: release the live lock
     const end = v.seekable.end(v.seekable.length - 1)
-    v.currentTime = Math.max(v.seekable.start(0), end - sec)
+    v.currentTime = Math.max(v.seekable.start(0), end - Math.max(0, sec))
   }
-  function goLive() { const v = videoRef.current; if (!v || !v.seekable.length) return; scrubbedRef.current = false; v.currentTime = v.seekable.end(v.seekable.length - 1) - 0.5 }
+  function goLive() { const v = videoRef.current; scrubbedRef.current = false; setScrubbed(false); if (!v || !v.seekable.length) return; v.currentTime = v.seekable.end(v.seekable.length - 1) - 0.5 }
+
+  // live is the default: we are LIVE unless the operator has scrubbed back into the DVR.
+  const liveNow = !scrubbed
+  // slider position: pinned to the RIGHT (live) while live so it never bounces as new
+  // chunks append; only when scrubbed does the handle sit back at (window - behind).
+  const sliderMax = Math.max(1, winSec)
+  const sliderVal = liveNow ? sliderMax : Math.min(sliderMax, Math.max(0, winSec - behind))
 
   return (
     <div className="player">
       <div className="video">
         <video ref={videoRef} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
-        <div className="plabel"><span className="pt" style={{ color: atLive ? '#4ade80' : '#fbbf24' }}>OUTPUT · {fmt.toUpperCase()}{atLive ? '' : ' · DVR catch-up'}</span></div>
+        <div className="plabel"><span className="pt" style={{ color: liveNow ? '#4ade80' : '#fbbf24' }}>OUTPUT · {fmt.toUpperCase()}{liveNow ? '' : ' · DVR'}</span></div>
         {/* On-air state: green ON AIR when published to the public, blue PREVIEW when the
             packaged output is playing but held private (verify DASH/HLS before going on air).
             Centered at the top so it never sits behind the OUTPUT label or the LIVE badge. */}
@@ -922,7 +923,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           border: `1px solid ${onAir ? 'rgba(74,222,128,.55)' : 'rgba(56,189,248,.55)'}`,
           color: onAir ? '#4ade80' : '#38bdf8', backdropFilter: 'blur(2px)',
         }}><span className="dot-s" style={{ background: onAir ? '#4ade80' : '#38bdf8' }} />{onAir ? 'ON AIR' : 'PREVIEW · not on air'}</div>
-        <div className="badge-live" style={atLive ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{atLive ? 'LIVE' : 'DVR'}</div>
+        <div className="badge-live" style={liveNow ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{liveNow ? 'LIVE' : 'DVR'}</div>
         <div className="bug"><span className="lg">{BOLT}</span>{d.name.toUpperCase()}</div>
         {subOn && cue && (
           <div style={{
@@ -931,27 +932,31 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
             fontSize: 15, fontWeight: 600, maxWidth: '88%', textAlign: 'center', lineHeight: 1.35, whiteSpace: 'pre-line',
           }}>{cue}</div>
         )}
-        <div className="ptime">{atLive ? 'live edge' : `${fmtOffset(behind)} behind`}</div>
+        <div className="ptime">{liveNow ? 'live edge' : `${fmtOffset(behind)} behind live`}</div>
       </div>
 
-      {/* DVR scrubber — seeks the real HLS timeline */}
+      {/* DVR scrubber — LIVE is the right end. The handle sits at the right (live) and you
+          drag LEFT to go back into already-aired content. It does not bounce as new chunks
+          append: while live the handle is pinned right; the bar just widens as the DVR fills
+          (a couple of minutes at first, up to the full window after an hour). Dragging to a
+          position plays that far back from live (e.g. halfway on a 1h window = 30m ago). */}
       <div style={{ padding: '10px 12px 4px', borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 7 }}>
-          <span className={`tag ${atLive ? 'live' : 'warn'}`} style={{ minWidth: 62, justifyContent: 'center' }}>
-            {atLive ? <><span className="dot-s live" />LIVE</> : fmtOffset(behind)}
+          <span className={`tag ${liveNow ? 'live' : 'warn'}`} style={{ minWidth: 74, justifyContent: 'center' }}>
+            {liveNow ? <><span className="dot-s live" />LIVE</> : `−${fmtOffset(behind)}`}
           </span>
-          <input type="range" min={0} max={winSec} step={1} value={winSec - behind}
-            onChange={e => seekBehind(winSec - Number(e.target.value))}
-            style={{ flex: 1, accentColor: atLive ? 'var(--live)' : 'var(--warn)' }} aria-label="DVR timeline" />
-          <button className="chip" style={{ padding: '5px 10px' }} disabled={atLive} onClick={goLive}>Go live</button>
+          <input type="range" min={0} max={sliderMax} step={1} value={sliderVal}
+            onChange={e => seekBehind(sliderMax - Number(e.target.value))}
+            style={{ flex: 1, accentColor: liveNow ? 'var(--live)' : 'var(--warn)' }} aria-label="DVR timeline — right is live, drag left to go back" />
+          <button className="chip" style={{ padding: '5px 10px' }} disabled={liveNow} onClick={goLive}>Go live</button>
         </div>
         <div style={{ display: 'flex', gap: 6, justifyContent: 'space-between', fontSize: 11, color: 'var(--faint)' }}>
-          <span>{d.dvr_mode === 'event_start' ? 'Event start' : `-${fmtWindow(winSec)} window`}</span>
+          <span>{d.dvr_mode === 'event_start' ? 'Event start' : `${fmtWindow(winSec)} DVR available`}</span>
           <span style={{ display: 'flex', gap: 6 }}>
             <button className="chip" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => seekBehind(behind + 15)}>« 15s</button>
             <button className="chip" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => seekBehind(behind + 60)}>« 1m</button>
           </span>
-          <span>Live</span>
+          <span style={{ color: liveNow ? 'var(--live)' : 'var(--faint)' }}>Live ▸</span>
         </div>
       </div>
 
