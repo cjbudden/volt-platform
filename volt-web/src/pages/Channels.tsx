@@ -148,7 +148,7 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
                 </td>
                 <td style={{ color: 'var(--muted)' }}>
                   {wt === 'transcode'
-                    ? (c._g?.rungs || []).map((r: any) => `${r.height}p`).join(' · ') || '—'
+                    ? ((c.output_ladder && c.output_ladder.length ? c.output_ladder : c._g?.rungs) || []).map((r: any) => `${r.height}p`).join(' · ') || '—'
                     : 'source ladder'}
                 </td>
                 <td>

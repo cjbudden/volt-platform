@@ -61,6 +61,7 @@ export class Orchestrator {
         input_loss_behavior: owner.input_loss_behavior,
         filler_ref,
         filler_vod_url,
+        output_ladder: owner.output_ladder,   // per-channel ladder override -> encoder
       },
       profile,
       inputs,

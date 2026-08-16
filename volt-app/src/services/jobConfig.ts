@@ -46,6 +46,8 @@ export interface OwnerRow {
   input_loss_behavior?: string;
   filler_ref?: string | null; // resolved slate URL or vod loop URL
   filler_vod_url?: string | null;
+  /** per-channel output ladder override; when set it wins over the profile rungs. */
+  output_ladder?: Array<{ height: number; bitrate_kbps: number; fps?: number }> | null;
 }
 
 export interface AccountRow {
@@ -115,7 +117,13 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
       );
     }
     cfg.gpu = profile.codec_backend === 'nvenc';
-    cfg.ladder = profile.rungs.map((r) => ({ height: r.height, bitrate_kbps: r.bitrate_kbps }));
+    // the channel's own output_ladder is the source of truth when set; only fall back
+    // to the group profile rungs when the channel has no override. (Previously always
+    // used the profile, so per-channel ladder edits were ignored by the encoder.)
+    const ladderSrc = (owner.output_ladder && owner.output_ladder.length)
+      ? owner.output_ladder
+      : profile.rungs;
+    cfg.ladder = ladderSrc.map((r) => ({ height: r.height, bitrate_kbps: r.bitrate_kbps }));
   } else {
     // package_only: the client sends the full ladder — one input per rendition
     cfg.inputs = inputs
