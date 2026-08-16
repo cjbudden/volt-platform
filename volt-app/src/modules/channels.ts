@@ -18,7 +18,21 @@ const CHANNEL_EDITABLE = [
   'dvr_window_sec', 'dvr_mode', 'geo_mode', 'geo_countries', 'epg_enabled',
   'output_ladder', 'input_failover_enabled', 'auto_failback', 'input_loss_behavior',
   'filler_slate_ref', 'filler_asset_id', 'fallback_transcode',
+  'watermark_enabled', 'watermark_ref', 'watermark_position',
+  'watermark_offset_x', 'watermark_offset_y', 'watermark_opacity', 'watermark_scale',
 ];
+
+// Watermark / channel brand overlay. `ref` is a library image URL (like filler_slate_ref);
+// position is a corner/edge anchor; offsets + scale + opacity are how it sits.
+const WATERMARK = z.object({
+  enabled: z.boolean().optional(),
+  ref: z.string().nullable().optional(),
+  position: z.enum(['tl', 'tr', 'bl', 'br', 'tc', 'bc']).optional(),
+  offsetX: z.number().int().min(0).max(4000).optional(),
+  offsetY: z.number().int().min(0).max(4000).optional(),
+  opacity: z.number().int().min(0).max(100).optional(),
+  scale: z.number().int().min(1).max(100).optional(),  // % of the video height
+}).optional();
 
 /** List channels for the tenant (scoped via group -> account). */
 channelsRouter.get(
@@ -110,6 +124,7 @@ const createSchema = z.object({
   outputLadder: z.array(RUNG).optional(),  // transcode: rungs to encode; package: mirror of inputs
   sources: z.array(SOURCE).optional(),     // primary (+ optional backup / per-rendition rows)
   ...FILLER,
+  watermark: WATERMARK,
 });
 
 /** Create a channel — enforces the group's max_channels entitlement. */
@@ -157,6 +172,18 @@ channelsRouter.post(
       return ch;
     });
 
+    // watermark (kept out of the positional insert): set it in one follow-up update so
+    // create and edit persist the exact same columns.
+    if (body.watermark) {
+      const w = body.watermark;
+      await query(
+        `UPDATE channels SET watermark_enabled=$2, watermark_ref=$3, watermark_position=$4,
+           watermark_offset_x=$5, watermark_offset_y=$6, watermark_opacity=$7, watermark_scale=$8 WHERE id=$1`,
+        [row.id, w.enabled ?? false, w.ref ?? null, w.position ?? 'br',
+         w.offsetX ?? 24, w.offsetY ?? 24, w.opacity ?? 100, w.scale ?? 12]
+      );
+    }
+
     await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
       action: 'create', entityType: 'channel', entityId: row.id,
       snapshot: { name: row.name, group_id: row.group_id, sources: (body.sources ?? []).length, ladder: body.outputLadder?.length ?? 0 } });
@@ -193,6 +220,8 @@ const editSchema = z.object({
   outputLadder: z.array(RUNG).nullable().optional(),
   // filler-on-loss + input failover
   ...FILLER,
+  // watermark / channel brand overlay
+  watermark: WATERMARK,
   // subtitles / live captions (persisted to the group's shared output profile)
   captions: z.object({
     enabled: z.boolean().optional(),
@@ -240,6 +269,16 @@ const editChannel = asyncHandler(async (req, res) => {
   if (has('fillerSlateRef')) patch.filler_slate_ref = body.fillerSlateRef ?? null;
   if (has('fillerAssetId')) patch.filler_asset_id = body.fillerAssetId ?? null;
   if (has('fallbackTranscode')) patch.fallback_transcode = body.fallbackTranscode;
+  if (has('watermark') && body.watermark) {
+    const w = body.watermark;
+    if (w.enabled !== undefined) patch.watermark_enabled = w.enabled;
+    if (w.ref !== undefined) patch.watermark_ref = w.ref ?? null;
+    if (w.position !== undefined) patch.watermark_position = w.position;
+    if (w.offsetX !== undefined) patch.watermark_offset_x = w.offsetX;
+    if (w.offsetY !== undefined) patch.watermark_offset_y = w.offsetY;
+    if (w.opacity !== undefined) patch.watermark_opacity = w.opacity;
+    if (w.scale !== undefined) patch.watermark_scale = w.scale;
+  }
   const touchMeta = has('schemaId') || has('metadata');
   if (touchMeta) {
     const md = await validateEntityMetadata(accountId(req), body.schemaId ?? null,

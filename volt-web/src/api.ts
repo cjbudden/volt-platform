@@ -75,6 +75,22 @@ export interface ChannelDetail extends Channel {
   testStream: TestStreamStatus
   onAir: boolean
   public: { url: string; dashUrl: string; available: boolean }
+  watermark: WatermarkCfg
+}
+
+export interface WatermarkCfg {
+  enabled: boolean
+  ref: string | null
+  position: 'tl' | 'tr' | 'bl' | 'br' | 'tc' | 'bc'
+  offsetX: number
+  offsetY: number
+  opacity: number
+  scale: number
+}
+export interface WatermarkPatch {
+  enabled?: boolean; ref?: string | null
+  position?: 'tl' | 'tr' | 'bl' | 'br' | 'tc' | 'bc'
+  offsetX?: number; offsetY?: number; opacity?: number; scale?: number
 }
 
 export type GateStatus = 'idle' | 'starting' | 'ready' | 'healthy' | 'degraded' | 'failed' | 'stopped'
@@ -120,6 +136,7 @@ export interface ChannelSettingsPatch {
   captions?: { enabled?: boolean; sourceLang?: string; targets?: string[] }
   inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
   fillerSlateRef?: string | null
+  watermark?: WatermarkPatch
   version?: number
 }
 
@@ -138,6 +155,7 @@ export const api = {
     inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
     fillerSlateRef?: string | null; fillerAssetId?: string | null
     fallbackTranscode?: boolean
+    watermark?: WatermarkPatch
   }): Promise<Channel> => req('/channels', { method: 'POST', body: JSON.stringify(b) }),
   startStop: (id: string, action: 'start' | 'stop') =>
     req(`/channels/${id}/${action}`, { method: 'POST' }),

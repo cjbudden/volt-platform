@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, originUrl, thumbUrl, type ChannelDetail as CD, type ChannelSettingsPatch, type ShareLinkRow } from '../api'
+import { api, originUrl, thumbUrl, type ChannelDetail as CD, type ChannelSettingsPatch, type ShareLinkRow, type WatermarkCfg } from '../api'
 import { navigate } from '../router'
 import { subscribeLive } from '../liveStatus'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
@@ -545,6 +545,28 @@ function parseVtt(txt: string): Cue[] {
   return cues
 }
 
+// Live preview of the channel watermark, positioned to match the encoder overlay so
+// brand / corner / offset can be validated in the player before (and without) burn-in.
+// Offsets are output pixels; we approximate against a nominal 1080-high frame for preview.
+function WatermarkOverlay({ wm }: { wm?: CD['watermark'] }) {
+  if (!wm || !wm.enabled || !wm.ref) return null
+  const src = /^https?:\/\//i.test(wm.ref) ? wm.ref : wm.ref
+  const ox = `${(wm.offsetX / 1080) * 100}%`
+  const oy = `${(wm.offsetY / 1080) * 100}%`
+  const s: any = {
+    position: 'absolute', height: `${wm.scale}%`, width: 'auto', opacity: wm.opacity / 100,
+    objectFit: 'contain', pointerEvents: 'none', zIndex: 4, filter: 'drop-shadow(0 1px 3px rgba(0,0,0,.6))',
+  }
+  const p = wm.position
+  if (p === 'tl') { s.top = oy; s.left = ox }
+  else if (p === 'tr') { s.top = oy; s.right = ox }
+  else if (p === 'bl') { s.bottom = oy; s.left = ox }
+  else if (p === 'tc') { s.top = oy; s.left = '50%'; s.transform = 'translateX(-50%)' }
+  else if (p === 'bc') { s.bottom = oy; s.left = '50%'; s.transform = 'translateX(-50%)' }
+  else { s.bottom = oy; s.right = ox } // br default
+  return <img src={src} alt="" style={s} />
+}
+
 function DualPlayers({ d, captionLangs, sourceUp, onAir, onSendSource, onGoLive, busy }: {
   d: CD; captionLangs: string[]; sourceUp: boolean; onAir: boolean; onSendSource: () => void; onGoLive: () => void; busy: boolean
 }) {
@@ -675,6 +697,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
       <div className="video">
         {canPreview ? <HlsVideo src={srcVideoSrc} fallbackSrc={srcFallback} /> : <div className="grad" style={srcErrored ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
         <div className="plabel"><span className="pt" style={{ color: srcErrored ? '#fca5a5' : '#a5b4fc' }}>SOURCE · {proto}</span></div>
+        {canPreview && <WatermarkOverlay wm={d.watermark} />}
         <div className="badge-live" style={{ background: badgeBg }}><span className="d" />{badgeText}</div>
         {srcErrored && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
@@ -966,6 +989,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           color: onAir ? '#4ade80' : '#38bdf8', backdropFilter: 'blur(2px)',
         }}><span className="dot-s" style={{ background: onAir ? '#4ade80' : '#38bdf8' }} />{onAir ? 'ON AIR' : 'PREVIEW · not on air'}</div>
         <div className="badge-live" style={liveNow ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{liveNow ? 'LIVE' : 'DVR'}</div>
+        <WatermarkOverlay wm={d.watermark} />
         <div className="bug"><span className="lg">{BOLT}</span>{d.name.toUpperCase()}</div>
         {/* legacy overlay only for the test-stream side-VTT path; real channels render
             the subtitle track natively in the player (from the manifest), so we don't
@@ -1228,6 +1252,15 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   const [slateRef, setSlateRef] = useState(d.filler_slate_ref || '')
   const [pickerOpen, setPickerOpen] = useState(false)
   const [loopPickerOpen, setLoopPickerOpen] = useState(false)
+  // watermark / channel brand overlay
+  const [wmEnabled, setWmEnabled] = useState(d.watermark?.enabled ?? false)
+  const [wmRef, setWmRef] = useState(d.watermark?.ref || '')
+  const [wmPos, setWmPos] = useState<WatermarkCfg['position']>(d.watermark?.position || 'br')
+  const [wmX, setWmX] = useState(String(d.watermark?.offsetX ?? 24))
+  const [wmY, setWmY] = useState(String(d.watermark?.offsetY ?? 24))
+  const [wmOpacity, setWmOpacity] = useState(d.watermark?.opacity ?? 100)
+  const [wmScale, setWmScale] = useState(d.watermark?.scale ?? 12)
+  const [wmPickerOpen, setWmPickerOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -1263,6 +1296,16 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     // filler on loss
     patch.inputLossBehavior = lossBehavior
     patch.fillerSlateRef = (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && slateRef.trim() ? slateRef.trim() : null
+    // watermark / brand overlay
+    patch.watermark = {
+      enabled: wmEnabled,
+      ref: wmEnabled && wmRef.trim() ? wmRef.trim() : null,
+      position: wmPos,
+      offsetX: Math.max(0, Number(wmX) || 0),
+      offsetY: Math.max(0, Number(wmY) || 0),
+      opacity: wmOpacity,
+      scale: wmScale,
+    }
 
     setBusy(true)
     try { await api.updateChannel(d.id, patch); onSaved() }
@@ -1409,6 +1452,49 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
               <div className="td" style={{ color: 'var(--warn)', marginTop: 6 }}>Will be raised to the DVR window ({fmtWindow(dvrMinNum * 60)}) — retention can’t be shorter than DVR.</div>
             )}
           </div>
+
+          {d.profile?.workflow_type === 'transcode' && (<>
+          <div style={SEC}>Watermark / channel brand</div>
+          <div className="toggle-row">
+            <div><div className="tt">Overlay a brand watermark</div><div className="td">Burned into the output (transcode only).</div></div>
+            <div className={`sw ${wmEnabled ? '' : 'off'}`} onClick={() => setWmEnabled(v => !v)}><i /></div>
+          </div>
+          {wmEnabled && (
+            <>
+              <div className="field"><label>Brand image</label>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {wmRef && <img src={thumbUrl(wmRef, 92, 68)} alt="" style={{ width: 46, height: 34, objectFit: 'contain', borderRadius: 6, background: '#0b0f16', flex: 'none' }} />}
+                  <input className="inp" value={wmRef} onChange={e => setWmRef(e.target.value)} placeholder="Pick a brand/logo, upload, or paste a URL" />
+                  <button type="button" className="btn ghost" onClick={() => setWmPickerOpen(true)}>Browse / upload…</button>
+                </div>
+              </div>
+              <div className="field"><label>Position</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6, maxWidth: 260 }}>
+                  {([['tl','Top L'],['tc','Top C'],['tr','Top R'],['bl','Bot L'],['bc','Bot C'],['br','Bot R']] as const).map(([p, lbl]) => (
+                    <button key={p} type="button" className={`btn ${wmPos === p ? 'primary' : 'ghost'}`} style={{ padding: '6px 4px', fontSize: 12 }} onClick={() => setWmPos(p)}>{lbl}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="field"><label>Offsets (px from the edge)</label>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ color: 'var(--faint)', fontSize: 12 }}>X</span>
+                  <input className="inp" style={{ width: 90 }} inputMode="numeric" value={wmX} onChange={e => setWmX(e.target.value.replace(/[^0-9]/g, ''))} />
+                  <span style={{ color: 'var(--faint)', fontSize: 12 }}>Y</span>
+                  <input className="inp" style={{ width: 90 }} inputMode="numeric" value={wmY} onChange={e => setWmY(e.target.value.replace(/[^0-9]/g, ''))} />
+                </div>
+              </div>
+              <div className="field"><label>Size — {wmScale}% of frame height</label>
+                <input type="range" min={2} max={40} step={1} value={wmScale} onChange={e => setWmScale(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
+              </div>
+              <div className="field"><label>Opacity — {wmOpacity}%</label>
+                <input type="range" min={10} max={100} step={5} value={wmOpacity} onChange={e => setWmOpacity(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
+              </div>
+            </>
+          )}
+          <ImagePicker open={wmPickerOpen} kinds={['brand', 'slate', 'other']} title="Choose or upload a brand watermark"
+            uploadKind="brand" uploadFolder="brands"
+            onClose={() => setWmPickerOpen(false)} onPick={(url) => { setWmRef(url); setWmPickerOpen(false) }} />
+          </>)}
 
           {err && <div className="err">{err}</div>}
         </div>

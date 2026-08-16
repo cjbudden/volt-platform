@@ -62,6 +62,13 @@ export class Orchestrator {
         filler_ref,
         filler_vod_url,
         output_ladder: owner.output_ladder,   // per-channel ladder override -> encoder
+        watermark_enabled: owner.watermark_enabled,
+        watermark_ref: owner.watermark_ref,
+        watermark_position: owner.watermark_position,
+        watermark_offset_x: owner.watermark_offset_x,
+        watermark_offset_y: owner.watermark_offset_y,
+        watermark_opacity: owner.watermark_opacity,
+        watermark_scale: owner.watermark_scale,
       },
       profile,
       inputs,

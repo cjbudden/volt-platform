@@ -18,6 +18,14 @@ async function ensureSchema(): Promise<void> {
   // is an explicit operator action; the public playback URL only serves when this is true
   // AND the output has valid content.
   await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS on_air BOOLEAN NOT NULL DEFAULT false`);
+  // Watermark / channel brand overlay (per channel). ref = library image URL.
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark_enabled BOOLEAN NOT NULL DEFAULT false`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark_ref TEXT`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark_position TEXT NOT NULL DEFAULT 'br'`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark_offset_x INTEGER NOT NULL DEFAULT 24`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark_offset_y INTEGER NOT NULL DEFAULT 24`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark_opacity INTEGER NOT NULL DEFAULT 100`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark_scale INTEGER NOT NULL DEFAULT 12`);
 }
 
 const server = app.listen(config.port, () => {

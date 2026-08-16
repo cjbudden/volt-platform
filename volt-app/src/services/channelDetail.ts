@@ -31,6 +31,7 @@ export interface ChannelDetail {
   degraded?: boolean;
   onAir: boolean;
   public: { url: string; dashUrl: string; available: boolean };
+  watermark: { enabled: boolean; ref: string | null; position: string; offsetX: number; offsetY: number; opacity: number; scale: number };
 }
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
@@ -234,6 +235,15 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     epgEnabled: channel.epg_enabled !== false,
     ladder, sources, viewers, epg, statusBoard, log, health, billing, degraded,
     onAir, public: publicBlock,
+    watermark: {
+      enabled: channel.watermark_enabled === true,
+      ref: channel.watermark_ref ?? null,
+      position: channel.watermark_position ?? 'br',
+      offsetX: channel.watermark_offset_x ?? 24,
+      offsetY: channel.watermark_offset_y ?? 24,
+      opacity: channel.watermark_opacity ?? 100,
+      scale: channel.watermark_scale ?? 12,
+    },
   };
 }
 

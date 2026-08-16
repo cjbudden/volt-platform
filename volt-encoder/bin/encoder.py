@@ -243,6 +243,42 @@ def start_relay(inp, idx):
     return spawn(name, cmd)
 
 
+def _fetch_watermark(cfg):
+    """Download the watermark/brand image once so ffmpeg can overlay it. Returns a
+    local path or None (fetch failure just skips the overlay, never fails the job)."""
+    wm = cfg.get("watermark")
+    if not wm or not wm.get("url"):
+        return None
+    dest = os.path.join(WORK_DIR, "watermark.img")
+    try:
+        import urllib.request
+        urllib.request.urlretrieve(wm["url"], dest)
+        log(f"watermark: fetched {wm['url']} -> {dest}")
+        return dest
+    except Exception as e:  # noqa: BLE001
+        log(f"watermark: fetch failed ({e}); overlay skipped")
+        return None
+
+
+def _overlay_vf(scale_h, wm_path, wm):
+    """Build the -vf graph: scale the frame, load+size+fade the logo, overlay it at the
+    chosen corner/edge with the given pixel offsets. scale = % of the frame HEIGHT."""
+    mx = int(wm.get("offset_x", 24)); my = int(wm.get("offset_y", 24))
+    pos = str(wm.get("position") or "br").lower()
+    xy = {
+        "tl": f"{mx}:{my}",
+        "tr": f"main_w-overlay_w-{mx}:{my}",
+        "bl": f"{mx}:main_h-overlay_h-{my}",
+        "br": f"main_w-overlay_w-{mx}:main_h-overlay_h-{my}",
+        "tc": f"(main_w-overlay_w)/2:{my}",
+        "bc": f"(main_w-overlay_w)/2:main_h-overlay_h-{my}",
+    }.get(pos, f"main_w-overlay_w-{mx}:main_h-overlay_h-{my}")
+    op = max(0.0, min(1.0, float(wm.get("opacity", 100)) / 100.0))
+    wmh = max(1, int(round(scale_h * float(wm.get("scale", 12)) / 100.0)))
+    return (f"movie={wm_path},format=rgba,colorchannelmixer=aa={op:.3f},scale=-1:{wmh}[wm];"
+            f"[in]scale=-2:{scale_h}[bg];[bg][wm]overlay={xy}")
+
+
 def start_transcode(cfg, keys_unused):
     """transcode: one mezzanine -> full ladder, aligned closed GOPs, each
     rendition to its own UDP port. GPU (NVENC) if requested, else x264."""
@@ -252,6 +288,8 @@ def start_transcode(cfg, keys_unused):
     gpu = cfg.get("gpu", False)
     fps = cfg.get("fps", 25)
     gop = int(seg * fps)  # closed GOP == segment length so boundaries align
+    wm = cfg.get("watermark") if cfg.get("watermark", {}).get("url") else None
+    wm_path = _fetch_watermark(cfg) if wm else None
 
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin"]
     if gpu:
@@ -262,7 +300,7 @@ def start_transcode(cfg, keys_unused):
         vcodec = ["-c:v", "h264_nvenc", "-preset", "p4"] if gpu else \
                  ["-c:v", "libx264", "-preset", "veryfast"]
         cmd += ["-map", "0:v:0"]
-        cmd += ["-vf", f"scale=-2:{r['height']}"]
+        cmd += ["-vf", _overlay_vf(r['height'], wm_path, wm) if wm_path else f"scale=-2:{r['height']}"]
         cmd += vcodec
         cmd += ["-b:v", f"{r['bitrate_kbps']}k",
                 "-maxrate", f"{int(r['bitrate_kbps']*1.1)}k",

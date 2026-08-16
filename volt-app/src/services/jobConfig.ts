@@ -48,6 +48,14 @@ export interface OwnerRow {
   filler_vod_url?: string | null;
   /** per-channel output ladder override; when set it wins over the profile rungs. */
   output_ladder?: Array<{ height: number; bitrate_kbps: number; fps?: number }> | null;
+  /** watermark / channel brand overlay */
+  watermark_enabled?: boolean;
+  watermark_ref?: string | null;
+  watermark_position?: string;
+  watermark_offset_x?: number;
+  watermark_offset_y?: number;
+  watermark_opacity?: number;
+  watermark_scale?: number;
 }
 
 export interface AccountRow {
@@ -177,6 +185,22 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
       source_lang: profile.caption_source_lang ?? 'auto',
       targets: profile.caption_targets ?? [],
       offset_sec: profile.caption_offset_sec ?? 0,
+    };
+  }
+
+  // Watermark / channel brand overlay. Burned in on the TRANSCODE path (re-encode);
+  // package_only copies the source, so the encoder skips burn-in there (the console
+  // still previews it). ref is a library URL made absolute so the encoder can fetch it.
+  if (owner.watermark_enabled && owner.watermark_ref) {
+    const ref = owner.watermark_ref;
+    const url = /^https?:\/\//i.test(ref) ? ref : `${config.internalApiBaseUrl.replace(/\/$/, '')}${ref.startsWith('/') ? '' : '/'}${ref}`;
+    cfg.watermark = {
+      url,
+      position: owner.watermark_position ?? 'br',
+      offset_x: owner.watermark_offset_x ?? 24,
+      offset_y: owner.watermark_offset_y ?? 24,
+      opacity: owner.watermark_opacity ?? 100,
+      scale: owner.watermark_scale ?? 12,
     };
   }
 
