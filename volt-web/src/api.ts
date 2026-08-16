@@ -30,7 +30,7 @@ export interface Group {
 }
 export interface Channel {
   id: string; name: string; status: string; group_id: string
-  enabled?: boolean; recording_retention_days: number | null
+  enabled?: boolean; recording_retention_days: number | null; recording_retention_sec?: number | null
   created_at: string; version: number; group_name?: string
   dvr_window_sec: number | null; dvr_mode: 'sliding' | 'event_start'
   geo_mode: 'worldwide' | 'allow' | 'block'; geo_countries: string[]

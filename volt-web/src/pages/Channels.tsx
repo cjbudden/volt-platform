@@ -6,6 +6,18 @@ import { ImagePicker } from '../ImagePicker'
 
 type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
 
+/** Format retention for the list: prefer the real seconds value (minutes..months),
+ *  fall back to the legacy days field. e.g. 3600s -> "1h", not "1d". */
+function fmtRetention(sec?: number | null, days?: number | null): string {
+  if (sec != null && sec > 0) {
+    for (const [u, l] of [[2592000, 'mo'], [604800, 'w'], [86400, 'd'], [3600, 'h'], [60, 'm']] as [number, string][]) {
+      if (sec % u === 0 && sec >= u) return `${sec / u}${l}`
+    }
+    return `${Math.max(1, Math.round(sec / 60))}m`
+  }
+  return days != null && days > 0 ? `${days}d` : '—'
+}
+
 export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
   const [channels, setChannels] = useState<any[] | null>(null)
   const [groups, setGroups] = useState<Group[]>([])
@@ -170,7 +182,7 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
                     )
                   })()}
                 </td>
-                <td style={{ color: 'var(--muted)' }}>{c.recording_retention_days ? `${c.recording_retention_days}d` : '—'}</td>
+                <td style={{ color: 'var(--muted)' }}>{fmtRetention(c.recording_retention_sec, c.recording_retention_days)}</td>
                 <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                   <button className={`btn ${live ? 'ghost' : 'primary'}`} disabled={busy === c.id} onClick={() => toggle(c)}>
                     {busy === c.id ? '…' : live ? 'Stop' : 'Start'}
