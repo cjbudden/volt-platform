@@ -553,25 +553,6 @@ function parseVtt(txt: string): Cue[] {
 // Live preview of the channel watermark, positioned to match the encoder overlay so
 // brand / corner / offset can be validated in the player before (and without) burn-in.
 // Offsets are output pixels; we approximate against a nominal 1080-high frame for preview.
-function WatermarkOverlay({ wm }: { wm?: CD['watermark'] }) {
-  if (!wm || !wm.enabled || !wm.ref) return null
-  const src = /^https?:\/\//i.test(wm.ref) ? wm.ref : wm.ref
-  const ox = `${(wm.offsetX / 1080) * 100}%`
-  const oy = `${(wm.offsetY / 1080) * 100}%`
-  const s: any = {
-    position: 'absolute', height: `${wm.scale}%`, width: 'auto', opacity: wm.opacity / 100,
-    objectFit: 'contain', pointerEvents: 'none', zIndex: 4, filter: 'drop-shadow(0 1px 3px rgba(0,0,0,.6))',
-  }
-  const p = wm.position
-  if (p === 'tl') { s.top = oy; s.left = ox }
-  else if (p === 'tr') { s.top = oy; s.right = ox }
-  else if (p === 'bl') { s.bottom = oy; s.left = ox }
-  else if (p === 'tc') { s.top = oy; s.left = '50%'; s.transform = 'translateX(-50%)' }
-  else if (p === 'bc') { s.bottom = oy; s.left = '50%'; s.transform = 'translateX(-50%)' }
-  else { s.bottom = oy; s.right = ox } // br default
-  return <img src={src} alt="" style={s} />
-}
-
 function DualPlayers({ d, captionLangs, sourceUp, onAir, onSendSource, onGoLive, busy }: {
   d: CD; captionLangs: string[]; sourceUp: boolean; onAir: boolean; onSendSource: () => void; onGoLive: () => void; busy: boolean
 }) {
@@ -702,7 +683,9 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
       <div className="video">
         {canPreview ? <HlsVideo src={srcVideoSrc} fallbackSrc={srcFallback} /> : <div className="grad" style={srcErrored ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
         <div className="plabel"><span className="pt" style={{ color: srcErrored ? '#fca5a5' : '#a5b4fc' }}>SOURCE · {proto}</span></div>
-        {canPreview && d.profile?.workflow_type === 'transcode' && <WatermarkOverlay wm={d.watermark} />}
+        {/* No DOM watermark here: on transcode the logo is BURNED INTO the encoded
+            picture by the encoder, so it is already in the video pixels. Painting a
+            second overlay would double it up and hide whether the burn-in works. */}
         <div className="badge-live" style={{ background: badgeBg }}><span className="d" />{badgeText}</div>
         {srcErrored && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
@@ -1008,7 +991,8 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           color: onAir ? '#4ade80' : '#38bdf8', backdropFilter: 'blur(2px)',
         }}><span className="dot-s" style={{ background: onAir ? '#4ade80' : '#38bdf8' }} />{onAir ? 'ON AIR' : 'PREVIEW · not on air'}</div>
         <div className="badge-live" style={liveNow ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{liveNow ? 'LIVE' : 'DVR'}</div>
-        {d.profile?.workflow_type === 'transcode' && <WatermarkOverlay wm={d.watermark} />}
+        {/* The watermark is burned into the encoded output (transcode), so it is
+            already in these pixels. We intentionally do NOT paint a DOM overlay. */}
         <div className="bug"><span className="lg">{BOLT}</span>{d.name.toUpperCase()}</div>
         {/* legacy overlay only for the test-stream side-VTT path; real channels render
             the subtitle track natively in the player (from the manifest), so we don't
