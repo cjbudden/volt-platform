@@ -34,7 +34,8 @@ current version is always the file in this repo.
   features with status (`done` / `ready_to_test` / `in_progress` / `pending`), how to
   test each, and any feedback. This is the "what's built vs open" list.
 - **Build status board**, `VOLT_BUILD_STATUS.md` (markdown) and `volt_build_status.html`
-  (open in a browser). Every capability + state.
+  (open in a browser). Every capability + state. The HTML is GENERATED from the
+  markdown, `node scripts/build-status.mjs`, so edit the markdown and re-run it.
 - **History**, `git log`. Each commit message states what changed and why. To see
   the story of a file: `git log --oneline -- path/to/file`.
 
@@ -102,7 +103,11 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
 - `totp.check.ts`, RFC 6238 TOTP correctness.
 - `notifications.check.sh`, templated send fans out to recipient × channel deliveries.
 - `saas.check.sh`, analytics ingest + reports, platform dashboard, support.
-- `share-links.check.sh`, admin creates a share link, public resolves it (isolated).
+- `share-links.check.sh`, admin creates a share link, public resolves it (isolated);
+  channel shares without going on air, custom expiry, PATCH (extend / PIN on+off / cap),
+  rotate (old URL dies), scoped list, email deliveries. 42 assertions.
+- `radio-brand.check.ts`, audio-only (radio) job config: no video ladder or GPU, AAC
+  rung defaulting, video path untouched, and brand never becoming an encoder overlay.
 - **API contract**, `volt-app/api/verify.sh` (Newman, runs the Postman collection).
 
 **Encoder, `volt-encoder/`**

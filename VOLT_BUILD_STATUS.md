@@ -1,6 +1,7 @@
 # Volt Streaming - Design vs Build Reconciliation
 
 *Single source of truth for "what did we decide" vs "what is actually built."*
+*`volt_build_status.html` is generated from THIS file: `node scripts/build-status.mjs`.*
 Generated 2026-08-02 by reconciling the 25 project-memory notes (decisions from
 all chat sequences) against the code in `volt-app/`, `volt-encoder/`, `e2e/`,
 and `deploy/terraform/`.
@@ -47,7 +48,10 @@ implemented.** Design is ~2 chats ahead of build.
 | Captions settings UI (account provider toggle + per-profile targets/model/offset) | ❌ | backend + master toggle done; the admin screen to enable it and pick languages is a follow-up |
 | Transcode-workflow failover | ❌ | logs warning, runs primary only |
 | Zero-gap primary↔backup splice | ❌ | sub-second gap today |
-| Watermark / bug overlay · FairPlay HLS | ❌ | backlog |
+| Watermark / bug overlay | ✅ | Built 15 Aug, extended 16 Aug: per-channel burn-in on the transcode path (image, corner/edge anchor, px offsets, % size, opacity) with a live console preview. Now settable **on the create form** as well as settings. Packaging channels copy the source, so it is hidden there. |
+| Channel brand image + description (identity, not burn-in) | ✅ | Built 16 Aug: `channels.brand_ref/brand_colour/description`. Set on create + settings from the Image Library; list thumbnail + detail header; served to guide clients via **`GET /api/epg/channels`** (id, name, icon, colour, description, medium) = XMLTV `<channel><icon/></channel>`. Doubles as station artwork for radio. Never reaches the encoder (asserted). |
+| Audio-only (radio) channels | ✅ | Built 16 Aug: `channels.audio_only` + `audio_ladder`; `buildEncoderJobConfig` short-circuits both video workflows (no ladder, no GPU, one input, AAC rungs defaulting to 128k/64k); `encoder.py` audio path (`-vn`, N AAC renditions on the UDP bus) + audio-only HLS/DASH packaging; **Radio** nav section with `/radio` + `/radio/:id`. 13/13 `radio-brand.check.ts`. Open on this feature: dedicated Icecast input adapter + live waveform/level meter. |
+| FairPlay HLS | ❌ | backlog |
 
 ## 3. Orchestration & infrastructure
 
@@ -112,7 +116,7 @@ implemented.** Design is ~2 chats ahead of build.
 
 ## 9. Frontend
 
-> **App-surfacing coverage** (tracked per-feature in `feature-tracker/features.json` via the `app_surface` field → the *volt-feature-tracker* artifact). Many capabilities below are ✅ *at the API/engine level* but **not yet wired into the React app**. In-app now: Channels list + create (transcode/package), Channel detail/control page, Test stream + playback + subtitles, Deep-link routing; Ladder profiles (in build). Backend-built but **not in app yet** (do not lose): share-link admin, image service, frame-accurate access, social publishing, EPG, analytics, file manager, watchfolder, SaaS admin, live-updates, full captions settings. These are carried as `app_surface: none` in the tracker so the gap stays visible; removals require a formal confirmation and are struck from both this doc and the tracker.
+> **App-surfacing coverage** (tracked per-feature in `feature-tracker/features.json` via the `app_surface` field → the *volt-feature-tracker* artifact). Many capabilities below are ✅ *at the API/engine level* but **not yet wired into the React app**. In-app now: Channels list + create (transcode/package), **Radio (audio-only) list + create**, Channel detail/control page, **channel brand + watermark on create/settings**, **share-preview links (create, email, QR, extend, rotate, revoke)**, Test stream + playback + subtitles, Deep-link routing; Ladder profiles (in build). Backend-built but **not in app yet** (do not lose): image service, frame-accurate access, social publishing, EPG, analytics, file manager, watchfolder, SaaS admin, live-updates, full captions settings. These are carried as `app_surface: none` in the tracker so the gap stays visible; removals require a formal confirmation and are struck from both this doc and the tracker.
 
 | Capability | Status | Notes / source |
 |---|---|---|
@@ -145,7 +149,7 @@ implemented.** Design is ~2 chats ahead of build.
 | Dual-credential admin auth (session OR account secret key) | ✅ | `requireAuth` accepts JWT or `sk_live` (mgmt scope); publishable keys refused for admin. Tested |
 | Public play surface: get-play-URL + check-access | ✅ | `/api/availability` (mints token) + `/api/access/check` (booleans); publishable-key auth |
 | Share page - secure time-boxed standalone preview link | ✅ | Built 3 Aug: `share_links` table + `shareLinks.ts` + `/api/share-links` (create/list/revoke, account-scoped) + public `/share/:token` isolated page (`sharePage.ts`) + `/api/share/:token/resolve`+`/download`. Time-boxed, revoke, max-views, optional PIN, watermarked preview, allow-download (hi-res/metadata) + notify-on-open, geo/rights enforced, cross-tenant isolated. Renders to the supplied mockup. 20 e2e assertions. Workflow: `docs/WORKFLOW_share_page.md` |
-| Share asset modal + Share action in console UI | 📐 | mockup provided (recipients · message · access period · preview vs download · downloadable elements · notify-on-open); backend it calls is built. UI wiring into `console.html` = follow-up. `docs/WORKFLOW_share_page.md` |
+| Share preview drawer + link management in the React app | ✅ | Built 16 Aug: two-step drawer on channel detail (set up → created link). Recipients + **email the one-time URL** at create/rotate, expiry preset **or an exact date/time**, PIN (generate/clear, min 3), view cap, watermark + notify-on-open toggles, note. Created step shows copy, open, **QR** (`volt-web/src/qr.ts`, dependency-free, verified against a real reader), expiry countdown, PIN reminder, delivery count. Link list per channel: view stats, last opened, recipients, **extend**, **new URL (rotate)**, revoke. API gained `PATCH /api/share-links/:id`, `POST /:id/rotate`, `?resourceKind&resourceId` filtering, `has_pin`. 42 assertions in `share-links.check.sh`. `docs/WORKFLOW_share_page.md` |
 | Sub-accounts (parent → child subtree) | 🟡 | `accounts.parent_account_id` + `accountSubtree()` helper (8 tests); per-query subtree wiring = follow-up |
 | SaaS-admin MFA (2-step login) | ✅ | Built 3 Aug: `totp.ts` (RFC 6238, no dep) + `/api/platform/auth/login`→enrol→`/mfa`→session. 9 TOTP-vector + 8 flow tests |
 

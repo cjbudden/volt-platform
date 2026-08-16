@@ -52,3 +52,39 @@ max-views, and optional PIN all enforced. Geo/rights identical to public playbac
 Backend + standalone page: **built and tested** (test/share-links.check.sh, 20/20).
 Interface integration (the "Share asset" modal wired into the console) and real S3
 presign + server-side watermark burn-in: **follow-ups** (see build status).
+
+
+---
+
+## Update, 16 Aug 2026 — the console side, and editing a live link
+
+The share workflow is now wired into the React app (channel detail → **Share preview**)
+and the API gained the pieces the form needed.
+
+**Two steps, one drawer.** Step 1 sets the link up: label, recipient emails, expiry
+(preset *or* an exact date/time), optional PIN, view cap, watermark and notify-on-open
+toggles, and a note. Step 2 is the created link: the URL with a copy button, a **QR**
+to scan it onto a phone (rendered by `volt-web/src/qr.ts`, no dependency), the expiry
+countdown, the PIN to pass on separately, and how many recipients it was emailed to.
+
+**Emailing the link.** `POST /api/share-links` accepts `recipients` + `sendEmail` and
+mails the one-time URL through the notification service (topic `share_link`). The raw
+token exists only at create and rotate time — we store `sha256(token)` — so there is
+deliberately **no re-send endpoint** that could resurrect a URL from the database. If a
+link needs to go out again, rotate it: that mints a new token, kills the URL already
+sent, and can mail the new one.
+
+**Editing without breaking the URL.** `PATCH /api/share-links/:id` changes the label,
+note, recipients, expiry (`expiresAt`, or `extendSec` to push the current one out),
+view cap, PIN (a string sets it, `null` clears it), watermark, notify-on-open and
+revoked. The token is untouched, so a link already with a client keeps working — you
+can extend an expiring review, or add a PIN to a link that turned out to be sensitive.
+
+**What the console lists.** `GET /api/share-links?resourceKind=channel&resourceId=…`
+returns only that resource's links, with `has_pin` (never the hash or the PIN),
+recipients, view count and first/last opened, so the drawer can show what happened to
+each link and offer extend / new URL / revoke.
+
+Ceilings and rules that live in one place: 90 days maximum life (`MAX_TTL_SEC` +
+`resolveExpiry`, which also rejects a past date), PIN minimum 3 characters, and the
+public resolve path still never accepts an admin credential.

@@ -316,13 +316,13 @@
     {
       "id": "share-preview-live",
       "name": "Share preview link (live channel)",
-      "summary": "Create a private preview link for THIS channel from the detail page (label, expiry, optional PIN, optional max-views, note). Separate workflow from on air: plays the packaged output whenever the source is active, ignores geo/access rules, secured by PIN+expiry. Recipient sees a standalone page (LIVE PREVIEW badge, waiting state when not producing, live-edge playback). List + revoke existing links.",
+      "summary": "A private, expiring link to preview a channel's output before go-live — separate from going on air, and it ignores geo/access rules. Set it up in one panel: label, recipient emails (optionally mailed the link), an expiry preset or an exact date/time, an optional PIN (generate one), a view cap, watermark and notify-on-open. The created link is shown once with a copy button and a QR to scan it onto a phone. Existing links for the channel are listed with view stats, last opened, who it went to, and actions to extend by 7 days, issue a new URL (killing the old one) or revoke.",
       "status": "ready_to_test",
       "test": {
-        "how": "Channel detail => Share preview => create link => open in a private window (enter PIN if set). Works without going on air.",
+        "how": "Channel detail → Share preview. Create a link with a PIN and a recipient; copy it or scan the QR and open it in a private window. Then try: extend 7 days, New URL (the first URL should stop working), revoke. The email is recorded as a notification delivery (adapters are stubs until SES is wired).",
         "artifact": ""
       },
-      "checks": "tsc clean; backend resolve skips geo/rights for channel; preview URL fixed to play origin locally.",
+      "checks": "Backend 42 assertions in share-links.check.sh (create/resolve/PIN/revoke/expiry + custom expiry, PATCH, rotate, scoped list, cross-tenant). QR verified against a real QR reader across v1-10, ECC L and M.",
       "feedback": [],
       "app_surface": "full"
     },
@@ -355,11 +355,11 @@
     {
       "id": "watermark",
       "name": "Watermark / channel brand overlay",
-      "summary": "Per-channel watermark: pick a brand image from the library, position (TL/TR/BL/BR/TC/BC), pixel offsets, size (% of frame height) and opacity. Burned into the TRANSCODE output via an ffmpeg overlay; packaged assets copy the source so it is not burned in there (the option is hidden for package channels). A live preview overlay renders the brand on the player so placement can be validated before burn-in. Persisted on the channel; create + edit share the same columns.",
+      "summary": "Per-channel watermark: pick a brand image from the library, position (TL/TR/BL/BR/TC/BC), pixel offsets, size (% of frame height) and opacity. Burned into the TRANSCODE output via an ffmpeg overlay; packaged assets copy the source so it is not burned in there (the option is hidden for package channels). A live preview overlay renders the brand on the player so placement can be validated before burn-in. Persisted on the channel; create + edit share the same columns. The full control set (image, position, size, opacity, margin) is now on the CREATE form as well as settings.",
       "status": "ready_to_test",
-      "app_surface": "partial",
+      "app_surface": "full",
       "test": {
-        "how": "Open a TRANSCODE channel => Settings => Watermark: pick a brand image, set position/offset/size/opacity, Save, and see the preview overlay. Burn-in shows on transcode output once running.",
+        "how": "Channels → New channel → Watermark (transcode only): pick a logo, position, size, opacity, margin, create. Or Channel detail → Settings → Watermark on an existing channel; the player preview shows the placement before burn-in.",
         "artifact": ""
       },
       "checks": "tsc + encoder syntax clean. NEEDS a transcode-channel run to confirm the burned-in overlay renders correctly (position/size/opacity).",
@@ -367,28 +367,28 @@
     },
     {
       "id": "channel-brand-image",
-      "name": "Channel branding image (near name)",
-      "summary": "A per-channel brand/logo shown next to the channel name in the admin, with a clickable box to select/browse from the library and a default TV icon when unset. Distinct from the watermark overlay (this is the channel identity thumbnail).",
-      "status": "building",
-      "app_surface": "none",
+      "name": "Channel brand image (info + guide)",
+      "summary": "A logo/artwork image and a description on the channel — its identity, kept separate from the burned-in watermark. Set on the CREATE form and in settings (browse the Image Library or upload). Shown as the list thumbnail and in the detail header, and served to guide clients via GET /api/epg/channels (id, name, icon, colour, description, medium) — the same thing XMLTV carries as <channel><icon src/></channel>. For a radio station it is the artwork a player shows.",
+      "status": "ready_to_test",
+      "app_surface": "full",
       "test": {
-        "how": "Planned: click the brand box by the channel name to pick/upload a logo; default TV icon when none.",
+        "how": "Channels → New channel → Brand: pick or upload a logo, add a description, create. The list thumbnail and the detail header should show it. Change it later in Settings → Brand. Check GET /api/epg/channels returns it as icon.",
         "artifact": ""
       },
-      "checks": "Not started — next up.",
+      "checks": "Built 16 Aug. Brand is never passed to the encoder (asserted in radio-brand.check.ts).",
       "feedback": []
     },
     {
       "id": "audio-only-radio",
-      "name": "Audio-only live (radio) + Icecast input + waveform",
-      "summary": "Audio-only live channels (radio stations): a single input and single output, like a live channel but audio-only. Support Icecast as an input alongside SRT/RTMP/HLS. Admin details page shows a live audio waveform/level meter for what is received and broadcast.",
-      "status": "building",
-      "app_surface": "none",
+      "name": "Radio — audio-only channels",
+      "summary": "A Radio section in the main nav and a real audio-only channel type: one source in, an AAC ladder out, no video anywhere in the chain. Create a station with artwork, a description, a source (Icecast, SRT, RTMP or HLS) and the audio rungs to encode; the job config short-circuits both video workflows (no ladder, no GPU) and the encoder maps audio only, with the packager emitting audio-only HLS/DASH. /radio and /radio/:id are the same list and detail pages at the audio scope.",
+      "status": "ready_to_test",
+      "app_surface": "partial",
       "test": {
-        "how": "Planned: create an audio-only channel with an Icecast (or other) source; watch the live waveform on the detail page.",
+        "how": "Radio → New station: artwork, source URL, tick the audio rungs, create. Start it and check the output is audio-only (master.m3u8 with audio renditions, no video). Edit the ladder in Settings → Audio ladder.",
         "artifact": ""
       },
-      "checks": "Design stage — separate workstream from video channels.",
+      "checks": "Built 16 Aug: 13/13 in radio-brand.check.ts on the job-config decisions. STILL OPEN on this feature: a dedicated Icecast input adapter and the live waveform/level meter on the detail page.",
       "feedback": []
     }
   ]
