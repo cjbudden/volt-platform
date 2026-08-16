@@ -18,7 +18,7 @@
 // ============================================================================
 
 export type GateName = 'server' | 'input' | 'encoder' | 'output' | 'public';
-export type GateStatus = 'idle' | 'starting' | 'healthy' | 'degraded' | 'failed' | 'stopped';
+export type GateStatus = 'idle' | 'starting' | 'ready' | 'healthy' | 'degraded' | 'failed' | 'stopped';
 
 export interface Gate {
   gate: GateName;
@@ -144,12 +144,16 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   else { outStatus = 'starting'; outDetail = 'waiting for the first segments'; }
   gates.push({ gate: 'output', label: 'Output', billable: false, status: outStatus, detail: outDetail });
 
-  // ---- 5) PUBLIC (being served) --------------------------------------------
-  const onAir = effLive && outStatus === 'healthy';
+  // ---- 5) PUBLIC / ON AIR --------------------------------------------------
+  // "On air" means PUBLISHED to viewers. The control plane only knows the output is
+  // READY (packaged + advancing); whether it's actually taken to air is the operator's
+  // publish action (client), so the backend reports 'ready' (blue) and the client shows
+  // green ON AIR once published. Output being ready does NOT mean it's public.
+  const outputReady = effLive && outStatus === 'healthy';
   gates.push({
     gate: 'public', label: 'On air', billable: false,
-    status: !effLive ? (ended || crashed ? 'stopped' : 'idle') : onAir ? 'healthy' : 'starting',
-    detail: onAir ? 'output served to viewers' : crashed ? 'off air (pipeline failed)' : !live ? 'off air' : 'not on air yet',
+    status: !effLive ? (ended || crashed ? 'stopped' : 'idle') : outputReady ? 'ready' : 'starting',
+    detail: outputReady ? 'ready — private until you go on air' : crashed ? 'off air (pipeline failed)' : !live ? 'off air' : 'warming up',
   });
 
   // ---- primary error: first failed/degraded gate, with its real reason ------
@@ -163,5 +167,7 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
     }
   }
 
-  return { gates, primaryError, onAir, live: effLive };
+  // `onAir` here means "output is READY to serve" (packaged + advancing); the actual
+  // publish-to-public toggle is the operator's action in the client.
+  return { gates, primaryError, onAir: outputReady, live: effLive };
 }

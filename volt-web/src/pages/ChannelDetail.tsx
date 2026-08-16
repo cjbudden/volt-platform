@@ -98,12 +98,17 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   const perr = health?.primaryError || null
   const errored = !!perr
   const outGate = health?.gates.find(g => g.gate === 'output')
+  const outputReady = outGate?.status === 'healthy'   // output packaged + advancing
+  // ON AIR (green) ONLY when the operator has published (onAir) AND output is ready.
+  // Output ready but not published = READY (blue). Not live = IDLE.
   const stateLabel = errored ? `${perr!.label.toUpperCase()} ERROR`
-    : health?.onAir || (onAir && outGate?.status === 'healthy') ? 'ON AIR'
-    : sourceUp ? (outGate?.status === 'healthy' ? 'READY' : 'STARTING')
+    : (onAir && outputReady) ? 'ON AIR'
+    : outputReady ? 'READY'
+    : sourceUp ? 'STARTING'
     : 'IDLE'
   const stateCls = errored ? 'down'
-    : (health?.onAir || onAir) ? 'live'
+    : (onAir && outputReady) ? 'live'
+    : outputReady ? 'sched'   // READY = blue
     : sourceUp ? 'sched' : 'idle'
   const isEvent = d.dvr_mode === 'event_start'
   const wt = d.profile?.workflow_type
@@ -191,7 +196,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         </div>
       )}
 
-      <PipelineStrip d={d} onQc={() => setQcOpen(true)} />
+      <PipelineStrip d={d} onQc={() => setQcOpen(true)} onAir={onAir} />
 
       <DualPlayers d={d} captionLangs={captionLangs} sourceUp={sourceUp} onAir={onAir}
         onSendSource={() => setConfirmStart(true)} onGoLive={() => setOnAir(true)} busy={busy} />
@@ -254,25 +259,37 @@ function StartConfirm({ d, onCancel, onConfirm }: { d: CD; onCancel: () => void;
   )
 }
 
-/* Always-visible five-gate pipeline strip: the model as the primary status view. */
-function PipelineStrip({ d, onQc }: { d: CD; onQc: () => void }) {
+/* Always-visible five-gate pipeline strip: the model as the primary status view.
+   The public gate is special: the backend reports READY (blue) once the output is
+   packaged + advancing, and only the operator's publish action (client `onAir`)
+   turns it into a green ON AIR. So we override the public gate's display locally. */
+function PipelineStrip({ d, onQc, onAir }: { d: CD; onQc: () => void; onAir: boolean }) {
   const gates = d.health?.gates || []
   if (!gates.length) return null
   return (
     <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 0 14px', flexWrap: 'wrap' }}>
-      {gates.map((g, i) => (
+      {gates.map((g, i) => {
+        // public gate: show green ON AIR only when the operator has published AND
+        // the backend says the output is ready; otherwise keep the backend status.
+        const onAirNow = g.gate === 'public' && onAir && g.status === 'ready'
+        const status = onAirNow ? 'healthy' : g.status
+        const label = onAirNow ? 'ON AIR' : g.status
+        const detail = onAirNow ? 'live — public can watch' : g.detail
+        const color = GATE_COLOR[status]
+        return (
         <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 6, flex: '1 1 130px' }}>
-          <div title={g.detail} style={{ flex: 1, border: `1px solid ${GATE_COLOR[g.status]}55`, background: `${GATE_COLOR[g.status]}12`, borderRadius: 9, padding: '7px 10px', minWidth: 0 }}>
+          <div title={detail} style={{ flex: 1, border: `1px solid ${color}55`, background: `${color}12`, borderRadius: 9, padding: '7px 10px', minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)' }}>
-              <span className="dot-s" style={{ background: GATE_COLOR[g.status] }} />{g.label}
+              <span className="dot-s" style={{ background: color }} />{g.label}
               {g.billable && <span style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 9 }}>●</span>}
             </div>
-            <div style={{ fontWeight: 700, fontSize: 11.5, color: GATE_COLOR[g.status], textTransform: 'uppercase' }}>{g.status}</div>
-            <div style={{ fontSize: 10.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.detail}</div>
+            <div style={{ fontWeight: 700, fontSize: 11.5, color, textTransform: 'uppercase' }}>{label}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{detail}</div>
           </div>
           {i < gates.length - 1 && <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 12 }}>→</div>}
         </div>
-      ))}
+        )
+      })}
       <button className="btn ghost" onClick={onQc} style={{ alignSelf: 'center' }}>Diagnose</button>
     </div>
   )
@@ -288,7 +305,7 @@ const GATE_META: Record<string, { icon: string; hint: string }> = {
 }
 const GATE_COLOR: Record<string, string> = {
   healthy: '#4ade80', degraded: '#fbbf24', failed: '#f87171',
-  starting: '#60a5fa', stopped: '#94a3b8', idle: '#64748b',
+  ready: '#38bdf8', starting: '#60a5fa', stopped: '#94a3b8', idle: '#64748b',
 }
 function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefresh: () => void }) {
   const h = d.health
@@ -383,17 +400,22 @@ function DualPlayers({ d, captionLangs, sourceUp, onAir, onSendSource, onGoLive,
 
   const outGate = d.health?.gates.find(g => g.gate === 'output')
   const outErr = outGate && (outGate.status === 'failed' || outGate.status === 'degraded')
+  // Output is ready to watch (packaged + advancing) once its gate is healthy. We
+  // preview the packaged DASH/HLS output as soon as it's ready — BEFORE going on air —
+  // so the operator can confirm packaging works before publishing to the public.
+  const outputReady = outGate?.status === 'healthy'
   return (
     <div className="player-grid" style={{ marginBottom: 18 }}>
       {/* SOURCE — shows the real incoming feed once a source is sent */}
       <SourcePlayer d={d} sourceUp={sourceUp} onSendSource={onSendSource} busy={busy} />
 
       {/* OUTPUT — an error panel wins over everything (never show a fake LIVE);
-          otherwise the live player when on air, else the idle/go-live panel. */}
+          otherwise preview the packaged output whenever it's ready (with a PREVIEW /
+          ON AIR badge to say whether it's public), else the idle/go-live panel. */}
       {outErr
         ? <OutputError d={d} />
-        : onAir
-          ? <HlsOutput d={d} captionLangs={captionLangs} subOn={subOn} setSubOn={setSubOn} subLang={subLang} setSubLang={setSubLang} />
+        : outputReady
+          ? <HlsOutput d={d} onAir={onAir} captionLangs={captionLangs} subOn={subOn} setSubOn={setSubOn} subLang={subLang} setSubLang={setSubLang} />
           : <IdleOutput sourceUp={sourceUp} onGoLive={onGoLive} />}
     </div>
   )
@@ -550,8 +572,8 @@ function IdleOutput({ sourceUp, onGoLive }: { sourceUp: boolean; onGoLive: () =>
   )
 }
 
-function HlsOutput({ d, captionLangs, subOn, setSubOn, subLang, setSubLang }: {
-  d: CD; captionLangs: string[]; subOn: boolean; setSubOn: (v: boolean) => void; subLang: string; setSubLang: (v: string) => void
+function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLang }: {
+  d: CD; onAir: boolean; captionLangs: string[]; subOn: boolean; setSubOn: (v: boolean) => void; subLang: string; setSubLang: (v: string) => void
 }) {
   const ts = d.testStream
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -649,6 +671,15 @@ function HlsOutput({ d, captionLangs, subOn, setSubOn, subLang, setSubLang }: {
       <div className="video">
         <video ref={videoRef} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
         <div className="plabel"><span className="pt" style={{ color: atLive ? '#4ade80' : '#fbbf24' }}>OUTPUT{atLive ? '' : ' · DVR catch-up'}</span></div>
+        {/* On-air state: green ON AIR when published to the public, blue PREVIEW when the
+            packaged output is playing but held private (verify DASH/HLS before going on air). */}
+        <div style={{
+          position: 'absolute', top: 10, left: 10, display: 'inline-flex', alignItems: 'center', gap: 6,
+          fontSize: 11, fontWeight: 700, letterSpacing: .4, padding: '4px 9px', borderRadius: 999,
+          background: onAir ? 'rgba(74,222,128,.16)' : 'rgba(56,189,248,.16)',
+          border: `1px solid ${onAir ? 'rgba(74,222,128,.5)' : 'rgba(56,189,248,.5)'}`,
+          color: onAir ? '#4ade80' : '#38bdf8',
+        }}><span className="dot-s" style={{ background: onAir ? '#4ade80' : '#38bdf8' }} />{onAir ? 'ON AIR' : 'PREVIEW · not on air'}</div>
         <div className="badge-live" style={atLive ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{atLive ? 'LIVE' : 'DVR'}</div>
         <div className="bug"><span className="lg">{BOLT}</span>{d.name.toUpperCase()}</div>
         {subOn && cue && (

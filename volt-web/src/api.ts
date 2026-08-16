@@ -74,7 +74,7 @@ export interface ChannelDetail extends Channel {
   testStream: TestStreamStatus
 }
 
-export type GateStatus = 'idle' | 'starting' | 'healthy' | 'degraded' | 'failed' | 'stopped'
+export type GateStatus = 'idle' | 'starting' | 'ready' | 'healthy' | 'degraded' | 'failed' | 'stopped'
 export interface Gate {
   gate: 'server' | 'input' | 'encoder' | 'output' | 'public'
   label: string
