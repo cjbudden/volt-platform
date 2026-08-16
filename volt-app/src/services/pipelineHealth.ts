@@ -57,6 +57,7 @@ export interface HealthInput {
   hasPrimarySource: boolean;
   packagingLabel: string;
   outputFresh?: boolean;      // GROUND TRUTH: the origin manifest is advancing on disk now
+  outputAgeMs?: number | null; // ms since the newest manifest was rewritten (null = none yet)
   onAirPublished?: boolean;   // the operator has taken this channel ON AIR (public URL open)
 }
 
@@ -99,6 +100,17 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   // encoder is genuinely running only if live AND it hasn't crashed this run
   const effLive = live && !crashed;
 
+  // OUTPUT GROUND TRUTH: the origin manifest mtime. Shaka rewrites it every segment,
+  // so if it stops advancing the pipeline has stalled RIGHT NOW — regardless of what a
+  // stale encoder flag says. This is what makes a transient stall blip amber and then
+  // clear when segments resume, instead of sitting falsely green.
+  const STALE_MS = 15000;
+  const outAge = inp.outputAgeMs ?? null;
+  const outFresh = outAge != null ? outAge < STALE_MS : !!inp.outputFresh;
+  const manifestSeen = outAge != null;
+  const outStalled = effLive && manifestSeen && outAge! >= STALE_MS;
+  const stalledFor = outStalled ? `${Math.round(outAge! / 1000)}s` : '';
+
   const gates: Gate[] = [];
 
   // ---- 1) SERVER (billable compute) ----------------------------------------
@@ -119,6 +131,7 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   else if (!live && !crashed) { inputStatus = ended ? 'stopped' : 'idle'; inputDetail = inp.hasPrimarySource ? 'source configured · idle' : 'no source configured'; }
   else if (inputErr) { inputStatus = 'failed'; inputDetail = inputErrMsg || firstErrLine || 'input error'; }
   else if (srcDown) { inputStatus = 'failed'; inputDetail = firstErrLine || 'source down — no signal'; }
+  else if (primaryUp && outStalled) { inputStatus = 'degraded'; inputDetail = firstErrLine || `source may have dropped — output stalled ${stalledFor}`; }
   else if (primaryUp) { inputStatus = 'healthy'; inputDetail = crashIsEncoder ? 'receiving — but the encoder failed' : String(primary?.detail || 'receiving'); }
   else if (reporting) { inputStatus = 'starting'; inputDetail = 'waiting for the source to arrive'; }
   else { inputStatus = 'starting'; inputDetail = 'connecting to source'; }
@@ -129,7 +142,8 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   if (crashIsEncoder) { encStatus = 'failed'; encDetail = firstErrLine || stopReason; }
   else if (crashIsInput) { encStatus = 'idle'; encDetail = 'no input to encode'; }
   else if (!live) { encStatus = ended ? 'stopped' : 'idle'; encDetail = 'not running'; }
-  else if (packagerOk) { encStatus = 'healthy'; encDetail = 'transcoding · packager healthy'; }
+  else if (outStalled) { encStatus = 'degraded'; encDetail = firstErrLine || `no new segments for ${stalledFor}`; }
+  else if (packagerOk || outFresh) { encStatus = 'healthy'; encDetail = 'transcoding · packager healthy'; }
   else { encStatus = 'starting'; encDetail = 'starting encoder + packager'; }
   gates.push({ gate: 'encoder', label: 'Encoder', billable: false, status: encStatus, detail: encDetail });
 
@@ -139,9 +153,11 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   let outStatus: GateStatus; let outDetail: string;
   if (crashed) { outStatus = 'failed'; outDetail = `no output — ${stopReason}`; }
   else if (!live) { outStatus = ended ? 'stopped' : 'idle'; outDetail = 'no output'; }
-  else if (inp.outputFresh || outputAvailable) { outStatus = 'healthy'; outDetail = `advancing · ${inp.packagingLabel}`; }
+  else if (outFresh) { outStatus = 'healthy'; outDetail = `advancing · ${inp.packagingLabel}`; }
+  else if (outStalled) { outStatus = 'degraded'; outDetail = firstErrLine || `output stalled — no new segments for ${stalledFor}`; }
   else if (stall) { outStatus = 'degraded'; outDetail = String(d(stall.detail).message || 'output stalled — no new segments'); }
   else if (inputStatus === 'failed' || encStatus === 'failed') { outStatus = 'idle'; outDetail = 'waiting on the upstream gate'; }
+  else if (outputAvailable && !manifestSeen) { outStatus = 'starting'; outDetail = 'packaging — first segments not on disk yet'; }
   else { outStatus = 'starting'; outDetail = 'waiting for the first segments'; }
   gates.push({ gate: 'output', label: 'Output', billable: false, status: outStatus, detail: outDetail });
 

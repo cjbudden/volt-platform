@@ -474,11 +474,23 @@ def start_captions(cfg, out_dir):
     spawn("caption-audio", aseg, critical=False)
     log(f"captions: live worker engine={engine} chunk={chunk}s targets={targets} langs={langs}")
 
+    def cap_event(etype, **detail):
+        # surface caption lifecycle/errors to the control plane so the UI can show
+        # WHY captions are (not) loading — not a roadblock, but worth knowing.
+        try:
+            if _events:
+                _events.event(etype, **detail)
+        except Exception:  # noqa: BLE001
+            pass
+
     def worker():
+        cap_event("caption.status", state="starting", engine=engine, langs=langs, chunk_sec=chunk)
         try:
             import captions as capmod
         except Exception as e:  # noqa: BLE001
             log(f"captions: engine import failed ({e}); worker not started")
+            cap_event("caption.error", stage="import", reason=str(e),
+                      hint="install faster-whisper (+ transformers/torch for translation) in the encoder's python")
             return
         # Build the engine ONCE and reuse across chunks (one warm whisper model + one
         # NLLB translator), then just point it at each new audio chunk. Recreating per
@@ -491,9 +503,13 @@ def start_captions(cfg, out_dir):
                 log("captions: whisper model + translator initialised (warming on first chunk)")
             except Exception as e:  # noqa: BLE001
                 log(f"captions: engine init failed ({e}); worker not started")
+                cap_event("caption.error", stage="init", reason=str(e),
+                          hint="whisper/NLLB model failed to load; check the model download + memory")
                 return
         seen = set()
         store = {l: [] for l in langs}
+        errs = 0
+        produced = False
         win = max(3, int(round(float(cfg.get("dvr_seconds", 300)) / chunk)))
         while True:
             try:
@@ -518,9 +534,15 @@ def start_captions(cfg, out_dir):
                                                       "model_size": model_size})
                             cues = capmod.apply_offset(ad.transcribe(targets), base + offset_cfg)
                     except Exception as e:  # noqa: BLE001
+                        errs += 1
                         log(f"captions: chunk {idx} transcribe failed: {e}")
+                        if errs == 1 or errs % 10 == 0:
+                            cap_event("caption.error", stage="transcribe", chunk=idx, reason=str(e), count=errs)
                         continue
                     proc = time.time() - t0
+                    if not produced:
+                        produced = True
+                        cap_event("caption.status", state="producing", langs=langs)
                     est = round(chunk + proc + 1.0, 1)
                     for c in cues:
                         store.setdefault(c.lang, []).append(c)

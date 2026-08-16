@@ -763,6 +763,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   const [behind, setBehind] = useState(0)          // seconds behind the live edge
   const [winSec, setWinSec] = useState(0)          // available DVR depth NOW (grows as it fills, capped at the window)
   const [cue, setCue] = useState('')
+  const [subTracks, setSubTracks] = useState(0)   // subtitle tracks discovered in the manifest
   const cuesRef = useRef<Cue[]>([])
   const didSnapRef = useRef(false)   // snap to live edge once on initial load
   // LIVE LOCK: live is the default. We hold the live edge and auto-recover after any
@@ -793,13 +794,16 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
       if (Hls.isSupported()) {
         let src = originUrl(`/origin/${d.id}/${cc ? 'master_cc.m3u8' : 'master.m3u8'}`)
         let triedPlain = false
-        const hls = new Hls({ lowLatencyMode: false, backBufferLength: d.dvr.effective_sec, liveSyncDurationCount: 3, manifestLoadingMaxRetry: 12, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 12, subtitleDisplay: false })
+        // renderTextTracksNatively: let the player draw the subtitle track from the
+        // manifest so we can judge accuracy + sync in the real player, not a side overlay.
+        const hls = new Hls({ lowLatencyMode: false, backBufferLength: d.dvr.effective_sec, liveSyncDurationCount: 3, manifestLoadingMaxRetry: 12, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 12, subtitleDisplay: true, renderTextTracksNatively: true })
         hlsRef.current = hls
         hls.loadSource(src); hls.attachMedia(video!)
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           setLevels(hls.levels.map((l: any) => ({ height: l.height, bitrate: l.bitrate })))
           video!.muted = true; video!.play().catch(() => {}); snapSoon()
         })
+        hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => setSubTracks((hls.subtitleTracks || []).length))
         hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
           if (!data.fatal) return
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {}; return }
@@ -845,6 +849,34 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
     if (level < 0) { try { p.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: true } } } }) } catch { /* ignore */ } }
     else { try { p.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } }); p.setQualityFor('video', level) } catch { /* ignore */ } }
   }, [level, fmt])
+
+  // subtitle selection: draw the manifest subtitle track in the PLAYER (native) for the
+  // chosen language, toggled by CC — so captions can be judged for accuracy + sync.
+  useEffect(() => {
+    if (fmt === 'hls') {
+      const hls = hlsRef.current; if (!hls) return
+      try {
+        hls.subtitleDisplay = subOn
+        const tracks = hls.subtitleTracks || []
+        if (!subOn) { hls.subtitleTrack = -1; return }
+        if (!tracks.length) return
+        const i = tracks.findIndex((t: any) => String(t.lang || t.name || '').toLowerCase().startsWith(subLang.toLowerCase()))
+        hls.subtitleTrack = i >= 0 ? i : 0
+      } catch { /* ignore */ }
+      return
+    }
+    // DASH (dash.js native text)
+    const p = dashRef.current; if (!p) return
+    try {
+      p.enableText(subOn)
+      if (subOn) {
+        p.setTextDefaultLanguage?.(subLang)
+        const tt = (p.getTracksFor?.('text') || [])
+        const t = tt.find((x: any) => String(x.lang || '').toLowerCase().startsWith(subLang.toLowerCase()))
+        if (t) p.setCurrentTrack?.(t)
+      }
+    } catch { /* ignore */ }
+  }, [subOn, subLang, fmt, subTracks, levels])
 
   // track live-edge vs DVR position
   useEffect(() => {
@@ -896,16 +928,18 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   }
   function goLive() { const v = videoRef.current; scrubbedRef.current = false; setScrubbed(false); if (!v || !v.seekable.length) return; v.currentTime = v.seekable.end(v.seekable.length - 1) - 0.5 }
 
-  // estimated live offset from the latest caption.offset telemetry (chunk + measured
-  // transcribe/translate time). Shown so the operator sees how far captions lag live.
-  const capOffset = useMemo(() => {
+  // Captions status from the latest caption.* telemetry so the operator can see the
+  // estimated live offset AND why captions failed (not a roadblock, but worth knowing).
+  const capStatus = useMemo(() => {
     if (!d.captions?.enabled) return null
+    const ev = (d.log || []).find(l => l.title === 'caption.offset' || l.title === 'caption.error' || l.title === 'caption.status')
+    if (!ev) return { kind: 'starting' as const }
     try {
-      const e = (d.log || []).find(l => l.title === 'caption.offset')
-      if (!e) return null
-      const j = JSON.parse(e.detail)
-      return typeof j.est_offset_sec === 'number' ? { sec: j.est_offset_sec as number, realtime: j.realtime !== false } : null
-    } catch { return null }
+      const j = JSON.parse(ev.detail || '{}')
+      if (ev.title === 'caption.error') return { kind: 'error' as const, reason: j.reason || 'unknown', hint: j.hint as string | undefined }
+      if (ev.title === 'caption.offset' && typeof j.est_offset_sec === 'number') return { kind: 'live' as const, sec: j.est_offset_sec as number, realtime: j.realtime !== false }
+      return { kind: 'starting' as const }
+    } catch { return { kind: 'starting' as const } }
   }, [d.log, d.captions?.enabled])
 
   // live is the default: we are LIVE unless the operator has scrubbed back into the DVR.
@@ -933,7 +967,10 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         }}><span className="dot-s" style={{ background: onAir ? '#4ade80' : '#38bdf8' }} />{onAir ? 'ON AIR' : 'PREVIEW · not on air'}</div>
         <div className="badge-live" style={liveNow ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{liveNow ? 'LIVE' : 'DVR'}</div>
         <div className="bug"><span className="lg">{BOLT}</span>{d.name.toUpperCase()}</div>
-        {subOn && cue && (
+        {/* legacy overlay only for the test-stream side-VTT path; real channels render
+            the subtitle track natively in the player (from the manifest), so we don't
+            double up here. */}
+        {subOn && cue && !d.captions?.enabled && (
           <div style={{
             position: 'absolute', left: '50%', bottom: 20, transform: 'translateX(-50%)',
             background: 'rgba(0,0,0,.72)', color: '#fff', padding: '6px 14px', borderRadius: 6,
@@ -979,10 +1016,18 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
               <button className={`chip ${fmt === 'dash' ? 'active' : ''}`} style={{ padding: '5px 10px', borderRadius: 0 }} onClick={() => setFmt('dash')}>DASH</button>
             </span>
           )}
-          {d.captions?.enabled && capOffset && (
-            <span title="Estimated live offset: chunk length + measured transcribe/translate time. Captions lag live by about this much; if not real-time the model can't keep up." style={{ fontSize: 11, color: capOffset.realtime ? 'var(--faint)' : '#fbbf24' }}>
-              captions ~{capOffset.sec}s{capOffset.realtime ? '' : ' (behind)'}
+          {capStatus && capStatus.kind === 'error' && (
+            <span title={capStatus.hint || 'captions engine error — see the QC log'} style={{ fontSize: 11, color: '#fca5a5', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              captions failed: {capStatus.reason}
             </span>
+          )}
+          {capStatus && capStatus.kind === 'live' && (
+            <span title="Estimated live offset: chunk length + measured transcribe/translate time. Captions lag live by about this much; if not real-time the model can't keep up." style={{ fontSize: 11, color: capStatus.realtime ? 'var(--faint)' : '#fbbf24' }}>
+              captions ~{capStatus.sec}s{capStatus.realtime ? '' : ' (behind)'}
+            </span>
+          )}
+          {capStatus && capStatus.kind === 'starting' && (
+            <span style={{ fontSize: 11, color: 'var(--faint)' }}>captions starting…</span>
           )}
           <button className={`chip ${subOn ? 'active' : ''}`} style={{ padding: '5px 10px' }} onClick={() => setSubOn(!subOn)}>CC</button>
           {subOn && (

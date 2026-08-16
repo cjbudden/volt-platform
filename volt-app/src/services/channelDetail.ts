@@ -141,6 +141,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     hasPrimarySource: sources.some((s: any) => s.role === 'primary' && s.ingest_url) || sources.length > 0,
     packagingLabel: packagingLabel(profile),
     outputFresh,
+    outputAgeMs: outMtime > 0 ? (nowMs - outMtime) : null,
     onAirPublished: channel.on_air === true,
   });
   // back-compat: `degraded` now means "a gate is failed or degraded" (a REAL problem,
