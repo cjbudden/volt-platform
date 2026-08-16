@@ -28,11 +28,22 @@ export interface Gate {
   billable: boolean;
 }
 
+export type OverallStatus = 'idle' | 'starting' | 'ready' | 'onair' | 'degraded' | 'error' | 'stopped';
+
 export interface PipelineHealth {
   gates: Gate[];
   primaryError: { gate: GateName; label: string; message: string } | null;
   onAir: boolean;
   live: boolean;
+  // ONE consistent roll-up of the gates, used everywhere (list + detail) so the
+  // channel's status never disagrees with itself:
+  //   error    — a gate failed (blocks the pipeline)
+  //   degraded — a gate is degraded (e.g. transient output stall); recovers on its own
+  //   onair    — published AND serving valid content (green / LIVE)
+  //   ready    — output is valid but private (ready to go on air)
+  //   starting — live and warming up, no error yet
+  //   stopped/idle — not running
+  overall: OverallStatus;
 }
 
 interface Ev { seq?: number; type: string; detail: any; ts?: any }
@@ -198,7 +209,18 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
     }
   }
 
+  // ONE overall roll-up, derived from the gates so list + detail always agree.
+  const anyFailed = gates.some((g) => g.status === 'failed');
+  const anyDegraded = gates.some((g) => g.status === 'degraded');
+  let overall: OverallStatus;
+  if (anyFailed) overall = 'error';
+  else if (anyDegraded) overall = 'degraded';
+  else if (published && outputValid) overall = 'onair';
+  else if (!effLive) overall = ended ? 'stopped' : 'idle';
+  else if (outputValid) overall = 'ready';
+  else overall = 'starting';
+
   // `onAir` is TRUE only when actually live to the public: published AND serving valid
   // content. `live` = the encoder run is up (billable), regardless of publish state.
-  return { gates, primaryError, onAir: published && outputValid, live: effLive };
+  return { gates, primaryError, onAir: published && outputValid, live: effLive, overall };
 }

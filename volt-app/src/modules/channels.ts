@@ -6,7 +6,7 @@ import { asyncHandler, notFound, conflict } from '../util/http';
 import { orchestrator } from '../services/orchestrator';
 import { validateEntityMetadata } from './metadataSchemas';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
-import { buildChannelDetail, DVR_MAX_SEC } from '../services/channelDetail';
+import { buildChannelDetail, loadChannelHealthLite, DVR_MAX_SEC } from '../services/channelDetail';
 import { startTestStream, stopTestStream, testStreamStatus, isTestStreamAvailable } from '../services/testStream';
 import { outputHasValidContent } from './publicLive';
 
@@ -45,31 +45,25 @@ channelsRouter.get(
         ORDER BY c.created_at DESC`,
       [accountId(req)]
     );
-    // Lightweight pipeline state + billing for the LIST (no per-channel event scan):
-    // reflects the five-gate model at a glance without the full detail build.
+    // ONE consistent status: the LIST uses the SAME five-gate health as the detail page
+    // (via the ground-truth manifest + events), rolled up to `overall`, so a channel is
+    // never "Starting" in the list while it's actually READY on the detail.
+    const now = Date.now();
     const ids = rows.map((r) => r.id);
-    const stMap = new Map<string, any>();
     const sinceMap = new Map<string, number>();
     if (ids.length) {
-      const sts = await query<any>(
-        `SELECT channel_id, output_available, packager_ok FROM stream_status WHERE channel_id = ANY($1)`, [ids]);
-      for (const s of sts) stMap.set(s.channel_id, s);
       const insts = await query<any>(
         `SELECT channel_id, min(launched_at) AS since FROM instances
           WHERE channel_id = ANY($1) AND terminated_at IS NULL GROUP BY channel_id`, [ids]);
       for (const i of insts) if (i.since) sinceMap.set(i.channel_id, new Date(i.since).getTime());
     }
-    const enriched = rows.map((c) => {
-      const st = stMap.get(c.id);
+    const enriched = await Promise.all(rows.map(async (c) => {
       const live = c.status === 'live';
       const billable = live;
       const serverSince = live ? (sinceMap.get(c.id) ?? null) : null;
-      // state: idle | starting | onair | stopped  (error needs the detail build)
-      const state = !live
-        ? (c.status === 'ended' ? 'stopped' : 'idle')
-        : st?.output_available ? 'onair' : 'starting';
-      return { ...c, pipelineState: state, billable, serverSince };
-    });
+      const health = await loadChannelHealthLite(c, now);
+      return { ...c, pipelineState: health.overall, onAir: c.on_air === true, billable, serverSince };
+    }));
     res.json(enriched);
   })
 );

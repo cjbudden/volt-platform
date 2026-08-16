@@ -104,18 +104,21 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   const errored = !!perr
   const outGate = health?.gates.find(g => g.gate === 'output')
   const outputReady = outGate?.status === 'healthy'   // output packaged + advancing
-  // ON AIR (green) ONLY when published AND the public stream is truly live (valid content).
-  // Output ready but not published = READY (blue). Not live = IDLE. An error always wins.
+  // ONE consistent status: the header uses the SAME `overall` roll-up the list uses, so
+  // they never disagree. error > degraded > on air > ready > starting > stopped/idle.
   const trulyOnAir = published && d.onAir
-  const stateLabel = errored ? `${perr!.label.toUpperCase()} ERROR`
-    : trulyOnAir ? 'ON AIR'
-    : outputReady ? 'READY'
-    : sourceUp ? 'STARTING'
-    : 'IDLE'
-  const stateCls = errored ? 'down'
-    : trulyOnAir ? 'live'
-    : outputReady ? 'sched'   // READY = blue
-    : sourceUp ? 'sched' : 'idle'
+  const ov = d.health?.overall || (sourceUp ? 'starting' : 'idle')
+  const OVMAP: Record<string, { label: string; cls: string }> = {
+    onair: { label: 'ON AIR', cls: 'live' },
+    ready: { label: 'READY', cls: 'sched' },
+    starting: { label: 'STARTING', cls: 'sched' },
+    degraded: { label: 'DEGRADED', cls: 'warn' },
+    error: { label: perr ? `${perr.label.toUpperCase()} ERROR` : 'ERROR', cls: 'down' },
+    stopped: { label: 'STOPPED', cls: 'idle' },
+    idle: { label: 'IDLE', cls: 'idle' },
+  }
+  const stateLabel = (OVMAP[ov] || OVMAP.idle).label
+  const stateCls = (OVMAP[ov] || OVMAP.idle).cls
   const isEvent = d.dvr_mode === 'event_start'
   const wt = d.profile?.workflow_type
   const captionLangs = d.captions.targets.length ? d.captions.targets : ['en']

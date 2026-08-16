@@ -77,6 +77,34 @@ function newestManifestMtimeMs(channelId: string): number {
   } catch { return 0; }
 }
 
+/** Compute the SAME five-gate health used by the detail page, but with only the loads
+ *  it needs, so the channels LIST shows a status that never disagrees with the detail.
+ *  Per channel: one stream_status row, recent events, the encoder log tail, and the
+ *  manifest mtime (ground truth). Returns the health (incl. the `overall` roll-up). */
+export async function loadChannelHealthLite(channel: any, nowMs: number): Promise<PipelineHealth> {
+  const st = await one<any>(
+    `SELECT output_available, active_source, fallback_in_use, filler_in_use, packager_ok, sources, updated_at
+       FROM stream_status WHERE channel_id = $1`, [channel.id]);
+  const evs = await query<any>(
+    `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]);
+  const encTail = encoderLogTail(channel.id);
+  const logTailErrors = encTail.filter((l) => l.level === 'down' || l.level === 'warn').map((l) => l.detail).reverse();
+  const outMtime = newestManifestMtimeMs(channel.id);
+  const outputAgeMs = outMtime > 0 ? (nowMs - outMtime) : null;
+  const sstates: Record<string, any> = (st && st.sources && typeof st.sources === 'object') ? st.sources : {};
+  return computePipelineHealth({
+    ownerStatus: channel.status,
+    st,
+    events: evs,
+    logTailErrors,
+    hasPrimarySource: Object.keys(sstates).length > 0,
+    packagingLabel: '',
+    outputFresh: outputAgeMs != null ? outputAgeMs < 15000 : false,
+    outputAgeMs,
+    onAirPublished: channel.on_air === true,
+  });
+}
+
 export async function buildChannelDetail(channel: any, nowMs: number): Promise<ChannelDetail> {
   const group = channel.group_id
     ? await one<any>('SELECT id, name, output_profile_id FROM groups WHERE id = $1', [channel.group_id])

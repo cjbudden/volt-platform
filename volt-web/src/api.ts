@@ -36,7 +36,7 @@ export interface Channel {
   geo_mode: 'worldwide' | 'allow' | 'block'; geo_countries: string[]
   input_loss_behavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
   filler_slate_ref?: string | null
-  pipelineState?: 'idle' | 'starting' | 'onair' | 'error' | 'stopped'
+  pipelineState?: 'idle' | 'starting' | 'ready' | 'onair' | 'degraded' | 'error' | 'stopped'
   billable?: boolean
   serverSince?: number | null
   on_air?: boolean
@@ -106,6 +106,7 @@ export interface PipelineHealth {
   primaryError: { gate: string; label: string; message: string } | null
   onAir: boolean
   live: boolean
+  overall: 'idle' | 'starting' | 'ready' | 'onair' | 'degraded' | 'error' | 'stopped'
 }
 
 export interface TestStreamStatus {

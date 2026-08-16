@@ -46,6 +46,12 @@ export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
     const unsub = subscribeLive('*', refetch)
     return () => { if (t) clearTimeout(t); unsub() }
   }, [])
+  // ground-truth transitions (e.g. Starting -> Ready when the manifest starts advancing)
+  // aren't always a discrete SSE event, so reconcile gently so the list stays honest+live.
+  useEffect(() => {
+    const iv = setInterval(() => load(), 6000)
+    return () => clearInterval(iv)
+  }, [])
 
   const shown = useMemo(() => {
     if (!channels) return channels
@@ -175,14 +181,17 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
                 <td>
                   {(() => {
                     const ps = c.pipelineState
+                    // same overall roll-up as the detail page — one consistent status.
                     const map: Record<string, { label: string; cls: string }> = {
                       onair: { label: 'On air', cls: 'live' },
+                      ready: { label: 'Ready', cls: 'sched' },
                       starting: { label: 'Starting', cls: 'sched' },
+                      degraded: { label: 'Degraded', cls: 'warn' },
                       error: { label: 'Error', cls: 'down' },
                       stopped: { label: 'Stopped', cls: 'idle' },
                       idle: { label: 'Idle', cls: 'idle' },
                     }
-                    const m = (ps && map[ps]) || (live ? map.onair : c.status === 'scheduled' ? { label: 'Scheduled', cls: 'sched' } : map.idle)
+                    const m = (ps && map[ps]) || (live ? map.starting : c.status === 'scheduled' ? { label: 'Scheduled', cls: 'sched' } : map.idle)
                     return (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span className={`tag ${m.cls}`}><span className={`dot-s ${m.cls}`} />{m.label}</span>
