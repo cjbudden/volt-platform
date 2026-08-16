@@ -6,6 +6,15 @@ import { ImagePicker } from '../ImagePicker'
 
 type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
 
+type RetUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
+const RET_UNIT_SEC: Record<RetUnit, number> = { minutes: 60, hours: 3600, days: 86400, weeks: 604800, months: 2592000 }
+function splitDuration(sec: number | null): { n: string; unit: RetUnit } {
+  if (sec == null || sec <= 0) return { n: '', unit: 'days' }
+  const order: RetUnit[] = ['months', 'weeks', 'days', 'hours', 'minutes']
+  for (const u of order) { const s = RET_UNIT_SEC[u]; if (sec % s === 0 && sec >= s) return { n: String(sec / s), unit: u } }
+  return { n: String(Math.max(1, Math.round(sec / 60))), unit: 'minutes' }
+}
+
 /** Format retention for the list: prefer the real seconds value (minutes..months),
  *  fall back to the legacy days field. e.g. 3600s -> "1h", not "1d". */
 function fmtRetention(sec?: number | null, days?: number | null): string {
@@ -212,7 +221,8 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   const [type, setType] = useState<'transcode' | 'package_only'>('transcode')
   const [name, setName] = useState('')
   const [purchasing, setPurchasing] = useState('reserved')
-  const [retention, setRetention] = useState<string>('7')
+  const [retNum, setRetNum] = useState<string>('7')
+  const [retUnit, setRetUnit] = useState<RetUnit>('days')
   const [dvrMin, setDvrMin] = useState(60)
   const DVR_MAX_MIN = 240
 
@@ -281,7 +291,8 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
     try {
       await api.createChannel({
         groupId: group.id, name: name.trim(), purchasingMode: purchasing,
-        resilienceTier: 'standard', recordingRetentionDays: retention ? Number(retention) : null,
+        resilienceTier: 'standard',
+        recordingRetentionSec: retNum ? Math.max(Number(retNum) * RET_UNIT_SEC[retUnit], dvrMin * 60) : null,
         dvrWindowSec: Math.max(30, dvrMin * 60), dvrMode: 'sliding',
         outputLadder, sources,
         inputFailoverEnabled: sources.some(s => s.role === 'backup'),
@@ -418,8 +429,21 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
               <option value="on_demand">On demand</option>
             </select>
           </div>
-          <div className="field"><label>Recording retention (days)</label>
-            <input className="inp" value={retention} onChange={e => setRetention(e.target.value.replace(/[^0-9]/g, ''))} />
+          <div className="field"><label>Recording retention <span style={{ color: 'var(--faint)' }}>— blank number = keep forever</span></label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input className="inp" style={{ width: 110 }} inputMode="numeric" placeholder="keep forever"
+                value={retNum} onChange={e => setRetNum(e.target.value.replace(/[^0-9]/g, ''))} />
+              <select className="inp" value={retUnit} onChange={e => setRetUnit(e.target.value as RetUnit)}>
+                <option value="minutes">minutes</option>
+                <option value="hours">hours</option>
+                <option value="days">days</option>
+                <option value="weeks">weeks</option>
+                <option value="months">months</option>
+              </select>
+            </div>
+            {retNum && Number(retNum) * RET_UNIT_SEC[retUnit] < dvrMin * 60 && (
+              <div className="hintxt" style={{ color: 'var(--warn)' }}>Will be raised to the DVR window ({dvrMin}m) — retention can’t be shorter than DVR.</div>
+            )}
           </div>
           <div className="field">
             <label>DVR catch-up window — {dvrMin} min{dvrMin >= 60 ? ` (${(dvrMin / 60).toFixed(dvrMin % 60 ? 1 : 0)}h)` : ''}</label>

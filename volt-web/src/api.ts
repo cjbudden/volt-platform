@@ -127,7 +127,7 @@ export const api = {
   channels: (): Promise<Channel[]> => req('/channels'),
   createChannel: (b: {
     groupId: string; name: string; purchasingMode?: string
-    resilienceTier?: string; recordingRetentionDays?: number | null
+    resilienceTier?: string; recordingRetentionDays?: number | null; recordingRetentionSec?: number | null
     dvrWindowSec?: number | null; dvrMode?: 'sliding' | 'event_start'
     outputLadder?: { height: number; bitrateKbps: number }[]
     sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string; renditionLabel?: string; renditionBitrateKbps?: number }[]

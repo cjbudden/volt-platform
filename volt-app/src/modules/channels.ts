@@ -101,7 +101,8 @@ const createSchema = z.object({
   name: z.string().min(1),
   purchasingMode: z.enum(['on_demand', 'reserved', 'spot_fallback']).default('reserved'),
   resilienceTier: z.enum(['standard', 'resilient_input', 'full_redundancy']).default('standard'),
-  recordingRetentionDays: z.number().int().positive().nullable().optional(), // retention rule
+  recordingRetentionDays: z.number().int().positive().nullable().optional(), // legacy days rule
+  recordingRetentionSec: z.number().int().positive().nullable().optional(),  // retention (any unit -> seconds)
   dvrWindowSec: z.number().int().min(30).max(DVR_MAX_SEC).nullable().optional().default(3600), // DVR on, default 1h for 24x7 (≤4h)
   dvrMode: z.enum(['sliding', 'event_start']).default('sliding'),
   // NEW — source + ladder + fallback captured at setup
@@ -128,14 +129,17 @@ channelsRouter.post(
       ? JSON.stringify(body.outputLadder.map((r) => ({ height: r.height, bitrate_kbps: r.bitrateKbps })))
       : null;
 
+    // retention: seconds is the source of truth; derive the coarse day field in sync
+    const retSec = body.recordingRetentionSec ?? (body.recordingRetentionDays != null ? body.recordingRetentionDays * 86400 : null);
+    const retDays = retSec != null ? Math.max(1, Math.ceil(retSec / 86400)) : null;
     const row = await tx(async (c) => {
       const ch = (await c.query(
-        `INSERT INTO channels(group_id, name, purchasing_mode, resilience_tier, recording_retention_days,
+        `INSERT INTO channels(group_id, name, purchasing_mode, resilience_tier, recording_retention_days, recording_retention_sec,
            dvr_window_sec, dvr_mode, output_ladder,
            input_failover_enabled, auto_failback, input_loss_behavior, filler_slate_ref, filler_asset_id, fallback_transcode,
            created_by, updated_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$15) RETURNING *`,
-        [body.groupId, body.name, body.purchasingMode, body.resilienceTier, body.recordingRetentionDays ?? null,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,$16) RETURNING *`,
+        [body.groupId, body.name, body.purchasingMode, body.resilienceTier, retDays, retSec,
          body.dvrWindowSec ?? null, body.dvrMode, ladder,
          body.inputFailoverEnabled ?? false, body.autoFailback ?? true, body.inputLossBehavior ?? 'none',
          body.fillerSlateRef ?? null, body.fillerAssetId ?? null, body.fallbackTranscode ?? false,
