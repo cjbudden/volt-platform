@@ -42,6 +42,9 @@ import events as events_mod
 WORK_DIR = os.environ.get("WORK_DIR", "/work")
 OUT_DIR = os.path.join(WORK_DIR, "out")
 UDP_BASE_PORT = int(os.environ.get("UDP_BASE_PORT", "20000"))  # rendition i -> 127.0.0.1:(UDP_BASE_PORT + i)
+# Dedicated audio-elementary-stream ports sit well above the video renditions so
+# they never collide: audio track a -> UDP_BASE_PORT + AUDIO_IDX_BASE + a.
+AUDIO_IDX_BASE = 100
 # Shaka Packager binary name/path. Distros/installs vary (`packager`,
 # `shaka-packager`, or a downloaded `packager-osx-arm64`), so allow an override.
 PACKAGER_BIN = os.environ.get("PACKAGER_BIN", "packager")
@@ -205,6 +208,59 @@ def udp_out(idx):
     return f"udp://127.0.0.1:{UDP_BASE_PORT + idx}?reuse=1&buffer_size=2097152"
 
 
+def _lang3(code):
+    """Normalise a language tag to a 3-letter code Shaka/HLS likes (best effort)."""
+    if not code:
+        return None
+    c = str(code).strip().lower().replace("_", "-").split("-")[0]
+    two_to_three = {
+        "en": "eng", "ms": "msa", "zh": "zho", "ta": "tam", "hi": "hin",
+        "id": "ind", "ar": "ara", "es": "spa", "fr": "fra", "de": "deu",
+        "pt": "por", "ja": "jpn", "ko": "kor", "th": "tha", "vi": "vie",
+    }
+    if len(c) == 2:
+        return two_to_three.get(c, c)
+    return c or None
+
+
+def probe_audio_tracks(url):
+    """ffprobe the source for its audio streams so the transcoder can carry EACH one
+    as its own track in the manifest. Returns a list of {lang, name}; never raises —
+    on any failure it falls back to a single unlabelled track so encoding still runs."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index:stream_tags=language,title",
+             "-of", "json", "-analyzeduration", "4000000", "-probesize", "4000000", url],
+            capture_output=True, text=True, timeout=20,
+        )
+        streams = (json.loads(out.stdout or "{}").get("streams") or [])
+        tracks = []
+        for i, s in enumerate(streams):
+            tags = s.get("tags") or {}
+            lang = _lang3(tags.get("language"))
+            name = tags.get("title") or (lang.upper() if lang else f"Audio {i + 1}")
+            tracks.append({"lang": lang, "name": name})
+        if tracks:
+            log(f"audio: probed {len(tracks)} track(s): "
+                + ", ".join(t["name"] for t in tracks))
+            return tracks
+    except Exception as e:  # noqa: BLE001
+        log(f"audio: probe failed ({e}); assuming a single track")
+    return [{"lang": None, "name": "Audio 1"}]
+
+
+def audio_tracks(cfg):
+    """Memoised audio-track list for the TRANSCODE path (probed from the mezzanine)."""
+    cached = cfg.get("_audio_tracks")
+    if cached is not None:
+        return cached
+    src = cfg["inputs"][0]
+    tracks = probe_audio_tracks(src["url"])
+    cfg["_audio_tracks"] = tracks
+    return tracks
+
+
 def input_args(inp):
     """Protocol-specific FFmpeg input flags for a contribution feed."""
     proto = inp["protocol"].lower()
@@ -290,12 +346,16 @@ def start_transcode(cfg, keys_unused):
     gop = int(seg * fps)  # closed GOP == segment length so boundaries align
     wm = cfg.get("watermark") if cfg.get("watermark", {}).get("url") else None
     wm_path = _fetch_watermark(cfg) if wm else None
+    tracks = audio_tracks(cfg)  # one AAC elementary stream per source audio track
 
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin"]
     if gpu:
         cmd += ["-hwaccel", "cuda"]
     cmd += input_args(src)
 
+    # VIDEO: one video-only rendition per ladder rung (audio is carried separately as
+    # its own elementary stream below, so Shaka can assign it as a distinct manifest
+    # track — the standard demuxed HLS/DASH shape).
     for i, r in enumerate(ladder):
         vcodec = ["-c:v", "h264_nvenc", "-preset", "p4"] if gpu else \
                  ["-c:v", "libx264", "-preset", "veryfast"]
@@ -308,56 +368,52 @@ def start_transcode(cfg, keys_unused):
                 "-g", str(gop), "-keyint_min", str(gop),
                 "-sc_threshold", "0",           # closed GOP, no scene-cut
                 "-force_key_frames", f"expr:gte(t,n_forced*{seg})",
-                "-r", str(fps)]
-        cmd += ["-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k", "-ac", "2"]
+                "-r", str(fps),
+                "-an"]                          # video-only; audio is separate
         cmd += ["-f", "mpegts", udp_out(i)]
+
+    # AUDIO: transcode EACH source audio track to its own AAC MPEG-TS on a dedicated
+    # port. Track 0 always exists; extra tracks (multi-language sources) each get one.
+    for a, _t in enumerate(tracks):
+        cmd += ["-map", f"0:a:{a}?", "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+                "-f", "mpegts", udp_out(AUDIO_IDX_BASE + a)]
     return [spawn("transcode", cmd)]
-
-
-def audio_ladder(cfg):
-    """Audio renditions for an audio-only (radio) channel. Defaults to a sane
-    two-rung AAC ladder when the control plane sends none."""
-    lad = cfg.get("audio_ladder") or [{"label": "high", "bitrate_kbps": 128},
-                                      {"label": "low", "bitrate_kbps": 64}]
-    return [{"label": r.get("label") or f"{r['bitrate_kbps']}k",
-             "bitrate_kbps": int(r["bitrate_kbps"])} for r in lad]
-
-
-def start_audio(cfg):
-    """audio_only: one input -> N AAC renditions, no video anywhere in the chain.
-    Same UDP-bus shape as the video path so the packager stays identical."""
-    src = cfg["inputs"][0]
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin"]
-    cmd += input_args(src)
-    for i, r in enumerate(audio_ladder(cfg)):
-        cmd += ["-map", "0:a:0", "-vn",
-                "-c:a", "aac", "-b:a", f"{r['bitrate_kbps']}k", "-ac", "2", "-ar", "48000",
-                "-f", "mpegts", udp_out(i)]
-    return [spawn("audio-encode", cmd)]
 
 
 # ---------------------------------------------------------------------------
 # Shaka Packager: consume the UDP renditions, emit CMAF + HLS + DASH to OUT_DIR.
 # ---------------------------------------------------------------------------
+def _audio_descriptor(in_url, slot, lang, name, default):
+    """A Shaka audio stream descriptor. Each track gets its OWN output dir (audio,
+    audio_1, audio_2, …) so multiple tracks never collide, plus language + a display
+    name so players show a proper track picker. The first track is the DEFAULT."""
+    sub = "audio" if slot == 0 else f"audio_{slot}"
+    aseg = f"{OUT_DIR}/{sub}/seg_$Number$.m4s"
+    ainit = f"{OUT_DIR}/{sub}/init.mp4"
+    parts = [f"in={in_url}", "stream=audio",
+             f"init_segment={ainit}", f"segment_template={aseg}",
+             "hls_group_id=audio", f"hls_name={name or ('Audio ' + str(slot + 1))}"]
+    if lang:
+        parts.append(f"language={lang}")
+    if default:
+        parts.append("dash_roles=main")
+    return ",".join(parts)
+
+
 def build_shaka(cfg, keys):
     seg = cfg["segment_seconds"]
     channel = cfg["channel_id"]
-    if cfg.get("audio_only"):
-        rends = []                                   # radio: no video stream at all
-    elif cfg["workflow"] == "package_only":
+    transcode = cfg["workflow"] != "package_only"
+    if not transcode:
         rends = [(i, inp.get("rendition_label", f"r{i}"), inp.get("has_audio", i == 0))
                  for i, inp in enumerate(primary_inputs(cfg))]
     else:
-        rends = [(i, f"{r['height']}p", i == 0) for i, r in enumerate(cfg["ladder"])]
+        rends = [(i, f"{r['height']}p", False) for i, r in enumerate(cfg["ladder"])]
 
     cmd = [PACKAGER_BIN]
-    for idx, r in enumerate(audio_ladder(cfg) if cfg.get("audio_only") else []):
-        label = r["label"]
-        cmd.append(
-            f"in={udp_out(idx)},stream=audio,"
-            f"init_segment={OUT_DIR}/{label}/init.mp4,"
-            f"segment_template={OUT_DIR}/{label}/seg_$Number$.m4s"
-        )
+    # VIDEO streams (audio for transcode is added separately below; for package_only
+    # audio still rides with each input that carries it).
+    audio_slot = 0
     for idx, label, has_audio in rends:
         vseg = f"{OUT_DIR}/{label}/seg_$Number$.m4s"
         vinit = f"{OUT_DIR}/{label}/init.mp4"
@@ -365,13 +421,19 @@ def build_shaka(cfg, keys):
             f"in={udp_out(idx)},stream=video,"
             f"init_segment={vinit},segment_template={vseg}"
         )
-        if has_audio:
-            aseg = f"{OUT_DIR}/audio/seg_$Number$.m4s"
-            ainit = f"{OUT_DIR}/audio/init.mp4"
-            cmd.append(
-                f"in={udp_out(idx)},stream=audio,"
-                f"init_segment={ainit},segment_template={aseg}"
-            )
+        # package_only: keep each source input's audio, but give every track its OWN
+        # output dir + language so multiple audio inputs no longer overwrite one another.
+        if not transcode and has_audio:
+            inp = primary_inputs(cfg)[idx]
+            lang = _lang3(inp.get("language") or inp.get("lang"))
+            name = inp.get("audio_name") or inp.get("audio_label") or (lang.upper() if lang else None)
+            cmd.append(_audio_descriptor(udp_out(idx), audio_slot, lang, name, audio_slot == 0))
+            audio_slot += 1
+
+    # transcode: one manifest audio track per source audio stream, from its dedicated port.
+    if transcode:
+        for a, t in enumerate(audio_tracks(cfg)):
+            cmd.append(_audio_descriptor(udp_out(AUDIO_IDX_BASE + a), a, t.get("lang"), t.get("name"), a == 0))
 
     cmd += [
         "--segment_duration", str(seg),
@@ -717,14 +779,9 @@ def main():
     cfg = load_config()
     OUT_DIR = resolve_out_dir(cfg)
     os.makedirs(OUT_DIR, exist_ok=True)
-    if cfg.get("audio_only"):
-        nrend = len(audio_ladder(cfg))
-    elif cfg["workflow"] == "package_only":
-        nrend = len(primary_inputs(cfg))
-    else:
-        nrend = len(cfg.get("ladder", []))
+    nrend = len(primary_inputs(cfg)) if cfg["workflow"] == "package_only" \
+        else len(cfg.get("ladder", []))
     log(f"channel={cfg['channel_id']} workflow={cfg['workflow']} "
-        f"{'audio-only ' if cfg.get('audio_only') else ''}"
         f"renditions={nrend} out={OUT_DIR} local={is_local(cfg)}")
 
     # Event log + live status snapshot. Reports to the control plane's ingest
@@ -751,11 +808,7 @@ def main():
     _events.packager(True)
 
     selector = None
-    if cfg.get("audio_only"):
-        # radio: a single audio input, no ladder, no filler/failover hop yet
-        start_audio(cfg)
-        _events.source_state("primary", True, renditions=nrend)
-    elif cfg["workflow"] == "package_only":
+    if cfg["workflow"] == "package_only":
         if redundancy_on(cfg):
             # The source-selector owns the bus ports Shaka reads: it runs the
             # primary + backup relays and the filler, and forwards the active

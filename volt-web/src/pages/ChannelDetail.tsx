@@ -5,7 +5,6 @@ import { subscribeLive } from '../liveStatus'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 
-const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z" /></svg>
 const LANGS = [
   { code: 'en', label: 'English' }, { code: 'ms', label: 'Malay' },
   { code: 'zh', label: 'Chinese' }, { code: 'ta', label: 'Tamil' },
@@ -617,6 +616,13 @@ function OutputError({ d }: { d: CD }) {
 // the fallback so the pane is never dead.
 function HlsVideo({ src, fallbackSrc }: { src: string; fallbackSrc?: string }) {
   const ref = useRef<HTMLVideoElement | null>(null)
+  const hlsRef = useRef<any>(null)
+  const eng = useAudioEngine(ref)
+  const [audioTracks, setAudioTracks] = useState<AudioTrackOpt[]>([])
+  const [audioTrack, setAudioTrackState] = useState(0)
+  // element starts muted for autoplay; the audio engine unmutes it once armed and
+  // carries audibility on its gain node, so we never re-mute after arming.
+  const softMute = (v: HTMLVideoElement) => { if (!v.dataset.audioArmed) v.muted = true }
   useEffect(() => {
     let cancelled = false; let hls: any; let usingFallback = false; let fails = 0
     const v = ref.current; if (!v || !src) return
@@ -633,9 +639,18 @@ function HlsVideo({ src, fallbackSrc }: { src: string; fallbackSrc?: string }) {
           // liveSyncDurationCount:3 keeps us ~3 segments off the edge (normal live
           // latency); NOT lowLatency because the origin is a standard LIVE playlist.
           hls = new Hls({ lowLatencyMode: false, liveSyncDurationCount: 3, backBufferLength: 30, manifestLoadingMaxRetry: 8, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 8 })
+          hlsRef.current = hls
           hls.loadSource(url); hls.attachMedia(v)
-          hls.on(Hls.Events.MANIFEST_PARSED, () => { v.muted = true; v.play().catch(() => {}); setTimeout(snapLive, 400) })
+          hls.on(Hls.Events.MANIFEST_PARSED, () => { softMute(v); v.play().catch(() => {}); setTimeout(snapLive, 400) })
           hls.on(Hls.Events.LEVEL_LOADED, snapLive)
+          // surface the audio tracks the encoder put in the manifest so the operator
+          // can switch between them (single track hides the selector).
+          const readAudio = () => {
+            setAudioTracks((hls.audioTracks || []).map((t: any, i: number) => ({ id: i, label: t.name || t.lang || `Audio ${i + 1}` })))
+            if (typeof hls.audioTrack === 'number' && hls.audioTrack >= 0) setAudioTrackState(hls.audioTrack)
+          }
+          hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, readAudio)
+          hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, readAudio)
           hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
             if (!data.fatal) return
             if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {}; return }
@@ -643,16 +658,145 @@ function HlsVideo({ src, fallbackSrc }: { src: string; fallbackSrc?: string }) {
             if (!usingFallback && fallbackSrc && fails >= 2) { usingFallback = true; fails = 0; start(fallbackSrc); return }
             setTimeout(() => { try { hls.loadSource(url); hls.startLoad() } catch {} }, 1500) // not ready yet -> reload
           })
-        } else if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = url; v.muted = true; v.play().catch(() => {}); v.addEventListener('loadeddata', snapLive, { once: true }) }
+        } else if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = url; softMute(v); v.play().catch(() => {}); v.addEventListener('loadeddata', snapLive, { once: true }) }
       }
       start(src)
     })()
-    return () => { cancelled = true; try { hls?.destroy() } catch {} }
+    return () => { cancelled = true; try { hls?.destroy() } catch {}; hlsRef.current = null }
   }, [src, fallbackSrc])
-  return <video ref={ref} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
+  const selectAudio = (i: number) => { setAudioTrackState(i); try { if (hlsRef.current) hlsRef.current.audioTrack = i } catch { /* ignore */ } }
+  return (
+    <>
+      <video ref={ref} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
+      <AudioDock eng={eng} tracks={audioTracks} currentTrack={audioTrack} onSelectTrack={selectAudio} />
+    </>
+  )
 }
 
 function hostOf(url?: string | null) { try { return url ? new URL(url).host : '' } catch { return '' } }
+
+/* ------------------------------------------------- audio: meter + controls */
+// Real audio metering, not a decorative animation. One Web Audio graph per <video>:
+// MediaElementSource -> analyser -> gain -> destination. The analyser taps the
+// DECODED audio, so the bars reflect the actual level being received. Audibility is
+// carried by the gain node, so the meter keeps reading the signal even when the
+// output is silenced (audio is muted by default on this page). Browser rules: the
+// element must start muted to autoplay, and an AudioContext only runs after a user
+// gesture, so we arm and resume the graph on mount and on the first pointer
+// interaction. If the media is cross-origin without CORS the tap reads silence, but
+// our origin and the CDN already serve CORS for hls.js, so it works. If the graph
+// cannot be built we fall back to the element's own muted/volume, so audio is always
+// controllable even where Web Audio is not.
+type AudioTrackOpt = { id: number; label: string }
+const AUDIO_BARS = 5
+const SPK_HI = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z" /></svg>
+const SPK_LO = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z" /></svg>
+const SPK_MUTE = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm18.6.4-1.4-1.4L17 11.2 13.8 8l-1.4 1.4L15.6 12.6 12.4 15.8l1.4 1.4L17 14l3.2 3.2 1.4-1.4-3.2-3.2 3.2-3.2z" /></svg>
+
+function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
+  const [muted, setMuted] = useState(true)     // audio disabled by default on the page
+  const [volume, setVolume] = useState(1)
+  const [bars, setBars] = useState<number[]>(() => new Array(AUDIO_BARS).fill(0))
+  const ctxRef = useRef<AudioContext | null>(null)
+  const gainRef = useRef<GainNode | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const builtRef = useRef(false)
+  const mv = useRef({ muted, volume }); mv.current = { muted, volume }
+
+  const arm = () => {
+    const v = videoRef.current
+    if (!v) return
+    try {
+      if (!builtRef.current) {
+        const AC: typeof AudioContext | undefined = window.AudioContext || (window as any).webkitAudioContext
+        if (!AC) return
+        const ctx = new AC()
+        const source = ctx.createMediaElementSource(v)
+        const analyser = ctx.createAnalyser(); analyser.fftSize = 64; analyser.smoothingTimeConstant = 0.75
+        const gain = ctx.createGain(); gain.gain.value = mv.current.muted ? 0 : mv.current.volume
+        source.connect(analyser); analyser.connect(gain); gain.connect(ctx.destination)
+        ctxRef.current = ctx; gainRef.current = gain; builtRef.current = true
+        v.dataset.audioArmed = '1'   // the player stops forcing element.muted after this
+        v.muted = false              // audibility is now the gain node's job
+        const data = new Uint8Array(analyser.frequencyBinCount)
+        const band = Math.max(1, Math.floor(data.length / AUDIO_BARS))
+        const loop = () => {
+          analyser.getByteFrequencyData(data)
+          const next: number[] = []
+          for (let b = 0; b < AUDIO_BARS; b++) {
+            let sum = 0
+            for (let i = 0; i < band; i++) sum += data[b * band + i] || 0
+            next.push(Math.min(1, (sum / band) / 180))
+          }
+          setBars(next)
+          rafRef.current = requestAnimationFrame(loop)
+        }
+        rafRef.current = requestAnimationFrame(loop)
+      }
+      if (ctxRef.current && ctxRef.current.state === 'suspended') ctxRef.current.resume().catch(() => {})
+    } catch { /* cross-origin taint / unsupported: fall back to element audio */ }
+  }
+
+  useEffect(() => {
+    arm()
+    const onFirst = () => arm()
+    window.addEventListener('pointerdown', onFirst, { once: true })
+    return () => {
+      window.removeEventListener('pointerdown', onFirst)
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      try { ctxRef.current?.close() } catch { /* ignore */ }
+      ctxRef.current = null; builtRef.current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (gainRef.current && ctxRef.current) gainRef.current.gain.value = muted ? 0 : volume
+    else { const v = videoRef.current; if (v) { v.muted = muted; v.volume = volume } }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [muted, volume])
+
+  const toggleMute = () => { arm(); setMuted(m => !m) }
+  const setVol = (val: number) => { arm(); setVolume(val); setMuted(val <= 0) }
+  return { muted, volume, bars, toggleMute, setVol }
+}
+
+type AudioEngine = ReturnType<typeof useAudioEngine>
+
+// Bottom-right dock: mute button, volume, optional audio-track selector, and the
+// live meter. Replaces the old channel bug. The bars reflect the real signal, so
+// they move whenever audio is arriving (grey while muted, green when audible).
+function AudioDock({ eng, tracks, currentTrack, onSelectTrack }: {
+  eng: AudioEngine; tracks: AudioTrackOpt[]; currentTrack: number; onSelectTrack: (i: number) => void
+}) {
+  const icon = eng.muted || eng.volume <= 0 ? SPK_MUTE : eng.volume < 0.5 ? SPK_LO : SPK_HI
+  return (
+    <div style={{
+      position: 'absolute', right: 12, bottom: 12, zIndex: 5, display: 'flex', alignItems: 'center',
+      gap: 8, padding: '5px 9px', borderRadius: 10, background: 'rgba(0,0,0,.5)', backdropFilter: 'blur(3px)',
+    }}>
+      <button className="chip" style={{ padding: '4px 7px', lineHeight: 0 }} title={eng.muted ? 'Unmute' : 'Mute'}
+        aria-label={eng.muted ? 'Unmute' : 'Mute'} onClick={eng.toggleMute}>{icon}</button>
+      <input type="range" min={0} max={1} step={0.02} value={eng.muted ? 0 : eng.volume}
+        onChange={e => eng.setVol(Number(e.target.value))} aria-label="Volume"
+        style={{ width: 64, accentColor: 'var(--brand)' }} />
+      {tracks.length > 1 && (
+        <select value={currentTrack} onChange={e => onSelectTrack(Number(e.target.value))}
+          title="Audio track" aria-label="Audio track" style={{ fontSize: 11, padding: '2px 4px' }}>
+          {tracks.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+        </select>
+      )}
+      <div title={eng.muted ? 'Audio present (muted)' : 'Audio level'} style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 18, width: AUDIO_BARS * 6 }}>
+        {eng.bars.map((b, i) => (
+          <span key={i} style={{
+            width: 3, borderRadius: 2, height: `${Math.max(12, b * 100)}%`, alignSelf: 'flex-end',
+            background: eng.muted ? 'rgba(148,163,184,.6)' : 'var(--live, #4ade80)', transition: 'height 90ms linear',
+          }} />
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: boolean; onSendSource: () => void; busy: boolean }) {
   const configured = d.sources.find(s => s.role === 'primary' && s.ingest_url) || d.sources.find(s => s.ingest_url)
@@ -771,6 +915,12 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const hlsRef = useRef<any>(null)
   const dashRef = useRef<any>(null)
+  const eng = useAudioEngine(videoRef)
+  const [audioTracks, setAudioTracks] = useState<AudioTrackOpt[]>([])
+  const [audioTrack, setAudioTrack] = useState(0)
+  // element starts muted for autoplay; the audio engine unmutes it once armed and
+  // carries audibility on its gain node, so we never re-mute after arming.
+  const softMute = (v: HTMLVideoElement) => { if (!v.dataset.audioArmed) v.muted = true }
   const [fmt, setFmt] = useState<'hls' | 'dash'>(pkg === 'dash' ? 'dash' : 'hls')
   const [levels, setLevels] = useState<{ height: number; bitrate: number }[]>([])
   const [level, setLevel] = useState(-1) // -1 = auto (ABR)
@@ -819,9 +969,17 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         hls.loadSource(src); hls.attachMedia(video!)
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           setLevels(hls.levels.map((l: any) => ({ height: l.height, bitrate: l.bitrate })))
-          video!.muted = true; video!.play().catch(() => {}); snapSoon()
+          softMute(video!); video!.play().catch(() => {}); snapSoon()
         })
         hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => setSubTracks((hls.subtitleTracks || []).length))
+        // audio tracks the encoder assigned to the manifest (transcode makes a
+        // separate audio track; multi-track sources expose one entry per language).
+        const readAudio = () => {
+          setAudioTracks((hls.audioTracks || []).map((t: any, i: number) => ({ id: i, label: t.name || t.lang || `Audio ${i + 1}` })))
+          if (typeof hls.audioTrack === 'number' && hls.audioTrack >= 0) setAudioTrack(hls.audioTrack)
+        }
+        hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, readAudio)
+        hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, readAudio)
         hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
           if (!data.fatal) return
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {}; return }
@@ -831,7 +989,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           setTimeout(() => { try { hls.loadSource(src); hls.startLoad() } catch {} }, 1500)
         })
       } else if (video!.canPlayType('application/vnd.apple.mpegurl')) {
-        video!.src = originUrl(`/origin/${d.id}/${cc ? 'master_cc.m3u8' : 'master.m3u8'}`); video!.muted = true; video!.play().catch(() => {}); snapSoon()
+        video!.src = originUrl(`/origin/${d.id}/${cc ? 'master_cc.m3u8' : 'master.m3u8'}`); softMute(video!); video!.play().catch(() => {}); snapSoon()
       }
     }
     async function attachDash() {
@@ -848,7 +1006,11 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           const bs = player.getBitrateInfoListFor('video') || []
           setLevels(bs.map((b: any) => ({ height: b.height, bitrate: b.bitrate })))
         } catch { /* ignore */ }
-        video.muted = true; video.play().catch(() => {}); snapSoon()
+        try {
+          const at = player.getTracksFor('audio') || []
+          setAudioTracks(at.map((t: any, i: number) => ({ id: i, label: (t.labels && t.labels[0]?.text) || t.lang || `Audio ${i + 1}` })))
+        } catch { /* ignore */ }
+        softMute(video); video.play().catch(() => {}); snapSoon()
       }
       try { player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, onInit) } catch { /* ignore */ }
     }
@@ -868,6 +1030,13 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
     if (level < 0) { try { p.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: true } } } }) } catch { /* ignore */ } }
     else { try { p.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } }); p.setQualityFor('video', level) } catch { /* ignore */ } }
   }, [level, fmt])
+
+  // apply audio-track selection (multi-language) for either engine
+  useEffect(() => {
+    if (fmt === 'hls') { try { if (hlsRef.current) hlsRef.current.audioTrack = audioTrack } catch { /* ignore */ } return }
+    const p = dashRef.current; if (!p) return
+    try { const at = p.getTracksFor('audio') || []; if (at[audioTrack]) p.setCurrentTrack(at[audioTrack]) } catch { /* ignore */ }
+  }, [audioTrack, fmt])
 
   // subtitle selection: draw the manifest subtitle track in the PLAYER (native) for the
   // chosen language, toggled by CC — so captions can be judged for accuracy + sync.
@@ -993,7 +1162,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         <div className="badge-live" style={liveNow ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{liveNow ? 'LIVE' : 'DVR'}</div>
         {/* The watermark is burned into the encoded output (transcode), so it is
             already in these pixels. We intentionally do NOT paint a DOM overlay. */}
-        <div className="bug"><span className="lg">{BOLT}</span>{d.name.toUpperCase()}</div>
+        <AudioDock eng={eng} tracks={audioTracks} currentTrack={audioTrack} onSelectTrack={setAudioTrack} />
         {/* legacy overlay only for the test-stream side-VTT path; real channels render
             the subtitle track natively in the player (from the manifest), so we don't
             double up here. */}
