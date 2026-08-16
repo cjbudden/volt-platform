@@ -405,11 +405,21 @@ def _captions_audio_url(cfg):
     return ins[0]["url"]
 
 
-def _live_sub_playlist(indices, chunk, media_seq):
-    """A LIVE WebVTT media playlist (no ENDLIST) over a sliding window of segments."""
+def _iso(epoch):
+    """EXT-X-PROGRAM-DATE-TIME timestamp (UTC millis)."""
+    import datetime
+    dt = datetime.datetime.utcfromtimestamp(epoch)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(round((epoch - int(epoch)) * 1000)):03d}Z"
+
+
+def _live_sub_playlist(indices, chunk, media_seq, first_pdt_wall):
+    """A LIVE WebVTT media playlist (no ENDLIST) with EXT-X-PROGRAM-DATE-TIME so the
+    player aligns the cues to the video by wall-clock (same clock the companion video
+    playlists carry)."""
     lines = ["#EXTM3U", "#EXT-X-VERSION:7",
              f"#EXT-X-TARGETDURATION:{int(round(chunk))}",
-             f"#EXT-X-MEDIA-SEQUENCE:{media_seq}"]
+             f"#EXT-X-MEDIA-SEQUENCE:{media_seq}",
+             f"#EXT-X-PROGRAM-DATE-TIME:{_iso(first_pdt_wall)}"]
     for i in indices:
         lines.append(f"#EXTINF:{chunk:.3f},")
         lines.append(f"sub_{i}.vtt")
@@ -417,19 +427,44 @@ def _live_sub_playlist(indices, chunk, media_seq):
 
 
 def _write_sub_segment(path, cues, seg_start, seg_end):
-    """One HLS WebVTT segment; cues in absolute program time, anchored via X-TIMESTAMP-MAP."""
-    from captions import cue_block
+    """One HLS WebVTT segment. Cues are written RELATIVE to the segment start (0..chunk)
+    and LOCAL:0 in the timestamp map, so with the playlist's PROGRAM-DATE-TIME the player
+    places each fragment by date and the cue offset within it."""
+    from captions import cue_block, Cue
     body = ["WEBVTT", "X-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000", ""]
     for c in cues:
         if c.end > seg_start and c.start < seg_end:
-            body.append(cue_block(c))
+            rel = Cue(max(0.0, c.start - seg_start), max(0.0, c.end - seg_start), c.text, c.lang)
+            body.append(cue_block(rel))
             body.append("")
     with open(path, "w") as fh:
         fh.write("\n".join(body).rstrip() + "\n")
 
 
-def _write_companion_master(out_dir, langs, default_lang):
-    """Copy Shaka's master.m3u8 and add a SUBTITLES group referencing the live subs."""
+def _pdt_companion_playlist(text, now):
+    """Copy a Shaka video media playlist and inject EXT-X-PROGRAM-DATE-TIME so the video
+    carries a wall-clock the subtitle track can align to. The newest segment ends ~now,
+    so the window starts at now - (sum of segment durations)."""
+    lines = text.splitlines()
+    total = 0.0
+    for l in lines:
+        if l.startswith("#EXTINF:"):
+            try: total += float(l[len("#EXTINF:"):].split(",")[0])
+            except ValueError: pass
+    start_wall = now - total
+    out, stamped = [], False
+    for l in lines:
+        if (not stamped) and l.startswith("#EXTINF:"):
+            out.append(f"#EXT-X-PROGRAM-DATE-TIME:{_iso(start_wall)}")
+            stamped = True
+        out.append(l)
+    return "\n".join(out) + "\n"
+
+
+def _write_companion(out_dir, langs, default_lang, now):
+    """Build master_cc.m3u8 that (a) carries the SUBTITLES group and (b) points each
+    video variant at a PDT-stamped companion playlist, so the player aligns subs to
+    frames by wall-clock. Returns nothing; writes master_cc.m3u8 + *_cc.m3u8."""
     src_path = os.path.join(out_dir, "master.m3u8")
     if not os.path.exists(src_path):
         return
@@ -443,7 +478,7 @@ def _write_companion_master(out_dir, langs, default_lang):
         f'URI="subtitles/{l}/subs.m3u8"'
         for l in langs
     ]
-    out, inserted = [], False
+    out, inserted, expect_uri = [], False, False
     for line in src:
         if line.startswith("#EXT-X-STREAM-INF"):
             if not inserted:
@@ -451,6 +486,22 @@ def _write_companion_master(out_dir, langs, default_lang):
                 inserted = True
             if "SUBTITLES=" not in line:
                 line = line + ',SUBTITLES="subs"'
+            out.append(line)
+            expect_uri = True
+            continue
+        if expect_uri and line and not line.startswith("#"):
+            # this is a video variant playlist URI -> write a PDT-stamped companion
+            base = line[:-len(".m3u8")] if line.endswith(".m3u8") else line
+            cc_name = f"{base}_cc.m3u8"
+            try:
+                vtext = open(os.path.join(out_dir, line)).read()
+                with open(os.path.join(out_dir, cc_name), "w") as fh:
+                    fh.write(_pdt_companion_playlist(vtext, now))
+                out.append(cc_name)
+            except OSError:
+                out.append(line)  # fall back to the plain playlist if unreadable
+            expect_uri = False
+            continue
         out.append(line)
     with open(os.path.join(out_dir, "master_cc.m3u8"), "w") as fh:
         fh.write("\n".join(out) + "\n")
@@ -509,6 +560,10 @@ def start_captions(cfg, out_dir):
             "-i", audio_url, "-vn", "-ac", "1", "-ar", "16000",
             "-f", "segment", "-segment_time", str(chunk), "-reset_timestamps", "1",
             os.path.join(tmp, "cap_%05d.wav")]
+    # wall-clock anchor for program time 0 (when the audio segmenter starts reading the
+    # live edge). Subtitle segment i -> PDT cap_t0 + i*chunk; the companion video
+    # playlists carry a matching wall-clock so the player aligns cues to frames.
+    cap_t0 = time.time()
     spawn("caption-audio", aseg, critical=False)
     log(f"captions: live worker engine={engine} chunk={chunk}s targets={targets} langs={langs}")
 
@@ -589,8 +644,10 @@ def start_captions(cfg, out_dir):
                         _write_sub_segment(os.path.join(sub_root, l, f"sub_{idx}.vtt"),
                                            store.get(l, []), base, base + chunk)
                         with open(os.path.join(sub_root, l, "subs.m3u8"), "w") as fh:
-                            fh.write(_live_sub_playlist(range(first, idx + 1), chunk, first))
-                    _write_companion_master(out_dir, langs, default_lang)
+                            # PDT anchor for the first segment in the window = program time
+                            # first*chunk after the caption clock started.
+                            fh.write(_live_sub_playlist(range(first, idx + 1), chunk, first, cap_t0 + first * chunk))
+                    _write_companion(out_dir, langs, default_lang, time.time())
                     _write_companion_mpd(out_dir, langs, chunk, first)
                     if _events:
                         _events.event("caption.offset", est_offset_sec=est, proc_sec=round(proc, 1),

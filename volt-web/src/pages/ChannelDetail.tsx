@@ -779,6 +779,10 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   const pkg = (d.profile?.packaging || 'hls').toLowerCase()
   const hasHls = pkg === 'hls' || pkg === 'both'
   const hasDash = pkg === 'dash' || pkg === 'both'
+  // CAPTION DELIVERY LATENCY: captions are produced ~12s after the audio, so when they
+  // are on we hold the play point back by this much. "Live" then means the point where
+  // the subtitles already exist and align, not the bleeding edge.
+  const capHold = d.captions?.enabled ? 18 : 0
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const hlsRef = useRef<any>(null)
   const dashRef = useRef<any>(null)
@@ -806,23 +810,26 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
     if (!video) return
     didSnapRef.current = false
     setLevels([]); setLevel(-1)
-    // LIVE IS THE DEFAULT: jump to the live edge shortly after load (once).
+    // LIVE IS THE DEFAULT: jump to the play point shortly after load (once). With captions
+    // on, the play point is held back by capHold so the subtitles already exist there.
     const snapSoon = () => {
-      const snap = () => { try { const sk = video.seekable; if (sk.length && !didSnapRef.current) { video.currentTime = sk.end(sk.length - 1) - 0.5; didSnapRef.current = true } } catch {} }
+      const snap = () => { try { const sk = video.seekable; if (sk.length && !didSnapRef.current) { video.currentTime = sk.end(sk.length - 1) - (capHold || 0.5); didSnapRef.current = true } } catch {} }
       setTimeout(snap, 300); setTimeout(snap, 1200)
     }
-    // With captions on, load the captions-aware companion manifest (subtitles in the
-    // manifest); fall back to the plain master if the companion isn't written yet.
+    // Captions on: load the captions-aware companion manifest (subtitles + PDT in the
+    // manifest). It appears a few seconds after start, so retry it rather than dropping
+    // to the plain master permanently; only fall back after several misses.
     const cc = !!d.captions?.enabled
     async function attachHls() {
       const Hls = (await import('hls.js')).default
       if (cancelled) return
       if (Hls.isSupported()) {
         let src = originUrl(`/origin/${d.id}/${cc ? 'master_cc.m3u8' : 'master.m3u8'}`)
-        let triedPlain = false
-        // renderTextTracksNatively: let the player draw the subtitle track from the
-        // manifest so we can judge accuracy + sync in the real player, not a side overlay.
-        const hls = new Hls({ lowLatencyMode: false, backBufferLength: d.dvr.effective_sec, liveSyncDurationCount: 3, manifestLoadingMaxRetry: 12, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 12, subtitleDisplay: true, renderTextTracksNatively: true })
+        let ccTries = 0
+        // liveSyncDuration = the caption hold-back (or hls default when captions off).
+        const cfg: any = { lowLatencyMode: false, backBufferLength: d.dvr.effective_sec, manifestLoadingMaxRetry: 12, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 12, subtitleDisplay: true, renderTextTracksNatively: true }
+        if (capHold) cfg.liveSyncDuration = capHold; else cfg.liveSyncDurationCount = 3
+        const hls = new Hls(cfg)
         hlsRef.current = hls
         hls.loadSource(src); hls.attachMedia(video!)
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -833,9 +840,10 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
           if (!data.fatal) return
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {}; return }
-          // captions companion not written yet -> fall back to the plain master once
-          if (cc && !triedPlain) { triedPlain = true; src = originUrl(`/origin/${d.id}/master.m3u8`); try { hls.loadSource(src); hls.startLoad() } catch {}; return }
-          setTimeout(() => { try { hls.loadSource(src); hls.startLoad() } catch {} }, 1500) // not ready yet -> reload
+          // keep retrying the companion (it appears ~12s in); only after several misses
+          // fall back to the plain master so video still plays if captions never come.
+          if (cc && src.endsWith('master_cc.m3u8') && ++ccTries >= 6) { src = originUrl(`/origin/${d.id}/master.m3u8`) }
+          setTimeout(() => { try { hls.loadSource(src); hls.startLoad() } catch {} }, 1500)
         })
       } else if (video!.canPlayType('application/vnd.apple.mpegurl')) {
         video!.src = originUrl(`/origin/${d.id}/${cc ? 'master_cc.m3u8' : 'master.m3u8'}`); video!.muted = true; video!.play().catch(() => {}); snapSoon()
@@ -918,8 +926,14 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         // edge. Messy source timing makes hls.js stall and resume behind; without this
         // it silently accumulates minutes of lag (the "-5:29 behind" we saw). Snapping
         // whenever we drift >12s keeps the preview honestly live and self-heals stalls.
-        if (!scrubbedRef.current && end - v.currentTime > 12) {
-          try { v.currentTime = end - 0.5 } catch { /* ignore */ }
+        if (!scrubbedRef.current) {
+          const target = capHold || 0.5
+          const behindNow = end - v.currentTime
+          // hold at the play point: pull back if we drifted well behind, and pull back
+          // from the bleeding edge if captions are on (so subs are always present).
+          if (behindNow > target + 12 || behindNow < Math.max(0, target - 6)) {
+            try { v.currentTime = end - target } catch { /* ignore */ }
+          }
         }
         setBehind(Math.max(0, Math.round(end - v.currentTime)))
       }
@@ -952,7 +966,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
     const end = v.seekable.end(v.seekable.length - 1)
     v.currentTime = Math.max(v.seekable.start(0), end - Math.max(0, sec))
   }
-  function goLive() { const v = videoRef.current; scrubbedRef.current = false; setScrubbed(false); if (!v || !v.seekable.length) return; v.currentTime = v.seekable.end(v.seekable.length - 1) - 0.5 }
+  function goLive() { const v = videoRef.current; scrubbedRef.current = false; setScrubbed(false); if (!v || !v.seekable.length) return; v.currentTime = v.seekable.end(v.seekable.length - 1) - (capHold || 0.5) }
 
   // Captions status from the latest caption.* telemetry so the operator can see the
   // estimated live offset AND why captions failed (not a roadblock, but worth knowing).
