@@ -123,10 +123,7 @@ export default function App() {
       <div className="main">
         <div className="topbar">
           <div className="crumb"><b>{label}</b></div>
-          <div className="search">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4-4" /></svg>
-            <input placeholder="Search streams, events, recordings…" />
-          </div>
+          <div className="spacer" style={{ flex: 1 }} />
           <div className="top-actions">
             <UploadIndicator />
             <div className="icon-btn"><span className="dot"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" /></svg></div>

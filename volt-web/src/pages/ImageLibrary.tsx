@@ -133,8 +133,12 @@ export default function ImageLibrary() {
         </div>
 
         <div>
-          <div className="filters" style={{ marginBottom: 12 }}>
-            <input className="inp" style={{ maxWidth: 240 }} placeholder="Search name or path…" value={q} onChange={e => setQ(e.target.value)} />
+          <div className="filters" style={{ marginBottom: 12, gap: 8, alignItems: 'center' }}>
+            <div style={{ position: 'relative', flex: '1 1 320px', maxWidth: 420 }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', width: 16, height: 16, color: 'var(--faint)', pointerEvents: 'none' }}><circle cx="11" cy="11" r="7" /><path d="m21 21-4-4" /></svg>
+              <input className="inp" style={{ width: '100%', paddingLeft: 34 }} placeholder="Search images by name, path or tag…" value={q} onChange={e => setQ(e.target.value)} aria-label="Search images" />
+              {q && <button className="xbtn" onClick={() => setQ('')} title="Clear" style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)' }}>✕</button>}
+            </div>
             {KINDS.map(k => <div key={k} className={`chip ${kind === k ? 'active' : ''}`} onClick={() => setKind(k)}>{k}</div>)}
           </div>
 
