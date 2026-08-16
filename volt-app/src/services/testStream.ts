@@ -143,6 +143,36 @@ export async function startTestStream(channelId: string, name: string, opts: Tes
   if (o.dash) genArgs.push('--dash');
   if (inputUrl) genArgs.push('--input-url', inputUrl);
 
+  // Watermark burn-in: the logo is baked into the picture by the encoder, NOT
+  // painted as a player overlay. It only applies on the TRANSCODE path (the test
+  // stream re-encodes, so it can burn in); package_only would be a copy relay.
+  // Resolve the channel's watermark settings and pass them to the generator; the
+  // ref is turned into an absolute URL the generator can fetch on the same host.
+  const wm = await one<any>(
+    `SELECT c.watermark_enabled, c.watermark_ref, c.watermark_position,
+            c.watermark_offset_x, c.watermark_offset_y, c.watermark_opacity, c.watermark_scale,
+            p.workflow_type
+       FROM channels c
+       JOIN groups g ON g.id = c.group_id
+       LEFT JOIN output_profiles p ON p.id = g.output_profile_id
+      WHERE c.id = $1`,
+    [channelId]
+  ).catch(() => null);
+  if (wm && wm.workflow_type === 'transcode' && wm.watermark_enabled && wm.watermark_ref) {
+    const ref = String(wm.watermark_ref);
+    const url = /^https?:\/\//i.test(ref)
+      ? ref
+      : `${config.internalApiBaseUrl.replace(/\/$/, '')}${ref.startsWith('/') ? '' : '/'}${ref}`;
+    genArgs.push(
+      '--watermark', url,
+      '--wm-pos', String(wm.watermark_position || 'br'),
+      '--wm-scale', String(wm.watermark_scale ?? 12),
+      '--wm-opacity', String(wm.watermark_opacity ?? 100),
+      '--wm-x', String(wm.watermark_offset_x ?? 24),
+      '--wm-y', String(wm.watermark_offset_y ?? 24),
+    );
+  }
+
   // capture the encoder's stdout/stderr to a per-channel log for diagnosis
   const logFd = openSync(join(out, 'encoder.log'), 'a');
   const ff = spawn('bash', [join(bin, 'test-stream.sh'), ...genArgs], { stdio: ['ignore', logFd, logFd], detached: false });
