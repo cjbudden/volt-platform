@@ -702,16 +702,6 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
       </div>
       <div className="pfoot">
         <span className={`dot-s ${srcErrored ? 'down' : sourceUp ? 'live' : 'idle'}`} /> {srcErrored ? (inputFailed ? 'Source not arriving' : 'Source OK · encoder failed downstream') : sourceUp ? `Ingesting ${srcHost || proto} · repackaging` : configured ? `Source configured · ${proto} · ${srcHost || 'ingest'}` : 'No source — send one to enable output'}
-        <select value={0} onChange={() => {}}>
-          {d.sources.length ? d.sources.map((s, i) => {
-            // packaging: each input is a rendition, so label it by size (Source 1080p,
-            // Source 720p...). Transcode: a single mezzanine, so label by role.
-            const rung = (s as any).rendition_label as string | undefined
-            const label = d.profile?.workflow_type === 'package_only' ? (rung || s.role) : s.role
-            return <option key={s.id} value={i}>Source {label}</option>
-          })
-            : <><option>Source Primary</option><option>Source Backup</option></>}
-        </select>
       </div>
       {sourceUp && ts.sourceNote && (
         <div style={{ padding: '9px 12px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--warn)', display: 'flex', gap: 8 }}>
