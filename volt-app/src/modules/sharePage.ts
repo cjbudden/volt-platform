@@ -95,7 +95,7 @@ function render(d){
   '<div class="infobar"><div>Secure preview shared with you · access expires in <b>'+daysLeft(d.expiresAt)+'</b> ('+fmtDate(d.expiresAt)+')</div>'+(d.sharedBy?'<div>Shared by '+esc(d.sharedBy)+' · '+esc(d.brand.account||'')+'</div>':'')+'</div>'+
   '<h1>'+esc(d.title)+'</h1>'+
   '<p class="sub">'+esc(d.brand.account||'')+' · '+esc(cat)+(dt?' · '+esc(dt):'')+(d.durationMs?' · Duration '+fmtDur(d.durationMs):'')+'</p>'+
-  '<div class="player"><span class="badge">PREVIEW</span>'+wm+'<video id="v" controls playsinline preload="metadata"></video>'+(d.durationMs?'<span class="dur">'+fmtDur(d.durationMs)+'</span>':'')+'</div>'+
+  '<div class="player"><span class="badge">'+(d.live?'LIVE PREVIEW':'PREVIEW')+'</span>'+wm+'<video id="v" controls playsinline preload="metadata"></video>'+(d.live&&!d.available?'<div class="state" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#cbd5e1;background:#0b0f16;z-index:3"><h1 style="color:#fff;font-size:22px;margin:0 0 6px">Preview not live right now</h1><p style="margin:0 0 14px">The stream is not currently being produced. This preview will play when the source is active.</p><button class="btn primary" id="retry">Check again</button></div>':'')+(d.durationMs?'<span class="dur">'+fmtDur(d.durationMs)+'</span>':'')+'</div>'+
   '<div class="under"><div class="cap">Streaming preview'+(d.watermark?' · watermarked to your link':'')+'</div><div class="btns">'+metaBtn+hiresBtn+'</div></div>'+
   '<div class="grid"><div>'+
     (md.description||md.about?'<div class="card"><h3>About this asset</h3><div class="about">'+esc(md.description||md.about)+'</div></div>':'')+
@@ -105,9 +105,17 @@ function render(d){
     '<div class="card access"><h3>Your access</h3><ul>'+accessItems.map(i=>'<li>'+i+'</li>').join('')+'</ul></div>'+
   '</div></div>';
 
-  // play the preview
+  // live preview not being produced yet: offer a re-resolve instead of a dead player
+  const retry=$('#retry'); if(retry){retry.onclick=async()=>{const out=await resolve();if(out.ok)render(out.data);else if(out.reason==='pin_required')pinPrompt(false);else stateMsg(out.reason);};}
+  // play the preview (skip while a live stream isn't available)
   const v=$('#v'), src=d.hls;
-  if(src){ if(window.Hls&&Hls.isSupported()){const h=new Hls();h.loadSource(src);h.attachMedia(v);} else {v.src=src;} }
+  if(src && !(d.live && !d.available)){
+    if(window.Hls&&Hls.isSupported()){
+      // live: track the edge so recipients see NOW, not the start of the DVR window
+      const h=new Hls(d.live?{liveSyncDurationCount:3}:{});h.loadSource(src);h.attachMedia(v);
+      if(d.live){h.on(Hls.Events.MANIFEST_PARSED,()=>{try{v.muted=true;v.play().catch(()=>{})}catch(e){}});}
+    } else { v.src=src; }
+  }
   const hi=$('#hires'); if(hi){hi.onclick=async e=>{e.preventDefault();const r=await fetch('/api/share/'+encodeURIComponent(TOKEN)+'/download/hi_res');if(r.ok){const j=await r.json();window.location=j.url;}else{alert('Download not available.');}};}
 }
 (async()=>{const out=await resolve();if(out.ok)render(out.data);else if(out.reason==='pin_required')pinPrompt(false);else stateMsg(out.reason);})();

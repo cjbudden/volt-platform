@@ -19,10 +19,29 @@
  * test against a live database.
  */
 import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, statSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { query, one, tx } from '../db';
 import { config } from '../config';
 import { mintPlaybackToken } from './apiKeys';
 import { evaluateAccess } from './rights';
+
+/** Is a live channel/event's origin manifest advancing right now? (share preview
+ *  availability: the link only shows content while the source is active and output
+ *  is being created — NOT tied to on-air). */
+function liveOutputFresh(resourceId: string): boolean {
+  try {
+    const dir = join(config.testStream.originDir, resourceId);
+    if (!existsSync(dir)) return false;
+    let newest = 0;
+    for (const f of readdirSync(dir)) {
+      if (f.endsWith('.m3u8') || f.endsWith('.mpd')) {
+        try { const m = statSync(join(dir, f)).mtimeMs; if (m > newest) newest = m; } catch { /* ignore */ }
+      }
+    }
+    return newest > 0 && (Date.now() - newest) < 15000;
+  } catch { return false; }
+}
 
 export type ShareResourceKind = 'vod' | 'channel' | 'event';
 export type ShareAccessType = 'preview_only' | 'allow_download';
@@ -77,8 +96,11 @@ export function manifestUrls(kind: ShareResourceKind, resourceId: string, master
       dash: formats?.dash ? `${base}/manifest.mpd` : null,
     };
   }
-  // live channel/event: stable origin path the packager writes to
-  return { hls: `${cdn()}/${kind}/${resourceId}/master.m3u8`, dash: `${cdn()}/${kind}/${resourceId}/manifest.mpd` };
+  // live channel/event: the packager writes to the origin. The SHARE preview plays
+  // this directly, independent of on-air — same-origin locally, via the CDN in prod.
+  const useCdn = config.env === 'production' && !/example\.com/.test(config.aws.cdnBaseUrl);
+  const base = useCdn ? `${cdn()}/${kind}/${resourceId}` : `/origin/${resourceId}`;
+  return { hls: `${base}/master.m3u8`, dash: `${base}/manifest.mpd` };
 }
 
 /** Load the shared resource's view model (title/metadata/manifest), scoped to the account. */
@@ -207,6 +229,10 @@ export async function openShare(raw: string, opts: { pin?: string; geo?: string;
     view: {
       title: resource.title,
       kind: resource.kind,
+      live: resource.kind !== 'vod',
+      // live preview is only watchable while the source is active and output is being
+      // created; VOD is always available. The page shows a waiting state otherwise.
+      available: resource.kind === 'vod' ? true : liveOutputFresh(resource.id),
       durationMs: resource.durationMs,
       metadata: row.allow_metadata || row.access_type === 'preview_only' ? resource.metadata : resource.metadata, // metadata always visible on the page; download is separate
       hls: resource.hls, dash: resource.dash,

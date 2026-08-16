@@ -144,6 +144,17 @@ export const api = {
   // Go on air / take off air — the PUBLIC publish toggle (opens/closes /live/:id/...).
   setAir: (id: string, on: boolean): Promise<Channel> =>
     req(`/channels/${id}/air`, { method: 'POST', body: JSON.stringify({ on }) }),
+  // Share link — a private, PIN/expiry-secured preview of THIS channel's output, for
+  // clients/reviewers to approve before go-live. Not on air, ignores geo/access rules.
+  createShareLink: (b: {
+    resourceKind: 'vod' | 'channel' | 'event'; resourceId: string
+    accessPeriod?: string; ttlSec?: number; label?: string; message?: string
+    pin?: string; maxViews?: number | null
+  }): Promise<{ id: string; url: string; token: string; expiresAt: string }> =>
+    req('/share-links', { method: 'POST', body: JSON.stringify(b) }),
+  shareLinks: (): Promise<ShareLinkRow[]> => req('/share-links'),
+  revokeShareLink: (id: string): Promise<{ id: string; revoked: boolean }> =>
+    req(`/share-links/${id}/revoke`, { method: 'POST' }),
   channel: (id: string): Promise<ChannelDetail> => req(`/channels/${id}`),
   updateChannel: (id: string, patch: ChannelSettingsPatch): Promise<any> =>
     req(`/channels/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
@@ -179,6 +190,13 @@ export const api = {
     let body: any = null; try { body = await r.json() } catch { /* */ }
     return { ok: false, status: r.status, body }
   },
+}
+
+export interface ShareLinkRow {
+  id: string; resource_kind: 'vod' | 'channel' | 'event'; resource_id: string
+  label: string | null; access_type: string; expires_at: string
+  max_views: number | null; view_count: number; first_opened_at: string | null
+  last_viewed_at: string | null; revoked: boolean; created_at: string; token_prefix: string
 }
 
 export interface MediaFile {
