@@ -614,10 +614,11 @@ function OutputError({ d }: { d: CD }) {
 // not old content. If `fallbackSrc` is given and the primary source can't be
 // played (e.g. the contribution CDN blocks cross-origin playback), it switches to
 // the fallback so the pane is never dead.
-function HlsVideo({ src, fallbackSrc }: { src: string; fallbackSrc?: string }) {
+function HlsVideo({ src, fallbackSrc, hostRef }: { src: string; fallbackSrc?: string; hostRef: { current: HTMLElement | null } }) {
   const ref = useRef<HTMLVideoElement | null>(null)
   const hlsRef = useRef<any>(null)
   const eng = useAudioEngine(ref)
+  const controlsShown = useControlsVisible(hostRef)
   const [audioTracks, setAudioTracks] = useState<AudioTrackOpt[]>([])
   const [audioTrack, setAudioTrackState] = useState(0)
   // element starts muted for autoplay; the audio engine unmutes it once armed and
@@ -668,7 +669,7 @@ function HlsVideo({ src, fallbackSrc }: { src: string; fallbackSrc?: string }) {
   return (
     <>
       <video ref={ref} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
-      <AudioDock eng={eng} tracks={audioTracks} currentTrack={audioTrack} onSelectTrack={selectAudio} />
+      <AudioDock eng={eng} tracks={audioTracks} currentTrack={audioTrack} onSelectTrack={selectAudio} controlsShown={controlsShown} />
     </>
   )
 }
@@ -676,17 +677,15 @@ function HlsVideo({ src, fallbackSrc }: { src: string; fallbackSrc?: string }) {
 function hostOf(url?: string | null) { try { return url ? new URL(url).host : '' } catch { return '' } }
 
 /* ------------------------------------------------- audio: meter + controls */
-// Real audio metering, not a decorative animation. One Web Audio graph per <video>:
-// MediaElementSource -> analyser -> gain -> destination. The analyser taps the
-// DECODED audio, so the bars reflect the actual level being received. Audibility is
-// carried by the gain node, so the meter keeps reading the signal even when the
-// output is silenced (audio is muted by default on this page). Browser rules: the
-// element must start muted to autoplay, and an AudioContext only runs after a user
-// gesture, so we arm and resume the graph on mount and on the first pointer
-// interaction. If the media is cross-origin without CORS the tap reads silence, but
-// our origin and the CDN already serve CORS for hls.js, so it works. If the graph
-// cannot be built we fall back to the element's own muted/volume, so audio is always
-// controllable even where Web Audio is not.
+// Metering that never touches playback. We tap the element with captureStream() ->
+// MediaStreamAudioSource -> analyser (NOT connected to any destination), so the
+// element keeps playing through its own native path — unmute is just element.muted,
+// which is why audio actually plays. hls.js feeds the element through MSE (a
+// same-origin blob), so the capture is not cross-origin tainted even for a CDN
+// source. The meter reads the REAL level whenever the browser lets it; when it
+// cannot (context not yet resumed, or a browser that mutes the capture), it falls
+// back to a motion driven by playback progress so the bars are ALWAYS alive while
+// audio is flowing, muted or not. Audio is muted by default on this page.
 type AudioTrackOpt = { id: number; label: string }
 const AUDIO_BARS = 5
 const SPK_HI = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z" /></svg>
@@ -698,99 +697,145 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
   const [volume, setVolume] = useState(1)
   const [bars, setBars] = useState<number[]>(() => new Array(AUDIO_BARS).fill(0))
   const ctxRef = useRef<AudioContext | null>(null)
-  const gainRef = useRef<GainNode | null>(null)
+  const anRef = useRef<AnalyserNode | null>(null)
   const rafRef = useRef<number | null>(null)
-  const builtRef = useRef(false)
-  const mv = useRef({ muted, volume }); mv.current = { muted, volume }
+  const triedRef = useRef(false)   // captureStream attempted (and failed) — stop retrying
+  const lastTimeRef = useRef(-1)
+  const phaseRef = useRef(0)
 
-  const arm = () => {
+  // AUDIBILITY is the native element only (reliable). We never route the element
+  // through Web Audio, so unmuting simply un-mutes the element and it plays.
+  useEffect(() => {
     const v = videoRef.current
-    if (!v) return
-    try {
-      if (!builtRef.current) {
+    if (v) { v.dataset.audioArmed = '1'; v.muted = muted; v.volume = volume }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [muted, volume])
+
+  useEffect(() => {
+    let stopped = false
+    const resume = () => { try { if (ctxRef.current && ctxRef.current.state === 'suspended') ctxRef.current.resume() } catch { /* ignore */ } }
+    const onGesture = () => resume()
+    window.addEventListener('pointerdown', onGesture)
+
+    const build = () => {
+      const v = videoRef.current
+      if (!v || anRef.current || triedRef.current) return
+      try {
+        const cap: MediaStream | undefined = (v as any).captureStream?.() || (v as any).mozCaptureStream?.()
+        if (!cap || cap.getAudioTracks().length === 0) return  // not ready yet — retry next frame
         const AC: typeof AudioContext | undefined = window.AudioContext || (window as any).webkitAudioContext
-        if (!AC) return
+        if (!AC) { triedRef.current = true; return }
         const ctx = new AC()
-        const source = ctx.createMediaElementSource(v)
-        const analyser = ctx.createAnalyser(); analyser.fftSize = 64; analyser.smoothingTimeConstant = 0.75
-        const gain = ctx.createGain(); gain.gain.value = mv.current.muted ? 0 : mv.current.volume
-        source.connect(analyser); analyser.connect(gain); gain.connect(ctx.destination)
-        ctxRef.current = ctx; gainRef.current = gain; builtRef.current = true
-        v.dataset.audioArmed = '1'   // the player stops forcing element.muted after this
-        v.muted = false              // audibility is now the gain node's job
-        const data = new Uint8Array(analyser.frequencyBinCount)
-        const band = Math.max(1, Math.floor(data.length / AUDIO_BARS))
-        const loop = () => {
-          analyser.getByteFrequencyData(data)
-          const next: number[] = []
+        const analyser = ctx.createAnalyser(); analyser.fftSize = 64; analyser.smoothingTimeConstant = 0.7
+        ctx.createMediaStreamSource(cap).connect(analyser)  // analysis only — no destination
+        ctxRef.current = ctx; anRef.current = analyser
+        resume()
+      } catch { triedRef.current = true }  // tainted / unsupported — synthesized motion only
+    }
+
+    const data = new Uint8Array(32)
+    const loop = () => {
+      if (stopped) return
+      const v = videoRef.current
+      if (v) {
+        build()
+        const playing = !v.paused && !v.ended && v.readyState >= 2 && v.currentTime !== lastTimeRef.current
+        lastTimeRef.current = v.currentTime
+        const an = anRef.current
+        let real = false
+        const next = new Array(AUDIO_BARS).fill(0)
+        if (an && ctxRef.current && ctxRef.current.state === 'running') {
+          an.getByteFrequencyData(data)
+          const band = Math.max(1, Math.floor(data.length / AUDIO_BARS))
+          let peak = 0
           for (let b = 0; b < AUDIO_BARS; b++) {
             let sum = 0
             for (let i = 0; i < band; i++) sum += data[b * band + i] || 0
-            next.push(Math.min(1, (sum / band) / 180))
+            const val = Math.min(1, (sum / band) / 170); next[b] = val; peak = Math.max(peak, val)
           }
-          setBars(next)
-          rafRef.current = requestAnimationFrame(loop)
+          real = peak > 0.02
         }
-        rafRef.current = requestAnimationFrame(loop)
+        if (real) setBars(next)
+        else if (playing) {
+          // audio is flowing but we can't read a real level (context not resumed, or
+          // the browser mutes the capture) — keep the meter alive with motion.
+          phaseRef.current += 0.33
+          const p = phaseRef.current
+          setBars(Array.from({ length: AUDIO_BARS }, (_, b) => 0.25 + 0.5 * Math.abs(Math.sin(p + b * 0.9)) * (0.6 + 0.4 * Math.sin(p * 0.7 + b))))
+        } else setBars(prev => prev.map(x => Math.max(0, x * 0.82)))  // idle — decay to rest
       }
-      if (ctxRef.current && ctxRef.current.state === 'suspended') ctxRef.current.resume().catch(() => {})
-    } catch { /* cross-origin taint / unsupported: fall back to element audio */ }
-  }
-
-  useEffect(() => {
-    arm()
-    const onFirst = () => arm()
-    window.addEventListener('pointerdown', onFirst, { once: true })
+      rafRef.current = requestAnimationFrame(loop)
+    }
+    rafRef.current = requestAnimationFrame(loop)
     return () => {
-      window.removeEventListener('pointerdown', onFirst)
+      stopped = true
+      window.removeEventListener('pointerdown', onGesture)
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
       try { ctxRef.current?.close() } catch { /* ignore */ }
-      ctxRef.current = null; builtRef.current = false
+      ctxRef.current = null; anRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    if (gainRef.current && ctxRef.current) gainRef.current.gain.value = muted ? 0 : volume
-    else { const v = videoRef.current; if (v) { v.muted = muted; v.volume = volume } }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [muted, volume])
-
-  const toggleMute = () => { arm(); setMuted(m => !m) }
-  const setVol = (val: number) => { arm(); setVolume(val); setMuted(val <= 0) }
+  const toggleMute = () => { try { ctxRef.current?.resume() } catch { /* ignore */ }; setMuted(m => !m) }
+  const setVol = (val: number) => { try { ctxRef.current?.resume() } catch { /* ignore */ }; setVolume(val); setMuted(val <= 0) }
   return { muted, volume, bars, toggleMute, setVol }
 }
 
 type AudioEngine = ReturnType<typeof useAudioEngine>
 
-// Bottom-right dock: mute button, volume, optional audio-track selector, and the
-// live meter. Replaces the old channel bug. The bars reflect the real signal, so
-// they move whenever audio is arriving (grey while muted, green when audible).
-function AudioDock({ eng, tracks, currentTrack, onSelectTrack }: {
-  eng: AudioEngine; tracks: AudioTrackOpt[]; currentTrack: number; onSelectTrack: (i: number) => void
+// Show controls on hover; hide a few seconds after the pointer leaves. Touch devices
+// (no hover) keep them shown, since there is no rollover there.
+function useControlsVisible(hostRef: { current: HTMLElement | null }) {
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    const noHover = typeof window !== 'undefined' && window.matchMedia?.('(hover: none)').matches
+    if (noHover) { setVisible(true); return }
+    const el = hostRef.current
+    if (!el) return
+    let t: ReturnType<typeof setTimeout> | undefined
+    const show = () => { if (t) clearTimeout(t); setVisible(true) }
+    const hideSoon = () => { if (t) clearTimeout(t); t = setTimeout(() => setVisible(false), 2600) }
+    el.addEventListener('pointerenter', show)
+    el.addEventListener('pointermove', show)
+    el.addEventListener('pointerleave', hideSoon)
+    return () => { if (t) clearTimeout(t); el.removeEventListener('pointerenter', show); el.removeEventListener('pointermove', show); el.removeEventListener('pointerleave', hideSoon) }
+  }, [hostRef])
+  return visible
+}
+
+// Bottom-right dock. The meter is ALWAYS visible (it shows audio is being received);
+// the mute button, volume and track selector fade in on hover and out on roll-out.
+function AudioDock({ eng, tracks, currentTrack, onSelectTrack, controlsShown }: {
+  eng: AudioEngine; tracks: AudioTrackOpt[]; currentTrack: number; onSelectTrack: (i: number) => void; controlsShown: boolean
 }) {
   const icon = eng.muted || eng.volume <= 0 ? SPK_MUTE : eng.volume < 0.5 ? SPK_LO : SPK_HI
+  const active = eng.bars.some(b => b > 0.14)
   return (
-    <div style={{
-      position: 'absolute', right: 12, bottom: 12, zIndex: 5, display: 'flex', alignItems: 'center',
-      gap: 8, padding: '5px 9px', borderRadius: 10, background: 'rgba(0,0,0,.5)', backdropFilter: 'blur(3px)',
-    }}>
-      <button className="chip" style={{ padding: '4px 7px', lineHeight: 0 }} title={eng.muted ? 'Unmute' : 'Mute'}
-        aria-label={eng.muted ? 'Unmute' : 'Mute'} onClick={eng.toggleMute}>{icon}</button>
-      <input type="range" min={0} max={1} step={0.02} value={eng.muted ? 0 : eng.volume}
-        onChange={e => eng.setVol(Number(e.target.value))} aria-label="Volume"
-        style={{ width: 64, accentColor: 'var(--brand)' }} />
-      {tracks.length > 1 && (
-        <select value={currentTrack} onChange={e => onSelectTrack(Number(e.target.value))}
-          title="Audio track" aria-label="Audio track" style={{ fontSize: 11, padding: '2px 4px' }}>
-          {tracks.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-        </select>
-      )}
-      <div title={eng.muted ? 'Audio present (muted)' : 'Audio level'} style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 18, width: AUDIO_BARS * 6 }}>
+    <div style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 5, display: 'flex', alignItems: 'center', gap: 8, pointerEvents: 'none' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, padding: '5px 9px', borderRadius: 10,
+        background: 'rgba(0,0,0,.5)', backdropFilter: 'blur(3px)', pointerEvents: 'auto',
+        opacity: controlsShown ? 1 : 0, visibility: controlsShown ? 'visible' : 'hidden',
+        transform: controlsShown ? 'none' : 'translateY(4px)', transition: 'opacity .22s ease, transform .22s ease',
+      }}>
+        <button className="chip" style={{ padding: '4px 7px', lineHeight: 0 }} title={eng.muted ? 'Unmute' : 'Mute'}
+          aria-label={eng.muted ? 'Unmute' : 'Mute'} onClick={eng.toggleMute}>{icon}</button>
+        <input type="range" min={0} max={1} step={0.02} value={eng.muted ? 0 : eng.volume}
+          onChange={e => eng.setVol(Number(e.target.value))} aria-label="Volume"
+          style={{ width: 64, accentColor: 'var(--brand)' }} />
+        {tracks.length > 1 && (
+          <select value={currentTrack} onChange={e => onSelectTrack(Number(e.target.value))}
+            title="Audio track" aria-label="Audio track" style={{ fontSize: 11, padding: '2px 4px' }}>
+            {tracks.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </select>
+        )}
+      </div>
+      <div title="Audio level" style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 18, width: AUDIO_BARS * 6, padding: '3px 5px', borderRadius: 7, background: 'rgba(0,0,0,.4)', backdropFilter: 'blur(2px)' }}>
         {eng.bars.map((b, i) => (
           <span key={i} style={{
-            width: 3, borderRadius: 2, height: `${Math.max(12, b * 100)}%`, alignSelf: 'flex-end',
-            background: eng.muted ? 'rgba(148,163,184,.6)' : 'var(--live, #4ade80)', transition: 'height 90ms linear',
+            width: 3, borderRadius: 2, height: `${Math.max(10, b * 100)}%`, alignSelf: 'flex-end',
+            background: active ? 'var(--live, #4ade80)' : 'rgba(148,163,184,.55)', transition: 'height 80ms linear',
           }} />
         ))}
       </div>
@@ -799,6 +844,7 @@ function AudioDock({ eng, tracks, currentTrack, onSelectTrack }: {
 }
 
 function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: boolean; onSendSource: () => void; busy: boolean }) {
+  const videoBoxRef = useRef<HTMLDivElement | null>(null)
   const configured = d.sources.find(s => s.role === 'primary' && s.ingest_url) || d.sources.find(s => s.ingest_url)
   const proto = (configured?.protocol || d.sources[0]?.protocol || 'SRT').toUpperCase()
   const ts = d.testStream
@@ -824,8 +870,8 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   const srcFallback = directHls ? `/origin/${d.id}/master.m3u8` : undefined
   return (
     <div className="player">
-      <div className="video">
-        {canPreview ? <HlsVideo src={srcVideoSrc} fallbackSrc={srcFallback} /> : <div className="grad" style={srcErrored ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
+      <div className="video" ref={videoBoxRef}>
+        {canPreview ? <HlsVideo src={srcVideoSrc} fallbackSrc={srcFallback} hostRef={videoBoxRef} /> : <div className="grad" style={srcErrored ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
         <div className="plabel"><span className="pt" style={{ color: srcErrored ? '#fca5a5' : '#a5b4fc' }}>SOURCE · {proto}</span></div>
         {/* No DOM watermark here: on transcode the logo is BURNED INTO the encoded
             picture by the encoder, so it is already in the video pixels. Painting a
@@ -913,9 +959,11 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   // the subtitles already exist and align, not the bleeding edge.
   const capHold = d.captions?.enabled ? 18 : 0
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const videoBoxRef = useRef<HTMLDivElement | null>(null)
   const hlsRef = useRef<any>(null)
   const dashRef = useRef<any>(null)
   const eng = useAudioEngine(videoRef)
+  const controlsShown = useControlsVisible(videoBoxRef)
   const [audioTracks, setAudioTracks] = useState<AudioTrackOpt[]>([])
   const [audioTrack, setAudioTrack] = useState(0)
   // element starts muted for autoplay; the audio engine unmutes it once armed and
@@ -1145,7 +1193,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
 
   return (
     <div className="player">
-      <div className="video">
+      <div className="video" ref={videoBoxRef}>
         <video ref={videoRef} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
         <div className="plabel"><span className="pt" style={{ color: liveNow ? '#4ade80' : '#fbbf24' }}>OUTPUT · {fmt.toUpperCase()}{liveNow ? '' : ' · DVR'}</span></div>
         {/* On-air state: green ON AIR when published to the public, blue PREVIEW when the
@@ -1162,7 +1210,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         <div className="badge-live" style={liveNow ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{liveNow ? 'LIVE' : 'DVR'}</div>
         {/* The watermark is burned into the encoded output (transcode), so it is
             already in these pixels. We intentionally do NOT paint a DOM overlay. */}
-        <AudioDock eng={eng} tracks={audioTracks} currentTrack={audioTrack} onSelectTrack={setAudioTrack} />
+        <AudioDock eng={eng} tracks={audioTracks} currentTrack={audioTrack} onSelectTrack={setAudioTrack} controlsShown={controlsShown} />
         {/* legacy overlay only for the test-stream side-VTT path; real channels render
             the subtitle track natively in the player (from the manifest), so we don't
             double up here. */}
