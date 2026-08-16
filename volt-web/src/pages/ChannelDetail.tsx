@@ -677,7 +677,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
     <div className="player">
       <div className="video">
         {canPreview ? <HlsVideo src={srcVideoSrc} fallbackSrc={srcFallback} /> : <div className="grad" style={srcErrored ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
-        <div className="plabel"><span className="pt" style={{ color: srcErrored ? '#fca5a5' : '#a5b4fc' }}>SOURCE · {proto} {directHls ? 'contribution' : 'ingest'}</span></div>
+        <div className="plabel"><span className="pt" style={{ color: srcErrored ? '#fca5a5' : '#a5b4fc' }}>SOURCE · {proto}</span></div>
         <div className="badge-live" style={{ background: badgeBg }}><span className="d" />{badgeText}</div>
         {srcErrored && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
@@ -706,8 +706,14 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
       <div className="pfoot">
         <span className={`dot-s ${srcErrored ? 'down' : sourceUp ? 'live' : 'idle'}`} /> {srcErrored ? (inputFailed ? 'Source not arriving' : 'Source OK · encoder failed downstream') : sourceUp ? `Ingesting ${srcHost || proto} · repackaging` : configured ? `Source configured · ${proto} · ${srcHost || 'ingest'}` : 'No source — send one to enable output'}
         <select value={0} onChange={() => {}}>
-          {d.sources.length ? d.sources.map((s, i) => <option key={s.id} value={i}>Source · {s.role}</option>)
-            : <><option>Source · Primary</option><option>Source · Backup</option></>}
+          {d.sources.length ? d.sources.map((s, i) => {
+            // packaging: each input is a rendition, so label it by size (Source 1080p,
+            // Source 720p...). Transcode: a single mezzanine, so label by role.
+            const rung = (s as any).rendition_label as string | undefined
+            const label = d.profile?.workflow_type === 'package_only' ? (rung || s.role) : s.role
+            return <option key={s.id} value={i}>Source {label}</option>
+          })
+            : <><option>Source Primary</option><option>Source Backup</option></>}
         </select>
       </div>
       {sourceUp && ts.sourceNote && (
@@ -772,6 +778,10 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   const [cue, setCue] = useState('')
   const cuesRef = useRef<Cue[]>([])
   const didSnapRef = useRef(false)   // snap to live edge once on initial load
+  // LIVE LOCK: live is the default. We hold the live edge and auto-recover after any
+  // stall/drift; the player only leaves live when the operator deliberately scrubs the
+  // DVR timeline (set true by seekBehind), and re-locks on Go live.
+  const scrubbedRef = useRef(false)
 
   // attach the playback engine for the chosen format. HLS -> hls.js on master.m3u8;
   // DASH -> dash.js on manifest.mpd. Both populate the ladder list, autoplay, and
@@ -851,6 +861,13 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
       if (sk.length) {
         const end = sk.end(sk.length - 1), start = sk.start(0)
         setWinSec(Math.max(1, Math.round(end - start)))
+        // LIVE LOCK: if the operator hasn't scrubbed, keep pulling back to the live
+        // edge. Messy source timing makes hls.js stall and resume behind; without this
+        // it silently accumulates minutes of lag (the "-5:29 behind" we saw). Snapping
+        // whenever we drift >12s keeps the preview honestly live and self-heals stalls.
+        if (!scrubbedRef.current && end - v.currentTime > 12) {
+          try { v.currentTime = end - 0.5 } catch { /* ignore */ }
+        }
         const b = Math.max(0, Math.round(end - v.currentTime))
         setBehind(b)
         // HYSTERESIS so the LIVE/DVR badge doesn't flap around the threshold. Normal
@@ -883,10 +900,11 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
 
   function seekBehind(sec: number) {
     const v = videoRef.current; if (!v || !v.seekable.length) return
+    scrubbedRef.current = true   // deliberate DVR scrub: release the live lock
     const end = v.seekable.end(v.seekable.length - 1)
     v.currentTime = Math.max(v.seekable.start(0), end - sec)
   }
-  function goLive() { const v = videoRef.current; if (!v || !v.seekable.length) return; v.currentTime = v.seekable.end(v.seekable.length - 1) - 0.5 }
+  function goLive() { const v = videoRef.current; if (!v || !v.seekable.length) return; scrubbedRef.current = false; v.currentTime = v.seekable.end(v.seekable.length - 1) - 0.5 }
 
   return (
     <div className="player">
@@ -938,7 +956,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
       </div>
 
       <div className="pfoot">
-        <span className="dot-s live" /> Playing {fmt.toUpperCase()}{hasHls && hasDash ? ' · HLS + DASH produced' : ''}{d.captions?.enabled ? ' · live subtitles (WebVTT)' : ''}
+        <span className="dot-s live" /> Playing {fmt.toUpperCase()}{d.captions?.enabled ? ' · live subtitles (WebVTT)' : ''}
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>
           {/* HLS / DASH toggle — verify BOTH packagings play. Only shown when the
               channel produces both; otherwise there is only one output to preview. */}
