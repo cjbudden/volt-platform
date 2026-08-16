@@ -702,7 +702,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
       <div className="video">
         {canPreview ? <HlsVideo src={srcVideoSrc} fallbackSrc={srcFallback} /> : <div className="grad" style={srcErrored ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
         <div className="plabel"><span className="pt" style={{ color: srcErrored ? '#fca5a5' : '#a5b4fc' }}>SOURCE · {proto}</span></div>
-        {canPreview && <WatermarkOverlay wm={d.watermark} />}
+        {canPreview && d.profile?.workflow_type === 'transcode' && <WatermarkOverlay wm={d.watermark} />}
         <div className="badge-live" style={{ background: badgeBg }}><span className="d" />{badgeText}</div>
         {srcErrored && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
@@ -1008,7 +1008,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           color: onAir ? '#4ade80' : '#38bdf8', backdropFilter: 'blur(2px)',
         }}><span className="dot-s" style={{ background: onAir ? '#4ade80' : '#38bdf8' }} />{onAir ? 'ON AIR' : 'PREVIEW · not on air'}</div>
         <div className="badge-live" style={liveNow ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{liveNow ? 'LIVE' : 'DVR'}</div>
-        <WatermarkOverlay wm={d.watermark} />
+        {d.profile?.workflow_type === 'transcode' && <WatermarkOverlay wm={d.watermark} />}
         <div className="bug"><span className="lg">{BOLT}</span>{d.name.toUpperCase()}</div>
         {/* legacy overlay only for the test-stream side-VTT path; real channels render
             the subtitle track natively in the player (from the manifest), so we don't
@@ -1492,9 +1492,10 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             )}
           </div>
 
-          <div style={SEC}>Watermark / on-screen brand</div>
+          {d.profile?.workflow_type === 'transcode' && (<>
+          <div style={SEC}>Watermark <span style={{ color: 'var(--faint)', fontWeight: 400 }}>: burned into the transcode output</span></div>
           <div className="toggle-row">
-            <div><div className="tt">Overlay a brand watermark</div><div className="td">{d.profile?.workflow_type === 'transcode' ? 'Burned into the output.' : 'Preview only on packaged channels (burn-in needs transcode).'}</div></div>
+            <div><div className="tt">Overlay a brand watermark</div><div className="td">Burned into the output for this transcode channel.</div></div>
             <div className={`sw ${wmEnabled ? '' : 'off'}`} onClick={() => setWmEnabled(v => !v)}><i /></div>
           </div>
           {wmEnabled && (
@@ -1532,6 +1533,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           <ImagePicker open={wmPickerOpen} kinds={['brand', 'slate', 'other']} title="Choose or upload a brand watermark"
             uploadKind="brand" uploadFolder="brands"
             onClose={() => setWmPickerOpen(false)} onPick={(url) => { setWmRef(url); setWmPickerOpen(false) }} />
+          </>)}
 
           {err && <div className="err">{err}</div>}
         </div>
