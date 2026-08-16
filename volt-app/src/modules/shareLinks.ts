@@ -22,6 +22,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, badRequest, notFound } from '../util/http';
 import {
   createShareLink, openShare, findShareByToken, loadResource, ACCESS_PERIODS,
+  updateShareLink, rotateShareToken, sendShareInvite, publicShareRow, MAX_TTL_SEC,
   type ShareResourceKind,
 } from '../services/shareLinks';
 import { config } from '../config';
@@ -36,7 +37,9 @@ const createSchema = z.object({
   resourceId: z.string().uuid(),
   // accept either a named period (matches the modal dropdown) or an explicit ttl
   accessPeriod: z.string().optional(),
-  ttlSec: z.number().int().positive().max(90 * 86400).optional(),
+  ttlSec: z.number().int().positive().max(MAX_TTL_SEC).optional(),
+  // an exact date/time picked in the console (wins over accessPeriod/ttlSec)
+  expiresAt: z.string().datetime({ offset: true }).optional(),
   label: z.string().max(200).optional(),
   message: z.string().max(2000).optional(),
   recipients: z.array(z.string().email()).max(50).optional(),
@@ -48,6 +51,21 @@ const createSchema = z.object({
   notifyOnOpen: z.boolean().optional(),
   pin: z.string().min(3).max(32).optional(),
   maxViews: z.number().int().positive().max(100000).nullable().optional(),
+  // email the one-time URL to `recipients` as part of creating it
+  sendEmail: z.boolean().optional(),
+});
+
+const patchSchema = z.object({
+  label: z.string().max(200).nullable().optional(),
+  message: z.string().max(2000).nullable().optional(),
+  recipients: z.array(z.string().email()).max(50).optional(),
+  expiresAt: z.string().datetime({ offset: true }).optional(),
+  extendSec: z.number().int().positive().max(MAX_TTL_SEC).optional(),
+  maxViews: z.number().int().positive().max(100000).nullable().optional(),
+  pin: z.string().max(32).nullable().optional(),
+  watermark: z.boolean().optional(),
+  notifyOnOpen: z.boolean().optional(),
+  revoked: z.boolean().optional(),
 });
 
 shareLinksRouter.post('/', asyncHandler(async (req, res) => {
@@ -59,20 +77,40 @@ shareLinksRouter.post('/', asyncHandler(async (req, res) => {
   const out = await createShareLink({
     accountId: accountId(req), createdBy,
     resourceKind: b.resourceKind as ShareResourceKind, resourceId: b.resourceId,
-    ttlSec, label: b.label, message: b.message, recipients: b.recipients,
+    ttlSec, expiresAt: b.expiresAt, label: b.label, message: b.message, recipients: b.recipients,
     accessType: b.accessType, allowHiRes: b.allowHiRes, allowPlayer: b.allowPlayer, allowMetadata: b.allowMetadata,
     watermark: b.watermark, notifyOnOpen: b.notifyOnOpen, pin: b.pin, maxViews: b.maxViews ?? null,
   }).catch((e) => { if (e.status === 404) throw notFound('resource not found in this account'); throw e; });
+
+  // optionally mail the link out now — this is the ONLY moment the raw URL exists
+  let sent = 0;
+  if (b.sendEmail && b.recipients?.length) {
+    const resource = await loadResource(b.resourceKind as ShareResourceKind, b.resourceId, accountId(req));
+    const creator = createdBy ? await one<any>(`SELECT display_name, email FROM users WHERE id=$1`, [createdBy]) : null;
+    ({ sent } = await sendShareInvite({
+      accountId: accountId(req), url: out.url, title: resource?.title ?? 'a preview',
+      recipients: b.recipients, sharedBy: creator?.display_name ?? creator?.email ?? null,
+      message: b.message ?? null, expiresAt: out.expiresAt, hasPin: !!b.pin,
+    }));
+  }
   // the raw token/url is returned ONCE here and never again
-  res.status(201).json(out);
+  res.status(201).json({ ...out, sent });
 }));
 
 shareLinksRouter.get('/', asyncHandler(async (req, res) => {
+  // optional narrowing so a resource page asks only for its own links
+  const kind = req.query.resourceKind ? String(req.query.resourceKind) : null;
+  const rid = req.query.resourceId ? String(req.query.resourceId) : null;
   const rows = await query<any>(
-    `SELECT id, resource_kind, resource_id, label, recipients, access_type, expires_at, max_views,
-            view_count, first_opened_at, last_viewed_at, revoked, created_at, token_prefix
-       FROM share_links WHERE account_id=$1 ORDER BY created_at DESC`,
-    [accountId(req)]
+    `SELECT id, resource_kind, resource_id, label, message, recipients, access_type, expires_at, max_views,
+            view_count, first_opened_at, last_viewed_at, revoked, watermark, notify_on_open,
+            (pin_hash IS NOT NULL) AS has_pin, created_at, created_by, token_prefix
+       FROM share_links
+      WHERE account_id=$1
+        AND ($2::text IS NULL OR resource_kind=$2::share_resource_kind)
+        AND ($3::uuid IS NULL OR resource_id=$3::uuid)
+      ORDER BY created_at DESC`,
+    [accountId(req), kind, rid]
   );
   res.json(rows);
 }));
@@ -80,8 +118,33 @@ shareLinksRouter.get('/', asyncHandler(async (req, res) => {
 shareLinksRouter.get('/:id', asyncHandler(async (req, res) => {
   const row = await one<any>(`SELECT * FROM share_links WHERE id=$1 AND account_id=$2`, [req.params.id, accountId(req)]);
   if (!row) throw notFound('share link');
-  delete row.token_hash; delete row.pin_hash;
+  res.json(publicShareRow(row));
+}));
+
+shareLinksRouter.patch('/:id', asyncHandler(async (req, res) => {
+  const b = patchSchema.parse(req.body ?? {});
+  const row = await updateShareLink(req.params.id, accountId(req), b);
+  if (!row) throw notFound('share link');
   res.json(row);
+}));
+
+/** Re-issue the token. The old URL dies; the new one is shown once, like create. */
+shareLinksRouter.post('/:id/rotate', asyncHandler(async (req, res) => {
+  const send = !!(req.body ?? {}).sendEmail;
+  const out = await rotateShareToken(req.params.id, accountId(req));
+  if (!out) throw notFound('share link');
+  const row = await one<any>(`SELECT * FROM share_links WHERE id=$1 AND account_id=$2`, [req.params.id, accountId(req)]);
+  let sent = 0;
+  if (send && row?.recipients?.length) {
+    const resource = await loadResource(row.resource_kind, row.resource_id, row.account_id);
+    const creator = row.created_by ? await one<any>(`SELECT display_name, email FROM users WHERE id=$1`, [row.created_by]) : null;
+    ({ sent } = await sendShareInvite({
+      accountId: row.account_id, url: out.url, title: resource?.title ?? 'a preview',
+      recipients: row.recipients, sharedBy: creator?.display_name ?? creator?.email ?? null,
+      message: row.message, expiresAt: out.expiresAt, hasPin: !!row.pin_hash,
+    }));
+  }
+  res.json({ ...out, sent });
 }));
 
 shareLinksRouter.post('/:id/revoke', asyncHandler(async (req, res) => {

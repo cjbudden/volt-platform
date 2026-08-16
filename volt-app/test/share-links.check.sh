@@ -99,6 +99,60 @@ psql "$DATABASE_URL" -q -c "UPDATE share_links SET expires_at=now()-interval '1 
 EX=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share/$ERAW/resolve" -H 'content-type:application/json' -d '{}')
 ok "expired link resolve is 410" '[ "$EX" = "410" ]'
 
+# ===========================================================================
+# Sharing a LIVE CHANNEL + editing a link in place (recipients, custom expiry,
+# PATCH, rotate). The channel share is a separate workflow from on air: it must
+# work without the channel being published.
+# ===========================================================================
+FUTURE=$(node -e "console.log(new Date(Date.now()+3*86400000).toISOString())")
+CH=$(curl -s -X POST "http://localhost:$PORT/api/share-links" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' \
+  -d "{\"resourceKind\":\"channel\",\"resourceId\":\"0000000e-0000-0000-0000-000000000001\",\"expiresAt\":\"$FUTURE\",\"label\":\"Client approval\",\"recipients\":[\"client@partner.example\"],\"sendEmail\":true,\"maxViews\":2,\"notifyOnOpen\":true}")
+CHRAW=$(echo "$CH" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+CHID=$(echo "$CH" | sed -n 's/.*"id":"\([0-9a-f-]*\)".*/\1/p')
+ok "channel share link created" '[ -n "$CHRAW" ]'
+ok "custom expiresAt is honoured (not the 7-day default)" 'echo "$CH" | grep -q "$(echo $FUTURE | cut -c1-10)"'
+ok "sendEmail reports the deliveries it made" 'echo "$CH" | grep -q "\"sent\":1"'
+CHR=$(curl -s -X POST "http://localhost:$PORT/api/share/$CHRAW/resolve" -H 'content-type:application/json' -d '{}')
+ok "channel share resolves without the channel being on air" 'echo "$CHR" | grep -q "\"ok\":true"'
+ok "channel share is flagged live" 'echo "$CHR" | grep -q "\"live\":true"'
+ok "channel share reports whether output is available right now" 'echo "$CHR" | grep -q "\"available\":"'
+
+# --- list: scoped to a resource, exposes has_pin, never the hash ---
+LIST=$(curl -s "http://localhost:$PORT/api/share-links?resourceKind=channel&resourceId=0000000e-0000-0000-0000-000000000001" -H "authorization: Bearer $TOKA")
+ok "list can be scoped to one resource" '[ "$(echo "$LIST" | grep -o "\"resource_kind\":\"vod\"" | wc -l)" = "0" ]'
+ok "list says whether a PIN is set, without leaking it" 'echo "$LIST" | grep -q "\"has_pin\":false" && ! echo "$LIST" | grep -q "pin_hash"'
+ok "list carries the recipients it was sent to" 'echo "$LIST" | grep -q "client@partner.example"'
+
+# --- PATCH: extend, cap, PIN on, then PIN off ---
+PA=$(curl -s -X PATCH "http://localhost:$PORT/api/share-links/$CHID" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' \
+  -d '{"extendSec":604800,"maxViews":10,"pin":"7391","label":"Client approval v2"}')
+NEWEXP=$(echo "$PA" | sed -n 's/.*"expires_at":"\([^"]*\)".*/\1/p')
+ok "PATCH extends the expiry past the custom date it was created with" 'node -e "process.exit(new Date(process.argv[1])>new Date(process.argv[2])?0:1)" "$NEWEXP" "$FUTURE"'
+ok "PATCH raises the view cap" 'echo "$PA" | grep -q "\"max_views\":10"'
+ok "PATCH sets a PIN (reported as has_pin, never the value)" 'echo "$PA" | grep -q "\"has_pin\":true" && ! echo "$PA" | grep -q "7391"'
+PN=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share/$CHRAW/resolve" -H 'content-type:application/json' -d '{}')
+ok "the new PIN is enforced on the SAME url (401)" '[ "$PN" = "401" ]'
+curl -s -X PATCH "http://localhost:$PORT/api/share-links/$CHID" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' -d '{"pin":null}' >/dev/null
+PC=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share/$CHRAW/resolve" -H 'content-type:application/json' -d '{}')
+ok "clearing the PIN opens the same url again (200)" '[ "$PC" = "200" ]'
+ok "a 2-character PIN is rejected" '[ "$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "http://localhost:$PORT/api/share-links/$CHID" -H "authorization: Bearer $TOKA" -H "content-type:application/json" -d "{\"pin\":\"12\"}")" = "400" ]'
+
+# --- rotate: a new URL works, the old one is dead ---
+ROT=$(curl -s -X POST "http://localhost:$PORT/api/share-links/$CHID/rotate" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' -d '{"sendEmail":true}')
+NEWRAW=$(echo "$ROT" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+ok "rotate issues a different token" '[ -n "$NEWRAW" ] && [ "$NEWRAW" != "$CHRAW" ]'
+ok "rotate re-sends to the stored recipients" 'echo "$ROT" | grep -q "\"sent\":1"'
+ok "the rotated url resolves" '[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share/$NEWRAW/resolve" -H "content-type:application/json" -d "{}")" = "200" ]'
+ok "the old url is dead after rotate (404)" '[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share/$CHRAW/resolve" -H "content-type:application/json" -d "{}")" = "404" ]'
+
+# --- cross-tenant PATCH / rotate are 404 ---
+ok "admin B cannot PATCH A's link" '[ "$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "http://localhost:$PORT/api/share-links/$CHID" -H "authorization: Bearer $TOKB" -H "content-type:application/json" -d "{\"label\":\"x\"}")" = "404" ]'
+ok "admin B cannot rotate A's link" '[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share-links/$CHID/rotate" -H "authorization: Bearer $TOKB" -H "content-type:application/json" -d "{}")" = "404" ]'
+
+# --- email deliveries actually landed in the notification store ---
+DLV=$(psql "$DATABASE_URL" -tA -c "SELECT count(*) FROM notification_deliveries d JOIN notifications n ON n.id=d.notification_id WHERE n.topic='share_link'")
+ok "share invites are recorded as notification deliveries" '[ "$DLV" -ge 2 ]'
+
 kill $API 2>/dev/null
 echo ""
 echo "== RESULT: $pass passed, $fail failed =="
