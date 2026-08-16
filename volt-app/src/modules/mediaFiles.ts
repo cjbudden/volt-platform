@@ -29,7 +29,12 @@ mediaFilesRouter.get('/', asyncHandler(async (req, res) => {
     else { params.push(folder); where.push(`folder = $${params.length}`); }
   }
   if (kind) { params.push(kind); where.push(`kind = $${params.length}`); }
-  if (q) { params.push(`%${q}%`); where.push(`(name ILIKE $${params.length} OR path ILIKE $${params.length})`); }
+  const term = (q ?? '').trim();
+  if (term) {
+    params.push(`%${term}%`);
+    // match the file name, its folder path, OR any of its tags
+    where.push(`(name ILIKE $${params.length} OR path ILIKE $${params.length} OR array_to_string(tags, ' ') ILIKE $${params.length})`);
+  }
   if (tag) { params.push(tag); where.push(`$${params.length} = ANY(tags)`); }
   const rows = await query(`SELECT * FROM media_files WHERE ${where.join(' AND ')} ORDER BY folder, name`, params);
   res.json(rows.map((r: any) => ({ ...r, url: urlFor(r.store_key) })));

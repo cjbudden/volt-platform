@@ -46,11 +46,18 @@ export default function ImageLibrary() {
 
   async function loadFolders() { try { setFolders((await api.fileFolders()).folders) } catch { /* */ } }
   async function load() {
-    try { setFiles(await api.files({ folder: folder || '', recursive: true, kind: kind === 'all' ? undefined : kind, q: q || undefined })) }
+    try { setErr(''); setFiles(await api.files({ folder: folder || '', recursive: true, kind: kind === 'all' ? undefined : kind, q: q.trim() || undefined })) }
     catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { loadFolders() }, [])
-  useEffect(() => { setFiles(null); load() /* eslint-disable-next-line */ }, [folder, kind, q])
+  // folder / kind change reloads immediately; the search term is debounced so typing
+  // doesn't fire a request per keystroke (and doesn't flicker the grid to Loading).
+  useEffect(() => { setFiles(null); load() /* eslint-disable-next-line */ }, [folder, kind])
+  useEffect(() => {
+    const t = setTimeout(() => { load() }, 200)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line
+  }, [q])
 
   // ---- staging: build a review list instead of uploading immediately ---------
   function stageFiles(list: FileList | File[]) {
