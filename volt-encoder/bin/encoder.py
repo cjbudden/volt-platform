@@ -709,6 +709,13 @@ def start_captions(cfg, out_dir):
     sub_root = os.path.join(out_dir, "subtitles")
     for l in langs:
         os.makedirs(os.path.join(sub_root, l), exist_ok=True)
+        # Write an EMPTY live subtitle playlist up-front. hls.js loads the master ONCE,
+        # so the subtitle track must be advertised from the very first companion write —
+        # otherwise a player that connects before the first cue is produced never gets a
+        # subtitle track for the whole session. This empty playlist makes the track exist
+        # immediately (no 404) and it fills in as cues arrive.
+        with open(os.path.join(sub_root, l, "subs.m3u8"), "w") as fh:
+            fh.write(_live_sub_playlist([], chunk, 0, time.time()))
     tmp = os.path.join(WORK_DIR, "cap_audio")
     os.makedirs(tmp, exist_ok=True)
     audio_url = _captions_audio_url(cfg)

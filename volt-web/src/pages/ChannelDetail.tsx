@@ -981,7 +981,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   // CAPTION DELIVERY LATENCY: captions are produced ~12s after the audio, so when they
   // are on we hold the play point back by this much. "Live" then means the point where
   // the subtitles already exist and align, not the bleeding edge.
-  const capHold = d.captions?.enabled ? 18 : 0
+  const capHold = d.captions?.enabled ? 14 : 0
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const videoBoxRef = useRef<HTMLDivElement | null>(null)
   const hlsRef = useRef<any>(null)
@@ -1181,9 +1181,11 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           const depth = end - start
           const target = Math.min(capHold || 0.5, Math.max(0.5, depth - 3))
           const behindNow = end - v.currentTime
-          // hold at the play point: pull back if we drifted well behind, and pull back
-          // from the bleeding edge if captions are on (so subs are always present).
-          if (behindNow > target + 12 || behindNow < Math.max(0, target - 6)) {
+          // DON'T fight hls.js's own live sync (that caused the start jitter). Only step
+          // in on a real problem: a big stall that left us far behind, or running up to
+          // the bleeding edge where captions/subs would not exist yet. A wide deadband
+          // in between lets the player hold a smooth position.
+          if (behindNow > target + 30 || behindNow < 1.5) {
             try { v.currentTime = end - target } catch { /* ignore */ }
           }
         }
@@ -1194,9 +1196,12 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
     return () => v.removeEventListener('timeupdate', onT)
   }, [])
 
-  // poll the live subtitle track and pick the current cue
+  // poll the live subtitle track and pick the current cue. LEGACY: this drives the
+  // DOM-overlay caption path used only by the test-stream side-VTT. Real channels render
+  // captions NATIVELY from the manifest subtitle track, so skip this poll entirely when
+  // captions are enabled (it would 404 on the non-existent /subs/<lang>.vtt).
   useEffect(() => {
-    if (!subOn) { setCue(''); return }
+    if (!subOn || d.captions?.enabled) { setCue(''); return }
     const url = ts.subtitles[subLang]; if (!url) return
     let stop = false
     async function poll() {
@@ -1210,7 +1215,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
       setCue(hit?.text || '')
     }, 300)
     return () => { stop = true; clearInterval(iv); clearInterval(tick) }
-  }, [subOn, subLang, ts.subtitles])
+  }, [subOn, subLang, ts.subtitles, d.captions?.enabled])
 
   function seekBehind(sec: number) {
     const v = videoRef.current; if (!v || !v.seekable.length) return
