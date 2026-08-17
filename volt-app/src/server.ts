@@ -51,13 +51,23 @@ export function createServer() {
   app.get('/console', (_req, res) => res.redirect('/console.html'));
 
   // TEST BUILD origin: serve the locally-generated HLS/DASH/WebVTT so the app player
-  // can play back a real live test stream. Playlists must not be cached; segments can.
+  // can play back a real live test stream.
+  //
+  // CACHE: the packager REUSES the same segment filenames every run (seg_1.m4s,
+  // init.mp4, sub_N.vtt), so a segment URL does NOT identify unique content across runs.
+  // Marking segments `immutable` therefore poisons the browser cache: after a restart the
+  // player replays the PREVIOUS run's segment-1 (old footage) and old caption segments
+  // until it walks past the cached range, then "jumps to live". So we must NOT cache
+  // segments immutably here — `no-cache` keeps a copy but forces revalidation (cheap 304
+  // when unchanged within a run, a fresh fetch when the same filename holds new content
+  // after a restart). Playlists are never stored.
   app.use('/origin', (req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     if (/\.(m3u8|mpd)$/.test(req.path)) res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    else if (/\.(m4s|mp4|ts|vtt)$/.test(req.path)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    else if (/\.(m4s|mp4|ts|vtt)$/.test(req.path)) res.setHeader('Cache-Control', 'no-cache');
     next();
   }, express.static(config.testStream.originDir, {
+    cacheControl: false,   // don't let express.static re-add its own Cache-Control
     setHeaders: (res, p) => {
       if (p.endsWith('.m3u8')) res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       else if (p.endsWith('.mpd')) res.setHeader('Content-Type', 'application/dash+xml');
