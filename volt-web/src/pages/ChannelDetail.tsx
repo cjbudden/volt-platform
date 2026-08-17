@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, originUrl, thumbUrl, type ChannelDetail as CD, type ChannelSettingsPatch, type ShareCreated, type ShareLinkRow, type WatermarkCfg } from '../api'
-import { qrSvg } from '../qr'
+import { api, originUrl, thumbUrl, type ChannelDetail as CD, type ChannelSettingsPatch, type ShareLinkRow, type WatermarkCfg, type FailoverMode, type FailoverTestState } from '../api'
 import { navigate } from '../router'
 import { subscribeLive } from '../liveStatus'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
@@ -106,6 +105,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   const outputReady = outGate?.status === 'healthy'   // output packaged + advancing
   // ONE consistent status: the header uses the SAME `overall` roll-up the list uses, so
   // they never disagree. error > degraded > on air > ready > starting > stopped/idle.
+  const trulyOnAir = published && d.onAir
   const ov = d.health?.overall || (sourceUp ? 'starting' : 'idle')
   const OVMAP: Record<string, { label: string; cls: string }> = {
     onair: { label: 'ON AIR', cls: 'live' },
@@ -231,6 +231,8 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
       <DualPlayers d={d} captionLangs={captionLangs} sourceUp={sourceUp} onAir={published}
         onSendSource={() => setConfirmStart(true)} onGoLive={() => setAir(true)} busy={busy} />
 
+      <FailoverTestPanel d={d} sourceUp={sourceUp} />
+
       <EpgStrip d={d}
         onAddEpg={() => navigate('events')}
         onHideEpg={async () => { try { await api.updateChannel(d.id, { epgEnabled: false }); await load() } catch (e: any) { setErr(e.message) } }} />
@@ -297,7 +299,7 @@ function StartConfirm({ d, onCancel, onConfirm }: { d: CD; onCancel: () => void;
    relabel that as ON AIR — and FAILED (red) when published but the public stream is
    broken. `onAir` (published intent) is accepted for API stability but the status is
    authoritative from the backend. */
-function PipelineStrip({ d }: { d: CD; onQc?: () => void; onAir?: boolean }) {
+function PipelineStrip({ d, onQc }: { d: CD; onQc: () => void; onAir?: boolean }) {
   const gates = d.health?.gates || []
   if (!gates.length) return null
   return (
@@ -409,334 +411,129 @@ function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefr
 /* A PRIVATE preview link for a client/reviewer to approve before go-live. This is a
    SEPARATE workflow from on air / public playback: it is secured only by an optional
    PIN + an expiry (and an optional view cap), ignores geo/access rules, and plays the
-   packaged output whenever the source is active — it does NOT publish the channel.
-
-   Two steps: set the link up, then the created link (URL + QR + who it went to). The
-   raw URL exists only at that moment — we store a hash — so it is shown once and can
-   only be re-issued by regenerating the token. */
+   packaged output whenever the source is active — it does NOT publish the channel. */
 const SHARE_PERIODS: { label: string; sec: number }[] = [
   { label: '1 day', sec: 86400 }, { label: '3 days', sec: 3 * 86400 },
   { label: '7 days', sec: 7 * 86400 }, { label: '14 days', sec: 14 * 86400 },
   { label: '30 days', sec: 30 * 86400 },
 ]
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-function absUrl(u: string) { return /^https?:\/\//i.test(u) ? u : `${location.origin}${u}` }
-/** "in 6 days" / "in 4 hours" / "expired" — the number that actually matters here. */
-function untilLabel(iso: string): string {
-  const ms = new Date(iso).getTime() - Date.now()
-  if (ms <= 0) return 'expired'
-  const h = ms / 3600000
-  if (h < 1) return `in ${Math.max(1, Math.round(ms / 60000))} min`
-  if (h < 48) return `in ${Math.round(h)} h`
-  return `in ${Math.round(h / 24)} days`
-}
-/** local datetime-local value (no seconds) for an ISO instant */
-function toLocalInput(iso: string): string {
-  const d = new Date(iso)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
-}
-
 function ShareDrawer({ d, onClose }: { d: CD; onClose: () => void }) {
-  // --- step 1: set up -------------------------------------------------------
   const [label, setLabel] = useState('')
   const [ttlSec, setTtlSec] = useState(7 * 86400)
-  const [customExpiry, setCustomExpiry] = useState('')          // datetime-local, '' = use the preset
-  const [recipients, setRecipients] = useState<string[]>([])
-  const [recipInput, setRecipInput] = useState('')
-  const [sendEmail, setSendEmail] = useState(true)
   const [pin, setPin] = useState('')
-  const [maxViews, setMaxViews] = useState('')
   const [message, setMessage] = useState('')
-  const [watermark, setWatermark] = useState(true)
-  const [notifyOnOpen, setNotifyOnOpen] = useState(true)
-
-  // --- step 2: the created link --------------------------------------------
-  const [created, setCreated] = useState<(ShareCreated & { pinShown?: string }) | null>(null)
-  const [copied, setCopied] = useState(false)
-
+  const [maxViews, setMaxViews] = useState('')
   const [busy, setBusy] = useState(false)
+  const [created, setCreated] = useState<{ url: string; expiresAt: string } | null>(null)
+  const [copied, setCopied] = useState(false)
   const [err, setErr] = useState('')
   const [links, setLinks] = useState<ShareLinkRow[]>([])
-  const [showLinks, setShowLinks] = useState(false)
 
   async function loadLinks() {
-    try { setLinks(await api.shareLinks({ resourceKind: 'channel', resourceId: d.id })) } catch { /* ignore */ }
+    try { const all = await api.shareLinks(); setLinks(all.filter(l => l.resource_id === d.id)) } catch { /* ignore */ }
   }
   useEffect(() => { loadLinks() /* eslint-disable-next-line */ }, [d.id])
 
-  function addRecipient(raw?: string) {
-    const parts = (raw ?? recipInput).split(/[,;\s]+/).map(s => s.trim()).filter(Boolean)
-    if (!parts.length) return
-    const bad = parts.find(p => !EMAIL_RE.test(p))
-    if (bad) { setErr(`"${bad}" is not a valid email address`); return }
-    setRecipients(r => Array.from(new Set([...r, ...parts])))
-    setRecipInput(''); setErr('')
-  }
-  const expiresAtIso = customExpiry ? new Date(customExpiry).toISOString() : undefined
-  const pinOk = !pin.trim() || pin.trim().length >= 3
-
   async function create() {
-    if (!pinOk) { setErr('A PIN needs at least 3 characters — or leave it empty for no PIN.'); return }
     setBusy(true); setErr('')
     try {
       const out = await api.createShareLink({
-        resourceKind: 'channel', resourceId: d.id,
-        ...(expiresAtIso ? { expiresAt: expiresAtIso } : { ttlSec }),
+        resourceKind: 'channel', resourceId: d.id, ttlSec,
         label: label || undefined, message: message || undefined,
-        recipients: recipients.length ? recipients : undefined,
-        sendEmail: sendEmail && recipients.length > 0,
-        watermark, notifyOnOpen,
         pin: pin.trim() ? pin.trim() : undefined,
         maxViews: maxViews.trim() ? Number(maxViews) : null,
       })
-      setCreated({ ...out, url: absUrl(out.url), pinShown: pin.trim() || undefined })
+      setCreated({ url: absUrl(out.url), expiresAt: out.expiresAt })
       await loadLinks()
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
-
-  async function copy(text: string) {
-    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1600) } catch { /* ignore */ }
-  }
-  async function extend(l: ShareLinkRow, sec: number) {
-    setErr('')
-    try { await api.updateShareLink(l.id, { extendSec: sec }); await loadLinks() } catch (e: any) { setErr(e.message) }
-  }
-  async function regenerate(l: ShareLinkRow) {
-    if (!confirm('Regenerate this link?\n\nThe URL already sent stops working immediately and a new one is issued.')) return
-    setBusy(true); setErr('')
-    try {
-      const out = await api.rotateShareLink(l.id, l.recipients?.length > 0)
-      setCreated({ ...out, url: absUrl(out.url) })
-      await loadLinks()
-    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
-  }
-  async function revoke(id: string) {
-    try { await api.revokeShareLink(id); await loadLinks() } catch (e: any) { setErr(e.message) }
-  }
-
-  function resetForm() {
-    setCreated(null); setPin(''); setLabel(''); setMessage(''); setMaxViews('')
-    setRecipients([]); setRecipInput(''); setCustomExpiry('')
-  }
-
-  const live = links.filter(l => !l.revoked && new Date(l.expires_at).getTime() > Date.now())
+  function absUrl(u: string) { return /^https?:\/\//i.test(u) ? u : `${location.origin}${u}` }
+  async function copy() { if (!created) return; try { await navigator.clipboard.writeText(created.url); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* ignore */ } }
+  async function revoke(id: string) { try { await api.revokeShareLink(id); await loadLinks() } catch (e: any) { setErr(e.message) } }
 
   return (
-    <div className="drawer-scrim" onClick={onClose}>
-      <div className="drawer" onClick={e => e.stopPropagation()} style={{ width: 520 }}>
-        <div className="drawer-h">
-          <div className="t">{created ? 'Share link ready' : 'Share a preview'}</div>
-          <button className="xbtn" onClick={onClose}>✕</button>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 60, display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 'min(560px,96vw)', maxHeight: '92vh', overflow: 'auto', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+          <h2 style={{ margin: 0 }}>Share a preview</h2>
+          <div style={{ flex: 1 }} />
+          <button className="btn ghost" onClick={onClose}>Close</button>
         </div>
+        <p style={{ color: 'var(--muted)', marginTop: 4 }}>
+          A private link to preview <b>{d.name}</b> for a client or reviewer to approve before go-live.
+          Secured by an expiry and an optional PIN. This does not put the channel on air and ignores geo/access rules.
+        </p>
 
-        <div className="drawer-b">
-          {/* what this is — the distinction from going on air matters */}
-          <div style={{ display: 'flex', gap: 10, padding: '11px 13px', borderRadius: 11, background: 'var(--brand-dim)', border: '1px solid rgba(63,123,255,.32)', marginBottom: 16 }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="#9db8ff" strokeWidth="2" style={{ width: 16, height: 16, flex: 'none', marginTop: 2 }}>
-              <circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" />
-            </svg>
-            <div style={{ fontSize: 12.5, color: '#c8d5f5', lineHeight: 1.5 }}>
-              A private link to preview <b>{d.name}</b> before go-live. Secured by an expiry and an optional PIN,
-              it ignores geo and access rules, and does <b>not</b> put the channel on air.
+        {!created ? (
+          <>
+            <div style={{ display: 'grid', gap: 12, margin: '12px 0' }}>
+              <label style={{ display: 'grid', gap: 5 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Label (optional)</span>
+                <input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Client approval — cooking show" />
+              </label>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <label style={{ display: 'grid', gap: 5, flex: '1 1 160px' }}>
+                  <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Link expires after</span>
+                  <select value={ttlSec} onChange={e => setTtlSec(Number(e.target.value))}>
+                    {SHARE_PERIODS.map(p => <option key={p.sec} value={p.sec}>{p.label}</option>)}
+                  </select>
+                </label>
+                <label style={{ display: 'grid', gap: 5, flex: '1 1 120px' }}>
+                  <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>PIN (optional)</span>
+                  <input value={pin} onChange={e => setPin(e.target.value)} inputMode="numeric" placeholder="e.g. 4823" />
+                </label>
+                <label style={{ display: 'grid', gap: 5, flex: '1 1 120px' }}>
+                  <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Max views (optional)</span>
+                  <input value={maxViews} onChange={e => setMaxViews(e.target.value.replace(/[^0-9]/g, ''))} inputMode="numeric" placeholder="unlimited" />
+                </label>
+              </div>
+              <label style={{ display: 'grid', gap: 5 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Note to recipient (optional)</span>
+                <textarea value={message} onChange={e => setMessage(e.target.value)} rows={2} placeholder="Please review and let me know if we're good to go live." style={{ resize: 'vertical' }} />
+              </label>
+            </div>
+            {err && <div className="err" style={{ marginBottom: 10 }}>{err}</div>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn ghost" onClick={onClose}>Cancel</button>
+              <button className="btn primary" disabled={busy} onClick={create}>{busy ? 'Creating…' : 'Create share link'}</button>
+            </div>
+          </>
+        ) : (
+          <div style={{ margin: '12px 0' }}>
+            <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(74,222,128,.10)', border: '1px solid rgba(74,222,128,.4)', marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, color: '#4ade80', marginBottom: 6 }}>Share link created</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <code style={{ flex: 1, fontSize: 12.5, wordBreak: 'break-all', background: 'rgba(148,163,184,.12)', padding: '8px 10px', borderRadius: 8 }}>{created.url}</code>
+                <button className="btn primary" onClick={copy} style={{ whiteSpace: 'nowrap' }}>{copied ? 'Copied' : 'Copy'}</button>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>Expires {new Date(created.expiresAt).toLocaleString()}{pin.trim() ? ' · PIN protected' : ''}. The full link is shown once here.</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn ghost" onClick={() => { setCreated(null); setPin(''); setLabel(''); setMessage(''); setMaxViews('') }}>Create another</button>
+              <button className="btn primary" onClick={onClose}>Done</button>
             </div>
           </div>
+        )}
 
-          {!created ? (
-            <>
-              <div className="field">
-                <label>Label <span style={{ color: 'var(--faint)', fontWeight: 500 }}>— internal, so you can tell links apart</span></label>
-                <input className="inp" value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Client approval — cooking show" />
-              </div>
-
-              <div style={SEC}>Who it goes to</div>
-              <div className="field">
-                <label>Recipients</label>
-                {recipients.length > 0 && (
-                  <div className="chipset" style={{ marginBottom: 8 }}>
-                    {recipients.map(r => (
-                      <span key={r} className="selchip sel" style={{ cursor: 'default' }}>
-                        {r}
-                        <button className="xbtn" style={{ fontSize: 13, lineHeight: 1, padding: 0 }} title="Remove"
-                          onClick={() => setRecipients(list => list.filter(x => x !== r))}>✕</button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input className="inp" value={recipInput} onChange={e => setRecipInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addRecipient() } }}
-                    onBlur={() => recipInput.trim() && addRecipient()}
-                    placeholder="name@client.com — Enter to add" />
-                  <button type="button" className="btn ghost" onClick={() => addRecipient()}>Add</button>
+        {links.length > 0 && (
+          <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 14 }}>Existing links for this channel</h3>
+            {links.map(l => (
+              <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--border)', fontSize: 12.5 }}>
+                <span className={`dot-s ${l.revoked ? 'idle' : new Date(l.expires_at).getTime() < Date.now() ? 'warn' : 'live'}`} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.label || l.token_prefix + '…'}</div>
+                  <div style={{ color: 'var(--faint)' }}>{l.revoked ? 'revoked' : `expires ${new Date(l.expires_at).toLocaleDateString()}`} · {l.view_count} view{l.view_count === 1 ? '' : 's'}</div>
                 </div>
-                <div className="hintxt">Optional. Anyone with the link can open it, so recipients are a record of who you sent it to.</div>
+                {!l.revoked && <button className="btn ghost" style={{ padding: '4px 10px', color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }} onClick={() => revoke(l.id)}>Revoke</button>}
               </div>
-              <div className="toggle-row">
-                <div>
-                  <div className="tt">Email the link to them</div>
-                  <div className="td">{recipients.length ? `Sends to ${recipients.length} recipient${recipients.length === 1 ? '' : 's'} now.` : 'Add a recipient to enable.'}</div>
-                </div>
-                <div className={`sw ${sendEmail && recipients.length ? '' : 'off'}`} onClick={() => recipients.length && setSendEmail(v => !v)} />
-              </div>
-
-              <div style={SEC}>How long it lives</div>
-              <div className="field">
-                <label>Expires</label>
-                <div className="chipset">
-                  {SHARE_PERIODS.map(p => (
-                    <div key={p.sec} className={`selchip ${!customExpiry && ttlSec === p.sec ? 'sel' : ''}`}
-                      onClick={() => { setTtlSec(p.sec); setCustomExpiry('') }}>{p.label}</div>
-                  ))}
-                  <div className={`selchip ${customExpiry ? 'sel' : ''}`}
-                    onClick={() => setCustomExpiry(customExpiry ? '' : toLocalInput(new Date(Date.now() + ttlSec * 1000).toISOString()))}>
-                    Pick a date
-                  </div>
-                </div>
-                {customExpiry && (
-                  <input className="inp" type="datetime-local" value={customExpiry} style={{ marginTop: 9 }}
-                    min={toLocalInput(new Date(Date.now() + 60000).toISOString())}
-                    onChange={e => setCustomExpiry(e.target.value)} />
-                )}
-                <div className="hintxt">
-                  Dies {customExpiry ? new Date(customExpiry).toLocaleString() : new Date(Date.now() + ttlSec * 1000).toLocaleString()} — 90 days maximum.
-                </div>
-              </div>
-
-              <div style={SEC}>Protection</div>
-              <div className="field">
-                <label>PIN <span style={{ color: 'var(--faint)', fontWeight: 500 }}>— optional, share it separately</span></label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input className="inp" value={pin} onChange={e => setPin(e.target.value)} inputMode="numeric" placeholder="No PIN" />
-                  <button type="button" className="btn ghost" style={{ whiteSpace: 'nowrap' }}
-                    onClick={() => setPin(String(Math.floor(1000 + Math.random() * 9000)))}>Generate</button>
-                  {pin && <button type="button" className="btn ghost" onClick={() => setPin('')}>Clear</button>}
-                </div>
-                {!pinOk && <div className="err">At least 3 characters.</div>}
-              </div>
-              <div className="field">
-                <label>View limit <span style={{ color: 'var(--faint)', fontWeight: 500 }}>— optional</span></label>
-                <input className="inp" value={maxViews} inputMode="numeric" placeholder="Unlimited"
-                  onChange={e => setMaxViews(e.target.value.replace(/[^0-9]/g, ''))} />
-                <div className="hintxt">The link stops working after this many opens.</div>
-              </div>
-              <div className="toggle-row">
-                <div>
-                  <div className="tt">Watermark the preview</div>
-                  <div className="td">Overlays who it was shared with, to discourage re-sharing.</div>
-                </div>
-                <div className={`sw ${watermark ? '' : 'off'}`} onClick={() => setWatermark(v => !v)} />
-              </div>
-              <div className="toggle-row">
-                <div>
-                  <div className="tt">Tell me when it is opened</div>
-                  <div className="td">A notification the first time someone views it.</div>
-                </div>
-                <div className={`sw ${notifyOnOpen ? '' : 'off'}`} onClick={() => setNotifyOnOpen(v => !v)} />
-              </div>
-
-              <div style={SEC}>Message</div>
-              <div className="field">
-                <label>Note to the recipient <span style={{ color: 'var(--faint)', fontWeight: 500 }}>— optional</span></label>
-                <textarea className="inp" value={message} rows={3} style={{ resize: 'vertical' }}
-                  onChange={e => setMessage(e.target.value)}
-                  placeholder="Please review and let me know if we're good to go live." />
-                <div className="hintxt">Shown on the preview page, and in the email if you send one.</div>
-              </div>
-              {err && <div className="err">{err}</div>}
-            </>
-          ) : (
-            <>
-              <div style={{ padding: 16, borderRadius: 12, background: 'rgba(74,222,128,.08)', border: '1px solid rgba(74,222,128,.35)' }}>
-                <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, color: '#4ade80', marginBottom: 8, fontSize: 13 }}>Copy it now — this is the only time it is shown</div>
-                    <code style={{ display: 'block', fontSize: 12, wordBreak: 'break-all', background: 'rgba(148,163,184,.12)', padding: '9px 11px', borderRadius: 8, marginBottom: 10 }}>{created.url}</code>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="btn primary" onClick={() => copy(created.url)}>{copied ? 'Copied' : 'Copy link'}</button>
-                      <a className="btn ghost" href={created.url} target="_blank" rel="noreferrer">Open</a>
-                    </div>
-                  </div>
-                  <div style={{ flex: 'none', background: '#fff', padding: 6, borderRadius: 10 }}
-                    title="Scan to open the preview on a phone or tablet"
-                    dangerouslySetInnerHTML={{ __html: qrSvg(created.url, 118) }} />
-                </div>
-              </div>
-
-              <div style={{ marginTop: 14 }}>
-                <div className="kv"><span className="k">Expires</span><span className="v">{new Date(created.expiresAt).toLocaleString()} ({untilLabel(created.expiresAt)})</span></div>
-                <div className="kv"><span className="k">PIN</span><span className="v">{created.pinShown ? `${created.pinShown} — send this separately` : 'None'}</span></div>
-                <div className="kv"><span className="k">Emailed</span><span className="v">{created.sent ? `Sent to ${created.sent} recipient${created.sent === 1 ? '' : 's'}` : 'Not sent'}</span></div>
-              </div>
-              {err && <div className="err">{err}</div>}
-            </>
-          )}
-
-          {/* existing links for this channel */}
-          {links.length > 0 && (
-            <div style={{ marginTop: 20, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-              <button className="btn ghost" style={{ width: '100%', justifyContent: 'space-between' }} onClick={() => setShowLinks(v => !v)}>
-                <span>Links for this channel — {live.length} active of {links.length}</span>
-                <span style={{ color: 'var(--faint)' }}>{showLinks ? '▲' : '▼'}</span>
-              </button>
-              {showLinks && links.map(l => {
-                const expired = new Date(l.expires_at).getTime() < Date.now()
-                const cls = l.revoked ? 'idle' : expired ? 'warn' : 'live'
-                const capped = l.max_views != null && l.view_count >= l.max_views
-                return (
-                  <div key={l.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '11px 0', borderBottom: '1px solid var(--border)', fontSize: 12.5 }}>
-                    <span className={`dot-s ${cls}`} style={{ marginTop: 5 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {l.label || `${l.token_prefix}…`}
-                        {l.has_pin && <span className="tag idle" style={{ marginLeft: 7 }}>PIN</span>}
-                        {capped && !l.revoked && <span className="tag warn" style={{ marginLeft: 7 }}>view limit hit</span>}
-                      </div>
-                      <div style={{ color: 'var(--faint)', marginTop: 3 }}>
-                        {l.revoked ? 'Revoked' : expired ? 'Expired' : `Expires ${untilLabel(l.expires_at)}`}
-                        {' · '}{l.view_count} view{l.view_count === 1 ? '' : 's'}{l.max_views != null ? ` of ${l.max_views}` : ''}
-                        {l.last_viewed_at ? ` · last opened ${new Date(l.last_viewed_at).toLocaleDateString()}` : ' · never opened'}
-                      </div>
-                      {l.recipients?.length > 0 && (
-                        <div style={{ color: 'var(--faint)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          Sent to {l.recipients.join(', ')}
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}>
-                        {!l.revoked && <button className="btn ghost" style={SMALL_BTN} onClick={() => extend(l, 7 * 86400)}>Extend 7 days</button>}
-                        <button className="btn ghost" style={SMALL_BTN} onClick={() => regenerate(l)} disabled={busy}>New URL</button>
-                        {!l.revoked
-                          ? <button className="btn ghost" style={{ ...SMALL_BTN, color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }} onClick={() => revoke(l.id)}>Revoke</button>
-                          : <span style={{ color: 'var(--faint)', alignSelf: 'center' }}>Regenerating also un-revokes</span>}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="drawer-f">
-          {!created ? (
-            <>
-              <button className="btn ghost" onClick={onClose}>Cancel</button>
-              <button className="btn primary" disabled={busy || !pinOk} onClick={create}>
-                {busy ? 'Creating…' : sendEmail && recipients.length ? 'Create and send' : 'Create link'}
-              </button>
-            </>
-          ) : (
-            <>
-              <button className="btn ghost" onClick={resetForm}>Create another</button>
-              <button className="btn primary" onClick={onClose}>Done</button>
-            </>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
 }
-const SMALL_BTN: React.CSSProperties = { padding: '4px 10px', fontSize: 11.5 }
 
 /* ------------------------------------------------------------------ players */
 interface Cue { start: number; end: number; text: string }
@@ -957,7 +754,7 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
         const disp = dispRef.current
         let real = false
         if (an && data && ctxRef.current && ctxRef.current.state === 'running') {
-          an.getByteFrequencyData(data as Uint8Array<ArrayBuffer>)
+          an.getByteFrequencyData(data)
           const bins = data.length
           // log-spaced band edges so each bar covers a musically meaningful range (low
           // bass dominates a linear split — that was the "single bar" look). Computed once.
@@ -1289,8 +1086,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           const at = player.getTracksFor('audio') || []
           setAudioTracks(at.map((t: any, i: number) => ({ id: i, label: (t.labels && t.labels[0]?.text) || t.lang || `Audio ${i + 1}` })))
         } catch { /* ignore */ }
-        if (video) { softMute(video); video.play().catch(() => {}) }
-        snapSoon()
+        softMute(video); video.play().catch(() => {}); snapSoon()
       }
       try { player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, onInit) } catch { /* ignore */ }
     }
@@ -1550,6 +1346,88 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   )
 }
 
+/* ------------------------------------------------- pre-on-air failover test */
+// Validate the failover paths BEFORE going on air: force the encoder to slate, loop,
+// or backup (or simulate a primary loss) and watch the real output switch. On channels
+// where the encoder selector is not running (transcode / no redundancy), the same
+// controls drive a client-side PREVIEW of what each failover state looks like, so the
+// sequence can still be demonstrated to a client.
+const FAILOVER_STEPS: { m: FailoverMode; label: string; hue: string; note: string }[] = [
+  { m: 'primary_down', label: 'Simulate primary loss', hue: '#fbbf24', note: 'Primary feed drops — selector picks the best remaining source' },
+  { m: 'slate', label: 'Slate', hue: '#38bdf8', note: 'Static slate card covers the output' },
+  { m: 'loop', label: 'Loop', hue: '#a78bfa', note: 'Loop / VOD filler plays' },
+  { m: 'backup', label: 'Backup source', hue: '#4ade80', note: 'Switch to the backup input' },
+]
+function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
+  const [cap, setCap] = useState<FailoverTestState | null>(null)
+  const [mode, setMode] = useState<FailoverMode>('auto')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    let ok = true
+    api.failoverTestStatus(d.id).then(s => { if (ok) { setCap(s); setMode(s.mode) } }).catch(() => {})
+    return () => { ok = false }
+  }, [d.id])
+  const real = !!cap?.realFailover
+  const apply = async (m: FailoverMode) => {
+    setErr('')
+    if (real) {
+      setBusy(true)
+      try { const s = await api.failoverTest(d.id, m); setMode(s.mode); setCap(s) } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+    } else {
+      // preview only — no encoder selector to drive; still record the mode so the
+      // panel demonstrates the target state. Best-effort write for parity.
+      setMode(m); api.failoverTest(d.id, m).catch(() => {})
+    }
+  }
+  const active = FAILOVER_STEPS.find(s => s.m === mode)
+  return (
+    <div className="card" style={{ marginBottom: 18, padding: '14px 16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
+        <b style={{ fontSize: 14 }}>Pre-flight · Failover test</b>
+        <span className={`tag ${real ? 'live' : 'idle'}`} style={{ fontSize: 10.5 }}>
+          <span className={`dot-s ${real ? 'live' : 'idle'}`} />{real ? 'LIVE ENCODER FAILOVER' : 'PREVIEW SIMULATION'}
+        </span>
+        {mode !== 'auto' && <span className="tag warn" style={{ fontSize: 10.5 }}>ACTIVE: {active?.label || mode}</span>}
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
+        {real
+          ? 'Force each failover path and watch the OUTPUT player switch, then resume. This exercises the real encoder selector — safe to run before you go on air.'
+          : `This channel has no encoder-level failover (${cap?.workflowType === 'transcode' ? 'transcode workflow' : 'redundancy not enabled'}), so these controls preview what each failover state looks like. Enable input failover on a package channel to test the real switch.`}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {FAILOVER_STEPS.map(s => (
+          <button key={s.m} className={`btn ${mode === s.m ? 'primary' : 'ghost'}`} disabled={busy}
+            title={s.note} onClick={() => apply(s.m)} style={{ padding: '7px 12px' }}>
+            <span className="dot-s" style={{ background: s.hue, marginRight: 6 }} />{s.label}
+          </button>
+        ))}
+        <button className={`btn ${mode === 'auto' ? 'primary' : 'ghost'}`} disabled={busy}
+          onClick={() => apply('auto')} style={{ padding: '7px 12px', marginLeft: 'auto' }}>
+          Resume normal
+        </button>
+      </div>
+      {!real && mode !== 'auto' && (
+        <div style={{ marginTop: 12, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)', aspectRatio: '16/6', position: 'relative', background: 'radial-gradient(120% 120% at 50% 20%,#141a26 0%,#0b0f16 70%)', display: 'grid', placeItems: 'center' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 11, letterSpacing: 1, color: 'var(--faint)', marginBottom: 6 }}>SIMULATED FAILOVER</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: active?.hue || '#fff' }}>{active?.label?.toUpperCase()}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6, maxWidth: 420 }}>{active?.note}</div>
+          </div>
+          <span style={{ position: 'absolute', top: 8, right: 10, fontSize: 10, fontWeight: 700, color: '#fbbf24', border: '1px solid rgba(251,191,36,.5)', borderRadius: 999, padding: '2px 8px' }}>PREVIEW</span>
+        </div>
+      )}
+      {real && mode !== 'auto' && !sourceUp && (
+        <div className="td" style={{ color: 'var(--warn)', marginTop: 10 }}>The channel is not running — start it so the encoder can act on the failover command.</div>
+      )}
+      {real && mode !== 'auto' && sourceUp && (
+        <div className="td" style={{ color: 'var(--muted)', marginTop: 10 }}>Watch the OUTPUT player above — it should switch within a second or two. Press Resume normal when done.</div>
+      )}
+      {err && <div className="err" style={{ marginTop: 10 }}>{err}</div>}
+    </div>
+  )
+}
+
 /* --------------------------------------------------------------------- EPG */
 function EpgStrip({ d, onAddEpg, onHideEpg }: { d: CD; onAddEpg: () => void; onHideEpg: () => void }) {
   // Hidden entirely when the channel has the guide turned off (Settings).
@@ -1745,10 +1623,6 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   // channel brand image (identity logo, replaces the initials box)
   const [brandRef, setBrandRef] = useState((d as any).brand_ref || '')
   const [brandPickerOpen, setBrandPickerOpen] = useState(false)
-  // the blurb that rides with the brand into the guide + channel info
-  const [description, setDescription] = useState(d.brand?.description || (d as any).description || '')
-  // audio ladder (radio stations only)
-  const [aLadder, setALadder] = useState(() => (d.audioLadder?.length ? d.audioLadder : [{ label: 'high', bitrate_kbps: 128 }, { label: 'low', bitrate_kbps: 64 }]))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -1795,8 +1669,6 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
       scale: wmScale,
     }
     patch.brandRef = brandRef.trim() ? brandRef.trim() : null
-    patch.description = description.trim() ? description.trim() : null
-    if (d.audioOnly) patch.audioLadder = aLadder.map(a => ({ label: a.label, bitrateKbps: a.bitrate_kbps }))
 
     setBusy(true)
     try { await api.updateChannel(d.id, patch); onSaved() }
@@ -1828,31 +1700,6 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           <ImagePicker open={brandPickerOpen} kinds={['brand', 'poster', 'slate', 'other']} title="Choose or upload a channel brand image"
             uploadKind="brand" uploadFolder="brands"
             onClose={() => setBrandPickerOpen(false)} onPick={(url) => { setBrandRef(url); setBrandPickerOpen(false) }} />
-          <div className="field">
-            <label>Description <span style={{ color: 'var(--faint)' }}>— shown in the programme guide and channel info</span></label>
-            <textarea className="inp" rows={2} style={{ resize: 'vertical' }} value={description}
-              onChange={e => setDescription(e.target.value)} placeholder="What this channel carries." />
-          </div>
-
-          {d.audioOnly && (
-            <>
-              <div style={SEC}>Audio ladder</div>
-              <div className="field">
-                {aLadder.map((a, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <input className="inp" style={{ width: 120 }} value={a.label}
-                      onChange={e => setALadder(l => l.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
-                    <input className="inp" style={{ width: 100 }} inputMode="numeric" value={a.bitrate_kbps}
-                      onChange={e => setALadder(l => l.map((x, j) => j === i ? { ...x, bitrate_kbps: Number(e.target.value.replace(/[^0-9]/g, '')) || 0 } : x))} />
-                    <span style={{ fontSize: 12, color: 'var(--faint)' }}>kbps AAC</span>
-                    {aLadder.length > 1 && <button className="xbtn" title="Remove" onClick={() => setALadder(l => l.filter((_, j) => j !== i))}>✕</button>}
-                  </div>
-                ))}
-                <button className="chip" onClick={() => setALadder(l => [...l, { label: `rung${l.length + 1}`, bitrate_kbps: 64 }])}>+ Add rendition</button>
-                <div className="hintxt">Audio-only output — no video is encoded or packaged for this station.</div>
-              </div>
-            </>
-          )}
 
           <div style={SEC}>Source</div>
           <SourceInput protocols={protocols} value={primary} onChange={setPrimary} label="Primary source" />

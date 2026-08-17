@@ -31,6 +31,8 @@ The pure logic (Health, SelectorPolicy) takes an injected clock so it is fully
 unit-testable; the process orchestration (SourceSelector) wraps it.
 """
 
+import json
+import os
 import subprocess
 import threading
 import time
@@ -239,7 +241,7 @@ class SourceSelector:
     is testable and shares the parent's child registry."""
 
     def __init__(self, cfg, ladder, primary, backup, spawn, log, work_dir="/work",
-                 tick=1.0, event_log=None):
+                 tick=1.0, event_log=None, control_dir=None):
         self.cfg = cfg
         self.ladder = ladder            # [{height,bitrate_kbps}] — rendition shape
         self.primary = primary          # list of primary-role inputs
@@ -250,6 +252,15 @@ class SourceSelector:
         self.work_dir = work_dir
         self.tick = tick
         self._last_group_up = {"primary": None, "backup": None}
+        # MANUAL FAILOVER TEST: the control plane can drop a small JSON file here to force
+        # a failover for pre-on-air validation (force slate / loop / backup / simulate a
+        # primary loss), then clear it to resume health-driven behaviour. We poll it each
+        # tick. control_dir defaults to the output dir so the control plane (which serves
+        # that dir) can write it without a live control channel to the encoder.
+        self.control_path = os.path.join(control_dir or work_dir, "_failover_control.json")
+        self._override = "auto"
+        self._filler_proc = None        # current filler ffmpeg (so we can swap slate<->loop)
+        self._filler_kind = None
 
         red = cfg.get("redundancy", {})
         self.auto_failback = red.get("auto_failback", True)
@@ -288,12 +299,14 @@ class SourceSelector:
                 cmd = filler_vod_cmd(self.filler["vod_loop_url"], self.ladder,
                                      self.cfg["segment_seconds"],
                                      self.cfg.get("fps", 25), pp)
+                self._filler_kind = "loop"
             else:
                 slate = self.filler.get("slate_ref", "/app/assets/slate.png")
                 cmd = filler_slate_cmd(slate, self.ladder,
                                        self.cfg["segment_seconds"],
                                        self.cfg.get("fps", 25), pp)
-            self.spawn("filler", cmd)
+                self._filler_kind = "slate"
+            self._filler_proc = self.spawn("filler", cmd)
             if self.events:
                 self.events.filler_ready(True)
 
@@ -331,6 +344,41 @@ class SourceSelector:
             return "primary_lost" if old == "primary" else "primary_unavailable"
         return "source_change"
 
+    # -- manual failover test (pre-on-air validation) -----------------------
+    def _read_override(self):
+        """Read the failover-test control file, if present. Returns one of:
+        'auto' (health-driven, the default), 'primary_down' (pretend primary failed),
+        'backup', 'slate', 'loop'. Any read/parse problem falls back to 'auto'."""
+        try:
+            with open(self.control_path) as fh:
+                mode = str((json.load(fh) or {}).get("mode", "auto")).lower()
+            return mode if mode in ("auto", "primary_down", "backup", "slate", "loop") else "auto"
+        except FileNotFoundError:
+            return "auto"
+        except Exception:  # noqa: BLE001
+            return "auto"
+
+    def _ensure_filler(self, kind):
+        """Make the requested filler kind (slate|loop) the running filler, respawning it
+        if we currently have the other kind. Falls back to slate if no loop VOD is set."""
+        if kind == "loop" and not self.filler.get("vod_loop_url"):
+            kind = "slate"
+        if kind == self._filler_kind and self._filler_proc and self._filler_proc.poll() is None:
+            return
+        if self._filler_proc and self._filler_proc.poll() is None:
+            try: self._filler_proc.terminate()
+            except Exception: pass  # noqa: BLE001
+        pp = self._progress_path("filler", 0)
+        if kind == "loop":
+            cmd = filler_vod_cmd(self.filler["vod_loop_url"], self.ladder,
+                                 self.cfg["segment_seconds"], self.cfg.get("fps", 25), pp)
+        else:
+            slate = self.filler.get("slate_ref", "/app/assets/slate.png")
+            cmd = filler_slate_cmd(slate, self.ladder, self.cfg["segment_seconds"],
+                                   self.cfg.get("fps", 25), pp)
+        self._filler_proc = self.spawn("filler", cmd)
+        self._filler_kind = kind
+
     # -- health + decision loop --------------------------------------------
     def _group_alive(self, group, now):
         watchers = self._watch[group]
@@ -350,7 +398,30 @@ class SourceSelector:
             now = time.monotonic()
             primary_up = self._group_alive("primary", now)
             backup_up = self._group_alive("backup", now) if self.backup else False
-            want = self.policy.decide(now, primary_up, backup_up)
+
+            # MANUAL FAILOVER TEST override (pre-on-air validation). When set, it wins over
+            # the health-driven policy so an operator can force each failover path and watch
+            # the real output switch, then clear it to resume normal behaviour.
+            override = self._read_override()
+            if override != self._override:
+                self.log(f"source-selector: failover-test override -> {override}")
+                if self.events:
+                    self.events.event("failover.test", mode=override)
+                self._override = override
+
+            if override in ("slate", "loop"):
+                self._ensure_filler(override)
+                want = "filler"
+                self.policy.active = want  # keep policy state in sync so failback is clean
+            elif override == "backup":
+                want = "backup" if self.backup else "filler"
+                self.policy.active = want
+            elif override == "primary_down":
+                # pretend the primary group is gone: let the policy pick the best of the rest.
+                want = self.policy.decide(now, False, backup_up)
+            else:
+                want = self.policy.decide(now, primary_up, backup_up)
+
             if want != self.active:
                 self._switch(want, self._switch_reason(self.active, want))
             self._stop.wait(self.tick)

@@ -9,6 +9,9 @@ import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '
 import { buildChannelDetail, loadChannelHealthLite, DVR_MAX_SEC } from '../services/channelDetail';
 import { startTestStream, stopTestStream, testStreamStatus, isTestStreamAvailable } from '../services/testStream';
 import { outputHasValidContent } from './publicLive';
+import { config } from '../config';
+import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 export const channelsRouter = Router();
 channelsRouter.use(requireAuth);
@@ -20,7 +23,7 @@ const CHANNEL_EDITABLE = [
   'filler_slate_ref', 'filler_asset_id', 'fallback_transcode',
   'watermark_enabled', 'watermark_ref', 'watermark_position',
   'watermark_offset_x', 'watermark_offset_y', 'watermark_opacity', 'watermark_scale',
-  'brand_ref', 'brand_colour', 'description', 'audio_only', 'audio_ladder',
+  'brand_ref',
 ];
 
 // Watermark / channel brand overlay. `ref` is a library image URL (like filler_slate_ref);
@@ -106,12 +109,6 @@ const FILLER = {
   fallbackTranscode: z.boolean().optional(),          // package_only: transcode fallback to all rungs
 };
 
-/** Audio rendition for a radio channel: an AAC bitrate, optionally named. */
-const AUDIO_RUNG = z.object({
-  label: z.string().optional(),
-  bitrateKbps: z.number().int().min(24).max(512),
-});
-
 const createSchema = z.object({
   groupId: z.string().uuid(),
   name: z.string().min(1),
@@ -127,11 +124,6 @@ const createSchema = z.object({
   ...FILLER,
   watermark: WATERMARK,
   brandRef: z.string().nullable().optional(),   // channel brand/logo image (identity)
-  brandColour: z.string().max(32).nullable().optional(),
-  description: z.string().max(2000).nullable().optional(),
-  // audio-only (radio): no video ladder, an AAC rendition list instead
-  audioOnly: z.boolean().optional(),
-  audioLadder: z.array(AUDIO_RUNG).optional(),
 });
 
 /** Create a channel — enforces the group's max_channels entitlement. */
@@ -190,27 +182,14 @@ channelsRouter.post(
          w.offsetX ?? 24, w.offsetY ?? 24, w.opacity ?? 100, w.scale ?? 12]
       );
     }
-    if (body.brandRef !== undefined || body.brandColour !== undefined || body.description !== undefined) {
-      await query(
-        `UPDATE channels SET brand_ref=COALESCE($2, brand_ref), brand_colour=COALESCE($3, brand_colour),
-           description=COALESCE($4, description) WHERE id=$1`,
-        [row.id, body.brandRef ?? null, body.brandColour ?? null, body.description ?? null]
-      );
+    if (body.brandRef !== undefined) {
+      await query('UPDATE channels SET brand_ref=$2 WHERE id=$1', [row.id, body.brandRef ?? null]);
     }
-    // radio: an AAC ladder replaces the video one entirely
-    if (body.audioOnly) {
-      const audio = (body.audioLadder?.length ? body.audioLadder : [{ label: 'High', bitrateKbps: 128 }, { label: 'Low', bitrateKbps: 64 }])
-        .map((a) => ({ label: a.label ?? `${a.bitrateKbps}k`, bitrate_kbps: a.bitrateKbps }));
-      await query(`UPDATE channels SET audio_only=true, audio_ladder=$2::jsonb, output_ladder=NULL WHERE id=$1`,
-        [row.id, JSON.stringify(audio)]);
-    }
-    const created = await one<any>(`SELECT * FROM channels WHERE id=$1`, [row.id]);
 
     await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
       action: 'create', entityType: 'channel', entityId: row.id,
-      snapshot: { name: row.name, group_id: row.group_id, sources: (body.sources ?? []).length,
-                  ladder: body.outputLadder?.length ?? 0, audio_only: !!body.audioOnly } });
-    res.status(201).json(created ?? row);
+      snapshot: { name: row.name, group_id: row.group_id, sources: (body.sources ?? []).length, ladder: body.outputLadder?.length ?? 0 } });
+    res.status(201).json(row);
   })
 );
 
@@ -246,10 +225,6 @@ const editSchema = z.object({
   // watermark / channel brand overlay
   watermark: WATERMARK,
   brandRef: z.string().nullable().optional(),
-  brandColour: z.string().max(32).nullable().optional(),
-  description: z.string().max(2000).nullable().optional(),
-  audioOnly: z.boolean().optional(),
-  audioLadder: z.array(AUDIO_RUNG).optional(),
   // subtitles / live captions (persisted to the group's shared output profile)
   captions: z.object({
     enabled: z.boolean().optional(),
@@ -308,12 +283,6 @@ const editChannel = asyncHandler(async (req, res) => {
     if (w.scale !== undefined) patch.watermark_scale = w.scale;
   }
   if (has('brandRef')) patch.brand_ref = body.brandRef ?? null;
-  if (has('brandColour')) patch.brand_colour = body.brandColour ?? null;
-  if (has('description')) patch.description = body.description ?? null;
-  if (has('audioOnly')) patch.audio_only = body.audioOnly;
-  if (has('audioLadder') && body.audioLadder) {
-    patch.audio_ladder = JSON.stringify(body.audioLadder.map((a) => ({ label: a.label ?? `${a.bitrateKbps}k`, bitrate_kbps: a.bitrateKbps })));
-  }
   const touchMeta = has('schemaId') || has('metadata');
   if (touchMeta) {
     const md = await validateEntityMetadata(accountId(req), body.schemaId ?? null,
@@ -454,6 +423,57 @@ channelsRouter.post(
       inputUrl: body.inputUrl ?? null,
     });
     res.json(status);
+  })
+);
+
+/** Pre-on-air FAILOVER TEST. Writes a small control file into the channel's output dir
+ *  that the running encoder's source-selector polls, letting an admin force a failover
+ *  (slate / loop / backup / simulate a primary loss) and watch the REAL output switch,
+ *  then clear it (mode=auto) to resume health-driven behaviour. The real switch only
+ *  happens on redundancy-enabled package channels (where the selector runs); the UI
+ *  offers a preview simulation elsewhere. */
+const failoverModes = ['auto', 'primary_down', 'backup', 'slate', 'loop'] as const;
+const failoverTestSchema = z.object({ mode: z.enum(failoverModes) });
+function failoverControlPath(channelId: string) {
+  return join(resolve(config.testStream.originDir, channelId), '_failover_control.json');
+}
+function channelFailoverCapability(chan: any) {
+  // the encoder selector runs only for package_only channels with input failover enabled
+  const real = chan.workflow_type !== 'transcode' && !!chan.input_failover_enabled;
+  return { realFailover: real, workflowType: chan.workflow_type ?? null,
+    autoFailback: chan.auto_failback ?? null, lossBehavior: chan.input_loss_behavior ?? null };
+}
+channelsRouter.post(
+  '/:id/failover-test',
+  asyncHandler(async (req, res) => {
+    const chan = await one<any>(
+      `SELECT c.*, p.workflow_type FROM channels c JOIN groups g ON g.id = c.group_id
+         LEFT JOIN output_profiles p ON p.id = g.output_profile_id
+        WHERE c.id = $1 AND g.account_id = $2`,
+      [req.params.id, accountId(req)]
+    );
+    if (!chan) throw notFound('Channel not found');
+    const { mode } = failoverTestSchema.parse(req.body);
+    const dir = resolve(config.testStream.originDir, req.params.id);
+    try { mkdirSync(dir, { recursive: true }); } catch { /* exists */ }
+    writeFileSync(failoverControlPath(req.params.id), JSON.stringify({ mode, at: Date.now() }));
+    res.json({ mode, ...channelFailoverCapability(chan) });
+  })
+);
+channelsRouter.get(
+  '/:id/failover-test',
+  asyncHandler(async (req, res) => {
+    const chan = await one<any>(
+      `SELECT c.input_failover_enabled, c.auto_failback, c.input_loss_behavior, p.workflow_type
+         FROM channels c JOIN groups g ON g.id = c.group_id
+         LEFT JOIN output_profiles p ON p.id = g.output_profile_id
+        WHERE c.id = $1 AND g.account_id = $2`,
+      [req.params.id, accountId(req)]
+    );
+    if (!chan) throw notFound('Channel not found');
+    let mode = 'auto';
+    try { mode = String(JSON.parse(readFileSync(failoverControlPath(req.params.id), 'utf8')).mode || 'auto'); } catch { /* no file yet */ }
+    res.json({ mode, ...channelFailoverCapability(chan) });
   })
 );
 
