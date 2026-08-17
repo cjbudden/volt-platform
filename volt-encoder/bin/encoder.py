@@ -587,19 +587,25 @@ def _write_companion(out_dir, langs, default_lang, now):
         src = open(src_path).read().splitlines()
     except OSError:
         return
+    # Only advertise a subtitle language once ITS playlist actually exists, so the
+    # companion is a valid, smooth video manifest from the first segment (before any
+    # captions are produced) and never points the player at a missing subs playlist.
+    present = [l for l in langs
+               if os.path.exists(os.path.join(out_dir, "subtitles", l, "subs.m3u8"))]
+    have_subs = bool(present)
     media = [
         f'#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="{l.upper()}",'
         f'LANGUAGE="{l}",AUTOSELECT=YES,DEFAULT={"YES" if l == default_lang else "NO"},'
         f'URI="subtitles/{l}/subs.m3u8"'
-        for l in langs
+        for l in present
     ]
     out, inserted, expect_uri = [], False, False
     for line in src:
         if line.startswith("#EXT-X-STREAM-INF"):
-            if not inserted:
+            if have_subs and not inserted:
                 out.extend(media)
                 inserted = True
-            if "SUBTITLES=" not in line:
+            if have_subs and "SUBTITLES=" not in line:
                 line = line + ',SUBTITLES="subs"'
             out.append(line)
             expect_uri = True
@@ -646,6 +652,44 @@ def _write_companion_mpd(out_dir, langs, chunk, first_idx):
     mpd = mpd.replace("</Period>", "".join(blocks) + "</Period>")
     with open(os.path.join(out_dir, "manifest_cc.mpd"), "w") as fh:
         fh.write(mpd)
+
+
+def _subs_first_idx(out_dir, lang):
+    """First subtitle index in the live window (the subs playlist MEDIA-SEQUENCE), used
+    as the DASH companion startNumber. 0 if not available yet."""
+    try:
+        for l in open(os.path.join(out_dir, "subtitles", lang, "subs.m3u8")):
+            if l.startswith("#EXT-X-MEDIA-SEQUENCE:"):
+                return int(l.split(":", 1)[1])
+    except Exception:  # noqa: BLE001
+        pass
+    return 0
+
+
+def start_companion_refresher(out_dir, langs, default_lang, chunk, interval=2.0):
+    """Regenerate the caption COMPANION manifests on a FAST fixed cadence, DECOUPLED
+    from caption production.
+
+    The player watches the companion (master_cc.m3u8 -> stream_*_cc.m3u8) so it can see
+    the subtitle group. If the companion only refreshed when a caption chunk finished
+    (~8-10s), the companion VIDEO playlist would advance in bursts of 2-3 segments while
+    Shaka's real playlist advances every 4s — the player stalls then jumps, which shows
+    as a stutter/shiver. Refreshing every ~2s tracks Shaka's live edge so video stays
+    smooth, while the PDT and the (existence-gated) subtitle group stay current. This is
+    the single owner of the companion manifests; the caption worker only writes the
+    subtitle segments + subs.m3u8."""
+    def loop():
+        while True:
+            try:
+                if os.path.exists(os.path.join(out_dir, "master.m3u8")):
+                    now = time.time()
+                    _write_companion(out_dir, langs, default_lang, now)
+                    _write_companion_mpd(out_dir, langs, chunk, _subs_first_idx(out_dir, default_lang))
+            except Exception as e:  # noqa: BLE001
+                log(f"companion refresher error: {e}")
+            time.sleep(interval)
+    threading.Thread(target=loop, name="companion", daemon=True).start()
+    log(f"captions: companion refresher every {interval}s (decoupled from transcribe)")
 
 
 def start_captions(cfg, out_dir):
@@ -762,8 +806,9 @@ def start_captions(cfg, out_dir):
                             # PDT anchor for the first segment in the window = program time
                             # first*chunk after the caption clock started.
                             fh.write(_live_sub_playlist(range(first, idx + 1), chunk, first, cap_t0 + first * chunk))
-                    _write_companion(out_dir, langs, default_lang, time.time())
-                    _write_companion_mpd(out_dir, langs, chunk, first)
+                    # NOTE: the companion manifests are refreshed by the decoupled
+                    # companion thread (fast, fixed cadence) — NOT here — so video stays
+                    # smooth regardless of transcribe timing.
                     if _events:
                         _events.event("caption.offset", est_offset_sec=est, proc_sec=round(proc, 1),
                                       chunk_sec=chunk, realtime=bool(proc < chunk), langs=langs)
@@ -772,6 +817,8 @@ def start_captions(cfg, out_dir):
             time.sleep(1)
 
     threading.Thread(target=worker, name="captions", daemon=True).start()
+    # Fast, decoupled companion regeneration so the player's video stays smooth.
+    start_companion_refresher(out_dir, langs, default_lang, chunk)
 
 
 def shutdown(*_):

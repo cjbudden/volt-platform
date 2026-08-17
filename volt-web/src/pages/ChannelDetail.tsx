@@ -154,6 +154,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
             {d.dvr.capped && <span style={{ color: 'var(--warn)' }}> (capped 4h)</span>}
             {' · '}{(d.sources[0]?.protocol || 'SRT').toUpperCase()} ingest · {d.profile?.packaging === 'both' ? 'HLS + DASH' : (d.profile?.packaging || 'HLS').toUpperCase()}
             {d.captions.enabled ? ' · captions on' : ''}
+            {d.watermark?.enabled && d.profile?.workflow_type === 'transcode' ? ' · Watermark on' : ''}
             {d.geo_mode !== 'worldwide' ? ` · geo ${d.geo_mode}` : ''}
           </p>
         </div>
@@ -321,7 +322,6 @@ function PipelineStrip({ d, onQc }: { d: CD; onQc: () => void; onAir?: boolean }
         </div>
         )
       })}
-      <button className="btn ghost" onClick={onQc} style={{ alignSelf: 'center' }}>Diagnose</button>
     </div>
   )
 }
@@ -1020,7 +1020,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
     // LIVE IS THE DEFAULT: jump to the play point shortly after load (once). With captions
     // on, the play point is held back by capHold so the subtitles already exist there.
     const snapSoon = () => {
-      const snap = () => { try { const sk = video.seekable; if (sk.length && !didSnapRef.current) { video.currentTime = sk.end(sk.length - 1) - (capHold || 0.5); didSnapRef.current = true } } catch {} }
+      const snap = () => { try { const sk = video.seekable; if (sk.length && !didSnapRef.current) { const end = sk.end(sk.length - 1), start = sk.start(0); const hold = Math.min(capHold || 0.5, Math.max(0.5, (end - start) - 3)); video.currentTime = end - hold; didSnapRef.current = true } } catch {} }
       setTimeout(snap, 300); setTimeout(snap, 1200)
     }
     // Captions on: load the captions-aware companion manifest (subtitles + PDT in the
@@ -1174,7 +1174,12 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         // it silently accumulates minutes of lag (the "-5:29 behind" we saw). Snapping
         // whenever we drift >12s keeps the preview honestly live and self-heals stalls.
         if (!scrubbedRef.current) {
-          const target = capHold || 0.5
+          // Clamp the hold-back to what is actually buffered: early on, the seekable
+          // window is shorter than capHold (18s), so seeking to end - 18 would land
+          // before the buffer start and the player would jerk/shiver. Never target
+          // past the start; grow toward capHold as the window fills.
+          const depth = end - start
+          const target = Math.min(capHold || 0.5, Math.max(0.5, depth - 3))
           const behindNow = end - v.currentTime
           // hold at the play point: pull back if we drifted well behind, and pull back
           // from the bleeding edge if captions are on (so subs are always present).
@@ -1213,7 +1218,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
     const end = v.seekable.end(v.seekable.length - 1)
     v.currentTime = Math.max(v.seekable.start(0), end - Math.max(0, sec))
   }
-  function goLive() { const v = videoRef.current; scrubbedRef.current = false; setScrubbed(false); if (!v || !v.seekable.length) return; v.currentTime = v.seekable.end(v.seekable.length - 1) - (capHold || 0.5) }
+  function goLive() { const v = videoRef.current; scrubbedRef.current = false; setScrubbed(false); if (!v || !v.seekable.length) return; const sk = v.seekable, end = sk.end(sk.length - 1), start = sk.start(0); const hold = Math.min(capHold || 0.5, Math.max(0.5, (end - start) - 3)); v.currentTime = end - hold }
 
   // Captions status from the latest caption.* telemetry so the operator can see the
   // estimated live offset AND why captions failed (not a roadblock, but worth knowing).
