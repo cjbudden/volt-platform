@@ -1370,74 +1370,62 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
   }, [d.id])
   const real = !!cap?.realFailover
   const apply = async (m: FailoverMode) => {
-    setErr('')
-    if (real) {
-      setBusy(true)
-      try { const s = await api.failoverTest(d.id, m); setMode(s.mode); setCap(s) } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
-    } else {
-      // preview only — no encoder selector to drive; still record the mode so the
-      // panel demonstrates the target state. Best-effort write for parity.
-      setMode(m); api.failoverTest(d.id, m).catch(() => {})
-    }
+    if (!real) return   // no encoder selector to drive; nothing to simulate
+    setErr(''); setBusy(true)
+    try { const s = await api.failoverTest(d.id, m); setMode(s.mode); setCap(s) } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
   const active = FAILOVER_STEPS.find(s => s.m === mode)
+  const loopDesc = cap?.lossBehavior === 'vod_loop'
+    ? (cap?.loopKind === 'uploaded' ? 'a pre-selected loop video'
+      : cap?.loopKind === 'motion_slate' ? 'a loop made from the slate image (gentle motion)'
+      : 'a loop (no slate set yet, using the default)')
+    : cap?.lossBehavior === 'slate' ? 'a static slate image'
+    : cap?.lossBehavior === 'last_frame' ? 'the frozen last frame'
+    : cap?.lossBehavior === 'black' ? 'black'
+    : cap?.lossBehavior === 'none' ? 'nothing (output stops)'
+    : 'not configured'
   return (
     <div className="card" style={{ marginBottom: 18, padding: '14px 16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
-        <b style={{ fontSize: 14 }}>Pre-flight · Failover test</b>
+        <b style={{ fontSize: 14 }}>Failover control</b>
         <span className={`tag ${real ? 'live' : 'idle'}`} style={{ fontSize: 10.5 }}>
-          <span className={`dot-s ${real ? 'live' : 'idle'}`} />{real ? 'LIVE ENCODER FAILOVER' : 'PREVIEW SIMULATION'}
+          <span className={`dot-s ${real ? 'live' : 'idle'}`} />{real ? 'ENABLED' : 'NOT ENABLED'}
         </span>
-        {mode !== 'auto' && <span className="tag warn" style={{ fontSize: 10.5 }}>ACTIVE: {active?.label || mode}</span>}
+        {real && mode !== 'auto' && <span className="tag warn" style={{ fontSize: 10.5 }}>ACTIVE: {active?.label || mode}</span>}
       </div>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
-        On total input loss the filler is{' '}
-        <b style={{ color: 'var(--text)' }}>{
-          cap?.lossBehavior === 'vod_loop'
-            ? (cap?.loopKind === 'uploaded' ? 'a pre-selected loop video'
-              : cap?.loopKind === 'motion_slate' ? 'a loop made from the slate image (gentle motion)'
-              : 'a loop (no slate set yet, using the default)')
-            : cap?.lossBehavior === 'slate' ? 'a static slate image'
-            : cap?.lossBehavior === 'last_frame' ? 'the frozen last frame'
-            : cap?.lossBehavior === 'black' ? 'black'
-            : cap?.lossBehavior === 'none' ? 'nothing (output stops)'
-            : 'not configured'
-        }</b>. Set this in Settings, under Filler on total loss.
-      </div>
-      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
-        {real
-          ? 'Force each failover path and watch the OUTPUT player switch, then resume. This exercises the real encoder selector — safe to run before you go on air.'
-          : `This channel has no encoder-level failover (${cap?.workflowType === 'transcode' ? 'transcode workflow' : 'redundancy not enabled'}), so these controls preview what each failover state looks like. Enable input failover on a package channel to test the real switch.`}
-      </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {FAILOVER_STEPS.map(s => (
-          <button key={s.m} className={`btn ${mode === s.m ? 'primary' : 'ghost'}`} disabled={busy}
-            title={s.note} onClick={() => apply(s.m)} style={{ padding: '7px 12px' }}>
-            <span className="dot-s" style={{ background: s.hue, marginRight: 6 }} />{s.label}
-          </button>
-        ))}
-        <button className={`btn ${mode === 'auto' ? 'primary' : 'ghost'}`} disabled={busy}
-          onClick={() => apply('auto')} style={{ padding: '7px 12px', marginLeft: 'auto' }}>
-          Resume normal
-        </button>
-      </div>
-      {!real && mode !== 'auto' && (
-        <div style={{ marginTop: 12, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)', aspectRatio: '16/6', position: 'relative', background: 'radial-gradient(120% 120% at 50% 20%,#141a26 0%,#0b0f16 70%)', display: 'grid', placeItems: 'center' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 11, letterSpacing: 1, color: 'var(--faint)', marginBottom: 6 }}>SIMULATED FAILOVER</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: active?.hue || '#fff' }}>{active?.label?.toUpperCase()}</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6, maxWidth: 420 }}>{active?.note}</div>
+      {real ? (
+        <>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+            On total input loss the filler is <b style={{ color: 'var(--text)' }}>{loopDesc}</b>. Set this in Settings, under Filler on total loss.
           </div>
-          <span style={{ position: 'absolute', top: 8, right: 10, fontSize: 10, fontWeight: 700, color: '#fbbf24', border: '1px solid rgba(251,191,36,.5)', borderRadius: 999, padding: '2px 8px' }}>PREVIEW</span>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
+            A pre-flight test and a live manual switch: force a path and the real output switches within a second or two, then Resume. You can also use it on purpose, to move off a primary or bring it back.
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {FAILOVER_STEPS.map(s => (
+              <button key={s.m} className={`btn ${mode === s.m ? 'primary' : 'ghost'}`} disabled={busy}
+                title={s.note} onClick={() => apply(s.m)} style={{ padding: '7px 12px' }}>
+                <span className="dot-s" style={{ background: s.hue, marginRight: 6 }} />{s.label}
+              </button>
+            ))}
+            <button className={`btn ${mode === 'auto' ? 'primary' : 'ghost'}`} disabled={busy}
+              onClick={() => apply('auto')} style={{ padding: '7px 12px', marginLeft: 'auto' }}>
+              Resume normal
+            </button>
+          </div>
+          {mode !== 'auto' && !sourceUp && (
+            <div className="td" style={{ color: 'var(--warn)', marginTop: 10 }}>The channel is not running — start it so the encoder can act on the switch.</div>
+          )}
+          {mode !== 'auto' && sourceUp && (
+            <div className="td" style={{ color: 'var(--muted)', marginTop: 10 }}>Watch the OUTPUT player above. Press Resume normal to return to health-driven behaviour.</div>
+          )}
+          {err && <div className="err" style={{ marginTop: 10 }}>{err}</div>}
+        </>
+      ) : (
+        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+          Input failover is off for this channel, so there is nothing to switch yet. Turn on <b style={{ color: 'var(--text)' }}>Enable input failover</b> in Settings and add a backup source, then start the channel. This panel will then let you test each failover path and switch sources on purpose, with the result shown in the output player above.
         </div>
       )}
-      {real && mode !== 'auto' && !sourceUp && (
-        <div className="td" style={{ color: 'var(--warn)', marginTop: 10 }}>The channel is not running — start it so the encoder can act on the failover command.</div>
-      )}
-      {real && mode !== 'auto' && sourceUp && (
-        <div className="td" style={{ color: 'var(--muted)', marginTop: 10 }}>Watch the OUTPUT player above — it should switch within a second or two. Press Resume normal when done.</div>
-      )}
-      {err && <div className="err" style={{ marginTop: 10 }}>{err}</div>}
     </div>
   )
 }
