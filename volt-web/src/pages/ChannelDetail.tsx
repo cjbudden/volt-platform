@@ -1389,11 +1389,20 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
           <span className={`dot-s ${real ? 'live' : 'idle'}`} />{real ? 'LIVE ENCODER FAILOVER' : 'PREVIEW SIMULATION'}
         </span>
         {mode !== 'auto' && <span className="tag warn" style={{ fontSize: 10.5 }}>ACTIVE: {active?.label || mode}</span>}
-        <span className={`tag ${cap?.autoLoopReady ? 'live' : 'idle'}`} style={{ fontSize: 10.5, marginLeft: 'auto' }}
-          title="The encoder captures a few seconds of this channel's own output and stores it as the loop filler, so a loop failover replays recent real content at the right bitrate.">
-          <span className={`dot-s ${cap?.autoLoopReady ? 'live' : 'idle'}`} />
-          {cap?.autoLoopReady ? 'AUTO-LOOP READY' : 'AUTO-LOOP PENDING'}
-        </span>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+        On total input loss the filler is{' '}
+        <b style={{ color: 'var(--text)' }}>{
+          cap?.lossBehavior === 'vod_loop'
+            ? (cap?.loopKind === 'uploaded' ? 'a pre-selected loop video'
+              : cap?.loopKind === 'motion_slate' ? 'a loop made from the slate image (gentle motion)'
+              : 'a loop (no slate set yet, using the default)')
+            : cap?.lossBehavior === 'slate' ? 'a static slate image'
+            : cap?.lossBehavior === 'last_frame' ? 'the frozen last frame'
+            : cap?.lossBehavior === 'black' ? 'black'
+            : cap?.lossBehavior === 'none' ? 'nothing (output stops)'
+            : 'not configured'
+        }</b>. Set this in Settings, under Filler on total loss.
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
         {real
@@ -1614,6 +1623,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   // filler on loss
   const [lossBehavior, setLossBehavior] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>(d.input_loss_behavior || 'none')
   const [slateRef, setSlateRef] = useState(d.filler_slate_ref || '')
+  const [failover, setFailover] = useState(!!d.input_failover_enabled)
+  const [autoFailback, setAutoFailback] = useState(d.auto_failback !== false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [loopPickerOpen, setLoopPickerOpen] = useState(false)
   // watermark / channel brand overlay
@@ -1661,6 +1672,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     // captions
     patch.captions = { enabled: capOn, targets: capOn ? capLangs : [] }
     // filler on loss
+    patch.inputFailoverEnabled = failover
+    patch.autoFailback = autoFailback
     patch.inputLossBehavior = lossBehavior
     patch.fillerSlateRef = (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && slateRef.trim() ? slateRef.trim() : null
     // watermark / brand overlay
@@ -1710,6 +1723,18 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           <SourceInput protocols={protocols} value={primary} onChange={setPrimary} label="Primary source" />
           <SourceInput protocols={protocols} value={backup} onChange={setBackup} label="Backup source (optional)" />
 
+          <div style={SEC}>Failover</div>
+          <div className="toggle-row">
+            <div><div className="tt">Enable input failover</div><div className="td">If the primary source fails, switch to the backup, then to the filler, to keep the output live. Works on transcode and packaged channels.</div></div>
+            <div className={`sw ${failover ? '' : 'off'}`} onClick={() => setFailover(v => !v)}><i /></div>
+          </div>
+          {failover && (
+            <div className="toggle-row">
+              <div><div className="tt">Auto failback to primary</div><div className="td">Return to the primary automatically once it has been healthy for a short hold. Off keeps the output on the backup until you intervene.</div></div>
+              <div className={`sw ${autoFailback ? '' : 'off'}`} onClick={() => setAutoFailback(v => !v)}><i /></div>
+            </div>
+          )}
+
           <div style={SEC}>Filler on total loss</div>
           <div className="field"><label>When no source is available</label>
             <select className="inp" value={lossBehavior} onChange={e => setLossBehavior(e.target.value as any)}>
@@ -1735,6 +1760,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
                 <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick an existing loop asset or paste a URL" />
                 <button type="button" className="btn ghost" onClick={() => setLoopPickerOpen(true)}>Browse…</button>
               </div>
+              <div className="td" style={{ marginTop: 6 }}>No loop video? Leave this empty and set a Slate image: the loop is then made from the slate with a gentle scale in/out so it is not a still frame.</div>
             </div>
           )}
           <ImagePicker open={pickerOpen} kinds={['slate', 'brand', 'other']} title="Choose or upload a slate image"

@@ -138,6 +138,8 @@ export interface ChannelSettingsPatch {
   epgEnabled?: boolean
   sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string }[]
   captions?: { enabled?: boolean; sourceLang?: string; targets?: string[] }
+  inputFailoverEnabled?: boolean
+  autoFailback?: boolean
   inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
   fillerSlateRef?: string | null
   watermark?: WatermarkPatch
@@ -152,8 +154,8 @@ export interface FailoverTestState {
   workflowType: 'transcode' | 'package_only' | null
   autoFailback: boolean | null
   lossBehavior: string | null
-  autoLoopReady: boolean       // the encoder has captured a loop from this channel's output
-  autoLoopAt: number | null    // when it was last captured (ms)
+  loopKind: 'uploaded' | 'motion_slate' | 'slate' | null  // what the loop filler will be
+  hasSlate: boolean
 }
 
 export const api = {

@@ -10,7 +10,7 @@ import { buildChannelDetail, loadChannelHealthLite, DVR_MAX_SEC } from '../servi
 import { startTestStream, stopTestStream, testStreamStatus, isTestStreamAvailable } from '../services/testStream';
 import { outputHasValidContent } from './publicLive';
 import { config } from '../config';
-import { writeFileSync, readFileSync, mkdirSync, statSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 export const channelsRouter = Router();
@@ -437,19 +437,20 @@ const failoverTestSchema = z.object({ mode: z.enum(failoverModes) });
 function failoverControlPath(channelId: string) {
   return join(resolve(config.testStream.originDir, channelId), '_failover_control.json');
 }
-function autoLoopInfo(channelId: string) {
-  // the encoder captures the channel's own output to _autoloop.mp4 in the output dir
-  try {
-    const st = statSync(join(resolve(config.testStream.originDir, channelId), '_autoloop.mp4'));
-    return { autoLoopReady: st.size > 1024, autoLoopAt: st.mtimeMs as number | null };
-  } catch { return { autoLoopReady: false, autoLoopAt: null as number | null }; }
-}
-function channelFailoverCapability(chan: any, channelId: string) {
-  // the encoder selector runs only for package_only channels with input failover enabled
-  const real = chan.workflow_type !== 'transcode' && !!chan.input_failover_enabled;
+function channelFailoverCapability(chan: any) {
+  // The selector is now wired for BOTH transcode and package_only, so a real failover
+  // runs whenever input failover is enabled on the channel.
+  const real = !!chan.input_failover_enabled;
+  // What the loop filler will be, so the admin knows before testing: an uploaded loop
+  // asset wins; otherwise a loop is made from the slate image with a gentle motion.
+  const lossBehavior = chan.input_loss_behavior ?? null;
+  const loopKind = lossBehavior === 'vod_loop'
+    ? (chan.filler_asset_id ? 'uploaded' : (chan.filler_slate_ref ? 'motion_slate' : 'slate'))
+    : null;
   return { realFailover: real, workflowType: chan.workflow_type ?? null,
-    autoFailback: chan.auto_failback ?? null, lossBehavior: chan.input_loss_behavior ?? null,
-    ...autoLoopInfo(channelId) };
+    autoFailback: chan.auto_failback ?? null, lossBehavior,
+    hasBackup: undefined as boolean | undefined, loopKind,
+    hasSlate: !!chan.filler_slate_ref };
 }
 channelsRouter.post(
   '/:id/failover-test',
@@ -465,7 +466,7 @@ channelsRouter.post(
     const dir = resolve(config.testStream.originDir, req.params.id);
     try { mkdirSync(dir, { recursive: true }); } catch { /* exists */ }
     writeFileSync(failoverControlPath(req.params.id), JSON.stringify({ mode, at: Date.now() }));
-    res.json({ mode, ...channelFailoverCapability(chan, req.params.id) });
+    res.json({ mode, ...channelFailoverCapability(chan) });
   })
 );
 channelsRouter.get(
@@ -481,7 +482,7 @@ channelsRouter.get(
     if (!chan) throw notFound('Channel not found');
     let mode = 'auto';
     try { mode = String(JSON.parse(readFileSync(failoverControlPath(req.params.id), 'utf8')).mode || 'auto'); } catch { /* no file yet */ }
-    res.json({ mode, ...channelFailoverCapability(chan, req.params.id) });
+    res.json({ mode, ...channelFailoverCapability(chan) });
   })
 );
 

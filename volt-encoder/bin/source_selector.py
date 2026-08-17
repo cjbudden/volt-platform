@@ -39,6 +39,10 @@ import time
 
 BUS_BASE = 20000
 PRIV_BASE = {"primary": 21000, "backup": 22000, "filler": 23000}
+# Transcode failover: the selector feeds ONE chosen source to this port and the
+# transcoder reads it (instead of the raw input URL), so a switch happens upstream of
+# the encoder and the ladder it produces stays continuous.
+SOURCE_FEED_PORT = 20500
 
 
 # ---------------------------------------------------------------------------
@@ -137,10 +141,11 @@ def _priv_url(group, idx):
     return f"udp://127.0.0.1:{PRIV_BASE[group] + idx}?pkt_size=1316&overrun_nonfatal=1"
 
 
-def _bus_url(idx):
-    # the bus is read by Shaka Packager — use only Shaka-compatible UDP options
-    # (reuse/buffer_size), never ffmpeg's pkt_size, or Shaka rejects the input.
-    return f"udp://127.0.0.1:{BUS_BASE + idx}?reuse=1&buffer_size=2097152"
+def _bus_url(idx, bus_base=BUS_BASE):
+    # the bus is read by Shaka Packager (package_only) or by the transcoder (transcode,
+    # single source feed) — use only reader-compatible UDP options (reuse/buffer_size),
+    # never ffmpeg's pkt_size, or Shaka rejects the input.
+    return f"udp://127.0.0.1:{bus_base + idx}?reuse=1&buffer_size=2097152"
 
 
 def relay_cmd(inp, group, idx, progress_url):
@@ -194,28 +199,43 @@ def filler_vod_cmd(vod_url, ladder, seg, fps, progress_url):
     return cmd
 
 
-def autoloop_capture_cmd(master_playlist, out_path, seconds):
-    """Capture a few seconds of the channel's OWN live output into a short, loopable
-    MP4 — the auto-generated loop filler. We read the packaged output playlist at the
-    live edge and copy it (no re-encode), so the clip is already at the exact ladder /
-    bitrate the channel produces. On total input loss the loop filler replays this
-    recent real content instead of a generic slate. faststart makes it seek-friendly
-    for looping."""
-    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-            "-live_start_index", "-1", "-http_persistent", "0",
-            "-i", master_playlist,
-            "-t", str(seconds), "-c", "copy", "-movflags", "+faststart",
-            out_path]
+def filler_motion_slate_cmd(slate_ref, ladder, seg, fps, progress_url):
+    """Loop a slate image but give it a slow BREATHING ZOOM (a gentle scale in and out)
+    so the loop is not a dead-static frame. This is the 'loop made from a slate image'
+    option: same ladder-matched, GOP-aligned output as the static slate, plus a subtle
+    ~25s zoom cycle via zoompan (z oscillates around 1.06 by +/-0.05). The image is
+    pre-upscaled so the zoom stays sharp."""
+    gop = int(seg * fps)
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+           "-progress", progress_url,
+           "-loop", "1", "-i", slate_ref,
+           "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+    for i, r in enumerate(ladder):
+        h = int(r["height"]); w = (int(round(h * 16 / 9)) // 2) * 2
+        period = max(1, int(fps * 4))   # ~25s breath at typical fps
+        vf = (f"scale={w * 2}:{h * 2},"
+              f"zoompan=z='1.06+0.05*sin(on/{period})':d=1:"
+              f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps={fps}")
+        cmd += ["-map", "0:v:0", "-map", "1:a:0",
+                "-vf", vf,
+                "-c:v", "libx264", "-preset", "veryfast",
+                "-b:v", f"{r['bitrate_kbps']}k",
+                "-g", str(gop), "-keyint_min", str(gop), "-sc_threshold", "0",
+                "-force_key_frames", f"expr:gte(t,n_forced*{seg})",
+                "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+                "-f", "mpegts", _priv_url("filler", i)]
+    return cmd
 
 
-def forwarder_cmd(group, idx):
-    """Copy the active group's private TS to the bus port Shaka reads. No
-    re-encode; genpts keeps the bus timeline monotonic across a restart."""
+def forwarder_cmd(group, idx, bus_base=BUS_BASE):
+    """Copy the active group's private TS to the bus port the reader consumes (Shaka for
+    package_only, the transcoder for transcode). No re-encode; genpts keeps the bus
+    timeline monotonic across a restart."""
     return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
             "-fflags", "+genpts+nobuffer", "-flags", "low_delay",
             "-i", _priv_url(group, idx),
             "-c", "copy", "-muxdelay", "0", "-muxpreload", "0",
-            "-f", "mpegts", _bus_url(idx)]
+            "-f", "mpegts", _bus_url(idx, bus_base)]
 
 
 # ---------------------------------------------------------------------------
@@ -255,9 +275,12 @@ class SourceSelector:
     is testable and shares the parent's child registry."""
 
     def __init__(self, cfg, ladder, primary, backup, spawn, log, work_dir="/work",
-                 tick=1.0, event_log=None, control_dir=None):
+                 tick=1.0, event_log=None, control_dir=None, bus_base=BUS_BASE):
         self.cfg = cfg
         self.ladder = ladder            # [{height,bitrate_kbps}] — rendition shape
+        # Where the active source is delivered: Shaka's per-rendition bus (package_only)
+        # or the single transcoder feed port (transcode single-source failover).
+        self.bus_base = bus_base
         self.primary = primary          # list of primary-role inputs
         self.backup = backup            # list of backup-role inputs (may be empty)
         self.spawn = spawn
@@ -275,9 +298,6 @@ class SourceSelector:
         self._override = "auto"
         self._filler_proc = None        # current filler ffmpeg (so we can swap slate<->loop)
         self._filler_kind = None
-        # Auto-generated loop: the encoder captures a few seconds of the real output here.
-        # It is preferred over slate for the loop filler when no explicit loop was uploaded.
-        self.autoloop_path = os.path.join(control_dir or work_dir, "_autoloop.mp4")
 
         red = cfg.get("redundancy", {})
         self.auto_failback = red.get("auto_failback", True)
@@ -309,22 +329,11 @@ class SourceSelector:
                 self.spawn(f"relay:{group}:{i}", relay_cmd(inp, group, i, pp))
                 self._watch[group].append(_ProgressWatcher(pp))
 
-        # filler (one ffmpeg, all renditions) — slate or vod_loop
+        # filler (one ffmpeg, all renditions) — slate (static) or loop. The loop is
+        # either an uploaded video, or the slate image with a gentle breathing zoom.
         if self.loss_behavior in ("slate", "vod_loop"):
-            pp = self._progress_path("filler", 0)
-            loop_src = self._loop_source() if self.loss_behavior == "vod_loop" else None
-            if loop_src:
-                cmd = filler_vod_cmd(loop_src, self.ladder,
-                                     self.cfg["segment_seconds"],
-                                     self.cfg.get("fps", 25), pp)
-                self._filler_kind = "loop"
-            else:
-                slate = self.filler.get("slate_ref", "/app/assets/slate.png")
-                cmd = filler_slate_cmd(slate, self.ladder,
-                                       self.cfg["segment_seconds"],
-                                       self.cfg.get("fps", 25), pp)
-                self._filler_kind = "slate"
-            self._filler_proc = self.spawn("filler", cmd)
+            self._filler_proc = self.spawn("filler", self._filler_cmd(
+                "loop" if self.loss_behavior == "vod_loop" else "slate"))
             if self.events:
                 self.events.filler_ready(True)
 
@@ -337,7 +346,7 @@ class SourceSelector:
 
     def _start_forwarder(self, idx, group):
         self._forwarders[idx] = self.spawn(
-            f"fwd:{idx}<-{group}", forwarder_cmd(group, idx))
+            f"fwd:{idx}<-{group}", forwarder_cmd(group, idx, self.bus_base))
 
     def _switch(self, new_group, reason="source_change"):
         self.log(f"source-selector: switching {self.active} -> {new_group} ({reason})")
@@ -376,39 +385,41 @@ class SourceSelector:
         except Exception:  # noqa: BLE001
             return "auto"
 
-    def _loop_source(self):
-        """Resolve the loop filler source, in precedence order: an explicitly uploaded
-        loop VOD, else the auto-generated loop captured from this channel's own output,
-        else None (caller falls back to slate)."""
-        url = self.filler.get("vod_loop_url")
-        if url:
-            return url
-        if os.path.exists(self.autoloop_path):
-            return self.autoloop_path
-        return None
+    def _slate_ref(self):
+        return self.filler.get("slate_ref", "/app/assets/slate.png")
+
+    def _filler_cmd(self, kind):
+        """Build the filler ffmpeg command for the requested kind and record which kind
+        actually runs. The loop is an admin choice, resolved deterministically:
+          loop  -> an uploaded loop video if provided, else the slate image with a gentle
+                   breathing zoom (a loop made from the slate). Never a still frame.
+          slate -> the static slate image held on screen.
+        The filler is always ladder-matched and GOP-aligned. `_filler_kind` records the
+        concrete result ('loop', 'motion_slate' or 'slate') so the UI/logs are clear."""
+        pp = self._progress_path("filler", 0)
+        seg, fps = self.cfg["segment_seconds"], self.cfg.get("fps", 25)
+        if kind == "loop":
+            url = self.filler.get("vod_loop_url")
+            if url:
+                self._filler_kind = "loop"
+                return filler_vod_cmd(url, self.ladder, seg, fps, pp)
+            self._filler_kind = "motion_slate"
+            return filler_motion_slate_cmd(self._slate_ref(), self.ladder, seg, fps, pp)
+        self._filler_kind = "slate"
+        return filler_slate_cmd(self._slate_ref(), self.ladder, seg, fps, pp)
 
     def _ensure_filler(self, kind):
-        """Make the requested filler kind (slate|loop) the running filler, respawning it
-        if we currently have the other kind. Falls back to slate if no loop source (an
-        uploaded loop or an auto-generated loop) is available yet."""
-        loop_src = self._loop_source()
-        if kind == "loop" and not loop_src:
-            kind = "slate"
-        if kind == self._filler_kind and self._filler_proc and self._filler_proc.poll() is None:
+        """Make the requested filler kind (slate|loop) the running filler, respawning only
+        if it is not already what is running."""
+        want = "loop" if kind == "loop" else "slate"
+        running_is_loop = self._filler_kind in ("loop", "motion_slate")
+        if ((want == "loop" and running_is_loop) or (want == "slate" and self._filler_kind == "slate")) \
+                and self._filler_proc and self._filler_proc.poll() is None:
             return
         if self._filler_proc and self._filler_proc.poll() is None:
             try: self._filler_proc.terminate()
             except Exception: pass  # noqa: BLE001
-        pp = self._progress_path("filler", 0)
-        if kind == "loop":
-            cmd = filler_vod_cmd(loop_src, self.ladder,
-                                 self.cfg["segment_seconds"], self.cfg.get("fps", 25), pp)
-        else:
-            slate = self.filler.get("slate_ref", "/app/assets/slate.png")
-            cmd = filler_slate_cmd(slate, self.ladder, self.cfg["segment_seconds"],
-                                   self.cfg.get("fps", 25), pp)
-        self._filler_proc = self.spawn("filler", cmd)
-        self._filler_kind = kind
+        self._filler_proc = self.spawn("filler", self._filler_cmd(want))
 
     # -- health + decision loop --------------------------------------------
     def _group_alive(self, group, now):
@@ -439,13 +450,6 @@ class SourceSelector:
                 if self.events:
                     self.events.event("failover.test", mode=override)
                 self._override = override
-
-            # STANDBY UPGRADE: once the auto-generated loop exists, promote the idle
-            # filler from slate to loop so a real total-loss failover shows recent output,
-            # not a static card. Only while filler is NOT on air, so there is no blip.
-            if (self.loss_behavior == "vod_loop" and self.active != "filler"
-                    and self._filler_kind != "loop" and self._loop_source()):
-                self._ensure_filler("loop")
 
             if override in ("slate", "loop"):
                 self._ensure_filler(override)

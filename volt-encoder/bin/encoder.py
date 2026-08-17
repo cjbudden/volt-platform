@@ -335,9 +335,13 @@ def _overlay_vf(scale_h, wm_path, wm):
             f"[in]scale=-2:{scale_h}[bg];[bg][wm]overlay={xy}")
 
 
-def start_transcode(cfg, keys_unused):
+def start_transcode(cfg, keys_unused, source_override=None):
     """transcode: one mezzanine -> full ladder, aligned closed GOPs, each
-    rendition to its own UDP port. GPU (NVENC) if requested, else x264."""
+    rendition to its own UDP port. GPU (NVENC) if requested, else x264.
+
+    source_override: when input failover is on, read the selector's single chosen-source
+    feed (a local UDP mpegts) instead of the raw ingest URL, so a primary/backup/filler
+    switch happens upstream of the transcoder."""
     ladder = cfg["ladder"]
     seg = cfg["segment_seconds"]
     src = cfg["inputs"][0]
@@ -351,7 +355,10 @@ def start_transcode(cfg, keys_unused):
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin"]
     if gpu:
         cmd += ["-hwaccel", "cuda"]
-    cmd += input_args(src)
+    if source_override:
+        cmd += ["-fflags", "+genpts", "-i", source_override]
+    else:
+        cmd += input_args(src)
 
     # VIDEO: one video-only rendition per ladder rung (audio is carried separately as
     # its own elementary stream below, so Shaka can assign it as a distinct manifest
@@ -692,46 +699,6 @@ def start_companion_refresher(out_dir, langs, default_lang, chunk, interval=2.0)
     log(f"captions: companion refresher every {interval}s (decoupled from transcribe)")
 
 
-def start_autoloop_generator(cfg, out_dir, seconds=None, warmup=25.0, refresh=300.0):
-    """Auto-generate the LOOP filler from the channel's OWN output.
-
-    Once the output is producing, capture a few seconds of it (already at the exact
-    ladder / bitrate the channel emits) into a short MP4 the source-selector uses as the
-    loop filler. Refreshed periodically so the stored loop stays recent. Cheap: it copies
-    the packaged output, no re-encode. Disable with redundancy.auto_loop=false; length via
-    redundancy.auto_loop_seconds. Writes atomically to _autoloop.mp4 in the output dir."""
-    red = cfg.get("redundancy") or {}
-    if red.get("auto_loop") is False:
-        return
-    secs = float(seconds if seconds is not None else (red.get("auto_loop_seconds") or 10))
-    master = os.path.join(out_dir, "master.m3u8")
-    dst = os.path.join(out_dir, "_autoloop.mp4")
-    tmp = dst + ".tmp"
-
-    def loop():
-        time.sleep(warmup)  # let the output build a live window first
-        first = True
-        while True:
-            try:
-                if os.path.exists(master):
-                    cmd = source_selector.autoloop_capture_cmd(master, tmp, secs)
-                    subprocess.run(cmd, timeout=secs + 40,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    if os.path.exists(tmp) and os.path.getsize(tmp) > 1024:
-                        os.replace(tmp, dst)   # atomic swap so readers never see a partial file
-                        if first:
-                            log(f"autoloop: stored {secs:g}s of output as the loop filler -> {dst}")
-                            first = False
-                        if _events:
-                            _events.event("autoloop.ready", seconds=secs)
-            except Exception as e:  # noqa: BLE001
-                log(f"autoloop: capture failed ({e})")
-            time.sleep(refresh)
-
-    threading.Thread(target=loop, name="autoloop", daemon=True).start()
-    log(f"autoloop: generator armed (capture {secs:g}s after {int(warmup)}s warmup, refresh {int(refresh)}s)")
-
-
 def start_captions(cfg, out_dir):
     cap = cfg.get("captions")
     if not cap or not cap.get("enabled"):
@@ -948,12 +915,26 @@ def main():
             _events.source_state("primary", True, renditions=nrend)
     else:
         if redundancy_on(cfg):
-            # Transcode failover needs the selector to feed a single chosen
-            # mezzanine into the encoder (an extra source-bus hop) — not yet
-            # wired. Run on the primary mezzanine for now.
-            log("redundancy: input_failover requested on a transcode job — "
-                "mezzanine failover not yet wired; running primary only (see README)")
-        start_transcode(cfg, keys)
+            # TRANSCODE FAILOVER (single-source): the selector chooses ONE active source
+            # (primary / backup / filler) and forwards it to SOURCE_FEED_PORT; the
+            # transcoder reads that instead of the raw URL, so a source switch happens
+            # UPSTREAM of the encoder and the ladder it produces stays continuous.
+            prim, bak = primary_inputs(cfg), backup_inputs(cfg)
+            top = (cfg.get("ladder") or [{"height": 720, "bitrate_kbps": 4000}])[0]
+            selector = source_selector.SourceSelector(
+                cfg, ladder=[{"height": top["height"], "bitrate_kbps": top["bitrate_kbps"]}],
+                primary=prim[:1], backup=bak[:1],
+                spawn=lambda name, cmd: spawn(name, cmd, critical=False),
+                log=log, work_dir=WORK_DIR, event_log=_events,
+                control_dir=OUT_DIR, bus_base=source_selector.SOURCE_FEED_PORT)
+            _selectors.append(selector)
+            log(f"redundancy: transcode input_failover on — primary + {len(bak)} backup, "
+                f"loss_behavior={cfg['redundancy'].get('input_loss_behavior','slate')}")
+            selector.start()
+            feed = f"udp://127.0.0.1:{source_selector.SOURCE_FEED_PORT}?reuse=1&buffer_size=2097152"
+            start_transcode(cfg, keys, source_override=feed)
+        else:
+            start_transcode(cfg, keys)
         _events.source_state("primary", True, renditions=nrend)
 
     if is_local(cfg):
@@ -967,12 +948,6 @@ def main():
         start_captions(cfg, OUT_DIR)
     except Exception as e:  # noqa: BLE001
         log(f"captions: failed to start ({e}); continuing without captions")
-
-    # Auto-generate the loop filler from this channel's own output (non-critical).
-    try:
-        start_autoloop_generator(cfg, OUT_DIR)
-    except Exception as e:  # noqa: BLE001
-        log(f"autoloop: failed to start ({e}); continuing without an auto loop")
 
     # Supervise: if any critical child dies, tear the whole channel down so
     # ECS restarts a clean container (renditions must stay in lockstep).
