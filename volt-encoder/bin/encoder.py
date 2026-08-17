@@ -261,6 +261,46 @@ def audio_tracks(cfg):
     return tracks
 
 
+def _hls_edge_flags(url, back_sec=12):
+    """Choose the ffmpeg flags that make an HLS ingest START AT THE LIVE EDGE.
+
+    There are two kinds of source playlist and they need OPPOSITE handling:
+      * A truly-live playlist (no #EXT-X-ENDLIST) -> `-live_start_index -1` begins at the
+        newest segment. Correct.
+      * A BOUNDED playlist (has #EXT-X-ENDLIST — a Wowza/CloudFront nDVR window, an event
+        recording, a catch-up URL) -> ffmpeg treats it as a FILE and `-live_start_index`
+        is IGNORED, so it begins at segment 0 and replays the ENTIRE window forward (the
+        "day-old content that slowly catches up" bug, confirmed by test). For this case we
+        must SEEK to the end with `-sseof -N` (start N seconds before EOF = the live edge).
+
+    So we probe the playlist once for ENDLIST and pick the right flag. On any probe failure
+    we fall back to seeking the edge (`-sseof`), which is the safer default for a source we
+    already know can be a bounded window."""
+    endlist = None
+    try:
+        import urllib.request
+        from urllib.parse import urljoin
+        def _get(u):
+            req = urllib.request.Request(u, headers={"User-Agent": "volt-encoder/1.0"})
+            return urllib.request.urlopen(req, timeout=8).read().decode("utf-8", "ignore")
+        txt = _get(url)
+        # if this is a MASTER playlist, follow the first variant to reach the media playlist
+        if "#EXT-X-STREAM-INF" in txt and "#EXTINF" not in txt:
+            lines = txt.splitlines()
+            for i, l in enumerate(lines):
+                if l.startswith("#EXT-X-STREAM-INF") and i + 1 < len(lines) and lines[i + 1].strip():
+                    txt = _get(urljoin(url, lines[i + 1].strip()))
+                    break
+        endlist = "#EXT-X-ENDLIST" in txt
+    except Exception as e:  # noqa: BLE001
+        log(f"ingest: HLS edge probe failed ({e}); seeking to the edge to be safe")
+    if endlist is False:
+        log("ingest: HLS source is live (no ENDLIST) -> start at the newest segment")
+        return ["-fflags", "+genpts", "-live_start_index", "-1", "-http_persistent", "0"]
+    log(f"ingest: HLS source is a bounded window (ENDLIST={endlist}) -> seek {back_sec}s before the edge")
+    return ["-fflags", "+genpts", "-sseof", f"-{back_sec}", "-http_persistent", "0"]
+
+
 def input_args(inp):
     """Protocol-specific FFmpeg input flags for a contribution feed."""
     proto = inp["protocol"].lower()
@@ -270,22 +310,9 @@ def input_args(inp):
     if proto in ("rtmp", "rtmps"):
         return ["-i", url]
     if proto == "hls":
-        # START AT THE LIVE EDGE. Without this, ffmpeg opens the source playlist at
-        # the OLDEST segment in its window (or segment 0), so everything we package
-        # is minutes behind real time and every restart resumes from that same old
-        # point. -live_start_index -1 tells the HLS demuxer to begin at the newest
-        # segment, so the packaged output tracks the true live edge and a restart
-        # re-acquires live rather than replaying old content.
-        #   http_persistent 0 avoids a stale keep-alive connection re-serving an old
-        #   playlist view; +genpts keeps timestamps monotonic for the -c copy relay.
-        # NOTE: we deliberately do NOT use -re here — the source playlist is already
-        # live-paced; -re would pin playback to whatever (old) segment we opened at.
-        return [
-            "-fflags", "+genpts",
-            "-live_start_index", "-1",
-            "-http_persistent", "0",
-            "-i", url,
-        ]
+        # START AT THE LIVE EDGE — see _hls_edge_flags for why this must adapt to whether
+        # the source playlist is live or a bounded (ENDLIST) DVR window.
+        return [*_hls_edge_flags(url), "-i", url]
     die(f"unsupported input protocol: {proto}")
 
 
@@ -727,9 +754,11 @@ def start_captions(cfg, out_dir):
     os.makedirs(tmp, exist_ok=True)
     audio_url = _captions_audio_url(cfg)
 
-    # continuous audio segmenter: fixed-length mono 16k WAV chunks for whisper
+    # continuous audio segmenter: fixed-length mono 16k WAV chunks for whisper. Must start
+    # at the LIVE EDGE (same adaptive HLS handling as the video ingest) or captions would
+    # transcribe old audio and never line up.
     aseg = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-            "-fflags", "+genpts", "-live_start_index", "-1", "-http_persistent", "0",
+            *_hls_edge_flags(audio_url),
             "-i", audio_url, "-vn", "-ac", "1", "-ar", "16000",
             "-f", "segment", "-segment_time", str(chunk), "-reset_timestamps", "1",
             os.path.join(tmp, "cap_%05d.wav")]
