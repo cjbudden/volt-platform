@@ -692,6 +692,46 @@ def start_companion_refresher(out_dir, langs, default_lang, chunk, interval=2.0)
     log(f"captions: companion refresher every {interval}s (decoupled from transcribe)")
 
 
+def start_autoloop_generator(cfg, out_dir, seconds=None, warmup=25.0, refresh=300.0):
+    """Auto-generate the LOOP filler from the channel's OWN output.
+
+    Once the output is producing, capture a few seconds of it (already at the exact
+    ladder / bitrate the channel emits) into a short MP4 the source-selector uses as the
+    loop filler. Refreshed periodically so the stored loop stays recent. Cheap: it copies
+    the packaged output, no re-encode. Disable with redundancy.auto_loop=false; length via
+    redundancy.auto_loop_seconds. Writes atomically to _autoloop.mp4 in the output dir."""
+    red = cfg.get("redundancy") or {}
+    if red.get("auto_loop") is False:
+        return
+    secs = float(seconds if seconds is not None else (red.get("auto_loop_seconds") or 10))
+    master = os.path.join(out_dir, "master.m3u8")
+    dst = os.path.join(out_dir, "_autoloop.mp4")
+    tmp = dst + ".tmp"
+
+    def loop():
+        time.sleep(warmup)  # let the output build a live window first
+        first = True
+        while True:
+            try:
+                if os.path.exists(master):
+                    cmd = source_selector.autoloop_capture_cmd(master, tmp, secs)
+                    subprocess.run(cmd, timeout=secs + 40,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if os.path.exists(tmp) and os.path.getsize(tmp) > 1024:
+                        os.replace(tmp, dst)   # atomic swap so readers never see a partial file
+                        if first:
+                            log(f"autoloop: stored {secs:g}s of output as the loop filler -> {dst}")
+                            first = False
+                        if _events:
+                            _events.event("autoloop.ready", seconds=secs)
+            except Exception as e:  # noqa: BLE001
+                log(f"autoloop: capture failed ({e})")
+            time.sleep(refresh)
+
+    threading.Thread(target=loop, name="autoloop", daemon=True).start()
+    log(f"autoloop: generator armed (capture {secs:g}s after {int(warmup)}s warmup, refresh {int(refresh)}s)")
+
+
 def start_captions(cfg, out_dir):
     cap = cfg.get("captions")
     if not cap or not cap.get("enabled"):
@@ -927,6 +967,12 @@ def main():
         start_captions(cfg, OUT_DIR)
     except Exception as e:  # noqa: BLE001
         log(f"captions: failed to start ({e}); continuing without captions")
+
+    # Auto-generate the loop filler from this channel's own output (non-critical).
+    try:
+        start_autoloop_generator(cfg, OUT_DIR)
+    except Exception as e:  # noqa: BLE001
+        log(f"autoloop: failed to start ({e}); continuing without an auto loop")
 
     # Supervise: if any critical child dies, tear the whole channel down so
     # ECS restarts a clean container (renditions must stay in lockstep).

@@ -152,6 +152,8 @@ export interface FailoverTestState {
   workflowType: 'transcode' | 'package_only' | null
   autoFailback: boolean | null
   lossBehavior: string | null
+  autoLoopReady: boolean       // the encoder has captured a loop from this channel's output
+  autoLoopAt: number | null    // when it was last captured (ms)
 }
 
 export const api = {

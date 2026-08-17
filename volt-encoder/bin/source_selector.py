@@ -194,6 +194,20 @@ def filler_vod_cmd(vod_url, ladder, seg, fps, progress_url):
     return cmd
 
 
+def autoloop_capture_cmd(master_playlist, out_path, seconds):
+    """Capture a few seconds of the channel's OWN live output into a short, loopable
+    MP4 — the auto-generated loop filler. We read the packaged output playlist at the
+    live edge and copy it (no re-encode), so the clip is already at the exact ladder /
+    bitrate the channel produces. On total input loss the loop filler replays this
+    recent real content instead of a generic slate. faststart makes it seek-friendly
+    for looping."""
+    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+            "-live_start_index", "-1", "-http_persistent", "0",
+            "-i", master_playlist,
+            "-t", str(seconds), "-c", "copy", "-movflags", "+faststart",
+            out_path]
+
+
 def forwarder_cmd(group, idx):
     """Copy the active group's private TS to the bus port Shaka reads. No
     re-encode; genpts keeps the bus timeline monotonic across a restart."""
@@ -261,6 +275,9 @@ class SourceSelector:
         self._override = "auto"
         self._filler_proc = None        # current filler ffmpeg (so we can swap slate<->loop)
         self._filler_kind = None
+        # Auto-generated loop: the encoder captures a few seconds of the real output here.
+        # It is preferred over slate for the loop filler when no explicit loop was uploaded.
+        self.autoloop_path = os.path.join(control_dir or work_dir, "_autoloop.mp4")
 
         red = cfg.get("redundancy", {})
         self.auto_failback = red.get("auto_failback", True)
@@ -295,8 +312,9 @@ class SourceSelector:
         # filler (one ffmpeg, all renditions) — slate or vod_loop
         if self.loss_behavior in ("slate", "vod_loop"):
             pp = self._progress_path("filler", 0)
-            if self.loss_behavior == "vod_loop" and self.filler.get("vod_loop_url"):
-                cmd = filler_vod_cmd(self.filler["vod_loop_url"], self.ladder,
+            loop_src = self._loop_source() if self.loss_behavior == "vod_loop" else None
+            if loop_src:
+                cmd = filler_vod_cmd(loop_src, self.ladder,
                                      self.cfg["segment_seconds"],
                                      self.cfg.get("fps", 25), pp)
                 self._filler_kind = "loop"
@@ -358,10 +376,23 @@ class SourceSelector:
         except Exception:  # noqa: BLE001
             return "auto"
 
+    def _loop_source(self):
+        """Resolve the loop filler source, in precedence order: an explicitly uploaded
+        loop VOD, else the auto-generated loop captured from this channel's own output,
+        else None (caller falls back to slate)."""
+        url = self.filler.get("vod_loop_url")
+        if url:
+            return url
+        if os.path.exists(self.autoloop_path):
+            return self.autoloop_path
+        return None
+
     def _ensure_filler(self, kind):
         """Make the requested filler kind (slate|loop) the running filler, respawning it
-        if we currently have the other kind. Falls back to slate if no loop VOD is set."""
-        if kind == "loop" and not self.filler.get("vod_loop_url"):
+        if we currently have the other kind. Falls back to slate if no loop source (an
+        uploaded loop or an auto-generated loop) is available yet."""
+        loop_src = self._loop_source()
+        if kind == "loop" and not loop_src:
             kind = "slate"
         if kind == self._filler_kind and self._filler_proc and self._filler_proc.poll() is None:
             return
@@ -370,7 +401,7 @@ class SourceSelector:
             except Exception: pass  # noqa: BLE001
         pp = self._progress_path("filler", 0)
         if kind == "loop":
-            cmd = filler_vod_cmd(self.filler["vod_loop_url"], self.ladder,
+            cmd = filler_vod_cmd(loop_src, self.ladder,
                                  self.cfg["segment_seconds"], self.cfg.get("fps", 25), pp)
         else:
             slate = self.filler.get("slate_ref", "/app/assets/slate.png")
@@ -408,6 +439,13 @@ class SourceSelector:
                 if self.events:
                     self.events.event("failover.test", mode=override)
                 self._override = override
+
+            # STANDBY UPGRADE: once the auto-generated loop exists, promote the idle
+            # filler from slate to loop so a real total-loss failover shows recent output,
+            # not a static card. Only while filler is NOT on air, so there is no blip.
+            if (self.loss_behavior == "vod_loop" and self.active != "filler"
+                    and self._filler_kind != "loop" and self._loop_source()):
+                self._ensure_filler("loop")
 
             if override in ("slate", "loop"):
                 self._ensure_filler(override)

@@ -128,6 +128,49 @@ def test_filler_vod_cmd():
     check("vod paced realtime", "-re" in cmd)
     check("vod -> filler port 23000", "udp://127.0.0.1:23000" in " ".join(cmd))
 
+# ---------------- auto-generated loop filler ----------------
+def test_autoloop_capture_cmd():
+    cmd = ss.autoloop_capture_cmd("/out/master.m3u8", "/out/_autoloop.mp4", 10)
+    check("autoloop reads the output playlist", "-i" in cmd and "/out/master.m3u8" in cmd)
+    check("autoloop captures N seconds", "-t" in cmd and "10" in cmd)
+    check("autoloop copies (no re-encode -> keeps output bitrate)", "-c" in cmd and "copy" in cmd)
+    check("autoloop starts at the live edge", "-live_start_index" in cmd)
+    check("autoloop writes the loop file", "/out/_autoloop.mp4" in cmd)
+
+def _mk_selector(tmp, vod=None):
+    red = {"input_loss_behavior": "vod_loop", "filler": {"slate_ref": "/s.png"}}
+    if vod:
+        red["filler"]["vod_loop_url"] = vod
+    cfg = {"segment_seconds": 4, "fps": 25, "redundancy": red}
+    ladder = [{"height": 480, "bitrate_kbps": 1200}]
+    prim = [{"protocol": "hls", "url": "p0", "rendition_label": "480p"}]
+    class P:
+        def poll(self): return None
+        def terminate(self): pass
+    return ss.SourceSelector(cfg, ladder, prim, [], lambda n, c: P(), lambda *a: None,
+                             work_dir=tmp, control_dir=tmp)
+
+def test_loop_source_precedence():
+    import tempfile
+    tmp = tempfile.mkdtemp()
+    sel = _mk_selector(tmp)
+    check("no loop source before a loop exists", sel._loop_source() is None)
+    open(sel.autoloop_path, "w").write("x" * 2048)
+    check("auto-generated loop used once captured", sel._loop_source() == sel.autoloop_path)
+    sel2 = _mk_selector(tmp, vod="s3://b/v.mp4")
+    check("uploaded loop wins over the auto loop", sel2._loop_source() == "s3://b/v.mp4")
+
+def test_ensure_filler_uses_autoloop():
+    import tempfile
+    tmp = tempfile.mkdtemp()
+    sel = _mk_selector(tmp)
+    sel._filler_kind = "slate"
+    sel._ensure_filler("loop")
+    check("no loop source -> filler stays slate", sel._filler_kind == "slate")
+    open(sel.autoloop_path, "w").write("x" * 2048)
+    sel._ensure_filler("loop")
+    check("auto loop present -> filler becomes loop", sel._filler_kind == "loop")
+
 for fn in list(globals().values()):
     if callable(fn) and getattr(fn, "__name__", "").startswith("test_"):
         fn()

@@ -1389,6 +1389,11 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
           <span className={`dot-s ${real ? 'live' : 'idle'}`} />{real ? 'LIVE ENCODER FAILOVER' : 'PREVIEW SIMULATION'}
         </span>
         {mode !== 'auto' && <span className="tag warn" style={{ fontSize: 10.5 }}>ACTIVE: {active?.label || mode}</span>}
+        <span className={`tag ${cap?.autoLoopReady ? 'live' : 'idle'}`} style={{ fontSize: 10.5, marginLeft: 'auto' }}
+          title="The encoder captures a few seconds of this channel's own output and stores it as the loop filler, so a loop failover replays recent real content at the right bitrate.">
+          <span className={`dot-s ${cap?.autoLoopReady ? 'live' : 'idle'}`} />
+          {cap?.autoLoopReady ? 'AUTO-LOOP READY' : 'AUTO-LOOP PENDING'}
+        </span>
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
         {real
