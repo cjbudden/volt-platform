@@ -28,6 +28,11 @@ async function ensureSchema(): Promise<void> {
   await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark_scale INTEGER NOT NULL DEFAULT 12`);
   // Channel brand image (identity logo shown in place of the initials box).
   await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS brand_ref TEXT`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS brand_colour TEXT`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS description TEXT`);
+  // Audio-only (radio) channels: one input, an AAC ladder out, no video anywhere.
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS audio_only BOOLEAN NOT NULL DEFAULT false`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS audio_ladder JSONB`);
 }
 
 const server = app.listen(config.port, () => {

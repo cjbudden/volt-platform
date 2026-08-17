@@ -20,6 +20,7 @@ const I = {
   images: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></svg>,
   multiview: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>,
   analytics: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18" /><path d="m7 14 4-4 3 3 5-6" /></svg>,
+  radio: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 11h16a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><circle cx="8" cy="15.5" r="2.5" /><path d="M17 14h2M17 17h2M18 3 7 8" /></svg>,
 }
 
 const NAV: { group: string; items: { key: string; label: string; icon: ReactElement; badge?: string }[] }[] = [
@@ -30,6 +31,7 @@ const NAV: { group: string; items: { key: string; label: string; icon: ReactElem
   ] },
   { group: 'Broadcast', items: [
     { key: 'channels', label: 'Channels', icon: I.channels },
+    { key: 'radio', label: 'Radio', icon: I.radio },
     { key: 'events', label: 'Events', icon: I.events },
     { key: 'loops', label: 'Loops & Fillers', icon: I.loops },
   ] },
@@ -56,8 +58,10 @@ export default function App() {
   const section = route.section
   const channelId = route.channelId
   const createOpen = route.create
-  const setCreateOpen = (open: boolean) => navigate(open ? '/channels/new' : '/channels', { replace: true })
-  const openChannel = (id: string) => navigate(`/channels/${id}`)
+  // create + open stay inside whichever scope you are in (channels or radio)
+  const scope = section === 'radio' ? 'radio' : 'channels'
+  const setCreateOpen = (open: boolean) => navigate(open ? `/${scope}/new` : `/${scope}`, { replace: true })
+  const openChannel = (id: string) => navigate(`/${scope}/${id}`)
 
   const account = email.split('@')[1]?.split('.')[0]?.toUpperCase() || 'RTM'
   const label = NAV.flatMap(g => g.items).find(i => i.key === section)?.label
@@ -136,10 +140,11 @@ export default function App() {
           </div>
         </div>
         <div className="content">
-          {section === 'channels'
+          {section === 'channels' || section === 'radio'
             ? (channelId
-                ? <ChannelDetail key={channelId} id={channelId} onBack={() => navigate('/channels')} />
-                : <Channels createOpen={createOpen} setCreateOpen={setCreateOpen} onOpen={openChannel} />)
+                ? <ChannelDetail key={channelId} id={channelId} onBack={() => navigate(`/${scope}`)} />
+                : <Channels key={scope} mode={section === 'radio' ? 'radio' : 'video'}
+                    createOpen={createOpen} setCreateOpen={setCreateOpen} onOpen={openChannel} />)
             : section === 'images'
             ? <ImageLibrary />
             : <Placeholder title={label} />}
