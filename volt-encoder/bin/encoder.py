@@ -534,17 +534,39 @@ def _write_sub_segment(path, cues, seg_start, seg_end):
         fh.write("\n".join(body).rstrip() + "\n")
 
 
-def _pdt_companion_playlist(text, now):
+def _pdt_companion_playlist(text, now, out_dir):
     """Copy a Shaka video media playlist and inject EXT-X-PROGRAM-DATE-TIME so the video
-    carries a wall-clock the subtitle track can align to. The newest segment ends ~now,
-    so the window starts at now - (sum of segment durations)."""
+    carries a wall-clock the subtitle track aligns to.
+
+    RELIABILITY: the PDT must be a STABLE, real content timestamp — not an estimate.
+    We anchor the FIRST segment's PDT to that segment file's mtime (when the encoder
+    actually wrote it, i.e. the real wall-clock of that content), minus its duration to
+    get the segment START. mtime never changes once written, so the timeline does not
+    jitter between regenerations, and it reflects the SAME real clock the subtitle
+    segments use (both produced live on this box) — so cues line up with frames. If the
+    file cannot be stat'd we fall back to the old now - total estimate."""
     lines = text.splitlines()
-    total = 0.0
+    first_uri, first_dur, pend = None, 0.0, None
     for l in lines:
         if l.startswith("#EXTINF:"):
-            try: total += float(l[len("#EXTINF:"):].split(",")[0])
-            except ValueError: pass
-    start_wall = now - total
+            try: pend = float(l[len("#EXTINF:"):].split(",")[0])
+            except ValueError: pend = None
+        elif l and not l.startswith("#"):
+            first_uri, first_dur = l, (pend or 0.0)
+            break
+    start_wall = None
+    if first_uri:
+        try:
+            start_wall = os.path.getmtime(os.path.join(out_dir, first_uri)) - first_dur
+        except OSError:
+            start_wall = None
+    if start_wall is None:
+        total = 0.0
+        for l in lines:
+            if l.startswith("#EXTINF:"):
+                try: total += float(l[len("#EXTINF:"):].split(",")[0])
+                except ValueError: pass
+        start_wall = now - total
     out, stamped = [], False
     for l in lines:
         if (not stamped) and l.startswith("#EXTINF:"):
@@ -589,7 +611,7 @@ def _write_companion(out_dir, langs, default_lang, now):
             try:
                 vtext = open(os.path.join(out_dir, line)).read()
                 with open(os.path.join(out_dir, cc_name), "w") as fh:
-                    fh.write(_pdt_companion_playlist(vtext, now))
+                    fh.write(_pdt_companion_playlist(vtext, now, out_dir))
                 out.append(cc_name)
             except OSError:
                 out.append(line)  # fall back to the plain playlist if unreadable

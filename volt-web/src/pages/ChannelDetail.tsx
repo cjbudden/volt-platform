@@ -687,7 +687,7 @@ function hostOf(url?: string | null) { try { return url ? new URL(url).host : ''
 // back to a motion driven by playback progress so the bars are ALWAYS alive while
 // audio is flowing, muted or not. Audio is muted by default on this page.
 type AudioTrackOpt = { id: number; label: string }
-const AUDIO_BARS = 5
+const AUDIO_BARS = 7
 const SPK_HI = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z" /></svg>
 const SPK_LO = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z" /></svg>
 const SPK_MUTE = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm18.6.4-1.4-1.4L17 11.2 13.8 8l-1.4 1.4L15.6 12.6 12.4 15.8l1.4 1.4L17 14l3.2 3.2 1.4-1.4-3.2-3.2 3.2-3.2z" /></svg>
@@ -698,6 +698,9 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
   const [bars, setBars] = useState<number[]>(() => new Array(AUDIO_BARS).fill(0))
   const ctxRef = useRef<AudioContext | null>(null)
   const anRef = useRef<AnalyserNode | null>(null)
+  const dataRef = useRef<Uint8Array | null>(null)
+  const edgesRef = useRef<number[] | null>(null)
+  const dispRef = useRef<number[]>(new Array(AUDIO_BARS).fill(0))  // smoothed bar heights
   const rafRef = useRef<number | null>(null)
   const triedRef = useRef(false)   // captureStream attempted (and failed) — stop retrying
   const lastTimeRef = useRef(-1)
@@ -726,14 +729,18 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
         const AC: typeof AudioContext | undefined = window.AudioContext || (window as any).webkitAudioContext
         if (!AC) { triedRef.current = true; return }
         const ctx = new AC()
-        const analyser = ctx.createAnalyser(); analyser.fftSize = 64; analyser.smoothingTimeConstant = 0.7
+        const analyser = ctx.createAnalyser()
+        // 256-point FFT (128 bins) gives enough resolution to spread energy across the
+        // bars; moderate smoothing keeps it lively but not jittery.
+        analyser.fftSize = 256; analyser.smoothingTimeConstant = 0.6
         ctx.createMediaStreamSource(cap).connect(analyser)  // analysis only — no destination
         ctxRef.current = ctx; anRef.current = analyser
+        dataRef.current = new Uint8Array(analyser.frequencyBinCount)
+        edgesRef.current = null
         resume()
       } catch { triedRef.current = true }  // tainted / unsupported — synthesized motion only
     }
 
-    const data = new Uint8Array(32)
     const loop = () => {
       if (stopped) return
       const v = videoRef.current
@@ -741,28 +748,43 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
         build()
         const playing = !v.paused && !v.ended && v.readyState >= 2 && v.currentTime !== lastTimeRef.current
         lastTimeRef.current = v.currentTime
-        const an = anRef.current
+        const an = anRef.current, data = dataRef.current
+        const disp = dispRef.current
         let real = false
-        const next = new Array(AUDIO_BARS).fill(0)
-        if (an && ctxRef.current && ctxRef.current.state === 'running') {
+        if (an && data && ctxRef.current && ctxRef.current.state === 'running') {
           an.getByteFrequencyData(data)
-          const band = Math.max(1, Math.floor(data.length / AUDIO_BARS))
+          const bins = data.length
+          // log-spaced band edges so each bar covers a musically meaningful range (low
+          // bass dominates a linear split — that was the "single bar" look). Computed once.
+          if (!edgesRef.current) {
+            const top = Math.max(AUDIO_BARS + 1, Math.floor(bins * 0.78))
+            const e: number[] = []
+            for (let b = 0; b <= AUDIO_BARS; b++) e.push(Math.min(top, Math.max(1, Math.round(2 * Math.pow(top / 2, b / AUDIO_BARS)))))
+            for (let b = 1; b < e.length; b++) if (e[b] <= e[b - 1]) e[b] = e[b - 1] + 1
+            edgesRef.current = e
+          }
+          const edges = edgesRef.current
           let peak = 0
           for (let b = 0; b < AUDIO_BARS; b++) {
-            let sum = 0
-            for (let i = 0; i < band; i++) sum += data[b * band + i] || 0
-            const val = Math.min(1, (sum / band) / 170); next[b] = val; peak = Math.max(peak, val)
+            let sum = 0, n = 0
+            for (let i = edges[b]; i < edges[b + 1] && i < bins; i++) { sum += data[i]; n++ }
+            const avg = n ? (sum / n) / 255 : 0
+            // perceptual curve + gentle lift on higher bands (they carry less energy)
+            const val = Math.min(1, Math.pow(avg, 0.62) * (1 + b * 0.16))
+            disp[b] = val > disp[b] ? val : disp[b] * 0.82 + val * 0.18  // fast attack, slow release
+            peak = Math.max(peak, disp[b])
           }
-          real = peak > 0.02
+          real = peak > 0.03
         }
-        if (real) setBars(next)
+        if (real) setBars(disp.slice())
         else if (playing) {
-          // audio is flowing but we can't read a real level (context not resumed, or
-          // the browser mutes the capture) — keep the meter alive with motion.
-          phaseRef.current += 0.33
+          // audio is flowing but we cannot read a real level yet (context not resumed,
+          // or the browser mutes the capture) — keep the meter alive with motion.
+          phaseRef.current += 0.3
           const p = phaseRef.current
-          setBars(Array.from({ length: AUDIO_BARS }, (_, b) => 0.25 + 0.5 * Math.abs(Math.sin(p + b * 0.9)) * (0.6 + 0.4 * Math.sin(p * 0.7 + b))))
-        } else setBars(prev => prev.map(x => Math.max(0, x * 0.82)))  // idle — decay to rest
+          for (let b = 0; b < AUDIO_BARS; b++) disp[b] = 0.28 + 0.42 * Math.abs(Math.sin(p * 1.1 + b * 0.7)) * (0.65 + 0.35 * Math.sin(p * 0.5 + b * 1.3))
+          setBars(disp.slice())
+        } else { for (let b = 0; b < AUDIO_BARS; b++) disp[b] = Math.max(0, disp[b] * 0.85); setBars(disp.slice()) }
       }
       rafRef.current = requestAnimationFrame(loop)
     }
@@ -831,11 +853,11 @@ function AudioDock({ eng, tracks, currentTrack, onSelectTrack, controlsShown }: 
           </select>
         )}
       </div>
-      <div title="Audio level" style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 18, width: AUDIO_BARS * 6, padding: '3px 5px', borderRadius: 7, background: 'rgba(0,0,0,.4)', backdropFilter: 'blur(2px)' }}>
+      <div title="Audio level" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, height: 30, width: AUDIO_BARS * 8 + 12, padding: '5px 8px', borderRadius: 9, background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(2px)' }}>
         {eng.bars.map((b, i) => (
           <span key={i} style={{
-            width: 3, borderRadius: 2, height: `${Math.max(10, b * 100)}%`, alignSelf: 'flex-end',
-            background: active ? 'var(--live, #4ade80)' : 'rgba(148,163,184,.55)', transition: 'height 80ms linear',
+            width: 4, borderRadius: 2, height: `${Math.max(8, Math.min(100, b * 100))}%`, alignSelf: 'center',
+            background: active ? 'var(--live, #4ade80)' : 'rgba(148,163,184,.5)', transition: 'height 70ms linear',
           }} />
         ))}
       </div>
@@ -1031,9 +1053,11 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
           if (!data.fatal) return
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {}; return }
-          // keep retrying the companion (it appears ~12s in); only after several misses
+          // keep retrying the companion (it appears ~12s in); only after MANY misses
           // fall back to the plain master so video still plays if captions never come.
-          if (cc && src.endsWith('master_cc.m3u8') && ++ccTries >= 6) { src = originUrl(`/origin/${d.id}/master.m3u8`) }
+          // The companion is normally reliable, so keep trying it for a good while
+          // rather than dropping subtitles for the whole session on a transient error.
+          if (cc && src.endsWith('master_cc.m3u8') && ++ccTries >= 20) { src = originUrl(`/origin/${d.id}/master.m3u8`) }
           setTimeout(() => { try { hls.loadSource(src); hls.startLoad() } catch {} }, 1500)
         })
       } else if (video!.canPlayType('application/vnd.apple.mpegurl')) {
@@ -1113,6 +1137,25 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
       }
     } catch { /* ignore */ }
   }, [subOn, subLang, fmt, subTracks, levels])
+
+  // SELF-HEAL: hls.js can drop the selected subtitle track after a level switch,
+  // recovery, or DVR seek, which is what made captions come and go. Re-assert the
+  // chosen track + display on a slow interval so it stays on reliably for live and DVR.
+  useEffect(() => {
+    if (!subOn || fmt !== 'hls') return
+    const iv = setInterval(() => {
+      const hls = hlsRef.current; if (!hls) return
+      try {
+        const tracks = hls.subtitleTracks || []
+        if (!tracks.length) return
+        hls.subtitleDisplay = true
+        const want = tracks.findIndex((t: any) => String(t.lang || t.name || '').toLowerCase().startsWith(subLang.toLowerCase()))
+        const target = want >= 0 ? want : 0
+        if (hls.subtitleTrack !== target) hls.subtitleTrack = target
+      } catch { /* ignore */ }
+    }, 3000)
+    return () => clearInterval(iv)
+  }, [subOn, subLang, fmt])
 
   // track live-edge vs DVR position
   useEffect(() => {
