@@ -687,7 +687,7 @@ function hostOf(url?: string | null) { try { return url ? new URL(url).host : ''
 // back to a motion driven by playback progress so the bars are ALWAYS alive while
 // audio is flowing, muted or not. Audio is muted by default on this page.
 type AudioTrackOpt = { id: number; label: string }
-const AUDIO_BARS = 7
+const AUDIO_BARS = 14
 const SPK_HI = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z" /></svg>
 const SPK_LO = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z" /></svg>
 const SPK_MUTE = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm18.6.4-1.4-1.4L17 11.2 13.8 8l-1.4 1.4L15.6 12.6 12.4 15.8l1.4 1.4L17 14l3.2 3.2 1.4-1.4-3.2-3.2 3.2-3.2z" /></svg>
@@ -732,7 +732,7 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
         const analyser = ctx.createAnalyser()
         // 256-point FFT (128 bins) gives enough resolution to spread energy across the
         // bars; moderate smoothing keeps it lively but not jittery.
-        analyser.fftSize = 256; analyser.smoothingTimeConstant = 0.6
+        analyser.fftSize = 256; analyser.smoothingTimeConstant = 0.35  // low = snappy, tracks transients
         ctx.createMediaStreamSource(cap).connect(analyser)  // analysis only — no destination
         ctxRef.current = ctx; anRef.current = analyser
         dataRef.current = new Uint8Array(analyser.frequencyBinCount)
@@ -769,22 +769,24 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
             let sum = 0, n = 0
             for (let i = edges[b]; i < edges[b + 1] && i < bins; i++) { sum += data[i]; n++ }
             const avg = n ? (sum / n) / 255 : 0
-            // perceptual curve + gentle lift on higher bands (they carry less energy)
-            const val = Math.min(1, Math.pow(avg, 0.62) * (1 + b * 0.16))
-            disp[b] = val > disp[b] ? val : disp[b] * 0.82 + val * 0.18  // fast attack, slow release
+            // strong perceptual curve + gain so normal speech/music fills the meter,
+            // with a small lift on higher bands (they carry less energy).
+            const val = Math.min(1, Math.pow(avg, 0.5) * 1.7 * (1 + b * 0.05))
+            // instant attack, fast release -> lively, clearly follows the audio
+            disp[b] = val >= disp[b] ? val : disp[b] * 0.7 + val * 0.3
             peak = Math.max(peak, disp[b])
           }
-          real = peak > 0.03
+          real = peak > 0.02
         }
         if (real) setBars(disp.slice())
         else if (playing) {
-          // audio is flowing but we cannot read a real level yet (context not resumed,
-          // or the browser mutes the capture) — keep the meter alive with motion.
-          phaseRef.current += 0.3
+          // audio flowing but no real level yet (context not resumed, or muted capture)
+          // — a brisk travelling wave so the meter reads as alive, not frozen.
+          phaseRef.current += 0.6
           const p = phaseRef.current
-          for (let b = 0; b < AUDIO_BARS; b++) disp[b] = 0.28 + 0.42 * Math.abs(Math.sin(p * 1.1 + b * 0.7)) * (0.65 + 0.35 * Math.sin(p * 0.5 + b * 1.3))
+          for (let b = 0; b < AUDIO_BARS; b++) disp[b] = 0.22 + 0.5 * Math.abs(Math.sin(p + b * 0.55)) * (0.6 + 0.4 * Math.sin(p * 0.4 + b * 0.9))
           setBars(disp.slice())
-        } else { for (let b = 0; b < AUDIO_BARS; b++) disp[b] = Math.max(0, disp[b] * 0.85); setBars(disp.slice()) }
+        } else { for (let b = 0; b < AUDIO_BARS; b++) disp[b] = Math.max(0, disp[b] * 0.8); setBars(disp.slice()) }
       }
       rafRef.current = requestAnimationFrame(loop)
     }
@@ -853,11 +855,11 @@ function AudioDock({ eng, tracks, currentTrack, onSelectTrack, controlsShown }: 
           </select>
         )}
       </div>
-      <div title="Audio level" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, height: 30, width: AUDIO_BARS * 8 + 12, padding: '5px 8px', borderRadius: 9, background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(2px)' }}>
+      <div title="Audio level" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2, height: 32, width: AUDIO_BARS * 5 + 14, padding: '5px 8px', borderRadius: 9, background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(2px)' }}>
         {eng.bars.map((b, i) => (
           <span key={i} style={{
-            width: 4, borderRadius: 2, height: `${Math.max(8, Math.min(100, b * 100))}%`, alignSelf: 'center',
-            background: active ? 'var(--live, #4ade80)' : 'rgba(148,163,184,.5)', transition: 'height 70ms linear',
+            width: 3, borderRadius: 2, height: `${Math.max(6, Math.min(100, b * 100))}%`, alignSelf: 'center',
+            background: active ? 'var(--live, #4ade80)' : 'rgba(148,163,184,.5)',
           }} />
         ))}
       </div>
