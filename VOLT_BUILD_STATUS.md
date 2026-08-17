@@ -48,8 +48,9 @@ implemented.** Design is ~2 chats ahead of build.
 | Captions settings UI (account provider toggle + per-profile targets/model/offset) | ❌ | backend + master toggle done; the admin screen to enable it and pick languages is a follow-up |
 | Transcode-workflow failover | ❌ | logs warning, runs primary only |
 | Zero-gap primary↔backup splice | ❌ | sub-second gap today |
-| Watermark / bug overlay | ✅ | Built 15 Aug, extended 16 Aug: per-channel burn-in on the transcode path (image, corner/edge anchor, px offsets, % size, opacity) with a live console preview. Now settable **on the create form** as well as settings. Packaging channels copy the source, so it is hidden there. |
+| Watermark / bug overlay | ✅ | Built 15 Aug, extended 16 Aug (burn-in wired into the encoder + test harness `test-stream.sh`; the settings show for ALL channels, burn-in stays transcode-only and packaged channels get the preview overlay): per-channel burn-in on the transcode path (image, corner/edge anchor, px offsets, % size, opacity) with a live console preview. Now settable **on the create form** as well as settings. Packaging channels copy the source, so it is hidden there. |
 | Channel brand image + description (identity, not burn-in) | ✅ | Built 16 Aug: `channels.brand_ref/brand_colour/description`. Set on create + settings from the Image Library; list thumbnail + detail header; served to guide clients via **`GET /api/epg/channels`** (id, name, icon, colour, description, medium) = XMLTV `<channel><icon/></channel>`. Doubles as station artwork for radio. Never reaches the encoder (asserted). |
+| Multi-language audio tracks (probe -> per-track AAC -> manifest track picker) | ✅ | Built 16 Aug: `probe_audio_tracks` on the mezzanine, one AAC elementary stream per source track on its own port, Shaka descriptors with language + display name (first = default), player track selector + real level meter with volume/mute. |
 | Audio-only (radio) channels | ✅ | Built 16 Aug: `channels.audio_only` + `audio_ladder`; `buildEncoderJobConfig` short-circuits both video workflows (no ladder, no GPU, one input, AAC rungs defaulting to 128k/64k); `encoder.py` audio path (`-vn`, N AAC renditions on the UDP bus) + audio-only HLS/DASH packaging; **Radio** nav section with `/radio` + `/radio/:id`. 13/13 `radio-brand.check.ts`. Open on this feature: dedicated Icecast input adapter + live waveform/level meter. |
 | FairPlay HLS | ❌ | backlog |
 
@@ -115,6 +116,12 @@ implemented.** Design is ~2 chats ahead of build.
 | WAF enforcement (paid add-on) | 📐 | designed; not built |
 
 ## 9. Frontend
+
+| Capability | Status | Notes / source |
+|---|---|---|
+| Site-wide search (channels · events · recordings) | ✅ | Built 16 Aug: `GET /api/search?q=` account-scoped across the three entities (defensive per entity), top-panel field with a debounced results dropdown that navigates on click. |
+| Radio section (audio-only scope) | ✅ | Built 16 Aug: `/radio` + `/radio/:id` reuse the channel list + detail at the audio scope, station wording, audio-ladder column and editor, create form with artwork + AAC rungs. |
+
 
 > **App-surfacing coverage** (tracked per-feature in `feature-tracker/features.json` via the `app_surface` field → the *volt-feature-tracker* artifact). Many capabilities below are ✅ *at the API/engine level* but **not yet wired into the React app**. In-app now: Channels list + create (transcode/package), **Radio (audio-only) list + create**, Channel detail/control page, **channel brand + watermark on create/settings**, **share-preview links (create, email, QR, extend, rotate, revoke)**, Test stream + playback + subtitles, Deep-link routing; Ladder profiles (in build). Backend-built but **not in app yet** (do not lose): image service, frame-accurate access, social publishing, EPG, analytics, file manager, watchfolder, SaaS admin, live-updates, full captions settings. These are carried as `app_surface: none` in the tracker so the gap stays visible; removals require a formal confirmation and are struck from both this doc and the tracker.
 

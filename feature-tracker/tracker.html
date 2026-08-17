@@ -28,8 +28,8 @@
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
  <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-16.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>19</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>5</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>12</b> 📱 In app</span><span class=chip><b>7</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>20</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>5</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>13</b> 📱 In app</span><span class=chip><b>7</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>Live stream end to end (create → transcode → play)</div>
@@ -269,13 +269,26 @@
     <div class=top><div class=name>Radio — audio-only channels</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
-    <div class=summary>A Radio section in the main nav and a real audio-only channel type: one source in, an AAC ladder out, no video anywhere in the chain. Create a station with artwork, a description, a source (Icecast, SRT, RTMP or HLS) and the audio rungs to encode; the job config short-circuits both video workflows (no ladder, no GPU) and the encoder maps audio only, with the packager emitting audio-only HLS/DASH. /radio and /radio/:id are the same list and detail pages at the audio scope.</div>
-    <div class=meta>Built 16 Aug: 13/13 in radio-brand.check.ts on the job-config decisions. STILL OPEN on this feature: a dedicated Icecast input adapter and the live waveform/level meter on the detail page.</div>
+    <div class=summary>A Radio section in the main nav and a real audio-only channel type: one source in, an AAC ladder out, no video anywhere in the chain. Create a station with artwork, a description, a source (Icecast, SRT, RTMP or HLS) and the audio rungs to encode; the job config short-circuits both video workflows (no ladder, no GPU) and the encoder maps audio only, with the packager emitting audio-only HLS/DASH. /radio and /radio/:id are the same list and detail pages at the audio scope. The detail page also has a real audio level meter with volume/mute and a track selector, and the encoder probes multi-language audio so each source track becomes its own manifest track.</div>
+    <div class=meta>Built 16 Aug: 13/13 in radio-brand.check.ts on the job-config decisions; audio meter + multi-track playback landed alongside. STILL OPEN on this feature: a dedicated Icecast input adapter.</div>
     <div class=how><b>How to test:</b> Radio → New station: artwork, source URL, tick the audio rungs, create. Start it and check the output is audio-only (master.m3u8 with audio renditions, no video). Edit the ladder in Settings → Audio ladder.</div>
     
     <div class=actions>
          <button class="btn ok" data-approve="Radio — audio-only channels">✓ Approve as working</button>
          <button class="btn warn" data-changes="Radio — audio-only channels">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Site-wide search</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>The top-panel search finds channels, events and recordings across the account and navigates straight to them. GET /api/search?q= is account-scoped and defensive per entity, the field is debounced with a results dropdown.</div>
+    <div class=meta>Built 16 Aug.</div>
+    <div class=how><b>How to test:</b> Type part of a channel, event or recording name in the top search field; click a result to jump to it.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Site-wide search">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Site-wide search">Request changes</button>
        </div>
     
   </div><div class=card data-status="in_review" data-app="partial">
