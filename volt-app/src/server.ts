@@ -110,6 +110,25 @@ export function createServer() {
   app.use('/api/events', eventsRouter);
   app.use('/api/output-profiles', profilesRouter);
   app.get('/api/ingest-protocols', (_req, res) => res.json({ protocols: INGEST_PROTOCOLS }));
+  // Caption OUTPUT languages the pipeline can actually DELIVER. Single source of truth
+  // for the language pickers in the creation and settings forms. Must stay in step with
+  // the encoder's translation capability: whisper transcribes ~100 languages and
+  // natively translates X->English; every non-English target below is served by the
+  // NLLB MT stage and needs a FLORES mapping in volt-encoder/bin/captions.py.
+  app.get('/api/caption-languages', (_req, res) => res.json({
+    languages: [
+      { code: 'en', label: 'English' },
+      { code: 'ms', label: 'Malay' },
+      { code: 'id', label: 'Indonesian' },
+      { code: 'zh', label: 'Chinese (Simplified)' },
+      { code: 'zh-Hant', label: 'Chinese (Traditional)' },
+      { code: 'ta', label: 'Tamil' },
+      { code: 'hi', label: 'Hindi' },
+      { code: 'es', label: 'Spanish' },
+      { code: 'fr', label: 'French' },
+      { code: 'ar', label: 'Arabic' },
+    ],
+  }));
   app.use('/api/files', mediaFilesRouter);   // image library (file manager)
 
   // Resized preview derivatives (WebP), cached under the store's derived/ prefix.

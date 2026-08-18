@@ -4,11 +4,7 @@ import { navigate } from '../router'
 import { subscribeLive } from '../liveStatus'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
-
-const LANGS = [
-  { code: 'en', label: 'English' }, { code: 'ms', label: 'Malay' },
-  { code: 'zh', label: 'Chinese' }, { code: 'ta', label: 'Tamil' },
-]
+import { LangPicker, useCaptionLanguages } from '../LangPicker'
 function fmtOffset(sec: number) {
   if (sec <= 0) return 'LIVE'
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60)
@@ -1081,6 +1077,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   // are on we hold the play point back by this much. "Live" then means the point where
   // the subtitles already exist and align, not the bleeding edge.
   const capHold = d.captions?.enabled ? 14 : 0
+  const langOpts = useCaptionLanguages()   // labels for the CC language selector
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const videoBoxRef = useRef<HTMLDivElement | null>(null)
   const hlsRef = useRef<any>(null)
@@ -1468,7 +1465,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           <button className={`chip ${subOn ? 'active' : ''}`} style={{ padding: '5px 10px' }} onClick={() => setSubOn(!subOn)}>CC</button>
           {subOn && (
             <select value={subLang} onChange={e => setSubLang(e.target.value)}>
-              {captionLangs.map(c => <option key={c} value={c}>{LANGS.find(l => l.code === c)?.label || c}</option>)}
+              {captionLangs.map(c => <option key={c} value={c}>{langOpts.find(l => l.code === c)?.label || c.toUpperCase()}</option>)}
             </select>
           )}
           <select value={level} onChange={e => setLevel(Number(e.target.value))}>
@@ -1753,6 +1750,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   // subtitles
   const [capOn, setCapOn] = useState(d.captions.enabled)
   const [capLangs, setCapLangs] = useState<string[]>(d.captions.targets.length ? d.captions.targets : ['en'])
+  const langOpts = useCaptionLanguages()
   // filler on loss
   const [lossBehavior, setLossBehavior] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>(d.input_loss_behavior || 'none')
   const [slateRef, setSlateRef] = useState(d.filler_slate_ref || '')
@@ -1967,13 +1965,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             <div className={`sw ${capOn ? '' : 'off'}`} onClick={() => setCapOn(v => !v)}><i /></div>
           </div>
           {capOn && (
-            <div className="field"><label>Target languages</label>
-              <div className="chipset">
-                {LANGS.map(l => {
-                  const on = capLangs.includes(l.code)
-                  return <div key={l.code} className={`selchip ${on ? 'sel' : ''}`} onClick={() => setCapLangs(on ? capLangs.filter(x => x !== l.code) : [...capLangs, l.code])}>{l.label}</div>
-                })}
-              </div>
+            <div className="field"><label>Output languages <span style={{ color: 'var(--faint)' }}>— the spoken language is detected automatically and translated into each of these</span></label>
+              <LangPicker value={capLangs} onChange={setCapLangs} options={langOpts} />
             </div>
           )}
 

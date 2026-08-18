@@ -165,6 +165,8 @@ export const api = {
   login: (email: string, password: string) =>
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   groups: (): Promise<Group[]> => req('/groups'),
+  // caption OUTPUT languages the pipeline can deliver (single source of truth for pickers)
+  captionLanguages: (): Promise<{ languages: { code: string; label: string }[] }> => req('/caption-languages'),
   channels: (): Promise<Channel[]> => req('/channels'),
   createChannel: (b: {
     groupId: string; name: string; purchasingMode?: string
