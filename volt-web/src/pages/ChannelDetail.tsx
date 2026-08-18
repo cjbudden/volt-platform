@@ -1363,11 +1363,15 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
   const [mode, setMode] = useState<FailoverMode>('auto')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  // Re-fetch the capability whenever the channel's failover-relevant settings change,
+  // not just on channel id. Saving Settings reloads the parent `d` with the same id, so
+  // keying on these fields lets the panel reflect a freshly enabled failover (or a
+  // changed filler behaviour) without a manual page refresh.
   useEffect(() => {
     let ok = true
     api.failoverTestStatus(d.id).then(s => { if (ok) { setCap(s); setMode(s.mode) } }).catch(() => {})
     return () => { ok = false }
-  }, [d.id])
+  }, [d.id, d.input_failover_enabled, d.auto_failback, d.input_loss_behavior, d.filler_slate_ref])
   const real = !!cap?.realFailover
   const apply = async (m: FailoverMode) => {
     if (!real) return   // no encoder selector to drive; nothing to simulate
@@ -1685,7 +1689,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     setBusy(true)
     try { await api.updateChannel(d.id, patch); onSaved() }
     catch (e: any) {
-      if (String(e.message).includes('409') || /version|match/i.test(e.message)) setErr('This channel changed since you opened it — reopen settings and retry.')
+      if (String(e.message).includes('409') || /version|match/i.test(e.message)) setErr('This channel changed since you opened it. Reopen settings and retry.')
       else setErr(e.message)
     } finally { setBusy(false) }
   }

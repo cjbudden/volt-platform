@@ -35,6 +35,8 @@ export interface Channel {
   dvr_window_sec: number | null; dvr_mode: 'sliding' | 'event_start'
   geo_mode: 'worldwide' | 'allow' | 'block'; geo_countries: string[]
   input_loss_behavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
+  input_failover_enabled?: boolean
+  auto_failback?: boolean
   filler_slate_ref?: string | null
   pipelineState?: 'idle' | 'starting' | 'ready' | 'onair' | 'degraded' | 'error' | 'stopped'
   billable?: boolean
