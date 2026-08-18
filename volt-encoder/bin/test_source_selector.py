@@ -102,6 +102,27 @@ def test_relay_cmd():
     check("relay copies (no reencode)", "-c" in cmd and "copy" in cmd)
     check("relay targets primary priv port 21002", "udp://127.0.0.1:21002" in " ".join(cmd))
     check("relay has progress", "-progress" in cmd and "/work/p.txt" in cmd)
+    # push protocols already arrive at realtime -> no -re pacing
+    check("srt relay is NOT paced", "-re" not in cmd)
+
+def test_relay_cmd_hls_paced_and_edge():
+    # HLS is a PULL source: it must be paced (-re) so out_time advances ~1x, else the health
+    # poller reads the between-segment idle as a loss and flaps to filler. And it must carry
+    # the pre-computed live-edge flags so it starts at the edge, not segment 0 of a DVR window.
+    inp = {"protocol": "hls", "url": "https://x/live.m3u8",
+           "_edge_flags": ["-fflags", "+genpts", "-live_start_index", "-1", "-http_persistent", "0"],
+           "_pace": True}
+    cmd = ss.relay_cmd(inp, "primary", 0, "/work/p.txt")
+    j = " ".join(cmd)
+    check("hls relay is paced (-re)", "-re" in cmd)
+    check("hls relay carries edge flags", "-live_start_index" in cmd and "-1" in cmd)
+    check("hls relay -re precedes -i", cmd.index("-re") < cmd.index("-i"))
+
+def test_relay_cmd_default_flags_without_edge():
+    # no _edge_flags provided -> fall back to the plain genpts flags (still valid)
+    inp = {"protocol": "srt", "url": "srt://h:9000"}
+    cmd = ss.relay_cmd(inp, "primary", 0, "/work/p.txt")
+    check("relay falls back to +genpts", "+genpts" in cmd)
 
 def test_forwarder_cmd():
     cmd = ss.forwarder_cmd("backup", 1)

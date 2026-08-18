@@ -149,11 +149,24 @@ def _bus_url(idx, bus_base=BUS_BASE):
 
 
 def relay_cmd(inp, group, idx, progress_url):
-    """Pull one source (SRT/RTMP/HLS) and re-mux to its private TS port,
-    no re-encode. `-progress` lets the poller watch out_time for liveness."""
+    """Pull one source (SRT/RTMP/HLS) and re-mux to its private TS port, no re-encode.
+    `-progress` lets the poller watch out_time for liveness.
+
+    Two things make the relay's liveness signal trustworthy:
+      * `_edge_flags` (pre-computed by the parent for HLS) start the pull at the LIVE EDGE
+        of the source playlist, not segment 0 of a bounded DVR window.
+      * `-re` paces a pull-based source (HLS/HTTP) to realtime. Without it a `-c copy` pull
+        reads a whole segment at once then idles, so out_time stair-steps: it jumps by a
+        segment then sits flat for ~a segment interval. The health poller reads that flat
+        stretch as 'source stopped' and flaps to filler every segment. `-re` makes out_time
+        advance ~1x, so it only stops advancing when the source ACTUALLY stops. Push
+        protocols (SRT/RTMP) already arrive at realtime, so they are left unpaced."""
     proto = inp["protocol"].lower()
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-           "-progress", progress_url, "-fflags", "+genpts"]
+           "-progress", progress_url]
+    cmd += inp.get("_edge_flags") or ["-fflags", "+genpts"]
+    if proto in ("hls", "http", "https") or inp.get("_pace"):
+        cmd += ["-re"]
     cmd += ["-i", inp["url"]]
     cmd += ["-c", "copy", "-f", "mpegts", _priv_url(group, idx)]
     return cmd
@@ -307,9 +320,13 @@ class SourceSelector:
         self.n = len(ladder)
         self._forwarders = {}           # idx -> Popen
         self._watch = {"primary": [], "backup": [], "filler": []}
+        # down_hold has margin over a single segment fetch: even with -re pacing the relay,
+        # network jitter can briefly pause out_time between segments, and we must not read
+        # that as a loss and flap to filler. A genuine total loss still trips within ~5s and
+        # the player/DVR buffer covers the gap.
         self.health = {
-            "primary": Health(start_up=False),
-            "backup": Health(start_up=False),
+            "primary": Health(up_hold=3.0, down_hold=5.0, start_up=False),
+            "backup": Health(up_hold=3.0, down_hold=5.0, start_up=False),
         }
         self.policy = SelectorPolicy(
             has_backup=bool(backup), auto_failback=self.auto_failback, start="primary")

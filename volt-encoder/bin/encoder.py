@@ -343,6 +343,68 @@ def _fetch_watermark(cfg):
         return None
 
 
+def prepare_filler_slate(cfg):
+    """Resolve the failover filler slate to a real LOCAL file so ffmpeg can ALWAYS open it.
+
+    The control plane sends slate_ref as a library URL (like the watermark). ffmpeg cannot
+    loop a bare '/library/..' path or, reliably, an http image with `-loop 1`, so we download
+    it once (exactly as we do the watermark) and rewrite the config to the local path. If there
+    is no slate, or the download fails, we GENERATE a plain slate locally so the filler never
+    dies: a dead filler is what took the whole output down when the primary flapped. Only
+    relevant when input failover is on and the loss behaviour uses a slate/loop."""
+    red = cfg.get("redundancy") or {}
+    if not red.get("input_failover"):
+        return
+    if red.get("input_loss_behavior", "slate") not in ("slate", "vod_loop"):
+        return
+    filler = red.get("filler") or {}
+    ref = filler.get("slate_ref")
+    dest = os.path.join(WORK_DIR, "slate.png")
+    resolved = None
+    if ref and re.match(r"^https?://", ref, re.I):
+        try:
+            import urllib.request
+            urllib.request.urlretrieve(ref, dest)
+            log(f"filler slate: fetched {ref} -> {dest}")
+            resolved = dest
+        except Exception as e:  # noqa: BLE001
+            log(f"filler slate: fetch failed ({e}); generating a plain slate")
+    elif ref and os.path.exists(ref):
+        resolved = ref  # already a real local file
+    elif ref:
+        log(f"filler slate: ref '{ref}' is not a URL or an existing file; generating a plain slate")
+    if not resolved:
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                 "-f", "lavfi", "-i", "color=c=0x0A0E18:s=1280x720",
+                 "-frames:v", "1", dest], check=True)
+            log("filler slate: generated a plain fallback slate")
+            resolved = dest
+        except Exception as e:  # noqa: BLE001
+            log(f"filler slate: fallback generation failed ({e}); filler may not start")
+    if resolved:
+        filler["slate_ref"] = resolved
+        red["filler"] = filler
+        cfg["redundancy"] = red
+
+
+def prepare_failover_inputs(inputs):
+    """Attach live-edge flags + a realtime-pacing hint to each HLS/HTTP failover input so the
+    source-selector's relays (a) start at the LIVE EDGE of the source playlist rather than
+    replaying a bounded DVR window from the start, and (b) pace to realtime so their liveness
+    signal is smooth (see relay_cmd in source_selector for why this stops health flapping).
+    Push protocols (SRT/RTMP) arrive at realtime already and need neither."""
+    for inp in inputs:
+        proto = (inp.get("protocol") or "").lower()
+        if proto in ("hls", "http", "https"):
+            try:
+                inp["_edge_flags"] = _hls_edge_flags(inp["url"])
+            except Exception as e:  # noqa: BLE001
+                log(f"failover input: edge-flag probe failed ({e}); using default flags")
+            inp["_pace"] = True
+
+
 def _overlay_vf(scale_h, wm_path, wm):
     """Build the -vf graph: scale the frame, load+size+fade the logo, overlay it at the
     chosen corner/edge with the given pixel offsets. scale = % of the frame HEIGHT."""
@@ -919,6 +981,10 @@ def main():
     time.sleep(1)
     _events.packager(True)
 
+    # Failover prep (no-op unless input_failover is on): make sure the filler slate is a
+    # real local file so the filler can never fail to open it.
+    prepare_filler_slate(cfg)
+
     selector = None
     if cfg["workflow"] == "package_only":
         if redundancy_on(cfg):
@@ -926,6 +992,7 @@ def main():
             # primary + backup relays and the filler, and forwards the active
             # group to the bus with health-driven failover + filler-on-loss.
             prim, bak = primary_inputs(cfg), backup_inputs(cfg)
+            prepare_failover_inputs(prim + bak)
             selector = source_selector.SourceSelector(
                 cfg, ladder=ladder_from_inputs(prim),
                 primary=prim, backup=bak,
@@ -949,6 +1016,7 @@ def main():
             # transcoder reads that instead of the raw URL, so a source switch happens
             # UPSTREAM of the encoder and the ladder it produces stays continuous.
             prim, bak = primary_inputs(cfg), backup_inputs(cfg)
+            prepare_failover_inputs(prim[:1] + bak[:1])
             top = (cfg.get("ladder") or [{"height": 720, "bitrate_kbps": 4000}])[0]
             selector = source_selector.SourceSelector(
                 cfg, ladder=[{"height": top["height"], "bitrate_kbps": top["bitrate_kbps"]}],
@@ -962,9 +1030,13 @@ def main():
             selector.start()
             feed = f"udp://127.0.0.1:{source_selector.SOURCE_FEED_PORT}?reuse=1&buffer_size=2097152"
             start_transcode(cfg, keys, source_override=feed)
+            # NOTE: on the failover path the selector's health loop owns the source up/down
+            # events. Do NOT emit a static 'primary up' here — it would contradict the real
+            # health signal (claiming primary is up while the selector has failed over).
         else:
             start_transcode(cfg, keys)
-        _events.source_state("primary", True, renditions=nrend)
+            # no health monitor on the direct path; assume primary feeding on start
+            _events.source_state("primary", True, renditions=nrend)
 
     if is_local(cfg):
         log(f"local mode: writing directly to {OUT_DIR}; S3 uploader skipped")

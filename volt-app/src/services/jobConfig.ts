@@ -48,9 +48,6 @@ export interface OwnerRow {
   filler_vod_url?: string | null;
   /** per-channel output ladder override; when set it wins over the profile rungs. */
   output_ladder?: Array<{ height: number; bitrate_kbps: number; fps?: number }> | null;
-  /** audio-only (radio): no video anywhere; audio_ladder replaces the video rungs */
-  audio_only?: boolean;
-  audio_ladder?: Array<{ label?: string; bitrate_kbps: number }> | null;
   /** watermark / channel brand overlay */
   watermark_enabled?: boolean;
   watermark_ref?: string | null;
@@ -102,19 +99,6 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
       token: config.ingestToken,
     },
   };
-
-  // AUDIO-ONLY (radio): one input, an AAC rendition list, no video ladder. This
-  // short-circuits the video workflows entirely — the encoder runs its audio path and
-  // the packager emits audio-only HLS/DASH.
-  if (owner.audio_only) {
-    cfg.audio_only = true;
-    cfg.inputs = inputs
-      .filter((i) => i.role === 'primary')
-      .map((i) => ({ rendition_label: i.rendition_label ?? 'source', role: i.role, protocol: i.protocol, url: inputUrl(i), has_audio: true }));
-    cfg.audio_ladder = (owner.audio_ladder?.length ? owner.audio_ladder : [{ label: 'high', bitrate_kbps: 128 }, { label: 'low', bitrate_kbps: 64 }])
-      .map((a) => ({ label: a.label ?? `${a.bitrate_kbps}k`, bitrate_kbps: a.bitrate_kbps }));
-    return cfg;
-  }
 
   if (profile.workflow_type === 'transcode') {
     // one mezzanine input; we build the ladder from the profile rungs
@@ -176,13 +160,24 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
   }
 
   if (owner.input_failover_enabled) {
+    // The filler slate/loop refs are library references (e.g. '/library/<acct>/slates/x.jpg').
+    // ffmpeg cannot open a bare '/library/..' path, so make them absolute fetchable URLs the
+    // same way the watermark ref is resolved: the encoder then downloads them locally. Without
+    // this the filler ffmpeg dies with "No such file or directory" and failover has nothing to
+    // fall back TO, so a lost primary takes the whole output down.
+    const absRef = (ref: string | null | undefined): string | null => {
+      if (!ref) return null;
+      if (/^https?:\/\//i.test(ref)) return ref;
+      const base = config.internalApiBaseUrl.replace(/\/$/, '');
+      return `${base}${ref.startsWith('/') ? '' : '/'}${ref}`;
+    };
     cfg.redundancy = {
       input_failover: true,
       auto_failback: owner.auto_failback ?? true,
       input_loss_behavior: owner.input_loss_behavior ?? 'slate',
       filler: {
-        slate_ref: owner.filler_ref ?? null,
-        vod_loop_url: owner.filler_vod_url ?? null,
+        slate_ref: absRef(owner.filler_ref),
+        vod_loop_url: absRef(owner.filler_vod_url),
       },
     };
   }
