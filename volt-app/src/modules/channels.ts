@@ -230,6 +230,8 @@ const editSchema = z.object({
     enabled: z.boolean().optional(),
     sourceLang: z.string().optional(),
     targets: z.array(z.string()).optional(),
+    // lip-sync trim in seconds (positive = cues later), clamped to a sane range
+    offsetSec: z.number().min(-30).max(30).optional(),
   }).optional(),
   version: z.number().int().optional(),
 });
@@ -333,6 +335,7 @@ const editChannel = asyncHandler(async (req, res) => {
         if (cap.enabled !== undefined) { sets.push(`captions_enabled = $${sets.length + 1}`); vals.push(cap.enabled); }
         if (cap.sourceLang !== undefined) { sets.push(`caption_source_lang = $${sets.length + 1}`); vals.push(cap.sourceLang); }
         if (cap.targets !== undefined) { sets.push(`caption_targets = $${sets.length + 1}::jsonb`); vals.push(JSON.stringify(cap.targets)); }
+        if (cap.offsetSec !== undefined) { sets.push(`caption_offset_sec = $${sets.length + 1}`); vals.push(cap.offsetSec); }
         if (sets.length) {
           vals.push(grp.output_profile_id);
           await query(`UPDATE output_profiles SET ${sets.join(', ')}, updated_at = now() WHERE id = $${vals.length}`, vals);

@@ -906,14 +906,13 @@ function ScrollMeter({ history, active }: { history: number[]; active: boolean }
       const lvl = history[i]
       const h = Math.max(1.6, lvl * H)
       const y = (H - h) / 2
-      // newest samples brighter, history fades toward the left; colour follows the
-      // LEVEL like a broadcast meter: green for normal, amber when hot, red at peak
+      // ONE colour: green. Loudness reads through bar HEIGHT and brightness, and the
+      // history fades as it scrolls left. (No amber/red: a level meter going red read
+      // as an error, which it is not.) Idle/no-audio renders neutral slate.
       const age = (history.length - 1 - i) / history.length
-      const a = active ? 0.95 - age * 0.6 : 0.5 - age * 0.32
-      g.fillStyle = !active ? `rgba(148,163,184,${a})`
-        : lvl > 0.86 ? `rgba(248,113,113,${a})`
-        : lvl > 0.68 ? `rgba(251,191,36,${a})`
-        : `rgba(74,222,128,${a})`
+      const bright = 0.35 + lvl * 0.6          // louder = brighter, same hue
+      const a = (active ? bright : 0.4) * (1 - age * 0.6)
+      g.fillStyle = active ? `rgba(74,222,128,${a})` : `rgba(148,163,184,${a})`
       g.fillRect(i, y, 1, h)
     }
     // soft glow on the newest columns so the live edge of the meter reads as "now"
@@ -1750,6 +1749,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   // subtitles
   const [capOn, setCapOn] = useState(d.captions.enabled)
   const [capLangs, setCapLangs] = useState<string[]>(d.captions.targets.length ? d.captions.targets : ['en'])
+  const [capTrim, setCapTrim] = useState(String(d.captions.offset_sec ?? 0))
   const langOpts = useCaptionLanguages()
   // filler on loss
   const [lossBehavior, setLossBehavior] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>(d.input_loss_behavior || 'none')
@@ -1801,7 +1801,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     // programme guide panel
     if (epgOn !== (d.epgEnabled !== false)) patch.epgEnabled = epgOn
     // captions
-    patch.captions = { enabled: capOn, targets: capOn ? capLangs : [] }
+    patch.captions = { enabled: capOn, targets: capOn ? capLangs : [],
+      offsetSec: Math.max(-30, Math.min(30, Number(capTrim) || 0)) }
     // filler on loss
     patch.inputFailoverEnabled = failover
     patch.autoFailback = autoFailback
@@ -1965,9 +1966,15 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             <div className={`sw ${capOn ? '' : 'off'}`} onClick={() => setCapOn(v => !v)}><i /></div>
           </div>
           {capOn && (
-            <div className="field"><label>Output languages <span style={{ color: 'var(--faint)' }}>— the spoken language is detected automatically and translated into each of these</span></label>
-              <LangPicker value={capLangs} onChange={setCapLangs} options={langOpts} />
-            </div>
+            <>
+              <div className="field"><label>Output languages <span style={{ color: 'var(--faint)' }}>— the spoken language is detected automatically and translated into each of these</span></label>
+                <LangPicker value={capLangs} onChange={setCapLangs} options={langOpts} />
+              </div>
+              <div className="field"><label>Caption timing trim <span style={{ color: 'var(--faint)' }}>— seconds; positive shows words LATER, negative earlier. Watch the output and adjust in 0.5s steps until speech and captions line up. Applies from the next restart.</span></label>
+                <input className="inp" style={{ width: 110 }} inputMode="decimal" value={capTrim}
+                  onChange={e => setCapTrim(e.target.value.replace(/[^0-9.-]/g, ''))} placeholder="0" />
+              </div>
+            </>
           )}
 
           <div style={SEC}>Recording</div>

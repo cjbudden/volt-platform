@@ -170,6 +170,8 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     enabled: !!profile?.captions_enabled,
     targets: Array.isArray(profile?.caption_targets) ? profile.caption_targets : [],
     source_lang: profile?.caption_source_lang || 'auto',
+    // lip-sync trim in seconds (positive = cues later); operator-tunable in Settings
+    offset_sec: Number(profile?.caption_offset_sec ?? 0),
   };
 
   // ---- REAL status (latest encoder report), REAL events, REAL EPG -----------

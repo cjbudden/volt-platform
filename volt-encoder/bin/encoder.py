@@ -983,8 +983,16 @@ def start_captions(cfg, out_dir):
     # continuous audio segmenter: fixed-length mono 16k WAV chunks for whisper. Must start
     # at the LIVE EDGE (same adaptive HLS handling as the video ingest) or captions would
     # transcribe old audio and never line up.
+    #
+    # PACING (-re) is essential for SYNC on pull sources: without it ffmpeg gulps a whole
+    # source segment (10s here) the instant it is published, so wav chunks close in
+    # BURSTS and their mtimes (our measured capture clock for the cue timestamp maps)
+    # jitter by up to a source segment against the -re paced video path. That was the
+    # words-out-of-step-with-speech error. Paced, both pipelines consume the source at
+    # 1x and the two capture clocks track each other.
+    pace = ["-re"] if re.match(r"^https?://", audio_url, re.I) else []
     aseg = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-            *_hls_edge_flags(audio_url),
+            *_hls_edge_flags(audio_url), *pace,
             "-i", audio_url, "-vn", "-ac", "1", "-ar", "16000",
             "-f", "segment", "-segment_time", str(chunk), "-reset_timestamps", "1",
             os.path.join(tmp, "cap_%05d.wav")]
