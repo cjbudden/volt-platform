@@ -91,5 +91,50 @@ ok(seq == ["sub_5.vtt", "sub_6.vtt", "sub_7.vtt"], "segment URIs in order")
 empty = encoder._live_sub_playlist([], chunk, 0, t0)
 ok("#EXTM3U" in empty and "sub_" not in empty, "empty placeholder playlist valid")
 
+# ---- video PTS mapping (the cue timestamp map, the caption display fix) ----
+def _mk_init(path, timescale):
+    with open(path, "wb") as fh:
+        fh.write(b"\x00\x00\x00\x20mdhd" + bytes([0, 0, 0, 0]) + b"\x00" * 8
+                 + timescale.to_bytes(4, "big") + b"\x00" * 4)
+
+def _mk_seg(path, base_time, timescale_units=True):
+    with open(path, "wb") as fh:
+        fh.write(b"\x00\x00\x00\x14tfdt" + bytes([1, 0, 0, 0]) + int(base_time).to_bytes(8, "big"))
+
+tmp2 = tempfile.mkdtemp()
+os.makedirs(os.path.join(tmp2, "480p"))
+_mk_init(os.path.join(tmp2, "480p", "init.mp4"), 90000)
+ok(encoder._mp4_timescale(os.path.join(tmp2, "480p", "init.mp4")) == 90000, "mdhd timescale parsed")
+
+# newest segment: content starts at PTS 400s, written (mtime) at wall 1000.0, 4s segment
+segp = os.path.join(tmp2, "480p", "seg_100.m4s")
+_mk_seg(segp, 400 * 90000)
+os.utime(segp, (1000.0, 1000.0))
+ok(encoder._mp4_tfdt_time(segp) == 400 * 90000, "tfdt base time parsed")
+
+# pts(wall): segment END is PTS 404 at wall 1000 -> wall 1010 = PTS 414
+pts = encoder._video_pts_of_wall(tmp2, 1010.0, 4.0)
+ok(pts is not None and abs(pts - 414.0) < 0.001, f"wall->PTS mapping exact (got {pts})")
+
+# the newest segment is the reference: add a newer one and the mapping follows it
+seg2 = os.path.join(tmp2, "480p", "seg_101.m4s")
+_mk_seg(seg2, 404 * 90000)
+os.utime(seg2, (1003.9, 1003.9))   # written 3.9s later (pacing drift), covers 404..408
+pts2 = encoder._video_pts_of_wall(tmp2, 1010.0, 4.0)
+ok(pts2 is not None and abs(pts2 - (408 + (1010.0 - 1003.9))) < 0.001,
+   f"mapping re-samples from the NEWEST segment (got {pts2})")
+
+# the timestamp map lands in the VTT and is the REAL 90kHz value
+class FC:
+    def __init__(s, a, b, t): s.start, s.end, s.text, s.lang = a, b, t, "en"
+vtt = os.path.join(tmp2, "test.vtt")
+encoder._write_sub_segment(vtt, [FC(8.5, 11.0, "hello")], 8.0, 16.0, mpegts=414 * 90000)
+body = open(vtt).read()
+ok(f"X-TIMESTAMP-MAP=MPEGTS:{414*90000},LOCAL:00:00:00.000" in body,
+   "VTT carries the true 90kHz map (constant-0 map was the display killer)")
+ok("00:00:00.500 --> 00:00:03.000" in body, "cues stay segment-relative under the map")
+encoder._write_sub_segment(vtt, [FC(8.5, 11.0, "hello")], 8.0, 16.0, mpegts=None)
+ok("X-TIMESTAMP-MAP" not in open(vtt).read(), "map omitted when PTS unknown")
+
 print(f"\n{p} passed, {f} failed")
 raise SystemExit(1 if f else 0)

@@ -692,7 +692,8 @@ function hostOf(url?: string | null) { try { return url ? new URL(url).host : ''
 // back to a motion driven by playback progress so the bars are ALWAYS alive while
 // audio is flowing, muted or not. Audio is muted by default on this page.
 type AudioTrackOpt = { id: number; label: string }
-const AUDIO_BARS = 14
+const AUDIO_BARS = 14      // analysis bands (level is computed across these)
+const HIST_COLS = 72       // scrolling meter: 72 columns x 100ms = ~7s of history
 const SPK_HI = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z" /></svg>
 const SPK_LO = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z" /></svg>
 const SPK_MUTE = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm18.6.4-1.4-1.4L17 11.2 13.8 8l-1.4 1.4L15.6 12.6 12.4 15.8l1.4 1.4L17 14l3.2 3.2 1.4-1.4-3.2-3.2 3.2-3.2z" /></svg>
@@ -700,7 +701,14 @@ const SPK_MUTE = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentCo
 function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
   const [muted, setMuted] = useState(true)     // audio disabled by default on the page
   const [volume, setVolume] = useState(1)
-  const [bars, setBars] = useState<number[]>(() => new Array(AUDIO_BARS).fill(0))
+  // SCROLLING LEVEL HISTORY: the meter is a right-to-left timeline. Every 100ms the
+  // current overall level is appended on the RIGHT and the past scrolls LEFT, so the
+  // strip shows ~7 seconds of level history (audio flowing over time), not just the
+  // instantaneous spectrum. 10 samples/second is the sweet spot at this size: real
+  // motion without smearing, and only 10 renders/second instead of one per frame.
+  const [history, setHistory] = useState<number[]>(() => new Array(HIST_COLS).fill(0))
+  const histRef = useRef<number[]>(new Array(HIST_COLS).fill(0))
+  const lastPushRef = useRef(0)
   const ctxRef = useRef<AudioContext | null>(null)
   const anRef = useRef<AnalyserNode | null>(null)
   const dataRef = useRef<Uint8Array | null>(null)
@@ -783,15 +791,26 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
           }
           real = peak > 0.02
         }
-        if (real) setBars(disp.slice())
-        else if (playing) {
-          // audio flowing but no real level yet (context not resumed, or muted capture)
-          // — a brisk travelling wave so the meter reads as alive, not frozen.
-          phaseRef.current += 0.6
-          const p = phaseRef.current
-          for (let b = 0; b < AUDIO_BARS; b++) disp[b] = 0.22 + 0.5 * Math.abs(Math.sin(p + b * 0.55)) * (0.6 + 0.4 * Math.sin(p * 0.4 + b * 0.9))
-          setBars(disp.slice())
-        } else { for (let b = 0; b < AUDIO_BARS; b++) disp[b] = Math.max(0, disp[b] * 0.8); setBars(disp.slice()) }
+        // overall level for the scrolling history: peak of the perceptual bands when the
+        // analyser reads real audio; a gentle synthetic pulse while audio is flowing but
+        // the capture cannot be read yet; decay to zero when nothing plays.
+        let lvl = 0
+        if (real) {
+          for (let b = 0; b < AUDIO_BARS; b++) lvl = Math.max(lvl, disp[b])
+        } else if (playing) {
+          phaseRef.current += 0.09
+          lvl = 0.25 + 0.28 * Math.abs(Math.sin(phaseRef.current)) * (0.6 + 0.4 * Math.sin(phaseRef.current * 0.37))
+        } else {
+          const h = histRef.current
+          lvl = Math.max(0, (h[h.length - 1] || 0) * 0.7)
+        }
+        const nowMs = performance.now()
+        if (nowMs - lastPushRef.current >= 100) {
+          lastPushRef.current = nowMs
+          const h = histRef.current
+          h.shift(); h.push(Math.min(1, lvl))
+          setHistory(h.slice())
+        }
       }
       rafRef.current = requestAnimationFrame(loop)
     }
@@ -808,7 +827,7 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
 
   const toggleMute = () => { try { ctxRef.current?.resume() } catch { /* ignore */ }; setMuted(m => !m) }
   const setVol = (val: number) => { try { ctxRef.current?.resume() } catch { /* ignore */ }; setVolume(val); setMuted(val <= 0) }
-  return { muted, volume, bars, toggleMute, setVol }
+  return { muted, volume, history, toggleMute, setVol }
 }
 
 type AudioEngine = ReturnType<typeof useAudioEngine>
@@ -839,7 +858,8 @@ function AudioDock({ eng, tracks, currentTrack, onSelectTrack, controlsShown }: 
   eng: AudioEngine; tracks: AudioTrackOpt[]; currentTrack: number; onSelectTrack: (i: number) => void; controlsShown: boolean
 }) {
   const icon = eng.muted || eng.volume <= 0 ? SPK_MUTE : eng.volume < 0.5 ? SPK_LO : SPK_HI
-  const active = eng.bars.some(b => b > 0.14)
+  // audio counts as present when the RECENT history (last ~1.5s) carries real level
+  const active = eng.history.slice(-15).some(b => b > 0.12)
   return (
     <div style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 5, display: 'flex', alignItems: 'center', gap: 8, pointerEvents: 'none' }}>
       <div style={{
@@ -860,16 +880,42 @@ function AudioDock({ eng, tracks, currentTrack, onSelectTrack, controlsShown }: 
           </select>
         )}
       </div>
-      <div title="Audio level" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2, height: 32, width: AUDIO_BARS * 5 + 14, padding: '5px 8px', borderRadius: 9, background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(2px)' }}>
-        {eng.bars.map((b, i) => (
-          <span key={i} style={{
-            width: 3, borderRadius: 2, height: `${Math.max(6, Math.min(100, b * 100))}%`, alignSelf: 'center',
-            background: active ? 'var(--live, #4ade80)' : 'rgba(148,163,184,.5)',
-          }} />
-        ))}
+      <div title="Audio level (last ~7 seconds, newest on the right)" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 32, padding: '5px 8px', borderRadius: 9, background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(2px)' }}>
+        <ScrollMeter history={eng.history} active={active} />
       </div>
     </div>
   )
+}
+
+// Right-to-left scrolling level meter: each column is 100ms of overall level, newest on
+// the RIGHT, sliding LEFT over ~7s. Drawn on a canvas (one paint per new sample), with
+// columns mirrored around the vertical centre like a waveform so quiet reads thin and
+// loud reads tall.
+function ScrollMeter({ history, active }: { history: number[]; active: boolean }) {
+  const ref = useRef<HTMLCanvasElement | null>(null)
+  const W = HIST_COLS, H = 22
+  useEffect(() => {
+    const cv = ref.current
+    if (!cv) return
+    const dpr = window.devicePixelRatio || 1
+    if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr }
+    const g = cv.getContext('2d')
+    if (!g) return
+    g.setTransform(dpr, 0, 0, dpr, 0, 0)
+    g.clearRect(0, 0, W, H)
+    for (let i = 0; i < history.length; i++) {
+      const lvl = history[i]
+      const h = Math.max(1.6, lvl * H)
+      const y = (H - h) / 2
+      // newest samples brighter, history fades toward the left
+      const age = (history.length - 1 - i) / history.length
+      g.fillStyle = active
+        ? `rgba(74, 222, 128, ${0.9 - age * 0.55})`
+        : `rgba(148, 163, 184, ${0.55 - age * 0.35})`
+      g.fillRect(i, y, 1, h)
+    }
+  }, [history, active])
+  return <canvas ref={ref} style={{ width: W, height: H, display: 'block' }} aria-label="Audio level history" />
 }
 
 function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: boolean; onSendSource: () => void; busy: boolean }) {
@@ -950,13 +996,23 @@ function IdleOutput({ sourceUp, onGoLive, warming, sinceMs, captionsOn }: {
   // not read a healthy start as a fault. Live captions (whisper) add a transcription
   // offset before the first playable output: expect 10 to 20 seconds with captions on,
   // around 4 seconds with captions off.
+  //
+  // ANCHOR: the count starts when THIS warm-up began, never the billable session start.
+  // billing.since spans the whole run, so anchoring there showed 8000+ seconds when a
+  // long-running channel re-entered warm-up. Use billing.since only while it is fresh
+  // (a genuine just-started run); otherwise count from when this panel saw the warm-up.
   const [nowT, setNowT] = useState(Date.now())
+  const warmAnchorRef = useRef<number | null>(null)
   useEffect(() => {
-    if (!warming) return
+    if (!warming) { warmAnchorRef.current = null; return }
+    if (warmAnchorRef.current == null) {
+      const fresh = sinceMs && Date.now() - sinceMs < 120_000
+      warmAnchorRef.current = fresh ? sinceMs! : Date.now()
+    }
     const iv = setInterval(() => setNowT(Date.now()), 1000)
     return () => clearInterval(iv)
-  }, [warming])
-  const warmSec = warming && sinceMs ? Math.max(0, Math.floor((nowT - sinceMs) / 1000)) : 0
+  }, [warming, sinceMs])
+  const warmSec = warming && warmAnchorRef.current ? Math.max(0, Math.floor((nowT - warmAnchorRef.current) / 1000)) : 0
   const expect = captionsOn ? 'usually 10 to 20 seconds while live captions warm up' : 'usually around 4 seconds'
   return (
     <div className="player">

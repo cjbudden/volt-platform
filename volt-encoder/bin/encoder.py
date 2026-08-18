@@ -710,12 +710,82 @@ def _live_sub_playlist(indices, chunk, media_seq, t0, pdt_map=None):
     return "\n".join(lines) + "\n"
 
 
-def _write_sub_segment(path, cues, seg_start, seg_end):
-    """One HLS WebVTT segment. Cues are written RELATIVE to the segment start (0..chunk)
-    and LOCAL:0 in the timestamp map, so with the playlist's PROGRAM-DATE-TIME the player
-    places each fragment by date and the cue offset within it."""
+def _mp4_timescale(init_path):
+    """Media timescale from an fMP4 init segment's mdhd box (single-track init)."""
+    try:
+        data = open(init_path, "rb").read(65536)
+        i = data.find(b"mdhd")
+        if i < 0:
+            return None
+        ver = data[i + 4]
+        off = i + 8 + (16 if ver == 1 else 8)
+        ts = int.from_bytes(data[off:off + 4], "big")
+        return ts or None
+    except OSError:
+        return None
+
+
+def _mp4_tfdt_time(seg_path):
+    """baseMediaDecodeTime (media units) from a CMAF segment's tfdt box: the exact
+    PTS at which this segment's content starts on the video timeline."""
+    try:
+        data = open(seg_path, "rb").read(65536)
+        i = data.find(b"tfdt")
+        if i < 0:
+            return None
+        ver = data[i + 4]
+        if ver == 1:
+            return int.from_bytes(data[i + 8:i + 16], "big")
+        return int.from_bytes(data[i + 8:i + 12], "big")
+    except OSError:
+        return None
+
+
+def _video_pts_of_wall(out_dir, wall, seg_dur):
+    """Map a WALL-CLOCK instant onto the video's PTS timeline (seconds).
+
+    Uses the newest video segment as the reference sample: its tfdt gives the PTS its
+    content STARTS at, its mtime is the wall-clock its content END was written. So
+    pts(wall) = (tfdt/timescale + seg_dur) + (wall - mtime). The reference is re-sampled
+    from the newest segment every call, so pacing drift cannot accumulate (same principle
+    as the per-segment PDT stamps). Returns None if no segment can be read."""
+    try:
+        rend = None
+        for name in sorted(os.listdir(out_dir)):
+            if os.path.isfile(os.path.join(out_dir, name, "init.mp4")):
+                rend = os.path.join(out_dir, name)
+                break
+        if not rend:
+            return None
+        segs = glob.glob(os.path.join(rend, "seg_*.m4s"))
+        if not segs:
+            return None
+        newest = max(segs, key=os.path.getmtime)
+        ts = _mp4_timescale(os.path.join(rend, "init.mp4"))
+        base = _mp4_tfdt_time(newest)
+        if not ts or base is None:
+            return None
+        pts_end = base / ts + seg_dur
+        return pts_end + (wall - os.path.getmtime(newest))
+    except OSError:
+        return None
+
+
+def _write_sub_segment(path, cues, seg_start, seg_end, mpegts=None):
+    """One HLS WebVTT segment. Cues are written RELATIVE to the segment start (0..chunk).
+
+    ALIGNMENT (the make-or-break part): players place WebVTT cues via the
+    X-TIMESTAMP-MAP header, which must carry the VIDEO's REAL 90kHz PTS for this
+    chunk's start. A constant (like MPEGTS:0) maps every chunk's cues to the same
+    spot on the timeline, so captions show only while the playhead is near that one
+    spot: the 'worked for two chunks then stopped forever' failure. `mpegts` is the
+    true PTS in 90kHz units (from _video_pts_of_wall); when unknown the map is
+    omitted and players fall back to fragment-anchored placement."""
     from captions import cue_block, Cue
-    body = ["WEBVTT", "X-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000", ""]
+    body = ["WEBVTT"]
+    if mpegts is not None:
+        body.append(f"X-TIMESTAMP-MAP=MPEGTS:{int(mpegts)},LOCAL:00:00:00.000")
+    body.append("")
     for c in cues:
         if c.end > seg_start and c.start < seg_end:
             rel = Cue(max(0.0, c.start - seg_start), max(0.0, c.end - seg_start), c.text, c.lang)
@@ -1005,9 +1075,14 @@ def start_captions(cfg, out_dir):
                     for c in cues:
                         store.setdefault(c.lang, []).append(c)
                     first = max(0, idx - win + 1)
+                    # true video PTS (90kHz) at this chunk's wall-clock start, so the
+                    # timestamp map puts the cues exactly where the matching frames are
+                    w0 = pdts.get(idx)
+                    pts = _video_pts_of_wall(out_dir, w0, seg) if w0 is not None else None
+                    mpegts = int(round(pts * 90000)) if pts is not None and pts >= 0 else None
                     for l in langs:
                         _write_sub_segment(os.path.join(sub_root, l, f"sub_{idx}.vtt"),
-                                           store.get(l, []), base, base + chunk)
+                                           store.get(l, []), base, base + chunk, mpegts=mpegts)
                         with open(os.path.join(sub_root, l, "subs.m3u8"), "w") as fh:
                             # per-chunk PDT from measured capture times (cap_t0 clock is
                             # only the fallback for chunks with no measurement).
