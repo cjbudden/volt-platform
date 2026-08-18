@@ -448,8 +448,7 @@ function channelFailoverCapability(chan: any) {
     ? (chan.filler_asset_id ? 'uploaded' : (chan.filler_slate_ref ? 'motion_slate' : 'slate'))
     : null;
   return { realFailover: real, workflowType: chan.workflow_type ?? null,
-    autoFailback: chan.auto_failback ?? null, lossBehavior,
-    hasBackup: undefined as boolean | undefined, loopKind,
+    autoFailback: chan.auto_failback ?? null, lossBehavior, loopKind,
     hasSlate: !!chan.filler_slate_ref };
 }
 channelsRouter.post(
@@ -466,7 +465,8 @@ channelsRouter.post(
     const dir = resolve(config.testStream.originDir, req.params.id);
     try { mkdirSync(dir, { recursive: true }); } catch { /* exists */ }
     writeFileSync(failoverControlPath(req.params.id), JSON.stringify({ mode, at: Date.now() }));
-    res.json({ mode, ...channelFailoverCapability(chan) });
+    const hasBackup = !!(await one(`SELECT 1 FROM stream_inputs WHERE channel_id=$1 AND role='backup' LIMIT 1`, [req.params.id]));
+    res.json({ mode, hasBackup, ...channelFailoverCapability(chan) });
   })
 );
 channelsRouter.get(
@@ -482,7 +482,8 @@ channelsRouter.get(
     if (!chan) throw notFound('Channel not found');
     let mode = 'auto';
     try { mode = String(JSON.parse(readFileSync(failoverControlPath(req.params.id), 'utf8')).mode || 'auto'); } catch { /* no file yet */ }
-    res.json({ mode, ...channelFailoverCapability(chan) });
+    const hasBackup = !!(await one(`SELECT 1 FROM stream_inputs WHERE channel_id=$1 AND role='backup' LIMIT 1`, [req.params.id]));
+    res.json({ mode, hasBackup, ...channelFailoverCapability(chan) });
   })
 );
 

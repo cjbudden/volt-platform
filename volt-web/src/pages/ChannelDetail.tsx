@@ -1384,6 +1384,12 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
     : cap?.lossBehavior === 'black' ? 'black'
     : cap?.lossBehavior === 'none' ? 'nothing (output stops)'
     : 'not configured'
+  // Only offer failover control once there is something to fail over TO: a backup source,
+  // a filler (slate/loop), or input failover already enabled. Otherwise hide it entirely
+  // (it belongs in setup, not the main view for a channel with no redundancy).
+  const configured = !!cap && (real || cap.hasBackup || cap.hasSlate
+    || (!!cap.lossBehavior && cap.lossBehavior !== 'none'))
+  if (!configured) return null
   return (
     <div className="card" style={{ marginBottom: 18, padding: '14px 16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>

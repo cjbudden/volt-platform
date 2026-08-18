@@ -465,7 +465,11 @@ class SourceSelector:
                 want = self.policy.decide(now, primary_up, backup_up)
 
             if want != self.active:
-                self._switch(want, self._switch_reason(self.active, want))
+                # A switch driven by the control file is a manual/test action, not a
+                # health failover — record it as such so the log and status reflect WHY.
+                reason = (f"manual:{override}" if override in ("slate", "loop", "backup", "primary_down")
+                          else self._switch_reason(self.active, want))
+                self._switch(want, reason)
             self._stop.wait(self.tick)
 
     def stop(self):

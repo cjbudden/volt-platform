@@ -156,6 +156,7 @@ export interface FailoverTestState {
   lossBehavior: string | null
   loopKind: 'uploaded' | 'motion_slate' | 'slate' | null  // what the loop filler will be
   hasSlate: boolean
+  hasBackup: boolean
 }
 
 export const api = {
