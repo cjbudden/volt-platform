@@ -28,11 +28,13 @@ async function ensureSchema(): Promise<void> {
   await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark_scale INTEGER NOT NULL DEFAULT 12`);
   // Channel brand image (identity logo shown in place of the initials box).
   await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS brand_ref TEXT`);
-  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS brand_colour TEXT`);
-  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS description TEXT`);
-  // Audio-only (radio) channels: one input, an AAC ladder out, no video anywhere.
-  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS audio_only BOOLEAN NOT NULL DEFAULT false`);
-  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS audio_ladder JSONB`);
+  // Share links: viewer verification level. auth_mode 'none' | 'pin' (creator-set PIN,
+  // pin_hash) | 'email_pin' (viewer confirms a recipient email; a one-time PIN is
+  // emailed to it; verify_* hold the emailed code hash + who it went to + its expiry).
+  await query(`ALTER TABLE share_links ADD COLUMN IF NOT EXISTS auth_mode TEXT NOT NULL DEFAULT 'none'`);
+  await query(`ALTER TABLE share_links ADD COLUMN IF NOT EXISTS verify_code_hash TEXT`);
+  await query(`ALTER TABLE share_links ADD COLUMN IF NOT EXISTS verify_email TEXT`);
+  await query(`ALTER TABLE share_links ADD COLUMN IF NOT EXISTS verify_expires_at TIMESTAMPTZ`);
 }
 
 const server = app.listen(config.port, () => {

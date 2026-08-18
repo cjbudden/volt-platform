@@ -63,13 +63,16 @@ export const ACCESS_PERIODS: Record<string, number> = {
 };
 
 /** Reason codes a resolve can fail with (kept stable for the page + tests). */
-export type ShareDenyReason = 'not_found' | 'revoked' | 'expired' | 'view_cap' | 'pin_required' | 'pin_wrong';
+export type ShareDenyReason = 'not_found' | 'revoked' | 'expired' | 'view_cap' | 'pin_required' | 'pin_wrong'
+  | 'code_required' | 'code_wrong' | 'code_expired';
 
 export interface ShareRow {
   id: string; account_id: string; resource_kind: ShareResourceKind; resource_id: string;
   message: string | null; recipients: string[];
   access_type: ShareAccessType; allow_hi_res: boolean; allow_player: boolean; allow_metadata: boolean;
   watermark: boolean; notify_on_open: boolean; pin_hash: string | null;
+  auth_mode?: 'none' | 'pin' | 'email_pin';
+  verify_code_hash?: string | null; verify_email?: string | null; verify_expires_at?: string | null;
   expires_at: string; max_views: number | null; view_count: number; first_opened_at: string | null;
   revoked: boolean; created_by: string | null; created_at: string;
 }
@@ -83,6 +86,58 @@ export function evaluateSharePolicy(row: Pick<ShareRow, 'revoked' | 'expires_at'
     if (!pin) return { ok: false, reason: 'pin_required' };
     if (sha256(pin) !== row.pin_hash) return { ok: false, reason: 'pin_wrong' };
   }
+  return { ok: true };
+}
+
+/** Pure check of the EMAILED one-time PIN (email_pin auth mode). The viewer confirms
+ *  the recipient email and enters the code that was emailed to it. The code stays
+ *  valid until verify_expires_at, so a page refresh inside the window does not force
+ *  a new email. Time is passed in for testability. */
+export function evaluateEmailCode(
+  row: Pick<ShareRow, 'auth_mode' | 'verify_code_hash' | 'verify_email' | 'verify_expires_at'>,
+  nowMs: number, email?: string, code?: string,
+): { ok: true } | { ok: false; reason: ShareDenyReason } {
+  if (row.auth_mode !== 'email_pin') return { ok: true };
+  if (!email || !code) return { ok: false, reason: 'code_required' };
+  if (!row.verify_code_hash || !row.verify_email) return { ok: false, reason: 'code_required' };
+  if (row.verify_expires_at && new Date(row.verify_expires_at).getTime() <= nowMs) {
+    return { ok: false, reason: 'code_expired' };
+  }
+  if (email.trim().toLowerCase() !== row.verify_email.toLowerCase()) return { ok: false, reason: 'code_wrong' };
+  if (sha256(code.trim()) !== row.verify_code_hash) return { ok: false, reason: 'code_wrong' };
+  return { ok: true };
+}
+
+/** Generate + store + email a one-time PIN for an email_pin share. SECURITY: responds
+ *  identically whether or not the address is one of the link's recipients, so the page
+ *  cannot be used to probe who a link was sent to. The code is 6 digits, valid 10
+ *  minutes, and its hash lives on the row (one active code at a time). */
+export async function requestShareEmailCode(raw: string, email: string, nowMs = Date.now()): Promise<{ ok: true }> {
+  const row = await findShareByToken(raw);
+  if (!row || row.auth_mode !== 'email_pin') return { ok: true };   // generic response
+  const base = evaluateSharePolicy(row, nowMs, undefined);
+  // pin gate is not part of this mode; only refuse on dead links
+  if (!base.ok && base.reason !== 'pin_required') return { ok: true };
+  const norm = email.trim().toLowerCase();
+  const recipients = (Array.isArray(row.recipients) ? row.recipients : []).map((r) => String(r).toLowerCase());
+  if (!recipients.includes(norm)) return { ok: true };              // generic response
+  const code = String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
+  await query(
+    `UPDATE share_links SET verify_code_hash=$2, verify_email=$3,
+        verify_expires_at=to_timestamp($4/1000.0) WHERE id=$1`,
+    [row.id, sha256(code), norm, nowMs + 10 * 60 * 1000]
+  );
+  try {
+    const { sendNotification } = await import('./notifications');
+    await sendNotification({
+      accountId: row.account_id, topic: 'share.verify',
+      subject: 'Your preview access code',
+      body: `Your one-time code for the shared preview is: ${code}\n\n`
+        + 'Enter it on the preview page to continue. The code is valid for 10 minutes. '
+        + 'If you did not request this, you can ignore this email.',
+      recipients: [norm], channels: ['email', 'in_app'],
+    } as any);
+  } catch { /* delivery is recorded by the notifications service; page shows generic state */ }
   return { ok: true };
 }
 
@@ -139,12 +194,25 @@ export interface CreateShareInput {
   ttlSec: number; label?: string; message?: string; recipients?: string[];
   accessType?: ShareAccessType; allowHiRes?: boolean; allowPlayer?: boolean; allowMetadata?: boolean;
   watermark?: boolean; notifyOnOpen?: boolean; pin?: string; maxViews?: number | null;
+  /** viewer verification: none | pin (creator-set `pin`) | email_pin (a one-time PIN is
+   *  emailed to a recipient address the viewer confirms on the page). */
+  authMode?: 'none' | 'pin' | 'email_pin';
+  /** true = the SYSTEM emails the link + message + instructions to each recipient. */
+  sendEmail?: boolean;
 }
 
-/** Create a share link. Returns the row + the ONE-TIME raw URL. */
-export async function createShareLink(inp: CreateShareInput): Promise<{ id: string; url: string; token: string; expiresAt: string }> {
+/** Create a share link. Returns the row + the ONE-TIME raw URL (+ email delivery info). */
+export async function createShareLink(inp: CreateShareInput): Promise<{ id: string; url: string; token: string; expiresAt: string; emailed: number }> {
   const resource = await loadResource(inp.resourceKind, inp.resourceId, inp.accountId);
   if (!resource) throw Object.assign(new Error('resource not found in this account'), { status: 404 });
+  const authMode = inp.authMode ?? (inp.pin ? 'pin' : 'none');
+  const recipients = (inp.recipients ?? []).map((r) => r.trim()).filter(Boolean);
+  if (authMode === 'email_pin' && recipients.length === 0) {
+    throw Object.assign(new Error('email verification needs at least one recipient email'), { status: 400 });
+  }
+  if (inp.sendEmail && recipients.length === 0) {
+    throw Object.assign(new Error('sending by email needs at least one recipient email'), { status: 400 });
+  }
   const t = generateShareToken();
   const expiresAt = new Date(Date.now() + inp.ttlSec * 1000).toISOString();
   const download = inp.accessType === 'allow_download';
@@ -152,20 +220,49 @@ export async function createShareLink(inp: CreateShareInput): Promise<{ id: stri
     `INSERT INTO share_links
       (account_id, resource_kind, resource_id, token_prefix, token_hash, label, message, recipients,
        access_type, allow_hi_res, allow_player, allow_metadata, watermark, notify_on_open, pin_hash,
-       expires_at, max_views, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       auth_mode, expires_at, max_views, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      RETURNING id, expires_at`,
     [
       inp.accountId, inp.resourceKind, inp.resourceId, t.prefix, t.hash, inp.label ?? null, inp.message ?? null,
-      JSON.stringify(inp.recipients ?? []),
+      JSON.stringify(recipients),
       inp.accessType ?? 'preview_only',
       download ? !!inp.allowHiRes : false, download ? !!inp.allowPlayer : false, download ? !!inp.allowMetadata : false,
-      inp.watermark ?? true, !!inp.notifyOnOpen, inp.pin ? sha256(inp.pin) : null,
-      expiresAt, inp.maxViews ?? null, inp.createdBy ?? null,
+      inp.watermark ?? true, !!inp.notifyOnOpen, authMode === 'pin' && inp.pin ? sha256(inp.pin) : null,
+      authMode, expiresAt, inp.maxViews ?? null, inp.createdBy ?? null,
     ]
   );
   const url = `${config.publicBaseUrl.replace(/\/$/, '')}/share/${t.raw}`;
-  return { id: row.id, url, token: t.raw, expiresAt: row.expires_at };
+
+  // SEND EMAIL path: the system delivers the link with the personal message and the
+  // right instructions for the link's verification mode. The PIN itself is never in
+  // this email (a creator-set PIN travels out of band; an emailed PIN is requested by
+  // the viewer on the page).
+  let emailed = 0;
+  if (inp.sendEmail && recipients.length) {
+    const creator = inp.createdBy ? await one<any>(`SELECT display_name, email FROM users WHERE id=$1`, [inp.createdBy]) : null;
+    const who = creator?.display_name || creator?.email || 'A colleague';
+    const instructions = authMode === 'email_pin'
+      ? 'When you open the link, enter this email address. A one-time access code will be emailed to you; enter it to view the preview.'
+      : authMode === 'pin'
+        ? 'The preview is protected by a PIN, which you will receive separately.'
+        : 'Open the link to view the preview.';
+    const expiryLine = `The link expires ${new Date(expiresAt).toUTCString()}`
+      + (inp.maxViews ? ` or after ${inp.maxViews} view${inp.maxViews === 1 ? '' : 's'}, whichever comes first` : '') + '.';
+    try {
+      const { sendNotification } = await import('./notifications');
+      await sendNotification({
+        accountId: inp.accountId, topic: 'share.invite',
+        subject: `${who} shared a private preview with you: ${resource.title}`,
+        body: (inp.message ? `${inp.message}\n\n` : '')
+          + `Watch the private preview here:\n${url}\n\n${instructions}\n${expiryLine}\n\n`
+          + 'This link is personal to you. Please do not forward it.',
+        recipients, channels: ['email', 'in_app'],
+      } as any);
+      emailed = recipients.length;
+    } catch { /* creation succeeded; email delivery state lives in notifications */ }
+  }
+  return { id: row.id, url, token: t.raw, expiresAt: row.expires_at, emailed };
 }
 
 /** Resolve a raw token to its row (by hash). No policy check here. */
@@ -179,7 +276,7 @@ export async function findShareByToken(raw: string): Promise<ShareRow | null> {
  * playback token, count the view, and fire the notify-on-first-open hook. Runs the
  * geo/rights gate. Returns a denial object if the policy rejects.
  */
-export async function openShare(raw: string, opts: { pin?: string; geo?: string; nowMs?: number }): Promise<
+export async function openShare(raw: string, opts: { pin?: string; email?: string; code?: string; geo?: string; nowMs?: number }): Promise<
   | { ok: false; reason: ShareDenyReason }
   | { ok: true; view: any }
 > {
@@ -188,6 +285,9 @@ export async function openShare(raw: string, opts: { pin?: string; geo?: string;
   const now = opts.nowMs ?? Date.now();
   const policy = evaluateSharePolicy(row, now, opts.pin);
   if (!policy.ok) return policy;
+  // second factor: emailed one-time PIN (email_pin auth mode)
+  const codeCheck = evaluateEmailCode(row, now, opts.email, opts.code);
+  if (!codeCheck.ok) return codeCheck;
 
   const resource = await loadResource(row.resource_kind, row.resource_id, row.account_id);
   if (!resource) return { ok: false, reason: 'not_found' };

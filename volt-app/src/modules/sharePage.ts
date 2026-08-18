@@ -63,11 +63,39 @@ function fmtDur(ms){if(!ms)return '';const s=Math.round(ms/1000);const h=Math.fl
 function fmtDate(iso){try{return new Date(iso).toLocaleDateString(undefined,{day:'2-digit',month:'short',year:'numeric'})}catch(e){return iso}}
 function daysLeft(iso){const d=Math.ceil((new Date(iso)-Date.now())/86400000);return d<=0?'today':d===1?'1 day':d+' days'}
 
+const CREDS={};   // pin / email+code entered by the viewer, reused on re-resolves
 async function resolve(pin){
-  const r=await fetch('/api/share/'+encodeURIComponent(TOKEN)+'/resolve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(pin?{pin}:{})});
+  if(pin)CREDS.pin=pin;
+  const r=await fetch('/api/share/'+encodeURIComponent(TOKEN)+'/resolve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(CREDS)});
   if(r.ok)return {ok:true,data:await r.json()};
   let j={};try{j=await r.json()}catch(e){}
   return {ok:false,status:r.status,reason:j.reason};
+}
+// email_pin flow: confirm the recipient email -> a one-time code is emailed -> enter it.
+function emailPrompt(note){
+  $('#app').innerHTML='<div class="pinbox"><h1>Confirm your email</h1><p>'+(note?esc(note)+' ':'')+'This preview is protected. Enter the email address this link was sent to and we will email you a one-time access code.</p><input id="em" type="email" autocomplete="email" placeholder="you@example.com" style="letter-spacing:normal"/><button class="btn primary" id="emGo" style="width:100%;justify-content:center">Email me a code</button></div>';
+  $('#emGo').onclick=async()=>{
+    const v=$('#em').value.trim(); if(!v)return;
+    CREDS.email=v; delete CREDS.code;
+    try{await fetch('/api/share/'+encodeURIComponent(TOKEN)+'/request-code',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:v})});}catch(e){}
+    codePrompt(false);
+  };
+  $('#em').addEventListener('keydown',e=>{if(e.key==='Enter')$('#emGo').click()});
+}
+function codePrompt(wrong){
+  $('#app').innerHTML='<div class="pinbox"><h1>Enter your access code</h1><p>'+(wrong?'That code was not correct. ':'')+'If <b>'+esc(CREDS.email||'your email')+'</b> received this link, a 6-digit code has been emailed to it (valid 10 minutes).</p><input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;"/><button class="btn primary" id="codeGo" style="width:100%;justify-content:center">Unlock preview</button><p style="margin-top:14px"><a href="#" id="again">Use a different email / send a new code</a></p></div>';
+  $('#codeGo').onclick=async()=>{
+    const v=$('#code').value.trim(); if(!v)return;
+    CREDS.code=v;
+    const out=await resolve();
+    if(out.ok)render(out.data);
+    else if(out.reason==='code_wrong')codePrompt(true);
+    else if(out.reason==='code_expired')emailPrompt('That code has expired.');
+    else if(out.reason==='code_required')codePrompt(true);
+    else stateMsg(out.reason);
+  };
+  $('#again').onclick=e=>{e.preventDefault();emailPrompt()};
+  $('#code').addEventListener('keydown',e=>{if(e.key==='Enter')$('#codeGo').click()});
 }
 function stateMsg(reason){
   const map={expired:'This link has expired.',revoked:'This link has been revoked.',view_cap:'This link has reached its view limit.',not_found:'This link is not valid.'};
@@ -106,7 +134,7 @@ function render(d){
   '</div></div>';
 
   // live preview not being produced yet: offer a re-resolve instead of a dead player
-  const retry=$('#retry'); if(retry){retry.onclick=async()=>{const out=await resolve();if(out.ok)render(out.data);else if(out.reason==='pin_required')pinPrompt(false);else stateMsg(out.reason);};}
+  const retry=$('#retry'); if(retry){retry.onclick=async()=>{const out=await resolve();if(out.ok)render(out.data);else if(out.reason==='pin_required')pinPrompt(false);else if(out.reason==='code_required'||out.reason==='code_expired')emailPrompt();else stateMsg(out.reason);};}
   // play the preview (skip while a live stream isn't available)
   const v=$('#v'), src=d.hls;
   if(src && !(d.live && !d.available)){
@@ -118,7 +146,7 @@ function render(d){
   }
   const hi=$('#hires'); if(hi){hi.onclick=async e=>{e.preventDefault();const r=await fetch('/api/share/'+encodeURIComponent(TOKEN)+'/download/hi_res');if(r.ok){const j=await r.json();window.location=j.url;}else{alert('Download not available.');}};}
 }
-(async()=>{const out=await resolve();if(out.ok)render(out.data);else if(out.reason==='pin_required')pinPrompt(false);else stateMsg(out.reason);})();
+(async()=>{const out=await resolve();if(out.ok)render(out.data);else if(out.reason==='pin_required')pinPrompt(false);else if(out.reason==='code_required'||out.reason==='code_expired')emailPrompt();else stateMsg(out.reason);})();
 </script>
 </body></html>`;
 }

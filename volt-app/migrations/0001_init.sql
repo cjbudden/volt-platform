@@ -847,6 +847,10 @@ CREATE TABLE share_links (
     watermark       BOOLEAN NOT NULL DEFAULT true,  -- preview watermarked to the link
     notify_on_open  BOOLEAN NOT NULL DEFAULT false, -- email creator on first open
     pin_hash        TEXT,                           -- optional PIN gate (sha256), null = none
+    auth_mode       TEXT NOT NULL DEFAULT 'none',   -- none | pin (creator-set) | email_pin (emailed one-time PIN)
+    verify_code_hash TEXT,                          -- sha256 of the emailed one-time PIN
+    verify_email    TEXT,                           -- recipient email the PIN went to
+    verify_expires_at TIMESTAMPTZ,                  -- emailed PIN validity window
     expires_at      TIMESTAMPTZ NOT NULL,           -- hard stop; link dies after this
     max_views       INTEGER,                        -- optional view cap (null = unlimited)
     view_count      INTEGER NOT NULL DEFAULT 0,

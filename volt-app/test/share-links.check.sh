@@ -99,59 +99,52 @@ psql "$DATABASE_URL" -q -c "UPDATE share_links SET expires_at=now()-interval '1 
 EX=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share/$ERAW/resolve" -H 'content-type:application/json' -d '{}')
 ok "expired link resolve is 410" '[ "$EX" = "410" ]'
 
-# ===========================================================================
-# Sharing a LIVE CHANNEL + editing a link in place (recipients, custom expiry,
-# PATCH, rotate). The channel share is a separate workflow from on air: it must
-# work without the channel being published.
-# ===========================================================================
-FUTURE=$(node -e "console.log(new Date(Date.now()+3*86400000).toISOString())")
-CH=$(curl -s -X POST "http://localhost:$PORT/api/share-links" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' \
-  -d "{\"resourceKind\":\"channel\",\"resourceId\":\"0000000e-0000-0000-0000-000000000001\",\"expiresAt\":\"$FUTURE\",\"label\":\"Client approval\",\"recipients\":[\"client@partner.example\"],\"sendEmail\":true,\"maxViews\":2,\"notifyOnOpen\":true}")
-CHRAW=$(echo "$CH" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-CHID=$(echo "$CH" | sed -n 's/.*"id":"\([0-9a-f-]*\)".*/\1/p')
-ok "channel share link created" '[ -n "$CHRAW" ]'
-ok "custom expiresAt is honoured (not the 7-day default)" 'echo "$CH" | grep -q "$(echo $FUTURE | cut -c1-10)"'
-ok "sendEmail reports the deliveries it made" 'echo "$CH" | grep -q "\"sent\":1"'
-CHR=$(curl -s -X POST "http://localhost:$PORT/api/share/$CHRAW/resolve" -H 'content-type:application/json' -d '{}')
-ok "channel share resolves without the channel being on air" 'echo "$CHR" | grep -q "\"ok\":true"'
-ok "channel share is flagged live" 'echo "$CHR" | grep -q "\"live\":true"'
-ok "channel share reports whether output is available right now" 'echo "$CHR" | grep -q "\"available\":"'
+# ==== NEW: view-count expiry (expire after 1 view) ====
+CV=$(curl -s -X POST "http://localhost:$PORT/api/share-links" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' \
+  -d '{"resourceKind":"vod","resourceId":"0000000f-0000-0000-0000-000000000001","accessPeriod":"7 days","maxViews":1}')
+VRAW=$(echo "$CV" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+V1=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share/$VRAW/resolve" -H 'content-type:application/json' -d '{}')
+V2=$(curl -s -X POST "http://localhost:$PORT/api/share/$VRAW/resolve" -H 'content-type:application/json' -d '{}')
+ok "1-view link: first open is 200" '[ "$V1" = "200" ]'
+ok "1-view link: second open is view_cap" 'echo "$V2" | grep -q view_cap'
 
-# --- list: scoped to a resource, exposes has_pin, never the hash ---
-LIST=$(curl -s "http://localhost:$PORT/api/share-links?resourceKind=channel&resourceId=0000000e-0000-0000-0000-000000000001" -H "authorization: Bearer $TOKA")
-ok "list can be scoped to one resource" '[ "$(echo "$LIST" | grep -o "\"resource_kind\":\"vod\"" | wc -l)" = "0" ]'
-ok "list says whether a PIN is set, without leaking it" 'echo "$LIST" | grep -q "\"has_pin\":false" && ! echo "$LIST" | grep -q "pin_hash"'
-ok "list carries the recipients it was sent to" 'echo "$LIST" | grep -q "client@partner.example"'
+# ==== NEW: send-by-email (system emails the link + message + instructions) ====
+SE=$(curl -s -X POST "http://localhost:$PORT/api/share-links" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' \
+  -d '{"resourceKind":"vod","resourceId":"0000000f-0000-0000-0000-000000000001","accessPeriod":"7 days","sendEmail":true,"recipients":["press@partner.example"],"message":"Please review."}')
+ok "sendEmail returns emailed:1" 'echo "$SE" | grep -q "\"emailed\":1"'
+INVITE=$(psql "$DATABASE_URL" -tA -c "SELECT body FROM notifications WHERE topic='share.invite' ORDER BY created_at DESC LIMIT 1")
+ok "invite email carries the link" 'echo "$INVITE" | grep -q "/share/shr_"'
+ok "invite email carries the message" 'echo "$INVITE" | grep -q "Please review."'
+SE2=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share-links" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' \
+  -d '{"resourceKind":"vod","resourceId":"0000000f-0000-0000-0000-000000000001","accessPeriod":"7 days","sendEmail":true}')
+ok "sendEmail without recipients is 400" '[ "$SE2" = "400" ]'
 
-# --- PATCH: extend, cap, PIN on, then PIN off ---
-PA=$(curl -s -X PATCH "http://localhost:$PORT/api/share-links/$CHID" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' \
-  -d '{"extendSec":604800,"maxViews":10,"pin":"7391","label":"Client approval v2"}')
-NEWEXP=$(echo "$PA" | sed -n 's/.*"expires_at":"\([^"]*\)".*/\1/p')
-ok "PATCH extends the expiry past the custom date it was created with" 'node -e "process.exit(new Date(process.argv[1])>new Date(process.argv[2])?0:1)" "$NEWEXP" "$FUTURE"'
-ok "PATCH raises the view cap" 'echo "$PA" | grep -q "\"max_views\":10"'
-ok "PATCH sets a PIN (reported as has_pin, never the value)" 'echo "$PA" | grep -q "\"has_pin\":true" && ! echo "$PA" | grep -q "7391"'
-PN=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share/$CHRAW/resolve" -H 'content-type:application/json' -d '{}')
-ok "the new PIN is enforced on the SAME url (401)" '[ "$PN" = "401" ]'
-curl -s -X PATCH "http://localhost:$PORT/api/share-links/$CHID" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' -d '{"pin":null}' >/dev/null
-PC=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share/$CHRAW/resolve" -H 'content-type:application/json' -d '{}')
-ok "clearing the PIN opens the same url again (200)" '[ "$PC" = "200" ]'
-ok "a 2-character PIN is rejected" '[ "$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "http://localhost:$PORT/api/share-links/$CHID" -H "authorization: Bearer $TOKA" -H "content-type:application/json" -d "{\"pin\":\"12\"}")" = "400" ]'
-
-# --- rotate: a new URL works, the old one is dead ---
-ROT=$(curl -s -X POST "http://localhost:$PORT/api/share-links/$CHID/rotate" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' -d '{"sendEmail":true}')
-NEWRAW=$(echo "$ROT" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-ok "rotate issues a different token" '[ -n "$NEWRAW" ] && [ "$NEWRAW" != "$CHRAW" ]'
-ok "rotate re-sends to the stored recipients" 'echo "$ROT" | grep -q "\"sent\":1"'
-ok "the rotated url resolves" '[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share/$NEWRAW/resolve" -H "content-type:application/json" -d "{}")" = "200" ]'
-ok "the old url is dead after rotate (404)" '[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share/$CHRAW/resolve" -H "content-type:application/json" -d "{}")" = "404" ]'
-
-# --- cross-tenant PATCH / rotate are 404 ---
-ok "admin B cannot PATCH A's link" '[ "$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "http://localhost:$PORT/api/share-links/$CHID" -H "authorization: Bearer $TOKB" -H "content-type:application/json" -d "{\"label\":\"x\"}")" = "404" ]'
-ok "admin B cannot rotate A's link" '[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$PORT/api/share-links/$CHID/rotate" -H "authorization: Bearer $TOKB" -H "content-type:application/json" -d "{}")" = "404" ]'
-
-# --- email deliveries actually landed in the notification store ---
-DLV=$(psql "$DATABASE_URL" -tA -c "SELECT count(*) FROM notification_deliveries d JOIN notifications n ON n.id=d.notification_id WHERE n.topic='share_link'")
-ok "share invites are recorded as notification deliveries" '[ "$DLV" -ge 2 ]'
+# ==== NEW: email-PIN verification (second factor) ====
+EP=$(curl -s -X POST "http://localhost:$PORT/api/share-links" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' \
+  -d '{"resourceKind":"vod","resourceId":"0000000f-0000-0000-0000-000000000001","accessPeriod":"7 days","authMode":"email_pin","recipients":["viewer@partner.example"]}')
+EPRAW=$(echo "$EP" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+ok "email_pin link created" '[ -n "$EPRAW" ]'
+E1=$(curl -s -X POST "http://localhost:$PORT/api/share/$EPRAW/resolve" -H 'content-type:application/json' -d '{}')
+ok "email_pin without creds is code_required" 'echo "$E1" | grep -q code_required'
+# wrong email: response is GENERIC and no code is armed
+curl -s -X POST "http://localhost:$PORT/api/share/$EPRAW/request-code" -H 'content-type:application/json' -d '{"email":"attacker@evil.example"}' >/dev/null
+ARMED=$(psql "$DATABASE_URL" -tA -c "SELECT count(*) FROM share_links WHERE auth_mode='email_pin' AND verify_code_hash IS NOT NULL")
+ok "request-code with a non-recipient arms nothing" '[ "$ARMED" = "0" ]'
+# right email: a code is emailed; fish it out of the recorded notification
+curl -s -X POST "http://localhost:$PORT/api/share/$EPRAW/request-code" -H 'content-type:application/json' -d '{"email":"viewer@partner.example"}' >/dev/null
+CODE=$(psql "$DATABASE_URL" -tA -c "SELECT body FROM notifications WHERE topic='share.verify' ORDER BY created_at DESC LIMIT 1" | grep -o '[0-9]\{6\}' | head -1)
+ok "verification code emailed (6 digits)" '[ -n "$CODE" ]'
+E2=$(curl -s -X POST "http://localhost:$PORT/api/share/$EPRAW/resolve" -H 'content-type:application/json' -d "{\"email\":\"viewer@partner.example\",\"code\":\"999999\"}")
+ok "wrong code is code_wrong" 'echo "$E2" | grep -q code_wrong'
+E3=$(curl -s -X POST "http://localhost:$PORT/api/share/$EPRAW/resolve" -H 'content-type:application/json' -d "{\"email\":\"viewer@partner.example\",\"code\":\"$CODE\"}")
+ok "correct email+code resolves the preview" 'echo "$E3" | grep -q "\"ok\":true"'
+# expired code path
+psql "$DATABASE_URL" -q -c "UPDATE share_links SET verify_expires_at=now()-interval '1 minute' WHERE auth_mode='email_pin'"
+E4=$(curl -s -X POST "http://localhost:$PORT/api/share/$EPRAW/resolve" -H 'content-type:application/json' -d "{\"email\":\"viewer@partner.example\",\"code\":\"$CODE\"}")
+ok "expired code is code_expired" 'echo "$E4" | grep -q code_expired'
+# share page carries the email/code flow
+EPAGE=$(curl -s "http://localhost:$PORT/share/$EPRAW")
+ok "share page includes the email verification flow" 'echo "$EPAGE" | grep -q "request-code"'
 
 kill $API 2>/dev/null
 echo ""

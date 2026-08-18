@@ -200,7 +200,10 @@ export const api = {
     resourceKind: 'vod' | 'channel' | 'event'; resourceId: string
     accessPeriod?: string; ttlSec?: number; label?: string; message?: string
     pin?: string; maxViews?: number | null
-  }): Promise<{ id: string; url: string; token: string; expiresAt: string }> =>
+    recipients?: string[]
+    authMode?: 'none' | 'pin' | 'email_pin'
+    sendEmail?: boolean
+  }): Promise<{ id: string; url: string; token: string; expiresAt: string; emailed: number }> =>
     req('/share-links', { method: 'POST', body: JSON.stringify(b) }),
   shareLinks: (): Promise<ShareLinkRow[]> => req('/share-links'),
   revokeShareLink: (id: string): Promise<{ id: string; revoked: boolean }> =>
