@@ -465,6 +465,16 @@ channelsRouter.post(
     );
     if (!chan) throw notFound('Channel not found');
     const { mode } = failoverTestSchema.parse(req.body);
+    // Failover acts on the RUNNING encoder's source selector: before the channel is
+    // started there is nothing to switch, so refuse instead of writing a control file
+    // nothing reads (a stale forced mode is also cleared at every encoder start).
+    const running = await one(
+      `SELECT 1 FROM instances WHERE channel_id=$1 AND terminated_at IS NULL LIMIT 1`,
+      [req.params.id]);
+    if (!running) {
+      res.status(409).json({ error: 'Channel is not running. Start the channel first: failover acts on the running encoder.' });
+      return;
+    }
     const dir = resolve(config.testStream.originDir, req.params.id);
     try { mkdirSync(dir, { recursive: true }); } catch { /* exists */ }
     writeFileSync(failoverControlPath(req.params.id), JSON.stringify({ mode, at: Date.now() }));

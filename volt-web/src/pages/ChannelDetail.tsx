@@ -166,8 +166,9 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>Settings
         </button>
         {!serverUp ? (
-          <button className="btn primary" disabled={busy} onClick={() => setConfirmStart(true)}>
-            {busy ? 'Sending source…' : 'Send source'}
+          <button className="btn primary" disabled={busy} onClick={() => setConfirmStart(true)}
+            title="Brings the encoder up and begins ingesting the configured source">
+            {busy ? 'Starting…' : 'Start channel'}
           </button>
         ) : (
           <>
@@ -936,7 +937,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   const proto = (configured?.protocol || d.sources[0]?.protocol || 'SRT').toUpperCase()
   const ts = d.testStream
   const srcHost = hostOf(ts.sourceUrl || configured?.ingest_url)
-  const sendLabel = configured ? `Send source (${proto})` : 'Send test source'
+  const sendLabel = configured ? `Start channel (${proto})` : 'Start with test source'
   // Reflect the pipeline: the source can only be previewed via the encoder output,
   // so if the input gate failed, or the source is valid but the ENCODER failed, we
   // must NOT show a green RECEIVING. Show the real error instead.
@@ -980,7 +981,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center' }}>
             <div>
               <button className="btn primary" onClick={onSendSource} disabled={busy} style={{ transform: 'scale(1.05)' }}>
-                {busy ? 'Sending source…' : `▶  ${sendLabel}`}
+                {busy ? 'Starting…' : `▶  ${sendLabel}`}
               </button>
               {configured?.ingest_url && <div style={{ marginTop: 10, fontSize: 11, color: 'var(--faint)', maxWidth: 340, wordBreak: 'break-all' }}>{configured.ingest_url}</div>}
             </div>
@@ -1504,8 +1505,14 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
     return () => { ok = false }
   }, [d.id, d.input_failover_enabled, d.auto_failback, d.input_loss_behavior, d.filler_slate_ref])
   const real = !!cap?.realFailover
+  // Failover acts on the RUNNING encoder's source selector. Before the channel is
+  // started there is nothing to switch, so the test/switch actions stay disabled
+  // (and the API refuses them too). Once running, health-driven failover is armed
+  // automatically: an invalid or lost source engages the backup/filler by itself
+  // after the start-up grace; this panel is for forcing paths on purpose.
+  const running = d.health?.gates.find(g => g.gate === 'server')?.status === 'healthy'
   const apply = async (m: FailoverMode) => {
-    if (!real) return   // no encoder selector to drive; nothing to simulate
+    if (!real || !running) return   // no running selector to drive; nothing to force
     setErr(''); setBusy(true)
     try { const s = await api.failoverTest(d.id, m); setMode(s.mode); setCap(s) } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
@@ -1544,18 +1551,21 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {FAILOVER_STEPS.map(s => (
-              <button key={s.m} className={`btn ${mode === s.m ? 'primary' : 'ghost'}`} disabled={busy}
-                title={s.note} onClick={() => apply(s.m)} style={{ padding: '7px 12px' }}>
+              <button key={s.m} className={`btn ${mode === s.m ? 'primary' : 'ghost'}`} disabled={busy || !running}
+                title={running ? s.note : 'Start the channel first: failover acts on the running encoder'}
+                onClick={() => apply(s.m)} style={{ padding: '7px 12px' }}>
                 <span className="dot-s" style={{ background: s.hue, marginRight: 6 }} />{s.label}
               </button>
             ))}
-            <button className={`btn ${mode === 'auto' ? 'primary' : 'ghost'}`} disabled={busy}
+            <button className={`btn ${mode === 'auto' ? 'primary' : 'ghost'}`} disabled={busy || !running}
               onClick={() => apply('auto')} style={{ padding: '7px 12px', marginLeft: 'auto' }}>
               Resume normal
             </button>
           </div>
-          {mode !== 'auto' && !sourceUp && (
-            <div className="td" style={{ color: 'var(--warn)', marginTop: 10 }}>The channel is not running — start it so the encoder can act on the switch.</div>
+          {!running && (
+            <div className="td" style={{ color: 'var(--muted)', marginTop: 10 }}>
+              Controls arm once the channel is STARTED: failover acts on the running encoder, so there is nothing to switch before then. While running, automatic failover is always armed. If the source is invalid or lost, the encoder switches to the backup or filler by itself; these buttons force a path on purpose.
+            </div>
           )}
           {mode !== 'auto' && sourceUp && (
             <div className="td" style={{ color: 'var(--muted)', marginTop: 10 }}>Watch the OUTPUT player above. Press Resume normal to return to health-driven behaviour.</div>
