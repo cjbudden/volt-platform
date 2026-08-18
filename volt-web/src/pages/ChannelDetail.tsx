@@ -903,16 +903,33 @@ function ScrollMeter({ history, active }: { history: number[]; active: boolean }
     if (!g) return
     g.setTransform(dpr, 0, 0, dpr, 0, 0)
     g.clearRect(0, 0, W, H)
+    // faint centre baseline so the strip reads as a waveform even in silence
+    g.fillStyle = 'rgba(148,163,184,.22)'
+    g.fillRect(0, H / 2 - 0.5, W, 1)
     for (let i = 0; i < history.length; i++) {
       const lvl = history[i]
       const h = Math.max(1.6, lvl * H)
       const y = (H - h) / 2
-      // newest samples brighter, history fades toward the left
+      // newest samples brighter, history fades toward the left; colour follows the
+      // LEVEL like a broadcast meter: green for normal, amber when hot, red at peak
       const age = (history.length - 1 - i) / history.length
-      g.fillStyle = active
-        ? `rgba(74, 222, 128, ${0.9 - age * 0.55})`
-        : `rgba(148, 163, 184, ${0.55 - age * 0.35})`
+      const a = active ? 0.95 - age * 0.6 : 0.5 - age * 0.32
+      g.fillStyle = !active ? `rgba(148,163,184,${a})`
+        : lvl > 0.86 ? `rgba(248,113,113,${a})`
+        : lvl > 0.68 ? `rgba(251,191,36,${a})`
+        : `rgba(74,222,128,${a})`
       g.fillRect(i, y, 1, h)
+    }
+    // soft glow on the newest columns so the live edge of the meter reads as "now"
+    if (active) {
+      const lvl = history[history.length - 1] || 0
+      const h = Math.max(1.6, lvl * H)
+      g.save()
+      g.shadowColor = 'rgba(74,222,128,.8)'
+      g.shadowBlur = 4
+      g.fillStyle = 'rgba(190,255,210,.95)'
+      g.fillRect(W - 2, (H - h) / 2, 1.6, h)
+      g.restore()
     }
   }, [history, active])
   return <canvas ref={ref} style={{ width: W, height: H, display: 'block' }} aria-label="Audio level history" />

@@ -51,7 +51,15 @@ function encoderLogTail(channelId: string): { ts: string; level: string; title: 
   try {
     const p = join(config.testStream.originDir, channelId, 'encoder.log');
     if (!existsSync(p)) return [];
-    const lines = readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean);
+    const allLines = readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean);
+    // encoder.log is APPENDED across runs. Only THIS run's lines may surface: errors
+    // from a previous run painted a flash of red on every clean start. The encoder
+    // prints a run banner at boot; scope the tail to the last banner onward.
+    let lastStart = -1;
+    for (let i = allLines.length - 1; i >= 0; i--) {
+      if (allLines[i].includes('[volt-encoder] channel=')) { lastStart = i; break; }
+    }
+    const lines = lastStart >= 0 ? allLines.slice(lastStart) : allLines;
     const rx = /FATAL|error|Error|Unknown|Could not|No such|Invalid|failed|Connection|Server returned|Immediate exit|not found|Unsupported|Cannot|denied|refused|timed out|timeout/i;
     const bad = /FATAL|Could not|No such|failed|Server returned|Unsupported|Invalid|not found|denied|refused/i;
     // Spawn announcements ('[volt-encoder] start <name>: ffmpeg ... -loglevel error ...')
@@ -86,12 +94,35 @@ function newestManifestMtimeMs(channelId: string): number {
  *  it needs, so the channels LIST shows a status that never disagrees with the detail.
  *  Per channel: one stream_status row, recent events, the encoder log tail, and the
  *  manifest mtime (ground truth). Returns the health (incl. the `overall` roll-up). */
+/** launched_at (ms) of the running encoder instance, or null when none is running.
+ *  Status/events older than this belong to a PREVIOUS run: using them while a new run
+ *  boots painted a flash of stale errors on every clean start. */
+async function runningSinceMs(channelId: string): Promise<number | null> {
+  const inst = await one<any>(
+    `SELECT min(launched_at) AS since FROM instances WHERE channel_id = $1 AND terminated_at IS NULL`,
+    [channelId]);
+  return inst?.since ? new Date(inst.since).getTime() : null;
+}
+const RUN_GRACE_MS = 2000;
+
+function scopeToRun<T extends { ts: string }>(evs: T[], runSince: number | null): T[] {
+  if (!runSince) return evs;
+  return evs.filter((e) => new Date(e.ts).getTime() >= runSince - RUN_GRACE_MS);
+}
+
+function scopeStatusToRun(st: any, runSince: number | null): any {
+  if (!st || !runSince) return st;
+  const upd = st.updated_at ? new Date(st.updated_at).getTime() : 0;
+  return upd < runSince - RUN_GRACE_MS ? null : st;   // stale report from the previous run
+}
+
 export async function loadChannelHealthLite(channel: any, nowMs: number): Promise<PipelineHealth> {
-  const st = await one<any>(
+  const runSince = await runningSinceMs(channel.id);
+  const st = scopeStatusToRun(await one<any>(
     `SELECT output_available, active_source, fallback_in_use, filler_in_use, packager_ok, sources, updated_at
-       FROM stream_status WHERE channel_id = $1`, [channel.id]);
-  const evs = await query<any>(
-    `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]);
+       FROM stream_status WHERE channel_id = $1`, [channel.id]), runSince);
+  const evs = scopeToRun(await query<any>(
+    `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]), runSince);
   const encTail = encoderLogTail(channel.id);
   const logTailErrors = encTail.filter((l) => l.level === 'down' || l.level === 'warn').map((l) => l.detail).reverse();
   const outMtime = newestManifestMtimeMs(channel.id);
@@ -142,17 +173,21 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   };
 
   // ---- REAL status (latest encoder report), REAL events, REAL EPG -----------
-  const st = await one<any>(
+  // Everything is scoped to the CURRENT run: a freshly launched encoder must not be
+  // painted with the previous run's status row, events or log lines (the start-up
+  // error flash). runSince also feeds billing below.
+  const runSince = await runningSinceMs(channel.id);
+  const st = scopeStatusToRun(await one<any>(
     `SELECT output_available, active_source, fallback_in_use, filler_in_use, packager_ok, sources, updated_at
-       FROM stream_status WHERE channel_id = $1`, [channel.id]);
+       FROM stream_status WHERE channel_id = $1`, [channel.id]), runSince);
   const reporting = !!st;
   const outputAvailable = !!st?.output_available;
   const seg = Number(profile?.segment_dur ?? 4).toFixed(1);
   const sstates: Record<string, any> = (st && st.sources && typeof st.sources === 'object') ? st.sources : {};
 
   // event log — real stream_events, newest first; empty when none
-  const evs = await query<any>(
-    `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]);
+  const evs = scopeToRun(await query<any>(
+    `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]), runSince);
 
   // real encoder-log error lines (newest-first), shared by the log view + health model
   const encTail = encoderLogTail(channel.id);
@@ -183,12 +218,9 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   const degraded = !!health.primaryError;
 
   // billing: the encoder SERVER is the billable unit. Metering runs while the
-  // channel is live; `since` = when the running encoder task launched.
-  const inst = await one<any>(
-    `SELECT min(launched_at) AS since FROM instances WHERE channel_id = $1 AND terminated_at IS NULL`,
-    [channel.id]);
+  // channel is live; `since` = when the running encoder task launched (runSince).
   const serverUp = channel.status === 'live';
-  const sinceMs = inst?.since ? new Date(inst.since).getTime() : null;
+  const sinceMs = runSince;
   const billing = buildBilling(serverUp, sinceMs, nowMs, recommendInstance(profile?.workflow_type, ladder));
 
   const outGate = health.gates.find((g) => g.gate === 'output')!;

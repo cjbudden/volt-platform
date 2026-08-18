@@ -1092,7 +1092,10 @@ def start_captions(cfg, out_dir):
                     # smooth regardless of transcribe timing.
                     if _events:
                         _events.event("caption.offset", est_offset_sec=est, proc_sec=round(proc, 1),
-                                      chunk_sec=chunk, realtime=bool(proc < chunk), langs=langs)
+                                      chunk_sec=chunk, realtime=bool(proc < chunk), langs=langs,
+                                      # per-chunk detected spoken language (auto mode), so the
+                                      # console can show what the AI heard when it changes
+                                      detected=getattr(reuse, "_last_lang", None))
             except Exception as e:  # noqa: BLE001
                 log(f"captions worker error: {e}")
             time.sleep(1)

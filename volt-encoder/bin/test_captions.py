@@ -106,15 +106,25 @@ try:
 except SystemExit:
     ok(True, "make_translator: unmapped target raises")
 
-# WhisperAdapter routes non-English targets through the injected translator.
-# Stub out the Whisper model so no audio/model is needed.
+# WhisperAdapter routes targets per chunk with PER-CHUNK language detection.
+# Stub out the Whisper model so no audio/model is needed. The stub simulates a
+# broadcast where the detected language changes chunk to chunk (en <-> ms).
+class Info:
+    def __init__(self, language, probability=0.95):
+        self.language = language
+        self.language_probability = probability
+
 class StubWhisper(C.WhisperAdapter):
+    detect = Info("en")     # what the next transcribe pass "detects"
     def _model(self):  # no real model
         return object()
-    def _run_task(self, model, task, lang):
-        # source transcript for transcribe; English for the translate task
-        return [C.Cue(0.0, 1.0, "hello", "en")] if task == "transcribe" else [C.Cue(0.0, 1.0, "HELLO-EN", "en")]
+    def _run_task(self, model, task, lang, language=None):
+        self.last_pinned = language
+        if task == "transcribe":
+            return [C.Cue(0.0, 1.0, "hello", lang)], self.detect
+        return [C.Cue(0.0, 1.0, "HELLO-EN", lang)], self.detect
 
+# pinned English source, non-English targets go through MT
 wa = StubWhisper("/dev/null", source_lang="en", translator=FakeMT())
 cues = wa.transcribe(["ms", "zh", "ta"])
 langs = {c.lang for c in cues}
@@ -122,10 +132,47 @@ ok(langs == {"en", "ms", "zh", "ta"}, f"whisper+MT yields en+ms+zh+ta (got {lang
 ms = [c.text for c in cues if c.lang == "ms"]
 ok(ms == ["<ms>hello"], "non-English target routed through MT translator")
 
-# Reverse direction: non-English source, English target uses Whisper's translate task (no MT)
+# pinned non-English source, English target uses Whisper's translate task (no MT)
 wa2 = StubWhisper("/dev/null", source_lang="ms", translator=None)
 cues2 = wa2.transcribe(["en"])
 ok(any(c.lang == "en" and c.text == "HELLO-EN" for c in cues2), "X->English uses Whisper translate task, no MT needed")
+
+# ---- per-chunk detection: the mid-programme language switch (the broadcast case) ----
+wa3 = StubWhisper("/dev/null", source_lang="auto", translator=FakeMT())
+# chunk 1: English detected -> target en served by the transcript itself, no translate pass
+wa3.detect = Info("en")
+c1 = wa3.transcribe(["en"])
+ok({c.lang for c in c1} == {"en"} and any(c.text == "hello" for c in c1),
+   "auto: English chunk -> en track from transcript, no translation")
+# chunk 2: the programme switches to MALAY -> target en must be TRANSLATED, not raw Malay
+wa3.detect = Info("ms")
+c2 = wa3.transcribe(["en"])
+ok(any(c.lang == "en" and c.text == "HELLO-EN" for c in c2),
+   "auto: Malay chunk -> en track gets Whisper-translated English")
+ok(not any(c.lang == "en" and c.text == "hello" for c in c2),
+   "auto: Malay chunk -> raw Malay text never labelled as English")
+ok(any(c.lang == "ms" and c.text == "hello" for c in c2),
+   "auto: Malay chunk -> source cues labelled with the DETECTED language")
+ok(wa3.last_pinned == "ms", "translate pass pinned to the detected language")
+# chunk 3: switch back to English -> en served directly again
+wa3.detect = Info("en")
+c3 = wa3.transcribe(["en"])
+ok(any(c.lang == "en" and c.text == "hello" for c in c3), "auto: back to English chunk")
+
+# low-confidence detection is sticky: keep the last confident language
+wa4 = StubWhisper("/dev/null", source_lang="auto", translator=None)
+wa4.detect = Info("ms", probability=0.9)
+wa4.transcribe(["en"])
+wa4.detect = Info("ta", probability=0.2)   # shaky guess on a noisy chunk
+c5 = wa4.transcribe(["en"])
+ok(any(c.lang == "ms" for c in c5), "low-confidence detection falls back to last confident language")
+
+# non-English target from a DETECTED (not configured) language goes through MT
+wa5 = StubWhisper("/dev/null", source_lang="auto", translator=FakeMT())
+wa5.detect = Info("en")
+c6 = wa5.transcribe(["ms"])
+ok(any(c.lang == "ms" and c.text == "<ms>hello" for c in c6),
+   "auto: English chunk -> ms target via MT from detected en")
 
 print(f"\n{p} passed, {f} failed")
 raise SystemExit(1 if f else 0)

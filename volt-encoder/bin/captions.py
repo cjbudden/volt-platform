@@ -224,40 +224,63 @@ class WhisperAdapter:
         self._m = WhisperModel(self.model_size, device=device, compute_type=compute)
         return self._m
 
-    def _run_task(self, model, task: str, lang: str) -> list[Cue]:
+    def _run_task(self, model, task: str, lang: str, language: str | None = None):
+        """Run one whisper pass. Returns (cues labelled `lang`, whisper info).
+        `language` pins the decode language; None lets whisper DETECT it (info.language)."""
         kw = {"task": task, "beam_size": 1}
-        if self.source_lang and self.source_lang != "auto":
-            kw["language"] = self.source_lang
-        segments, _info = model.transcribe(self.audio_path, **kw)
-        return [Cue(float(s.start), float(s.end), s.text.strip(), lang)
-                for s in segments if s.text.strip()]
+        if language:
+            kw["language"] = language
+        segments, info = model.transcribe(self.audio_path, **kw)
+        return ([Cue(float(s.start), float(s.end), s.text.strip(), lang)
+                 for s in segments if s.text.strip()], info)
 
     def transcribe(self, targets: list[str]) -> list[Cue]:
+        """Per-chunk transcript + translations, with PER-CHUNK language detection.
+
+        Broadcast reality (the reason this exists): the spoken language changes from
+        programme to programme and even inside one programme (English anchor, Malay
+        interview, back to English). So the SOURCE language is re-detected on every
+        chunk unless the channel pins one, and the requested OUTPUT languages are
+        always delivered:
+          * target == detected      -> the transcript itself serves that track
+          * target 'en', detected X -> Whisper's native X->English translate task
+          * any other target        -> NLLB MT from the DETECTED language
+        Detection on a short chunk can be shaky, so a low-confidence detection
+        (probability < 0.5) falls back to the last confidently detected language
+        (sticky), which also stops one noisy chunk from flapping the routing."""
         model = self._model()
-        cues: list[Cue] = []
-        # source-language transcript
-        src_cues = self._run_task(model, "transcribe", self.source_lang or "auto")
-        # relabel 'auto' to the detected/assumed source so downstream filtering works
-        src_lang = self.source_lang if self.source_lang and self.source_lang != "auto" else "en"
-        cues += [Cue(c.start, c.end, c.text, src_lang) for c in src_cues]
-        # per-target translation:
-        #   • 'en'  -> Whisper's own translate task (native X->English)
-        #   • other -> downstream MT (NLLB) from the source-language transcript
+        pinned = self.source_lang if self.source_lang and self.source_lang != "auto" else None
+        src_cues, info = self._run_task(model, "transcribe", "src", language=pinned)
+        if pinned:
+            detected = pinned
+        else:
+            lang = getattr(info, "language", None)
+            prob = getattr(info, "language_probability", None)
+            if lang and (prob is None or prob >= 0.5):
+                detected = lang
+            else:
+                detected = getattr(self, "_last_lang", None) or lang or "en"
+        self._last_lang = detected
+        src_cues = [Cue(c.start, c.end, c.text, detected) for c in src_cues]
+        cues: list[Cue] = list(src_cues)
         unmet = []
         for t in targets:
-            if t == src_lang:
+            if t == detected:
                 continue
             if t == "en":
-                cues += self._run_task(model, "translate", "en")
-            elif self.translator is not None:
-                cues += self.translator.translate_cues(src_cues, src_lang, t)
+                # native X->English; pin the decode language to what we detected so the
+                # translate pass does not have to re-guess
+                en_cues, _ = self._run_task(model, "translate", "en", language=detected)
+                cues += en_cues
+            elif self.translator is not None and detected in FLORES and t in FLORES:
+                cues += self.translator.translate_cues(src_cues, detected, t)
             else:
                 unmet.append(t)
         if unmet:
-            # only reached when a non-English target was requested but no MT model
-            # was wired — surface which targets still need one
-            print(f"captions[whisper]: targets need an MT model (NLLB): {unmet}",
-                  file=sys.stderr)
+            # a target could not be produced for THIS chunk: either no MT model was
+            # wired, or the detected language has no FLORES mapping yet
+            print(f"captions[whisper]: chunk in '{detected}' could not serve targets {unmet}"
+                  f" (add an MT model / FLORES mapping)", file=sys.stderr)
         return cues
 
 
