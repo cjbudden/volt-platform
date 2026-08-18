@@ -571,7 +571,8 @@ CREATE TABLE stream_status (
     filler_in_use    BOOLEAN NOT NULL DEFAULT false,     -- active_source == filler
     packager_ok      BOOLEAN NOT NULL DEFAULT false,
     sources          JSONB   NOT NULL DEFAULT '{}'::jsonb,-- per-source state map
-    last_seq         BIGINT  NOT NULL DEFAULT 0,          -- guards out-of-order reports
+    last_seq         BIGINT  NOT NULL DEFAULT 0,          -- guards out-of-order reports (within one run)
+    boot_ms          BIGINT  NOT NULL DEFAULT 0,          -- encoder boot time; a newer boot always wins
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK ((event_id IS NOT NULL) <> (channel_id IS NOT NULL))
 );

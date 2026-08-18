@@ -35,6 +35,9 @@ async function ensureSchema(): Promise<void> {
   await query(`ALTER TABLE share_links ADD COLUMN IF NOT EXISTS verify_code_hash TEXT`);
   await query(`ALTER TABLE share_links ADD COLUMN IF NOT EXISTS verify_email TEXT`);
   await query(`ALTER TABLE share_links ADD COLUMN IF NOT EXISTS verify_expires_at TIMESTAMPTZ`);
+  // Run identity for encoder status reports: seq restarts on every encoder boot, so
+  // boot_ms disambiguates runs (a newer boot always wins the status upsert).
+  await query(`ALTER TABLE stream_status ADD COLUMN IF NOT EXISTS boot_ms BIGINT NOT NULL DEFAULT 0`);
 }
 
 const server = app.listen(config.port, () => {

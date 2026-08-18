@@ -757,8 +757,8 @@ function hostOf(url?: string | null) { try { return url ? new URL(url).host : ''
 // back to a motion driven by playback progress so the bars are ALWAYS alive while
 // audio is flowing, muted or not. Audio is muted by default on this page.
 type AudioTrackOpt = { id: number; label: string }
-const AUDIO_BARS = 14      // analysis bands (level is computed across these)
-const HIST_COLS = 72       // scrolling meter: 72 columns x 100ms = ~7s of history
+const AUDIO_BARS = 14      // analysis bands (drive the fallback motion)
+const HIST_COLS = 16       // scrolling meter: 16 BARS x 250ms = ~4s of history
 const SPK_HI = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z" /></svg>
 const SPK_LO = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z" /></svg>
 const SPK_MUTE = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm18.6.4-1.4-1.4L17 11.2 13.8 8l-1.4 1.4L15.6 12.6 12.4 15.8l1.4 1.4L17 14l3.2 3.2 1.4-1.4-3.2-3.2 3.2-3.2z" /></svg>
@@ -856,12 +856,18 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
           }
           real = peak > 0.02
         }
-        // overall level for the scrolling history: peak of the perceptual bands when the
-        // analyser reads real audio; a gentle synthetic pulse while audio is flowing but
-        // the capture cannot be read yet; decay to zero when nothing plays.
+        // overall level for the scrolling history. Computed from the RAW spectrum RMS,
+        // NOT the boosted display bands: those carry a strong perceptual gain for the
+        // per-band look and sit near 1.0 for any normal audio, which made the meter
+        // read as a constant 100% wall. Raw RMS with a gentle curve keeps real
+        // dynamics: silence near 0, speech mid, loud music high but not pinned.
         let lvl = 0
-        if (real) {
-          for (let b = 0; b < AUDIO_BARS; b++) lvl = Math.max(lvl, disp[b])
+        if (real && dataRef.current) {
+          const dd = dataRef.current
+          const used = Math.max(8, Math.floor(dd.length * 0.78))
+          let acc = 0
+          for (let i = 0; i < used; i++) { const v = dd[i] / 255; acc += v * v }
+          lvl = Math.min(1, Math.pow(Math.sqrt(acc / used), 0.6) * 1.15)
         } else if (playing) {
           phaseRef.current += 0.09
           lvl = 0.25 + 0.28 * Math.abs(Math.sin(phaseRef.current)) * (0.6 + 0.4 * Math.sin(phaseRef.current * 0.37))
@@ -870,7 +876,7 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
           lvl = Math.max(0, (h[h.length - 1] || 0) * 0.7)
         }
         const nowMs = performance.now()
-        if (nowMs - lastPushRef.current >= 100) {
+        if (nowMs - lastPushRef.current >= 250) {   // one bar per 250ms
           lastPushRef.current = nowMs
           const h = histRef.current
           h.shift(); h.push(Math.min(1, lvl))
@@ -952,13 +958,14 @@ function AudioDock({ eng, tracks, currentTrack, onSelectTrack, controlsShown }: 
   )
 }
 
-// Right-to-left scrolling level meter: each column is 100ms of overall level, newest on
-// the RIGHT, sliding LEFT over ~7s. Drawn on a canvas (one paint per new sample), with
-// columns mirrored around the vertical centre like a waveform so quiet reads thin and
-// loud reads tall.
+// Right-to-left scrolling BAR meter: each bar is 250ms of overall level, the newest
+// enters on the RIGHT and the history steps LEFT (~4s across the strip). Discrete
+// rounded bars like the original meter, not a filled area: quiet is short, loud is
+// tall, and the level is real (raw-signal RMS), so it is not pinned at 100%.
 function ScrollMeter({ history, active }: { history: number[]; active: boolean }) {
   const ref = useRef<HTMLCanvasElement | null>(null)
-  const W = HIST_COLS, H = 22
+  const BAR = 4, GAP = 2
+  const W = HIST_COLS * (BAR + GAP) - GAP, H = 22
   useEffect(() => {
     const cv = ref.current
     if (!cv) return
@@ -968,32 +975,21 @@ function ScrollMeter({ history, active }: { history: number[]; active: boolean }
     if (!g) return
     g.setTransform(dpr, 0, 0, dpr, 0, 0)
     g.clearRect(0, 0, W, H)
-    // faint centre baseline so the strip reads as a waveform even in silence
-    g.fillStyle = 'rgba(148,163,184,.22)'
-    g.fillRect(0, H / 2 - 0.5, W, 1)
     for (let i = 0; i < history.length; i++) {
       const lvl = history[i]
-      const h = Math.max(1.6, lvl * H)
+      const h = Math.max(2, lvl * H)
+      const x = i * (BAR + GAP)
       const y = (H - h) / 2
-      // ONE colour: green. Loudness reads through bar HEIGHT and brightness, and the
-      // history fades as it scrolls left. (No amber/red: a level meter going red read
-      // as an error, which it is not.) Idle/no-audio renders neutral slate.
+      // ONE colour: green, brightness follows loudness; the history fades slightly as
+      // it steps left. Idle/no-audio renders neutral slate.
       const age = (history.length - 1 - i) / history.length
-      const bright = 0.35 + lvl * 0.6          // louder = brighter, same hue
-      const a = (active ? bright : 0.4) * (1 - age * 0.6)
+      const a = (active ? 0.45 + lvl * 0.5 : 0.4) * (1 - age * 0.45)
       g.fillStyle = active ? `rgba(74,222,128,${a})` : `rgba(148,163,184,${a})`
-      g.fillRect(i, y, 1, h)
-    }
-    // soft glow on the newest columns so the live edge of the meter reads as "now"
-    if (active) {
-      const lvl = history[history.length - 1] || 0
-      const h = Math.max(1.6, lvl * H)
-      g.save()
-      g.shadowColor = 'rgba(74,222,128,.8)'
-      g.shadowBlur = 4
-      g.fillStyle = 'rgba(190,255,210,.95)'
-      g.fillRect(W - 2, (H - h) / 2, 1.6, h)
-      g.restore()
+      if (typeof (g as any).roundRect === 'function') {
+        g.beginPath(); (g as any).roundRect(x, y, BAR, h, 2); g.fill()
+      } else {
+        g.fillRect(x, y, BAR, h)
+      }
     }
   }, [history, active])
   return <canvas ref={ref} style={{ width: W, height: H, display: 'block' }} aria-label="Audio level history" />

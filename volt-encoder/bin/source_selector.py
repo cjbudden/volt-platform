@@ -254,6 +254,41 @@ def forwarder_cmd(group, idx, bus_base=BUS_BASE):
 # ---------------------------------------------------------------------------
 # Orchestration — process management around the pure logic above.
 # ---------------------------------------------------------------------------
+class _PlaylistWatcher:
+    """Is a live HLS source's PLAYLIST still advancing?
+
+    Relay byte-flow alone cannot answer that: a dead origin behind a CDN keeps serving
+    the STALE playlist, and a (re)spawned relay happily replays the old window, so the
+    source read 'up' while actually looping stale content. The truth for live HLS is
+    that the playlist document keeps CHANGING. Poll it cheaply, hash it, and call the
+    source advancing only while the hash keeps moving (stale_after covers sources with
+    long segments, e.g. 10s Wowza chunklists)."""
+
+    def __init__(self, url, interval=4.0, stale_after=15.0):
+        self.url = url
+        self.interval = interval
+        self.stale_after = stale_after
+        self._last_hash = None
+        self._last_change = None
+        self._last_poll = 0.0
+
+    def advancing(self, now):
+        if now - self._last_poll >= self.interval:
+            self._last_poll = now
+            try:
+                import hashlib
+                import urllib.request
+                req = urllib.request.Request(self.url, headers={"User-Agent": "volt-selector/1.0"})
+                body = urllib.request.urlopen(req, timeout=3).read()
+                h = hashlib.sha1(body).hexdigest()
+                if h != self._last_hash:
+                    self._last_hash = h
+                    self._last_change = now
+            except Exception:  # noqa: BLE001
+                pass  # unreachable playlist: _last_change ages out below
+        return self._last_change is not None and (now - self._last_change) < self.stale_after
+
+
 class _ProgressWatcher:
     """Tail an ffmpeg `-progress` stream (written to a file we poll) and report
     whether out_time advanced since the last check == the source is alive."""
@@ -348,12 +383,25 @@ class SourceSelector:
         return f"{self.work_dir}/progress-{group}-{idx}.txt"
 
     def start(self):
-        # candidate relays (primary + backup), one per rendition
+        # candidate relays (primary + backup), one per rendition. Handles + specs are
+        # KEPT so a dead relay can be respawned: an HLS source that 404s for a while
+        # kills its relay ffmpeg, and without respawn the source could come back with
+        # nothing listening — primary read 'down' forever and recovery never happened.
+        self._relay_specs = []           # (group, idx, inp, progress_path)
+        self._relay_procs = {}           # (group, idx) -> Popen
+        self._relay_retry = {}           # (group, idx) -> last respawn monotonic
+        self._plwatch = {"primary": [], "backup": []}
         for group, inputs in (("primary", self.primary), ("backup", self.backup)):
             for i, inp in enumerate(inputs):
                 pp = self._progress_path(group, i)
-                self.spawn(f"relay:{group}:{i}", relay_cmd(inp, group, i, pp))
+                self._relay_specs.append((group, i, inp, pp))
+                self._relay_procs[(group, i)] = self.spawn(
+                    f"relay:{group}:{i}", relay_cmd(inp, group, i, pp))
                 self._watch[group].append(_ProgressWatcher(pp))
+                # pull sources: also require the source PLAYLIST itself to advance, or a
+                # stale CDN cache + relay respawns would read as a healthy source
+                if (inp.get("protocol") or "").lower() in ("hls", "http", "https"):
+                    self._plwatch[group].append(_PlaylistWatcher(inp["url"]))
 
         # filler (one ffmpeg, all renditions) — slate (static) or loop. The loop is
         # either an uploaded video, or the slate image with a gentle breathing zoom.
@@ -454,13 +502,51 @@ class SourceSelector:
             except Exception: pass  # noqa: BLE001
         self._filler_proc = self.spawn("filler", self._filler_cmd(want))
 
+    # -- child resilience ---------------------------------------------------
+    def _respawn_dead_children(self, now):
+        """Respawn any dead relay/filler/forwarder (with a 5s per-child backoff).
+        Children die for environmental reasons (source outage kills a relay, a decode
+        error kills the filler); staying dead turned a transient outage into a
+        permanent one. Respawning is always safe: relays re-pull the source, the
+        filler regenerates, forwarders re-point at the active group's bus port."""
+        for group, idx, inp, pp in getattr(self, "_relay_specs", []):
+            p = self._relay_procs.get((group, idx))
+            if p is not None and p.poll() is None:
+                continue
+            if now - self._relay_retry.get((group, idx), 0) < 5.0:
+                continue
+            self._relay_retry[(group, idx)] = now
+            self.log(f"source-selector: relay {group}:{idx} died; respawning")
+            self._relay_procs[(group, idx)] = self.spawn(
+                f"relay:{group}:{idx}", relay_cmd(inp, group, idx, pp))
+        # filler (only when this channel runs one)
+        if self.loss_behavior in ("slate", "vod_loop") and self._filler_proc is not None \
+                and self._filler_proc.poll() is not None:
+            if now - getattr(self, "_filler_retry", 0) >= 5.0:
+                self._filler_retry = now
+                self.log("source-selector: filler died; respawning")
+                self._filler_proc = self.spawn("filler", self._filler_cmd(
+                    "loop" if self._filler_kind in ("loop", "motion_slate") else "slate"))
+        # forwarders always point at the ACTIVE group
+        for idx, fwd in list(self._forwarders.items()):
+            if fwd is not None and fwd.poll() is None:
+                continue
+            if now - getattr(self, "_fwd_retry", {}).get(idx, 0) < 5.0:
+                continue
+            self._fwd_retry = getattr(self, "_fwd_retry", {})
+            self._fwd_retry[idx] = now
+            self.log(f"source-selector: forwarder {idx} died; respawning -> {self.active}")
+            self._start_forwarder(idx, self.active)
+
     # -- health + decision loop --------------------------------------------
     def _group_alive(self, group, now):
         watchers = self._watch[group]
         if not watchers:
             return False
-        # a group is alive only if EVERY rendition relay is advancing
-        raw = all(w.raw_alive() for w in watchers)
+        # a group is alive only if EVERY rendition relay is advancing AND (for pull
+        # sources) every source playlist is still advancing
+        raw = all(w.raw_alive() for w in watchers) \
+            and all(pw.advancing(now) for pw in getattr(self, "_plwatch", {}).get(group, []))
         up = self.health[group].sample(now, raw) == "up"
         if up:
             self._ever_up[group] = True
@@ -476,6 +562,7 @@ class SourceSelector:
     def _run(self):
         while not self._stop.is_set():
             now = time.monotonic()
+            self._respawn_dead_children(now)
             primary_up = self._group_alive("primary", now)
             backup_up = self._group_alive("backup", now) if self.backup else False
 

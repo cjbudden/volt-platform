@@ -49,6 +49,10 @@ const snapshotSchema = z.object({
   packager_ok: z.boolean(),
   sources: z.record(z.any()).default({}),
   seq: z.number().int().nonnegative().default(0),
+  // encoder boot time (ms). seq restarts at 1 on every encoder boot, so ordering
+  // reports by seq alone rejected EVERYTHING a restarted encoder sent until it passed
+  // the dead run's counter (the UI stuck on the old state). A newer boot always wins.
+  boot_ms: z.number().nonnegative().default(0),
 });
 const reportSchema = z.object({
   kind: kindEnum,
@@ -116,8 +120,8 @@ ingestRouter.post(
       // (out-of-order) report clobbering a newer one.
       await query(
         `INSERT INTO stream_status(${col}, output_available, active_source, fallback_in_use,
-                                   filler_in_use, packager_ok, sources, last_seq, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+                                   filler_in_use, packager_ok, sources, last_seq, boot_ms, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
          ON CONFLICT (${col}) DO UPDATE SET
            output_available = EXCLUDED.output_available,
            active_source    = EXCLUDED.active_source,
@@ -126,8 +130,11 @@ ingestRouter.post(
            packager_ok      = EXCLUDED.packager_ok,
            sources          = EXCLUDED.sources,
            last_seq         = EXCLUDED.last_seq,
+           boot_ms          = EXCLUDED.boot_ms,
            updated_at       = now()
-         WHERE stream_status.last_seq <= EXCLUDED.last_seq`,
+         WHERE EXCLUDED.boot_ms > COALESCE(stream_status.boot_ms, 0)
+            OR (EXCLUDED.boot_ms = COALESCE(stream_status.boot_ms, 0)
+                AND stream_status.last_seq <= EXCLUDED.last_seq)`,
         [
           body.id,
           s.output_available,
@@ -137,6 +144,7 @@ ingestRouter.post(
           s.packager_ok,
           s.sources,
           s.seq,
+          s.boot_ms,
         ]
       );
       // push the change to any live admin dashboards for this tenant

@@ -53,9 +53,15 @@ class EventLog:
         self.status_path = status_path
         self._emit = emit
         self._seq = 0
+        # RUN IDENTITY: seq restarts at 1 on every encoder boot, so the control plane
+        # cannot order reports across restarts by seq alone (a fresh run's seq 1 looked
+        # "older" than the dead run's seq 81 and every report was rejected: the UI stuck
+        # on the previous run's state). boot_ms disambiguates: a newer boot always wins.
+        self.boot_ms = int(clock())
         self._lock = threading.Lock()
         self.status = {
             "channel_id": channel_id,
+            "boot_ms": self.boot_ms,
             "output_available": False,
             "active_source": "primary",
             "fallback_in_use": False,
@@ -135,28 +141,6 @@ class EventLog:
         elif old == "filler":
             self.event("filler.cleared", to=new)
         self._recompute_output()
-        self._publish()
-
-    def output_stalled(self, stalled, **detail):
-        """Output watchdog. The packager stopped advancing (encoder not keeping up
-        in real time, or the source stalled) while the channel is running. Flip
-        output_available and emit a clear event so the admin sees an ERROR + why."""
-        if bool(stalled) == bool(self.status.get("output_stalled")):
-            return
-        self.status["output_stalled"] = bool(stalled)
-        if stalled:
-            self.status["output_available"] = False
-            self.event("output.stalled", **detail)
-        else:
-            self._recompute_output()
-            self.event("output.resumed", **detail)
-        self._publish()
-
-    def input_error(self, source, message, **detail):
-        """A live input died/failed. Mark it down, drop output, and emit why."""
-        self.status["sources"][source] = {"state": "down"}
-        self.status["output_available"] = False
-        self.event("input.error", source=source, message=message, **detail)
         self._publish()
 
     # -- derived output-available + publishing ------------------------------

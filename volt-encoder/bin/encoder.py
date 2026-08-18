@@ -533,7 +533,13 @@ def start_transcode(cfg, keys_unused, source_override=None):
     if gpu:
         cmd += ["-hwaccel", "cuda"]
     if source_override:
-        cmd += ["-fflags", "+genpts", "-i", source_override]
+        # WIDE PROBE WINDOW on the selector feed: the UDP bus starts mid-stream and the
+        # audio PID can arrive seconds after the video (source burstiness, relay start
+        # order). With ffmpeg's default ~5s analyze window the optional audio map
+        # (0:a:0?) sometimes probed BEFORE audio appeared and the whole run went out
+        # silent. 10s of analysis catches late audio; cost is a slightly slower start.
+        cmd += ["-fflags", "+genpts", "-analyzeduration", "10000000", "-probesize", "10000000",
+                "-i", source_override]
     else:
         cmd += input_args(src)
 
@@ -561,7 +567,10 @@ def start_transcode(cfg, keys_unused, source_override=None):
     for a, _t in enumerate(tracks):
         cmd += ["-map", f"0:a:{a}?", "-c:a", "aac", "-b:a", "128k", "-ac", "2",
                 "-f", "mpegts", udp_out(AUDIO_IDX_BASE + a)]
-    return [spawn("transcode", cmd)]
+    # SUPERVISED: a transcoder death (mid-stream TS error, codec hiccup) previously took
+    # the whole channel down until a manual restart. Respawned, it rejoins the UDP feed
+    # (or re-pulls the source) and the packager continues the same timeline.
+    return [spawn_supervised("transcode", cmd)]
 
 
 # ---------------------------------------------------------------------------
@@ -645,6 +654,47 @@ def spawn(name, cmd, critical=True):
     proc = subprocess.Popen(cmd)
     _children.append((name, proc, critical))
     return proc
+
+
+_shutting_down = False
+
+
+def spawn_supervised(name, cmd_or_builder, backoff=3.0):
+    """Spawn a child and RESPAWN it whenever it exits unexpectedly (until shutdown).
+
+    Production hardening: a network hiccup kills ffmpeg (an HLS source that 404s for a
+    while, a mid-stream TS error in the transcoder, the caption audio puller losing its
+    connection) and a dead child previously stayed dead for the rest of the run, which
+    read as 'transcription stopped working' / 'the transcode failed' / 'it never
+    recovered'. Every long-running child is supervised: on exit it is relaunched after
+    `backoff` seconds, forever, unless the encoder is shutting down.
+
+    cmd_or_builder is a list, or a ZERO-ARG CALLABLE rebuilt per respawn (so e.g. the
+    caption ingest re-probes the source's live edge instead of reusing stale flags)."""
+    def build():
+        return cmd_or_builder() if callable(cmd_or_builder) else cmd_or_builder
+
+    state = {"proc": spawn(name, build(), critical=False)}
+
+    def watch():
+        while not _shutting_down:
+            p = state["proc"]
+            if p.poll() is None:
+                time.sleep(1.0)
+                continue
+            if _shutting_down:
+                return
+            log(f"{name}: exited rc={p.returncode}; respawning in {backoff:.0f}s")
+            time.sleep(backoff)
+            if _shutting_down:
+                return
+            try:
+                state["proc"] = spawn(name, build(), critical=False)
+            except Exception as e:  # noqa: BLE001
+                log(f"{name}: respawn failed ({e}); retrying")
+
+    threading.Thread(target=watch, name=f"sup:{name}", daemon=True).start()
+    return state
 
 
 def start_uploader(cfg):
@@ -990,17 +1040,30 @@ def start_captions(cfg, out_dir):
     # jitter by up to a source segment against the -re paced video path. That was the
     # words-out-of-step-with-speech error. Paced, both pipelines consume the source at
     # 1x and the two capture clocks track each other.
-    pace = ["-re"] if re.match(r"^https?://", audio_url, re.I) else []
-    aseg = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-            *_hls_edge_flags(audio_url), *pace,
-            "-i", audio_url, "-vn", "-ac", "1", "-ar", "16000",
-            "-f", "segment", "-segment_time", str(chunk), "-reset_timestamps", "1",
-            os.path.join(tmp, "cap_%05d.wav")]
+    # command BUILDER so every (re)spawn re-probes the live edge: a respawn hours into a
+    # run must join the stream NOW, not where the original probe pointed. The %05d
+    # numbering continues from the highest existing chunk via -segment_start_number.
+    def aseg():
+        pace = ["-re"] if re.match(r"^https?://", audio_url, re.I) else []
+        existing = sorted(glob.glob(os.path.join(tmp, "cap_*.wav")))
+        nxt = 0
+        if existing:
+            mo = re.search(r"cap_(\d+)\.wav", existing[-1])
+            nxt = (int(mo.group(1)) + 1) if mo else 0
+        return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+                *_hls_edge_flags(audio_url), *pace,
+                "-i", audio_url, "-vn", "-ac", "1", "-ar", "16000",
+                "-f", "segment", "-segment_time", str(chunk), "-reset_timestamps", "1",
+                "-segment_start_number", str(nxt),
+                os.path.join(tmp, "cap_%05d.wav")]
     # wall-clock anchor for program time 0 (when the audio segmenter starts reading the
     # live edge). Subtitle segment i -> PDT cap_t0 + i*chunk; the companion video
     # playlists carry a matching wall-clock so the player aligns cues to frames.
     cap_t0 = time.time()
-    spawn("caption-audio", aseg, critical=False)
+    # SUPERVISED: if the source drops, this ffmpeg dies; unsupervised it stayed dead and
+    # 'transcription stopped working for the rest of the run'. Now it rejoins the live
+    # edge as soon as the source is back.
+    spawn_supervised("caption-audio", aseg)
     log(f"captions: live worker engine={engine} chunk={chunk}s targets={targets} langs={langs}")
 
     def cap_event(etype, **detail):
@@ -1044,9 +1107,22 @@ def start_captions(cfg, out_dir):
         while True:
             try:
                 wavs = sorted(glob.glob(os.path.join(tmp, "cap_*.wav")))
-                for w in wavs[:-1]:  # skip the chunk still being written
-                    if w in seen:
-                        continue
+                fresh = [w for w in wavs[:-1] if w not in seen]  # [:-1] skips the chunk still being written
+                # LIVE CURRENCY GUARANTEE: captions must track the stream, not a queue. If
+                # transcription falls behind (slow chunk, CPU contention, heavy translation)
+                # the pending list grows, and processing it in order means NEVER catching up:
+                # the offset only compounds (observed 50s+ behind, past the player's hold
+                # point = captions invisible while burning maximum compute). So when a
+                # backlog builds, jump to the NEWEST pending chunk and record the skipped
+                # ones as a caption gap. A live viewer loses a few seconds of captions once;
+                # they never lose captions permanently.
+                if len(fresh) > 2:
+                    for w in fresh[:-1]:
+                        seen.add(w)
+                    log(f"captions: {len(fresh) - 1} chunk(s) behind; skipping to the newest to stay live")
+                    cap_event("caption.skip", skipped=len(fresh) - 1)
+                    fresh = fresh[-1:]
+                for w in fresh:
                     seen.add(w)
                     mo = re.search(r"cap_(\d+)\.wav", w)
                     if not mo:
@@ -1114,6 +1190,8 @@ def start_captions(cfg, out_dir):
 
 
 def shutdown(*_):
+    global _shutting_down
+    _shutting_down = True   # stop every supervisor from respawning
     log("shutdown: terminating children")
     if _events:
         _events.channel_stop()

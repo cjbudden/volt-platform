@@ -120,17 +120,30 @@ class NllbTranslator:
             self._tok = AutoTokenizer.from_pretrained(self.model_name)
             self._model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
 
-    def translate_text(self, text: str, src: str, tgt: str) -> str:  # pragma: no cover
+    def translate_texts(self, texts: list[str], src: str, tgt: str) -> list[str]:  # pragma: no cover
+        """BATCHED translation: one tokenizer + one generate call for ALL cues of a chunk.
+        Per-cue generate calls were the live-captions killer: 3-4 cues x 2 target
+        languages = up to 8 sequential CPU generations per 8s chunk, blowing the
+        realtime budget and building an ever-growing backlog. Greedy decode
+        (num_beams=1) and a tight max_length keep the batch fast; subtitle cues are
+        short so quality loss is negligible."""
+        if not texts:
+            return []
         self._load()
         self._tok.src_lang = FLORES[src]
-        enc = self._tok(text, return_tensors="pt")
+        enc = self._tok(texts, return_tensors="pt", padding=True, truncation=True, max_length=160)
         out = self._model.generate(
-            **enc, forced_bos_token_id=self._tok.convert_tokens_to_ids(FLORES[tgt]), max_length=256
+            **enc, forced_bos_token_id=self._tok.convert_tokens_to_ids(FLORES[tgt]),
+            max_length=160, num_beams=1,
         )
-        return self._tok.batch_decode(out, skip_special_tokens=True)[0]
+        return self._tok.batch_decode(out, skip_special_tokens=True)
+
+    def translate_text(self, text: str, src: str, tgt: str) -> str:  # pragma: no cover
+        return self.translate_texts([text], src, tgt)[0]
 
     def translate_cues(self, cues: list[Cue], src: str, tgt: str) -> list[Cue]:
-        return [Cue(c.start, c.end, self.translate_text(c.text, src, tgt), tgt) for c in cues]
+        outs = self.translate_texts([c.text for c in cues], src, tgt)
+        return [Cue(c.start, c.end, t, tgt) for c, t in zip(cues, outs)]
 
 
 def make_translator(targets: list[str], src_lang: str):
