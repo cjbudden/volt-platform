@@ -20,6 +20,7 @@
 import { Router } from 'express';
 import { one } from '../db';
 import { config } from '../config';
+import { liveDirFor, liveUrlBase } from '../services/liveOrigin';
 import { asyncHandler } from '../util/http';
 import { existsSync, statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,7 +29,7 @@ import { join } from 'node:path';
  *  master.m3u8 / manifest.mpd on every new segment, so a recent mtime = valid content. */
 export function outputHasValidContent(channelId: string): boolean {
   try {
-    const dir = join(config.testStream.originDir, channelId);
+    const dir = liveDirFor(channelId);   // per-run namespace: probe the CURRENT run
     if (!existsSync(dir)) return false;
     let newest = 0;
     for (const f of readdirSync(dir)) {
@@ -72,6 +73,6 @@ publicLiveRouter.get(
       res.redirect(302, `${cdn.replace(/\/$/, '')}/channel/${id}/${file}`);
       return;
     }
-    res.redirect(302, `/origin/${id}/${file}`);
+    res.redirect(302, `${liveUrlBase(id)}/${file}`);
   })
 );

@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { config } from './config';
+import { currentRunId } from './services/liveOrigin';
 import { errorHandler } from './util/http';
 import { authRouter } from './auth/routes';
 import { channelsRouter } from './modules/channels';
@@ -62,6 +63,17 @@ export function createServer() {
   // when unchanged within a run, a fresh fetch when the same filename holds new content
   // after a restart). Playlists are never stored.
   app.use('/origin', (req, res, next) => {
+    // PER-RUN NAMESPACE: /origin/<id>/live/* is the stable player/share URL; rewrite it
+    // to the CURRENT run dir (runs/<runId>/*) named by the channel's pointer file. Falls
+    // back to the channel root when no pointer exists (test stub / legacy layout), so
+    // both producers keep working. Segment URIs inside manifests are relative, so they
+    // resolve under /live/ and get rewritten here too.
+    const live = req.url.match(/^\/([A-Za-z0-9-]+)\/live(\/.*)?$/);
+    if (live) {
+      const rest = live[2] ?? '/master.m3u8';
+      const run = currentRunId(live[1]);
+      req.url = run ? `/${live[1]}/runs/${run}${rest}` : `/${live[1]}${rest}`;
+    }
     res.setHeader('Access-Control-Allow-Origin', '*');
     if (/\.(m3u8|mpd)$/.test(req.path)) res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     else if (/\.(m4s|mp4|ts|vtt)$/.test(req.path)) res.setHeader('Cache-Control', 'no-cache');

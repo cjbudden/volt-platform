@@ -9,9 +9,10 @@
 //  ECS tasks via the orchestrator). Enabled when ffmpeg is present locally.
 // ============================================================================
 import { spawn, ChildProcess } from 'node:child_process';
-import { existsSync, rmSync, mkdirSync, openSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { config } from '../config';
+import { liveDirFor, liveUrlBase } from './liveOrigin';
 import { query, one } from '../db';
 
 export interface TestStreamOptions {
@@ -52,7 +53,9 @@ function originFor(channelId: string) {
 const ORIGIN_FRESH_MS = 45_000;
 
 function probeOrigin(channelId: string): { live: boolean; mtime: number | null; dash: boolean; poster: boolean } {
-  const dir = originFor(channelId);
+  // manifests live in the CURRENT RUN dir (per-run namespace); thumbs stay at the
+  // channel root (the thumbnailer writes them there, they span runs).
+  const dir = liveDirFor(channelId);
   const master = join(dir, 'master.m3u8');
   try {
     const st = statSync(master);
@@ -61,7 +64,7 @@ function probeOrigin(channelId: string): { live: boolean; mtime: number | null; 
       live: age <= ORIGIN_FRESH_MS,
       mtime: st.mtimeMs,
       dash: existsSync(join(dir, 'manifest.mpd')) || existsSync(join(dir, 'stream.mpd')),
-      poster: existsSync(join(dir, 'thumbs', 'poster.jpg')),
+      poster: existsSync(join(originFor(channelId), 'thumbs', 'poster.jpg')),
     };
   } catch {
     return { live: false, mtime: null, dash: false, poster: false };
@@ -70,11 +73,13 @@ function probeOrigin(channelId: string): { live: boolean; mtime: number | null; 
 
 export function testStreamStatus(channelId: string) {
   const r = running.get(channelId);
-  const base = `/origin/${channelId}`;
+  // stable live URL: the /origin router resolves /live/ to the current run dir, so
+  // player and share URLs survive channel restarts (per-run output namespace).
+  const base = liveUrlBase(channelId);
   const langs = r?.opts.langs ?? ['en'];
   // Shaka (real encoder) emits manifest.mpd; the test stub emits stream.mpd.
   const origin = probeOrigin(channelId);
-  const dashName = existsSync(join(originFor(channelId), 'manifest.mpd')) ? 'manifest.mpd' : 'stream.mpd';
+  const dashName = existsSync(join(liveDirFor(channelId), 'manifest.mpd')) ? 'manifest.mpd' : 'stream.mpd';
   // producer: this process's test stub, else a live origin from the real encoder
   const producer: 'test' | 'encoder' | null = r ? 'test' : origin.live ? 'encoder' : null;
   const isRunning = !!r || origin.live;
@@ -85,8 +90,8 @@ export function testStreamStatus(channelId: string) {
     hls: `${base}/master.m3u8`,
     dash: r ? (r.opts.dash ? `${base}/stream.mpd` : null) : origin.dash ? `${base}/${dashName}` : null,
     subtitles: Object.fromEntries(langs.map((l) => [l, `${base}/subs/${l}.vtt`])),
-    poster: origin.poster ? `${base}/thumbs/poster.jpg` : null,
-    thumbsVtt: existsSync(join(originFor(channelId), 'thumbs', 'thumbs.vtt')) ? `${base}/thumbs/thumbs.vtt` : null,
+    poster: origin.poster ? `/origin/${channelId}/thumbs/poster.jpg` : null,
+    thumbsVtt: existsSync(join(originFor(channelId), 'thumbs', 'thumbs.vtt')) ? `/origin/${channelId}/thumbs/thumbs.vtt` : null,
     options: r?.opts ?? null,
     sourceKind: r?.sourceKind ?? (origin.live ? 'ingest' : null),
     sourceUrl: r?.sourceUrl ?? null,
@@ -133,10 +138,13 @@ export async function startTestStream(channelId: string, name: string, opts: Tes
     inputUrl,
   };
 
-  const out = originFor(channelId);
-  // clean any stale output so the player doesn't pick up an old timeline
-  try { rmSync(out, { recursive: true, force: true }); } catch { /* ignore */ }
+  // PER-RUN NAMESPACE: the test stub writes to its own run dir too (suffixed -test),
+  // and repoints current_run.txt at it. Nothing is deleted: previous runs are the
+  // channel's recordings and are pruned only by the retention policy at encoder start.
+  const runId = `${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')}-test`;
+  const out = join(originFor(channelId), 'runs', runId);
   mkdirSync(out, { recursive: true });
+  writeFileSync(join(originFor(channelId), 'current_run.txt'), runId);
 
   const bin = config.testStream.encoderBin;
   const genArgs = ['--out', out, '--name', o.name, '--dvr-sec', String(o.dvrSec), '--seg', '4'];

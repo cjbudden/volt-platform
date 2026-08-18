@@ -50,6 +50,8 @@ AUDIO_IDX_BASE = 100
 PACKAGER_BIN = os.environ.get("PACKAGER_BIN", "packager")
 
 _children = []   # (name, Popen, critical)
+BASE_OUT_DIR = None   # local mode: the channel origin root (runs live in runs/<RUN_ID>)
+RUN_ID = None         # this run's unique, date-ordered id (local mode)
 _selectors = []  # SourceSelector instances (own their own poller threads)
 _events = None   # EventLog (status snapshot + per-stream event log)
 
@@ -89,63 +91,100 @@ def is_local(cfg):
 
 
 def resolve_out_dir(cfg):
-    """Where Shaka writes the packaged CMAF + manifests. In local mode this is
-    the origin directory the control plane exposes at /origin/<channel>; the
-    directory IS the live edge + DVR + recording (no S3 hop)."""
+    """Where Shaka writes the packaged CMAF + manifests.
+
+    PER-RUN NAMESPACE (local mode): every run writes to its OWN date-stamped dir,
+    <base>/runs/<runId>, and <base>/current_run.txt names the live run. Nothing is ever
+    overwritten: previous runs survive as the channel's recordings (uniquely named,
+    ordered by runId) and are pruned only by the recording/retention policy in
+    manage_runs(). The control plane serves the stable /origin/<id>/live/* URL by
+    resolving the pointer, so player and share URLs survive restarts.
+
+    Cloud mode is unchanged (WORK_DIR/out, mirrored to S3 by the uploader)."""
+    global BASE_OUT_DIR, RUN_ID
     out = cfg.get("output") or {}
     d = out.get("dir") or os.environ.get("OUTPUT_DIR")
     if is_local(cfg) and d:
-        return os.path.abspath(d)
+        BASE_OUT_DIR = os.path.abspath(d)
+        RUN_ID = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        return os.path.join(BASE_OUT_DIR, "runs", RUN_ID)
     return os.path.join(WORK_DIR, "out")
 
 
-def clean_stale_run(out_dir):
-    """Move the PREVIOUS run's output aside before this run writes.
+def manage_runs(cfg, base, run_id):
+    """Per-run output housekeeping at channel start (local mode only).
 
-    Why this matters: segment/manifest names are reused across runs (master.m3u8,
-    seg_N.m4s, ...). If the old run's files are still in the origin dir when a channel
-    starts, the availability gate sees the OLD manifest and lets the player connect to
-    it, so the viewer plays the previous run's (possibly day-old) content; then the new
-    run overwrites the manifests with RESTARTED numbering and the player lurches back
-    and forth between the two timelines (the start-up jitter). Stale cap_audio chunks
-    also feed the transcriber audio from the previous run. One sweep at start
-    guarantees the player can only ever see THIS run.
-
-    Because the local segments double as the recording, the stale run is ARCHIVED to
-    _prevruns/<epoch>/ rather than deleted (only the 2 newest archives are kept).
-    Swept aside: root manifests/segments (*.m3u8, *.mpd, *.m4s, *.mp4, *.ts) and every
-    subdirectory (rendition dirs, audio, subtitles, cap_audio — all per-run). The
-    failover-test control file is DELETED (a leftover forced mode must not survive a
-    restart). Kept in place: encoder.log, status.json, watermark and progress files."""
+    The rules Christian set:
+      * NEVER overwrite previous outputs: every run has its own runs/<runId> dir, so
+        collisions cannot happen by construction. Previous runs ARE the recordings.
+      * Recording ENABLED (a retention is set): keep old runs; prune only the ones
+        older than the retention window. Clip/VOD tooling references run paths that
+        never change.
+      * Recording DISABLED: old runs serve no purpose, clear them out at start.
+      * Always: delete a stale _failover_control.json (a leftover forced mode must not
+        survive a restart) and MIGRATE any legacy pre-runs layout (root manifests +
+        rendition dirs from the old over-the-top scheme, or the interim _prevruns
+        archive) into uniquely named runs/legacy-* dirs so they obey the same
+        retention rules instead of shadowing or being lost."""
     import shutil
-    if not os.path.isdir(out_dir):
+    if not base or not os.path.isdir(base):
         return
-    keep = ("_prevruns",)
-    arch = os.path.join(out_dir, "_prevruns", str(int(time.time())))
-    moved = 0
-    for name in os.listdir(out_dir):
-        p = os.path.join(out_dir, name)
-        try:
-            if name in keep:
-                continue
-            if name == "_failover_control.json":
-                os.remove(p)
-                continue
-            if os.path.isdir(p) or name.endswith((".m3u8", ".mpd", ".m4s", ".mp4", ".ts")):
-                os.makedirs(arch, exist_ok=True)
-                shutil.move(p, os.path.join(arch, name))
-                moved += 1
-        except OSError:
-            pass
-    if moved:
-        log(f"startup: archived {moved} stale item(s) from the previous run to {arch}")
-    # bound disk use: keep only the 2 newest archived runs
+    runs_root = os.path.join(base, "runs")
+    os.makedirs(runs_root, exist_ok=True)
+
+    # stale forced-failover mode must never survive a restart
     try:
-        runs = sorted(os.listdir(os.path.join(out_dir, "_prevruns")))
-        for old in runs[:-2]:
-            shutil.rmtree(os.path.join(out_dir, "_prevruns", old), ignore_errors=True)
+        os.remove(os.path.join(base, "_failover_control.json"))
     except OSError:
         pass
+
+    # ---- migrate the legacy over-the-top layout (one-time) -------------------
+    legacy = [n for n in os.listdir(base)
+              if n not in ("runs", "_prevruns") and (
+                  os.path.isdir(os.path.join(base, n)) and n not in ("thumbs",)
+                  or n.endswith((".m3u8", ".mpd", ".m4s", ".mp4", ".ts")))]
+    if legacy:
+        dest = os.path.join(runs_root, f"legacy-{int(time.time())}")
+        os.makedirs(dest, exist_ok=True)
+        for n in legacy:
+            try:
+                shutil.move(os.path.join(base, n), os.path.join(dest, n))
+            except OSError:
+                pass
+        log(f"startup: migrated {len(legacy)} legacy item(s) into {dest}")
+    prev = os.path.join(base, "_prevruns")
+    if os.path.isdir(prev):
+        for n in os.listdir(prev):
+            try:
+                shutil.move(os.path.join(prev, n), os.path.join(runs_root, f"legacy-{n}"))
+            except OSError:
+                pass
+        shutil.rmtree(prev, ignore_errors=True)
+
+    # ---- retention pruning ---------------------------------------------------
+    rec = cfg.get("recording") or {}
+    enabled = bool(rec.get("enabled"))
+    retention_sec = rec.get("retention_sec")
+    now = time.time()
+    kept = removed = 0
+    for n in sorted(os.listdir(runs_root)):
+        if n == run_id:
+            continue
+        p = os.path.join(runs_root, n)
+        try:
+            age = now - os.path.getmtime(p)
+        except OSError:
+            continue
+        if not enabled:
+            shutil.rmtree(p, ignore_errors=True)
+            removed += 1
+        elif retention_sec and age > float(retention_sec):
+            shutil.rmtree(p, ignore_errors=True)
+            removed += 1
+        else:
+            kept += 1
+    log(f"runs: id={run_id} recording={'on' if enabled else 'off'} "
+        f"retention={retention_sec or 'none'}s previous kept={kept} pruned={removed}")
 
 
 def primary_inputs(cfg):
@@ -1002,9 +1041,12 @@ def main():
     cfg = load_config()
     OUT_DIR = resolve_out_dir(cfg)
     os.makedirs(OUT_DIR, exist_ok=True)
-    # Sweep the previous run's manifests/segments BEFORE anything is written or served:
-    # the availability gate and the player must only ever see THIS run's output.
-    clean_stale_run(OUT_DIR)
+    if BASE_OUT_DIR:
+        # per-run namespace: housekeep old runs per the recording/retention policy,
+        # then point /origin/<id>/live/* at THIS run before anything is served.
+        manage_runs(cfg, BASE_OUT_DIR, RUN_ID)
+        with open(os.path.join(BASE_OUT_DIR, "current_run.txt"), "w") as fh:
+            fh.write(RUN_ID)
     nrend = len(primary_inputs(cfg)) if cfg["workflow"] == "package_only" \
         else len(cfg.get("ladder", []))
     log(f"channel={cfg['channel_id']} workflow={cfg['workflow']} "
@@ -1050,7 +1092,9 @@ def main():
                 primary=prim, backup=bak,
                 spawn=lambda name, cmd: spawn(name, cmd, critical=False),
                 log=log, work_dir=WORK_DIR, event_log=_events,
-                control_dir=OUT_DIR)  # control plane writes the failover-test file here
+                # the control plane writes the failover-test file at the channel ROOT
+                # (stable across runs), not inside the per-run output dir
+                control_dir=BASE_OUT_DIR or OUT_DIR)
             _selectors.append(selector)
             log(f"redundancy: input_failover on — {len(prim)} primary / "
                 f"{len(bak)} backup rendition(s), "
@@ -1075,7 +1119,8 @@ def main():
                 primary=prim[:1], backup=bak[:1],
                 spawn=lambda name, cmd: spawn(name, cmd, critical=False),
                 log=log, work_dir=WORK_DIR, event_log=_events,
-                control_dir=OUT_DIR, bus_base=source_selector.SOURCE_FEED_PORT)
+                control_dir=BASE_OUT_DIR or OUT_DIR,   # channel root: stable across runs
+                bus_base=source_selector.SOURCE_FEED_PORT)
             _selectors.append(selector)
             log(f"redundancy: transcode input_failover on — primary + {len(bak)} backup, "
                 f"loss_behavior={cfg['redundancy'].get('input_loss_behavior','slate')}")

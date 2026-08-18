@@ -8,6 +8,7 @@ import { one, query } from '../db';
 import { config } from '../config';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { liveDirFor } from './liveOrigin';
 import { computePipelineHealth, type PipelineHealth } from './pipelineHealth';
 import { recommendInstance, buildBilling, type Billing } from './billing';
 
@@ -70,7 +71,7 @@ function encoderLogTail(channelId: string): { ts: string; level: string; title: 
  *  Shaka rewrites these every new segment, so a recent mtime = output is advancing. */
 function newestManifestMtimeMs(channelId: string): number {
   try {
-    const dir = join(config.testStream.originDir, channelId);
+    const dir = liveDirFor(channelId);   // per-run namespace: probe the CURRENT run
     let newest = 0;
     for (const f of readdirSync(dir)) {
       if (f.endsWith('.m3u8') || f.endsWith('.mpd')) {

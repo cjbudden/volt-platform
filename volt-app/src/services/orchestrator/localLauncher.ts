@@ -14,7 +14,8 @@
 //  live edge + DVR + recording. The S3 uploader is skipped (encoder local mode).
 // ============================================================================
 import { spawn, ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, readdirSync, writeFileSync, openSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync, openSync } from 'node:fs';
+import { liveDirFor } from '../liveOrigin';
 import { join, resolve } from 'node:path';
 import { config } from '../../config';
 import type { TaskLauncher, LaunchResult } from './launcher';
@@ -67,8 +68,10 @@ export class LocalTaskLauncher implements TaskLauncher {
     // ACTIVE CLEANUP first: reap any leftover encoder/ffmpeg/packager for THIS stream
     // from a previous run so we start clean (not merely relocate the port).
     reapStreamEncoder(config.testStream.originDir, streamId);
-    // fresh timeline: clear any stale output so the player doesn't replay an old edge
-    try { rmSync(out, { recursive: true, force: true }); } catch { /* ignore */ }
+    // NOTE: we deliberately do NOT delete the origin dir here any more. Runs write to
+    // their own runs/<runId>/ namespace (nothing is overwritten), and previous runs ARE
+    // the channel's recordings: wiping them here destroyed every recording on restart.
+    // The encoder prunes old runs per the channel's recording/retention settings.
     mkdirSync(out, { recursive: true });
 
     // Inject local-storage mode: write CMAF to the origin dir, skip the S3 uploader.
@@ -116,14 +119,17 @@ export class LocalTaskLauncher implements TaskLauncher {
       console.warn('[local-launcher] thumbnailer: job has no stream_id; skipping');
       return { taskArn, lifecycle: 'on_demand' };
     }
-    const origin = this.originFor(streamId);
+    // Renditions live in the run dir that just ended (per-run namespace; the pointer
+    // still names it until the next start). Thumbs stay at the channel root: they are
+    // channel-level artifacts and their /origin/<id>/thumbs/ URL survives run changes.
+    const origin = liveDirFor(streamId);
     const rend = this.pickHiResRendition(origin);
     if (!rend) {
       console.warn(`[local-launcher] thumbnailer: no rendition segments under ${origin}; skipping`);
       return { taskArn, lifecycle: 'on_demand' };
     }
     const vodPlaylist = this.writeVodPlaylist(origin, rend, Number(job.segment_seconds) || 4);
-    const outDir = join(origin, 'thumbs');
+    const outDir = join(this.originFor(streamId), 'thumbs');
     mkdirSync(outDir, { recursive: true });
 
     const localJob: Record<string, any> = {

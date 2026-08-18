@@ -895,8 +895,8 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   // to the packaged origin if the CDN blocks cross-origin playback. For SRT/RTMP the
   // raw feed can't play in a browser, so we show the packaged origin as a proxy.
   const directHls = (configured?.protocol || '').toLowerCase() === 'hls' && configured?.ingest_url ? configured.ingest_url : undefined
-  const srcVideoSrc = directHls ?? `/origin/${d.id}/master.m3u8`
-  const srcFallback = directHls ? `/origin/${d.id}/master.m3u8` : undefined
+  const srcVideoSrc = directHls ?? `/origin/${d.id}/live/master.m3u8`
+  const srcFallback = directHls ? `/origin/${d.id}/live/master.m3u8` : undefined
   return (
     <div className="player">
       <div className="video" ref={videoBoxRef}>
@@ -1057,7 +1057,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
       const Hls = (await import('hls.js')).default
       if (cancelled) return
       if (Hls.isSupported()) {
-        let src = originUrl(`/origin/${d.id}/${cc ? 'master_cc.m3u8' : 'master.m3u8'}`)
+        let src = originUrl(`/origin/${d.id}/live/${cc ? 'master_cc.m3u8' : 'master.m3u8'}`)
         let ccTries = 0
         // liveSyncDuration = the caption hold-back (or hls default when captions off).
         const cfg: any = { lowLatencyMode: false, backBufferLength: d.dvr.effective_sec, manifestLoadingMaxRetry: 12, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 12, subtitleDisplay: true, renderTextTracksNatively: true }
@@ -1085,17 +1085,17 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           // fall back to the plain master so video still plays if captions never come.
           // The companion is normally reliable, so keep trying it for a good while
           // rather than dropping subtitles for the whole session on a transient error.
-          if (cc && src.endsWith('master_cc.m3u8') && ++ccTries >= 20) { src = originUrl(`/origin/${d.id}/master.m3u8`) }
+          if (cc && src.endsWith('master_cc.m3u8') && ++ccTries >= 20) { src = originUrl(`/origin/${d.id}/live/master.m3u8`) }
           setTimeout(() => { try { hls.loadSource(src); hls.startLoad() } catch {} }, 1500)
         })
       } else if (video!.canPlayType('application/vnd.apple.mpegurl')) {
-        video!.src = originUrl(`/origin/${d.id}/${cc ? 'master_cc.m3u8' : 'master.m3u8'}`); softMute(video!); video!.play().catch(() => {}); snapSoon()
+        video!.src = originUrl(`/origin/${d.id}/live/${cc ? 'master_cc.m3u8' : 'master.m3u8'}`); softMute(video!); video!.play().catch(() => {}); snapSoon()
       }
     }
     async function attachDash() {
       const dashjs: any = (await import('dashjs')).default
       if (cancelled) return
-      const url = originUrl(`/origin/${d.id}/${cc ? 'manifest_cc.mpd' : 'manifest.mpd'}`)
+      const url = originUrl(`/origin/${d.id}/live/${cc ? 'manifest_cc.mpd' : 'manifest.mpd'}`)
       const player = dashjs.MediaPlayer().create()
       dashRef.current = player
       // start on the live edge, ABR on by default
