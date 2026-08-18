@@ -99,6 +99,55 @@ def resolve_out_dir(cfg):
     return os.path.join(WORK_DIR, "out")
 
 
+def clean_stale_run(out_dir):
+    """Move the PREVIOUS run's output aside before this run writes.
+
+    Why this matters: segment/manifest names are reused across runs (master.m3u8,
+    seg_N.m4s, ...). If the old run's files are still in the origin dir when a channel
+    starts, the availability gate sees the OLD manifest and lets the player connect to
+    it, so the viewer plays the previous run's (possibly day-old) content; then the new
+    run overwrites the manifests with RESTARTED numbering and the player lurches back
+    and forth between the two timelines (the start-up jitter). Stale cap_audio chunks
+    also feed the transcriber audio from the previous run. One sweep at start
+    guarantees the player can only ever see THIS run.
+
+    Because the local segments double as the recording, the stale run is ARCHIVED to
+    _prevruns/<epoch>/ rather than deleted (only the 2 newest archives are kept).
+    Swept aside: root manifests/segments (*.m3u8, *.mpd, *.m4s, *.mp4, *.ts) and every
+    subdirectory (rendition dirs, audio, subtitles, cap_audio — all per-run). The
+    failover-test control file is DELETED (a leftover forced mode must not survive a
+    restart). Kept in place: encoder.log, status.json, watermark and progress files."""
+    import shutil
+    if not os.path.isdir(out_dir):
+        return
+    keep = ("_prevruns",)
+    arch = os.path.join(out_dir, "_prevruns", str(int(time.time())))
+    moved = 0
+    for name in os.listdir(out_dir):
+        p = os.path.join(out_dir, name)
+        try:
+            if name in keep:
+                continue
+            if name == "_failover_control.json":
+                os.remove(p)
+                continue
+            if os.path.isdir(p) or name.endswith((".m3u8", ".mpd", ".m4s", ".mp4", ".ts")):
+                os.makedirs(arch, exist_ok=True)
+                shutil.move(p, os.path.join(arch, name))
+                moved += 1
+        except OSError:
+            pass
+    if moved:
+        log(f"startup: archived {moved} stale item(s) from the previous run to {arch}")
+    # bound disk use: keep only the 2 newest archived runs
+    try:
+        runs = sorted(os.listdir(os.path.join(out_dir, "_prevruns")))
+        for old in runs[:-2]:
+            shutil.rmtree(os.path.join(out_dir, "_prevruns", old), ignore_errors=True)
+    except OSError:
+        pass
+
+
 def primary_inputs(cfg):
     """Live path uses primary-role inputs only (backups are the failover pool,
     not a parallel encode). Inputs with no role default to primary."""
@@ -953,6 +1002,9 @@ def main():
     cfg = load_config()
     OUT_DIR = resolve_out_dir(cfg)
     os.makedirs(OUT_DIR, exist_ok=True)
+    # Sweep the previous run's manifests/segments BEFORE anything is written or served:
+    # the availability gate and the player must only ever see THIS run's output.
+    clean_stale_run(OUT_DIR)
     nrend = len(primary_inputs(cfg)) if cfg["workflow"] == "package_only" \
         else len(cfg.get("ladder", []))
     log(f"channel={cfg['channel_id']} workflow={cfg['workflow']} "

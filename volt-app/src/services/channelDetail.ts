@@ -32,11 +32,6 @@ export interface ChannelDetail {
   onAir: boolean;
   public: { url: string; dashUrl: string; available: boolean };
   watermark: { enabled: boolean; ref: string | null; position: string; offsetX: number; offsetY: number; opacity: number; scale: number };
-  /** Station identity — logo/artwork + accent + blurb. Shown in the console and the
-   *  programme guide, and used as the artwork for an audio-only channel. */
-  brand: { ref: string | null; colour: string | null; description: string | null };
-  audioOnly: boolean;
-  audioLadder: { label: string; bitrate_kbps: number }[];
 }
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
@@ -58,7 +53,11 @@ function encoderLogTail(channelId: string): { ts: string; level: string; title: 
     const lines = readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean);
     const rx = /FATAL|error|Error|Unknown|Could not|No such|Invalid|failed|Connection|Server returned|Immediate exit|not found|Unsupported|Cannot|denied|refused|timed out|timeout/i;
     const bad = /FATAL|Could not|No such|failed|Server returned|Unsupported|Invalid|not found|denied|refused/i;
-    return lines.filter((l) => rx.test(l)).slice(-10).map((l) => ({
+    // Spawn announcements ('[volt-encoder] start <name>: ffmpeg ... -loglevel error ...')
+    // quote the ffmpeg command, so the substring 'error' matches and a NORMAL start-up
+    // line gets surfaced as an input failure. A command echo is never an error: skip them.
+    const spawn = /^\[volt-encoder\]\s+start\s+[\w:.<>-]+:/;
+    return lines.filter((l) => rx.test(l) && !spawn.test(l)).slice(-10).map((l) => ({
       ts: 'encoder',
       level: bad.test(l) ? 'down' : 'warn',
       title: 'Encoder',
@@ -277,13 +276,6 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
       opacity: channel.watermark_opacity ?? 100,
       scale: channel.watermark_scale ?? 12,
     },
-    brand: {
-      ref: channel.brand_ref ?? null,
-      colour: channel.brand_colour ?? null,
-      description: channel.description ?? null,
-    },
-    audioOnly: channel.audio_only === true,
-    audioLadder: Array.isArray(channel.audio_ladder) ? channel.audio_ladder : [],
   };
 }
 

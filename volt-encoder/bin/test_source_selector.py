@@ -186,6 +186,41 @@ def test_loop_choice_uploaded_vs_slate():
     sel2._filler_cmd("loop")
     check("loop with upload -> uploaded video", sel2._filler_kind == "loop")
 
+def test_startup_grace():
+    import tempfile
+    tmp = tempfile.mkdtemp()
+    sel = _mk_selector(tmp)
+    # before start() there is no grace window
+    check("no grace before start", not sel._in_start_grace(0))
+    sel._started = 100.0
+    # inside the grace window with no source ever up -> grace active
+    check("grace active at t+5", sel._in_start_grace(105.0))
+    # grace expires after start_grace seconds
+    check("grace over at t+grace", not sel._in_start_grace(100.0 + sel.start_grace + 0.1))
+    # any source having been up ends the grace immediately
+    sel._ever_up["primary"] = True
+    check("grace over once a source was up", not sel._in_start_grace(105.0))
+
+def test_startup_grace_suppresses_down_event():
+    import tempfile
+    tmp = tempfile.mkdtemp()
+    sel = _mk_selector(tmp)
+    sel._started = 100.0
+    events = []
+    class EV:
+        def source_state(self, group, up, renditions=0): events.append((group, up))
+    sel.events = EV()
+    # watcher that never advances -> group reads down
+    class W:
+        def raw_alive(self): return False
+    sel._watch["primary"] = [W()]
+    sel.health["primary"].state = "down"
+    sel._last_group_up["primary"] = True   # force a would-be transition to down
+    up = sel._group_alive("primary", 105.0)          # inside grace
+    check("down event suppressed during grace", events == [] and not up)
+    sel._group_alive("primary", 100.0 + sel.start_grace + 1)   # after grace
+    check("down event emitted after grace", events == [("primary", False)])
+
 def test_transcode_feed_bus_base():
     # in transcode single-source mode the forwarder writes to the transcoder feed port
     cmd = ss.forwarder_cmd("primary", 0, ss.SOURCE_FEED_PORT)

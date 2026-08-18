@@ -578,7 +578,10 @@ function DualPlayers({ d, captionLangs, sourceUp, onAir, onSendSource, onGoLive,
         ? <OutputError d={d} />
         : outputReady
           ? <HlsOutput d={d} onAir={onAir} captionLangs={captionLangs} subOn={subOn} setSubOn={setSubOn} subLang={subLang} setSubLang={setSubLang} />
-          : <IdleOutput sourceUp={sourceUp} onGoLive={onGoLive} />}
+          : <IdleOutput sourceUp={sourceUp} onGoLive={onGoLive}
+              warming={d.health?.gates.find(g => g.gate === 'server')?.status === 'healthy'}
+              sinceMs={d.billing?.since ?? null}
+              captionsOn={!!d.captions?.enabled} />}
     </div>
   )
 }
@@ -939,32 +942,53 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   )
 }
 
-function IdleOutput({ sourceUp, onGoLive }: { sourceUp: boolean; onGoLive: () => void }) {
+function IdleOutput({ sourceUp, onGoLive, warming, sinceMs, captionsOn }: {
+  sourceUp: boolean; onGoLive: () => void; warming?: boolean; sinceMs?: number | null; captionsOn?: boolean
+}) {
+  // Warm-up counter: while the encoder is up but the output is not yet packaged, show
+  // how long the warm-up has been running and what wait is NORMAL, so the operator does
+  // not read a healthy start as a fault. Live captions (whisper) add a transcription
+  // offset before the first playable output: expect 10 to 20 seconds with captions on,
+  // around 4 seconds with captions off.
+  const [nowT, setNowT] = useState(Date.now())
+  useEffect(() => {
+    if (!warming) return
+    const iv = setInterval(() => setNowT(Date.now()), 1000)
+    return () => clearInterval(iv)
+  }, [warming])
+  const warmSec = warming && sinceMs ? Math.max(0, Math.floor((nowT - sinceMs) / 1000)) : 0
+  const expect = captionsOn ? 'usually 10 to 20 seconds while live captions warm up' : 'usually around 4 seconds'
   return (
     <div className="player">
       <div className="video">
         <div className="grad" style={{ background: 'radial-gradient(120% 120% at 70% 20%,#20304a 0%,#0b0f16 70%)' }} />
-        <div className="plabel"><span className="pt" style={{ color: sourceUp ? '#38bdf8' : '#98a1b6' }}>OUTPUT · {sourceUp ? 'ready' : 'idle'}</span></div>
-        <div className="badge-live" style={{ background: sourceUp ? 'rgba(56,189,248,.8)' : 'rgba(102,112,138,.7)' }}><span className="d" />{sourceUp ? 'READY' : 'IDLE'}</div>
+        <div className="plabel"><span className="pt" style={{ color: sourceUp ? '#38bdf8' : '#98a1b6' }}>OUTPUT · {warming ? 'warming up' : sourceUp ? 'ready' : 'idle'}</span></div>
+        <div className="badge-live" style={{ background: sourceUp ? 'rgba(56,189,248,.8)' : 'rgba(102,112,138,.7)' }}><span className="d" />{warming ? 'STARTING' : sourceUp ? 'READY' : 'IDLE'}</div>
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
-          {sourceUp ? (
+          {warming ? (
+            <div style={{ color: 'var(--muted)', fontSize: 13, maxWidth: 340 }}>
+              <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', marginBottom: 6 }}>{warmSec}s</div>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Preparing the output</div>
+              First playable output takes a moment: {expect}. This is normal start-up, not a fault.
+            </div>
+          ) : sourceUp ? (
             <div>
               <button className="btn primary" onClick={onGoLive} style={{ transform: 'scale(1.05)' }}>
                 <span className="dot-s live" style={{ marginRight: 6 }} />Go live
               </button>
-              <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>Source is receiving — take the output live.</div>
+              <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>Source is receiving. Take the output live.</div>
             </div>
           ) : (
             <div style={{ color: 'var(--faint)', fontSize: 13, maxWidth: 300 }}>
               <div style={{ fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>Waiting for source</div>
-              Send a source first — the output can only go live once the source is arriving.
+              Send a source first: the output can only go live once the source is arriving.
             </div>
           )}
         </div>
-        <div className="ptime">{sourceUp ? 'ready to go live' : 'no source'}</div>
+        <div className="ptime">{warming ? `warming up · ${warmSec}s` : sourceUp ? 'ready to go live' : 'no source'}</div>
       </div>
       <div className="pfoot">
-        <span className={`dot-s ${sourceUp ? 'sched' : 'idle'}`} /> {sourceUp ? 'Encoder warm · output held private until you go live' : 'Output disabled until a source is connected'}
+        <span className={`dot-s ${warming || sourceUp ? 'sched' : 'idle'}`} /> {warming ? (captionsOn ? 'Encoder starting · captions add 10 to 20 seconds before first output' : 'Encoder starting · first output in a few seconds') : sourceUp ? 'Encoder warm · output held private until you go live' : 'Output disabled until a source is connected'}
       </div>
     </div>
   )

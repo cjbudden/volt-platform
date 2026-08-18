@@ -316,6 +316,15 @@ class SourceSelector:
         self.auto_failback = red.get("auto_failback", True)
         self.loss_behavior = red.get("input_loss_behavior", "slate")
         self.filler = red.get("filler", {}) or {}
+        # STARTUP GRACE: at channel start every source is 'down' simply because the relays
+        # have not connected yet. Failing over to filler (and reporting source.down) in that
+        # window is wrong twice over: the operator sees a scary INPUT ERROR on every start,
+        # and the output opens with filler frames then lurches to the primary. So until a
+        # source has been up ONCE, or the grace expires, we hold on the primary quietly.
+        # A real dead source still engages the filler once the grace runs out.
+        self.start_grace = float(red.get("start_grace_sec", 20.0))
+        self._started = None            # set in start()
+        self._ever_up = {"primary": False, "backup": False}
 
         self.n = len(ladder)
         self._forwarders = {}           # idx -> Popen
@@ -358,8 +367,15 @@ class SourceSelector:
         for i in range(self.n):
             self._start_forwarder(i, "primary")
 
+        self._started = time.monotonic()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+
+    def _in_start_grace(self, now):
+        """True while we are still waiting for the FIRST sign of life from any source."""
+        return (self._started is not None
+                and (now - self._started) < self.start_grace
+                and not any(self._ever_up.values()))
 
     def _start_forwarder(self, idx, group):
         self._forwarders[idx] = self.spawn(
@@ -446,10 +462,15 @@ class SourceSelector:
         # a group is alive only if EVERY rendition relay is advancing
         raw = all(w.raw_alive() for w in watchers)
         up = self.health[group].sample(now, raw) == "up"
-        # emit a source.up / source.down event on a real state change
+        if up:
+            self._ever_up[group] = True
+        # emit a source.up / source.down event on a real state change — but never a DOWN
+        # during the startup grace: 'not connected yet' is not a loss, and reporting it
+        # paints an INPUT ERROR on every clean start.
         if self.events and up != self._last_group_up[group]:
-            self._last_group_up[group] = up
-            self.events.source_state(group, up, renditions=len(watchers))
+            if up or not self._in_start_grace(now):
+                self._last_group_up[group] = up
+                self.events.source_state(group, up, renditions=len(watchers))
         return up
 
     def _run(self):
@@ -480,6 +501,12 @@ class SourceSelector:
                 want = self.policy.decide(now, False, backup_up)
             else:
                 want = self.policy.decide(now, primary_up, backup_up)
+                # STARTUP GRACE: no source has EVER been up yet, so 'down' just means the
+                # relays are still connecting. Hold on the primary rather than opening the
+                # broadcast with filler and then lurching to the live feed seconds later.
+                if want == "filler" and self._in_start_grace(now):
+                    want = self.active
+                    self.policy.active = self.active
 
             if want != self.active:
                 # A switch driven by the control file is a manual/test action, not a
