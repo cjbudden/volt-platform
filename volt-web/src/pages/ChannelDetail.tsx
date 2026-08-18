@@ -1027,6 +1027,36 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   const [winSec, setWinSec] = useState(0)          // available DVR depth NOW (grows as it fills, capped at the window)
   const [cue, setCue] = useState('')
   const [subTracks, setSubTracks] = useState(0)   // subtitle tracks discovered in the manifest
+  // INPUT->OUTPUT LATENCY estimate. Exact when the manifest carries PDT (the caption
+  // companion stamps every segment with its real encoder write time): latency =
+  // now - playingDate = encoder write to glass. Without PDT we fall back to a rough
+  // buffer-based estimate and mark it approximate.
+  const [latency, setLatency] = useState<{ sec: number; exact: boolean } | null>(null)
+  useEffect(() => {
+    const iv = setInterval(() => {
+      try {
+        const v = videoRef.current
+        if (!v || v.paused || !v.currentTime) { setLatency(null); return }
+        if (fmt === 'dash' && dashRef.current) {
+          const l = dashRef.current.getCurrentLiveLatency?.()
+          setLatency(Number.isFinite(l) && l > 0 ? { sec: Math.round(l), exact: true } : null)
+          return
+        }
+        const pd: Date | null = hlsRef.current?.playingDate ?? null
+        if (pd && pd.getTime() > 0) {
+          const sec = (Date.now() - pd.getTime()) / 1000
+          if (sec > -5 && sec < 600) { setLatency({ sec: Math.max(0, Math.round(sec)), exact: true }); return }
+        }
+        // no PDT (plain master without captions): behind-edge + about 1.5 segments of
+        // packaging/transfer as a coarse estimate
+        const sk = v.seekable
+        const behindEdge = sk.length ? Math.max(0, sk.end(sk.length - 1) - v.currentTime) : 0
+        const segDur = d.profile?.segment_dur || 4
+        setLatency({ sec: Math.round(behindEdge + segDur * 1.5), exact: false })
+      } catch { setLatency(null) }
+    }, 1000)
+    return () => clearInterval(iv)
+  }, [fmt, d.profile?.segment_dur])
   const cuesRef = useRef<Cue[]>([])
   const didSnapRef = useRef(false)   // snap to live edge once on initial load
   // LIVE LOCK: live is the default. We hold the live edge and auto-recover after any
@@ -1332,6 +1362,14 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
 
       <div className="pfoot">
         <span className="dot-s live" /> Playing {fmt.toUpperCase()}
+        {latency && (
+          <span title={latency.exact
+            ? 'Estimated latency from the encoder writing a segment to it playing here, measured from the manifest wall-clock stamps. Add a few seconds of ingest/encode ahead of that for full input to output.'
+            : 'Approximate latency (no wall-clock stamps in this manifest): distance behind the newest buffered content plus packaging time.'}
+            style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 10 }}>
+            latency {latency.exact ? '≈' : '~'}{latency.sec}s
+          </span>
+        )}
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>
           {/* HLS / DASH toggle — verify BOTH packagings play. Only shown when the
               channel produces both; otherwise there is only one output to preview. */}

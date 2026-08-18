@@ -689,15 +689,22 @@ def _iso(epoch):
     return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(round((epoch - int(epoch)) * 1000)):03d}Z"
 
 
-def _live_sub_playlist(indices, chunk, media_seq, first_pdt_wall):
-    """A LIVE WebVTT media playlist (no ENDLIST) with EXT-X-PROGRAM-DATE-TIME so the
-    player aligns the cues to the video by wall-clock (same clock the companion video
-    playlists carry)."""
+def _live_sub_playlist(indices, chunk, media_seq, t0, pdt_map=None):
+    """A LIVE WebVTT media playlist (no ENDLIST) with EXT-X-PROGRAM-DATE-TIME on EVERY
+    segment so the player aligns the cues to the video by wall-clock.
+
+    Like the video companion, each chunk's PDT comes from its REAL capture time when
+    known (pdt_map: chunk index -> wall-clock start, taken from the audio chunk file's
+    mtime), not from an assumed-perfect `t0 + i*chunk` clock — an ingest that runs even
+    slightly off realtime would otherwise accumulate drift over a session and push the
+    cues away from the frames they belong to. Chunks with no measured time continue
+    from t0 + i*chunk (start-up placeholder / fallback)."""
     lines = ["#EXTM3U", "#EXT-X-VERSION:7",
              f"#EXT-X-TARGETDURATION:{int(round(chunk))}",
-             f"#EXT-X-MEDIA-SEQUENCE:{media_seq}",
-             f"#EXT-X-PROGRAM-DATE-TIME:{_iso(first_pdt_wall)}"]
+             f"#EXT-X-MEDIA-SEQUENCE:{media_seq}"]
     for i in indices:
+        wall = (pdt_map or {}).get(i, t0 + i * chunk)
+        lines.append(f"#EXT-X-PROGRAM-DATE-TIME:{_iso(wall)}")
         lines.append(f"#EXTINF:{chunk:.3f},")
         lines.append(f"sub_{i}.vtt")
     return "\n".join(lines) + "\n"
@@ -722,41 +729,40 @@ def _pdt_companion_playlist(text, now, out_dir):
     """Copy a Shaka video media playlist and inject EXT-X-PROGRAM-DATE-TIME so the video
     carries a wall-clock the subtitle track aligns to.
 
-    RELIABILITY: the PDT must be a STABLE, real content timestamp — not an estimate.
-    We anchor the FIRST segment's PDT to that segment file's mtime (when the encoder
-    actually wrote it, i.e. the real wall-clock of that content), minus its duration to
-    get the segment START. mtime never changes once written, so the timeline does not
-    jitter between regenerations, and it reflects the SAME real clock the subtitle
-    segments use (both produced live on this box) — so cues line up with frames. If the
-    file cannot be stat'd we fall back to the old now - total estimate."""
+    RELIABILITY: PDT is stamped on EVERY segment, each from that segment file's OWN
+    mtime (the real wall-clock when the encoder wrote it) minus its duration. A single
+    anchor at the window's first segment, extrapolated forward by the nominal EXTINF,
+    accumulates error across the whole window whenever the real wall spacing differs
+    from the nominal duration (measured live: ~3.7s wall per 4.0s segment, ~22s of
+    error at the live edge of a 300s window) — which silently pushed every subtitle
+    cue outside the played region a few minutes into a run. Per-segment stamps from
+    real mtimes cannot accumulate anything: the edge is exact, the DVR window is
+    exact, and mtimes never change so the timeline never jitters between
+    regenerations. A segment that cannot be stat'd continues from the previous stamp
+    (spec-compliant: players interpolate between PDT tags)."""
     lines = text.splitlines()
-    first_uri, first_dur, pend = None, 0.0, None
+    out = []
+    pend = None            # duration parsed from the preceding EXTINF
+    prev_end = None        # wall-clock end of the previous segment (continuity fallback)
+    total_listed = 0.0
     for l in lines:
         if l.startswith("#EXTINF:"):
             try: pend = float(l[len("#EXTINF:"):].split(",")[0])
             except ValueError: pend = None
-        elif l and not l.startswith("#"):
-            first_uri, first_dur = l, (pend or 0.0)
-            break
-    start_wall = None
-    if first_uri:
-        try:
-            start_wall = os.path.getmtime(os.path.join(out_dir, first_uri)) - first_dur
-        except OSError:
-            start_wall = None
-    if start_wall is None:
-        total = 0.0
-        for l in lines:
-            if l.startswith("#EXTINF:"):
-                try: total += float(l[len("#EXTINF:"):].split(",")[0])
-                except ValueError: pass
-        start_wall = now - total
-    out, stamped = [], False
-    for l in lines:
-        if (not stamped) and l.startswith("#EXTINF:"):
+            out.append(l)
+        elif l and not l.startswith("#") and pend is not None:
+            dur = pend or 0.0
+            try:
+                start_wall = os.path.getmtime(os.path.join(out_dir, l)) - dur
+            except OSError:
+                start_wall = prev_end if prev_end is not None else (now - total_listed - dur)
             out.append(f"#EXT-X-PROGRAM-DATE-TIME:{_iso(start_wall)}")
-            stamped = True
-        out.append(l)
+            out.append(l)
+            prev_end = start_wall + dur
+            total_listed += dur
+            pend = None
+        else:
+            out.append(l)
     return "\n".join(out) + "\n"
 
 
@@ -953,6 +959,7 @@ def start_captions(cfg, out_dir):
                 return
         seen = set()
         store = {l: [] for l in langs}
+        pdts = {}   # chunk idx -> measured wall-clock START (wav mtime - chunk)
         errs = 0
         produced = False
         win = max(3, int(round(float(cfg.get("dvr_seconds", 300)) / chunk)))
@@ -968,6 +975,12 @@ def start_captions(cfg, out_dir):
                         continue
                     idx = int(mo.group(1))
                     base = idx * chunk
+                    # measured capture clock: the wav closes when its last audio sample was
+                    # read, so mtime - chunk = the REAL wall-clock start of this chunk.
+                    try:
+                        pdts[idx] = os.path.getmtime(w) - chunk
+                    except OSError:
+                        pass
                     t0 = time.time()
                     try:
                         if reuse is not None:
@@ -996,9 +1009,9 @@ def start_captions(cfg, out_dir):
                         _write_sub_segment(os.path.join(sub_root, l, f"sub_{idx}.vtt"),
                                            store.get(l, []), base, base + chunk)
                         with open(os.path.join(sub_root, l, "subs.m3u8"), "w") as fh:
-                            # PDT anchor for the first segment in the window = program time
-                            # first*chunk after the caption clock started.
-                            fh.write(_live_sub_playlist(range(first, idx + 1), chunk, first, cap_t0 + first * chunk))
+                            # per-chunk PDT from measured capture times (cap_t0 clock is
+                            # only the fallback for chunks with no measurement).
+                            fh.write(_live_sub_playlist(range(first, idx + 1), chunk, first, cap_t0, pdt_map=pdts))
                     # NOTE: the companion manifests are refreshed by the decoupled
                     # companion thread (fast, fixed cadence) — NOT here — so video stays
                     # smooth regardless of transcribe timing.
