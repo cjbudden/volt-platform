@@ -16,6 +16,7 @@ current version is always the file in this repo.
 | **What exists and its state** (done / ready to test / pending) | Feature tracker → `feature-tracker/` · Build board → `VOLT_BUILD_STATUS.md` / `volt_build_status.html` |
 | **The current north-star design for encoding** | `volt-app/docs/ENCODING_WORKFLOW_PLAN.md` |
 | **How a subsystem was designed & why** | Design docs (below) |
+| **Why the subtitles line up** (and how to prove it again) | `CAPTIONS.md` + `volt-encoder/synctest.sh` |
 | **The history of a change** (what changed, when, why) | `git log --oneline`, every change is a commit with a message |
 | **How to run / test locally** | This page's *Run & test* + *Test base* sections |
 | **The API** (params, payloads, hypermedia) | `volt-app/docs/API.md` + Postman collection |
@@ -113,6 +114,26 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
 **Encoder, `volt-encoder/`**
 - `validate.sh`, REAL encoder against a synthetic source (HLS path), offline.
 - `validate-docker.sh`, ALL encoder functions incl. **SRT ingest**, inside the Linux image.
+- `synctest.sh <name> <seconds>`, **the caption-sync verdict**. Runs a real channel against
+  a real live source, then measures in seconds how far the subtitles are from the words.
+  Reports start-up, ingest health, clean stop, sync error, coverage, WER, and what a real
+  player shows. Use this whenever anything in the caption or timeline path changes.
+- `bin/syncheck.py`, the measurement behind it: decodes the audio a run ACTUALLY
+  delivered, transcribes it offline with word timestamps, and reports the placement error
+  of every published cue. Also reports PDT step error and how much delivered audio is
+  missing. Trusts nothing the encoder says about itself.
+- `bin/playercheck.py` (+ `bin/player_probe.html`), plays a run in headless Chromium with
+  hls.js and records which cue is on screen at each playhead position, plus stalls,
+  start-up and playback rate. `--vod` closes the DVR window so a stopped run replays whole.
+- `bin/test_player_alignment.py`, integration test: cues whose text states the media time
+  they claim, played in a real browser, checked against where the playhead actually was.
+  This is what catches a misinterpreted `X-TIMESTAMP-MAP`, which looks perfect on disk.
+- `bin/test_companion_pdt.py` (37), timeline maths: tfdt/mdhd parsing, PDT from the media
+  timeline, one shared epoch for video and subtitles, playlist shape, HLS variant choice.
+- `bin/test_captions.py` (58), caption engine: cue shaping from word timestamps, window
+  boundary splitting, model defaults, translation routing, segmentation.
+- `bin/capbench.py`, text-quality benchmark against the Unified vod2live demo's own
+  professional subtitle track (complements syncheck, which measures placement).
 
 **Prototypes**
 - `volt-frame-proto/test.mjs`, 15/15 frame-accuracy assertions.

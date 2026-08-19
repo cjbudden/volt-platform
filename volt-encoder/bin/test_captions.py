@@ -174,5 +174,57 @@ c6 = wa5.transcribe(["ms"])
 ok(any(c.lang == "ms" and c.text == "<ms>hello" for c in c6),
    "auto: English chunk -> ms target via MT from detected en")
 
+
+# ---- cue shaping from word timestamps --------------------------------------
+# Whisper's own segments are not subtitle cues: it emits blink-length fragments and
+# 20s run-ons, and its segment times are coarse. Cues are cut and timed from words.
+W = [(0.0, 0.3, "Hello"), (0.4, 0.7, "there"), (0.8, 1.1, "and"), (1.2, 1.6, "welcome"),
+     (1.7, 1.9, "to"), (2.0, 2.2, "the"), (2.3, 2.8, "show."), (2.9, 3.2, "This"),
+     (3.3, 3.5, "is"), (3.6, 4.1, "a"), (4.2, 4.8, "test.")]
+cs = C.cues_from_words(W, "en")
+ok(len(cs) == 2, f"a sentence end splits the cue ({len(cs)} cues)")
+ok(abs(cs[0].start - 0.0) < 1e-9 and abs(cs[0].end - 2.8) < 1e-9,
+   "cue times come from its FIRST and LAST word, not from a segment boundary")
+ok(cs[0].text == "Hello there and welcome to the show.",
+   f"cue text is the words it covers (got {cs[0].text!r})")
+# a sentence too short to stand alone stays with the next one rather than flashing by
+short = C.cues_from_words([(0.0, 0.2, "Yes."), (0.3, 0.6, "Carry"), (0.7, 1.0, "on.")], "en")
+ok(len(short) == 1, "a very short sentence is not left on its own")
+
+# a long pause starts a new cue even mid-sentence
+gap = C.cues_from_words([(0.0, 0.4, "one"), (3.0, 3.4, "two")], "en")
+ok(len(gap) == 2, "a speaker pause splits the cue")
+
+# never longer than a reader can take in
+long_words = [(i * 0.2, i * 0.2 + 0.15, "word") for i in range(60)]
+lc = C.cues_from_words(long_words, "en")
+ok(all(len(c.text.replace("\n", " ")) <= C.MAX_CUE_CHARS + 8 for c in lc),
+   "no cue exceeds the readable character budget")
+ok(all(c.end - c.start <= C.MAX_CUE_SEC + 0.3 for c in lc), "no cue outlasts the on-screen budget")
+ok(all(len(c.text.split("\n")) <= 2 for c in lc), "cues are at most two lines")
+
+# the window boundary split: the half of a sentence belonging to THIS window survives
+span = [(0.0, 0.4, "context"), (0.5, 0.9, "words"), (1.1, 1.5, "then"), (1.6, 2.0, "new")]
+nosplit = C.cues_from_words(span, "en")
+ok(len(nosplit) == 1, "without a boundary the sentence is one cue")
+split = C.cues_from_words(span, "en", split_at=1.0)
+ok(len(split) == 2 and split[1].start >= 1.0,
+   "split_at cuts at the window boundary so the second half is publishable on its own")
+ok(split[0].text == "context words" and split[1].text == "then new",
+   f"the split lands between words (got {split[0].text!r} / {split[1].text!r})")
+
+# default model: tiny was the old default and a big part of the accuracy problem
+ok(C.default_model("en") == "base.en", "English channels default to the English-only weights")
+ok(C.default_model("auto") == "base", "unpinned language defaults to the multilingual weights")
+ok(C.default_model("ms") == "base", "a non-English channel defaults to the multilingual weights")
+import os as _os
+_os.environ["WHISPER_MODEL"] = "small.en"
+ok(C.default_model("en") == "small.en", "WHISPER_MODEL overrides the default")
+del _os.environ["WHISPER_MODEL"]
+
+# line wrapping
+ok(C.wrap_cue_text("short") == "short", "short text is not wrapped")
+ok(C.wrap_cue_text("a" * 30 + " " + "b" * 30).count("\n") == 1, "long text wraps to two lines")
+
 print(f"\n{p} passed, {f} failed")
 raise SystemExit(1 if f else 0)

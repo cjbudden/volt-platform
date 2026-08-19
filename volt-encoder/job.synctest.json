@@ -1,0 +1,30 @@
+{
+  "_comment": "synctest.sh job: a real transcode channel with live captions, pointed at a public live HLS source. ORIGIN_DIR is substituted by synctest.sh.",
+  "channel_id": "synctest",
+  "workflow": "transcode",
+  "segment_seconds": 4,
+  "fps": 25,
+  "dvr_seconds": 300,
+  "preserved_segments": 0,
+  "gpu": false,
+  "output": { "mode": "local", "dir": "ORIGIN_DIR" },
+  "inputs": [
+    { "rendition_label": "mezzanine", "role": "primary", "protocol": "hls",
+      "url": "https://demo.unified-streaming.com/k8s/vod2live/stable/unified-learning.isml/.m3u8",
+      "variant": "highest",
+      "has_audio": true }
+  ],
+  "ladder": [
+    { "height": 720, "bitrate_kbps": 2500 },
+    { "height": 360, "bitrate_kbps": 800 }
+  ],
+  "captions": {
+    "enabled": true,
+    "engine": "whisper",
+    "source_lang": "en",
+    "targets": [],
+    "chunk_seconds": 8,
+    "preroll_segments": 1,
+    "offset_sec": 0
+  }
+}

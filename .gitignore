@@ -53,3 +53,7 @@ volt-encoder/_local_out/
 volt-encoder/.bin/
 
 volt-app/origin/_control-plane.log
+
+# ---- caption sync test harness (fetched / generated, not source) ----
+volt-encoder/bin/hls.min.js
+volt-encoder/_synctest/

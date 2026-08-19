@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>volt sync probe</title></head>
+<body style="margin:0;background:#000">
+<video id="v" muted playsinline style="width:640px"></video>
+<script src="hls.min.js"></script>
+<script>
+// Records what a real player actually DOES: which cue is on screen, at which point on
+// the media timeline, and every stall/error along the way. The page holds the data;
+// the driver reads window.__probe out of it.
+window.__probe = { samples: [], events: [], ready: false, fatal: null };
+const v = document.getElementById('v');
+const url = new URLSearchParams(location.search).get('src');
+const LIVE_HOLD = parseFloat(new URLSearchParams(location.search).get('hold') || '14');
+
+const hls = new Hls({
+  // the app's live configuration: hold the playhead back far enough that a cue for
+  // the moment being played already exists
+  liveSyncDuration: LIVE_HOLD,
+  liveMaxLatencyDuration: LIVE_HOLD + 20,
+  lowLatencyMode: false,
+  enableWebVTT: true,
+  // hls.js must add the cues to a native TextTrack; with this off it emits them and
+  // expects the app to render them itself, and nothing ever reaches v.textTracks
+  renderTextTracksNatively: true,
+  backBufferLength: 90
+});
+const ev = (t, d) => window.__probe.events.push({ t: performance.now() / 1000, type: t, d: d || null });
+
+hls.on(Hls.Events.MANIFEST_PARSED, () => { ev('manifest_parsed'); v.play().catch(e => ev('play_reject', String(e))); });
+hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (_, d) => {
+  ev('subtitle_tracks', (d.subtitleTracks || []).map(t => t.lang || t.name));
+  if ((d.subtitleTracks || []).length) hls.subtitleTrack = 0;
+  hls.subtitleDisplay = true;
+  // 'hidden' still populates activeCues, which is what we sample; 'disabled' would not
+  setTimeout(() => { for (const tt of v.textTracks) if (tt.mode === 'disabled') tt.mode = 'hidden'; }, 200);
+});
+hls.on(Hls.Events.CUES_PARSED, (_, d) => ev('cues_parsed', (d.cues || []).length));
+hls.on(Hls.Events.SUBTITLE_FRAG_PROCESSED, (_, d) => ev('sub_frag', { sn: d.frag && d.frag.sn, ok: d.success }));
+hls.on(Hls.Events.ERROR, (_, d) => {
+  ev('error', { type: d.type, details: d.details, fatal: d.fatal });
+  if (d.fatal) window.__probe.fatal = d.details;
+});
+v.addEventListener('waiting', () => ev('waiting'));
+v.addEventListener('stalled', () => ev('stalled'));
+v.addEventListener('playing', () => { ev('playing'); window.__probe.ready = true; });
+
+hls.loadSource(url);
+hls.attachMedia(v);
+
+function activeCues() {
+  const out = [];
+  for (const tt of v.textTracks) {
+    if (tt.kind !== 'subtitles' && tt.kind !== 'captions') continue;
+    for (const c of (tt.activeCues || [])) out.push(c.text);
+  }
+  // hls.js with renderTextTracksNatively:false still exposes cues on the track
+  return out;
+}
+
+hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_, d) =>
+  ev('audio_tracks', (d.audioTracks || []).map(t => (t.lang || t.name || '?') + (t.default ? '*' : ''))));
+
+setInterval(() => {
+  let pdt = null;
+  try { pdt = hls.playingDate ? hls.playingDate.getTime() / 1000 : null; } catch (e) {}
+  window.__probe.samples.push({
+    wall: Date.now() / 1000,
+    ct: v.currentTime,
+    paused: v.paused,
+    ready: v.readyState,
+    pdt: pdt,
+    abuf: (function(){ try { const b=hls.audioTrackController && v.buffered; return v.buffered.length ? +(v.buffered.end(v.buffered.length-1)-v.currentTime).toFixed(2) : null; } catch(e){ return null; } })(),
+    cues: activeCues(),
+    tt: Array.from(v.textTracks).map(t => ({ k: t.kind, m: t.mode, n: (t.cues || []).length, l: t.language }))
+  });
+}, 250);
+</script>
+</body>
+</html>

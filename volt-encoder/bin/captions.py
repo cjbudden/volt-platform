@@ -195,6 +195,92 @@ class GladiaAdapter:
         )
 
 
+# ---- cue shaping -----------------------------------------------------------
+# Whisper's own segment boundaries are not subtitle boundaries. Left alone it emits
+# both blink-length fragments and 20 second run-ons, and its per-segment start/end
+# times are coarse. Word-level timestamps let us cut cues where a reader would and
+# time each one to the word that opens it, which is most of the difference between
+# "roughly in the right place" and "on the syllable".
+MAX_CUE_CHARS = int(os.environ.get("CUE_MAX_CHARS", "84"))    # ~2 lines of 42
+MAX_CUE_SEC = float(os.environ.get("CUE_MAX_SEC", "6.0"))
+MIN_SPLIT_CHARS = int(os.environ.get("CUE_MIN_SPLIT_CHARS", "24"))
+WORD_GAP_SEC = float(os.environ.get("CUE_WORD_GAP_SEC", "0.8"))
+_SENTENCE_END = (".", "!", "?", "。", "！", "？")
+
+
+def wrap_cue_text(text, width=42):
+    """At most two lines, broken on a word boundary."""
+    text = " ".join(text.split())
+    if len(text) <= width:
+        return text
+    lines, cur = [], ""
+    for w in text.split():
+        if cur and len(cur) + 1 + len(w) > width and len(lines) < 1:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = f"{cur} {w}".strip()
+    lines.append(cur)
+    return "\n".join(lines[:2])
+
+
+def cues_from_words(words, lang, split_at=None):
+    """Build readable, word-accurate cues from [(start, end, text)].
+
+    A cue closes when any of these is true: it has reached a readable length, it has
+    been on screen long enough, the speaker paused, or a sentence ended and the cue is
+    already long enough to stand on its own.
+
+    `split_at` forces an extra cut at a caption WINDOW boundary. Live windows are
+    transcribed with a few seconds of the previous window as context (whisper is far
+    more accurate when a sentence does not begin at a hard cut), and everything before
+    the boundary was already published by the previous window. Without a forced cut, a
+    sentence straddling the boundary comes back as ONE cue starting in the context
+    region, gets discarded as already-seen, and the half of the sentence that belonged
+    to this window is silently lost. Splitting keeps both halves, each timed to its own
+    words."""
+    cues, buf = [], []
+
+    def flush():
+        if buf:
+            cues.append(Cue(buf[0][0], buf[-1][1],
+                            wrap_cue_text(" ".join(t for _s, _e, t in buf)), lang))
+            buf.clear()
+
+    for start, end, text in words:
+        text = (text or "").strip()
+        if not text:
+            continue
+        if buf:
+            cur_len = sum(len(t) + 1 for _s, _e, t in buf)
+            close = (
+                cur_len + len(text) > MAX_CUE_CHARS
+                or end - buf[0][0] > MAX_CUE_SEC
+                or start - buf[-1][1] > WORD_GAP_SEC
+                or (buf[-1][2].endswith(_SENTENCE_END) and cur_len >= MIN_SPLIT_CHARS)
+                or (split_at is not None and buf[0][0] < split_at <= start)
+            )
+            if close:
+                flush()
+        buf.append((start, end, text))
+    flush()
+    return cues
+
+
+def default_model(source_lang):
+    """Model to use when the job does not pin one.
+
+    `tiny` was the old default and it is a large part of why the text so often did not
+    match what was said. `base` is the smallest model that is honestly usable for
+    broadcast subtitles and is still comfortably realtime on CPU; the English-only
+    weights are noticeably more accurate than the multilingual ones at the same size,
+    so a channel pinned to English gets them automatically."""
+    env = os.environ.get("WHISPER_MODEL")
+    if env:
+        return env
+    return "base.en" if (source_lang or "").lower().startswith("en") else "base"
+
+
 class WhisperAdapter:
     """
     Self-hosted STT via faster-whisper (CTranslate2). No API key, no per-minute
@@ -218,7 +304,11 @@ class WhisperAdapter:
                  model_size: str | None = None, translator=None):
         self.audio_path = audio_path
         self.source_lang = source_lang
-        self.model_size = model_size or os.environ.get("WHISPER_MODEL", "tiny")
+        self.model_size = model_size or default_model(source_lang)
+        # live only: seconds into audio_path where the CONTEXT ends and the window this
+        # call is meant to publish begins. Forces a cue cut there so a sentence crossing
+        # the boundary is not lost with the context it started in. None = no boundary.
+        self.split_at = None
         # optional downstream MT stage for non-English targets (NLLB). Injectable
         # so tests can pass a fake and avoid loading the real model.
         self.translator = translator
@@ -239,13 +329,57 @@ class WhisperAdapter:
 
     def _run_task(self, model, task: str, lang: str, language: str | None = None):
         """Run one whisper pass. Returns (cues labelled `lang`, whisper info).
-        `language` pins the decode language; None lets whisper DETECT it (info.language)."""
-        kw = {"task": task, "beam_size": 1}
+        `language` pins the decode language; None lets whisper DETECT it (info.language).
+
+        The decode options here are the difference between a transcript and a
+        hallucination, and each one earns its place:
+
+        * vad_filter — whisper was trained on speech and will confidently invent
+          sentences over music, room tone or silence. Voice-activity gating is the
+          single biggest accuracy win on a live feed, where a large share of any given
+          window is not speech.
+        * condition_on_previous_text=False — with it on, one bad window poisons the
+          next and whisper falls into repeating the same line forever. Windows here are
+          independent by design, so the feature has nothing to offer and a well known
+          failure mode to contribute.
+        * the three thresholds — drop a window whose decode was improbable
+          (log_prob), whose output looks like a loop (compression_ratio) or which the
+          model itself thinks was silence (no_speech).
+        * word_timestamps — cues are then cut and timed from the words themselves
+          rather than from whisper's coarse segment boundaries.
+        * beam_size — 1 is greedy and fast; live can afford a little more when the
+          box has headroom, so it is configurable rather than hard-coded."""
+        kw = {
+            "task": task,
+            "beam_size": int(os.environ.get("WHISPER_BEAM", "2")),
+            "condition_on_previous_text": False,
+            "vad_filter": os.environ.get("WHISPER_VAD", "1") != "0",
+            "vad_parameters": {"min_silence_duration_ms": 400},
+            "no_speech_threshold": float(os.environ.get("WHISPER_NO_SPEECH", "0.6")),
+            "log_prob_threshold": float(os.environ.get("WHISPER_LOGPROB", "-1.0")),
+            "compression_ratio_threshold": float(os.environ.get("WHISPER_COMPRESSION", "2.4")),
+            "word_timestamps": os.environ.get("WHISPER_WORD_TS", "1") != "0",
+        }
         if language:
             kw["language"] = language
-        segments, info = model.transcribe(self.audio_path, **kw)
+        try:
+            segments, info = model.transcribe(self.audio_path, **kw)
+        except TypeError:
+            # a stub or an older faster-whisper that does not take the tuning options
+            segments, info = model.transcribe(self.audio_path, task=task, beam_size=1,
+                                              **({"language": language} if language else {}))
+        segs = list(segments)
+        words = []
+        for s in segs:
+            for w in (getattr(s, "words", None) or []):
+                if (w.word or "").strip():
+                    words.append((float(w.start), float(w.end), w.word.strip()))
+        if words:
+            return cues_from_words(words, lang, split_at=self.split_at), info
+        # no word timing available (stub, or word_timestamps off): fall back to
+        # whisper's own segments rather than producing nothing
         return ([Cue(float(s.start), float(s.end), s.text.strip(), lang)
-                 for s in segments if s.text.strip()], info)
+                 for s in segs if s.text.strip()], info)
 
     def transcribe(self, targets: list[str]) -> list[Cue]:
         """Per-chunk transcript + translations, with PER-CHUNK language detection.

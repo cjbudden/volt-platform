@@ -317,10 +317,15 @@ def probe_audio_tracks(url):
     on any failure it falls back to a single unlabelled track so encoding still runs."""
     try:
         out = subprocess.run(
+            # START-UP COST: this probe is serial, ahead of the packager and the
+            # transcoder, so its window is real dead air at channel start. Against a
+            # single resolved variant (see resolve_hls_variant) a 2s analyse window is
+            # plenty to see the audio streams; it only needed to be wide when the URL
+            # was a master and ffmpeg was opening every rendition at once.
             ["ffprobe", "-v", "error", "-select_streams", "a",
              "-show_entries", "stream=index:stream_tags=language,title",
-             "-of", "json", "-analyzeduration", "4000000", "-probesize", "4000000", url],
-            capture_output=True, text=True, timeout=20,
+             "-of", "json", "-analyzeduration", "2000000", "-probesize", "2000000", url],
+            capture_output=True, text=True, timeout=12,
         )
         streams = (json.loads(out.stdout or "{}").get("streams") or [])
         tracks = []
@@ -344,9 +349,116 @@ def audio_tracks(cfg):
     if cached is not None:
         return cached
     src = cfg["inputs"][0]
-    tracks = probe_audio_tracks(src["url"])
+    # probe the RESOLVED single variant, not the master: probing a master returns one
+    # audio stream per variant, which used to become one duplicate manifest audio track
+    # per variant (six identical English tracks on the test source).
+    tracks = probe_audio_tracks(input_url(src))
     cfg["_audio_tracks"] = tracks
     return tracks
+
+
+def _http_get(u, timeout=8):
+    import urllib.request
+    req = urllib.request.Request(u, headers={"User-Agent": "volt-encoder/1.0"})
+    return urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8", "ignore")
+
+
+_VARIANT_CACHE = {}
+
+
+def parse_master(text):
+    """[{uri, bandwidth, width, height}] from an HLS master playlist body."""
+    out = []
+    lines = text.splitlines()
+    for i, l in enumerate(lines):
+        if not l.startswith("#EXT-X-STREAM-INF"):
+            continue
+        attrs = l.split(":", 1)[1] if ":" in l else ""
+
+        def _a(name):
+            mo = re.search(name + r'=("[^"]*"|[^,]*)', attrs)
+            return mo.group(1).strip('"') if mo else None
+
+        res = _a("RESOLUTION") or ""
+        w = h = None
+        if "x" in res.lower():
+            try:
+                w, h = (int(x) for x in res.lower().split("x")[:2])
+            except ValueError:
+                w = h = None
+        uri = next((x.strip() for x in lines[i + 1:i + 3] if x.strip() and not x.startswith("#")), None)
+        if uri:
+            try:
+                bw = int(_a("BANDWIDTH") or 0)
+            except ValueError:
+                bw = 0
+            out.append({"uri": uri, "bandwidth": bw, "width": w, "height": h})
+    return out
+
+
+def resolve_hls_variant(url, want=None):
+    """If `url` is an HLS MASTER playlist, resolve it to the ONE variant media playlist
+    we should ingest. Anything else is returned unchanged.
+
+    This is not a nicety, it is a correctness fix. Pointed at a master, ffmpeg exposes
+    every variant as its own program and OPENS ALL OF THEM, and two things go wrong at
+    once:
+
+      * `-map 0:v:0` takes the FIRST video stream in the file, which is the LOWEST rung
+        (192x108 on the unified-streaming test source). The whole output ladder was
+        being upscaled from a thumbnail while the 1080p rung sat there unused.
+      * every variant carries its own audio, so every one of them became a manifest
+        audio track (six identical English tracks on the test source), and every one of
+        them was downloaded: that is where the "Invalid timestamps" / "Packet corrupt" /
+        "Stream ends prematurely" spam and a large part of the slow start came from.
+
+    Resolving to a single media playlist fixes all of that and cuts source bandwidth to
+    the one rendition we actually decode.
+
+    `want`: None or "highest" (default) takes the largest resolution then bitrate;
+    "lowest" the smallest; a height ("720" / "720p") picks that rung if present.
+    """
+    if not re.match(r"^https?://", url or "", re.I):
+        return url
+    key = (url, want)
+    if key in _VARIANT_CACHE:
+        return _VARIANT_CACHE[key]
+    resolved = url
+    try:
+        txt = _http_get(url)
+        if "#EXT-X-STREAM-INF" in txt and "#EXTINF" not in txt:
+            from urllib.parse import urljoin
+            variants = parse_master(txt)
+            # audio-only renditions carry no RESOLUTION; never pick one as the mezzanine
+            vids = [v for v in variants if v["height"]] or variants
+            pick = None
+            if want and str(want).lower() not in ("highest", "best", "auto"):
+                if str(want).lower() in ("lowest", "worst"):
+                    pick = min(vids, key=lambda v: (v["height"] or 0, v["bandwidth"]))
+                else:
+                    mo = re.match(r"(\d+)", str(want))
+                    if mo:
+                        exact = [v for v in vids if v["height"] == int(mo.group(1))]
+                        pick = exact[0] if exact else None
+            if pick is None:
+                pick = max(vids, key=lambda v: (v["height"] or 0, v["bandwidth"]))
+            resolved = urljoin(url, pick["uri"])
+            log(f"ingest: master playlist with {len(variants)} variant(s) -> using "
+                f"{pick['width']}x{pick['height']} @ {pick['bandwidth'] // 1000}kbps "
+                f"(one variant only)")
+    except Exception as e:  # noqa: BLE001
+        log(f"ingest: variant resolve failed ({e}); using the URL as given")
+    _VARIANT_CACHE[key] = resolved
+    return resolved
+
+
+def input_url(inp):
+    """The URL to actually open for a contribution input. HLS masters resolve to a single
+    variant (see resolve_hls_variant); everything else passes through."""
+    url = inp["url"]
+    if (inp.get("protocol") or "").lower() in ("hls", "http", "https"):
+        url = resolve_hls_variant(url, inp.get("variant"))
+    return url
 
 
 def _hls_edge_flags(url, back_sec=12):
@@ -384,19 +496,58 @@ def _hls_edge_flags(url, back_sec=12):
         log(f"ingest: HLS edge probe failed ({e}); seeking to the edge to be safe")
     if endlist is False:
         log("ingest: HLS source is live (no ENDLIST) -> start at the newest segment")
-        return ["-fflags", "+genpts", "-live_start_index", "-1", "-http_persistent", "0"]
+        return ["-fflags", "+genpts", "-live_start_index", "-1", *_http_resilience_flags()]
     log(f"ingest: HLS source is a bounded window (ENDLIST={endlist}) -> seek {back_sec}s before the edge")
-    return ["-fflags", "+genpts", "-sseof", f"-{back_sec}", "-http_persistent", "0"]
+    return ["-fflags", "+genpts", "-sseof", f"-{back_sec}", *_http_resilience_flags()]
+
+
+def _http_resilience_flags():
+    """Keep an HTTP/HLS ingest intact while the box is busy encoding.
+
+    THE FAILURE THIS FIXES, measured: run the ladder on a box with no spare CPU and the
+    ingest starts logging "Stream ends prematurely at N, should be M" followed by runs of
+    "Error submitting packet to decoder: Invalid data found". Those are TRUNCATED SEGMENT
+    DOWNLOADS. ffmpeg demuxes and encodes in one pipeline, so while x264 is working
+    nothing is draining the HTTP socket; the connection goes idle, the far end or an
+    intermediary closes it, and the rest of that segment is simply lost. It is silent:
+    no error is fatal, the run continues, and the damage only shows up downstream as
+    audio that is shorter than its own timeline says. On a 480s test run 71 of 116
+    delivered audio segments were short and 9% of the audio was missing outright, which
+    is both an audible dropout for the viewer and missing words for the recogniser.
+
+    The three flags, and what each one does about it:
+      * thread_queue_size — the demuxer runs on its own thread and can read ahead;
+        the default queue is a handful of packets, which is no buffer at all against an
+        encoder that stalls it for hundreds of milliseconds. This is the one that stops
+        the socket going idle in the first place.
+      * reconnect / reconnect_streamed / reconnect_on_network_error — when a fetch does
+        get cut short, resume it instead of discarding the remainder of the segment.
+      * http_persistent — reuse the connection between segment fetches rather than
+        opening a new TLS session for every one.
+
+    Verified: the same 110s transcode went from 73 ingest errors and 9% of the audio
+    missing to ZERO errors and complete audio."""
+    return [
+        "-http_persistent", "1",
+        "-reconnect", "1",
+        "-reconnect_streamed", "1",
+        "-reconnect_on_network_error", "1",
+        "-reconnect_delay_max", "4",
+        "-thread_queue_size", os.environ.get("INGEST_QUEUE", "4096"),
+    ]
 
 
 def input_args(inp):
     """Protocol-specific FFmpeg input flags for a contribution feed."""
     proto = inp["protocol"].lower()
-    url = inp["url"]
+    url = input_url(inp)
+    # a read-ahead queue on the demux thread benefits every protocol: it stops a busy
+    # encoder from starving the reader (see _http_resilience_flags)
+    q = ["-thread_queue_size", os.environ.get("INGEST_QUEUE", "4096")]
     if proto == "srt":
-        return ["-fflags", "+genpts", "-i", url]
+        return ["-fflags", "+genpts", *q, "-i", url]
     if proto in ("rtmp", "rtmps"):
-        return ["-i", url]
+        return [*q, "-i", url]
     if proto == "hls":
         # START AT THE LIVE EDGE — see _hls_edge_flags for why this must adapt to whether
         # the source playlist is live or a bounded (ENDLIST) DVR window.
@@ -487,6 +638,9 @@ def prepare_failover_inputs(inputs):
         proto = (inp.get("protocol") or "").lower()
         if proto in ("hls", "http", "https"):
             try:
+                # resolve a master to one variant FIRST so the relay opens a single
+                # rendition, then probe that playlist for its live/bounded shape
+                inp["url"] = input_url(inp)
                 inp["_edge_flags"] = _hls_edge_flags(inp["url"])
             except Exception as e:  # noqa: BLE001
                 log(f"failover input: edge-flag probe failed ({e}); using default flags")
@@ -708,56 +862,37 @@ def start_uploader(cfg):
 # ---------------------------------------------------------------------------
 # Live captions integration.
 #
-# The captions ENGINE (whisper transcribe + NLLB translate + WebVTT segmentation)
-# is built and unit-tested in captions.py. This is the LIVE INTEGRATION: a
-# dedicated ffmpeg segments the program audio into fixed chunks; each completed
-# chunk is transcribed (+ translated) via the captions adapters; cues are shifted
-# to program time; and per-language LIVE WebVTT renditions plus a captions-aware
-# companion HLS master (master_cc.m3u8) and DASH manifest (manifest_cc.mpd) are
-# written — because Shaka owns and rewrites master.m3u8 / manifest.mpd every
-# segment, so we cannot patch those in place. Players that want subtitles load the
-# _cc manifest.
+# THE RULE THIS SECTION IS BUILT ON: a subtitle cue is only ever as well aligned
+# as the clock used to place it. So there is exactly ONE clock here, the media
+# timeline of the stream we actually deliver, and every number below is read off
+# it rather than estimated from wall clock or file modification times.
 #
-# ESTIMATED LIVE OFFSET: whisper is not streaming, so each chunk is transcribed as
-# a finite clip. The offset needed to keep subs aligned is chunk_seconds + the
-# measured transcribe+translate time + a small margin. We measure it per chunk and
-# report caption.offset (with realtime=proc<chunk) so the UI shows the real value.
+# Caption audio is the DELIVERED audio: the packager's own CMAF audio segments,
+# the same bytes the viewer's player decodes. Each segment carries a tfdt
+# (baseMediaDecodeTime), which is the exact PTS its first sample sits at, so a
+# window of segments has a known start PTS to the sample, and a cue found N
+# seconds into that window belongs at start_pts + N. Nothing is inferred.
+#
+# What this replaced, and why: captions used to come from a SECOND, independent
+# ffmpeg pull of the source URL, started seconds after the video ingest. Two
+# independent joins to a live HLS edge land on different source segments, so the
+# audio whisper heard was offset from the video being packaged by a random
+# amount every run, and the two were reconciled afterwards by comparing file
+# mtimes. That is the "sometimes ahead, sometimes way behind, sometimes never
+# shown" behaviour: measured at a median of 15.7s out, with no run repeating the
+# previous run's error. Reading the packaged audio makes the offset structurally
+# zero instead of merely small, and removes a whole second pull of the source.
+#
+# LATENCY: a cue can only exist once its audio segment has been packaged, so the
+# caption offset is (window length) + (transcribe time) + a margin. It is
+# measured per window and reported as caption.offset, and it never delays the
+# video path, which does not wait for captions at any point.
 # ---------------------------------------------------------------------------
-def _captions_audio_url(cfg):
-    """The audio-bearing input to transcribe (has_audio primary, else the first)."""
-    ins = primary_inputs(cfg) or cfg["inputs"]
-    for i in ins:
-        if i.get("has_audio"):
-            return i["url"]
-    return ins[0]["url"]
-
-
 def _iso(epoch):
     """EXT-X-PROGRAM-DATE-TIME timestamp (UTC millis)."""
     import datetime
     dt = datetime.datetime.utcfromtimestamp(epoch)
     return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(round((epoch - int(epoch)) * 1000)):03d}Z"
-
-
-def _live_sub_playlist(indices, chunk, media_seq, t0, pdt_map=None):
-    """A LIVE WebVTT media playlist (no ENDLIST) with EXT-X-PROGRAM-DATE-TIME on EVERY
-    segment so the player aligns the cues to the video by wall-clock.
-
-    Like the video companion, each chunk's PDT comes from its REAL capture time when
-    known (pdt_map: chunk index -> wall-clock start, taken from the audio chunk file's
-    mtime), not from an assumed-perfect `t0 + i*chunk` clock — an ingest that runs even
-    slightly off realtime would otherwise accumulate drift over a session and push the
-    cues away from the frames they belong to. Chunks with no measured time continue
-    from t0 + i*chunk (start-up placeholder / fallback)."""
-    lines = ["#EXTM3U", "#EXT-X-VERSION:7",
-             f"#EXT-X-TARGETDURATION:{int(round(chunk))}",
-             f"#EXT-X-MEDIA-SEQUENCE:{media_seq}"]
-    for i in indices:
-        wall = (pdt_map or {}).get(i, t0 + i * chunk)
-        lines.append(f"#EXT-X-PROGRAM-DATE-TIME:{_iso(wall)}")
-        lines.append(f"#EXTINF:{chunk:.3f},")
-        lines.append(f"sub_{i}.vtt")
-    return "\n".join(lines) + "\n"
 
 
 def _mp4_timescale(init_path):
@@ -777,7 +912,7 @@ def _mp4_timescale(init_path):
 
 def _mp4_tfdt_time(seg_path):
     """baseMediaDecodeTime (media units) from a CMAF segment's tfdt box: the exact
-    PTS at which this segment's content starts on the video timeline."""
+    PTS at which this segment's content starts on the media timeline."""
     try:
         data = open(seg_path, "rb").read(65536)
         i = data.find(b"tfdt")
@@ -791,52 +926,133 @@ def _mp4_tfdt_time(seg_path):
         return None
 
 
-def _video_pts_of_wall(out_dir, wall, seg_dur):
-    """Map a WALL-CLOCK instant onto the video's PTS timeline (seconds).
+_TS_CACHE = {}    # init.mp4 path  -> timescale
+_PTS_CACHE = {}   # segment path   -> media PTS in seconds
+_EPOCH = {}       # out_dir        -> wall clock of media PTS 0
+# the epoch is read by BOTH the caption worker and the companion refresher; anchoring it
+# twice would give the two tracks two slightly different clocks for the first few seconds
+_EPOCH_LOCK = threading.Lock()
 
-    Uses the newest video segment as the reference sample: its tfdt gives the PTS its
-    content STARTS at, its mtime is the wall-clock its content END was written. So
-    pts(wall) = (tfdt/timescale + seg_dur) + (wall - mtime). The reference is re-sampled
-    from the newest segment every call, so pacing drift cannot accumulate (same principle
-    as the per-segment PDT stamps). Returns None if no segment can be read."""
-    try:
-        rend = None
-        for name in sorted(os.listdir(out_dir)):
-            if os.path.isfile(os.path.join(out_dir, name, "init.mp4")):
-                rend = os.path.join(out_dir, name)
-                break
-        if not rend:
+
+def _seg_pts(out_dir, rel_uri):
+    """Media-timeline PTS (seconds) a packaged segment starts at, from its own tfdt.
+
+    Segment files never change after they are written, so this is memoised: a full
+    DVR window is re-stamped every couple of seconds and re-reading every segment
+    header each time would be pointless IO."""
+    path = os.path.join(out_dir, rel_uri)
+    hit = _PTS_CACHE.get(path)
+    if hit is not None:
+        return hit
+    init = os.path.join(os.path.dirname(path), "init.mp4")
+    ts = _TS_CACHE.get(init)
+    if ts is None:
+        ts = _mp4_timescale(init)
+        if not ts:
             return None
-        segs = glob.glob(os.path.join(rend, "seg_*.m4s"))
-        if not segs:
-            return None
-        newest = max(segs, key=os.path.getmtime)
-        ts = _mp4_timescale(os.path.join(rend, "init.mp4"))
-        base = _mp4_tfdt_time(newest)
-        if not ts or base is None:
-            return None
-        pts_end = base / ts + seg_dur
-        return pts_end + (wall - os.path.getmtime(newest))
-    except OSError:
+        _TS_CACHE[init] = ts
+    base = _mp4_tfdt_time(path)
+    if base is None:
         return None
+    val = base / ts
+    if len(_PTS_CACHE) > 40000:          # 24/7 safety valve, not an expected path
+        _PTS_CACHE.clear()
+    _PTS_CACHE[path] = val
+    return val
+
+
+def _rendition_dirs(out_dir):
+    try:
+        return [os.path.join(out_dir, n) for n in sorted(os.listdir(out_dir))
+                if os.path.isfile(os.path.join(out_dir, n, "init.mp4"))]
+    except OSError:
+        return []
+
+
+def _seg_num(path):
+    mo = re.search(r"seg_(\d+)\.m4s$", path)
+    return int(mo.group(1)) if mo else -1
+
+
+def _media_epoch(out_dir, seg_dur):
+    """The wall clock that media PTS 0 corresponds to. Anchored ONCE per run.
+
+    Every EXT-X-PROGRAM-DATE-TIME we publish is then epoch + that segment's own PTS,
+    which means PDT advances by exactly EXTINF, is monotonic, and describes the same
+    instant on the video track and the subtitle track because both are derived from
+    the same two numbers.
+
+    The previous scheme stamped each segment with its own file mtime instead. That
+    looks safer (it "cannot accumulate drift") but it is stamping the encoder's write
+    schedule rather than the media timeline: measured on a box that was not keeping up,
+    nominally 4.000s segments were stamped 8.8s and 11.2s apart. Players align a
+    subtitle rendition to video by PDT, so cues were being placed wherever the encoder
+    happened to stutter. A single anchor plus real PTS cannot do that: it is exact by
+    construction and the anchor only affects what the clock reads, never alignment."""
+    hit = _EPOCH.get(out_dir)
+    if hit is not None:
+        return hit
+    with _EPOCH_LOCK:
+        hit = _EPOCH.get(out_dir)
+        if hit is not None:
+            return hit
+        for rend in _rendition_dirs(out_dir):
+            segs = sorted(glob.glob(os.path.join(rend, "seg_*.m4s")), key=_seg_num)
+            if not segs:
+                continue
+            newest = segs[-1]
+            pts = _seg_pts(out_dir, os.path.relpath(newest, out_dir))
+            if pts is None:
+                continue
+            try:
+                mt = os.path.getmtime(newest)
+            except OSError:
+                continue
+            # that segment's content ENDS around the moment it was written, so its
+            # content STARTED about one segment earlier:
+            #   epoch = write time - duration - its PTS
+            _EPOCH[out_dir] = mt - seg_dur - pts
+            return _EPOCH[out_dir]
+    return None
+
+
+def _live_sub_playlist(entries, target_dur, media_seq):
+    """A LIVE WebVTT media playlist. `entries` is [(idx, pdt_epoch, duration)] in order.
+
+    Each subtitle segment carries the PDT of the media it describes, taken from the
+    same epoch + PTS arithmetic the video companion uses, so the two tracks agree by
+    construction rather than by two clocks happening to land close together."""
+    import math
+    longest = max([d for _i, _p, d in entries] + [target_dur])
+    lines = ["#EXTM3U", "#EXT-X-VERSION:7",
+             # TARGETDURATION must be >= every EXTINF listed. Real window durations vary
+             # a little because the packager cuts segments on keyframes, so take the
+             # ceiling of the longest one actually present.
+             f"#EXT-X-TARGETDURATION:{int(math.ceil(longest - 0.001))}",
+             f"#EXT-X-MEDIA-SEQUENCE:{media_seq}"]
+    for idx, pdt, dur in entries:
+        if pdt is not None:
+            lines.append(f"#EXT-X-PROGRAM-DATE-TIME:{_iso(pdt)}")
+        lines.append(f"#EXTINF:{dur:.3f},")
+        lines.append(f"sub_{idx}.vtt")
+    return "\n".join(lines) + "\n"
 
 
 def _write_sub_segment(path, cues, seg_start, seg_end, mpegts=None):
-    """One HLS WebVTT segment. Cues are written RELATIVE to the segment start (0..chunk).
+    """One HLS WebVTT segment. Cues are written RELATIVE to the segment start.
 
-    ALIGNMENT (the make-or-break part): players place WebVTT cues via the
-    X-TIMESTAMP-MAP header, which must carry the VIDEO's REAL 90kHz PTS for this
-    chunk's start. A constant (like MPEGTS:0) maps every chunk's cues to the same
-    spot on the timeline, so captions show only while the playhead is near that one
-    spot: the 'worked for two chunks then stopped forever' failure. `mpegts` is the
-    true PTS in 90kHz units (from _video_pts_of_wall); when unknown the map is
-    omitted and players fall back to fragment-anchored placement.
+    ALIGNMENT: players place WebVTT cues via the X-TIMESTAMP-MAP header, which must
+    carry the media's REAL 90kHz PTS for this segment's start. A constant (like
+    MPEGTS:0) maps every segment's cues to the same spot on the timeline, so captions
+    show only while the playhead is near that one spot: the "worked for two chunks then
+    stopped forever" failure. `mpegts` is the true PTS in 90kHz units, read from the
+    delivered audio segment's tfdt; when unknown the map is omitted rather than guessed
+    and players fall back to fragment-anchored placement.
 
     READABILITY (the anti-stacking rules):
       * a cue lives in EXACTLY ONE segment: the one containing its START. Writing a
-        spanning cue into every overlapped segment created near-duplicate copies
-        (each mapped through a slightly different measured clock) that STACKED on
-        screen. A cue may extend past its segment's end; players handle that.
+        spanning cue into every overlapped segment created near-duplicate copies that
+        STACKED on screen.
       * duration is clamped to 1.0..7.0s: whisper emits both blink-length fragments
         (unreadable) and 20s+ run-ons (three lines parked on screen)."""
     from captions import cue_block, Cue
@@ -855,58 +1071,60 @@ def _write_sub_segment(path, cues, seg_start, seg_end, mpegts=None):
             nxt = max(0.0, mine[i + 1].start - seg_start)
             if rel_end > nxt > rel_start:
                 rel_end = nxt
-        rel = Cue(rel_start, rel_end, c.text, c.lang)
-        body.append(cue_block(rel))
+        # ...and never past the END of this segment, for the same reason across the
+        # boundary. A cue's own words always finish inside the window (the window's audio
+        # is all the recogniser was given), so an overrun is always the minimum-duration
+        # clamp stretching the last cue, and it would sit on screen underneath the next
+        # segment's first cue.
+        span = seg_end - seg_start
+        if rel_end > span:
+            rel_end = max(rel_start + 0.2, span)
+        body.append(cue_block(Cue(rel_start, rel_end, c.text, c.lang)))
         body.append("")
     with open(path, "w") as fh:
         fh.write("\n".join(body).rstrip() + "\n")
 
 
-def _pdt_companion_playlist(text, now, out_dir):
-    """Copy a Shaka video media playlist and inject EXT-X-PROGRAM-DATE-TIME so the video
-    carries a wall-clock the subtitle track aligns to.
+def _pdt_companion_playlist(text, out_dir, seg_dur):
+    """Copy a Shaka video media playlist and inject EXT-X-PROGRAM-DATE-TIME derived from
+    each segment's OWN tfdt, so the video carries the same wall clock the subtitle track
+    is stamped against.
 
-    RELIABILITY: PDT is stamped on EVERY segment, each from that segment file's OWN
-    mtime (the real wall-clock when the encoder wrote it) minus its duration. A single
-    anchor at the window's first segment, extrapolated forward by the nominal EXTINF,
-    accumulates error across the whole window whenever the real wall spacing differs
-    from the nominal duration (measured live: ~3.7s wall per 4.0s segment, ~22s of
-    error at the live edge of a 300s window) — which silently pushed every subtitle
-    cue outside the played region a few minutes into a run. Per-segment stamps from
-    real mtimes cannot accumulate anything: the edge is exact, the DVR window is
-    exact, and mtimes never change so the timeline never jitters between
-    regenerations. A segment that cannot be stat'd continues from the previous stamp
-    (spec-compliant: players interpolate between PDT tags)."""
+    PDT = run epoch + segment PTS. Because both terms are exact, consecutive stamps are
+    exactly EXTINF apart, the DVR window and the live edge are both exact, and the
+    stamps never move between regenerations. A segment whose header cannot be read
+    continues from the previous stamp (spec-compliant: players interpolate between PDT
+    tags)."""
+    epoch = _media_epoch(out_dir, seg_dur)
     lines = text.splitlines()
     out = []
     pend = None            # duration parsed from the preceding EXTINF
-    prev_end = None        # wall-clock end of the previous segment (continuity fallback)
-    total_listed = 0.0
+    prev_end = None        # wall clock end of the previous segment (continuity fallback)
     for l in lines:
         if l.startswith("#EXTINF:"):
-            try: pend = float(l[len("#EXTINF:"):].split(",")[0])
-            except ValueError: pend = None
+            try:
+                pend = float(l[len("#EXTINF:"):].split(",")[0])
+            except ValueError:
+                pend = None
             out.append(l)
         elif l and not l.startswith("#") and pend is not None:
             dur = pend or 0.0
-            try:
-                start_wall = os.path.getmtime(os.path.join(out_dir, l)) - dur
-            except OSError:
-                start_wall = prev_end if prev_end is not None else (now - total_listed - dur)
-            out.append(f"#EXT-X-PROGRAM-DATE-TIME:{_iso(start_wall)}")
+            pts = _seg_pts(out_dir, l) if epoch is not None else None
+            start_wall = (epoch + pts) if pts is not None else prev_end
+            if start_wall is not None:
+                out.append(f"#EXT-X-PROGRAM-DATE-TIME:{_iso(start_wall)}")
+                prev_end = start_wall + dur
             out.append(l)
-            prev_end = start_wall + dur
-            total_listed += dur
             pend = None
         else:
             out.append(l)
     return "\n".join(out) + "\n"
 
 
-def _write_companion(out_dir, langs, default_lang, now):
+def _write_companion(out_dir, langs, default_lang, seg_dur):
     """Build master_cc.m3u8 that (a) carries the SUBTITLES group and (b) points each
     video variant at a PDT-stamped companion playlist, so the player aligns subs to
-    frames by wall-clock. Returns nothing; writes master_cc.m3u8 + *_cc.m3u8."""
+    frames by wall clock. Writes master_cc.m3u8 + *_cc.m3u8."""
     src_path = os.path.join(out_dir, "master.m3u8")
     if not os.path.exists(src_path):
         return
@@ -944,7 +1162,7 @@ def _write_companion(out_dir, langs, default_lang, now):
             try:
                 vtext = open(os.path.join(out_dir, line)).read()
                 with open(os.path.join(out_dir, cc_name), "w") as fh:
-                    fh.write(_pdt_companion_playlist(vtext, now, out_dir))
+                    fh.write(_pdt_companion_playlist(vtext, out_dir, seg_dur))
                 out.append(cc_name)
             except OSError:
                 out.append(line)  # fall back to the plain playlist if unreadable
@@ -956,8 +1174,7 @@ def _write_companion(out_dir, langs, default_lang, now):
 
 
 def _write_companion_mpd(out_dir, langs, chunk, first_idx):
-    """Best-effort: copy Shaka's manifest.mpd and add a text AdaptationSet per language.
-    DASH live text alignment likely needs tuning against a real player (flagged)."""
+    """Best-effort: copy Shaka's manifest.mpd and add a text AdaptationSet per language."""
     src_path = os.path.join(out_dir, "manifest.mpd")
     if not os.path.exists(src_path):
         return
@@ -993,24 +1210,22 @@ def _subs_first_idx(out_dir, lang):
     return 0
 
 
-def start_companion_refresher(out_dir, langs, default_lang, chunk, interval=2.0):
+def start_companion_refresher(out_dir, langs, default_lang, chunk, seg_dur, interval=2.0):
     """Regenerate the caption COMPANION manifests on a FAST fixed cadence, DECOUPLED
     from caption production.
 
     The player watches the companion (master_cc.m3u8 -> stream_*_cc.m3u8) so it can see
-    the subtitle group. If the companion only refreshed when a caption chunk finished
-    (~8-10s), the companion VIDEO playlist would advance in bursts of 2-3 segments while
-    Shaka's real playlist advances every 4s — the player stalls then jumps, which shows
-    as a stutter/shiver. Refreshing every ~2s tracks Shaka's live edge so video stays
-    smooth, while the PDT and the (existence-gated) subtitle group stay current. This is
-    the single owner of the companion manifests; the caption worker only writes the
-    subtitle segments + subs.m3u8."""
+    the subtitle group. If the companion only refreshed when a caption window finished,
+    the companion VIDEO playlist would advance in bursts while Shaka's real playlist
+    advances every segment: the player stalls then jumps, which shows as a stutter.
+    Refreshing every ~2s tracks Shaka's live edge so video stays smooth. This is the
+    single owner of the companion manifests; the caption worker only writes the subtitle
+    segments and subs.m3u8."""
     def loop():
         while True:
             try:
                 if os.path.exists(os.path.join(out_dir, "master.m3u8")):
-                    now = time.time()
-                    _write_companion(out_dir, langs, default_lang, now)
+                    _write_companion(out_dir, langs, default_lang, seg_dur)
                     _write_companion_mpd(out_dir, langs, chunk, _subs_first_idx(out_dir, default_lang))
             except Exception as e:  # noqa: BLE001
                 log(f"companion refresher error: {e}")
@@ -1019,12 +1234,62 @@ def start_companion_refresher(out_dir, langs, default_lang, chunk, interval=2.0)
     log(f"captions: companion refresher every {interval}s (decoupled from transcribe)")
 
 
+def _decode_delivered_audio(out_dir, seg_nums, wav_path):
+    """Decode a run of DELIVERED audio segments to the 16 kHz mono WAV whisper wants.
+
+    Returns (wav_start_pts, duration_sec) where wav_start_pts is the exact media PTS of
+    the first sample, read from the first segment's tfdt. Returns None if the window is
+    not readable, which simply means we try again on the next pass."""
+    adir = os.path.join(out_dir, "audio")
+    init = os.path.join(adir, "init.mp4")
+    if not os.path.exists(init) or not seg_nums:
+        return None
+    paths = [os.path.join(adir, f"seg_{n}.m4s") for n in seg_nums]
+    if not all(os.path.exists(p) for p in paths):
+        return None
+    start = _seg_pts(out_dir, os.path.relpath(paths[0], out_dir))
+    if start is None:
+        return None
+    blob = wav_path + ".mp4"
+    try:
+        with open(blob, "wb") as out:
+            out.write(open(init, "rb").read())
+            for p in paths:
+                out.write(open(p, "rb").read())
+        # -vn: audio only. The CMAF timeline starts at a large tfdt; WAV has no
+        # timestamps, so the samples land at 0 and `start` above is what maps them back.
+        subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
+                        "-i", blob, "-vn", "-ac", "1", "-ar", "16000", wav_path],
+                       check=True, timeout=60)
+    except Exception:  # noqa: BLE001
+        return None
+    finally:
+        try:
+            os.remove(blob)
+        except OSError:
+            pass
+    try:
+        dur = os.path.getsize(wav_path) / (16000 * 2)   # 16-bit mono
+    except OSError:
+        dur = 0.0
+    return start, dur
+
+
 def start_captions(cfg, out_dir):
     cap = cfg.get("captions")
     if not cap or not cap.get("enabled"):
         return
     seg = float(cfg.get("segment_seconds", 4))
     chunk = float(cap.get("chunk_seconds") or max(8.0, seg * 2))
+    # a caption window is a whole number of DELIVERED audio segments, so its start and
+    # end are exact points on the media timeline rather than an arbitrary cut
+    per_win = max(1, int(round(chunk / seg)))
+    win_sec = per_win * seg
+    # segments of audio decoded BEFORE the window purely as context for the recogniser.
+    # Whisper is far more accurate when a sentence does not begin at a hard cut, but
+    # anything it finds in the preroll is discarded: those words belong to the previous
+    # window and were already published there.
+    preroll = max(0, int(cap.get("preroll_segments", 1)))
     targets = cap.get("targets", []) or []
     src_lang = cap.get("source_lang", "auto")
     engine = cap.get("engine") or "whisper"
@@ -1037,55 +1302,20 @@ def start_captions(cfg, out_dir):
     for l in langs:
         os.makedirs(os.path.join(sub_root, l), exist_ok=True)
         # Write an EMPTY live subtitle playlist up-front. hls.js loads the master ONCE,
-        # so the subtitle track must be advertised from the very first companion write —
-        # otherwise a player that connects before the first cue is produced never gets a
-        # subtitle track for the whole session. This empty playlist makes the track exist
-        # immediately (no 404) and it fills in as cues arrive.
+        # so the subtitle track must be advertised from the very first companion write,
+        # otherwise a player that connects before the first cue exists never gets a
+        # subtitle track for the whole session. This makes the track exist immediately
+        # (no 404) and it fills in as cues arrive.
         with open(os.path.join(sub_root, l, "subs.m3u8"), "w") as fh:
-            fh.write(_live_sub_playlist([], chunk, 0, time.time()))
+            fh.write(_live_sub_playlist([], win_sec, 0))
     tmp = os.path.join(WORK_DIR, "cap_audio")
     os.makedirs(tmp, exist_ok=True)
-    audio_url = _captions_audio_url(cfg)
-
-    # continuous audio segmenter: fixed-length mono 16k WAV chunks for whisper. Must start
-    # at the LIVE EDGE (same adaptive HLS handling as the video ingest) or captions would
-    # transcribe old audio and never line up.
-    #
-    # PACING (-re) is essential for SYNC on pull sources: without it ffmpeg gulps a whole
-    # source segment (10s here) the instant it is published, so wav chunks close in
-    # BURSTS and their mtimes (our measured capture clock for the cue timestamp maps)
-    # jitter by up to a source segment against the -re paced video path. That was the
-    # words-out-of-step-with-speech error. Paced, both pipelines consume the source at
-    # 1x and the two capture clocks track each other.
-    # command BUILDER so every (re)spawn re-probes the live edge: a respawn hours into a
-    # run must join the stream NOW, not where the original probe pointed. The %05d
-    # numbering continues from the highest existing chunk via -segment_start_number.
-    def aseg():
-        pace = ["-re"] if re.match(r"^https?://", audio_url, re.I) else []
-        existing = sorted(glob.glob(os.path.join(tmp, "cap_*.wav")))
-        nxt = 0
-        if existing:
-            mo = re.search(r"cap_(\d+)\.wav", existing[-1])
-            nxt = (int(mo.group(1)) + 1) if mo else 0
-        return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-                *_hls_edge_flags(audio_url), *pace,
-                "-i", audio_url, "-vn", "-ac", "1", "-ar", "16000",
-                "-f", "segment", "-segment_time", str(chunk), "-reset_timestamps", "1",
-                "-segment_start_number", str(nxt),
-                os.path.join(tmp, "cap_%05d.wav")]
-    # wall-clock anchor for program time 0 (when the audio segmenter starts reading the
-    # live edge). Subtitle segment i -> PDT cap_t0 + i*chunk; the companion video
-    # playlists carry a matching wall-clock so the player aligns cues to frames.
-    cap_t0 = time.time()
-    # SUPERVISED: if the source drops, this ffmpeg dies; unsupervised it stayed dead and
-    # 'transcription stopped working for the rest of the run'. Now it rejoins the live
-    # edge as soon as the source is back.
-    spawn_supervised("caption-audio", aseg)
-    log(f"captions: live worker engine={engine} chunk={chunk}s targets={targets} langs={langs}")
+    log(f"captions: engine={engine} window={win_sec}s ({per_win} delivered audio "
+        f"segment(s), {preroll} preroll) targets={targets} langs={langs}")
 
     def cap_event(etype, **detail):
-        # surface caption lifecycle/errors to the control plane so the UI can show
-        # WHY captions are (not) loading — not a roadblock, but worth knowing.
+        # surface caption lifecycle/errors to the control plane so the UI can show WHY
+        # captions are (or are not) loading
         try:
             if _events:
                 _events.event(etype, **detail)
@@ -1093,7 +1323,7 @@ def start_captions(cfg, out_dir):
             pass
 
     def worker():
-        cap_event("caption.status", state="starting", engine=engine, langs=langs, chunk_sec=chunk)
+        cap_event("caption.status", state="starting", engine=engine, langs=langs, chunk_sec=win_sec)
         try:
             import captions as capmod
         except Exception as e:  # noqa: BLE001
@@ -1101,137 +1331,199 @@ def start_captions(cfg, out_dir):
             cap_event("caption.error", stage="import", reason=str(e),
                       hint="install faster-whisper (+ transformers/torch for translation) in the encoder's python")
             return
-        # Build the engine ONCE and reuse across chunks (one warm whisper model + one
-        # NLLB translator), then just point it at each new audio chunk. Recreating per
-        # chunk would reload the models every time and never keep up live.
+        # Build the engine ONCE and reuse across windows (one warm whisper model + one
+        # NLLB translator), then just point it at each new audio window. Recreating it
+        # per window would reload the models every time and never keep up live.
         reuse = None
         if engine == "whisper":
             try:
                 mt = capmod.make_translator(targets, base_lang)
                 reuse = capmod.WhisperAdapter("", src_lang, model_size, translator=mt)
-                log("captions: whisper model + translator initialised (warming on first chunk)")
+                log(f"captions: whisper model '{reuse.model_size}' + translator initialised "
+                    f"(warming on first window)")
             except Exception as e:  # noqa: BLE001
                 log(f"captions: engine init failed ({e}); worker not started")
                 cap_event("caption.error", stage="init", reason=str(e),
                           hint="whisper/NLLB model failed to load; check the model download + memory")
                 return
-        seen = set()
-        store = {l: [] for l in langs}
-        pdts = {}   # chunk idx -> measured wall-clock START (wav mtime - chunk)
+        adir = os.path.join(out_dir, "audio")
+        wav = os.path.join(tmp, "window.wav")
+        store = {l: [] for l in langs}       # published cues, for the final VOD VTT
+        published = []                       # [(idx, pdt, dur)] in the live window
+        cursor = None                        # next audio segment number to start a window at
         errs = 0
         produced = False
-        win = max(3, int(round(float(cfg.get("dvr_seconds", 300)) / chunk)))
+        keep = max(3, int(round(float(cfg.get("dvr_seconds", 300)) / win_sec)))
+        last_text = {}
         while True:
             try:
-                wavs = sorted(glob.glob(os.path.join(tmp, "cap_*.wav")))
-                fresh = [w for w in wavs[:-1] if w not in seen]  # [:-1] skips the chunk still being written
-                # LIVE CURRENCY GUARANTEE: captions must track the stream, not a queue. If
-                # transcription falls behind (slow chunk, CPU contention, heavy translation)
-                # the pending list grows, and processing it in order means NEVER catching up:
-                # the offset only compounds (observed 50s+ behind, past the player's hold
-                # point = captions invisible while burning maximum compute). So when a
-                # backlog builds, jump to the NEWEST pending chunk and record the skipped
-                # ones as a caption gap. A live viewer loses a few seconds of captions once;
-                # they never lose captions permanently.
-                if len(fresh) > 2:
-                    for w in fresh[:-1]:
-                        seen.add(w)
-                    log(f"captions: {len(fresh) - 1} chunk(s) behind; skipping to the newest to stay live")
-                    cap_event("caption.skip", skipped=len(fresh) - 1)
-                    fresh = fresh[-1:]
-                for w in fresh:
-                    seen.add(w)
-                    mo = re.search(r"cap_(\d+)\.wav", w)
-                    if not mo:
+                nums = sorted(_seg_num(p) for p in glob.glob(os.path.join(adir, "seg_*.m4s")))
+                nums = [n for n in nums if n >= 0]
+                if len(nums) < 2:
+                    time.sleep(0.5)
+                    continue
+                # the newest file may still be being written; a segment is only complete
+                # once the one after it exists
+                complete = set(nums[:-1])
+                newest = max(complete)
+                if cursor is None:
+                    # START AT THE LIVE EDGE: begin with the newest complete window, not
+                    # with whatever is still sitting in the DVR window from before the
+                    # caption worker was ready
+                    cursor = max(min(complete), newest - per_win + 1)
+                # LIVE CURRENCY: if transcription falls behind (slow window, CPU
+                # contention, heavy translation) processing in order means never catching
+                # up and the offset only compounds, which ends with captions past the
+                # player's hold point and invisible while burning maximum compute. So when
+                # a backlog builds, jump to the newest full window and record the gap. A
+                # live viewer loses a few seconds of captions once; they never lose
+                # captions permanently.
+                behind = (newest - cursor + 1) // per_win - 1
+                if behind >= 2:
+                    skipped = behind * per_win
+                    cursor += skipped
+                    log(f"captions: {behind} window(s) behind; skipping to the newest to stay live")
+                    cap_event("caption.skip", skipped=skipped)
+                window = list(range(cursor, cursor + per_win))
+                if not all(n in complete for n in window):
+                    time.sleep(0.5)
+                    continue
+                pre = [n for n in range(cursor - preroll, cursor) if n in complete]
+                dec = _decode_delivered_audio(out_dir, pre + window, wav)
+                if dec is None:
+                    time.sleep(0.5)
+                    continue
+                wav_pts, wav_dur = dec
+                win_start = _seg_pts(out_dir, f"audio/seg_{cursor}.m4s")
+                if win_start is None:
+                    win_start = wav_pts + len(pre) * seg
+                # the window ENDS exactly where the next delivered segment begins. Taking
+                # win_start + nominal duration instead left a gap or an overlap whenever
+                # the packager cut a segment slightly short or long on a keyframe, and an
+                # overlap means the same words published twice on two different segments.
+                win_end = _seg_pts(out_dir, f"audio/seg_{cursor + per_win}.m4s")
+                if win_end is None or win_end <= win_start:
+                    win_end = win_start + win_sec
+                win_dur = win_end - win_start
+                t0 = time.time()
+                try:
+                    if reuse is not None:
+                        reuse.audio_path = wav
+                        # tell the recogniser where the context ends and this window
+                        # begins, so a sentence crossing the boundary is cut there
+                        # instead of being lost with the context it started in
+                        reuse.split_at = max(0.0, win_start - wav_pts)
+                        raw = reuse.transcribe(targets)
+                    else:
+                        ad = capmod.make_adapter({"engine": engine, "audio_path": wav,
+                                                  "source_lang": src_lang, "targets": targets,
+                                                  "model_size": model_size})
+                        raw = ad.transcribe(targets)
+                except Exception as e:  # noqa: BLE001
+                    errs += 1
+                    log(f"captions: window at seg {cursor} transcribe failed: {e}")
+                    if errs == 1 or errs % 10 == 0:
+                        cap_event("caption.error", stage="transcribe", chunk=cursor,
+                                  reason=str(e), count=errs)
+                    cursor += per_win
+                    continue
+                proc = time.time() - t0
+                # cue times are relative to the WAV; wav_pts puts them on the media
+                # timeline exactly, and offset_cfg is the optional playout offset
+                cues = capmod.apply_offset(raw, wav_pts + offset_cfg)
+                if not produced:
+                    produced = True
+                    cap_event("caption.status", state="producing", langs=langs)
+                fresh = []
+                for c in cues:
+                    text = (c.text or "").strip()
+                    if not text:
                         continue
-                    idx = int(mo.group(1))
-                    base = idx * chunk
-                    # measured capture clock: the wav closes when its last audio sample was
-                    # read, so mtime - chunk = the REAL wall-clock start of this chunk.
-                    try:
-                        pdts[idx] = os.path.getmtime(w) - chunk
-                    except OSError:
-                        pass
-                    t0 = time.time()
-                    try:
-                        if reuse is not None:
-                            reuse.audio_path = w
-                            cues = capmod.apply_offset(reuse.transcribe(targets), base + offset_cfg)
-                        else:
-                            ad = capmod.make_adapter({"engine": engine, "audio_path": w,
-                                                      "source_lang": src_lang, "targets": targets,
-                                                      "model_size": model_size})
-                            cues = capmod.apply_offset(ad.transcribe(targets), base + offset_cfg)
-                    except Exception as e:  # noqa: BLE001
-                        errs += 1
-                        log(f"captions: chunk {idx} transcribe failed: {e}")
-                        if errs == 1 or errs % 10 == 0:
-                            cap_event("caption.error", stage="transcribe", chunk=idx, reason=str(e), count=errs)
+                    # anything that STARTS in the preroll belongs to the previous window
+                    # and was already published there. The recogniser cuts a cue at the
+                    # boundary (split_at), so a cue that belongs to this window always
+                    # starts at it or after it. Testing the END instead let a preroll cue
+                    # through whenever its last word happened to finish a fraction after
+                    # the boundary, and it was then clamped forward, which put a whole
+                    # already-shown sentence on screen for a fraction of a second.
+                    if c.start < win_start - 0.05:
                         continue
-                    proc = time.time() - t0
-                    if not produced:
-                        produced = True
-                        cap_event("caption.status", state="producing", langs=langs)
-                    est = round(chunk + proc + 1.0, 1)
-                    # CUE HYGIENE before storing: drop empties, and merge a cue that
-                    # repeats the LAST stored text for its language (whisper repeats
-                    # itself across chunk boundaries and on hallucinated silence, which
-                    # rendered as the same line stacked twice on screen).
-                    for c in cues:
-                        text = (c.text or "").strip()
-                        if not text:
-                            continue
-                        lst = store.setdefault(c.lang, [])
-                        if lst and lst[-1].text.strip() == text and c.start - lst[-1].end < 1.5:
-                            lst[-1].end = max(lst[-1].end, c.end)   # extend, do not duplicate
-                            continue
-                        lst.append(c)
-                    first = max(0, idx - win + 1)
-                    # true video PTS (90kHz) at this chunk's wall-clock start, so the
-                    # timestamp map puts the cues exactly where the matching frames are
-                    w0 = pdts.get(idx)
-                    pts = _video_pts_of_wall(out_dir, w0, seg) if w0 is not None else None
-                    mpegts = int(round(pts * 90000)) if pts is not None and pts >= 0 else None
-                    for l in langs:
-                        _write_sub_segment(os.path.join(sub_root, l, f"sub_{idx}.vtt"),
-                                           store.get(l, []), base, base + chunk, mpegts=mpegts)
-                        with open(os.path.join(sub_root, l, "subs.m3u8"), "w") as fh:
-                            # per-chunk PDT from measured capture times (cap_t0 clock is
-                            # only the fallback for chunks with no measurement).
-                            fh.write(_live_sub_playlist(range(first, idx + 1), chunk, first, cap_t0, pdt_map=pdts))
-                    # NOTE: the companion manifests are refreshed by the decoupled
-                    # companion thread (fast, fixed cadence) — NOT here — so video stays
-                    # smooth regardless of transcribe timing.
-                    # TRACEABILITY: every chunk's full alignment story in one event/log
-                    # line: WHICH chunk, the WALL-CLOCK window its audio covers, and the
-                    # VIDEO PTS its cues are pinned to in the manifest. This is the
-                    # answer to 'do we know which frames these words belong to'.
-                    wall_iso = _iso(w0) if w0 is not None else None
-                    pts_sec = round(pts, 2) if pts is not None else None
-                    log(f"captions: chunk {idx} audio@{wall_iso or '?'} -> video PTS "
-                        f"{pts_sec if pts_sec is not None else 'unmapped'}s proc={proc:.1f}s")
-                    if _events:
-                        _events.event("caption.offset", est_offset_sec=est, proc_sec=round(proc, 1),
-                                      chunk_sec=chunk, realtime=bool(proc < chunk), langs=langs,
-                                      chunk=idx, wall_start=wall_iso, video_pts_sec=pts_sec,
-                                      # per-chunk detected spoken language (auto mode), so the
-                                      # console can show what the AI heard when it changes
-                                      detected=getattr(reuse, "_last_lang", None))
+                    c.start = max(c.start, win_start)
+                    if c.start >= win_end:
+                        # a word that ran past the window edge: hold it at the edge rather
+                        # than dropping it, the next window's preroll will not re-emit it
+                        c.start = win_end - 0.001
+                    c.end = max(c.end, c.start + 0.4)
+                    # whisper repeats itself across boundaries and on hallucinated silence,
+                    # which rendered as the same line stacked twice on screen
+                    if last_text.get(c.lang) == text:
+                        continue
+                    last_text[c.lang] = text
+                    c.text = text
+                    fresh.append(c)
+                    store.setdefault(c.lang, []).append(c)
+                mpegts = int(round(win_start * 90000)) if win_start >= 0 else None
+                epoch = _media_epoch(out_dir, seg)
+                pdt = (epoch + win_start) if epoch is not None else None
+                published.append((cursor, pdt, win_dur))
+                published[:] = published[-keep:]
+                for l in langs:
+                    _write_sub_segment(os.path.join(sub_root, l, f"sub_{cursor}.vtt"),
+                                       [c for c in fresh if c.lang == l],
+                                       win_start, win_end, mpegts=mpegts)
+                    with open(os.path.join(sub_root, l, "subs.m3u8"), "w") as fh:
+                        fh.write(_live_sub_playlist(published, win_sec, published[0][0]))
+                est = round(win_dur + proc + 1.0, 1)
+                # HEADROOM WARNING: transcription that takes more than half the window it
+                # covers has nothing left for a busy moment, and the next stall turns into
+                # skipped windows (gaps in the captions). Say so once, plainly, with the
+                # lever to pull, rather than letting it show up later as missing subtitles.
+                windows_done = getattr(worker, "_n", 0) + 1
+                worker._n = windows_done
+                # the first couple of windows include model warm-up, which is not a
+                # steady-state signal and should not raise an alarm on every start
+                if windows_done > 2 and proc > 0.5 * win_dur and not getattr(worker, "_warned", False):
+                    worker._warned = True
+                    log(f"captions: transcribe is using {proc / win_dur:.0%} of the window "
+                        f"(model={getattr(reuse, 'model_size', '?')}); this box has little "
+                        f"headroom. Use a smaller model, a GPU, or a longer chunk_seconds.")
+                    cap_event("caption.slow", proc_sec=round(proc, 1), window_sec=round(win_dur, 1),
+                              model=getattr(reuse, "model_size", None))
+                # TRACEABILITY: every window's full alignment story on one line. WHICH
+                # delivered audio segments, the exact media PTS they occupy, and the PDT
+                # the player will align them to. This is the answer to "do we know which
+                # frames these words belong to".
+                log(f"captions: seg {cursor}..{cursor + per_win - 1} pts "
+                    f"{win_start:.3f}..{win_end:.3f}s -> {len(fresh)} cue(s) "
+                    f"proc={proc:.1f}s pdt={_iso(pdt) if pdt else '?'}")
+                if _events:
+                    _events.event("caption.offset", est_offset_sec=est, proc_sec=round(proc, 1),
+                                  chunk_sec=win_sec, realtime=bool(proc < win_sec), langs=langs,
+                                  chunk=cursor, video_pts_sec=round(win_start, 2),
+                                  wall_start=_iso(pdt) if pdt else None,
+                                  cues=len(fresh),
+                                  detected=getattr(reuse, "_last_lang", None))
+                cursor += per_win
             except Exception as e:  # noqa: BLE001
                 log(f"captions worker error: {e}")
-            time.sleep(1)
+                time.sleep(1)
 
     threading.Thread(target=worker, name="captions", daemon=True).start()
     # Fast, decoupled companion regeneration so the player's video stays smooth.
-    start_companion_refresher(out_dir, langs, default_lang, chunk)
+    start_companion_refresher(out_dir, langs, default_lang, win_sec, seg)
 
 
-def shutdown(*_):
+def shutdown(sig=None, *_):
     global _shutting_down
     _shutting_down = True   # stop every supervisor from respawning
-    log("shutdown: terminating children")
+    # HONEST STOP REASON: an operator pressing stop and a container being reclaimed look
+    # identical in the log unless we say which happened. SIGINT is a person or a local
+    # stop; SIGTERM is the scheduler or the orchestrator taking the task away.
+    reason = {signal.SIGINT: "operator_stop",
+              signal.SIGTERM: "terminated"}.get(sig, "server_window_closed")
+    log(f"shutdown: terminating children (reason={reason})")
     if _events:
-        _events.channel_stop()
+        _events.channel_stop(reason)
     for sel in _selectors:
         sel.stop()
     for name, proc, _crit in _children:
