@@ -844,12 +844,18 @@ def _write_sub_segment(path, cues, seg_start, seg_end, mpegts=None):
     if mpegts is not None:
         body.append(f"X-TIMESTAMP-MAP=MPEGTS:{int(mpegts)},LOCAL:00:00:00.000")
     body.append("")
-    for c in cues:
-        if not (seg_start <= c.start < seg_end):
-            continue   # start-based ownership: exactly one segment carries each cue
+    mine = sorted((c for c in cues if seg_start <= c.start < seg_end), key=lambda c: c.start)
+    for i, c in enumerate(mine):
         dur = min(7.0, max(1.0, c.end - c.start))
         rel_start = max(0.0, c.start - seg_start)
-        rel = Cue(rel_start, rel_start + dur, c.text, c.lang)
+        rel_end = rel_start + dur
+        # never overlap the NEXT cue: the minimum-duration clamp could stretch a short
+        # cue over its successor, which renders as two lines stacked
+        if i + 1 < len(mine):
+            nxt = max(0.0, mine[i + 1].start - seg_start)
+            if rel_end > nxt > rel_start:
+                rel_end = nxt
+        rel = Cue(rel_start, rel_end, c.text, c.lang)
         body.append(cue_block(rel))
         body.append("")
     with open(path, "w") as fh:
