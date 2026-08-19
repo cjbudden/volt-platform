@@ -168,6 +168,11 @@ def relay_cmd(inp, group, idx, progress_url):
     if proto in ("hls", "http", "https") or inp.get("_pace"):
         cmd += ["-re"]
     cmd += ["-i", inp["url"]]
+    # EXPLICIT stream selection: a multi-variant master lists every rendition's streams
+    # and ffmpeg probes them all (printing 'could not find codec parameters' for the
+    # ones it never downloads). Map the first video + first audio deterministically so
+    # the relay's choice never depends on probe luck.
+    cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
     cmd += ["-c", "copy", "-f", "mpegts", _priv_url(group, idx)]
     return cmd
 

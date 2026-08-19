@@ -830,17 +830,28 @@ def _write_sub_segment(path, cues, seg_start, seg_end, mpegts=None):
     spot on the timeline, so captions show only while the playhead is near that one
     spot: the 'worked for two chunks then stopped forever' failure. `mpegts` is the
     true PTS in 90kHz units (from _video_pts_of_wall); when unknown the map is
-    omitted and players fall back to fragment-anchored placement."""
+    omitted and players fall back to fragment-anchored placement.
+
+    READABILITY (the anti-stacking rules):
+      * a cue lives in EXACTLY ONE segment: the one containing its START. Writing a
+        spanning cue into every overlapped segment created near-duplicate copies
+        (each mapped through a slightly different measured clock) that STACKED on
+        screen. A cue may extend past its segment's end; players handle that.
+      * duration is clamped to 1.0..7.0s: whisper emits both blink-length fragments
+        (unreadable) and 20s+ run-ons (three lines parked on screen)."""
     from captions import cue_block, Cue
     body = ["WEBVTT"]
     if mpegts is not None:
         body.append(f"X-TIMESTAMP-MAP=MPEGTS:{int(mpegts)},LOCAL:00:00:00.000")
     body.append("")
     for c in cues:
-        if c.end > seg_start and c.start < seg_end:
-            rel = Cue(max(0.0, c.start - seg_start), max(0.0, c.end - seg_start), c.text, c.lang)
-            body.append(cue_block(rel))
-            body.append("")
+        if not (seg_start <= c.start < seg_end):
+            continue   # start-based ownership: exactly one segment carries each cue
+        dur = min(7.0, max(1.0, c.end - c.start))
+        rel_start = max(0.0, c.start - seg_start)
+        rel = Cue(rel_start, rel_start + dur, c.text, c.lang)
+        body.append(cue_block(rel))
+        body.append("")
     with open(path, "w") as fh:
         fh.write("\n".join(body).rstrip() + "\n")
 
@@ -1156,8 +1167,19 @@ def start_captions(cfg, out_dir):
                         produced = True
                         cap_event("caption.status", state="producing", langs=langs)
                     est = round(chunk + proc + 1.0, 1)
+                    # CUE HYGIENE before storing: drop empties, and merge a cue that
+                    # repeats the LAST stored text for its language (whisper repeats
+                    # itself across chunk boundaries and on hallucinated silence, which
+                    # rendered as the same line stacked twice on screen).
                     for c in cues:
-                        store.setdefault(c.lang, []).append(c)
+                        text = (c.text or "").strip()
+                        if not text:
+                            continue
+                        lst = store.setdefault(c.lang, [])
+                        if lst and lst[-1].text.strip() == text and c.start - lst[-1].end < 1.5:
+                            lst[-1].end = max(lst[-1].end, c.end)   # extend, do not duplicate
+                            continue
+                        lst.append(c)
                     first = max(0, idx - win + 1)
                     # true video PTS (90kHz) at this chunk's wall-clock start, so the
                     # timestamp map puts the cues exactly where the matching frames are
@@ -1174,9 +1196,18 @@ def start_captions(cfg, out_dir):
                     # NOTE: the companion manifests are refreshed by the decoupled
                     # companion thread (fast, fixed cadence) — NOT here — so video stays
                     # smooth regardless of transcribe timing.
+                    # TRACEABILITY: every chunk's full alignment story in one event/log
+                    # line: WHICH chunk, the WALL-CLOCK window its audio covers, and the
+                    # VIDEO PTS its cues are pinned to in the manifest. This is the
+                    # answer to 'do we know which frames these words belong to'.
+                    wall_iso = _iso(w0) if w0 is not None else None
+                    pts_sec = round(pts, 2) if pts is not None else None
+                    log(f"captions: chunk {idx} audio@{wall_iso or '?'} -> video PTS "
+                        f"{pts_sec if pts_sec is not None else 'unmapped'}s proc={proc:.1f}s")
                     if _events:
                         _events.event("caption.offset", est_offset_sec=est, proc_sec=round(proc, 1),
                                       chunk_sec=chunk, realtime=bool(proc < chunk), langs=langs,
+                                      chunk=idx, wall_start=wall_iso, video_pts_sec=pts_sec,
                                       # per-chunk detected spoken language (auto mode), so the
                                       # console can show what the AI heard when it changes
                                       detected=getattr(reuse, "_last_lang", None))

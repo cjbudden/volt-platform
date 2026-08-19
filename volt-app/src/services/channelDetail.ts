@@ -66,7 +66,11 @@ function encoderLogTail(channelId: string): { ts: string; level: string; title: 
     // quote the ffmpeg command, so the substring 'error' matches and a NORMAL start-up
     // line gets surfaced as an input failure. A command echo is never an error: skip them.
     const spawn = /^\[volt-encoder\]\s+start\s+[\w:.<>-]+:/;
-    return lines.filter((l) => rx.test(l) && !spawn.test(l)).slice(-10).map((l) => ({
+    // Probe noise: reading a multi-variant HLS master, ffmpeg reports 'could not find
+    // codec parameters' for every rendition it probed but never downloaded. Harmless
+    // start-up chatter, not a fault: keep it out of the error feed entirely.
+    const probeNoise = /Could not find codec parameters/i;
+    return lines.filter((l) => rx.test(l) && !spawn.test(l) && !probeNoise.test(l)).slice(-10).map((l) => ({
       ts: 'encoder',
       level: bad.test(l) ? 'down' : 'warn',
       title: 'Encoder',

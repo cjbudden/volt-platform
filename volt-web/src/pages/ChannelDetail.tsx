@@ -1166,6 +1166,37 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   // now - playingDate = encoder write to glass. Without PDT we fall back to a rough
   // buffer-based estimate and mark it approximate.
   const [latency, setLatency] = useState<{ sec: number; exact: boolean } | null>(null)
+  // STALL DETECTION: 'healthy' must mean WATCHABLE. If the playhead stops advancing
+  // while the player believes it is playing, say so on the picture (no silent freeze
+  // with green gates) and try to recover: resume loading, then media-error recovery,
+  // then snap back to the live edge.
+  const [stalled, setStalled] = useState(false)
+  const stallRef = useRef<{ t: number; at: number; tries: number; lastFix: number }>({ t: -1, at: 0, tries: 0, lastFix: 0 })
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const v = videoRef.current
+      const s = stallRef.current
+      const now = performance.now()
+      if (!v || v.paused || v.ended || v.readyState < 2) { s.t = -1; s.at = now; setStalled(false); return }
+      if (v.currentTime !== s.t) { s.t = v.currentTime; s.at = now; s.tries = 0; setStalled(false); return }
+      if (now - s.at <= 6000) return
+      setStalled(true)
+      if (now - s.lastFix > 8000) {
+        s.lastFix = now; s.tries++
+        try {
+          if (fmt === 'hls' && hlsRef.current) {
+            if (s.tries === 1) hlsRef.current.startLoad()
+            else if (s.tries === 2) hlsRef.current.recoverMediaError()
+            else { const sk = v.seekable; if (sk.length) { v.currentTime = Math.max(sk.start(0), sk.end(sk.length - 1) - Math.max(2, capHold)) ; v.play().catch(() => {}) } }
+          } else if (dashRef.current) {
+            dashRef.current.seekToOriginalLive?.()
+          }
+        } catch { /* keep trying on the next cycle */ }
+      }
+    }, 1000)
+    return () => clearInterval(iv)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fmt])
   useEffect(() => {
     const iv = setInterval(() => {
       try {
@@ -1466,7 +1497,18 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
             fontSize: 15, fontWeight: 600, maxWidth: '88%', textAlign: 'center', lineHeight: 1.35, whiteSpace: 'pre-line',
           }}>{cue}</div>
         )}
-        <div className="ptime">{liveNow ? 'live edge' : `${fmtOffset(behind)} behind live`}</div>
+        {stalled && (
+          <div style={{
+            position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', zIndex: 6,
+            background: 'rgba(2,6,14,.55)', backdropFilter: 'blur(1px)',
+          }}>
+            <div style={{ textAlign: 'center', color: '#fecaca' }}>
+              <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: '.06em' }}>PLAYBACK STALLED</div>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>The playhead stopped advancing. Recovering automatically…</div>
+            </div>
+          </div>
+        )}
+        <div className="ptime">{stalled ? 'stalled — recovering' : liveNow ? 'live edge' : `${fmtOffset(behind)} behind live`}</div>
       </div>
 
       {/* DVR scrubber — LIVE is the right end. The handle sits at the right (live) and you
@@ -1495,7 +1537,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
       </div>
 
       <div className="pfoot">
-        <span className="dot-s live" /> Playing {fmt.toUpperCase()}
+        <span className={`dot-s ${stalled ? 'down' : 'live'}`} /> {stalled ? 'Stalled — recovering' : `Playing ${fmt.toUpperCase()}`}
         {latency && (
           <span title={latency.exact
             ? 'Estimated latency from the encoder writing a segment to it playing here, measured from the manifest wall-clock stamps. Add a few seconds of ingest/encode ahead of that for full input to output.'
@@ -1518,11 +1560,9 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
               captions failed: {capStatus.reason}
             </span>
           )}
-          {capStatus && capStatus.kind === 'live' && (
-            <span title="Estimated live offset: chunk length + measured transcribe/translate time. Captions lag live by about this much; if not real-time the model can't keep up." style={{ fontSize: 11, color: capStatus.realtime ? 'var(--faint)' : '#fbbf24' }}>
-              captions ~{capStatus.sec}s{capStatus.realtime ? '' : ' (behind)'}
-            </span>
-          )}
+          {/* caption offset badge removed: it read as a fault indicator without helping
+              diagnose anything. The per-chunk alignment story (chunk id, audio wall
+              window, mapped video PTS) now lives in the QC event log instead. */}
           {capStatus && capStatus.kind === 'starting' && (
             <span style={{ fontSize: 11, color: 'var(--faint)' }}>captions starting…</span>
           )}

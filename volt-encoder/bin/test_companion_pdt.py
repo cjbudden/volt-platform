@@ -136,5 +136,19 @@ ok("00:00:00.500 --> 00:00:03.000" in body, "cues stay segment-relative under th
 encoder._write_sub_segment(vtt, [FC(8.5, 11.0, "hello")], 8.0, 16.0, mpegts=None)
 ok("X-TIMESTAMP-MAP" not in open(vtt).read(), "map omitted when PTS unknown")
 
+# ---- anti-stacking rules ----
+# a cue belongs to EXACTLY the segment containing its START: a spanning cue must not
+# be duplicated into the next segment (near-duplicate copies stacked on screen)
+encoder._write_sub_segment(vtt, [FC(6.0, 10.0, "spans the boundary")], 8.0, 16.0, mpegts=None)
+ok("spans the boundary" not in open(vtt).read(),
+   "cue starting before the segment is NOT duplicated into it")
+encoder._write_sub_segment(vtt, [FC(6.0, 10.0, "spans the boundary")], 0.0, 8.0, mpegts=None)
+ok("spans the boundary" in open(vtt).read(), "the cue lives in its START segment")
+# duration clamps: blink-length cues become readable, run-ons are cut
+encoder._write_sub_segment(vtt, [FC(8.0, 8.2, "blink")], 8.0, 16.0, mpegts=None)
+ok("00:00:00.000 --> 00:00:01.000" in open(vtt).read(), "short cue clamped up to 1s")
+encoder._write_sub_segment(vtt, [FC(8.0, 30.0, "run-on")], 8.0, 16.0, mpegts=None)
+ok("00:00:00.000 --> 00:00:07.000" in open(vtt).read(), "long cue clamped down to 7s")
+
 print(f"\n{p} passed, {f} failed")
 raise SystemExit(1 if f else 0)
