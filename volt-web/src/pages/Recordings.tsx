@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, getToken, recordingRangeUrl, type RecordingRow, type RecordingTimeline, type VodAssetRow } from '../api'
+import { api, getToken, recordingRangeUrl, type RecordingRow, type RecordingTimeline, type VodAssetRow, type RecordingProgramme, type TranscriptSearch } from '../api'
 
 /* ============================================================================
    Recordings — review what was captured, pick a range, preview it, and turn it
@@ -21,17 +21,31 @@ function fmtDur(ms: number) {
 }
 const KIND_LABEL: Record<string, string> = { event: 'Event', channel_day: 'Channel day' }
 
+const MATCH_LABEL: Record<string, string> = { title: 'name match', programme: 'EPG match', transcript: 'spoken match' }
+
 export default function Recordings() {
   const [rows, setRows] = useState<RecordingRow[] | null>(null)
   const [err, setErr] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [kindFilter, setKindFilter] = useState<'all' | 'event' | 'channel_day'>('all')
+  const [q, setQ] = useState('')
 
-  async function load() {
-    try { setRows(await api.recordings(kindFilter === 'all' ? {} : { kind: kindFilter })) }
-    catch (e: any) { setErr(e.message) }
+  async function load(searchQ = q) {
+    try {
+      setRows(await api.recordings({
+        ...(kindFilter === 'all' ? {} : { kind: kindFilter }),
+        ...(searchQ.trim() ? { q: searchQ.trim() } : {}),
+      }))
+    } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [kindFilter])
+  // debounced content search: matches recording names, EPG programme titles that
+  // aired inside a recording, and the words spoken (transcript)
+  useEffect(() => {
+    const t = setTimeout(() => { load() }, 350)
+    return () => clearTimeout(t)
+    /* eslint-disable-next-line */
+  }, [q])
 
   const open = rows?.find(r => r.id === openId) || null
 
@@ -39,7 +53,9 @@ export default function Recordings() {
     <>
       <div className="page-head">
         <div><h1>Recordings</h1><p>Review captures, select a range, preview it, and create clips or VOD assets.</p></div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input className="inp rec-search" style={{ width: 280 }} value={q} onChange={e => setQ(e.target.value)}
+            placeholder="Search names, EPG programmes, spoken words…" />
           {(['all', 'event', 'channel_day'] as const).map(k => (
             <button key={k} className={`btn ${kindFilter === k ? 'primary' : 'ghost'}`} onClick={() => setKindFilter(k)}>
               {k === 'all' ? 'All' : KIND_LABEL[k]}
@@ -62,7 +78,9 @@ export default function Recordings() {
                   const live = r.status === 'recording'
                   return (
                     <tr key={r.id} onClick={() => setOpenId(openId === r.id ? null : r.id)} style={{ cursor: 'pointer', background: openId === r.id ? 'rgba(120,140,255,.06)' : undefined }}>
-                      <td><b>{r.source_name || '—'}</b>{r.title ? <span style={{ color: 'var(--faint)' }}> · {r.title}</span> : null}</td>
+                      <td><b>{r.source_name || '—'}</b>{r.title ? <span style={{ color: 'var(--faint)' }}> · {r.title}</span> : null}
+                        {r.matched_by && <span className="badge" style={{ marginLeft: 8, fontSize: 10 }}>{MATCH_LABEL[r.matched_by] || r.matched_by}</span>}
+                      </td>
                       <td style={{ color: 'var(--muted)' }}>{KIND_LABEL[r.kind] || r.kind}</td>
                       <td style={{ color: 'var(--muted)' }}>{fmtDate(start)} {fmtClock(start)} → {end != null ? fmtClock(end) : '…'}</td>
                       <td style={{ color: 'var(--muted)' }}>{end != null ? fmtDur(end - start) : fmtDur(Date.now() - start)}</td>
@@ -76,16 +94,23 @@ export default function Recordings() {
             </table>
           </div>
         )}
-      {open && <RecordingWorkbench key={open.id} rec={open} onChanged={load} />}
+      {open && <RecordingWorkbench key={open.id} rec={open} initialQuery={q} onChanged={() => load()} />}
     </>
   )
 }
 
 /* ------------------------------------------------------------- workbench */
-function RecordingWorkbench({ rec, onChanged }: { rec: RecordingRow; onChanged: () => void }) {
+function RecordingWorkbench({ rec, initialQuery, onChanged }: { rec: RecordingRow; initialQuery?: string; onChanged: () => void }) {
   const [tl, setTl] = useState<RecordingTimeline | null>(null)
   const [tlErr, setTlErr] = useState('')
   const [vods, setVods] = useState<VodAssetRow[] | null>(null)
+  // content-aware navigation: what was ON AIR (EPG) and what was SAID (transcript)
+  const [programmes, setProgrammes] = useState<RecordingProgramme[]>([])
+  const [tsLangs, setTsLangs] = useState<string[]>([])
+  const [tsQ, setTsQ] = useState(initialQuery || '')
+  const [tsLang, setTsLang] = useState('')
+  const [tsRes, setTsRes] = useState<TranscriptSearch | null>(null)
+  const [tsBusy, setTsBusy] = useState(false)
   // selection (wall-clock ms)
   const [selFrom, setSelFrom] = useState<number | null>(null)
   const [selTo, setSelTo] = useState<number | null>(null)
@@ -111,7 +136,25 @@ function RecordingWorkbench({ rec, onChanged }: { rec: RecordingRow; onChanged: 
   async function loadVods() {
     try { setVods((await api.recording(rec.id)).vod_assets) } catch { setVods([]) }
   }
-  useEffect(() => { loadTl(); loadVods() /* eslint-disable-next-line */ }, [rec.id])
+  useEffect(() => {
+    loadTl(); loadVods()
+    api.recordingProgrammes(rec.id).then(r => setProgrammes(r.programmes)).catch(() => setProgrammes([]))
+    api.recordingTranscript(rec.id).then(r => setTsLangs(r.languages)).catch(() => setTsLangs([]))
+    /* eslint-disable-next-line */
+  }, [rec.id])
+
+  async function searchTs(query = tsQ) {
+    if (!query.trim()) { setTsRes(null); return }
+    setTsBusy(true)
+    try { setTsRes(await api.recordingTranscript(rec.id, { q: query.trim(), lang: tsLang || undefined })) }
+    catch { setTsRes(null) } finally { setTsBusy(false) }
+  }
+  // list search term carries into the workbench so a "spoken match" hit lands
+  // ready to locate: run it once when transcripts exist
+  useEffect(() => {
+    if (initialQuery?.trim() && tsLangs.length) searchTs(initialQuery)
+    /* eslint-disable-next-line */
+  }, [tsLangs.length])
 
   const domain = useMemo(() => {
     const start = Number(rec.start_epoch_ms)
@@ -129,6 +172,13 @@ function RecordingWorkbench({ rec, onChanged }: { rec: RecordingRow; onChanged: 
   function preview() {
     if (!selOk) return
     setPlayUrl(recordingRangeUrl(rec.id, selFrom!, selTo!))
+  }
+  /** Jump the range picker to a moment/slice and start playing it. */
+  function jumpTo(fromMs: number, toMs: number) {
+    const f = Math.max(domain.start, Math.min(fromMs, domain.end - 1000))
+    const t = Math.min(domain.end, Math.max(toMs, f + 1000))
+    setSelFrom(f); setSelTo(t)
+    setPlayUrl(recordingRangeUrl(rec.id, f, t))
   }
   async function createClip() {
     if (!selOk) { setActErr('Select a range first'); return }
@@ -176,6 +226,9 @@ function RecordingWorkbench({ rec, onChanged }: { rec: RecordingRow; onChanged: 
         <>
           <TimelineBar domain={domain} spans={tl.spans} from={selFrom} to={selTo}
             onChange={(f, t) => { setSelFrom(f); setSelTo(t); setPlayUrl(null) }} />
+          {programmes.length > 0 && (
+            <ProgrammeLane domain={domain} programmes={programmes} onPick={p => jumpTo(p.startMs, p.endMs)} />
+          )}
           <div style={{ display: 'flex', gap: 14, alignItems: 'center', margin: '10px 0 14px', flexWrap: 'wrap' }}>
             <RangeInput label="From" value={selFrom} min={domain.start} max={domain.end} onChange={v => { setSelFrom(v); setPlayUrl(null) }} />
             <RangeInput label="To" value={selTo} min={domain.start} max={domain.end} onChange={v => { setSelTo(v); setPlayUrl(null) }} />
@@ -186,6 +239,44 @@ function RecordingWorkbench({ rec, onChanged }: { rec: RecordingRow; onChanged: 
             <button className="btn primary" disabled={!selOk} onClick={preview}>Preview range</button>
           </div>
           {playUrl && <RangePlayer url={playUrl} />}
+
+          {tsLangs.length > 0 && (
+            <div style={{ borderTop: '1px solid var(--border)', margin: '14px 0 0', paddingTop: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--faint)', marginBottom: 6 }}>
+                Find in transcript <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>— search what was said; click a hit to jump there and clip it</span>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input className="inp ts-q" style={{ flex: '1 1 260px' }} value={tsQ}
+                  onChange={e => setTsQ(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') searchTs() }}
+                  placeholder='e.g. "interest rates" — all words, any order' />
+                {tsLangs.length > 1 && (
+                  <select className="inp" style={{ width: 130 }} value={tsLang} onChange={e => setTsLang(e.target.value)}>
+                    <option value="">all languages</option>
+                    {tsLangs.map(l => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                )}
+                <button className="btn primary" disabled={tsBusy || !tsQ.trim()} onClick={() => searchTs()}>{tsBusy ? 'Searching…' : 'Search'}</button>
+              </div>
+              {tsRes && (
+                tsRes.matches.length === 0
+                  ? <div style={{ color: 'var(--faint)', fontSize: 13, marginTop: 8 }}>No spoken match for "{tsQ.trim()}" in this recording ({tsRes.entries} transcript lines checked).</div>
+                  : (
+                    <div className="ts-hits" style={{ marginTop: 8, maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+                      {tsRes.matches.map((m, i) => (
+                        <div key={i} onClick={() => jumpTo(m.tMs - 5000, m.endMs + 10000)}
+                          style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '8px 12px', cursor: 'pointer', borderTop: i ? '1px solid var(--border)' : 'none' }}>
+                          <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 12, color: 'var(--brand)', flex: 'none' }}>{fmtClock(m.tMs)}</span>
+                          <span style={{ fontSize: 10, color: 'var(--faint)', textTransform: 'uppercase', flex: 'none', width: 24 }}>{m.lang}</span>
+                          <span style={{ fontSize: 13, flex: 1 }}>{m.text}</span>
+                          {m.approx && <span style={{ fontSize: 10, color: 'var(--faint)', flex: 'none' }} title="Placed from subtitle file times; accurate to a few seconds">~approx</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )
+              )}
+            </div>
+          )}
 
           <div style={{ borderTop: '1px solid var(--border)', margin: '14px 0', paddingTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div className="field" style={{ margin: 0, flex: '1 1 220px' }}>
@@ -295,6 +386,35 @@ function TimelineBar({ domain, spans, from, to, onChange }: {
         <span>filled = recorded · dark = gap · drag to select</span>
         <span>{fmtClock(domain.end)}</span>
       </div>
+    </div>
+  )
+}
+
+/** EPG lane under the coverage bar: the programmes that AIRED inside this
+ *  recording, positioned on the same time axis. Click one to snap the range
+ *  picker to its slice (as-run times when observed) and start playback. */
+function ProgrammeLane({ domain, programmes, onPick }: {
+  domain: { start: number; end: number }
+  programmes: RecordingProgramme[]
+  onPick: (p: RecordingProgramme) => void
+}) {
+  const W = domain.end - domain.start
+  const pct = (ms: number) => Math.max(0, Math.min(100, ((ms - domain.start) / W) * 100))
+  return (
+    <div className="prog-lane" style={{ position: 'relative', height: 26, marginTop: 4 }}>
+      {programmes.map(p => {
+        const l = pct(p.startMs), r = pct(p.endMs)
+        if (r <= l) return null
+        return (
+          <div key={p.id} onClick={() => onPick(p)}
+            title={`${p.title} · ${fmtClock(p.startMs)} → ${fmtClock(p.endMs)}${p.asRun ? ' (as run)' : ' (scheduled)'}`}
+            style={{ position: 'absolute', top: 2, bottom: 2, left: `${l}%`, width: `${Math.max(r - l, 0.6)}%`,
+              background: 'rgba(200,160,60,.22)', border: '1px solid rgba(220,180,80,.55)', borderRadius: 5,
+              cursor: 'pointer', overflow: 'hidden', display: 'flex', alignItems: 'center', padding: '0 6px' }}>
+            <span style={{ fontSize: 10.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--muted)' }}>{p.title}</span>
+          </div>
+        )
+      })}
     </div>
   )
 }

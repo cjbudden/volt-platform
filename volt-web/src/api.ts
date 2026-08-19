@@ -230,12 +230,22 @@ export const api = {
     return req('/files' + (qs.toString() ? '?' + qs : ''))
   },
   // recordings library + range playback + clip/VOD creation
-  recordings: (p: { kind?: string; channelId?: string } = {}): Promise<RecordingRow[]> => {
+  recordings: (p: { kind?: string; channelId?: string; q?: string } = {}): Promise<RecordingRow[]> => {
     const qs = new URLSearchParams()
     if (p.kind) qs.set('kind', p.kind)
     if (p.channelId) qs.set('channelId', p.channelId)
+    if (p.q) qs.set('q', p.q)
     return req('/recordings' + (qs.toString() ? '?' + qs : ''))
   },
+  // transcript probe/search: no q = languages + entry count; with q = timed matches
+  recordingTranscript: (id: string, p: { q?: string; lang?: string } = {}): Promise<TranscriptSearch> => {
+    const qs = new URLSearchParams()
+    if (p.q) qs.set('q', p.q)
+    if (p.lang) qs.set('lang', p.lang)
+    return req(`/recordings/${id}/transcript` + (qs.toString() ? '?' + qs : ''))
+  },
+  recordingProgrammes: (id: string): Promise<{ programmes: RecordingProgramme[] }> =>
+    req(`/recordings/${id}/programmes`),
   recording: (id: string): Promise<RecordingRow & { vod_assets: VodAssetRow[] }> => req(`/recordings/${id}`),
   recordingTimeline: (id: string): Promise<RecordingTimeline> => req(`/recordings/${id}/timeline`),
   clipRecording: (id: string, b: { title: string; startMs: number; endMs: number; outputKind?: 'manifest' | 'progressive' | 'both' }): Promise<VodAssetRow> =>
@@ -271,6 +281,18 @@ export interface RecordingRow {
   start_epoch_ms: number | string; end_epoch_ms: number | string | null
   duration_ms: number | string | null; expires_at: string | null
   vod_count?: number
+  matched_by?: 'title' | 'programme' | 'transcript' | null
+}
+
+export interface TranscriptSearch {
+  recordingId: string
+  languages: string[]
+  entries: number
+  matches: { tMs: number; endMs: number; lang: string; text: string; approx: boolean }[]
+}
+
+export interface RecordingProgramme {
+  id: string; title: string; startMs: number; endMs: number; asRun: boolean; status: string
 }
 
 export interface RecordingTimeline {

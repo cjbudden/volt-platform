@@ -6,6 +6,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
 import { createClipVod, formatsFor } from '../services/clips';
 import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions } from '../services/localRecordingIndex';
+import { transcriptForStream, searchTranscript, transcriptMatches } from '../services/recordingSearch';
 
 /**
  * Recordings library — the raw captures. An event recording is one bounded run;
@@ -109,17 +110,102 @@ recordingsRouter.get(
   asyncHandler(async (req, res) => {
     const kind = typeof req.query.kind === 'string' ? req.query.kind : null;
     const channelId = typeof req.query.channelId === 'string' ? req.query.channelId : null;
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    // With a search term, a recording matches when its own title/source matches,
+    // when an EPG programme AIRING INSIDE ITS WINDOW matches (find content by
+    // what was on air), or — checked after SQL, on disk — when its transcript
+    // contains the words (find content by what was SAID).
     const rows = await query(
       `SELECT r.*, COALESCE(c.name, e.name) AS source_name,
-              (SELECT count(*)::int FROM vod_assets v WHERE v.recording_id = r.id) AS vod_count
+              (SELECT count(*)::int FROM vod_assets v WHERE v.recording_id = r.id) AS vod_count,
+              CASE WHEN $4::text IS NULL THEN NULL
+                   WHEN r.title ILIKE '%'||$4||'%' OR COALESCE(c.name, e.name) ILIKE '%'||$4||'%' THEN 'title'
+                   WHEN r.channel_id IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM programmes p WHERE p.channel_id = r.channel_id
+                       AND p.title ILIKE '%'||$4||'%'
+                       AND p.span && tstzrange(to_timestamp(r.start_epoch_ms/1000.0),
+                             to_timestamp(COALESCE(r.end_epoch_ms, (extract(epoch from now())*1000)::bigint)/1000.0), '[)')
+                   ) THEN 'programme'
+                   ELSE NULL END AS matched_by
        ${OWNED}
        WHERE g.account_id = $1
          AND ($2::text IS NULL OR r.kind = $2::recording_kind)
          AND ($3::uuid IS NULL OR r.channel_id = $3)
        ORDER BY r.start_epoch_ms DESC`,
-      [accountId(req), kind, channelId]
+      [accountId(req), kind, channelId, q || null]
     );
-    res.json(rows);
+    if (!q) return res.json(rows);
+    const out: any[] = [];
+    let scanned = 0;
+    for (const r of rows) {
+      if (r.matched_by) { out.push(r); continue; }
+      // transcript scan is a disk read — bound it to the most recent recordings
+      if (scanned >= 50) continue;
+      scanned++;
+      const endMs = r.end_epoch_ms != null ? Number(r.end_epoch_ms) : Date.now();
+      if (transcriptMatches(r.channel_id ?? r.event_id, q, Number(r.start_epoch_ms), endMs)) {
+        out.push({ ...r, matched_by: 'transcript' });
+      }
+    }
+    res.json(out);
+  })
+);
+
+/**
+ * TRANSCRIPT of a recording — the searchable "what was said, when" index.
+ * Without q: the languages present + entry count (cheap capability probe).
+ * With q: matching cues (all words, any order) inside the recording window,
+ * each with its wall-clock time — the UI jumps the range picker there.
+ */
+recordingsRouter.get(
+  '/:id/transcript',
+  asyncHandler(async (req, res) => {
+    const r = await ownedRecording(req);
+    const streamId = r.channel_id ?? r.event_id;
+    const fromMs = Number(r.start_epoch_ms);
+    const toMs = r.end_epoch_ms != null ? Number(r.end_epoch_ms) : Date.now();
+    const all = transcriptForStream(streamId).filter((e) => e.endMs >= fromMs && e.startMs <= toMs);
+    const languages = [...new Set(all.map((e) => e.lang))].sort();
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const lang = typeof req.query.lang === 'string' && req.query.lang ? req.query.lang : undefined;
+    if (!q) return res.json({ recordingId: r.id, languages, entries: all.length, matches: [] });
+    const matches = searchTranscript(all, q, lang).slice(0, 200)
+      .map((e) => ({ tMs: e.startMs, endMs: e.endMs, lang: e.lang, text: e.text, approx: e.approx === true }));
+    res.json({ recordingId: r.id, languages, entries: all.length, matches });
+  })
+);
+
+/**
+ * EPG programmes that aired inside this recording's window — content-aware
+ * navigation: click a programme, get its exact time slice to review or clip.
+ * Prefers the as-run times (actual_start/actual_end) when the airing was
+ * observed; falls back to the scheduled span.
+ */
+recordingsRouter.get(
+  '/:id/programmes',
+  asyncHandler(async (req, res) => {
+    const r = await ownedRecording(req);
+    if (!r.channel_id) return res.json({ programmes: [] });   // events carry their own identity
+    const fromMs = Number(r.start_epoch_ms);
+    const toMs = r.end_epoch_ms != null ? Number(r.end_epoch_ms) : Date.now();
+    const rows = await query(
+      `SELECT id, title, starts_at, ends_at, actual_start, actual_end, status
+         FROM programmes
+        WHERE channel_id = $1
+          AND span && tstzrange(to_timestamp($2::bigint/1000.0), to_timestamp($3::bigint/1000.0), '[)')
+        ORDER BY starts_at`,
+      [r.channel_id, fromMs, toMs]
+    );
+    res.json({
+      programmes: rows.map((p: any) => ({
+        id: p.id,
+        title: p.title,
+        startMs: new Date(p.actual_start ?? p.starts_at).getTime(),
+        endMs: new Date(p.actual_end ?? p.ends_at).getTime(),
+        asRun: p.actual_start != null,
+        status: p.status,
+      })),
+    });
   })
 );
 

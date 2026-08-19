@@ -44,6 +44,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q <<SQL
 DELETE FROM vod_assets WHERE recording_id = '$REC'::uuid;
 DELETE FROM recordings WHERE id = '$REC'::uuid;
 DELETE FROM channels WHERE id = '$CH'::uuid;
+DELETE FROM channels WHERE name = 'NoRec' AND group_id = '0000000d-0000-0000-0000-0000000000a1'::uuid;  -- prior runs (idempotent reruns)
 INSERT INTO accounts(id,name) VALUES ('0000000a-0000-0000-0000-0000000000a1'::uuid,'RecCo'),('0000000a-0000-0000-0000-0000000000a2'::uuid,'OtherCo')
   ON CONFLICT (id) DO NOTHING;
 INSERT INTO users(id,account_id,email,password_hash,role,status,display_name) VALUES
@@ -132,6 +133,60 @@ N=$(echo "$DET" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["v
 ok "recording detail lists both assets" '[ "$N" = "2" ]'
 LIST=$(curl -s "http://localhost:$PORT/api/recordings" -H "$A")
 ok "list rolls up vod_count=2" 'echo "$LIST" | grep -q "\"vod_count\":2"'
+
+# ---- content search: EPG programmes + transcript ---------------------------
+# seed: a programme airing INSIDE the window, one outside; a transcript index in
+# run 1 (the durable jsonl) and a VTT-only run 2 (fallback path, mtime-placed)
+python3 - "$REC_ORIGIN/origin/runs" <<'PY'
+import os, sys, glob, json
+runs = sorted(os.listdir(sys.argv[1]))
+def span(r):
+    segs = glob.glob(os.path.join(sys.argv[1], r, '*', 'seg_*.m4s'))
+    ts = [os.path.getmtime(s) for s in segs]
+    return min(ts), max(ts)
+r1s, r1e = span(runs[0]); r2s, r2e = span(runs[1])
+# run 1: durable transcript.jsonl
+with open(os.path.join(sys.argv[1], runs[0], 'transcript.jsonl'), 'w') as f:
+    f.write(json.dumps({"lang": "en", "start_ms": int((r1s+5)*1000), "end_ms": int((r1s+9)*1000),
+                        "text": "the prime minister announced new interest rates today"}) + "\n")
+    f.write(json.dumps({"lang": "en", "start_ms": int((r1s+15)*1000), "end_ms": int((r1s+18)*1000),
+                        "text": "markets reacted quickly to the decision"}) + "\n")
+# run 2: VTT only (pre-index recording) — mtime transplanted into the window
+d = os.path.join(sys.argv[1], runs[1], 'subtitles', 'en')
+os.makedirs(d, exist_ok=True)
+p = os.path.join(d, 'sub_0.vtt')
+open(p, 'w').write("WEBVTT\n\n00:00:01.000 --> 00:00:04.000\ngoal scored by the home team\n\n")
+os.utime(p, (r2s+8, r2s+8))
+print("SEEDED", int(r1s*1000), int(r2s*1000))
+PY
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q <<SQL
+DELETE FROM programmes WHERE channel_id='$CH'::uuid;
+INSERT INTO programmes(channel_id,title,starts_at,ends_at) VALUES
+ ('$CH'::uuid,'Berita Utama Morning News', to_timestamp($WSTART/1000.0+15), to_timestamp($WSTART/1000.0+45)),
+ ('$CH'::uuid,'Offwindow Show', to_timestamp($WEND/1000.0+3600), to_timestamp($WEND/1000.0+7200));
+SQL
+
+TS=$(curl -s "http://localhost:$PORT/api/recordings/$REC/transcript" -H "$A")
+ok "transcript probe reports language + entries" 'echo "$TS" | grep -q "\"languages\":\[\"en\"\]" && echo "$TS" | grep -qv "\"entries\":0"'
+TS=$(curl -s "http://localhost:$PORT/api/recordings/$REC/transcript?q=minister%20prime" -H "$A")
+echo "$TS" > /tmp/rec_ts_search.json
+ok "words match in any order" 'echo "$TS" | grep -q "prime minister announced" && echo "$TS" | grep -q "\"tMs\""'
+HITMS=$(echo "$TS" | python3 -c 'import json,sys; m=json.load(sys.stdin)["matches"]; print(m[0]["tMs"] if m else 0)')
+ok "transcript hit lands inside the recording window" '[ "$HITMS" -gt "$WSTART" ] && [ "$HITMS" -lt "$WEND" ]'
+TS=$(curl -s "http://localhost:$PORT/api/recordings/$REC/transcript?q=goal%20scored" -H "$A")
+ok "VTT-only run is searchable via fallback (approx)" 'echo "$TS" | grep -q "home team" && echo "$TS" | grep -q "\"approx\":true"'
+TS=$(curl -s "http://localhost:$PORT/api/recordings/$REC/transcript?q=prime&lang=ms" -H "$A")
+ok "language filter excludes other tracks" 'echo "$TS" | grep -q "\"matches\":\[\]"'
+PR=$(curl -s "http://localhost:$PORT/api/recordings/$REC/programmes" -H "$A")
+ok "programmes endpoint returns the in-window airing only" 'echo "$PR" | grep -q "Berita Utama" && ! echo "$PR" | grep -q "Offwindow"'
+L=$(curl -s "http://localhost:$PORT/api/recordings?q=Berita" -H "$A")
+ok "list search finds recording by EPG programme" 'echo "$L" | grep -q "$REC" && echo "$L" | grep -q "\"matched_by\":\"programme\""'
+L=$(curl -s "http://localhost:$PORT/api/recordings?q=interest%20rates" -H "$A")
+ok "list search finds recording by spoken words" 'echo "$L" | grep -q "$REC" && echo "$L" | grep -q "\"matched_by\":\"transcript\""'
+L=$(curl -s "http://localhost:$PORT/api/recordings?q=Rec%20Channel" -H "$A")
+ok "list search finds recording by name" 'echo "$L" | grep -q "\"matched_by\":\"title\""'
+L=$(curl -s "http://localhost:$PORT/api/recordings?q=zzznotfound" -H "$A")
+ok "no-match search returns nothing" '! echo "$L" | grep -q "$REC"'
 
 # ---- channels: explicit recording switch
 CREATED=$(curl -s -X POST "http://localhost:$PORT/api/channels" -H "$A" -H 'content-type:application/json' \
