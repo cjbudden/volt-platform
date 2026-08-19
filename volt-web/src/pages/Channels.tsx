@@ -203,7 +203,7 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
                     )
                   })()}
                 </td>
-                <td style={{ color: 'var(--muted)' }}>{fmtRetention(c.recording_retention_sec, c.recording_retention_days)}</td>
+                <td style={{ color: 'var(--muted)' }}>{c.recording_enabled === false ? 'rec off' : fmtRetention(c.recording_retention_sec, c.recording_retention_days)}</td>
                 <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                   <button className={`btn ${live ? 'ghost' : 'primary'}`} disabled={busy === c.id} onClick={() => toggle(c)}>
                     {busy === c.id ? '…' : live ? 'Stop' : 'Start'}
@@ -233,6 +233,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   const [type, setType] = useState<'transcode' | 'package_only'>('transcode')
   const [name, setName] = useState('')
   const [purchasing, setPurchasing] = useState('reserved')
+  const [recOn, setRecOn] = useState(true)
   const [retNum, setRetNum] = useState<string>('7')
   const [retUnit, setRetUnit] = useState<RetUnit>('days')
   const [dvrMin, setDvrMin] = useState(60)
@@ -311,7 +312,8 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
       const created = await api.createChannel({
         groupId: group.id, name: name.trim(), purchasingMode: purchasing,
         resilienceTier: 'standard',
-        recordingRetentionSec: retNum ? Math.max(Number(retNum) * RET_UNIT_SEC[retUnit], dvrMin * 60) : null,
+        recordingEnabled: recOn,
+        recordingRetentionSec: recOn && retNum ? Math.max(Number(retNum) * RET_UNIT_SEC[retUnit], dvrMin * 60) : null,
         dvrWindowSec: Math.max(30, dvrMin * 60), dvrMode: 'sliding',
         outputLadder, sources,
         inputFailoverEnabled: sources.some(s => s.role === 'backup'),
@@ -465,6 +467,11 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
               <option value="on_demand">On demand</option>
             </select>
           </div>
+          <div className="toggle-row">
+            <div><div className="tt">Recording and clipping</div><div className="td">Keep the live output as a recording: review it, clip highlights, and publish VOD assets. Off means segments are cleared after the DVR window and nothing can be clipped later.</div></div>
+            <div className={`sw ${recOn ? '' : 'off'}`} onClick={() => setRecOn(v => !v)}><i /></div>
+          </div>
+          {recOn && (
           <div className="field"><label>Recording retention <span style={{ color: 'var(--faint)' }}>— blank number = keep forever</span></label>
             <div style={{ display: 'flex', gap: 8 }}>
               <input className="inp" style={{ width: 110 }} inputMode="numeric" placeholder="keep forever"
@@ -481,6 +488,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
               <div className="hintxt" style={{ color: 'var(--warn)' }}>Will be raised to the DVR window ({dvrMin}m) — retention can’t be shorter than DVR.</div>
             )}
           </div>
+          )}
           <div className="field">
             <label>DVR catch-up window — {dvrMin} min{dvrMin >= 60 ? ` (${(dvrMin / 60).toFixed(dvrMin % 60 ? 1 : 0)}h)` : ''}</label>
             <input type="range" min={1} max={DVR_MAX_MIN} step={1} value={dvrMin} onChange={e => setDvrMin(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />

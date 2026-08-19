@@ -56,6 +56,7 @@ export class Orchestrator {
       kind,
       owner: {
         id: owner.id,
+        recording_enabled: owner.recording_enabled !== false,
         recording_retention_days: owner.recording_retention_days ?? null,
         recording_retention_sec: owner.recording_retention_sec ?? null,
         input_failover_enabled: owner.input_failover_enabled,

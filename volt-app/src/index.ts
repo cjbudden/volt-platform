@@ -38,6 +38,12 @@ async function ensureSchema(): Promise<void> {
   // Run identity for encoder status reports: seq restarts on every encoder boot, so
   // boot_ms disambiguates runs (a newer boot always wins the status upsert).
   await query(`ALTER TABLE stream_status ADD COLUMN IF NOT EXISTS boot_ms BIGINT NOT NULL DEFAULT 0`);
+  // EXPLICIT recording toggle. Previously recording-on was inferred from retention
+  // being set, while the form said 'blank retention = keep forever': contradictory
+  // (blank actually meant recording OFF at the encoder). Now: recording_enabled says
+  // whether run segments are KEPT; retention (when set) says for how long.
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS recording_enabled BOOLEAN NOT NULL DEFAULT true`);
+  await query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS recording_enabled BOOLEAN NOT NULL DEFAULT true`);
 }
 
 const server = app.listen(config.port, () => {

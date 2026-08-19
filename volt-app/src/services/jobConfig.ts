@@ -41,7 +41,8 @@ export interface DrmRow {
 }
 export interface OwnerRow {
   id: string;
-  /** recording is enabled when a retention is set; drives per-run pruning. */
+  /** explicit recording switch + retention; drives per-run keep/prune. */
+  recording_enabled?: boolean;
   recording_retention_days?: number | null;
   recording_retention_sec?: number | null;
   input_failover_enabled?: boolean;
@@ -162,13 +163,14 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
     };
   }
 
-  // Recording policy for the encoder's per-run output management: recording is
-  // considered ENABLED when the channel/event has a retention set. When enabled,
-  // previous run dirs are kept (they ARE the recordings) and pruned only past
-  // retention; when disabled, old runs are cleared at start since nothing keeps them.
+  // Recording policy for the encoder's per-run output management. recording_enabled is
+  // the EXPLICIT switch (set in the creation/settings forms): when on, previous run
+  // dirs are KEPT (they ARE the recordings) and pruned only past retention; retention
+  // blank means keep forever, exactly as the form says. When off, old runs are cleared
+  // at start since nothing keeps them.
   const retSec = owner.recording_retention_sec
     ?? (owner.recording_retention_days != null ? owner.recording_retention_days * 86400 : null);
-  cfg.recording = { enabled: retSec != null, retention_sec: retSec };
+  cfg.recording = { enabled: owner.recording_enabled !== false, retention_sec: retSec };
 
   if (owner.input_failover_enabled) {
     // The filler slate/loop refs are library references (e.g. '/library/<acct>/slates/x.jpg').

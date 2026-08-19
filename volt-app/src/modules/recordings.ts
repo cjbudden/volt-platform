@@ -5,6 +5,7 @@ import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
 import { createClipVod, formatsFor } from '../services/clips';
+import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions } from '../services/localRecordingIndex';
 
 /**
  * Recordings library — the raw captures. An event recording is one bounded run;
@@ -25,6 +26,83 @@ const OWNED = `
   LEFT JOIN events   e ON e.id = r.event_id
   JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
 `;
+
+/** Owned recording row or 404 (tenant scoped). */
+async function ownedRecording(req: any): Promise<any> {
+  const row = await one<any>(
+    `SELECT r.*, COALESCE(c.name, e.name) AS source_name ${OWNED}
+      WHERE r.id = $1 AND g.account_id = $2`,
+    [req.params.id, accountId(req)]
+  );
+  if (!row) throw notFound('Recording not found');
+  return row;
+}
+
+/**
+ * TIMELINE of a recording: the real on-disk coverage (per-run spans, so the UI
+ * can draw the scrubbable range with gaps), clamped to the recording's window.
+ * Built from the LOCAL per-run segment index: measured wall-clock placement per
+ * segment, exact media durations from the fMP4 boxes.
+ */
+recordingsRouter.get(
+  '/:id/timeline',
+  asyncHandler(async (req, res) => {
+    const r = await ownedRecording(req);
+    const streamId = r.channel_id ?? r.event_id;
+    const spans = recordingSpans(streamId)
+      .filter((s) => s.endMs > Number(r.start_epoch_ms)
+        && (r.end_epoch_ms == null || s.startMs < Number(r.end_epoch_ms)));
+    const hasAudio = listRuns(streamId).some((run) => pickRenditions(streamId, run).audio);
+    res.json({
+      recordingId: r.id,
+      streamId,
+      kind: r.kind,
+      sourceName: r.source_name,
+      startMs: Number(r.start_epoch_ms),
+      endMs: r.end_epoch_ms != null ? Number(r.end_epoch_ms) : null,
+      live: r.status === 'recording',
+      hasAudio,
+      spans,
+    });
+  })
+);
+
+/**
+ * RANGE PLAYBACK manifests. master.m3u8 references the video/audio media
+ * playlists (same query carried through); media playlists reference the public
+ * /origin segments directly, spanning runs with DISCONTINUITY + per-run MAP.
+ * Auth: these are admin console endpoints (bearer via the player's xhrSetup);
+ * the segments themselves are the already-public origin.
+ */
+const rangeQuery = z.object({
+  from: z.coerce.number().int().nonnegative(),
+  to: z.coerce.number().int().positive(),
+});
+recordingsRouter.get(
+  '/:id/range/master.m3u8',
+  asyncHandler(async (req, res) => {
+    const r = await ownedRecording(req);
+    const { from, to } = rangeQuery.parse(req.query);
+    if (to <= from) throw badRequest('to must be after from');
+    const streamId = r.channel_id ?? r.event_id;
+    const hasAudio = listRuns(streamId).some((run) => pickRenditions(streamId, run).audio);
+    const qs = `?from=${from}&to=${to}`;
+    res.type('application/vnd.apple.mpegurl').send(
+      rangeMasterPlaylist(streamId, hasAudio, `video.m3u8${qs}`, `audio.m3u8${qs}`));
+  })
+);
+recordingsRouter.get(
+  '/:id/range/:kind(video|audio).m3u8',
+  asyncHandler(async (req, res) => {
+    const r = await ownedRecording(req);
+    const { from, to } = rangeQuery.parse(req.query);
+    if (to <= from) throw badRequest('to must be after from');
+    const streamId = r.channel_id ?? r.event_id;
+    const pl = rangeMediaPlaylist(streamId, req.params.kind as 'video' | 'audio', from, to);
+    if (!pl) throw notFound('no recorded segments in that range');
+    res.type('application/vnd.apple.mpegurl').send(pl);
+  })
+);
 
 recordingsRouter.get(
   '/',

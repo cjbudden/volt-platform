@@ -199,6 +199,7 @@ CREATE TABLE events (
     input_loss_behavior    input_loss_behavior NOT NULL DEFAULT 'none',
     filler_asset_id        UUID,                                 -- slate/loop filler (-> filler_assets.id)
     filler_slate_ref       TEXT,                                 -- slate image URL/ref
+    recording_enabled        BOOLEAN NOT NULL DEFAULT true,      -- keep run segments as recordings (clip/VOD source)
     recording_retention_days INTEGER,                            -- retention rule (NULL = keep forever)
     -- custom metadata (assignable schema + values). Defined once at the event and
     -- harvested into the auto-VOD (schema.org VideoObject) when the recording ends.
@@ -228,6 +229,7 @@ CREATE TABLE channels (
     input_loss_behavior    input_loss_behavior NOT NULL DEFAULT 'none',
     filler_asset_id        UUID,                                 -- slate/loop filler (-> filler_assets.id)
     filler_slate_ref       TEXT,                                 -- slate image URL/ref
+    recording_enabled        BOOLEAN NOT NULL DEFAULT true,      -- keep run segments as recordings (clip/VOD source)
     recording_retention_days INTEGER,                            -- retention rule (NULL = keep forever)
     -- custom metadata (assignable schema + values), same mechanism as events/vod.
     -- FK to metadata_schemas added by ALTER below (that table is defined later).

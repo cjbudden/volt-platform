@@ -30,7 +30,8 @@ export interface Group {
 }
 export interface Channel {
   id: string; name: string; status: string; group_id: string
-  enabled?: boolean; recording_retention_days: number | null; recording_retention_sec?: number | null
+  enabled?: boolean; recording_enabled?: boolean
+  recording_retention_days: number | null; recording_retention_sec?: number | null
   created_at: string; version: number; group_name?: string
   dvr_window_sec: number | null; dvr_mode: 'sliding' | 'event_start'
   geo_mode: 'worldwide' | 'allow' | 'block'; geo_countries: string[]
@@ -132,6 +133,7 @@ export interface TestStreamStatus {
 
 export interface ChannelSettingsPatch {
   name?: string
+  recordingEnabled?: boolean
   recordingRetentionDays?: number | null
   dvrWindowSec?: number | null
   dvrMode?: 'sliding' | 'event_start'
@@ -170,7 +172,8 @@ export const api = {
   channels: (): Promise<Channel[]> => req('/channels'),
   createChannel: (b: {
     groupId: string; name: string; purchasingMode?: string
-    resilienceTier?: string; recordingRetentionDays?: number | null; recordingRetentionSec?: number | null
+    resilienceTier?: string; recordingEnabled?: boolean
+    recordingRetentionDays?: number | null; recordingRetentionSec?: number | null
     dvrWindowSec?: number | null; dvrMode?: 'sliding' | 'event_start'
     outputLadder?: { height: number; bitrateKbps: number }[]
     sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string; renditionLabel?: string; renditionBitrateKbps?: number }[]
@@ -226,6 +229,22 @@ export const api = {
     if (p.recursive) qs.set('recursive', '1')
     return req('/files' + (qs.toString() ? '?' + qs : ''))
   },
+  // recordings library + range playback + clip/VOD creation
+  recordings: (p: { kind?: string; channelId?: string } = {}): Promise<RecordingRow[]> => {
+    const qs = new URLSearchParams()
+    if (p.kind) qs.set('kind', p.kind)
+    if (p.channelId) qs.set('channelId', p.channelId)
+    return req('/recordings' + (qs.toString() ? '?' + qs : ''))
+  },
+  recording: (id: string): Promise<RecordingRow & { vod_assets: VodAssetRow[] }> => req(`/recordings/${id}`),
+  recordingTimeline: (id: string): Promise<RecordingTimeline> => req(`/recordings/${id}/timeline`),
+  clipRecording: (id: string, b: { title: string; startMs: number; endMs: number; outputKind?: 'manifest' | 'progressive' | 'both' }): Promise<VodAssetRow> =>
+    req(`/recordings/${id}/clip`, { method: 'POST', body: JSON.stringify(b) }),
+  publishRecording: (id: string, title?: string): Promise<VodAssetRow> =>
+    req(`/recordings/${id}/publish`, { method: 'POST', body: JSON.stringify({ title }) }),
+  recordingDownload: (id: string): Promise<{ status: 'exporting' | 'ready'; url?: string; message?: string }> =>
+    req(`/recordings/${id}/download`),
+
   fileFolders: (): Promise<{ folders: { path: string; name: string; count: number }[] }> => req('/files/folders'),
   createFolder: (path: string): Promise<{ path: string }> => req('/files/folders', { method: 'POST', body: JSON.stringify({ path }) }),
   uploadFile: (b: { folder?: string; name: string; kind?: string; contentType?: string; tags?: string[]; dataBase64: string }): Promise<MediaFile> =>
@@ -243,6 +262,34 @@ export const api = {
     let body: any = null; try { body = await r.json() } catch { /* */ }
     return { ok: false, status: r.status, body }
   },
+}
+
+export interface RecordingRow {
+  id: string; kind: 'event' | 'channel_day' | string
+  channel_id: string | null; event_id: string | null; source_name: string | null
+  title: string | null; status: 'recording' | 'closed' | string
+  start_epoch_ms: number | string; end_epoch_ms: number | string | null
+  duration_ms: number | string | null; expires_at: string | null
+  vod_count?: number
+}
+
+export interface RecordingTimeline {
+  recordingId: string; streamId: string; kind: string; sourceName: string | null
+  startMs: number; endMs: number | null; live: boolean; hasAudio: boolean
+  spans: { runId: string; startMs: number; endMs: number; segments: number }[]
+}
+
+export interface VodAssetRow {
+  id: string; kind: 'clip' | 'full_event' | string; title: string | null
+  recording_id: string | null; start_epoch_ms: number | string; end_epoch_ms: number | string
+  duration_ms: number | string | null; output_kind?: string | null
+  thumb_status?: string | null; created_at: string
+}
+
+/** Authenticated range-playback master manifest for a recording (bearer goes via
+ *  the player's xhrSetup for /api URLs; segments themselves are public /origin). */
+export function recordingRangeUrl(recordingId: string, fromMs: number, toMs: number) {
+  return `/api/recordings/${recordingId}/range/master.m3u8?from=${Math.round(fromMs)}&to=${Math.round(toMs)}`
 }
 
 export interface ShareLinkRow {

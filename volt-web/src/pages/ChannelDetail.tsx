@@ -1841,6 +1841,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     ? Number((d as any).recording_retention_sec)
     : (d.recording_retention_days != null ? d.recording_retention_days * 86400 : null)
   const initRet = splitDuration(initRetSec)
+  const initRecOn = (d as any).recording_enabled !== false
+  const [recOn, setRecOn] = useState(initRecOn)
   const [retNum, setRetNum] = useState<string>(initRet.n)
   const [retUnit, setRetUnit] = useState<RetUnit>(initRet.unit)
   // DVR
@@ -1896,7 +1898,9 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     if (name.trim() && name.trim() !== d.name) patch.name = name.trim()
     patch.dvrMode = dvrMode
     if (dvrMode === 'sliding') patch.dvrWindowSec = Math.max(30, dvrMinNum * 60)
-    // retention: number × unit -> seconds; never below the DVR window while DVR is on
+    // recording switch + retention: number × unit -> seconds; never below the DVR
+    // window while DVR is on. Applies from the next channel start.
+    if (recOn !== initRecOn) patch.recordingEnabled = recOn
     let retSec = retNum ? Number(retNum) * RET_UNIT_SEC[retUnit] : null
     if (retSec != null && dvrMode === 'sliding') retSec = Math.max(retSec, dvrMinNum * 60)
     if (retSec !== initRetSec) patch.recordingRetentionSec = retSec
@@ -2092,6 +2096,11 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           )}
 
           <div style={SEC}>Recording</div>
+          <div className="toggle-row">
+            <div><div className="tt">Recording and clipping</div><div className="td">Keep the live output as a recording: review it, clip highlights, and publish VOD assets. Off means segments are cleared after the DVR window and nothing can be clipped later. Applies from the next start.</div></div>
+            <div className={`sw ${recOn ? '' : 'off'}`} onClick={() => setRecOn(v => !v)}><i /></div>
+          </div>
+          {recOn && (
           <div className="field">
             <label>Retention <span style={{ color: 'var(--faint)' }}>— blank number = keep forever</span></label>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -2109,6 +2118,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
               <div className="td" style={{ color: 'var(--warn)', marginTop: 6 }}>Will be raised to the DVR window ({fmtWindow(dvrMinNum * 60)}) — retention can’t be shorter than DVR.</div>
             )}
           </div>
+          )}
 
           {d.profile?.workflow_type === 'transcode' && (<>
           <div style={SEC}>Watermark <span style={{ color: 'var(--faint)', fontWeight: 400 }}>: burned into the transcode output</span></div>
