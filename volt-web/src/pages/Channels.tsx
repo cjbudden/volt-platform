@@ -4,6 +4,7 @@ import { subscribeLive } from '../liveStatus'
 import { useProtocols, protoOf, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
+import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 
 type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
 
@@ -71,17 +72,8 @@ export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>Channels</h1>
-          <p>24×7 live channels. Transcode builds the rendition ladder for you; packaging takes a pre-encoded ladder.</p>
-        </div>
-        <div className="spacer" />
-        <button className="btn primary" onClick={() => setCreateOpen(true)}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>
-          New channel
-        </button>
-      </div>
+      <PageHead title="Channels" sub="24×7 live channels. Transcode builds the rendition ladder for you; packaging takes a pre-encoded ladder."
+        action={<NewButton label="New channel" onClick={() => setCreateOpen(true)} />} />
 
       {channels === null ? (
         <div className="loading">Loading channels…</div>
@@ -105,14 +97,6 @@ export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
   )
 }
 
-function FChip({ label, n, on, onClick }: { label: string; n: number; on: boolean; onClick: () => void }) {
-  return (
-    <div className={`chip ${on ? 'active' : ''}`} onClick={onClick}>
-      {label}<span className="ct">{n}</span>
-    </div>
-  )
-}
-
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="empty">
@@ -127,11 +111,6 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       </button>
     </div>
   )
-}
-
-const THUMB_BG = ['linear-gradient(135deg,#7dd3fc,#3f7bff)', 'linear-gradient(135deg,#4ade80,#16a34a)', 'linear-gradient(135deg,#c4b5fd,#7c3aed)', 'linear-gradient(135deg,#fca5a5,#ef4444)', 'linear-gradient(135deg,#fdba74,#f97316)']
-function initials(name: string) {
-  return name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'
 }
 
 function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChanged: () => void; onOpen?: (id: string) => void }) {
@@ -160,17 +139,7 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
             const live = c.status === 'live'
             return (
               <tr key={c.id} onClick={() => onOpen?.(c.id)} style={onOpen ? { cursor: 'pointer' } : undefined}>
-                <td>
-                  <div className="cell-name">
-                    {c.brand_ref
-                      ? <div className="thumb" style={{ background: '#0b0f16', overflow: 'hidden', padding: 0 }}><img src={thumbUrl(c.brand_ref, 80, 80, 'inside')} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /></div>
-                      : <div className="thumb" style={{ background: THUMB_BG[i % THUMB_BG.length] }}>{initials(c.name)}</div>}
-                    <div>
-                      <div className="nm">{c.name}</div>
-                      <div className="id">{c._g?.name || '—'}</div>
-                    </div>
-                  </div>
-                </td>
+                <td><EntityCell name={c.name} sub={c._g?.name} index={i} imgUrl={c.brand_ref ? thumbUrl(c.brand_ref, 80, 80, 'inside') : null} /></td>
                 <td>
                   <span className={`tag type ${wt === 'transcode' ? 'chan' : 'event'}`}>
                     {wt === 'transcode' ? 'Transcode' : wt === 'package_only' ? 'Packaging' : '—'}
@@ -197,7 +166,7 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
                     const m = (ps && map[ps]) || (live ? map.starting : c.status === 'scheduled' ? { label: 'Scheduled', cls: 'sched' } : map.idle)
                     return (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className={`tag ${m.cls}`}><span className={`dot-s ${m.cls}`} />{m.label}</span>
+                        <StatusTag label={m.label} cls={m.cls} />
                         {c.billable && <span title="encoder up (billable)" style={{ fontSize: 10, color: '#fbbf24' }}>● billable</span>}
                       </div>
                     )

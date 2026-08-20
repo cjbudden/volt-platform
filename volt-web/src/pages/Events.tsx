@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type EventRow, type Group } from '../api'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
+import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 
 /* ============================================================================
    Events — one-off broadcasts on the SAME core workflow as channels (sources,
@@ -43,16 +44,18 @@ function fmtIn(ms: number): string {
   return `${Math.floor(h / 24)}d`
 }
 
-/** Live state of an event derived from status + windows. */
-function eventPhase(ev: EventRow, now: number): { label: string; cls: string; sub?: string } {
+/** Live state of an event derived from status + windows. Tag classes match the
+ *  Channels status pills so both lists read identically. */
+type Phase = 'upcoming' | 'live' | 'ended'
+function eventPhase(ev: EventRow, now: number): { label: string; cls: string; sub?: string; phase: Phase } {
   const start = Date.parse(ev.scheduled_start), end = Date.parse(ev.scheduled_end)
   const srv = ev.server_start ? Date.parse(ev.server_start) : start
-  if (ev.status === 'live') return { label: 'ON AIR', cls: 'live' }
-  if (ev.status === 'ended') return { label: 'ended', cls: '' }
-  if (ev.status === 'error') return { label: 'error', cls: 'err' }
-  if (now >= end) return { label: 'window over', cls: '' }
-  if (now >= srv) return { label: 'starting', cls: '', sub: 'server window open' }
-  return { label: 'scheduled', cls: '', sub: `starts in ${fmtIn(start - now)}${srv < start ? ` · server ${fmtIn(srv - now)} early` : ''}` }
+  if (ev.status === 'live') return { label: 'On air', cls: 'live', phase: 'live' }
+  if (ev.status === 'ended') return { label: 'Ended', cls: 'idle', phase: 'ended' }
+  if (ev.status === 'error') return { label: 'Error', cls: 'down', phase: 'upcoming' }
+  if (now >= end) return { label: 'Window over', cls: 'idle', phase: 'ended' }
+  if (now >= srv) return { label: 'Starting', cls: 'sched', sub: 'server window open', phase: 'upcoming' }
+  return { label: 'Scheduled', cls: 'sched', phase: 'upcoming', sub: `starts in ${fmtIn(start - now)}${srv < start ? ` · server ${fmtIn(srv - now)} early` : ''}` }
 }
 
 export default function Events() {
@@ -63,6 +66,7 @@ export default function Events() {
   const [createOpen, setCreateOpen] = useState(false)
   const [editing, setEditing] = useState<EventRow | null>(null)
   const [now, setNow] = useState(Date.now())
+  const [filter, setFilter] = useState<'all' | Phase>('all')
 
   async function load() {
     try { setEvents(await api.events()) } catch (e: any) { setErr(e.message) }
@@ -75,50 +79,69 @@ export default function Events() {
     try { await api.eventStartStop(ev.id, action); await load() }
     catch (e: any) { setErr(e.message) } finally { setBusy('') }
   }
-  async function remove(ev: EventRow) {
-    if (!window.confirm(`Delete event "${ev.name}"? Its recording (if any) stays in the Recordings library.`)) return
-    setBusy(ev.id)
-    try { await api.deleteEvent(ev.id); await load() } catch (e: any) { setErr(e.message) } finally { setBusy('') }
-  }
 
   const groupName = (id: string) => groups.find(g => g.id === id)?.name || ''
+  const counts = useMemo(() => {
+    const c = events || []
+    const ph = (e: EventRow) => eventPhase(e, now).phase
+    return {
+      all: c.length,
+      upcoming: c.filter(e => ph(e) === 'upcoming').length,
+      live: c.filter(e => ph(e) === 'live').length,
+      ended: c.filter(e => ph(e) === 'ended').length,
+    }
+  }, [events, now])
+  const shown = useMemo(() => {
+    if (!events) return []
+    if (filter === 'all') return events
+    return events.filter(e => eventPhase(e, now).phase === filter)
+  }, [events, filter, now])
 
   return (
     <>
-      <div className="page-head">
-        <div><h1>Events</h1><p>Scheduled broadcasts. The server spins up for the window automatically; recordings and auto-VOD follow the event settings.</p></div>
-        <button className="btn primary" onClick={() => setCreateOpen(true)}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" style={{ width: 15 }}><path d="M12 5v14M5 12h14" /></svg>New event
-        </button>
-      </div>
+      <PageHead title="Events" sub="Scheduled broadcasts. The server spins up for the window automatically; recordings and auto-VOD follow the event settings."
+        action={<NewButton label="New event" onClick={() => setCreateOpen(true)} />} />
       {err && <div className="err">{err}</div>}
-      {events === null ? <div className="card" style={{ padding: 18, color: 'var(--faint)' }}>Loading…</div>
-        : events.length === 0 ? (
-          <div className="empty"><h3>No events yet</h3><p>Create an event with its on-air window; the platform starts the server on time, records the broadcast, and can publish the VOD automatically when it ends.</p></div>
-        ) : (
-          <div className="card" style={{ overflow: 'hidden' }}>
-            <table className="table">
+      {events === null ? (
+        <div className="loading">Loading events…</div>
+      ) : events.length === 0 ? (
+        <div className="empty">
+          <div className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg></div>
+          <h3>No events yet</h3>
+          <p>Create an event with its on-air window; the platform starts the server on time, records the broadcast, and can publish the VOD automatically when it ends.</p>
+          <button className="btn primary" onClick={() => setCreateOpen(true)} style={{ margin: '0 auto' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>
+            Create your first event
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="filters">
+            <FChip label="All" n={counts.all} on={filter === 'all'} onClick={() => setFilter('all')} />
+            <FChip label="Upcoming" n={counts.upcoming} on={filter === 'upcoming'} onClick={() => setFilter('upcoming')} />
+            <FChip label="Live" n={counts.live} on={filter === 'live'} onClick={() => setFilter('live')} />
+            <FChip label="Ended" n={counts.ended} on={filter === 'ended'} onClick={() => setFilter('ended')} />
+          </div>
+          <div className="card">
+            <table>
               <thead><tr><th>Event</th><th>Window</th><th>Status</th><th>Recording</th><th>Auto-VOD</th><th></th></tr></thead>
               <tbody>
-                {events.map(ev => {
+                {shown.map((ev, i) => {
                   const ph = eventPhase(ev, now)
                   const recOn = ev.recording_enabled !== false
                   return (
                     <tr key={ev.id} onClick={() => setEditing(ev)} style={{ cursor: 'pointer' }}>
-                      <td><b>{ev.name}</b>{groupName(ev.group_id) && <span style={{ color: 'var(--faint)' }}> · {groupName(ev.group_id)}</span>}</td>
+                      <td><EntityCell name={ev.name} sub={groupName(ev.group_id)} index={i} /></td>
                       <td style={{ color: 'var(--muted)' }}>{fmtWindow(ev.scheduled_start, ev.scheduled_end)}</td>
-                      <td>
-                        <span className={`badge ${ph.cls}`}>{ph.label}</span>
-                        {ph.sub && <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 2 }}>{ph.sub}</div>}
-                      </td>
+                      <td><StatusTag label={ph.label} cls={ph.cls} sub={ph.sub} /></td>
                       <td style={{ color: 'var(--muted)' }}>{recOn ? 'on' : 'off'}</td>
                       <td style={{ color: 'var(--muted)' }}>{recOn && ev.auto_vod !== false ? 'on' : 'off'}</td>
-                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                      <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                         {ev.status === 'live'
                           ? <button className="btn ghost" disabled={busy === ev.id} onClick={() => startStop(ev, 'stop')}>{busy === ev.id ? '…' : 'Stop'}</button>
-                          : ev.status !== 'ended' && <button className="btn primary" disabled={busy === ev.id} onClick={() => startStop(ev, 'start')} title="Start now (ahead of the scheduled window)">{busy === ev.id ? '…' : 'Start now'}</button>}
-                        <button className="btn ghost" style={{ marginLeft: 6 }} onClick={() => setEditing(ev)}>Settings</button>
-                        {ev.status !== 'live' && <button className="btn ghost" style={{ marginLeft: 6 }} disabled={busy === ev.id} onClick={() => remove(ev)}>✕</button>}
+                          : ev.status !== 'ended'
+                          ? <button className="btn primary" disabled={busy === ev.id} onClick={() => startStop(ev, 'start')} title="Start now (ahead of the scheduled window)">{busy === ev.id ? '…' : 'Start'}</button>
+                          : <button className="btn ghost" onClick={() => setEditing(ev)}>Open</button>}
                       </td>
                     </tr>
                   )
@@ -126,7 +149,8 @@ export default function Events() {
               </tbody>
             </table>
           </div>
-        )}
+        </>
+      )}
       {createOpen && <EventDrawer groups={groups} onClose={() => setCreateOpen(false)} onDone={() => { setCreateOpen(false); load() }} />}
       {editing && <EventDrawer groups={groups} event={editing} onClose={() => setEditing(null)} onDone={() => { setEditing(null); load() }} />}
     </>
@@ -168,6 +192,16 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
   const [autoVod, setAutoVod] = useState(ev ? ev.auto_vod !== false : true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+
+  // destructive action lives INSIDE the drawer (common design language: rows
+  // carry one primary action; delete is behind the entity's settings).
+  async function remove() {
+    if (!ev) return
+    if (!window.confirm(`Delete event "${ev.name}"? Its recording (if any) stays in the Recordings library.`)) return
+    setBusy(true); setErr('')
+    try { await api.deleteEvent(ev.id); onDone() }
+    catch (e: any) { setErr('Delete failed: ' + e.message) } finally { setBusy(false) }
+  }
 
   async function submit() {
     setErr('')
@@ -297,6 +331,9 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
           {err && <div className="err">{err}</div>}
         </div>
         <div className="drawer-f">
+          {isEdit && ev!.status !== 'live' && (
+            <button className="btn ghost" style={{ color: 'var(--down,#f87171)', marginRight: 'auto' }} disabled={busy} onClick={remove}>Delete event</button>
+          )}
           <button className="btn ghost" onClick={onClose}>Cancel</button>
           <button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save changes' : 'Create event'}</button>
         </div>
