@@ -5,6 +5,7 @@ import { subscribeLive } from '../liveStatus'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
+import { RecordingSection, RET_UNIT_SEC, splitDuration, type RetUnit } from '../scaffold'
 function fmtOffset(sec: number) {
   if (sec <= 0) return 'LIVE'
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60)
@@ -1821,17 +1822,6 @@ function EventLog({ d }: { d: CD }) {
   )
 }
 
-/* -------------------------------------------------------- retention units */
-type RetUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
-const RET_UNIT_SEC: Record<RetUnit, number> = { minutes: 60, hours: 3600, days: 86400, weeks: 604800, months: 2592000 }
-/** Seconds -> {number, unit} picking the largest whole unit (minutes and up). */
-function splitDuration(sec: number | null): { n: string; unit: RetUnit } {
-  if (sec == null || sec <= 0) return { n: '', unit: 'days' }
-  const order: RetUnit[] = ['months', 'weeks', 'days', 'hours', 'minutes']
-  for (const u of order) { const s = RET_UNIT_SEC[u]; if (sec % s === 0 && sec >= s) return { n: String(sec / s), unit: u } }
-  return { n: String(Math.max(1, Math.round(sec / 60))), unit: 'minutes' }
-}
-
 /* ------------------------------------------------------------ settings drawer */
 function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(d.name)
@@ -2095,30 +2085,10 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             </>
           )}
 
-          <div style={SEC}>Recording</div>
-          <div className="toggle-row">
-            <div><div className="tt">Recording and clipping</div><div className="td">Keep the live output as a recording: review it, clip highlights, and publish VOD assets. Off means segments are cleared after the DVR window and nothing can be clipped later. Applies from the next start.</div></div>
-            <div className={`sw ${recOn ? '' : 'off'}`} onClick={() => setRecOn(v => !v)}><i /></div>
-          </div>
-          {recOn && (
-          <div className="field">
-            <label>Retention <span style={{ color: 'var(--faint)' }}>— blank number = keep forever</span></label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input className="inp" style={{ width: 110 }} inputMode="numeric" placeholder="keep forever"
-                value={retNum} onChange={e => setRetNum(e.target.value.replace(/[^0-9]/g, ''))} />
-              <select className="inp" value={retUnit} onChange={e => setRetUnit(e.target.value as RetUnit)}>
-                <option value="minutes">minutes</option>
-                <option value="hours">hours</option>
-                <option value="days">days</option>
-                <option value="weeks">weeks</option>
-                <option value="months">months</option>
-              </select>
-            </div>
-            {dvrMode === 'sliding' && retNum && Number(retNum) * RET_UNIT_SEC[retUnit] < dvrMinNum * 60 && (
-              <div className="td" style={{ color: 'var(--warn)', marginTop: 6 }}>Will be raised to the DVR window ({fmtWindow(dvrMinNum * 60)}) — retention can’t be shorter than DVR.</div>
-            )}
-          </div>
-          )}
+          <RecordingSection ctx="channel" recOn={recOn} setRecOn={setRecOn}
+            retNum={retNum} setRetNum={setRetNum} retUnit={retUnit} setRetUnit={setRetUnit}
+            retWarn={dvrMode === 'sliding' && retNum && Number(retNum) * RET_UNIT_SEC[retUnit] < dvrMinNum * 60
+              ? `Will be raised to the DVR window (${fmtWindow(dvrMinNum * 60)}) — retention can’t be shorter than DVR.` : null} />
 
           {d.profile?.workflow_type === 'transcode' && (<>
           <div style={SEC}>Watermark <span style={{ color: 'var(--faint)', fontWeight: 400 }}>: burned into the transcode output</span></div>

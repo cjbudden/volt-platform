@@ -4,18 +4,9 @@ import { subscribeLive } from '../liveStatus'
 import { useProtocols, protoOf, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
-import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
+import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, SEC, type RetUnit } from '../scaffold'
 
 type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
-
-type RetUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
-const RET_UNIT_SEC: Record<RetUnit, number> = { minutes: 60, hours: 3600, days: 86400, weeks: 604800, months: 2592000 }
-function splitDuration(sec: number | null): { n: string; unit: RetUnit } {
-  if (sec == null || sec <= 0) return { n: '', unit: 'days' }
-  const order: RetUnit[] = ['months', 'weeks', 'days', 'hours', 'minutes']
-  for (const u of order) { const s = RET_UNIT_SEC[u]; if (sec % s === 0 && sec >= s) return { n: String(sec / s), unit: u } }
-  return { n: String(Math.max(1, Math.round(sec / 60))), unit: 'minutes' }
-}
 
 /** Format retention for the list: prefer the real seconds value (minutes..months),
  *  fall back to the legacy days field. e.g. 3600s -> "1h", not "1d". */
@@ -191,7 +182,6 @@ const RUNG_PRESETS = [
   { height: 1080, bitrateKbps: 5000 }, { height: 720, bitrateKbps: 2800 },
   { height: 480, bitrateKbps: 1200 }, { height: 360, bitrateKbps: 800 }, { height: 240, bitrateKbps: 400 },
 ]
-const SEC: React.CSSProperties = { fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', margin: '20px 0 10px', fontWeight: 700 }
 type PkgRow = { label: string; bitrateKbps: number; protocol: string; url: string; backupUrl: string }
 
 function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClose: () => void; onCreated: () => void }) {
@@ -436,33 +426,16 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
               <option value="on_demand">On demand</option>
             </select>
           </div>
-          <div className="toggle-row">
-            <div><div className="tt">Recording and clipping</div><div className="td">Keep the live output as a recording: review it, clip highlights, and publish VOD assets. Off means segments are cleared after the DVR window and nothing can be clipped later.</div></div>
-            <div className={`sw ${recOn ? '' : 'off'}`} onClick={() => setRecOn(v => !v)}><i /></div>
-          </div>
-          {recOn && (
-          <div className="field"><label>Recording retention <span style={{ color: 'var(--faint)' }}>— blank number = keep forever</span></label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input className="inp" style={{ width: 110 }} inputMode="numeric" placeholder="keep forever"
-                value={retNum} onChange={e => setRetNum(e.target.value.replace(/[^0-9]/g, ''))} />
-              <select className="inp" value={retUnit} onChange={e => setRetUnit(e.target.value as RetUnit)}>
-                <option value="minutes">minutes</option>
-                <option value="hours">hours</option>
-                <option value="days">days</option>
-                <option value="weeks">weeks</option>
-                <option value="months">months</option>
-              </select>
-            </div>
-            {retNum && Number(retNum) * RET_UNIT_SEC[retUnit] < dvrMin * 60 && (
-              <div className="hintxt" style={{ color: 'var(--warn)' }}>Will be raised to the DVR window ({dvrMin}m) — retention can’t be shorter than DVR.</div>
-            )}
-          </div>
-          )}
           <div className="field">
             <label>DVR catch-up window — {dvrMin} min{dvrMin >= 60 ? ` (${(dvrMin / 60).toFixed(dvrMin % 60 ? 1 : 0)}h)` : ''}</label>
             <input type="range" min={1} max={DVR_MAX_MIN} step={1} value={dvrMin} onChange={e => setDvrMin(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
             <div className="hintxt">Max 4h for 24×7 channels; event streams scrub back to the event start.</div>
           </div>
+
+          <RecordingSection ctx="channel" recOn={recOn} setRecOn={setRecOn}
+            retNum={retNum} setRetNum={setRetNum} retUnit={retUnit} setRetUnit={setRetUnit}
+            retWarn={retNum && Number(retNum) * RET_UNIT_SEC[retUnit] < dvrMin * 60
+              ? `Will be raised to the DVR window (${dvrMin}m) — retention can’t be shorter than DVR.` : null} />
 
           {err && <div className="err">{err}</div>}
         </div>
@@ -475,12 +448,3 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   )
 }
 
-function Preset({ sel, onClick, title, desc, meta }: { sel: boolean; onClick: () => void; title: string; desc: string; meta: string }) {
-  return (
-    <div className={`preset ${sel ? 'sel' : ''}`} onClick={onClick}>
-      <div className="pt">{title}</div>
-      <div className="px">{desc}</div>
-      <div className="px" style={{ fontFamily: 'ui-monospace,monospace', marginTop: 8, color: 'var(--faint)' }}>{meta}</div>
-    </div>
-  )
-}

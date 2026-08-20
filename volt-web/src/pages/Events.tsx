@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type EventRow, type Group } from '../api'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
-import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
+import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, SEC, splitDuration, type RetUnit } from '../scaffold'
 
 /* ============================================================================
    Events — one-off broadcasts on the SAME core workflow as channels (sources,
@@ -15,10 +15,6 @@ import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
    - auto-VOD: when the recording closes, a full-event VOD asset is derived
      automatically (the event's metadata is harvested onto it).
    ========================================================================== */
-
-const SEC: React.CSSProperties = { fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--faint)', margin: '18px 0 8px' }
-type RetUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
-const RET_UNIT_SEC: Record<RetUnit, number> = { minutes: 60, hours: 3600, days: 86400, weeks: 604800, months: 2592000 }
 
 const p2 = (n: number) => String(n).padStart(2, '0')
 /** ISO/date -> value for <input type=datetime-local> in LOCAL time. */
@@ -164,7 +160,17 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
   const isEdit = !!ev
   const protocols = useProtocols()
   const [name, setName] = useState(ev?.name ?? '')
-  const [groupId, setGroupId] = useState(ev?.group_id ?? (groups[0]?.id ?? ''))
+  // Type presets pick the group by workflow — the SAME control as the channel
+  // form, so both drawers open identically: Name → Type → …
+  const byType = useMemo(() => ({
+    transcode: groups.find(g => g.workflow_type === 'transcode'),
+    package_only: groups.find(g => g.workflow_type === 'package_only'),
+  }), [groups])
+  const initType: 'transcode' | 'package_only' =
+    (ev && groups.find(g => g.id === ev.group_id)?.workflow_type === 'package_only') ? 'package_only' : 'transcode'
+  const [type, setType] = useState<'transcode' | 'package_only'>(initType)
+  const groupId = ev?.group_id ?? byType[type]?.id ?? ''
+  const [purchasing, setPurchasing] = useState('spot_fallback')
   // schedule: on-air window + optional early server spin-up (input check time)
   const defStart = useMemo(() => { const d = new Date(Date.now() + 3600_000); d.setMinutes(0, 0, 0); return d }, [])
   const [start, setStart] = useState(ev ? toLocalInput(ev.scheduled_start) : toLocalInput(defStart))
@@ -185,8 +191,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
   const [recOn, setRecOn] = useState(ev ? ev.recording_enabled !== false : true)
   const initRetSec = ev?.recording_retention_sec != null ? Number(ev.recording_retention_sec)
     : (ev?.recording_retention_days != null ? ev.recording_retention_days * 86400 : null)
-  const initRet = initRetSec == null ? { n: '', unit: 'days' as RetUnit }
-    : (() => { for (const u of ['months', 'weeks', 'days', 'hours', 'minutes'] as RetUnit[]) { const s = RET_UNIT_SEC[u]; if (initRetSec % s === 0 && initRetSec >= s) return { n: String(initRetSec / s), unit: u } } return { n: String(Math.round(initRetSec / 60)), unit: 'minutes' as RetUnit } })()
+  const initRet = splitDuration(initRetSec)
   const [retNum, setRetNum] = useState(isEdit ? initRet.n : '')
   const [retUnit, setRetUnit] = useState<RetUnit>(initRet.unit)
   const [autoVod, setAutoVod] = useState(ev ? ev.auto_vod !== false : true)
@@ -206,7 +211,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
   async function submit() {
     setErr('')
     if (!name.trim()) { setErr('Give the event a name'); return }
-    if (!groupId) { setErr('Pick a group'); return }
+    if (!groupId) { setErr(`No ${type === 'transcode' ? 'transcode' : 'packaging'} group set up yet`); return }
     const sMs = new Date(start).getTime(), eMs = new Date(end).getTime()
     if (!(eMs > sMs)) { setErr('End must be after start'); return }
     if (!isEdit && !primary.url.trim()) { setErr('Add the primary source URL'); return }
@@ -219,6 +224,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
       scheduledEnd: fromLocalInput(end),
       serverStart: new Date(sMs - leadMin * 60000).toISOString(),
       serverStop: fromLocalInput(end),
+      purchasingMode: purchasing as 'on_demand' | 'reserved' | 'spot_fallback',
       recordingEnabled: recOn,
       recordingRetentionSec: recOn && retNum ? Number(retNum) * RET_UNIT_SEC[retUnit] : null,
       autoVod: recOn ? autoVod : false,
@@ -246,11 +252,15 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
           <div className="field"><label>Event name</label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Cup Final 2026" />
           </div>
+
           {!isEdit && (
-            <div className="field"><label>Group</label>
-              <select className="inp" value={groupId} onChange={e => setGroupId(e.target.value)}>
-                {groups.map(g => <option key={g.id} value={g.id}>{g.name}{g.workflow_type ? ` · ${g.workflow_type === 'transcode' ? 'transcode' : 'packaging'}` : ''}</option>)}
-              </select>
+            <div className="field"><label>Type</label>
+              <div className="presets">
+                <Preset sel={type === 'transcode'} onClick={() => setType('transcode')} title="Transcode"
+                  desc="One source in. We build the ABR ladder with FFmpeg." meta="1 input → many outputs" />
+                <Preset sel={type === 'package_only'} onClick={() => setType('package_only')} title="Packaging"
+                  desc="You send a pre-encoded ladder; we just package it." meta="N inputs → N outputs" />
+              </div>
             </div>
           )}
 
@@ -281,6 +291,8 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
             <div className={`sw ${backupOn ? '' : 'off'}`} onClick={() => setBackupOn(v => !v)}><i /></div>
           </div>
           {backupOn && <SourceInput protocols={protocols} value={backup} onChange={setBackup} label="Backup source" />}
+
+          <div style={SEC}>Filler on total loss</div>
           <div className="field"><label>When no source is available</label>
             <select className="inp" value={lossBehavior} onChange={e => setLossBehavior(e.target.value as any)}>
               <option value="none">Show nothing (output stops)</option>
@@ -303,30 +315,18 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
             uploadKind="slate" uploadFolder="slates" allowUpload={lossBehavior !== 'vod_loop'}
             onClose={() => setPickerOpen(false)} onPick={(url) => { setSlateRef(url); setPickerOpen(false) }} />
 
-          <div style={SEC}>Recording</div>
-          <div className="toggle-row">
-            <div><div className="tt">Recording and clipping</div><div className="td">Keep the event's output as one contained recording: review it, clip highlights, publish VOD. Off means nothing can be clipped later.</div></div>
-            <div className={`sw ${recOn ? '' : 'off'}`} onClick={() => setRecOn(v => !v)}><i /></div>
+          <div style={SEC}>Delivery</div>
+          <div className="field"><label>Purchasing mode</label>
+            <select className="inp" value={purchasing} onChange={e => setPurchasing(e.target.value)}>
+              <option value="reserved">Reserved</option>
+              <option value="spot_fallback">Spot with on-demand fallback</option>
+              <option value="on_demand">On demand</option>
+            </select>
           </div>
-          {recOn && (<>
-            <div className="field"><label>Retention <span style={{ color: 'var(--faint)' }}>— blank number = keep forever</span></label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input className="inp" style={{ width: 110 }} inputMode="numeric" placeholder="keep forever"
-                  value={retNum} onChange={e => setRetNum(e.target.value.replace(/[^0-9]/g, ''))} />
-                <select className="inp" value={retUnit} onChange={e => setRetUnit(e.target.value as RetUnit)}>
-                  <option value="minutes">minutes</option>
-                  <option value="hours">hours</option>
-                  <option value="days">days</option>
-                  <option value="weeks">weeks</option>
-                  <option value="months">months</option>
-                </select>
-              </div>
-            </div>
-            <div className="toggle-row">
-              <div><div className="tt">Automatic VOD on end</div><div className="td">When the event's recording closes, publish it as a full-event VOD asset automatically (the event's metadata is carried over).</div></div>
-              <div className={`sw ${autoVod ? '' : 'off'}`} onClick={() => setAutoVod(v => !v)}><i /></div>
-            </div>
-          </>)}
+
+          <RecordingSection ctx="event" recOn={recOn} setRecOn={setRecOn}
+            retNum={retNum} setRetNum={setRetNum} retUnit={retUnit} setRetUnit={setRetUnit}
+            autoVod={autoVod} setAutoVod={setAutoVod} />
 
           {err && <div className="err">{err}</div>}
         </div>
