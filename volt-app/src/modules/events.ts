@@ -10,7 +10,32 @@ import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '
 export const eventsRouter = Router();
 eventsRouter.use(requireAuth);
 
-const EVENT_EDITABLE = ['name', 'scheduled_start', 'scheduled_end', 'public_start', 'public_end', 'recording_retention_days', 'schema_id', 'metadata'];
+const EVENT_EDITABLE = ['name', 'scheduled_start', 'scheduled_end', 'server_start', 'server_stop',
+  'public_start', 'public_end', 'recording_enabled', 'recording_retention_days', 'recording_retention_sec',
+  'auto_vod', 'input_failover_enabled', 'auto_failback', 'input_loss_behavior', 'filler_slate_ref',
+  'schema_id', 'metadata'];
+
+/** Same source shape the channel forms use — events share the core workflow. */
+const sourceSchema = z.object({
+  role: z.enum(['primary', 'backup']).default('primary'),
+  protocol: z.string().min(1),
+  ingestUrl: z.string().optional(),
+  streamKey: z.string().optional(),
+  renditionLabel: z.string().optional(),
+  renditionBitrateKbps: z.number().int().positive().optional(),
+});
+
+async function replaceEventInputs(eventId: string, sources: z.infer<typeof sourceSchema>[]) {
+  await query('DELETE FROM stream_inputs WHERE event_id = $1', [eventId]);
+  for (const s of sources) {
+    await query(
+      `INSERT INTO stream_inputs(event_id, role, protocol, ingest_url, stream_key, rendition_label, rendition_bitrate_kbps)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [eventId, s.role ?? 'primary', s.protocol, s.ingestUrl ?? null, s.streamKey ?? null,
+       s.renditionLabel ?? null, s.renditionBitrateKbps ?? null]
+    );
+  }
+}
 
 eventsRouter.get(
   '/',
@@ -51,7 +76,15 @@ const createSchema = z
     publicEnd: z.string().datetime().optional(),
     purchasingMode: z.enum(['on_demand', 'reserved', 'spot_fallback']).default('spot_fallback'),
     resilienceTier: z.enum(['standard', 'resilient_input', 'full_redundancy']).default('standard'),
+    recordingEnabled: z.boolean().optional(),               // keep run segments as the event recording
     recordingRetentionDays: z.number().int().positive().nullable().optional(), // retention rule
+    recordingRetentionSec: z.number().int().positive().nullable().optional(),
+    autoVod: z.boolean().optional(),                        // derive a full-event VOD on recording close
+    sources: z.array(sourceSchema).optional(),              // same shape as channel sources
+    inputFailoverEnabled: z.boolean().optional(),
+    autoFailback: z.boolean().optional(),
+    inputLossBehavior: z.enum(['none', 'slate', 'vod_loop', 'last_frame', 'black']).optional(),
+    fillerSlateRef: z.string().nullable().optional(),
     schemaId: z.string().uuid().nullable().optional(),      // metadata schema (defined once, harvested to auto-VOD)
     metadata: z.record(z.any()).optional(),
   })
@@ -84,17 +117,24 @@ eventsRouter.post(
     const row = await one<any>(
       `INSERT INTO events(group_id, name, scheduled_start, scheduled_end,
                           server_start, server_stop, public_start, public_end,
-                          purchasing_mode, resilience_tier, recording_retention_days,
+                          purchasing_mode, resilience_tier,
+                          recording_enabled, recording_retention_days, recording_retention_sec, auto_vod,
+                          input_failover_enabled, auto_failback, input_loss_behavior, filler_slate_ref,
                           schema_id, metadata, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$14) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21,$21) RETURNING *`,
       [
         b.groupId, b.name, b.scheduledStart, b.scheduledEnd,
         b.serverStart ?? b.scheduledStart, b.serverStop ?? b.scheduledEnd,
         b.publicStart ?? b.scheduledStart, b.publicEnd ?? b.scheduledEnd,
-        b.purchasingMode, b.resilienceTier, b.recordingRetentionDays ?? null,
+        b.purchasingMode, b.resilienceTier,
+        b.recordingEnabled ?? true, b.recordingRetentionDays ?? null, b.recordingRetentionSec ?? null,
+        b.autoVod ?? true,
+        b.inputFailoverEnabled ?? false, b.autoFailback ?? true, b.inputLossBehavior ?? 'none',
+        b.fillerSlateRef ?? null,
         md.schemaId, JSON.stringify(md.metadata), who.userId,
       ]
     );
+    if (b.sources?.length) await replaceEventInputs(row.id, b.sources);
     await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
       action: 'create', entityType: 'event', entityId: row.id, snapshot: { name: row.name } });
     res.status(201).json(row);
@@ -107,9 +147,19 @@ const editEventSchema = z.object({
   name: z.string().min(1).optional(),
   scheduledStart: z.string().datetime().optional(),
   scheduledEnd: z.string().datetime().optional(),
+  serverStart: z.string().datetime().optional(),
+  serverStop: z.string().datetime().optional(),
   publicStart: z.string().datetime().optional(),
   publicEnd: z.string().datetime().optional(),
+  recordingEnabled: z.boolean().optional(),
   recordingRetentionDays: z.number().int().positive().nullable().optional(),
+  recordingRetentionSec: z.number().int().positive().nullable().optional(),
+  autoVod: z.boolean().optional(),
+  sources: z.array(sourceSchema).optional(),
+  inputFailoverEnabled: z.boolean().optional(),
+  autoFailback: z.boolean().optional(),
+  inputLossBehavior: z.enum(['none', 'slate', 'vod_loop', 'last_frame', 'black']).optional(),
+  fillerSlateRef: z.string().nullable().optional(),
   schemaId: z.string().uuid().nullable().optional(),
   metadata: z.record(z.any()).optional(),
   version: z.number().int().optional(),
@@ -128,9 +178,18 @@ const editEvent = asyncHandler(async (req, res) => {
   if (has('name')) patch.name = b.name;
   if (has('scheduledStart')) patch.scheduled_start = b.scheduledStart;
   if (has('scheduledEnd')) patch.scheduled_end = b.scheduledEnd;
+  if (has('serverStart')) patch.server_start = b.serverStart;
+  if (has('serverStop')) patch.server_stop = b.serverStop;
   if (has('publicStart')) patch.public_start = b.publicStart;
   if (has('publicEnd')) patch.public_end = b.publicEnd;
+  if (has('recordingEnabled')) patch.recording_enabled = b.recordingEnabled;
   if (has('recordingRetentionDays')) patch.recording_retention_days = b.recordingRetentionDays ?? null;
+  if (has('recordingRetentionSec')) patch.recording_retention_sec = b.recordingRetentionSec ?? null;
+  if (has('autoVod')) patch.auto_vod = b.autoVod;
+  if (has('inputFailoverEnabled')) patch.input_failover_enabled = b.inputFailoverEnabled;
+  if (has('autoFailback')) patch.auto_failback = b.autoFailback;
+  if (has('inputLossBehavior')) patch.input_loss_behavior = b.inputLossBehavior;
+  if (has('fillerSlateRef')) patch.filler_slate_ref = b.fillerSlateRef ?? null;
   if (has('schemaId') || has('metadata')) {
     const md = await validateEntityMetadata(accountId(req), b.schemaId ?? null,
       has('metadata') ? b.metadata : current.metadata, ['event']);
@@ -146,6 +205,7 @@ const editEvent = asyncHandler(async (req, res) => {
       current, patch, allowed: EVENT_EDITABLE, entityType: 'event',
       userId: who.userId, label: who.label, expectedVersion,
     });
+    if (has('sources') && b.sources) await replaceEventInputs(req.params.id, b.sources);
     res.set('ETag', String(row.version));
     res.json({ ...row, _changed: changed });
   } catch (e) {
@@ -168,6 +228,17 @@ eventsRouter.get(
 eventsRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
+    const owned = await one<any>(
+      `SELECT e.id, e.status FROM events e JOIN groups g ON g.id = e.group_id
+        WHERE e.id = $1 AND g.account_id = $2`,
+      [req.params.id, accountId(req)]
+    );
+    if (!owned) throw notFound('Event not found');
+    if (owned.status === 'live') throw badRequest('Stop the event before deleting it');
+    // instance rows reference the event with ON DELETE SET NULL, but the table
+    // CHECK requires an owner — remove the event's (terminated) instances first
+    // or the delete 500s for any event that ever ran.
+    await query('DELETE FROM instances WHERE event_id = $1', [req.params.id]);
     const row = await one<any>(
       `DELETE FROM events e USING groups g
         WHERE e.group_id = g.id AND e.id = $1 AND g.account_id = $2 RETURNING e.id, e.name`,

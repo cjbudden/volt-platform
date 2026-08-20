@@ -4,6 +4,7 @@ import Channels from './pages/Channels'
 import ChannelDetail from './pages/ChannelDetail'
 import ImageLibrary from './pages/ImageLibrary'
 import Recordings from './pages/Recordings'
+import Events from './pages/Events'
 import { useRoute, navigate, hrefFor } from './router'
 import { UploadIndicator } from './uploads'
 
@@ -145,6 +146,8 @@ export default function App() {
             ? <ImageLibrary />
             : section === 'recordings'
             ? <Recordings />
+            : section === 'events'
+            ? <Events />
             : <Placeholder title={label} />}
         </div>
       </div>

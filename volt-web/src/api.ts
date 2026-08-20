@@ -229,6 +229,20 @@ export const api = {
     if (p.recursive) qs.set('recursive', '1')
     return req('/files' + (qs.toString() ? '?' + qs : ''))
   },
+  // events — same core workflow as channels plus the scheduled window
+  events: (): Promise<EventRow[]> => req('/events'),
+  event: (id: string): Promise<EventRow> => req(`/events/${id}`),
+  createEvent: (b: EventCreateBody): Promise<EventRow> =>
+    req('/events', { method: 'POST', body: JSON.stringify(b) }),
+  updateEvent: (id: string, patch: EventPatchBody): Promise<EventRow> =>
+    req(`/events/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  eventStartStop: (id: string, action: 'start' | 'stop'): Promise<EventRow> =>
+    req(`/events/${id}/${action}`, { method: 'POST' }),
+  deleteEvent: async (id: string): Promise<void> => {
+    const r = await fetch('/api/events/' + id, { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
+    if (!r.ok && r.status !== 204) throw new Error(String(r.status))
+  },
+
   // recordings library + range playback + clip/VOD creation
   recordings: (p: { kind?: string; channelId?: string; q?: string } = {}): Promise<RecordingRow[]> => {
     const qs = new URLSearchParams()
@@ -273,6 +287,39 @@ export const api = {
     return { ok: false, status: r.status, body }
   },
 }
+
+export interface EventSourceRow {
+  id?: string; role: 'primary' | 'backup'; protocol: string
+  ingest_url: string | null; stream_key: string | null; status?: string
+}
+export interface EventRow {
+  id: string; group_id: string; name: string; status: string
+  scheduled_start: string; scheduled_end: string
+  server_start: string | null; server_stop: string | null
+  public_start: string | null; public_end: string | null
+  actual_start?: string | null; actual_end?: string | null
+  recording_enabled?: boolean
+  recording_retention_days: number | null; recording_retention_sec?: number | null
+  auto_vod?: boolean
+  input_failover_enabled?: boolean; auto_failback?: boolean
+  input_loss_behavior?: string; filler_slate_ref?: string | null
+  version: number; created_at: string
+  inputs?: EventSourceRow[]
+}
+export interface EventCreateBody {
+  groupId: string; name: string
+  scheduledStart: string; scheduledEnd: string
+  serverStart?: string; serverStop?: string
+  publicStart?: string; publicEnd?: string
+  purchasingMode?: 'on_demand' | 'reserved' | 'spot_fallback'
+  recordingEnabled?: boolean; recordingRetentionSec?: number | null
+  autoVod?: boolean
+  sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string }[]
+  inputFailoverEnabled?: boolean; autoFailback?: boolean
+  inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
+  fillerSlateRef?: string | null
+}
+export interface EventPatchBody extends Partial<Omit<EventCreateBody, 'groupId'>> { version?: number }
 
 export interface RecordingRow {
   id: string; kind: 'event' | 'channel_day' | string

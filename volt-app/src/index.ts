@@ -44,6 +44,10 @@ async function ensureSchema(): Promise<void> {
   // whether run segments are KEPT; retention (when set) says for how long.
   await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS recording_enabled BOOLEAN NOT NULL DEFAULT true`);
   await query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS recording_enabled BOOLEAN NOT NULL DEFAULT true`);
+  // Events: fine-grained retention (parity with channels) + the automated
+  // live-to-VOD switch (derive a full-event VOD asset when the recording closes).
+  await query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS recording_retention_sec BIGINT`);
+  await query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS auto_vod BOOLEAN NOT NULL DEFAULT true`);
 }
 
 const server = app.listen(config.port, () => {

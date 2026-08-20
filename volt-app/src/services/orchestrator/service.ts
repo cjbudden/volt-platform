@@ -220,9 +220,12 @@ export class Orchestrator {
       console.error('thumbnailer launch failed for recording', rec.id, e);
     }
     // Event recording → derive a full-event VOD, harvesting the event's metadata.
+    // auto_vod is the event's explicit switch (settings form); default on.
     if (rec.event_id) {
       try {
-        await deriveEventVod(rec);
+        const ev = await one<any>('SELECT auto_vod FROM events WHERE id = $1', [rec.event_id]);
+        if (ev?.auto_vod !== false) await deriveEventVod(rec);
+        else console.log('auto-VOD skipped (disabled on event)', rec.event_id);
       } catch (e) {
         console.error('auto-VOD derive failed for recording', rec.id, e);
       }

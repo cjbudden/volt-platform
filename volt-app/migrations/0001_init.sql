@@ -201,6 +201,8 @@ CREATE TABLE events (
     filler_slate_ref       TEXT,                                 -- slate image URL/ref
     recording_enabled        BOOLEAN NOT NULL DEFAULT true,      -- keep run segments as recordings (clip/VOD source)
     recording_retention_days INTEGER,                            -- retention rule (NULL = keep forever)
+    recording_retention_sec  BIGINT,                             -- finer retention (seconds; wins over days)
+    auto_vod                 BOOLEAN NOT NULL DEFAULT true,      -- derive a full-event VOD when the recording closes
     -- custom metadata (assignable schema + values). Defined once at the event and
     -- harvested into the auto-VOD (schema.org VideoObject) when the recording ends.
     -- FK to metadata_schemas added by ALTER below (that table is defined later).
@@ -231,6 +233,7 @@ CREATE TABLE channels (
     filler_slate_ref       TEXT,                                 -- slate image URL/ref
     recording_enabled        BOOLEAN NOT NULL DEFAULT true,      -- keep run segments as recordings (clip/VOD source)
     recording_retention_days INTEGER,                            -- retention rule (NULL = keep forever)
+    recording_retention_sec  BIGINT,                             -- finer retention (seconds; wins over days)
     -- custom metadata (assignable schema + values), same mechanism as events/vod.
     -- FK to metadata_schemas added by ALTER below (that table is defined later).
     schema_id        UUID,
