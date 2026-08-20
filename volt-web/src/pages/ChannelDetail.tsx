@@ -2078,7 +2078,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
               <div className="field"><label>Output languages <span style={{ color: 'var(--faint)' }}>— the spoken language is detected automatically and translated into each of these</span></label>
                 <LangPicker value={capLangs} onChange={setCapLangs} options={langOpts} />
               </div>
-              <div className="field"><label>Caption timing trim <span style={{ color: 'var(--faint)' }}>— seconds; positive shows words LATER, negative earlier. Watch the output and adjust in 0.5s steps until speech and captions line up. Applies from the next restart.</span></label>
+              <div className="field"><label>Subtitle offset <span style={{ color: 'var(--faint)' }}>— seconds. Use this to adjust the timing of subtitles if they are appearing too fast or slow: positive shows them later, negative earlier. Applies from the next restart.</span></label>
                 <input className="inp" style={{ width: 110 }} inputMode="decimal" value={capTrim}
                   onChange={e => setCapTrim(e.target.value.replace(/[^0-9.-]/g, ''))} placeholder="0" />
               </div>
