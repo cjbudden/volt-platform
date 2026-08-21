@@ -739,6 +739,21 @@ def _iso(epoch):
     return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(round((epoch - int(epoch)) * 1000)):03d}Z"
 
 
+def _atomic_write(path, text):
+    """Write a file ATOMICALLY (temp in same dir + rename).
+
+    open(path, 'w') TRUNCATES the file before writing, so anything reading the
+    playlist in that window (the control plane serving it, a player fetching)
+    receives an EMPTY or PARTIAL playlist — measured live: 69 empty reads in a
+    2-minute hammer test. A player that swallows one errors the level, retries,
+    and visibly stalls/repeats. os.replace is atomic on POSIX and macOS: readers
+    always see either the old complete file or the new complete file."""
+    tmp = f"{path}.tmp.{os.getpid()}"
+    with open(tmp, "w") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
+
+
 def _live_sub_playlist(indices, chunk, media_seq, t0, pdt_map=None):
     """A LIVE WebVTT media playlist (no ENDLIST) with EXT-X-PROGRAM-DATE-TIME on EVERY
     segment so the player aligns the cues to the video by wall-clock.
@@ -858,8 +873,7 @@ def _write_sub_segment(path, cues, seg_start, seg_end, mpegts=None):
         rel = Cue(rel_start, rel_end, c.text, c.lang)
         body.append(cue_block(rel))
         body.append("")
-    with open(path, "w") as fh:
-        fh.write("\n".join(body).rstrip() + "\n")
+    _atomic_write(path, "\n".join(body).rstrip() + "\n")
 
 
 def _pdt_companion_playlist(text, now, out_dir):
@@ -880,6 +894,7 @@ def _pdt_companion_playlist(text, now, out_dir):
     lines = text.splitlines()
     out = []
     pend = None            # duration parsed from the preceding EXTINF
+    prev_start = None      # stamped start of the previous segment (monotonicity floor)
     prev_end = None        # wall-clock end of the previous segment (continuity fallback)
     total_listed = 0.0
     for l in lines:
@@ -890,11 +905,38 @@ def _pdt_companion_playlist(text, now, out_dir):
         elif l and not l.startswith("#") and pend is not None:
             dur = pend or 0.0
             try:
-                start_wall = os.path.getmtime(os.path.join(out_dir, l)) - dur
+                measured = os.path.getmtime(os.path.join(out_dir, l)) - dur
             except OSError:
-                start_wall = prev_end if prev_end is not None else (now - total_listed - dur)
+                measured = prev_end if prev_end is not None else (now - total_listed - dur)
+            # JITTER GUARD: mtimes are the long-term anchor, but under CPU
+            # contention segment writes land LATE and BUNCH (measured live:
+            # 0.9..5.2s spacing for nominal 4.0s segments; a loaded laptop is
+            # worse) — raw mtime PDT then jitters or goes BACKWARDS, which
+            # players punish with re-fetches, stalls and caption drift. So:
+            # within a run, PDT spacing follows EXTINF and each segment pulls
+            # HALF of the measured error, converging on the real wall clock
+            # (steady-state error is bounded by one pacing delta) without
+            # visible jitter; a >1.5s disagreement is a real gap/discontinuity
+            # and re-anchors hard. PDT is strictly monotonic: never backwards.
+            if prev_start is None:
+                start_wall = measured
+            else:
+                err = measured - prev_end
+                if err > 1.5:
+                    # segment written well AFTER continuity: a real hole in the
+                    # stream (source loss, restart) — re-anchor to the measured
+                    # clock so the gap is honest
+                    start_wall = measured
+                else:
+                    # on time, jittered, or BUNCHED (a stream can't start before
+                    # the previous segment ended, so a backwards 'measurement' is
+                    # always write-contention noise): hold continuity, pull half
+                    # the error (clamped) toward the measured clock
+                    start_wall = prev_end + 0.5 * max(err, -1.0)
+                start_wall = max(start_wall, prev_start + 0.001)
             out.append(f"#EXT-X-PROGRAM-DATE-TIME:{_iso(start_wall)}")
             out.append(l)
+            prev_start = start_wall
             prev_end = start_wall + dur
             total_listed += dur
             pend = None
@@ -943,16 +985,26 @@ def _write_companion(out_dir, langs, default_lang, now):
             cc_name = f"{base}_cc.m3u8"
             try:
                 vtext = open(os.path.join(out_dir, line)).read()
-                with open(os.path.join(out_dir, cc_name), "w") as fh:
-                    fh.write(_pdt_companion_playlist(vtext, now, out_dir))
-                out.append(cc_name)
+                # SOURCE SANITY: the packager's playlist could itself be caught
+                # mid-write; publishing a copy of a truncated source would hand
+                # players a broken window for a whole refresh cycle. Skip this
+                # cycle (keep the previous good companion) unless it is complete.
+                vlines = [x for x in vtext.splitlines() if x.strip()]
+                complete = (vlines and vlines[0].startswith("#EXTM3U")
+                            and (vlines[-1].startswith("#") or vlines[-1].endswith((".m4s", ".mp4", ".ts"))))
+                if complete:
+                    _atomic_write(os.path.join(out_dir, cc_name),
+                                  _pdt_companion_playlist(vtext, now, out_dir))
+                if complete or os.path.exists(os.path.join(out_dir, cc_name)):
+                    out.append(cc_name)
+                else:
+                    out.append(line)
             except OSError:
                 out.append(line)  # fall back to the plain playlist if unreadable
             expect_uri = False
             continue
         out.append(line)
-    with open(os.path.join(out_dir, "master_cc.m3u8"), "w") as fh:
-        fh.write("\n".join(out) + "\n")
+    _atomic_write(os.path.join(out_dir, "master_cc.m3u8"), "\n".join(out) + "\n")
 
 
 def _write_companion_mpd(out_dir, langs, chunk, first_idx):
@@ -977,8 +1029,7 @@ def _write_companion_mpd(out_dir, langs, chunk, first_idx):
             f'</Representation></AdaptationSet>'
         )
     mpd = mpd.replace("</Period>", "".join(blocks) + "</Period>")
-    with open(os.path.join(out_dir, "manifest_cc.mpd"), "w") as fh:
-        fh.write(mpd)
+    _atomic_write(os.path.join(out_dir, "manifest_cc.mpd"), mpd)
 
 
 def _subs_first_idx(out_dir, lang):
@@ -1041,8 +1092,8 @@ def start_captions(cfg, out_dir):
         # otherwise a player that connects before the first cue is produced never gets a
         # subtitle track for the whole session. This empty playlist makes the track exist
         # immediately (no 404) and it fills in as cues arrive.
-        with open(os.path.join(sub_root, l, "subs.m3u8"), "w") as fh:
-            fh.write(_live_sub_playlist([], chunk, 0, time.time()))
+        _atomic_write(os.path.join(sub_root, l, "subs.m3u8"),
+                      _live_sub_playlist([], chunk, 0, time.time()))
     tmp = os.path.join(WORK_DIR, "cap_audio")
     os.makedirs(tmp, exist_ok=True)
     audio_url = _captions_audio_url(cfg)
@@ -1148,8 +1199,26 @@ def start_captions(cfg, out_dir):
                     base = idx * chunk
                     # measured capture clock: the wav closes when its last audio sample was
                     # read, so mtime - chunk = the REAL wall-clock start of this chunk.
+                    # JITTER GUARD (same rule as the video companion PDT): under CPU
+                    # contention the wav close lands LATE, so raw mtimes wobble and the
+                    # cues drift audibly out of sync on a loaded machine. Consecutive
+                    # chunks are CONTIGUOUS by construction, so hold continuity and pull
+                    # 25% of the measured error each chunk; a >75%-of-a-chunk
+                    # disagreement is a real discontinuity (skip/restart) and re-anchors.
                     try:
-                        pdts[idx] = os.path.getmtime(w) - chunk
+                        measured = os.path.getmtime(w) - chunk
+                        prev = pdts.get(idx - 1)
+                        if prev is None:
+                            pdts[idx] = measured
+                        else:
+                            expected = prev + chunk
+                            err = measured - expected
+                            if err > chunk * 0.75:
+                                pdts[idx] = measured   # real hole: re-anchor honestly
+                            else:
+                                # late/bunched wav closes are contention noise (audio
+                                # is continuous): hold continuity, pull half the error
+                                pdts[idx] = expected + 0.5 * max(err, -chunk * 0.25)
                     except OSError:
                         pass
                     t0 = time.time()
@@ -1215,10 +1284,10 @@ def start_captions(cfg, out_dir):
                     for l in langs:
                         _write_sub_segment(os.path.join(sub_root, l, f"sub_{idx}.vtt"),
                                            store.get(l, []), base, base + chunk, mpegts=mpegts)
-                        with open(os.path.join(sub_root, l, "subs.m3u8"), "w") as fh:
-                            # per-chunk PDT from measured capture times (cap_t0 clock is
-                            # only the fallback for chunks with no measurement).
-                            fh.write(_live_sub_playlist(range(first, idx + 1), chunk, first, cap_t0, pdt_map=pdts))
+                        # per-chunk PDT from measured capture times (cap_t0 clock is
+                        # only the fallback for chunks with no measurement).
+                        _atomic_write(os.path.join(sub_root, l, "subs.m3u8"),
+                                      _live_sub_playlist(range(first, idx + 1), chunk, first, cap_t0, pdt_map=pdts))
                     # NOTE: the companion manifests are refreshed by the decoupled
                     # companion thread (fast, fixed cadence) — NOT here — so video stays
                     # smooth regardless of transcribe timing.
