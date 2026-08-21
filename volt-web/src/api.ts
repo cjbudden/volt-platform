@@ -243,6 +243,25 @@ export const api = {
     if (!r.ok && r.status !== 204) throw new Error(String(r.status))
   },
 
+  // EPG — programme guides for channels and event-day schedules
+  epgOwners: (): Promise<EpgOwnerRow[]> => req('/epg/owners'),
+  epgProgrammes: (owner: EpgOwner, fromIso: string, toIso: string): Promise<ProgrammeRow[]> =>
+    req(`/epg?${owner.kind === 'event' ? 'eventId' : 'channelId'}=${owner.id}&from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`),
+  epgConflicts: (owner: EpgOwner, fromIso: string, toIso: string): Promise<ProgrammeConflict[]> =>
+    req(`/epg/conflicts?${owner.kind === 'event' ? 'eventId' : 'channelId'}=${owner.id}&from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`),
+  createProgramme: (owner: EpgOwner, b: ProgrammeBody): Promise<ProgrammeRow & { conflicts: { id: string; title: string }[] }> =>
+    req('/epg', { method: 'POST', body: JSON.stringify({ ...(owner.kind === 'event' ? { eventId: owner.id } : { channelId: owner.id }), ...b }) }),
+  patchProgramme: (id: string, b: Partial<ProgrammeBody>): Promise<ProgrammeRow> =>
+    req(`/epg/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteProgramme: async (id: string): Promise<void> => {
+    const r = await fetch('/api/epg/' + id, { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
+    if (!r.ok && r.status !== 204) throw new Error(String(r.status))
+  },
+  epgCopyDay: (owner: EpgOwner, fromStart: string, fromEnd: string, dayOffsets: number[]): Promise<{ copied: number; created: number }> =>
+    req('/epg/copy-day', { method: 'POST', body: JSON.stringify({ ...(owner.kind === 'event' ? { eventId: owner.id } : { channelId: owner.id }), fromStart, fromEnd, dayOffsets }) }),
+  epgClearDay: (owner: EpgOwner, fromStart: string, fromEnd: string): Promise<{ deleted: number }> =>
+    req('/epg/clear-day', { method: 'POST', body: JSON.stringify({ ...(owner.kind === 'event' ? { eventId: owner.id } : { channelId: owner.id }), fromStart, fromEnd }) }),
+
   // recordings library + range playback + clip/VOD creation
   recordings: (p: { kind?: string; channelId?: string; q?: string } = {}): Promise<RecordingRow[]> => {
     const qs = new URLSearchParams()
@@ -323,6 +342,33 @@ export interface EventCreateBody {
   fillerSlateRef?: string | null
 }
 export interface EventPatchBody extends Partial<Omit<EventCreateBody, 'groupId'>> { version?: number }
+
+export interface EpgOwner { kind: 'channel' | 'event'; id: string }
+export interface EpgOwnerRow {
+  kind: 'channel' | 'event'; id: string; name: string; status: string
+  programme_count: number; first_at: string | null; last_at: string | null
+  auto_clip_count: number; next_title: string | null; next_at: string | null
+}
+export interface ProgrammeRow {
+  id: string; channel_id: string | null; event_id: string | null
+  title: string; starts_at: string; ends_at: string; status: string
+  actual_start: string | null; actual_end: string | null
+  auto_vod: boolean; geo_mode: 'worldwide' | 'allow' | 'block'; geo_countries: string[]
+  replacement_kind: 'none' | 'slate' | 'loop' | 'vod'; replacement_ref: string | null
+  clip_status: 'none' | 'firing' | 'created' | 'error'; clip_asset_id: string | null; clip_error: string | null
+  metadata: Record<string, any>; series_id: string | null
+}
+export interface ProgrammeBody {
+  title: string; startsAt: string; endsAt?: string
+  autoVod?: boolean
+  geoMode?: 'worldwide' | 'allow' | 'block'; geoCountries?: string[]
+  replacementKind?: 'none' | 'slate' | 'loop' | 'vod'; replacementRef?: string | null
+  metadata?: Record<string, any>
+}
+export interface ProgrammeConflict {
+  a_id: string; a_title: string; b_id: string; b_title: string
+  overlap_start: string; overlap_end: string
+}
 
 export interface RecordingRow {
   id: string; kind: 'event' | 'channel_day' | string

@@ -48,6 +48,21 @@ async function ensureSchema(): Promise<void> {
   // live-to-VOD switch (derive a full-event VOD asset when the recording closes).
   await query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS recording_retention_sec BIGINT`);
   await query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS auto_vod BOOLEAN NOT NULL DEFAULT true`);
+  // EPG: programmes belong to a channel OR an event (event guides schedule the
+  // day's proceedings); per-programme slot REPLACEMENT (slate/loop/vod for the
+  // period) and post-airing auto-clip bookkeeping.
+  await query(`ALTER TABLE programmes ALTER COLUMN channel_id DROP NOT NULL`);
+  await query(`ALTER TABLE programmes ADD COLUMN IF NOT EXISTS event_id UUID REFERENCES events(id) ON DELETE CASCADE`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_prog_event_start ON programmes(event_id, starts_at)`);
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_prog_source_event ON programmes(event_id, source_ref) WHERE source_ref IS NOT NULL AND event_id IS NOT NULL`);
+  await query(`ALTER TABLE programmes ADD COLUMN IF NOT EXISTS replacement_kind TEXT NOT NULL DEFAULT 'none'`);
+  await query(`ALTER TABLE programmes ADD COLUMN IF NOT EXISTS replacement_ref TEXT`);
+  await query(`ALTER TABLE programmes ADD COLUMN IF NOT EXISTS clip_status TEXT NOT NULL DEFAULT 'none'`);
+  await query(`ALTER TABLE programmes ADD COLUMN IF NOT EXISTS clip_asset_id UUID`);
+  await query(`ALTER TABLE programmes ADD COLUMN IF NOT EXISTS clip_error TEXT`);
+  await query(`DO $$ BEGIN
+    ALTER TABLE programmes ADD CONSTRAINT chk_prog_owner CHECK ((channel_id IS NOT NULL) OR (event_id IS NOT NULL));
+  EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
 }
 
 const server = app.listen(config.port, () => {

@@ -273,6 +273,9 @@ export class Orchestrator {
     await this.rollChannelRecordings();
     // 4) fire scheduled clips whose end time has passed
     await this.fireScheduledClips();
+    // 4b) post-airing EPG automation: cut a clip/VOD for ended programmes
+    //     flagged auto_vod, named from the programme with its metadata
+    await this.fireProgrammeClips();
     // 5) reconcile ORPHANED recordings: a row stays status='recording' forever
     //    if its channel/event stopped without passing through stopStream (encoder
     //    crash, process kill, control plane down at the time). The UI then shows
@@ -328,6 +331,68 @@ export class Orchestrator {
       }
     }
     return orphans.length;
+  }
+
+  /**
+   * POST-AIRING AUTOMATION from the EPG: for every programme flagged auto_vod
+   * whose airing has ended, cut a clip/VOD of exactly that slot from the
+   * owner's recording. The asset takes the PROGRAMME's identity: its title and
+   * its metadata (harvested onto the vod asset), so the guide is the single
+   * place the show's details are typed. As-run times win over scheduled when
+   * the airing was observed. A claim guard (clip_status) makes firing
+   * exactly-once across ticks; a missing recording is recorded as clip_error
+   * rather than retried forever (7-day lookback window).
+   */
+  async fireProgrammeClips(): Promise<number> {
+    const due = await query<any>(
+      `SELECT * FROM programmes
+        WHERE auto_vod AND clip_status='none'
+          AND COALESCE(actual_end, ends_at) <= now()
+          AND ends_at > now() - interval '7 days'`
+    );
+    let fired = 0;
+    for (const p of due) {
+      const claimed = await one<any>(
+        `UPDATE programmes SET clip_status='firing' WHERE id=$1 AND clip_status='none' RETURNING id`, [p.id]);
+      if (!claimed) continue;
+      try {
+        const col = p.channel_id ? 'channel_id' : 'event_id';
+        const ownerId = p.channel_id ?? p.event_id;
+        const startMs = new Date(p.actual_start ?? p.starts_at).getTime();
+        const endMs = new Date(p.actual_end ?? p.ends_at).getTime();
+        const rec = await one<any>(
+          `SELECT * FROM recordings WHERE ${col}=$1
+             AND start_epoch_ms <= $2 AND (end_epoch_ms IS NULL OR end_epoch_ms >= $3)
+           ORDER BY start_epoch_ms DESC LIMIT 1`,
+          [ownerId, startMs, endMs]
+        );
+        if (!rec) {
+          await query(`UPDATE programmes SET clip_status='error', clip_error='no recording covers the slot' WHERE id=$1`, [p.id]);
+          continue;
+        }
+        const asset = await createClipVod({
+          ownerCol: col as 'channel_id' | 'event_id',
+          ownerId,
+          recordingId: rec.id,
+          title: p.title,
+          startMs, endMs,
+          outputKind: 'manifest',
+          masterKeyBase: rec.master_key ?? 'vod',
+        });
+        // harvest the programme's metadata onto the asset (single source of truth)
+        await query(`UPDATE vod_assets SET metadata=$2::jsonb WHERE id=$1`,
+          [(asset as any).id, JSON.stringify(p.metadata ?? {})]);
+        await query(`UPDATE programmes SET clip_status='created', clip_asset_id=$2, clip_error=NULL WHERE id=$1`,
+          [p.id, (asset as any).id]);
+        fired++;
+        console.log(`[orchestrator] EPG auto-clip created for programme "${p.title}" (${p.id}) -> asset ${(asset as any).id}`);
+      } catch (e) {
+        console.error('programme auto-clip failed', p.id, e);
+        await query(`UPDATE programmes SET clip_status='error', clip_error=$2 WHERE id=$1`,
+          [p.id, String((e as any)?.message ?? e).slice(0, 300)]).catch(() => {});
+      }
+    }
+    return fired;
   }
 
   /** Cut a VOD asset for every scheduled clip whose end time has arrived. */

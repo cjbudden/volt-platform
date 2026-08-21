@@ -611,7 +611,9 @@ CREATE INDEX idx_series_channel ON programme_series(channel_id);
 
 CREATE TABLE programmes (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    channel_id  UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    -- a programme belongs to a CHANNEL guide or an EVENT schedule (day's proceedings)
+    channel_id  UUID REFERENCES channels(id) ON DELETE CASCADE,
+    event_id    UUID REFERENCES events(id)   ON DELETE CASCADE,
     series_id   UUID REFERENCES programme_series(id) ON DELETE SET NULL,
     source_ref  TEXT,                                   -- idempotent upsert key (import diff)
     title       TEXT NOT NULL,
@@ -627,13 +629,23 @@ CREATE TABLE programmes (
     geo_mode     TEXT NOT NULL DEFAULT 'worldwide',     -- worldwide | allow | block
     geo_countries TEXT[] NOT NULL DEFAULT '{}',
     replacement_asset_id UUID,                          -- shown in blocked regions (-> vod_assets/filler)
-    auto_vod     BOOLEAN NOT NULL DEFAULT false,        -- Live->VOD on airing end
+    auto_vod     BOOLEAN NOT NULL DEFAULT false,        -- post-airing clip/VOD from this slot
+    -- slot replacement: play a slate/loop/vod INSTEAD of the live feed for this period
+    replacement_kind TEXT NOT NULL DEFAULT 'none',        -- none | slate | loop | vod
+    replacement_ref  TEXT,                                -- library/vod reference
+    -- post-airing auto-clip bookkeeping (fired by the scheduler tick)
+    clip_status   TEXT NOT NULL DEFAULT 'none',           -- none | firing | created | error
+    clip_asset_id UUID,
+    clip_error    TEXT,
     metadata     JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK (ends_at > starts_at)
+    CHECK (ends_at > starts_at),
+    CHECK ((channel_id IS NOT NULL) OR (event_id IS NOT NULL))
 );
 CREATE INDEX idx_prog_channel_start ON programmes(channel_id, starts_at);
+CREATE INDEX idx_prog_event_start   ON programmes(event_id, starts_at);
+CREATE UNIQUE INDEX idx_prog_source_event ON programmes(event_id, source_ref) WHERE source_ref IS NOT NULL AND event_id IS NOT NULL;
 CREATE INDEX idx_prog_span_gist     ON programmes USING gist (span);
 CREATE INDEX idx_prog_search        ON programmes USING gin (to_tsvector('simple', title));
 CREATE UNIQUE INDEX idx_prog_source ON programmes(channel_id, source_ref) WHERE source_ref IS NOT NULL;

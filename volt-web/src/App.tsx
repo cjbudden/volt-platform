@@ -6,6 +6,8 @@ import ImageLibrary from './pages/ImageLibrary'
 import Recordings from './pages/Recordings'
 import RecordingDetail from './pages/RecordingDetail'
 import Events from './pages/Events'
+import Epg from './pages/Epg'
+import EpgDetail from './pages/EpgDetail'
 import { useRoute, navigate, hrefFor } from './router'
 import { UploadIndicator } from './uploads'
 
@@ -23,6 +25,7 @@ const I = {
   images: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></svg>,
   multiview: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>,
   analytics: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18" /><path d="m7 14 4-4 3 3 5-6" /></svg>,
+  epg: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M8 4v16M3 14h18" /></svg>,
 }
 
 const NAV: { group: string; items: { key: string; label: string; icon: ReactElement; badge?: string }[] }[] = [
@@ -34,6 +37,7 @@ const NAV: { group: string; items: { key: string; label: string; icon: ReactElem
   { group: 'Broadcast', items: [
     { key: 'channels', label: 'Channels', icon: I.channels },
     { key: 'events', label: 'Events', icon: I.events },
+    { key: 'epg', label: 'EPG', icon: I.epg },
     { key: 'loops', label: 'Loops & Fillers', icon: I.loops },
   ] },
   { group: 'Media', items: [
@@ -151,6 +155,10 @@ export default function App() {
                 : <Recordings />)
             : section === 'events'
             ? <Events />
+            : section === 'epg'
+            ? (route.epgOwner
+                ? <EpgDetail key={route.epgOwner.kind + route.epgOwner.id} owner={route.epgOwner} onBack={() => navigate('/epg')} />
+                : <Epg />)
             : <Placeholder title={label} />}
         </div>
       </div>
