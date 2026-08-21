@@ -236,7 +236,7 @@ recordingsRouter.get(
 );
 
 async function fetchOwned(id: string, acct: string) {
-  return one<any>(`SELECT r.* ${OWNED} WHERE r.id = $1 AND g.account_id = $2`, [id, acct]);
+  return one<any>(`SELECT r.*, COALESCE(c.name, e.name) AS source_name ${OWNED} WHERE r.id = $1 AND g.account_id = $2`, [id, acct]);
 }
 
 recordingsRouter.get(
