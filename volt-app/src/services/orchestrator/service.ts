@@ -273,7 +273,61 @@ export class Orchestrator {
     await this.rollChannelRecordings();
     // 4) fire scheduled clips whose end time has passed
     await this.fireScheduledClips();
+    // 5) reconcile ORPHANED recordings: a row stays status='recording' forever
+    //    if its channel/event stopped without passing through stopStream (encoder
+    //    crash, process kill, control plane down at the time). The UI then shows
+    //    'Recording' on a stopped channel. Close them, ending at the REAL last
+    //    segment on disk rather than the sweep time.
+    await this.reconcileOrphanRecordings();
     return { started: due.length, stopped: over.length };
+  }
+
+  /** Close recording rows whose owner is not live any more. End time comes from
+   *  the newest recorded segment on disk inside the recording window (falls back
+   *  to now if nothing is on disk). Runs every tick; matches nothing normally. */
+  async reconcileOrphanRecordings(): Promise<number> {
+    const orphans = await query<any>(
+      `SELECT r.* FROM recordings r
+         LEFT JOIN channels c ON c.id = r.channel_id
+         LEFT JOIN events   e ON e.id = r.event_id
+        WHERE r.status = 'recording'
+          AND COALESCE(c.status, e.status) IS DISTINCT FROM 'live'
+          AND NOT EXISTS (SELECT 1 FROM instances i
+                           WHERE (i.channel_id = r.channel_id OR i.event_id = r.event_id)
+                             AND i.terminated_at IS NULL)`
+    );
+    for (const rec of orphans) {
+      try {
+        const streamId = rec.channel_id ?? rec.event_id;
+        let endMs = Date.now();
+        try {
+          const { recordingSpans } = await import('../localRecordingIndex');
+          const spans = recordingSpans(streamId)
+            .filter((s) => s.endMs > Number(rec.start_epoch_ms));
+          if (spans.length) endMs = Math.min(endMs, spans[spans.length - 1].endMs);
+        } catch { /* no local index (S3 deploy) — close at now */ }
+        endMs = Math.max(endMs, Number(rec.start_epoch_ms) + 1000);
+        const closed = await one<any>(
+          `UPDATE recordings SET
+             status='complete',
+             end_epoch_ms = $2,
+             duration_ms  = $2 - start_epoch_ms,
+             expires_at   = CASE WHEN retention_days IS NULL THEN NULL
+                                 ELSE to_timestamp($2/1000.0) + make_interval(days => retention_days) END,
+             thumb_status = 'processing'
+           WHERE id = $1 AND status='recording' RETURNING *`,
+          [rec.id, Math.round(endMs)]
+        );
+        if (closed) {
+          console.log(`[orchestrator] closed orphaned recording ${rec.id} (owner not live), end=${new Date(endMs).toISOString()}`);
+          await this.finalizeRecording(closed).catch((e: unknown) =>
+            console.error('orphan recording close hooks failed', rec.id, e));
+        }
+      } catch (e) {
+        console.error('orphan recording reconcile failed', rec.id, e);
+      }
+    }
+    return orphans.length;
   }
 
   /** Cut a VOD asset for every scheduled clip whose end time has arrived. */

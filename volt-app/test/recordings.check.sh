@@ -188,6 +188,24 @@ ok "list search finds recording by name" 'echo "$L" | grep -q "\"matched_by\":\"
 L=$(curl -s "http://localhost:$PORT/api/recordings?q=zzznotfound" -H "$A")
 ok "no-match search returns nothing" '! echo "$L" | grep -q "$REC"'
 
+# ---- orphaned recording reconciliation --------------------------------------
+# a recording left status='recording' while its channel is NOT live (crash/kill)
+# must be closed by the scheduler tick, ending at the real last segment on disk
+ORPH=00000010-0000-0000-0000-0000000000ee
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q <<SQL
+DELETE FROM recordings WHERE id='$ORPH'::uuid;
+INSERT INTO recordings(id,kind,channel_id,day_utc,title,status,start_epoch_ms,master_key)
+  VALUES ('$ORPH'::uuid,'channel_day','$CH'::uuid,CURRENT_DATE - 1,'Orphan','recording',$WSTART,'x');
+SQL
+ORPH_TICK=$(ORIGIN_DIR="$REC_ORIGIN" npx tsx -e "import {orchestrator} from './src/services/orchestrator'; (async()=>{const n=await orchestrator.reconcileOrphanRecordings(); console.log('closed',n); process.exit(0)})()" 2>/dev/null | tail -1)
+ROW=$(psql "$DATABASE_URL" -tA -c "SELECT status||'|'||COALESCE(end_epoch_ms::text,'null') FROM recordings WHERE id='$ORPH'")
+ST=${ROW%%|*}; EN=${ROW##*|}
+ok "orphan closed by reconciliation ($ORPH_TICK, status=$ST)" '[ "$ST" = "complete" ]'
+ok "orphan end from disk, inside the window" '[ "$EN" != "null" ] && [ "$EN" -gt "$WSTART" ] && [ "$EN" -le "$WEND" ]'
+LIVEROW=$(curl -s "http://localhost:$PORT/api/recordings" -H "$A" | python3 -c 'import json,sys; rs=json.load(sys.stdin); print(sum(1 for r in rs if r["status"]=="recording"))')
+ok "list shows no phantom 'Recording' rows" '[ "$LIVEROW" = "0" ]'
+psql "$DATABASE_URL" -q -c "DELETE FROM recordings WHERE id='$ORPH'::uuid"
+
 # ---- channels: explicit recording switch
 CREATED=$(curl -s -X POST "http://localhost:$PORT/api/channels" -H "$A" -H 'content-type:application/json' \
   -d '{"groupId":"0000000d-0000-0000-0000-0000000000a1","name":"NoRec","recordingEnabled":false,"sources":[{"role":"primary","protocol":"hls","ingestUrl":"https://x.example/a.m3u8"}]}')

@@ -8,8 +8,11 @@
 // SPEC GRAMMAR (the URL builder in the image library composes these):
 //   /img/<WxH>[,fit][,token...]/<store-key>
 //     fit          cover | inside | contain | fill        (default cover)
+//     crop=X-Y-W-H hard crop applied FIRST, percent of the source
+//                  (e.g. crop=25-0-50-100 keeps the middle half)
 //     focus=X-Y    area of focus for cover crops, percent of the source
-//                  (e.g. focus=30-20 keeps the top-left third in frame)
+//                  (e.g. focus=30-20 keeps the top-left third in frame);
+//                  honoured inside the crop when both are set
 //     gray         grayscale
 //     blur=N       gaussian blur sigma 0.3..50
 //     bright=N     brightness percent 10..300 (100 = unchanged)
@@ -23,6 +26,7 @@ import { imageStore, safeKey } from './imageStore';
 
 export interface ResizeSpec {
   w: number; h: number; fit: 'cover' | 'inside' | 'contain' | 'fill'
+  crop?: { x: number; y: number; w: number; h: number }   // percent of source, applied first
   focus?: { x: number; y: number }        // percent of source, cover only
   gray?: boolean
   blur?: number
@@ -50,6 +54,13 @@ export function parseSpec(spec: string): ResizeSpec | null {
     else if (t.startsWith('focus=')) {
       const f = t.slice(6).match(/^(\d{1,3})-(\d{1,3})$/);
       if (f) out.focus = { x: Math.min(100, +f[1]), y: Math.min(100, +f[2]) };
+    } else if (t.startsWith('crop=')) {
+      const c = t.slice(5).match(/^(\d{1,3})-(\d{1,3})-(\d{1,3})-(\d{1,3})$/);
+      if (c) {
+        const x = Math.min(99, +c[1]), y = Math.min(99, +c[2]);
+        const cw = Math.max(1, Math.min(100 - x, +c[3])), ch = Math.max(1, Math.min(100 - y, +c[4]));
+        out.crop = { x, y, w: cw, h: ch };
+      }
     } else if (t.startsWith('blur=')) {
       const v = parseFloat(t.slice(5));
       if (Number.isFinite(v)) out.blur = Math.min(50, Math.max(0.3, v));
@@ -74,6 +85,7 @@ export function parseSpec(spec: string): ResizeSpec | null {
 /** Canonical cache-key fragment for a spec (stable across param order). */
 function specKey(s: ResizeSpec): string {
   const parts = [`${s.w}x${s.h}`, s.fit];
+  if (s.crop) parts.push(`c${s.crop.x}-${s.crop.y}-${s.crop.w}-${s.crop.h}`);
   if (s.focus) parts.push(`f${s.focus.x}-${s.focus.y}`);
   if (s.gray) parts.push('g');
   if (s.blur) parts.push(`b${s.blur}`);
@@ -101,11 +113,33 @@ export async function resizeFromStore(key: string, spec: ResizeSpec): Promise<Re
   const original = await imageStore().get(src);
   if (!original) return null;
   try {
-    // normalise EXIF orientation FIRST so focal-point math sees true dimensions
+    // normalise EXIF orientation FIRST so crop/focal math sees true dimensions
     const upright = await sharp(original, { animated: false }).rotate().toBuffer();
     let img = sharp(upright);
 
-    if (spec.fit === 'cover' && spec.focus) {
+    // HARD CROP first (percent of the source). Focus coordinates are given in
+    // SOURCE percent too (that is what the builder overlay shows), so remap
+    // them into the cropped frame before the focal cover-crop below.
+    let focus = spec.focus;
+    if (spec.crop) {
+      const meta0 = await img.metadata();
+      const sw0 = meta0.width ?? 0, sh0 = meta0.height ?? 0;
+      if (sw0 > 0 && sh0 > 0) {
+        const left = Math.round((spec.crop.x / 100) * sw0);
+        const top = Math.round((spec.crop.y / 100) * sh0);
+        const cw = Math.max(1, Math.min(sw0 - left, Math.round((spec.crop.w / 100) * sw0)));
+        const ch = Math.max(1, Math.min(sh0 - top, Math.round((spec.crop.h / 100) * sh0)));
+        img = sharp(await img.extract({ left, top, width: cw, height: ch }).toBuffer());
+        if (focus) {
+          focus = {
+            x: Math.max(0, Math.min(100, ((focus.x - spec.crop.x) / spec.crop.w) * 100)),
+            y: Math.max(0, Math.min(100, ((focus.y - spec.crop.y) / spec.crop.h) * 100)),
+          };
+        }
+      }
+    }
+
+    if (spec.fit === 'cover' && focus) {
       // AREA OF FOCUS: crop the largest window with the target aspect whose
       // centre sits at the focal point (clamped inside the frame), then scale.
       const meta = await img.metadata();
@@ -114,8 +148,8 @@ export async function resizeFromStore(key: string, spec: ResizeSpec): Promise<Re
         const scale = Math.max(spec.w / sw, spec.h / sh);
         const cw = Math.min(sw, Math.round(spec.w / scale));
         const ch = Math.min(sh, Math.round(spec.h / scale));
-        const cx = Math.round((spec.focus.x / 100) * sw - cw / 2);
-        const cy = Math.round((spec.focus.y / 100) * sh - ch / 2);
+        const cx = Math.round((focus.x / 100) * sw - cw / 2);
+        const cy = Math.round((focus.y / 100) * sh - ch / 2);
         img = img.extract({
           left: Math.max(0, Math.min(sw - cw, cx)),
           top: Math.max(0, Math.min(sh - ch, cy)),
