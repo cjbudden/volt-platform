@@ -34,6 +34,7 @@ export default function ImageLibrary() {
   const [folderModal, setFolderModal] = useState<null | string>(null)
   const [staged, setStaged] = useState<{ items: Staged[]; folder: string } | null>(null)
   const [preview, setPreview] = useState<MediaFile | null>(null)
+  const [builder, setBuilder] = useState<MediaFile | null>(null)
   const [dragging, setDragging] = useState(false)
   const [toast, setToast] = useState('')
   const fileInput = useRef<HTMLInputElement | null>(null)
@@ -241,13 +242,16 @@ export default function ImageLibrary() {
                 </select>
                 <div className="hintxt">Controls where it appears in pickers (slate / watermark / brand / poster). Change any time.</div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                <button className="btn primary" onClick={() => { setBuilder(preview); setPreview(null) }}>URL builder…</button>
                 <button className="btn ghost" onClick={() => setPreview(null)}>Close</button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {builder && <UrlBuilder file={builder} onClose={() => setBuilder(null)} notify={m => { setToast(m); setTimeout(() => setToast(''), 2200) }} />}
 
       {toast && (
         <div style={{ position: 'fixed', left: '50%', bottom: 26, transform: 'translateX(-50%)', zIndex: 60, background: 'var(--panel-3)', border: '1px solid var(--border-2)', color: 'var(--text)', padding: '10px 16px', borderRadius: 10, fontSize: 13, boxShadow: 'var(--shadow)' }}>{toast}</div>
@@ -296,6 +300,156 @@ function FolderRow({ label, active, onClick, count, depth }: { label: string; ac
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
       <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
       <span style={{ fontSize: 11, color: 'var(--faint)' }}>{count}</span>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------- URL builder */
+/** Compose a derivative URL for an image: size, fit, AREA OF FOCUS (click the
+ *  preview to place it), filters, quality and format — with a live preview and
+ *  a copy-ready URL. The URL is stable and cacheable: paste it anywhere the
+ *  image is needed (players, EPG art, external CMS). */
+function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () => void; notify: (m: string) => void }) {
+  const srcW = file.width || 1280, srcH = file.height || 720
+  const [w, setW] = useState(String(Math.min(640, srcW)))
+  const [h, setH] = useState(String(Math.max(1, Math.round(Math.min(640, srcW) * (srcH / srcW)))))
+  const [fit, setFit] = useState<'cover' | 'inside' | 'contain' | 'fill'>('cover')
+  const [focus, setFocus] = useState<{ x: number; y: number } | null>(null)
+  const [gray, setGray] = useState(false)
+  const [blur, setBlur] = useState(0)
+  const [bright, setBright] = useState(100)
+  const [sat, setSat] = useState(100)
+  const [sharpen, setSharpen] = useState(false)
+  const [q, setQ] = useState(80)
+  const [fmt, setFmt] = useState<'webp' | 'jpeg' | 'png'>('webp')
+  const [debounced, setDebounced] = useState('')
+
+  const key = file.url.replace(/^\//, '')      // library/<acct>/<path>
+  const spec = (() => {
+    const t: string[] = [`${Math.max(1, +w || 1)}x${Math.max(1, +h || 1)}`, fit]
+    if (fit === 'cover' && focus) t.push(`focus=${Math.round(focus.x)}-${Math.round(focus.y)}`)
+    if (gray) t.push('gray')
+    if (blur > 0) t.push(`blur=${blur}`)
+    if (bright !== 100) t.push(`bright=${bright}`)
+    if (sat !== 100) t.push(`sat=${sat}`)
+    if (sharpen) t.push('sharp')
+    if (q !== 80) t.push(`q=${q}`)
+    if (fmt !== 'webp') t.push(`fmt=${fmt}`)
+    return t.join(',')
+  })()
+  const path = `/img/${spec}/${key}`
+  const absolute = `${window.location.origin}${path}`
+
+  // debounce the preview so sliders don't spawn a derivative per pixel
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(path), 350)
+    return () => clearTimeout(t)
+  }, [path])
+
+  function pickFocus(e: React.MouseEvent<HTMLDivElement>) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setFocus({ x: Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100)),
+               y: Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100)) })
+    if (fit !== 'cover') setFit('cover')
+  }
+  async function copy() {
+    try { await navigator.clipboard.writeText(absolute); notify('URL copied') }
+    catch {
+      const el = document.createElement('textarea')
+      el.value = absolute; document.body.appendChild(el); el.select()
+      document.execCommand('copy'); document.body.removeChild(el)
+      notify('URL copied')
+    }
+  }
+
+  const Slider = ({ label, value, set, min, max, step = 1, suffix = '' }: {
+    label: string; value: number; set: (v: number) => void; min: number; max: number; step?: number; suffix?: string
+  }) => (
+    <div className="field" style={{ margin: 0 }}>
+      <label>{label} — {value}{suffix}</label>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={e => set(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
+    </div>
+  )
+
+  return (
+    <div className="drawer-scrim" onClick={onClose} style={{ alignItems: 'center', justifyContent: 'center' }}>
+      <div className="card" onClick={e => e.stopPropagation()} style={{ width: 980, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto', padding: 0 }}>
+        <div className="drawer-h"><div className="t">Image URL builder — {file.name}</div><button className="xbtn" onClick={onClose}>✕</button></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 18, padding: 18 }}>
+          {/* live preview; click to set the area of focus */}
+          <div>
+            <div onClick={pickFocus} title="Click to set the area of focus (cover crops keep this point in frame)"
+              style={{ position: 'relative', background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 18px 18px', display: 'grid', placeItems: 'center', minHeight: 300, borderRadius: 10, overflow: 'hidden', cursor: 'crosshair' }}>
+              {debounced && <img src={debounced} alt="" style={{ maxWidth: '100%', maxHeight: 420, display: 'block' }} />}
+              {focus && fit === 'cover' && (
+                <div style={{ position: 'absolute', left: `${focus.x}%`, top: `${focus.y}%`, width: 18, height: 18, marginLeft: -9, marginTop: -9, border: '2px solid #fff', borderRadius: '50%', boxShadow: '0 0 0 2px rgba(0,0,0,.55), 0 0 10px rgba(255,255,255,.5)', pointerEvents: 'none' }} />
+              )}
+            </div>
+            <div className="hintxt" style={{ marginTop: 6 }}>
+              Source {srcW}×{srcH}. Click the preview to set the <b>area of focus</b>: cover crops keep that point in frame.
+              {focus && <button className="btn ghost" style={{ marginLeft: 8, padding: '2px 8px', fontSize: 11 }} onClick={e => { e.stopPropagation(); setFocus(null) }}>clear focus</button>}
+            </div>
+            <div className="field" style={{ marginTop: 12 }}>
+              <label>URL — paste anywhere; resized and cached on first request</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="inp url-out" readOnly value={absolute} onFocus={e => e.currentTarget.select()} style={{ flex: 1, fontFamily: 'ui-monospace,monospace', fontSize: 12 }} />
+                <button className="btn primary" onClick={copy}>Copy</button>
+              </div>
+            </div>
+          </div>
+          {/* controls */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div className="field" style={{ margin: 0 }}><label>Width</label>
+                <input className="inp" inputMode="numeric" value={w} onChange={e => setW(e.target.value.replace(/[^0-9]/g, ''))} />
+              </div>
+              <div className="field" style={{ margin: 0 }}><label>Height</label>
+                <input className="inp" inputMode="numeric" value={h} onChange={e => setH(e.target.value.replace(/[^0-9]/g, ''))} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {([['16:9', 16 / 9], ['4:3', 4 / 3], ['1:1', 1], ['9:16', 9 / 16]] as const).map(([lbl, r]) => (
+                <button key={lbl} className="btn ghost" style={{ padding: '4px 10px', fontSize: 12 }}
+                  onClick={() => setH(String(Math.max(1, Math.round((+w || 640) / r))))}>{lbl}</button>
+              ))}
+            </div>
+            <div className="field" style={{ margin: 0 }}><label>Fit</label>
+              <select className="inp" value={fit} onChange={e => setFit(e.target.value as any)}>
+                <option value="cover">Cover — fill the box, crop overflow</option>
+                <option value="inside">Inside — fit within, keep aspect</option>
+                <option value="contain">Contain — fit within, pad to box</option>
+                <option value="fill">Fill — stretch to box</option>
+              </select>
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--faint)', marginTop: 4 }}>Filters</div>
+            <Slider label="Brightness" value={bright} set={setBright} min={10} max={300} suffix="%" />
+            <Slider label="Saturation" value={sat} set={setSat} min={0} max={300} suffix="%" />
+            <Slider label="Blur" value={blur} set={setBlur} min={0} max={30} />
+            <div style={{ display: 'flex', gap: 14 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={gray} onChange={e => setGray(e.target.checked)} /> Grayscale
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={sharpen} onChange={e => setSharpen(e.target.checked)} /> Sharpen
+              </label>
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--faint)', marginTop: 4 }}>Output</div>
+            <Slider label="Quality" value={q} set={setQ} min={30} max={100} />
+            <div className="field" style={{ margin: 0 }}><label>Format</label>
+              <select className="inp" value={fmt} onChange={e => setFmt(e.target.value as any)}>
+                <option value="webp">WebP (smallest, recommended)</option>
+                <option value="jpeg">JPEG</option>
+                <option value="png">PNG (lossless)</option>
+              </select>
+            </div>
+            <button className="btn ghost" style={{ marginTop: 4 }} onClick={() => {
+              setFit('cover'); setFocus(null); setGray(false); setBlur(0); setBright(100); setSat(100); setSharpen(false); setQ(80); setFmt('webp')
+              setW(String(Math.min(640, srcW))); setH(String(Math.max(1, Math.round(Math.min(640, srcW) * (srcH / srcW)))))
+            }}>Reset</button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
