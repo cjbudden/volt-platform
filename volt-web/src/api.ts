@@ -251,11 +251,14 @@ export const api = {
     if (p.q) qs.set('q', p.q)
     return req('/recordings' + (qs.toString() ? '?' + qs : ''))
   },
-  // transcript probe/search: no q = languages + entry count; with q = timed matches
-  recordingTranscript: (id: string, p: { q?: string; lang?: string } = {}): Promise<TranscriptSearch> => {
+  // transcript probe/search: no q = languages + entry count (add from/to for the
+  // cues in that window); with q = timed matches across the whole recording
+  recordingTranscript: (id: string, p: { q?: string; lang?: string; from?: number; to?: number } = {}): Promise<TranscriptSearch> => {
     const qs = new URLSearchParams()
     if (p.q) qs.set('q', p.q)
     if (p.lang) qs.set('lang', p.lang)
+    if (p.from != null) qs.set('from', String(Math.round(p.from)))
+    if (p.to != null) qs.set('to', String(Math.round(p.to)))
     return req(`/recordings/${id}/transcript` + (qs.toString() ? '?' + qs : ''))
   },
   recordingProgrammes: (id: string): Promise<{ programmes: RecordingProgramme[] }> =>

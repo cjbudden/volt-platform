@@ -45,12 +45,15 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   const [playheadMs, setPlayheadMs] = useState<number | null>(null)
   const [playerErr, setPlayerErr] = useState('')
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  // transcript search
+  // transcript side panel: cues for the LOADED range (live-follows the playhead)
+  // or, when a search term is set, matches across the whole recording
   const [tsLangs, setTsLangs] = useState<string[]>([])
   const [tsQ, setTsQ] = useState(initialQuery)
   const [tsLang, setTsLang] = useState('')
-  const [tsRes, setTsRes] = useState<TranscriptSearch | null>(null)
-  const [tsBusy, setTsBusy] = useState(false)
+  const [cues, setCues] = useState<TranscriptSearch['matches']>([])
+  const [tsMode, setTsMode] = useState<'range' | 'search'>('range')
+  const [flash, setFlash] = useState<{ from: number; to: number } | null>(null)
+  const cueListRef = useRef<HTMLDivElement | null>(null)
   // clip creation
   const [clipTitle, setClipTitle] = useState('')
   const [outputKind, setOutputKind] = useState<'manifest' | 'progressive' | 'both'>('manifest')
@@ -99,11 +102,53 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     /* eslint-disable-next-line */
   }, [tl])
 
-  // run a carried-in search once transcripts confirm
+  // side panel content: debounced — search term set = whole-recording search;
+  // empty = the cues inside the loaded player range
   useEffect(() => {
-    if (initialQuery.trim() && tsLangs.length) searchTs(initialQuery)
+    if (!tsLangs.length) return
+    const t = setTimeout(async () => {
+      try {
+        if (tsQ.trim()) {
+          const r = await api.recordingTranscript(id, { q: tsQ.trim(), lang: tsLang || undefined })
+          setCues(r.matches); setTsMode('search')
+        } else if (loaded) {
+          const r = await api.recordingTranscript(id, { from: loaded.from, to: loaded.to, lang: tsLang || undefined })
+          setCues(r.matches); setTsMode('range')
+        }
+      } catch { /* panel stays as-is */ }
+    }, 300)
+    return () => clearTimeout(t)
     /* eslint-disable-next-line */
-  }, [tsLangs.length])
+  }, [tsQ, tsLang, tsLangs.length, loaded?.from, loaded?.to])
+
+  // the cue under the playhead (for the highlight + auto-follow)
+  const activeCue = useMemo(() => {
+    if (playheadMs == null || tsMode !== 'range') return -1
+    for (let i = cues.length - 1; i >= 0; i--) {
+      if (cues[i].tMs <= playheadMs && playheadMs <= cues[i].endMs + 1500) return i
+    }
+    return -1
+  }, [cues, playheadMs, tsMode])
+  useEffect(() => {
+    if (activeCue < 0) return
+    const el = cueListRef.current?.querySelector(`[data-cue="${activeCue}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [activeCue])
+
+  /** Subtitle line click: jump the playhead there and flash the cue's slice on
+   *  the clipping bar (marks are untouched — use I/O to set them). */
+  function jumpToCue(c: { tMs: number; endMs: number }) {
+    const v = videoRef.current
+    const lead = 1500
+    if (v && loaded && c.tMs - lead >= loaded.from && c.tMs <= loaded.to) {
+      v.currentTime = Math.max(0, (c.tMs - lead - loaded.from) / 1000)
+      v.play().catch(() => {})
+    } else {
+      loadRange(c.tMs - lead, Math.max(c.endMs + 60_000, c.tMs + 60_000))
+    }
+    setFlash({ from: c.tMs, to: c.endMs })
+    setTimeout(() => setFlash(null), 2600)
+  }
 
   // ---- player wiring --------------------------------------------------------
   const playUrl = loaded ? recordingRangeUrl(id, loaded.from, loaded.to) : null
@@ -198,13 +243,6 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     return tl.spans.reduce((a, s) => a + Math.max(0, Math.min(s.endMs, selTo!) - Math.max(s.startMs, selFrom!)), 0)
   }, [tl, selFrom, selTo, selOk])
 
-  async function searchTs(query = tsQ) {
-    if (!query.trim()) { setTsRes(null); return }
-    setTsBusy(true)
-    try { setTsRes(await api.recordingTranscript(id, { q: query.trim(), lang: tsLang || undefined })) }
-    catch { setTsRes(null) } finally { setTsBusy(false) }
-  }
-
   /** Jump: mark a slice AND load it into the player. */
   function jumpTo(fromMs: number, toMs: number) {
     if (!domain) return
@@ -261,9 +299,46 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
         <div className="empty"><h3>No segments on disk</h3><p>Nothing is recorded for this entry (pruned by retention, or recording was off for the run).</p></div>
       ) : (
         <div className="card" style={{ padding: 18 }}>
-          {/* ------- player ------- */}
-          <video ref={videoRef} controls playsInline
-            style={{ width: '100%', maxHeight: 440, background: '#000', borderRadius: 10, border: '1px solid var(--border)' }} />
+          {/* ------- player + live transcript side panel ------- */}
+          <div style={{ display: 'grid', gridTemplateColumns: tsLangs.length ? '1fr 330px' : '1fr', gap: 14, alignItems: 'stretch' }}>
+            <div>
+              <video ref={videoRef} controls playsInline
+                style={{ width: '100%', height: '100%', maxHeight: 430, background: '#000', borderRadius: 10, border: '1px solid var(--border)', objectFit: 'contain' }} />
+            </div>
+            {tsLangs.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', maxHeight: 430 }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 10px', borderBottom: '1px solid var(--border)', flex: 'none' }}>
+                  <input className="inp ts-q" style={{ flex: 1, fontSize: 12.5, padding: '6px 9px' }} value={tsQ}
+                    onChange={e => setTsQ(e.target.value)}
+                    placeholder="Search subtitles… (all words, any order)" />
+                  {tsLangs.length > 1 && (
+                    <select className="inp" style={{ width: 64, fontSize: 12, padding: '6px 6px' }} value={tsLang} onChange={e => setTsLang(e.target.value)}>
+                      <option value="">all</option>
+                      {tsLangs.map(l => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                  )}
+                </div>
+                <div ref={cueListRef} className="ts-hits" style={{ flex: 1, overflowY: 'auto' }}>
+                  {cues.length === 0 ? (
+                    <div style={{ padding: '12px 12px', color: 'var(--faint)', fontSize: 12.5 }}>
+                      {tsQ.trim() ? `No spoken match for "${tsQ.trim()}".` : 'No subtitles in the loaded range.'}
+                    </div>
+                  ) : cues.map((m, i) => (
+                    <div key={i} data-cue={i} onClick={() => jumpToCue(m)}
+                      style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '6px 10px', cursor: 'pointer',
+                        borderLeft: i === activeCue ? '3px solid var(--brand)' : '3px solid transparent',
+                        background: i === activeCue ? 'rgba(120,140,255,.12)' : 'transparent' }}>
+                      <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 11, color: 'var(--brand)', flex: 'none' }}>{fmtClock(m.tMs)}</span>
+                      <span style={{ fontSize: 12.5, flex: 1, color: i === activeCue ? 'var(--text,#fff)' : 'var(--muted)' }}>{m.text}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ padding: '5px 10px', borderTop: '1px solid var(--border)', fontSize: 10.5, color: 'var(--faint)', flex: 'none' }}>
+                  {tsMode === 'search' ? `${cues.length} match(es) across the recording — click to jump` : 'live transcript — click a line to jump there'}
+                </div>
+              </div>
+            )}
+          </div>
           {playerErr && <div className="err" style={{ marginTop: 6 }}>{playerErr}</div>}
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '8px 0 12px', flexWrap: 'wrap' }}>
             <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 13 }}>
@@ -282,7 +357,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
 
           {/* ------- timeline: coverage + loaded range + marks + playhead ------- */}
           {tl && <TimelineBar domain={domain} spans={tl.spans} from={selFrom} to={selTo}
-            loaded={loaded} playheadMs={playheadMs}
+            loaded={loaded} playheadMs={playheadMs} flash={flash}
             onChange={(f, t) => { setSelFrom(f); setSelTo(t) }}
             onSeek={(ms) => {
               const v = videoRef.current
@@ -291,54 +366,13 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
             }} />}
           {programmes.length > 0 && <ProgrammeLane domain={domain} programmes={programmes} onPick={p => jumpTo(p.startMs, p.endMs)} />}
 
-          <div style={{ display: 'flex', gap: 14, alignItems: 'center', margin: '10px 0 4px', flexWrap: 'wrap' }}>
+          {/* ------- marks + CLIP CREATION, right under the player ------- */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', margin: '10px 0 4px', flexWrap: 'wrap' }}>
             <RangeInput label="In" value={selFrom} min={domain.start} max={domain.end} onChange={v => setSelFrom(v)} />
             <RangeInput label="Out" value={selTo} min={domain.start} max={domain.end} onChange={v => setSelTo(v)} />
+            <button className="btn ghost" disabled={!selOk} onClick={() => loadRange(selFrom!, selTo!)}>Load marks</button>
             <span style={{ flex: 1 }} />
-            <button className="btn primary" disabled={!selOk} onClick={() => loadRange(selFrom!, selTo!)}>Load marked range</button>
-          </div>
-
-          {/* ------- transcript search ------- */}
-          {tsLangs.length > 0 && (
-            <>
-              <div style={SEC}>Find in transcript <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>— search what was said; click a hit to jump there and clip it</span></div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <input className="inp ts-q" style={{ flex: '1 1 260px' }} value={tsQ}
-                  onChange={e => setTsQ(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') searchTs() }}
-                  placeholder='e.g. "interest rates" — all words, any order' />
-                {tsLangs.length > 1 && (
-                  <select className="inp" style={{ width: 130 }} value={tsLang} onChange={e => setTsLang(e.target.value)}>
-                    <option value="">all languages</option>
-                    {tsLangs.map(l => <option key={l} value={l}>{l}</option>)}
-                  </select>
-                )}
-                <button className="btn primary" disabled={tsBusy || !tsQ.trim()} onClick={() => searchTs()}>{tsBusy ? 'Searching…' : 'Search'}</button>
-              </div>
-              {tsRes && (
-                tsRes.matches.length === 0
-                  ? <div style={{ color: 'var(--faint)', fontSize: 13, marginTop: 8 }}>No spoken match for "{tsQ.trim()}" in this recording ({tsRes.entries} transcript lines checked).</div>
-                  : (
-                    <div className="ts-hits" style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-                      {tsRes.matches.map((m, i) => (
-                        <div key={i} onClick={() => jumpTo(m.tMs - 5000, m.endMs + 10000)}
-                          style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '8px 12px', cursor: 'pointer', borderTop: i ? '1px solid var(--border)' : 'none' }}>
-                          <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 12, color: 'var(--brand)', flex: 'none' }}>{fmtClock(m.tMs)}</span>
-                          <span style={{ fontSize: 10, color: 'var(--faint)', textTransform: 'uppercase', flex: 'none', width: 24 }}>{m.lang}</span>
-                          <span style={{ fontSize: 13, flex: 1 }}>{m.text}</span>
-                          {m.approx && <span style={{ fontSize: 10, color: 'var(--faint)', flex: 'none' }} title="Placed from subtitle file times; accurate to a few seconds">~approx</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )
-              )}
-            </>
-          )}
-
-          {/* ------- clip creation ------- */}
-          <div style={SEC}>Create from this recording</div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div className="field" style={{ margin: 0, flex: '1 1 220px' }}>
+            <div className="field" style={{ margin: 0, flex: '1 1 200px', maxWidth: 300 }}>
               <label>Clip title</label>
               <input className="inp" value={clipTitle} onChange={e => setClipTitle(e.target.value)} placeholder="e.g. Goal 73' — highlight" />
             </div>
@@ -350,7 +384,10 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
                 <option value="both">Streaming + MP4</option>
               </select>
             </div>
-            <button className="btn primary" disabled={busy === 'clip' || !selOk} onClick={createClip}>{busy === 'clip' ? 'Creating…' : 'Create clip from marks'}</button>
+            <button className="btn primary" disabled={busy === 'clip' || !selOk} onClick={createClip}>{busy === 'clip' ? 'Creating…' : 'Create clip'}</button>
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
+            <span style={{ flex: 1 }} />
             <button className="btn ghost" disabled={busy === 'publish' || rec.status === 'recording'} onClick={publishFull}
               title={rec.status === 'recording' ? 'Available when the recording closes' : 'Publish the whole recording as a VOD asset'}>
               {busy === 'publish' ? 'Publishing…' : 'Publish full VOD'}
@@ -407,12 +444,13 @@ function Kbd({ children }: { children: React.ReactNode }) {
 /* --------------------------------------------------------------- timeline */
 /** Coverage bar with trim marks, the loaded player range, and the playhead.
  *  Drag = set marks; click (no drag) = seek the playhead. */
-function TimelineBar({ domain, spans, from, to, loaded, playheadMs, onChange, onSeek }: {
+function TimelineBar({ domain, spans, from, to, loaded, playheadMs, flash, onChange, onSeek }: {
   domain: { start: number; end: number }
   spans: { runId: string; startMs: number; endMs: number }[]
   from: number | null; to: number | null
   loaded: { from: number; to: number } | null
   playheadMs: number | null
+  flash?: { from: number; to: number } | null
   onChange: (from: number, to: number) => void
   onSeek: (ms: number) => void
 }) {
@@ -465,6 +503,12 @@ function TimelineBar({ domain, spans, from, to, loaded, playheadMs, onChange, on
               <div style={{ width: 4, height: '100%', background: 'rgba(90,220,150,.95)', borderRadius: 2 }} />
             </div>
           </>
+        )}
+        {flash && (
+          <div style={{ position: 'absolute', top: 2, bottom: 2, left: pct(flash.from),
+            width: `max(3px, calc(${pct(flash.to)} - ${pct(flash.from)}))`,
+            background: 'rgba(255,200,80,.55)', border: '1px solid rgba(255,210,110,.9)', borderRadius: 4,
+            pointerEvents: 'none', transition: 'opacity .4s', animation: 'pulse 1.2s ease-in-out infinite' }} />
         )}
         {playheadMs != null && (
           <div style={{ position: 'absolute', top: -3, bottom: -3, left: pct(playheadMs), width: 2, marginLeft: -1, background: '#fff', boxShadow: '0 0 6px rgba(255,255,255,.6)', pointerEvents: 'none' }} />

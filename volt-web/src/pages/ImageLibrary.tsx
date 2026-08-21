@@ -305,13 +305,15 @@ function FolderRow({ label, active, onClick, count, depth }: { label: string; ac
 }
 
 /* ------------------------------------------------------------- URL builder */
-/** Compose a derivative URL for an image: size, fit, CROP, AREA OF FOCUS,
- *  filters, quality and format — with a copy-ready URL.
+/** Compose a derivative URL for an image in ONE preview window.
  *
- *  Two panes: the SOURCE VIEW shows the original; drag the focus dot to place
- *  the point that cover-resizes keep in frame, or switch to Crop mode and drag
- *  a rectangle to hard-crop first. The RESULT preview below renders the built
- *  URL live (debounced). */
+ *  The preview shows the source with the filters approximated live (CSS), and
+ *  everything is set by interacting directly ON it:
+ *    - focal point: a draggable CROSSHAIR; cover resizes keep it in frame
+ *    - crop: drag a rectangle in Crop mode (outside dimmed)
+ *    - the bright outline is the OUTPUT FRAME: exactly what a cover resize at
+ *      the current size will keep, so the result is visible without a second
+ *      pane. The URL below is copy-ready. */
 function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () => void; notify: (m: string) => void }) {
   const srcW = file.width || 1280, srcH = file.height || 720
   const [w, setW] = useState(String(Math.min(640, srcW)))
@@ -327,9 +329,8 @@ function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () =>
   const [sharpen, setSharpen] = useState(false)
   const [q, setQ] = useState(80)
   const [fmt, setFmt] = useState<'webp' | 'jpeg' | 'png'>('webp')
-  const [debounced, setDebounced] = useState('')
   const drag = useRef<{ kind: 'focus' | 'crop'; ax: number; ay: number } | null>(null)
-  const srcBox = useRef<HTMLDivElement | null>(null)
+  const box = useRef<HTMLDivElement | null>(null)
 
   const key = file.url.replace(/^\//, '')      // library/<acct>/<path>
   const spec = (() => {
@@ -348,15 +349,26 @@ function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () =>
   const path = `/img/${spec}/${key}`
   const absolute = `${window.location.origin}${path}`
 
-  // debounce the RESULT preview so drags don't spawn a derivative per pixel
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(path), 400)
-    return () => clearTimeout(t)
-  }, [path])
+  /** The OUTPUT FRAME in source-percent coords: what a cover resize keeps.
+   *  Mirrors the server maths (crop first, focal window inside it). */
+  const kept = (() => {
+    if (fit !== 'cover') return crop     // non-cover: the crop is the frame
+    const W = Math.max(1, +w || 1), H = Math.max(1, +h || 1)
+    const rg = crop ?? { x: 0, y: 0, w: 100, h: 100 }
+    const rw = (rg.w / 100) * srcW, rh = (rg.h / 100) * srcH
+    const scale = Math.max(W / rw, H / rh)
+    const kw = Math.min(rw, W / scale), kh = Math.min(rh, H / scale)
+    const fx = focus ? Math.max(rg.x, Math.min(rg.x + rg.w, focus.x)) : rg.x + rg.w / 2
+    const fy = focus ? Math.max(rg.y, Math.min(rg.y + rg.h, focus.y)) : rg.y + rg.h / 2
+    const kwP = (kw / srcW) * 100, khP = (kh / srcH) * 100
+    const x = Math.max(rg.x, Math.min(rg.x + rg.w - kwP, fx - kwP / 2))
+    const y = Math.max(rg.y, Math.min(rg.y + rg.h - khP, fy - khP / 2))
+    return { x, y, w: kwP, h: khP }
+  })()
 
-  // ---- source-view pointer interactions (drag = smooth, click = set) --------
+  // ---- pointer interactions on the ONE preview ------------------------------
   const pct = (e: { clientX: number; clientY: number }) => {
-    const r = srcBox.current!.getBoundingClientRect()
+    const r = box.current!.getBoundingClientRect()
     return {
       x: Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100)),
       y: Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100)),
@@ -385,9 +397,8 @@ function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () =>
   }
   function up() {
     if (drag.current?.kind === 'crop') {
-      // a sub-2% drag is a click, not a crop
-      setCrop(c => (c && (c.w < 2 || c.h < 2)) ? null : c)
-      setMode('focus')      // back to focus so the next drag moves the point
+      setCrop(c => (c && (c.w < 2 || c.h < 2)) ? null : c)   // sub-2% drag = click
+      setMode('focus')
     }
     drag.current = null
   }
@@ -401,6 +412,13 @@ function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () =>
       notify('URL copied')
     }
   }
+
+  const cssFilter = [
+    gray ? 'grayscale(1)' : '',
+    blur > 0 ? `blur(${(blur / 5).toFixed(1)}px)` : '',
+    bright !== 100 ? `brightness(${bright / 100})` : '',
+    sat !== 100 ? `saturate(${sat / 100})` : '',
+  ].filter(Boolean).join(' ')
 
   const Slider = ({ label, value, set, min, max, step = 1, suffix = '' }: {
     label: string; value: number; set: (v: number) => void; min: number; max: number; step?: number; suffix?: string
@@ -418,9 +436,8 @@ function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () =>
         <div className="drawer-h"><div className="t">Image URL builder — {file.name}</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 18, padding: 18 }}>
           <div>
-            {/* -------- source view: drag focus, drag crop rectangle -------- */}
+            {/* -------- the ONE preview: filters live, focus + crop overlaid -------- */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--faint)' }}>Source</span>
               <button className={`btn ${mode === 'focus' ? 'primary' : 'ghost'}`} style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setMode('focus')}>Focus point</button>
               <button className={`btn ${mode === 'crop' ? 'primary' : 'ghost'}`} style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setMode('crop')}>Crop</button>
               {focus && <button className="btn ghost" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setFocus(null)}>clear focus</button>}
@@ -428,39 +445,42 @@ function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () =>
               <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 'auto' }}>{srcW}×{srcH}</span>
             </div>
             <div style={{ display: 'grid', placeItems: 'center', background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 18px 18px', borderRadius: 10, padding: 8 }}>
-              <div ref={srcBox} className="src-view" onPointerDown={down} onPointerMove={move} onPointerUp={up}
-                style={{ position: 'relative', display: 'inline-block', cursor: mode === 'crop' ? 'crosshair' : 'move', touchAction: 'none', userSelect: 'none', lineHeight: 0 }}>
-                <img src={thumbUrl(file.url, 900, 460, 'inside')} alt="" draggable={false}
-                  style={{ maxWidth: '100%', maxHeight: 300, display: 'block', pointerEvents: 'none' }} />
+              <div ref={box} className="src-view" onPointerDown={down} onPointerMove={move} onPointerUp={up}
+                style={{ position: 'relative', display: 'inline-block', cursor: mode === 'crop' ? 'crosshair' : 'default', touchAction: 'none', userSelect: 'none', lineHeight: 0 }}>
+                <img src={thumbUrl(file.url, 900, 520, 'inside')} alt="" draggable={false}
+                  style={{ maxWidth: '100%', maxHeight: 380, display: 'block', pointerEvents: 'none', filter: cssFilter || undefined }} />
+                {/* crop: dim everything outside */}
                 {crop && crop.w > 0 && (
                   <>
-                    {/* dim everything OUTSIDE the crop */}
                     <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.55)', pointerEvents: 'none',
                       clipPath: `polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 ${crop.y}%, ${crop.x}% ${crop.y}%, ${crop.x}% ${crop.y + crop.h}%, ${crop.x + crop.w}% ${crop.y + crop.h}%, ${crop.x + crop.w}% ${crop.y}%, 0 ${crop.y}%)` }} />
-                    <div style={{ position: 'absolute', left: `${crop.x}%`, top: `${crop.y}%`, width: `${crop.w}%`, height: `${crop.h}%`, border: '1.5px dashed #fff', boxShadow: '0 0 0 1px rgba(0,0,0,.5)', pointerEvents: 'none' }} />
+                    <div style={{ position: 'absolute', left: `${crop.x}%`, top: `${crop.y}%`, width: `${crop.w}%`, height: `${crop.h}%`, border: '1.5px dashed rgba(255,255,255,.85)', pointerEvents: 'none' }} />
                   </>
                 )}
+                {/* the output frame a cover resize keeps */}
+                {kept && fit === 'cover' && (
+                  <div style={{ position: 'absolute', left: `${kept.x}%`, top: `${kept.y}%`, width: `${kept.w}%`, height: `${kept.h}%`,
+                    border: '2px solid var(--brand,#5b8cff)', borderRadius: 3, boxShadow: '0 0 0 1px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.35)', pointerEvents: 'none' }} />
+                )}
+                {/* focal CROSSHAIR */}
                 {focus && (
-                  <div style={{ position: 'absolute', left: `${focus.x}%`, top: `${focus.y}%`, width: 20, height: 20, marginLeft: -10, marginTop: -10, border: '2px solid #fff', borderRadius: '50%', boxShadow: '0 0 0 2px rgba(0,0,0,.55), 0 0 10px rgba(255,255,255,.5)', pointerEvents: 'none' }}>
-                    <div style={{ position: 'absolute', left: '50%', top: '50%', width: 4, height: 4, margin: '-2px 0 0 -2px', borderRadius: '50%', background: '#fff' }} />
+                  <div style={{ position: 'absolute', left: `${focus.x}%`, top: `${focus.y}%`, width: 0, height: 0, pointerEvents: 'none' }}>
+                    <div style={{ position: 'absolute', left: -14, top: -1, width: 28, height: 2, background: '#fff', boxShadow: '0 0 3px rgba(0,0,0,.9)' }} />
+                    <div style={{ position: 'absolute', left: -1, top: -14, width: 2, height: 28, background: '#fff', boxShadow: '0 0 3px rgba(0,0,0,.9)' }} />
                   </div>
                 )}
               </div>
             </div>
             <div className="hintxt" style={{ marginTop: 6 }}>
-              <b>Drag</b> to {mode === 'focus' ? 'move the focus point: cover resizes keep it in frame' : 'draw the crop rectangle (applied before resize)'}.
+              <b>Drag</b> to {mode === 'focus' ? 'place the focus crosshair' : 'draw the crop rectangle'}.
+              {fit === 'cover' ? ' The blue outline is the output frame: exactly what your size keeps.' : ''}
               {crop ? ` Crop ${Math.round(crop.w)}×${Math.round(crop.h)}% at ${Math.round(crop.x)},${Math.round(crop.y)}.` : ''}
-            </div>
-
-            {/* -------- result preview + URL -------- */}
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--faint)', margin: '12px 0 6px' }}>Result</div>
-            <div style={{ background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 18px 18px', display: 'grid', placeItems: 'center', minHeight: 120, borderRadius: 10, padding: 8 }}>
-              {debounced && <img className="result-img" src={debounced} alt="" style={{ maxWidth: '100%', maxHeight: 220, display: 'block' }} />}
             </div>
             <div className="field" style={{ marginTop: 10 }}>
               <label>URL — paste anywhere; resized and cached on first request</label>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input className="inp url-out" readOnly value={absolute} onFocus={e => e.currentTarget.select()} style={{ flex: 1, fontFamily: 'ui-monospace,monospace', fontSize: 12 }} />
+                <button className="btn ghost" onClick={() => window.open(absolute, '_blank')} title="Open the rendered output in a new tab">View</button>
                 <button className="btn primary" onClick={copy}>Copy</button>
               </div>
             </div>

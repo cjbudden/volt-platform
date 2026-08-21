@@ -153,9 +153,11 @@ recordingsRouter.get(
 
 /**
  * TRANSCRIPT of a recording — the searchable "what was said, when" index.
- * Without q: the languages present + entry count (cheap capability probe).
+ * Without q: the languages present + entry count (cheap capability probe);
+ * add from/to (epoch ms) to also get the cues in that window (the detail
+ * page's live transcript side panel follows the loaded player range).
  * With q: matching cues (all words, any order) inside the recording window,
- * each with its wall-clock time — the UI jumps the range picker there.
+ * each with its wall-clock time — the UI jumps the player there.
  */
 recordingsRouter.get(
   '/:id/transcript',
@@ -168,9 +170,16 @@ recordingsRouter.get(
     const languages = [...new Set(all.map((e) => e.lang))].sort();
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const lang = typeof req.query.lang === 'string' && req.query.lang ? req.query.lang : undefined;
-    if (!q) return res.json({ recordingId: r.id, languages, entries: all.length, matches: [] });
-    const matches = searchTranscript(all, q, lang).slice(0, 200)
-      .map((e) => ({ tMs: e.startMs, endMs: e.endMs, lang: e.lang, text: e.text, approx: e.approx === true }));
+    const toRow = (e: any) => ({ tMs: e.startMs, endMs: e.endMs, lang: e.lang, text: e.text, approx: e.approx === true });
+    if (!q) {
+      const wFrom = Number(req.query.from), wTo = Number(req.query.to);
+      const entries = Number.isFinite(wFrom) && Number.isFinite(wTo)
+        ? all.filter((e) => e.endMs >= wFrom && e.startMs <= wTo)
+            .filter((e) => !lang || e.lang === lang).slice(0, 3000).map(toRow)
+        : [];
+      return res.json({ recordingId: r.id, languages, entries: all.length, matches: entries });
+    }
+    const matches = searchTranscript(all, q, lang).slice(0, 200).map(toRow);
     res.json({ recordingId: r.id, languages, entries: all.length, matches });
   })
 );
