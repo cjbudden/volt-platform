@@ -39,12 +39,17 @@ export interface ApiKeyRow {
   enabled: boolean;
 }
 
-/** Resolve a presented raw key to its row (enabled only). Bumps metering. */
+/**
+ * Resolve a presented raw key to its row (enabled only). Bumps metering.
+ * A SUSPENDED account's keys stop working immediately (SaaS control): the
+ * join is the single choke point every key-authenticated surface goes through.
+ */
 export async function verifyKey(raw: string): Promise<ApiKeyRow | null> {
   if (!raw || !/^(sk|pk)_/.test(raw)) return null;
   const row = await one<ApiKeyRow>(
-    `SELECT id, account_id, app_id, kind, scopes, enabled FROM api_keys
-      WHERE key_hash=$1 AND enabled=true`,
+    `SELECT k.id, k.account_id, k.app_id, k.kind, k.scopes, k.enabled
+       FROM api_keys k JOIN accounts a ON a.id = k.account_id
+      WHERE k.key_hash=$1 AND k.enabled=true AND COALESCE(a.status,'active') <> 'suspended'`,
     [sha256(raw)]
   );
   if (!row) return null;

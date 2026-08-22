@@ -50,6 +50,20 @@ appsRouter.get('/', asyncHandler(async (req, res) => {
   res.json(rows);
 }));
 
+/** ALL of the account's keys (client view): app keys + account secret keys.
+ *  Registered BEFORE /:id so 'keys' is not captured as an app id. Only prefix
+ *  and metadata are stored; raw keys are never retrievable. */
+appsRouter.get('/keys', asyncHandler(async (req, res) => {
+  const rows = await query(
+    `SELECT k.id, k.app_id, a.name AS app_name, k.kind, k.key_prefix, k.scopes, k.enabled,
+            k.last_used_at, k.request_count, k.created_at
+       FROM api_keys k LEFT JOIN apps a ON a.id=k.app_id
+      WHERE k.account_id=$1 ORDER BY k.created_at DESC`,
+    [accountId(req)]
+  );
+  res.json(rows);
+}));
+
 appsRouter.get('/:id', asyncHandler(async (req, res) => {
   const app = await one(`SELECT * FROM apps WHERE id=$1 AND account_id=$2`, [req.params.id, accountId(req)]);
   if (!app) throw notFound('App not found');

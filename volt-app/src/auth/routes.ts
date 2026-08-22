@@ -45,10 +45,12 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const { email, password } = loginSchema.parse(req.body);
     const user = await one<any>(
-      'SELECT id, account_id, role, password_hash, status FROM users WHERE email = $1',
+      `SELECT u.id, u.account_id, u.role, u.password_hash, u.status, a.status AS account_status
+         FROM users u JOIN accounts a ON a.id = u.account_id WHERE u.email = $1`,
       [email]
     );
     if (!user || user.status === 'disabled') throw unauthorized('Invalid credentials');
+    if (user.account_status === 'suspended') throw unauthorized('This account is suspended, contact support');
     if (!(await verifyPassword(user.password_hash, password))) throw unauthorized('Invalid credentials');
 
     const access = signAccess({ sub: user.id, account_id: user.account_id, role: user.role });
@@ -87,5 +89,40 @@ authRouter.post(
     const { refresh } = req.body ?? {};
     if (refresh) await one('UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1', [hashRefresh(refresh)]);
     res.status(204).end();
+  })
+);
+
+
+/** WHO AM I — the session's user, role, effective feature access, and the
+ *  access model description, so the UI gates nav and buttons exactly like the
+ *  API enforces them. */
+authRouter.get(
+  '/me',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { one: oneQ } = await import('../db');
+    const { resolveAccess, accessDescription } = await import('./roles');
+    const u = await oneQ<any>(
+      `SELECT u.id, u.email, u.role, u.status, u.platform_role, u.user_group_id,
+              g.name AS user_group_name, a.id AS account_id, a.name AS account_name,
+              a.plan_tier, a.status AS account_status
+         FROM users u JOIN accounts a ON a.id=u.account_id
+         LEFT JOIN user_groups g ON g.id=u.user_group_id
+        WHERE u.id=$1`, [req.auth!.sub]);
+    if (!u) {
+      // api-key principal
+      return res.json({ id: req.auth!.sub, role: 'admin', via: 'account_key',
+        accountId: req.auth!.account_id, features: (await resolveAccess(String(req.auth!.sub), 'admin')).perms,
+        model: accessDescription() });
+    }
+    const acc = await resolveAccess(u.id, u.role);
+    res.json({
+      id: u.id, email: u.email, role: acc.role, status: u.status,
+      platformRole: u.platform_role ?? null,
+      userGroupId: u.user_group_id, userGroupName: u.user_group_name,
+      account: { id: u.account_id, name: u.account_name, plan: u.plan_tier, status: u.account_status },
+      features: acc.perms,
+      model: accessDescription(),
+    });
   })
 );

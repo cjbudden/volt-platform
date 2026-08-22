@@ -297,6 +297,55 @@ export const api = {
     req('/files', { method: 'POST', body: JSON.stringify(b) }),
   patchFile: (id: string, b: { name?: string; folder?: string; kind?: string; tags?: string[]; version?: number }): Promise<MediaFile> =>
     req(`/files/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  // ---- admin: who am I + access model (drives nav/button gating) ----
+  me: (): Promise<Me> => req('/auth/me'),
+
+  // ---- admin: user management (admin+ only) ----
+  users: (): Promise<UserRow[]> => req('/users'),
+  createUser: (b: { email: string; password: string; role: TenantRole; userGroupId?: string | null }): Promise<UserRow> =>
+    req('/users', { method: 'POST', body: JSON.stringify(b) }),
+  patchUser: (id: string, b: { role?: TenantRole; status?: 'active' | 'disabled'; userGroupId?: string | null }): Promise<UserRow> =>
+    req(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+
+  // ---- admin: user groups (per-feature access none/view/manage) ----
+  userGroups: (): Promise<UserGroupRow[]> => req('/user-groups'),
+  createUserGroup: (b: { name: string; description?: string; permissions: Record<string, AccessLevel> }): Promise<UserGroupRow> =>
+    req('/user-groups', { method: 'POST', body: JSON.stringify(b) }),
+  patchUserGroup: (id: string, b: { name?: string; description?: string | null; permissions?: Record<string, AccessLevel> }): Promise<UserGroupRow> =>
+    req(`/user-groups/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteUserGroup: async (id: string): Promise<void> => {
+    const r = await fetch('/api/user-groups/' + id, { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
+    if (!r.ok && r.status !== 204) throw new Error(String(r.status))
+  },
+
+  // ---- admin: apps & API keys ----
+  apps: (): Promise<AppReg[]> => req('/apps'),
+  app: (id: string): Promise<AppReg & { keys: ApiKeyRow[] }> => req(`/apps/${id}`),
+  createApp: (b: { name: string; type: AppType; restrictions?: Record<string, any> }): Promise<AppReg & { publishableKey: MintedKey }> =>
+    req('/apps', { method: 'POST', body: JSON.stringify(b) }),
+  updateApp: (id: string, b: { name?: string; restrictions?: Record<string, any>; enabled?: boolean }): Promise<AppReg> =>
+    req(`/apps/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
+  rotateAppKey: (id: string): Promise<MintedKey> => req(`/apps/${id}/keys`, { method: 'POST' }),
+  revokeApiKey: async (keyId: string): Promise<void> => {
+    const r = await fetch('/api/apps/keys/' + keyId, { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
+    if (!r.ok && r.status !== 204) throw new Error(String(r.status))
+  },
+  createSecretKey: (): Promise<MintedKey> => req('/apps/secret-keys', { method: 'POST' }),
+  allKeys: (): Promise<AccountKeyRow[]> => req('/apps/keys'),
+
+  // ---- platform (system admin): client accounts ----
+  platformAccounts: (): Promise<PlatformAccountRow[]> => req('/platform/accounts'),
+  platformCreateAccount: (b: {
+    name: string; planTier?: 'standard' | 'pro' | 'enterprise'
+    maxChannels?: number; maxConcurrentSources?: number
+    ownerEmail: string; ownerPassword: string
+  }): Promise<{ account: PlatformAccountRow; owner: { id: string; email: string }; credentials: { email: string; password: string }; note: string }> =>
+    req('/platform/accounts', { method: 'POST', body: JSON.stringify(b) }),
+  platformPatchAccount: (id: string, b: {
+    name?: string; planTier?: 'standard' | 'pro' | 'enterprise'
+    maxChannels?: number; maxConcurrentSources?: number; status?: 'active' | 'suspended'
+  }): Promise<PlatformAccountRow> => req(`/platform/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+
   deleteFile: async (id: string, opts: { confirm?: boolean; force?: boolean } = {}): Promise<{ ok: boolean; status: number; body?: any }> => {
     const qs = new URLSearchParams()
     if (opts.confirm) qs.set('confirm', 'true')
@@ -308,6 +357,61 @@ export const api = {
     let body: any = null; try { body = await r.json() } catch { /* */ }
     return { ok: false, status: r.status, body }
   },
+}
+
+// ---- admin / access model types --------------------------------------------
+export type TenantRole = 'viewer' | 'operator' | 'admin' | 'owner'
+export type AccessLevel = 'none' | 'view' | 'manage'
+
+export interface Me {
+  id: string; email?: string; role: string; status?: string
+  platformRole?: string | null
+  userGroupId?: string | null; userGroupName?: string | null
+  account?: { id: string; name: string; plan: string; status: string }
+  features: Record<string, AccessLevel>
+  model: { roles: string[]; features: string[]; levels: AccessLevel[]; notes: string[] }
+}
+
+export interface UserRow {
+  id: string; email: string; role: TenantRole; status: 'active' | 'disabled' | 'invited'
+  is_platform?: boolean
+  user_group_id: string | null; user_group_name?: string | null
+  created_at: string
+}
+
+export interface UserGroupRow {
+  id: string; name: string; description: string | null
+  permissions: Record<string, AccessLevel>
+  member_count?: number
+  created_at: string
+}
+
+export type AppType = 'web' | 'ios' | 'android' | 'tv' | 'roku' | 'server'
+export interface AppReg {
+  id: string; name: string; type: AppType
+  restrictions: Record<string, any>; enabled: boolean
+  created_at: string; updated_at?: string
+}
+export interface ApiKeyRow {
+  id: string; key_prefix: string; kind: 'secret' | 'publishable'
+  scopes: string[]; enabled: boolean
+  last_used_at: string | null; request_count: number | string
+  created_at?: string
+}
+/** A freshly minted key: `key` is the RAW value, shown once, never retrievable again. */
+export interface MintedKey extends Omit<ApiKeyRow, 'enabled' | 'last_used_at' | 'request_count'> {
+  key: string
+}
+export interface AccountKeyRow extends ApiKeyRow {
+  app_id: string | null; app_name: string | null
+}
+
+export interface PlatformAccountRow {
+  id: string; name: string; plan_tier: string
+  max_channels: number; max_concurrent_sources?: number
+  status?: 'active' | 'suspended'
+  channels?: number | string; users?: number | string
+  created_at?: string
 }
 
 export interface EventSourceRow {

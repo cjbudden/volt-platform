@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type ReactElement } from 'react'
-import { api, setToken, type SearchHit } from './api'
+import { api, setToken, type SearchHit, type Me } from './api'
 import Channels from './pages/Channels'
 import ChannelDetail from './pages/ChannelDetail'
 import ImageLibrary from './pages/ImageLibrary'
@@ -8,6 +8,9 @@ import RecordingDetail from './pages/RecordingDetail'
 import Events from './pages/Events'
 import Epg from './pages/Epg'
 import EpgDetail from './pages/EpgDetail'
+import ApiKeys from './pages/ApiKeys'
+import Users from './pages/Users'
+import SystemAdmin from './pages/SystemAdmin'
 import { useRoute, navigate, hrefFor } from './router'
 import { UploadIndicator } from './uploads'
 
@@ -26,6 +29,16 @@ const I = {
   multiview: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>,
   analytics: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18" /><path d="m7 14 4-4 3 3 5-6" /></svg>,
   epg: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M8 4v16M3 14h18" /></svg>,
+  key: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.8 7.8 5.5 5.5 0 017.8-7.8zm0 0L15 8m-2 2 4-4m0 0 3 3 3-3-3-3" /></svg>,
+  users: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" /></svg>,
+  shield: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>,
+}
+
+/** Which FEATURE (from /auth/me) each content nav item belongs to; items whose
+ *  feature the user's group sets to 'none' are hidden so the nav matches the API. */
+const NAV_FEATURE: Record<string, string> = {
+  channels: 'channels', events: 'events', epg: 'epg', loops: 'media',
+  recordings: 'recordings', vod: 'vod', images: 'media', analytics: 'analytics',
 }
 
 const NAV: { group: string; items: { key: string; label: string; icon: ReactElement; badge?: string }[] }[] = [
@@ -57,6 +70,7 @@ export default function App() {
   const [pw, setPw] = useState('volt1234')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [me, setMe] = useState<Me | null>(null)
 
   // URL is the source of truth for section / open channel / create drawer
   const route = useRoute()
@@ -67,7 +81,9 @@ export default function App() {
   const openChannel = (id: string) => navigate(`/channels/${id}`)
 
   const account = email.split('@')[1]?.split('.')[0]?.toUpperCase() || 'RTM'
+  const EXTRA_LABEL: Record<string, string> = { apikeys: 'API Keys & Apps', users: 'User Management', system: 'System Admin' }
   const label = NAV.flatMap(g => g.items).find(i => i.key === section)?.label
+    || EXTRA_LABEL[section]
     || (section ? section.charAt(0).toUpperCase() + section.slice(1) : 'Channels')
 
   useEffect(() => {
@@ -76,9 +92,31 @@ export default function App() {
 
   async function login(e: React.FormEvent) {
     e.preventDefault(); setErr(''); setBusy(true)
-    try { const r = await api.login(email, pw); setToken(r.access); setAuthed(true) }
+    try {
+      const r = await api.login(email, pw); setToken(r.access); setAuthed(true)
+      api.me().then(setMe).catch(() => {})   // access map for nav/button gating
+    }
     catch (e: any) { setErr('Sign in failed: ' + e.message) } finally { setBusy(false) }
   }
+
+  const isAdmin = !me || me.role === 'admin' || me.role === 'owner'
+  const featureLevel = (key: string): string => {
+    if (!me) return 'manage'                     // before /me resolves, show all
+    const f = NAV_FEATURE[key]
+    if (!f) return 'view'                        // unmapped items stay visible
+    return me.features?.[f] ?? 'manage'
+  }
+  const nav = [
+    ...NAV.map(g => ({ ...g, items: g.items.filter(it => featureLevel(it.key) !== 'none') }))
+      .filter(g => g.items.length > 0),
+    ...(isAdmin ? [{ group: 'Admin', items: [
+      { key: 'apikeys', label: 'API Keys & Apps', icon: I.key },
+      { key: 'users', label: 'User Management', icon: I.users },
+    ] }] : []),
+    ...(me?.platformRole ? [{ group: 'System', items: [
+      { key: 'system', label: 'System Admin', icon: I.shield },
+    ] }] : []),
+  ]
 
   if (!authed) {
     return (
@@ -105,7 +143,7 @@ export default function App() {
           <div><div className="n">VOLT Stream</div><div className="s">OTT Streaming Platform</div></div>
         </div>
         <nav className="nav">
-          {NAV.map(g => (
+          {nav.map(g => (
             <div key={g.group}>
               <div className="nav-group">{g.group}</div>
               {g.items.map(it => {
@@ -123,7 +161,10 @@ export default function App() {
         </nav>
         <div className="side-foot">
           <div className="avatar">{account.slice(0, 2)}</div>
-          <div><div className="nm">{email.split('@')[0]}</div><div className="rl">{account} · Admin</div></div>
+          <div><div className="nm">{email.split('@')[0]}</div><div className="rl">
+            {(me?.account?.name || account)} · {me ? (me.role.charAt(0).toUpperCase() + me.role.slice(1)) : 'Admin'}
+            {me?.userGroupName ? ` · ${me.userGroupName}` : ''}
+          </div></div>
         </div>
       </aside>
 
@@ -137,7 +178,7 @@ export default function App() {
             <button className="btn primary" onClick={() => navigate('/channels/new')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>New Stream
             </button>
-            <div className="icon-btn" title="Sign out" onClick={() => { setAuthed(false); setToken('') }}>
+            <div className="icon-btn" title="Sign out" onClick={() => { setAuthed(false); setToken(''); setMe(null) }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" /></svg>
             </div>
           </div>
@@ -159,6 +200,12 @@ export default function App() {
             ? (route.epgOwner
                 ? <EpgDetail key={route.epgOwner.kind + route.epgOwner.id} owner={route.epgOwner} onBack={() => navigate('/epg')} />
                 : <Epg />)
+            : section === 'apikeys'
+            ? <ApiKeys />
+            : section === 'users'
+            ? <Users />
+            : section === 'system'
+            ? <SystemAdmin />
             : <Placeholder title={label} />}
         </div>
       </div>

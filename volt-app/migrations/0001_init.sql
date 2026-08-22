@@ -78,8 +78,21 @@ CREATE TABLE accounts (
     max_concurrent_sources  INTEGER NOT NULL DEFAULT 3,          -- LICENSED ceiling (quota)
     max_renditions          INTEGER NOT NULL DEFAULT 5,          -- renditions per package (ladder cap; hard max 8) — bounds container load
     max_asset_hours         INTEGER NOT NULL DEFAULT 12,         -- VOD single-asset cap
+    status                  TEXT NOT NULL DEFAULT 'active',      -- 'active' | 'suspended' (SaaS control)
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- USER GROUPS: named per-feature access sets (none/view/manage) that members
+-- inherit. Owners/admins bypass groups; the model lives in src/auth/roles.ts.
+CREATE TABLE user_groups (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id  UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    description TEXT,
+    permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (account_id, name)
 );
 
 CREATE TABLE users (
@@ -89,6 +102,7 @@ CREATE TABLE users (
     password_hash TEXT NOT NULL,                                 -- argon2id
     role          user_role NOT NULL DEFAULT 'operator',
     status        user_status NOT NULL DEFAULT 'invited',
+    user_group_id UUID REFERENCES user_groups(id) ON DELETE SET NULL,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (email)
 );

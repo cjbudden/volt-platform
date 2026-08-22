@@ -123,12 +123,14 @@ ok "sendEmail without recipients is 400" '[ "$SE2" = "400" ]'
 EP=$(curl -s -X POST "http://localhost:$PORT/api/share-links" -H "authorization: Bearer $TOKA" -H 'content-type:application/json' \
   -d '{"resourceKind":"vod","resourceId":"0000000f-0000-0000-0000-000000000001","accessPeriod":"7 days","authMode":"email_pin","recipients":["viewer@partner.example"]}')
 EPRAW=$(echo "$EP" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+EPID=$(echo "$EP" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
 ok "email_pin link created" '[ -n "$EPRAW" ]'
 E1=$(curl -s -X POST "http://localhost:$PORT/api/share/$EPRAW/resolve" -H 'content-type:application/json' -d '{}')
 ok "email_pin without creds is code_required" 'echo "$E1" | grep -q code_required'
 # wrong email: response is GENERIC and no code is armed
 curl -s -X POST "http://localhost:$PORT/api/share/$EPRAW/request-code" -H 'content-type:application/json' -d '{"email":"attacker@evil.example"}' >/dev/null
-ARMED=$(psql "$DATABASE_URL" -tA -c "SELECT count(*) FROM share_links WHERE auth_mode='email_pin' AND verify_code_hash IS NOT NULL")
+# scope to THIS link: earlier suite runs leave their own armed links behind
+ARMED=$(psql "$DATABASE_URL" -tA -c "SELECT count(*) FROM share_links WHERE id='$EPID' AND verify_code_hash IS NOT NULL")
 ok "request-code with a non-recipient arms nothing" '[ "$ARMED" = "0" ]'
 # right email: a code is emailed; fish it out of the recorded notification
 curl -s -X POST "http://localhost:$PORT/api/share/$EPRAW/request-code" -H 'content-type:application/json' -d '{"email":"viewer@partner.example"}' >/dev/null

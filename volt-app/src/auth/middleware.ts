@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { verifyAccess, AccessClaims } from './jwt';
 import { unauthorized } from '../util/http';
 import { verifyKey } from '../services/apiKeys';
+import { enforceAccess } from './roles';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -38,6 +39,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
       }
       req.auth = { sub: `apikey:${key.id}`, account_id: key.account_id, role: 'admin' };
       req.authVia = 'account_key';
+      await enforceAccess(req);      // central feature/function access rules
       return next();
     } catch (e) {
       return next(e);
@@ -49,9 +51,14 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   try {
     req.auth = verifyAccess(token);
     req.authVia = 'session';
-    next();
   } catch {
-    next(unauthorized('Invalid or expired token'));
+    return next(unauthorized('Invalid or expired token'));
+  }
+  try {
+    await enforceAccess(req);        // central feature/function access rules
+    next();
+  } catch (e) {
+    next(e);
   }
 }
 

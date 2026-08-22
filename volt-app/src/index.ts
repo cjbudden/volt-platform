@@ -63,6 +63,19 @@ async function ensureSchema(): Promise<void> {
   await query(`DO $$ BEGIN
     ALTER TABLE programmes ADD CONSTRAINT chk_prog_owner CHECK ((channel_id IS NOT NULL) OR (event_id IS NOT NULL));
   EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+  // ADMIN: user groups carry per-feature access (none/view/manage) for their
+  // members; users reference one; accounts gain a suspension hook (SaaS).
+  await query(`CREATE TABLE IF NOT EXISTS user_groups (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (account_id, name)
+  )`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS user_group_id UUID REFERENCES user_groups(id) ON DELETE SET NULL`);
+  await query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`);
 }
 
 const server = app.listen(config.port, () => {

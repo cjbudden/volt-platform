@@ -20,6 +20,8 @@ import { scheduledClipsRouter } from './modules/scheduledClips';
 import { publishTargetsRouter, publicationsRouter } from './modules/publishing';
 import { epgRouter } from './modules/epg';
 import { appsRouter, availabilityRouter, accessRouter } from './modules/apps';
+import { usersRouter } from './modules/users';
+import { userGroupsRouter } from './modules/userGroups';
 import { analyticsRouter, analyticsBeaconRouter } from './modules/analytics';
 import { platformRouter } from './modules/platform';
 import { platformAuthRouter } from './modules/platformAuth';
@@ -176,6 +178,8 @@ export function createServer() {
   app.use('/api/scheduled-clips', scheduledClipsRouter); // timeline clip scheduling
   app.use('/api/epg', epgRouter);                        // EPG / programme scheduling
   app.use('/api/apps', appsRouter);                      // app registration + API keys
+  app.use('/api/users', usersRouter);                    // tenant user management (admin+)
+  app.use('/api/user-groups', userGroupsRouter);         // per-feature access groups (admin+)
   app.use('/api/availability', availabilityRouter);      // public play-gate → mints playback token (publishable key)
   app.use('/api/access', accessRouter);                  // public check-access → booleans, no token (publishable key)
   app.use('/api/analytics/beacon', analyticsBeaconRouter); // public session beacon (playback-token)
