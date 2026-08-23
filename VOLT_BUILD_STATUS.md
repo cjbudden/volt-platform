@@ -203,3 +203,26 @@ implemented.** Design is ~2 chats ahead of build.
 - Settings fields read-only (copyable) while running, editable when stopped. Next.
 - Frontend empty-state polish (EPG "create" button, viewers "no data yet").
 - Real analytics wiring for the viewers card.
+
+## 2026-08-23 update - admin shipped, radio in build
+
+- ADMIN SECTION (built, 47/47 e2e): apps & API keys UI (publishable key shown once,
+  origin/IP restrictions, account secret keys), user management with roles
+  (owner>admin>operator>viewer) plus USER GROUPS carrying per-feature levels
+  none/view/manage enforced centrally in requireAuth and mirrored into the nav via
+  /auth/me; System Admin (platform staff only) creates client accounts + primary
+  owner in one transaction with credentials shown once, sets plan/quotas, suspends
+  accounts (login blocked, sessions revoked, API keys rejected). See admin.check.sh.
+- EPG (built, 18/18 extended e2e): owners roll-up, day builder (copy/clear days,
+  conflicts), per-slot geo + slot replacement fields, post-airing auto clip/VOD
+  using programme metadata for naming. Radio reuses these tables for its log.
+- RECORDINGS WORKBENCH (built, 34/34 e2e): searchable library (names, EPG
+  programmes, spoken words), NLE-style detail page with range playback across
+  runs, transcript column synced to the playhead, clip creation.
+- RADIO (in build, see RADIO.md): audio-only workflows. MP3 + HLS + DASH single
+  bitrate outputs, audio-valid inputs incl Icecast, ICY now-playing captured as a
+  timed log into the EPG tables with song/ad/content classification (drives
+  search, trimming, clipping and the transcription policy), detail page with an
+  audio visualiser instead of the 16:9 video, station artwork + live metadata.
+  NOTE: the 16 Aug audio-only channel work was lost in the two-session merge
+  (d460f5b); the new build supersedes it.

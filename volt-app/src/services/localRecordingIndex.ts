@@ -118,11 +118,23 @@ export function pickRenditions(streamId: string, runId: string): { video: string
   return { video: vids[0]?.r ?? null, audio: rends.includes('audio') };
 }
 
-/** Coverage summary across all runs (for the UI timeline: spans + gaps). */
+/** True when NO run of this stream has a video rendition (radio / audio-only). */
+export function isAudioOnly(streamId: string): boolean {
+  const runs = listRuns(streamId);
+  if (!runs.length) return false;
+  return runs.every((run) => {
+    const p = pickRenditions(streamId, run);
+    return !p.video;
+  }) && runs.some((run) => pickRenditions(streamId, run).audio);
+}
+
+/** Coverage summary across all runs (for the UI timeline: spans + gaps).
+ *  Audio-only runs (radio) fall back to the audio rendition. */
 export function recordingSpans(streamId: string): RunSpan[] {
   const spans: RunSpan[] = [];
   for (const runId of listRuns(streamId)) {
-    const { video } = pickRenditions(streamId, runId);
+    const pick = pickRenditions(streamId, runId);
+    const video = pick.video ?? (pick.audio ? 'audio' : null);
     if (!video) continue;
     const segs = scanRun(streamId, runId, video);
     if (!segs.length) continue;
@@ -170,8 +182,14 @@ export function rangeMediaPlaylist(streamId: string, kind: 'video' | 'audio', fr
 /** Master playlist for the range: video variant + audio group when present.
  *  Media playlist URLs are provided by the caller (they carry auth/query). */
 export function rangeMasterPlaylist(streamId: string, hasAudio: boolean,
-  videoUrl: string, audioUrl: string): string {
+  videoUrl: string | null, audioUrl: string): string {
   const lines = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-INDEPENDENT-SEGMENTS'];
+  if (!videoUrl) {
+    // AUDIO-ONLY (radio): the audio media playlist is the variant itself.
+    lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2"`);
+    lines.push(audioUrl);
+    return lines.join('\n') + '\n';
+  }
   if (hasAudio) {
     lines.push(`#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Audio",DEFAULT=YES,AUTOSELECT=YES,URI="${audioUrl}"`);
   }

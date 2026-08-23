@@ -54,6 +54,7 @@ recordingsRouter.get(
       .filter((s) => s.endMs > Number(r.start_epoch_ms)
         && (r.end_epoch_ms == null || s.startMs < Number(r.end_epoch_ms)));
     const hasAudio = listRuns(streamId).some((run) => pickRenditions(streamId, run).audio);
+    const hasVideo = listRuns(streamId).some((run) => pickRenditions(streamId, run).video);
     res.json({
       recordingId: r.id,
       streamId,
@@ -63,6 +64,7 @@ recordingsRouter.get(
       endMs: r.end_epoch_ms != null ? Number(r.end_epoch_ms) : null,
       live: r.status === 'recording',
       hasAudio,
+      audioOnly: hasAudio && !hasVideo,   // radio: player shows the visualiser
       spans,
     });
   })
@@ -87,9 +89,10 @@ recordingsRouter.get(
     if (to <= from) throw badRequest('to must be after from');
     const streamId = r.channel_id ?? r.event_id;
     const hasAudio = listRuns(streamId).some((run) => pickRenditions(streamId, run).audio);
+    const hasVideo = listRuns(streamId).some((run) => pickRenditions(streamId, run).video);
     const qs = `?from=${from}&to=${to}`;
     res.type('application/vnd.apple.mpegurl').send(
-      rangeMasterPlaylist(streamId, hasAudio, `video.m3u8${qs}`, `audio.m3u8${qs}`));
+      rangeMasterPlaylist(streamId, hasAudio, hasVideo ? `video.m3u8${qs}` : null, `audio.m3u8${qs}`));
   })
 );
 recordingsRouter.get(

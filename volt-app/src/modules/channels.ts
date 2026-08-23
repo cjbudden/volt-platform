@@ -23,7 +23,7 @@ const CHANNEL_EDITABLE = [
   'filler_slate_ref', 'filler_asset_id', 'fallback_transcode',
   'watermark_enabled', 'watermark_ref', 'watermark_position',
   'watermark_offset_x', 'watermark_offset_y', 'watermark_opacity', 'watermark_scale',
-  'brand_ref',
+  'brand_ref', 'radio_config',
 ];
 
 // Watermark / channel brand overlay. `ref` is a library image URL (like filler_slate_ref);
@@ -42,12 +42,15 @@ const WATERMARK = z.object({
 channelsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
+    // ?kind=tv|radio scopes the list (Channels page = tv, Radio page = radio);
+    // no param returns everything (back-compat for scripts and search).
+    const kindFilter = req.query.kind === 'radio' ? 'radio' : req.query.kind === 'tv' ? 'tv' : null;
     const rows = await query<any>(
       `SELECT c.*, g.name AS group_name
          FROM channels c JOIN groups g ON g.id = c.group_id
-        WHERE g.account_id = $1
+        WHERE g.account_id = $1 AND ($2::text IS NULL OR COALESCE(c.kind,'tv') = $2)
         ORDER BY c.created_at DESC`,
-      [accountId(req)]
+      [accountId(req), kindFilter]
     );
     // ONE consistent status: the LIST uses the SAME five-gate health as the detail page
     // (via the ground-truth manifest + events), rolled up to `overall`, so a channel is
@@ -89,7 +92,18 @@ channelsRouter.get(
 );
 
 // ingest protocols must match the DB `ingest_protocol` enum exactly.
-const PROTOCOL = z.enum(['srt', 'rtmp', 'rtmps', 'hls', 'dash', 'ndi', 'st2110']);
+const PROTOCOL = z.enum(['srt', 'rtmp', 'rtmps', 'hls', 'dash', 'ndi', 'st2110', 'icecast']);
+
+// RADIO (audio-only) workflow options — see RADIO.md. Single bitrate by design.
+const RADIO_CFG = z.object({
+  outputs: z.object({
+    mp3: z.boolean().optional(), hls: z.boolean().optional(), dash: z.boolean().optional(),
+  }).optional(),
+  bitrateKbps: z.number().int().min(32).max(320).optional(),
+  metadataCapture: z.boolean().optional(),   // icecast: ICY now-playing → timed EPG log
+  transcode: z.boolean().optional(),         // packaging is the default; transcode changes bitrate/format
+  transcription: z.boolean().optional(),     // icecast only: transcribe 'content' segments
+}).optional();
 const RUNG = z.object({ height: z.number().int().positive(), bitrateKbps: z.number().int().positive() });
 const SOURCE = z.object({
   role: z.enum(['primary', 'backup']).default('primary'),
@@ -125,6 +139,8 @@ const createSchema = z.object({
   ...FILLER,
   watermark: WATERMARK,
   brandRef: z.string().nullable().optional(),   // channel brand/logo image (identity)
+  kind: z.enum(['tv', 'radio']).default('tv'),  // radio = audio-only workflows
+  radio: RADIO_CFG,
 });
 
 /** Create a channel — enforces the group's max_channels entitlement. */
@@ -153,12 +169,14 @@ channelsRouter.post(
         `INSERT INTO channels(group_id, name, purchasing_mode, resilience_tier, recording_enabled, recording_retention_days, recording_retention_sec,
            dvr_window_sec, dvr_mode, output_ladder,
            input_failover_enabled, auto_failback, input_loss_behavior, filler_slate_ref, filler_asset_id, fallback_transcode,
+           kind, radio_config,
            created_by, updated_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$17) RETURNING *`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$19) RETURNING *`,
         [body.groupId, body.name, body.purchasingMode, body.resilienceTier, body.recordingEnabled ?? true, retDays, retSec,
          body.dvrWindowSec ?? null, body.dvrMode, ladder,
          body.inputFailoverEnabled ?? false, body.autoFailback ?? true, body.inputLossBehavior ?? 'none',
          body.fillerSlateRef ?? null, body.fillerAssetId ?? null, body.fallbackTranscode ?? false,
+         body.kind, body.kind === 'radio' ? JSON.stringify(body.radio ?? {}) : null,
          who.userId]
       )).rows[0];
       for (const s of body.sources ?? []) {
@@ -235,6 +253,8 @@ const editSchema = z.object({
     // lip-sync trim in seconds (positive = cues later), clamped to a sane range
     offsetSec: z.number().min(-30).max(30).optional(),
   }).optional(),
+  // radio (audio-only) workflow options — merged into radio_config
+  radio: RADIO_CFG,
   version: z.number().int().optional(),
 });
 const editChannel = asyncHandler(async (req, res) => {
@@ -288,6 +308,12 @@ const editChannel = asyncHandler(async (req, res) => {
     if (w.scale !== undefined) patch.watermark_scale = w.scale;
   }
   if (has('brandRef')) patch.brand_ref = body.brandRef ?? null;
+  if (has('radio') && body.radio && current.kind === 'radio') {
+    // shallow-merge over the stored config so partial patches keep other keys
+    const cur = current.radio_config ?? {};
+    patch.radio_config = { ...cur, ...body.radio,
+      outputs: { ...(cur.outputs ?? {}), ...(body.radio.outputs ?? {}) } };
+  }
   const touchMeta = has('schemaId') || has('metadata');
   if (touchMeta) {
     const md = await validateEntityMetadata(accountId(req), body.schemaId ?? null,

@@ -94,6 +94,16 @@ export const INGEST_PROTOCOLS: IngestProtocol[] = [
     packageFriendly: true,
   },
   {
+    id: 'icecast', label: 'Icecast / HTTP audio', ingest: 'pull',
+    urlLabel: 'Stream URL (mount)',
+    urlPlaceholder: 'https://ice.example.com/station-128-mp3',
+    urlExample: 'https://ice5.somafm.com/groovesalad-128-mp3',
+    urlPattern: '^https?://',
+    streamKey: { show: false },
+    hint: 'Icecast / SHOUTcast mount or any HTTP MP3/AAC stream. We negotiate ICY metadata, so now-playing titles are captured into the timed metadata log.',
+    packageFriendly: true,
+  },
+  {
     id: 'ndi', label: 'NDI', ingest: 'pull',
     urlLabel: 'NDI source name',
     urlPlaceholder: 'STUDIO-PC (Camera 1)',

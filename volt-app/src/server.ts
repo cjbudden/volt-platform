@@ -22,6 +22,8 @@ import { epgRouter } from './modules/epg';
 import { appsRouter, availabilityRouter, accessRouter } from './modules/apps';
 import { usersRouter } from './modules/users';
 import { userGroupsRouter } from './modules/userGroups';
+import { radioRouter } from './modules/radio';
+import { attachMp3Listener } from './services/radio/pipeline';
 import { analyticsRouter, analyticsBeaconRouter } from './modules/analytics';
 import { platformRouter } from './modules/platform';
 import { platformAuthRouter } from './modules/platformAuth';
@@ -89,6 +91,19 @@ export function createServer() {
       else if (p.endsWith('.vtt')) res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
     },
   }));
+
+  // Public LIVE MP3 listeners (NO admin auth) — the radio equivalent of /origin.
+  // One encoder, N listeners: the control plane fans the station's MP3 out and
+  // injects ICY now-playing titles for clients that send Icy-MetaData: 1.
+  app.get('/radio/:id/stream.mp3', async (req, res) => {
+    try {
+      const ch = await (await import('./db')).one<any>(
+        `SELECT id, name, kind FROM channels WHERE id=$1 AND kind='radio'`, [req.params.id]);
+      if (!ch) return res.status(404).end();
+      const ok = attachMp3Listener(ch.id, req as any, res as any, ch.name);
+      if (!ok) return res.status(404).json({ error: 'station is not live' });
+    } catch { res.status(400).end(); }
+  });
 
   // Public share surface (NO admin auth): the standalone /share/:token page and its
   // resolve/download endpoints. Mounted before the authed /api routers; it only ever
@@ -177,6 +192,7 @@ export function createServer() {
   app.use('/api/filler-assets', fillerAssetsRouter);     // slates & loops
   app.use('/api/scheduled-clips', scheduledClipsRouter); // timeline clip scheduling
   app.use('/api/epg', epgRouter);                        // EPG / programme scheduling
+  app.use('/api/radio', radioRouter);                    // radio (audio-only) stations
   app.use('/api/apps', appsRouter);                      // app registration + API keys
   app.use('/api/users', usersRouter);                    // tenant user management (admin+)
   app.use('/api/user-groups', userGroupsRouter);         // per-feature access groups (admin+)

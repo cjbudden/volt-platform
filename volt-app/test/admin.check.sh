@@ -31,6 +31,10 @@ except Exception: print('')
 " "$1" "$2"; }
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q <<'SQL'
+-- instances rows block channel deletion (FK SET NULL vs owner CHECK): clear them first
+DELETE FROM instances WHERE channel_id IN (
+  SELECT c.id FROM channels c JOIN groups g ON g.id=c.group_id
+   JOIN accounts a ON a.id=g.account_id WHERE a.name IN ('AdminCo','NewClient Co'));
 DELETE FROM accounts WHERE name IN ('AdminCo','NewClient Co');
 DELETE FROM users WHERE email LIKE '%@adminco.example' OR email='newowner@client.example';
 INSERT INTO accounts(id,name) VALUES ('0000000a-0000-0000-0000-0000000000b1'::uuid,'AdminCo');

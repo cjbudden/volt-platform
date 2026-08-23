@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, recordingRangeUrl, type RecordingRow, type RecordingTimeline, type VodAssetRow, type RecordingProgramme, type TranscriptSearch } from '../api'
 import { SEC } from '../scaffold'
+import AudioVisualizer from '../AudioVisualizer'
 
 /* ============================================================================
    Recording detail — the review/trim/clip page, following the same structural
@@ -302,8 +303,19 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
           {/* ------- player + live transcript side panel ------- */}
           <div style={{ display: 'grid', gridTemplateColumns: tsLangs.length ? '1fr 330px' : '1fr', gap: 14, alignItems: 'stretch' }}>
             <div>
+              {/* RADIO recordings are audio-only: replace the 16:9 video surface with
+                  the live audio visualiser (level + spectrum), so a muted review still
+                  shows whether there is signal. The <video> element still drives
+                  playback/seek; it is just not the visible surface. */}
               <video ref={videoRef} controls playsInline
-                style={{ width: '100%', height: '100%', maxHeight: 430, background: '#000', borderRadius: 10, border: '1px solid var(--border)', objectFit: 'contain' }} />
+                style={tl?.audioOnly
+                  ? { width: '100%', height: 44, background: '#000', borderRadius: 10, border: '1px solid var(--border)' }
+                  : { width: '100%', height: '100%', maxHeight: 430, background: '#000', borderRadius: 10, border: '1px solid var(--border)', objectFit: 'contain' }} />
+              {tl?.audioOnly && (
+                <div style={{ marginTop: 10 }}>
+                  <AudioVisualizer media={videoRef.current} height={330} idleText="Load a range and press play" />
+                </div>
+              )}
             </div>
             {tsLangs.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', maxHeight: 430 }}>

@@ -148,6 +148,7 @@ export interface ChannelSettingsPatch {
   fillerSlateRef?: string | null
   watermark?: WatermarkPatch
   brandRef?: string | null
+  radio?: RadioCfg
   version?: number
 }
 
@@ -169,7 +170,7 @@ export const api = {
   groups: (): Promise<Group[]> => req('/groups'),
   // caption OUTPUT languages the pipeline can deliver (single source of truth for pickers)
   captionLanguages: (): Promise<{ languages: { code: string; label: string }[] }> => req('/caption-languages'),
-  channels: (): Promise<Channel[]> => req('/channels'),
+  channels: (kind?: 'tv' | 'radio'): Promise<Channel[]> => req('/channels' + (kind ? `?kind=${kind}` : '')),
   createChannel: (b: {
     groupId: string; name: string; purchasingMode?: string
     resilienceTier?: string; recordingEnabled?: boolean
@@ -183,6 +184,8 @@ export const api = {
     fallbackTranscode?: boolean
     watermark?: WatermarkPatch
     brandRef?: string | null
+    kind?: 'tv' | 'radio'
+    radio?: RadioCfg
   }): Promise<Channel> => req('/channels', { method: 'POST', body: JSON.stringify(b) }),
   search: (q: string): Promise<{ results: SearchHit[] }> => req('/search?q=' + encodeURIComponent(q)),
   startStop: (id: string, action: 'start' | 'stop') =>
@@ -297,6 +300,22 @@ export const api = {
     req('/files', { method: 'POST', body: JSON.stringify(b) }),
   patchFile: (id: string, b: { name?: string; folder?: string; kind?: string; tags?: string[]; version?: number }): Promise<MediaFile> =>
     req(`/files/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  // ---- radio: audio-only stations (channels with kind='radio') ----
+  radioStations: (): Promise<RadioStationRow[]> => req('/radio'),
+  radioStation: (id: string): Promise<RadioStationDetail> => req(`/radio/${id}`),
+  radioStartStop: (id: string, action: 'start' | 'stop') =>
+    req(`/radio/${id}/${action}`, { method: 'POST' }),
+  radioNowPlaying: (id: string): Promise<RadioNowPlaying> => req(`/radio/${id}/nowplaying`),
+  radioLog: (id: string, p: { from?: string; to?: string; q?: string; class?: RadioClass; limit?: number } = {}): Promise<RadioLog> => {
+    const qs = new URLSearchParams()
+    if (p.from) qs.set('from', p.from)
+    if (p.to) qs.set('to', p.to)
+    if (p.q) qs.set('q', p.q)
+    if (p.class) qs.set('class', p.class)
+    if (p.limit) qs.set('limit', String(p.limit))
+    return req(`/radio/${id}/log` + (qs.toString() ? '?' + qs : ''))
+  },
+
   // ---- admin: who am I + access model (drives nav/button gating) ----
   me: (): Promise<Me> => req('/auth/me'),
 
@@ -357,6 +376,58 @@ export const api = {
     let body: any = null; try { body = await r.json() } catch { /* */ }
     return { ok: false, status: r.status, body }
   },
+}
+
+// ---- radio types --------------------------------------------------------------
+export type RadioClass = 'song' | 'ad' | 'content'
+export interface RadioOutputsCfg { mp3?: boolean; hls?: boolean; dash?: boolean }
+export interface RadioCfg {
+  outputs?: RadioOutputsCfg
+  bitrateKbps?: number
+  metadataCapture?: boolean
+  transcode?: boolean
+  transcription?: boolean
+}
+export interface RadioPipelineState {
+  running: boolean; runId?: string; startedAt?: number
+  sourceCodec?: string | null; listeners?: number
+  icy?: RadioIcyState | null
+}
+export interface RadioIcyState {
+  connected: boolean
+  station: { name?: string; genre?: string; url?: string; bitrateKbps?: number; contentType?: string }
+  title: string | null; streamUrl: string | null
+  class: RadioClass | null; since: number | null; changes: number; lastError: string | null
+}
+export interface RadioStationRow {
+  id: string; name: string; status: string; group_id: string; group_name?: string
+  kind: 'radio'; radio_config: RadioCfg | null
+  recording_enabled?: boolean; recording_retention_sec?: number | string | null
+  brand_ref?: string | null; on_air?: boolean; created_at: string; version: number
+  pipeline: RadioPipelineState
+  nowPlaying: string | null; nowPlayingClass: RadioClass | null
+  outputs: { mp3: string | null; hls: string | null; dash: string | null }
+}
+export interface RadioLogEntry {
+  id: string; title: string; starts_at: string; ends_at: string; status: string
+  class: RadioClass | null; stream_url: string | null
+}
+export interface RadioStationDetail extends RadioStationRow {
+  sources: { id: string; role: string; protocol: string; ingest_url: string | null; stream_key: string | null; status?: string }[]
+  icy: RadioIcyState | null
+  openRecording: { id: string; start_epoch_ms: number | string; status: string } | null
+  recentLog: (RadioLogEntry & { metadata?: any })[]
+}
+export interface RadioNowPlaying {
+  running: boolean; listeners: number
+  station: RadioIcyState['station'] | null
+  title: string | null; class: RadioClass | null; since: number | null; streamUrl: string | null
+  entry: { id: string; title: string; starts_at: string; metadata?: any } | null
+}
+export interface RadioLog {
+  stationId: string; from: string; to: string
+  counts: Partial<Record<RadioClass, number>>
+  entries: RadioLogEntry[]
 }
 
 // ---- admin / access model types --------------------------------------------
@@ -498,6 +569,7 @@ export interface RecordingProgramme {
 export interface RecordingTimeline {
   recordingId: string; streamId: string; kind: string; sourceName: string | null
   startMs: number; endMs: number | null; live: boolean; hasAudio: boolean
+  audioOnly?: boolean   // radio recordings: player shows the audio visualiser
   spans: { runId: string; startMs: number; endMs: number; segments: number }[]
 }
 

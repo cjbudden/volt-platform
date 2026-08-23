@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-19T15:18:05Z",
+  "updated": "2026-08-23T02:52:42Z",
   "features": [
     {
       "id": "live-stream-e2e",
@@ -107,14 +107,14 @@
     },
     {
       "id": "epg",
-      "name": "EPG & scheduling",
-      "summary": "Programme store, RRULE recurrence, materialised instances, now/next, conflict detection.",
-      "status": "in_review",
+      "name": "EPG: guides, day builder, slot control & post-airing automation",
+      "summary": "WHY: the guide is both the viewer-facing schedule and the automation spine: what aired drives clip creation and naming. WHAT: EPG section (owners roll-up), per-channel/per-event day builder (add/remove, copy days, clear day, conflicts), per-slot geo access and slot replacement (slate/loop/vod for the period), and post-airing auto clip/VOD generation that harvests the programme metadata for the asset name and fields. Event EPGs double as the day schedule. Radio (in build) reuses these same tables/APIs for the Icecast now-playing log.",
+      "status": "ready_to_test",
       "test": {
-        "how": "Exercisable via the console EPG tab and /api/epg. 7 pure + 6 HTTP tests.",
-        "artifact": null
+        "how": "EPG > pick a channel > build a day, copy it forward, set a slot geo rule and a replacement, let a programme end and watch the auto-clip appear in VOD with the EPG metadata.",
+        "artifact": ""
       },
-      "checks": "13 tests pass",
+      "checks": "18/18 epg-extended e2e + original 13; auto-clip firing verified.",
       "feedback": [],
       "app_surface": "none"
     },
@@ -380,15 +380,15 @@
     },
     {
       "id": "audio-only-radio",
-      "name": "Radio \u2014 audio-only channels",
-      "summary": "A Radio section in the main nav and a real audio-only channel type: one source in, an AAC ladder out, no video anywhere in the chain. Create a station with artwork, a description, a source (Icecast, SRT, RTMP or HLS) and the audio rungs to encode; the job config short-circuits both video workflows (no ladder, no GPU) and the encoder maps audio only, with the packager emitting audio-only HLS/DASH. /radio and /radio/:id are the same list and detail pages at the audio scope. The detail page also has a real audio level meter with volume/mute and a track selector, and the encoder probes multi-language audio so each source track becomes its own manifest track.",
+      "name": "Radio: audio-only streaming workflows",
+      "summary": "A full Radio section on the shared design language (list, create/settings, detail). WHY: radio and audio-first broadcasters need the same operate/record/clip toolchain as TV without paying for video, and the now-playing metadata a station already emits is the cheapest possible content log. WHAT: audio-valid inputs only, including Icecast (plus HLS/SRT pull); live outputs MP3, HLS and DASH, all single bitrate; packaging is the default and transcode is offered only to change bitrate or format. Icecast ICY now-playing metadata is captured as a TIMED LOG stored in the existing EPG tables/APIs, each entry classified as song / ad / content (news, DJ talk) so you can see what was received and broadcast, search it, and jump straight to trim/clip points in the recording. The detail page replaces the 16:9 video with an audio visualiser (proves signal even when muted) and shows station artwork plus the live ICY metadata. Transcription is only offered for Icecast sources, where metadata can tell speech from songs and ads. REBUILD NOTE: the 16 Aug audio-only channel work was lost in the two-session merge (see d460f5b); this supersedes it.",
       "status": "ready_to_test",
-      "app_surface": "partial",
+      "app_surface": "full",
       "test": {
-        "how": "Radio \u2192 New station: artwork, source URL, tick the audio rungs, create. Start it and check the output is audio-only (master.m3u8 with audio renditions, no video). Edit the ladder in Settings \u2192 Audio ladder.",
+        "how": "run-on-mac.sh, then `npx tsx scripts/seed-radio.ts` in volt-app seeds Groove Salad / Secret Agent / Drone Zone. Radio > start one > open it: visualiser moves while listening, now-playing + artwork update, the metadata log fills with classified entries (search it), and the MP3/HLS/DASH URLs play (MP3 in VLC shows titles too). Stop > Recordings: the capture opens in the workbench with the visualiser instead of video.",
         "artifact": ""
       },
-      "checks": "Built 16 Aug: 13/13 in radio-brand.check.ts on the job-config decisions; audio meter + multi-track playback landed alongside. STILL OPEN on this feature: a dedicated Icecast input adapter.",
+      "checks": "Built 23 Aug: 22/22 e2e (radio.check.sh, offline via an Icecast simulator with rotating song/ad/DJ titles) plus a LIVE SomaFM run: Groove Salad ingested, HLS/DASH/MP3 served, now-playing captured and classified, station artwork picked up from StreamUrl. UI verified in-browser (list, gated create form, detail, MP3 byte flow); visualiser analyser wiring proven with a decodable test tone. Regressions clean: recordings 34/34, admin 47/47.",
       "feedback": []
     },
     {
@@ -402,6 +402,32 @@
         "artifact": ""
       },
       "checks": "Built 16 Aug.",
+      "feedback": []
+    },
+    {
+      "id": "admin-section",
+      "name": "Admin: API keys & apps, user management, system admin",
+      "summary": "WHY: VOLT is sold as SaaS, so client accounts must be provisioned by platform staff, and inside an account the client needs to control who can use which features, plus register the frontend apps that consume the APIs. WHAT: API Keys & Apps page (register web/mobile/TV/server apps, publishable key shown once, origin/IP restrictions, account secret keys for server-to-server); User Management with roles (owner>admin>operator>viewer) and USER GROUPS holding per-feature levels none/view/manage, enforced centrally in the API and mirrored in the nav via /auth/me; System Admin (platform staff only) creates client accounts with the primary owner user in one step, credentials shown once, sets plan/quotas, suspends accounts (blocks login, revokes sessions, kills API keys).",
+      "status": "ready_to_test",
+      "app_surface": "full",
+      "test": {
+        "how": "Sign in as an owner: Admin group in the nav. Register an app (copy the pk once), create a user group with EPG=none and assign an operator: their nav and API lose EPG. System Admin needs platform_role=saas_admin on your user.",
+        "artifact": ""
+      },
+      "checks": "47/47 e2e (admin.check.sh) + UI walkthrough; existing suites regression-clean.",
+      "feedback": []
+    },
+    {
+      "id": "recordings-workbench",
+      "name": "Recordings: searchable library + NLE clipping workbench",
+      "summary": "WHY: recordings are the raw material for clips and VOD; finding the right moment fast is the whole value. WHAT: list>detail flow; search matches names, EPG programmes that aired inside a recording, and the spoken words (transcript index); detail page has range playback across runs, NLE keyboard (space, arrows, frame step, in/out points), a transcript column synced to the playhead (click a line to jump, search within), and clips listed under the player.",
+      "status": "ready_to_test",
+      "app_surface": "full",
+      "test": {
+        "how": "Recordings > search a spoken phrase > open the match: it lands with the search run; set in/out with keys, Create clip.",
+        "artifact": ""
+      },
+      "checks": "34/34 recordings e2e; transcript+EPG search verified in-browser.",
       "feedback": []
     }
   ]

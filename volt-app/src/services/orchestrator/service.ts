@@ -4,6 +4,7 @@ import { buildEncoderJobConfig, buildThumbnailerJobConfig, JobConfigCtx } from '
 import { resolveCaptionsPlan, buildCaptionsJobConfig } from '../captionsPlan';
 import { createClipVod, deriveEventVod } from '../clips';
 import { TaskLauncher, makeLauncher } from './launcher';
+import { startRadio, stopRadio } from '../radio/pipeline';
 
 /**
  * The orchestrator turns channel/event lifecycle into real running tasks and
@@ -89,6 +90,12 @@ export class Orchestrator {
 
   // ---- start / stop --------------------------------------------------------
   async startStream(kind: 'channel' | 'event', id: string): Promise<{ taskArn: string }> {
+    // RADIO channels run the audio-only pipeline (radio/pipeline.ts) instead of
+    // the video encoder task; instances/recording/status bookkeeping is shared.
+    if (kind === 'channel') {
+      const ch = await one<any>(`SELECT kind, radio_config FROM channels WHERE id=$1`, [id]);
+      if (ch?.kind === 'radio') return this.startRadioChannel(id, ch.radio_config ?? {});
+    }
     const ctx = await this.loadContext(kind, id);
     if (!ctx) throw new Error('stream not found');
     const job = buildEncoderJobConfig(ctx);
@@ -158,6 +165,30 @@ export class Orchestrator {
     return { taskArn: res.taskArn };
   }
 
+  /** Start a RADIO channel: audio pipeline in-process, shared bookkeeping. */
+  private async startRadioChannel(id: string, radioConfig: any): Promise<{ taskArn: string }> {
+    const src = await one<any>(
+      `SELECT protocol, ingest_url FROM stream_inputs
+        WHERE channel_id=$1 AND role='primary' AND ingest_url IS NOT NULL
+        ORDER BY created_at LIMIT 1`, [id]);
+    if (!src?.ingest_url) throw new Error('radio channel has no primary source URL');
+    const { runId, pid } = startRadio({
+      channelId: id, protocol: src.protocol, url: src.ingest_url, cfg: radioConfig || {},
+    });
+    const taskArn = `radio:${pid}:${runId}`;
+    await tx(async (c) => {
+      await c.query(
+        `INSERT INTO instances(channel_id, task_arn, is_gpu, lifecycle, role, state, launched_at)
+         VALUES ($1,$2,false,'on_demand','primary','running', now())`, [id, taskArn]);
+      const ch = await c.query(`SELECT recording_enabled FROM channels WHERE id=$1`, [id]);
+      if (ch.rows[0]?.recording_enabled !== false) {
+        await this.ensureChannelDayRecording(c, id, 'audio', `channel/${id}`);
+      }
+      await c.query(`UPDATE channels SET status='live', updated_at=now() WHERE id=$1`, [id]);
+    });
+    return { taskArn };
+  }
+
   /**
    * Stop a stream's encoder task(s). `origin` records WHO/WHY (operator click,
    * scheduler window, failover, shutdown) so the control-plane log and the
@@ -170,8 +201,9 @@ export class Orchestrator {
       `SELECT * FROM instances WHERE ${kind === 'channel' ? 'channel_id' : 'event_id'}=$1 AND terminated_at IS NULL`,
       [id]
     );
+    if (kind === 'channel') stopRadio(id);   // no-op unless a radio pipeline is up
     for (const inst of running) {
-      if (inst.task_arn) {
+      if (inst.task_arn && !String(inst.task_arn).startsWith('radio:')) {
         try {
           await this.launcher.stopTask(inst.task_arn, `${kind} ${id} stopped (${origin})`);
         } catch (e) {

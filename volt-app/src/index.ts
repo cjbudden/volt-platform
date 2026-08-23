@@ -3,6 +3,7 @@ import { config } from './config';
 import { pool, query } from './db';
 import { startScheduler } from './services/orchestrator';
 import { reapAllEncoders } from './services/orchestrator/encoderCleanup';
+import { stopAllRadio } from './services/radio/pipeline';
 
 const app = createServer();
 
@@ -76,6 +77,15 @@ async function ensureSchema(): Promise<void> {
   )`);
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS user_group_id UUID REFERENCES user_groups(id) ON DELETE SET NULL`);
   await query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`);
+  // RADIO: audio-only channels. kind picks the workflow surface (tv = video chain,
+  // radio = audio pipeline: MP3/HLS/DASH single-bitrate outputs, ICY metadata log).
+  // radio_config: { outputs:{mp3,hls,dash}, bitrateKbps, metadataCapture, classify,
+  // transcode, transcription } — see RADIO.md.
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'tv'`);
+  await query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS radio_config JSONB`);
+  // Icecast / HTTP audio ingest (ICY). ADD VALUE cannot run inside a transaction;
+  // each query() here is a single autocommit statement, so this is safe to re-run.
+  await query(`ALTER TYPE ingest_protocol ADD VALUE IF NOT EXISTS 'icecast'`);
 }
 
 const server = app.listen(config.port, () => {
@@ -96,6 +106,7 @@ const stopScheduler = startScheduler();
 async function shutdown(signal: string) {
   console.log(`\n${signal} received — shutting down`);
   stopScheduler();
+  stopAllRadio();   // detached ffmpeg trees would otherwise outlive the control plane
   server.close(async () => {
     await pool.end();
     process.exit(0);

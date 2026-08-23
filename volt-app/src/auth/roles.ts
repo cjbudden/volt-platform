@@ -31,11 +31,12 @@ export type Level = 'none' | 'view' | 'manage';
 const LEVEL_RANK: Record<Level, number> = { none: 0, view: 1, manage: 2 };
 
 /** The manageable FEATURES and the API surfaces they cover. */
-export const FEATURES = ['channels', 'events', 'epg', 'recordings', 'vod', 'media', 'sharing', 'analytics'] as const;
+export const FEATURES = ['channels', 'radio', 'events', 'epg', 'recordings', 'vod', 'media', 'sharing', 'analytics'] as const;
 export type Feature = (typeof FEATURES)[number];
 
 const FEATURE_PREFIXES: Record<Feature, string[]> = {
   channels: ['/api/channels', '/api/sources', '/api/streams'],
+  radio: ['/api/radio'],
   events: ['/api/events'],
   epg: ['/api/epg'],
   recordings: ['/api/recordings', '/api/scheduled-clips'],

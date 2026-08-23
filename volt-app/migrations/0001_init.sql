@@ -37,7 +37,7 @@ CREATE TYPE input_role        AS ENUM ('primary', 'backup');
 -- and segment numbering stay continuous (transcode: encode filler live; packaging:
 -- emit a pre-baked, ladder-matched filler prepared once at setup).
 CREATE TYPE input_loss_behavior AS ENUM ('none','slate','vod_loop','last_frame','black');
-CREATE TYPE ingest_protocol   AS ENUM ('srt','rtmp','rtmps','hls','dash','ndi','st2110');
+CREATE TYPE ingest_protocol   AS ENUM ('srt','rtmp','rtmps','hls','dash','ndi','st2110','icecast');
 CREATE TYPE instance_lifecycle AS ENUM ('spot', 'on_demand');
 CREATE TYPE instance_role     AS ENUM ('primary', 'standby', 'captions');
 CREATE TYPE vod_kind          AS ENUM ('clip', 'full_event', 'export');
@@ -235,6 +235,10 @@ CREATE TABLE channels (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     group_id         UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     name             TEXT NOT NULL,
+    -- 'tv' (video chain) or 'radio' (audio-only: MP3/HLS/DASH single bitrate,
+    -- ICY metadata log). radio_config holds the audio workflow options (RADIO.md).
+    kind             TEXT NOT NULL DEFAULT 'tv' CHECK (kind IN ('tv','radio')),
+    radio_config     JSONB,
     status           asset_status NOT NULL DEFAULT 'scheduled',
     enabled          BOOLEAN NOT NULL DEFAULT true,
     purchasing_mode  purchasing_mode NOT NULL DEFAULT 'reserved',

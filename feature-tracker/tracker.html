@@ -27,9 +27,9 @@
 </style></head><body>
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
- <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-19T15:18:05Z.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>21</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>4</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>13</b> 📱 In app</span><span class=chip><b>7</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-23T02:52:42Z.</div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>24</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>16</b> 📱 In app</span><span class=chip><b>6</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>Live stream end to end (create → transcode → play)</div>
@@ -120,6 +120,19 @@
     <div class=actions>
          <button class="btn ok" data-approve="Record edit API + audit trail">✓ Approve as working</button>
          <button class="btn warn" data-changes="Record edit API + audit trail">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="none">
+    <div class=top><div class=name>EPG: guides, day builder, slot control &amp; post-airing automation</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
+    <div class=summary>WHY: the guide is both the viewer-facing schedule and the automation spine: what aired drives clip creation and naming. WHAT: EPG section (owners roll-up), per-channel/per-event day builder (add/remove, copy days, clear day, conflicts), per-slot geo access and slot replacement (slate/loop/vod for the period), and post-airing auto clip/VOD generation that harvests the programme metadata for the asset name and fields. Event EPGs double as the day schedule. Radio (in build) reuses these same tables/APIs for the Icecast now-playing log.</div>
+    <div class=meta>18/18 epg-extended e2e + original 13; auto-clip firing verified.</div>
+    <div class=how><b>How to test:</b> EPG &gt; pick a channel &gt; build a day, copy it forward, set a slot geo rule and a replacement, let a programme end and watch the auto-clip appear in VOD with the EPG metadata.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="EPG: guides, day builder, slot control &amp; post-airing automation">✓ Approve as working</button>
+         <button class="btn warn" data-changes="EPG: guides, day builder, slot control &amp; post-airing automation">Request changes</button>
        </div>
     
   </div><div class=card data-status="ready_to_test" data-app="full">
@@ -278,17 +291,17 @@
          <button class="btn warn" data-changes="Channel brand image (info + guide)">Request changes</button>
        </div>
     
-  </div><div class=card data-status="ready_to_test" data-app="partial">
-    <div class=top><div class=name>Radio — audio-only channels</div>
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Radio: audio-only streaming workflows</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
-      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
-    <div class=summary>A Radio section in the main nav and a real audio-only channel type: one source in, an AAC ladder out, no video anywhere in the chain. Create a station with artwork, a description, a source (Icecast, SRT, RTMP or HLS) and the audio rungs to encode; the job config short-circuits both video workflows (no ladder, no GPU) and the encoder maps audio only, with the packager emitting audio-only HLS/DASH. /radio and /radio/:id are the same list and detail pages at the audio scope. The detail page also has a real audio level meter with volume/mute and a track selector, and the encoder probes multi-language audio so each source track becomes its own manifest track.</div>
-    <div class=meta>Built 16 Aug: 13/13 in radio-brand.check.ts on the job-config decisions; audio meter + multi-track playback landed alongside. STILL OPEN on this feature: a dedicated Icecast input adapter.</div>
-    <div class=how><b>How to test:</b> Radio → New station: artwork, source URL, tick the audio rungs, create. Start it and check the output is audio-only (master.m3u8 with audio renditions, no video). Edit the ladder in Settings → Audio ladder.</div>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>A full Radio section on the shared design language (list, create/settings, detail). WHY: radio and audio-first broadcasters need the same operate/record/clip toolchain as TV without paying for video, and the now-playing metadata a station already emits is the cheapest possible content log. WHAT: audio-valid inputs only, including Icecast (plus HLS/SRT pull); live outputs MP3, HLS and DASH, all single bitrate; packaging is the default and transcode is offered only to change bitrate or format. Icecast ICY now-playing metadata is captured as a TIMED LOG stored in the existing EPG tables/APIs, each entry classified as song / ad / content (news, DJ talk) so you can see what was received and broadcast, search it, and jump straight to trim/clip points in the recording. The detail page replaces the 16:9 video with an audio visualiser (proves signal even when muted) and shows station artwork plus the live ICY metadata. Transcription is only offered for Icecast sources, where metadata can tell speech from songs and ads. REBUILD NOTE: the 16 Aug audio-only channel work was lost in the two-session merge (see d460f5b); this supersedes it.</div>
+    <div class=meta>Built 23 Aug: 22/22 e2e (radio.check.sh, offline via an Icecast simulator with rotating song/ad/DJ titles) plus a LIVE SomaFM run: Groove Salad ingested, HLS/DASH/MP3 served, now-playing captured and classified, station artwork picked up from StreamUrl. UI verified in-browser (list, gated create form, detail, MP3 byte flow); visualiser analyser wiring proven with a decodable test tone. Regressions clean: recordings 34/34, admin 47/47.</div>
+    <div class=how><b>How to test:</b> run-on-mac.sh, then `npx tsx scripts/seed-radio.ts` in volt-app seeds Groove Salad / Secret Agent / Drone Zone. Radio &gt; start one &gt; open it: visualiser moves while listening, now-playing + artwork update, the metadata log fills with classified entries (search it), and the MP3/HLS/DASH URLs play (MP3 in VLC shows titles too). Stop &gt; Recordings: the capture opens in the workbench with the visualiser instead of video.</div>
     
     <div class=actions>
-         <button class="btn ok" data-approve="Radio — audio-only channels">✓ Approve as working</button>
-         <button class="btn warn" data-changes="Radio — audio-only channels">Request changes</button>
+         <button class="btn ok" data-approve="Radio: audio-only streaming workflows">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Radio: audio-only streaming workflows">Request changes</button>
        </div>
     
   </div><div class=card data-status="ready_to_test" data-app="full">
@@ -304,17 +317,30 @@
          <button class="btn warn" data-changes="Site-wide search">Request changes</button>
        </div>
     
-  </div><div class=card data-status="in_review" data-app="none">
-    <div class=top><div class=name>EPG &amp; scheduling</div>
-      <span class=pill style="background:#6366f1">👀 In review</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
-    <div class=summary>Programme store, RRULE recurrence, materialised instances, now/next, conflict detection.</div>
-    <div class=meta>13 tests pass</div>
-    <div class=how><b>How to test:</b> Exercisable via the console EPG tab and /api/epg. 7 pure + 6 HTTP tests.</div>
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Admin: API keys &amp; apps, user management, system admin</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>WHY: VOLT is sold as SaaS, so client accounts must be provisioned by platform staff, and inside an account the client needs to control who can use which features, plus register the frontend apps that consume the APIs. WHAT: API Keys &amp; Apps page (register web/mobile/TV/server apps, publishable key shown once, origin/IP restrictions, account secret keys for server-to-server); User Management with roles (owner&gt;admin&gt;operator&gt;viewer) and USER GROUPS holding per-feature levels none/view/manage, enforced centrally in the API and mirrored in the nav via /auth/me; System Admin (platform staff only) creates client accounts with the primary owner user in one step, credentials shown once, sets plan/quotas, suspends accounts (blocks login, revokes sessions, kills API keys).</div>
+    <div class=meta>47/47 e2e (admin.check.sh) + UI walkthrough; existing suites regression-clean.</div>
+    <div class=how><b>How to test:</b> Sign in as an owner: Admin group in the nav. Register an app (copy the pk once), create a user group with EPG=none and assign an operator: their nav and API lose EPG. System Admin needs platform_role=saas_admin on your user.</div>
     
     <div class=actions>
-         <button class="btn ok" data-approve="EPG &amp; scheduling">✓ Approve as working</button>
-         <button class="btn warn" data-changes="EPG &amp; scheduling">Request changes</button>
+         <button class="btn ok" data-approve="Admin: API keys &amp; apps, user management, system admin">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Admin: API keys &amp; apps, user management, system admin">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Recordings: searchable library + NLE clipping workbench</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>WHY: recordings are the raw material for clips and VOD; finding the right moment fast is the whole value. WHAT: list&gt;detail flow; search matches names, EPG programmes that aired inside a recording, and the spoken words (transcript index); detail page has range playback across runs, NLE keyboard (space, arrows, frame step, in/out points), a transcript column synced to the playhead (click a line to jump, search within), and clips listed under the player.</div>
+    <div class=meta>34/34 recordings e2e; transcript+EPG search verified in-browser.</div>
+    <div class=how><b>How to test:</b> Recordings &gt; search a spoken phrase &gt; open the match: it lands with the search run; set in/out with keys, Create clip.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Recordings: searchable library + NLE clipping workbench">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Recordings: searchable library + NLE clipping workbench">Request changes</button>
        </div>
     
   </div><div class=card data-status="in_review" data-app="none">

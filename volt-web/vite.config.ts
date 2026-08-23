@@ -16,6 +16,7 @@ export default defineConfig({
       '/origin': 'http://localhost:8080',  // test-stream HLS/DASH/WebVTT
       '/library': 'http://localhost:8080', // image-library original bytes
       '/img': 'http://localhost:8080',     // resized preview derivatives
+      '/radio': 'http://localhost:8080',   // live MP3 fan-out (radio stations)
     },
   },
 })

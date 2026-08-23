@@ -13,6 +13,7 @@ export interface Route {
   section: string
   channelId: string | null
   recordingId: string | null
+  radioId: string | null
   epgOwner: { kind: 'channel' | 'event'; id: string } | null
   create: boolean
   path: string
@@ -35,6 +36,7 @@ export function parseRoute(pathname: string, search = ''): Route {
   const parts = pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)
   const create = new URLSearchParams(search).has('new')
   const base = { channelId: null as string | null, recordingId: null as string | null,
+    radioId: null as string | null,
     epgOwner: null as Route['epgOwner'], create, path: pathname }
   if (parts.length === 0) return { ...base, section: 'channels' }
   if (parts[0] === 'channels') {
@@ -44,6 +46,10 @@ export function parseRoute(pathname: string, search = ''): Route {
   }
   if (parts[0] === 'recordings' && parts[1]) {
     return { ...base, section: 'recordings', recordingId: decodeURIComponent(parts[1]) }
+  }
+  if (parts[0] === 'radio' && parts[1]) {
+    if (parts[1] === 'new') return { ...base, section: 'radio', create: true }
+    return { ...base, section: 'radio', radioId: decodeURIComponent(parts[1]) }
   }
   if (parts[0] === 'epg' && (parts[1] === 'channel' || parts[1] === 'event') && parts[2]) {
     return { ...base, section: 'epg', epgOwner: { kind: parts[1], id: decodeURIComponent(parts[2]) } }

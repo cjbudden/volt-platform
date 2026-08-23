@@ -11,6 +11,8 @@ import EpgDetail from './pages/EpgDetail'
 import ApiKeys from './pages/ApiKeys'
 import Users from './pages/Users'
 import SystemAdmin from './pages/SystemAdmin'
+import Radio from './pages/Radio'
+import RadioDetail from './pages/RadioDetail'
 import { useRoute, navigate, hrefFor } from './router'
 import { UploadIndicator } from './uploads'
 
@@ -29,6 +31,7 @@ const I = {
   multiview: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>,
   analytics: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18" /><path d="m7 14 4-4 3 3 5-6" /></svg>,
   epg: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M8 4v16M3 14h18" /></svg>,
+  radio: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 11h16a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><circle cx="8" cy="15.5" r="2.5" /><path d="M17 14h2M17 17h2M18 3 7 8" /></svg>,
   key: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.8 7.8 5.5 5.5 0 017.8-7.8zm0 0L15 8m-2 2 4-4m0 0 3 3 3-3-3-3" /></svg>,
   users: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" /></svg>,
   shield: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>,
@@ -37,7 +40,7 @@ const I = {
 /** Which FEATURE (from /auth/me) each content nav item belongs to; items whose
  *  feature the user's group sets to 'none' are hidden so the nav matches the API. */
 const NAV_FEATURE: Record<string, string> = {
-  channels: 'channels', events: 'events', epg: 'epg', loops: 'media',
+  channels: 'channels', radio: 'radio', events: 'events', epg: 'epg', loops: 'media',
   recordings: 'recordings', vod: 'vod', images: 'media', analytics: 'analytics',
 }
 
@@ -49,6 +52,7 @@ const NAV: { group: string; items: { key: string; label: string; icon: ReactElem
   ] },
   { group: 'Broadcast', items: [
     { key: 'channels', label: 'Channels', icon: I.channels },
+    { key: 'radio', label: 'Radio', icon: I.radio },
     { key: 'events', label: 'Events', icon: I.events },
     { key: 'epg', label: 'EPG', icon: I.epg },
     { key: 'loops', label: 'Loops & Fillers', icon: I.loops },
@@ -200,6 +204,10 @@ export default function App() {
             ? (route.epgOwner
                 ? <EpgDetail key={route.epgOwner.kind + route.epgOwner.id} owner={route.epgOwner} onBack={() => navigate('/epg')} />
                 : <Epg />)
+            : section === 'radio'
+            ? (route.radioId
+                ? <RadioDetail key={route.radioId} id={route.radioId} onBack={() => navigate('/radio')} />
+                : <Radio />)
             : section === 'apikeys'
             ? <ApiKeys />
             : section === 'users'

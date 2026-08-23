@@ -26,7 +26,7 @@ export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
   const [filter, setFilter] = useState<'all' | 'transcode' | 'package_only'>('all')
 
   async function load() {
-    const [chs, gs] = await Promise.all([api.channels(), api.groups()])
+    const [chs, gs] = await Promise.all([api.channels('tv'), api.groups()])
     const gmap = new Map(gs.map(g => [g.id, g]))
     setChannels(chs.map(c => ({ ...c, _g: gmap.get(c.group_id) })))
     setGroups(gs)
