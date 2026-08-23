@@ -99,6 +99,9 @@
   --tag-drop:3px;
 }
 *{box-sizing:border-box}
+/* the app is dark: tell the browser, so native chrome (select dropdowns, date
+   pickers, scrollbars, autofill) renders dark instead of white-on-dark */
+html{color-scheme:dark}
 html,body{margin:0;height:100%}
 body{
   font-family:'Inter',system-ui,sans-serif;
@@ -112,6 +115,20 @@ body{
 /* form controls inherit the platform type scale instead of the browser's
    13.333px default, so an input never disagrees with the text beside it */
 input,select,textarea,button{font-family:inherit;font-size:var(--fs-body)}
+/* TEXT ENTRY IS STYLED BY DEFAULT, not by remembering to add a class.
+   Before this, a bare <input> or <textarea> fell back to the browser's white
+   box with black text: a light control on a dark panel, which is exactly the
+   inconsistency the design system exists to stop. `.inp` (0,1,0) and scoped
+   rules like `.search input` still win, so nothing that was already styled
+   changes. Checkboxes, radios, ranges, colours and file pickers keep their
+   native rendering. */
+input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]),
+select,textarea{
+  background:var(--panel-2);border:1px solid var(--border);border-radius:var(--radius-ctl,10px);
+  padding:9px 11px;color:var(--text);outline:none;transition:.15s}
+input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]):focus,
+select:focus,textarea:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-dim)}
+input::placeholder,textarea::placeholder{color:var(--faint)}
 ::selection{background:var(--brand-dim)}
 .app{display:grid;grid-template-columns:236px 1fr;min-height:100vh}
 
@@ -445,6 +462,23 @@ tbody tr:last-child td{border-bottom:none}
 .preset .px{font-size:var(--fs-sm);color:var(--muted);margin-top:6px}
 .preset .axes{display:flex;gap:6px;margin-top:11px}
 .axis{font-size:var(--fs-micro);font-weight:700;letter-spacing:.03em;padding:3px 8px;border-radius:6px;background:var(--panel-3);color:#c7cee0;text-transform:uppercase}
+/* CHOICE ROWS — a mutually exclusive choice where each option needs a line of
+   explanation (share security, expiry style…). Full-width rows, not inline
+   radios: the description is part of the decision, so it must be readable. */
+.choices{display:grid;gap:7px}
+.choice{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--border);
+  border-radius:var(--radius-ctl,10px);background:var(--panel-2);cursor:pointer;transition:.15s;text-align:left;width:100%;
+  font-family:inherit;color:inherit}
+.choice:hover{border-color:var(--border-2)}
+.choice:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-color:var(--brand)}
+.choice.on{border-color:rgba(63,123,255,.6);background:rgba(63,123,255,.08)}
+.choice .t{font-size:var(--fs-body);font-weight:600}
+.choice .d{font-size:var(--fs-sm);color:var(--faint);margin-top:2px}
+.choice .radio{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--border-2);flex:none;margin-top:2px;
+  display:grid;place-items:center}
+.choice.on .radio{border-color:var(--brand)}
+.choice.on .radio::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--brand)}
+
 .toggle-row{display:flex;align-items:center;gap:12px;padding:11px 13px;border:1px solid var(--border);border-radius:11px;background:var(--panel-2);margin-bottom:9px}
 .toggle-row .tt{font-weight:600;font-size:var(--fs-body)}
 .toggle-row .td{font-size:var(--fs-xs);color:var(--faint);margin-top:1px}

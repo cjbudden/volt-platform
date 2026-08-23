@@ -117,6 +117,32 @@ Every detail page opens with the same three lines, from one component
   It is **chromeless**: no border, no fill, 18px icon, a subtle hover wash.
   A bordered box around a bare icon competes with the real buttons next to it.
 
+## Forms
+
+**Text entry is styled by the element, not by remembering a class.** `input`,
+`select` and `textarea` carry the platform look by default: `--panel-2` fill,
+`--border`, `--radius-ctl`, `--fs-body`, brand focus ring. Checkboxes, radios,
+ranges, colours and file pickers keep native rendering, and `html { color-scheme:
+dark }` makes native chrome (dropdown lists, autofill, scrollbars) render dark.
+Before this, a bare `<input>` fell back to a white box with black text on a dark
+panel; the fix belongs in the element rule, not in every component.
+
+`.inp` and scoped rules like `.search input` still win where a control needs
+something different.
+
+### Choice rows
+
+A mutually exclusive choice where **each option needs a line of explanation**
+(share delivery, expiry style, link security) uses `.choices` / `.choice`, not
+inline radios: full-width rows, title on top, one plain-English line under it,
+and the dependent control **nested inside the selected row**. The description is
+part of the decision, so it has to be readable, and no control is ever on screen
+whose owner is not selected.
+
+The row is a `div` with `role="radio"`, never a `<button>`: a selected row can
+contain a `select` or an `input`, and interactive content nested in a button is
+invalid HTML that browsers handle inconsistently.
+
 ## Layout
 
 - `.content` caps at 1420px. Nothing may exceed it.
