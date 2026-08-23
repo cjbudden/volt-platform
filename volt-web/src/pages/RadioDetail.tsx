@@ -4,6 +4,7 @@ import { thumbUrl } from '../api'
 import AudioVisualizer, { VERDICT_UI } from '../AudioVisualizer'
 import { SEC, PageIdentity, StatusPill, TypeTag } from '../scaffold'
 import { RadioDrawer, ClassChip } from './Radio'
+import { ShareDrawer } from '../ShareDrawer'
 
 /* ============================================================================
    Radio station detail — the audio-only counterpart of the channel detail
@@ -32,6 +33,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
   const [groups, setGroups] = useState<Group[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [qcOpen, setQcOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [playing, setPlaying] = useState(false)
@@ -154,6 +156,9 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
         <button className="btn ghost" onClick={() => setQcOpen(true)} title="Diagnose the pipeline (server → input → encoder → output) and see the audio QC"
           style={st.health?.primaryError ? { color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' } : undefined}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>QC
+        </button>
+        <button className="btn ghost" onClick={() => setShareOpen(true)} title="Create a private, time-boxed preview link for a client or reviewer (does not go on air)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v14" /></svg>Share
         </button>
         <button className="btn ghost" onClick={() => setSettingsOpen(true)}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>Settings
@@ -401,6 +406,8 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
         <RadioDrawer groups={groups} station={st} onClose={() => setSettingsOpen(false)}
           onDone={() => { setSettingsOpen(false); load() }} />
       )}
+
+      {shareOpen && <ShareDrawer target={{ kind: 'radio', id: st.id, name: st.name }} onClose={() => setShareOpen(false)} />}
 
       {qcOpen && <RadioQcPanel st={st} verdict={verdict} levels={levels}
         onClose={() => setQcOpen(false)} onRefresh={load} />}

@@ -3,6 +3,7 @@ import { api, type EventRow, type Group } from '../api'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, SEC, splitDuration, type RetUnit } from '../scaffold'
+import { ShareDrawer } from '../ShareDrawer'
 
 /* ============================================================================
    Events — one-off broadcasts on the SAME core workflow as channels (sources,
@@ -197,6 +198,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
   const [autoVod, setAutoVod] = useState(ev ? ev.auto_vod !== false : true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [shareOpen, setShareOpen] = useState(false)
 
   // destructive action lives INSIDE the drawer (common design language: rows
   // carry one primary action; delete is behind the entity's settings).
@@ -331,6 +333,12 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
           {err && <div className="err">{err}</div>}
         </div>
         <div className="drawer-f">
+          {isEdit && (
+            <button className="btn ghost" onClick={() => setShareOpen(true)}
+              title="Create a private, time-boxed preview link for a client or reviewer (does not go on air)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v14" /></svg>Share
+            </button>
+          )}
           {isEdit && ev!.status !== 'live' && (
             <button className="btn ghost" style={{ color: 'var(--down,#f87171)', marginRight: 'auto' }} disabled={busy} onClick={remove}>Delete event</button>
           )}
@@ -338,6 +346,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
           <button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save changes' : 'Create event'}</button>
         </div>
       </div>
+      {shareOpen && ev && <ShareDrawer target={{ kind: 'event', id: ev.id, name: ev.name }} onClose={() => setShareOpen(false)} />}
     </div>
   )
 }
