@@ -18,7 +18,7 @@
 //  DEAD AIR, or noise/static — so "something is coming in" is distinguishable
 //  from "the right thing is coming in".
 // ============================================================================
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import type { RadioLevelSample, SignalVerdict } from './api'
 
 /** One AudioContext + source node per media element for the page's lifetime —
@@ -58,17 +58,23 @@ function dbToUnit(db: number): number {
 
 export default function AudioVisualizer({
   media, height = 220, idleText = 'No audio',
-  levels, verdict = 'unknown', live = false,
+  levels, verdict = 'unknown', live = false, idleOverlay,
 }: {
   media: HTMLMediaElement | null
   height?: number
   idleText?: string
+  /** Rendered centred over the surface while the station is OFF, in place of
+   *  `idleText`. This is where the start call to action goes, so the audio
+   *  surface offers the same "press to begin" affordance as a channel's video
+   *  surface instead of only stating that nothing is running. */
+  idleOverlay?: ReactNode
   /** Server-measured level samples (newest last) — the signal source of truth. */
   levels?: RadioLevelSample[]
   verdict?: SignalVerdict
   /** True while the station is running: drives the "receiving" vs idle wording. */
   live?: boolean
 }) {
+  const hasOverlay = !!idleOverlay
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   // rolling ring of recent level values (0..1), fed by the stream frames
   const ringRef = useRef<number[]>(new Array(120).fill(0))
@@ -191,7 +197,9 @@ export default function AudioVisualizer({
         g.fillText(v.note, 12 + labelW + 12, 18)
       }
 
-      if (!live) {
+      // The idle caption is painted on the canvas ONLY when nothing better is
+      // offered. With an overlay, the call to action says "off" more usefully.
+      if (!live && !hasOverlay) {
         g.fillStyle = 'rgba(255,255,255,.32)'
         g.font = '12px system-ui'
         g.textAlign = 'center'
@@ -200,12 +208,19 @@ export default function AudioVisualizer({
     }
     draw()
     return () => { cancelAnimationFrame(raf); media?.removeEventListener('play', resume) }
-  }, [media, idleText, verdict, live, levels])
+  }, [media, idleText, verdict, live, levels, hasOverlay])
 
   return (
-    <canvas ref={canvasRef} style={{
-      width: '100%', height, display: 'block', borderRadius: 10,
-      background: 'linear-gradient(180deg, rgba(13,19,31,.9), rgba(9,13,22,.95))',
-    }} />
+    <div style={{ position: 'relative' }}>
+      <canvas ref={canvasRef} style={{
+        width: '100%', height, display: 'block', borderRadius: 10,
+        background: 'linear-gradient(180deg, rgba(13,19,31,.9), rgba(9,13,22,.95))',
+      }} />
+      {!live && idleOverlay && (
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
+          {idleOverlay}
+        </div>
+      )}
+    </div>
   )
 }
