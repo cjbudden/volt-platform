@@ -132,16 +132,17 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
             <span className="lnk" style={{ cursor: 'pointer', color: 'var(--brand)' }} onClick={onBack}>Channels</span>
             &nbsp;/&nbsp; <b style={{ color: 'var(--text)' }}>{d.name}</b>
           </div>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* identity row: same classes/tokens as every other detail page */}
+          <h1 className="page-id">
             {(d as any).brand_ref
               ? <span className="dthumb" style={{ background: '#0b0f16', overflow: 'hidden', padding: 0 }}><img src={thumbUrl((d as any).brand_ref, 96, 96, 'inside')} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /></span>
               : <span className="dthumb" style={{ background: 'linear-gradient(135deg,#1d4ed8,#3b82f6)' }}>{d.name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()}</span>}
             {d.name}
-            <span className={`tag type ${wt === 'transcode' ? 'chan' : 'event'}`}>{wt === 'transcode' ? 'TRANSCODE' : 'PACKAGING'}</span>
+            <span className={`tag type ${wt === 'transcode' ? 'chan' : 'event'}`}>{wt === 'transcode' ? 'Transcode' : 'Packaging'}</span>
             <span className={`tag ${stateCls}`}><span className={`dot-s ${stateCls}`} />{stateLabel}</span>
             {d.billing?.billable && (
               <span title={`Encoder up (${d.billing.instance}) — live time metering`}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 9px', borderRadius: 999, background: 'rgba(251,191,36,.14)', border: '1px solid rgba(251,191,36,.4)', color: '#fbbf24' }}>
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-sm)', padding: '3px 9px', borderRadius: 999, background: 'rgba(251,191,36,.14)', border: '1px solid rgba(251,191,36,.4)', color: '#fbbf24' }}>
                 ● billable · {fmtDur(billingElapsed)}
               </span>
             )}
@@ -201,10 +202,10 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
           background: 'rgba(248,113,113,.10)', border: '1px solid rgba(248,113,113,.4)',
           display: 'flex', alignItems: 'center', gap: 12,
         }}>
-          <span style={{ fontSize: 18 }}>⚠</span>
+          <span style={{ fontSize: 'var(--fs-h2)' }}>⚠</span>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 700, color: '#fca5a5' }}>{perr.label} {perr.gate === 'output' && outGate?.status === 'degraded' ? 'degraded' : 'failed'}</div>
-            <div style={{ fontSize: 13, color: 'var(--muted)', wordBreak: 'break-word' }}>{perr.message}</div>
+            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)', wordBreak: 'break-word' }}>{perr.message}</div>
           </div>
           <button className="btn ghost" onClick={() => setQcOpen(true)} style={{ color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }}>Diagnose →</button>
         </div>
@@ -220,7 +221,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         }}>
           <span className="dot-s" style={{ background: d.onAir ? '#4ade80' : '#f87171' }} />
           <b style={{ color: d.onAir ? '#4ade80' : '#fca5a5' }}>{d.onAir ? 'ON AIR · public URL open' : 'ON AIR · public stream has no valid content'}</b>
-          <code style={{ fontSize: 12.5, color: 'var(--muted)', background: 'rgba(148,163,184,.12)', padding: '3px 8px', borderRadius: 6 }}>{d.public.url}</code>
+          <code style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', background: 'rgba(148,163,184,.12)', padding: '3px 8px', borderRadius: 6 }}>{d.public.url}</code>
           <a className="btn ghost" href={d.public.url} target="_blank" rel="noreferrer" style={{ marginLeft: 'auto', padding: '5px 12px' }}>Open public HLS</a>
           <a className="btn ghost" href={d.public.dashUrl} target="_blank" rel="noreferrer" style={{ padding: '5px 12px' }}>Open public DASH</a>
         </div>
@@ -277,7 +278,7 @@ function StartConfirm({ d, onCancel, onConfirm }: { d: CD; onCancel: () => void;
           is the billable unit, so metering starts now and runs until you stop the channel.
         </p>
         {b && (
-          <div style={{ margin: '12px 0', padding: '10px 12px', borderRadius: 10, background: 'rgba(251,191,36,.10)', border: '1px solid rgba(251,191,36,.35)', fontSize: 13 }}>
+          <div style={{ margin: '12px 0', padding: '10px 12px', borderRadius: 10, background: 'rgba(251,191,36,.10)', border: '1px solid rgba(251,191,36,.35)', fontSize: 'var(--fs-body)' }}>
             <div style={{ color: '#fbbf24', fontWeight: 700 }}>● live time metering starts now</div>
             <div style={{ color: 'var(--muted)' }}>{b.instance} · runs until you stop the channel</div>
           </div>
@@ -311,14 +312,14 @@ function PipelineStrip({ d, onQc }: { d: CD; onQc: () => void; onAir?: boolean }
         return (
         <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 6, flex: '1 1 130px' }}>
           <div title={detail} style={{ flex: 1, border: `1px solid ${color}55`, background: `${color}12`, borderRadius: 9, padding: '7px 10px', minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-label)', color: 'var(--muted)' }}>
               <span className="dot-s" style={{ background: color }} />{g.label}
               {g.billable && <span style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 9 }}>●</span>}
             </div>
-            <div style={{ fontWeight: 700, fontSize: 11.5, color, textTransform: 'uppercase' }}>{label}</div>
-            <div style={{ fontSize: 10.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{detail}</div>
+            <div style={{ fontWeight: 700, fontSize: 'var(--fs-xs)', color, textTransform: 'uppercase' }}>{label}</div>
+            <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{detail}</div>
           </div>
-          {i < gates.length - 1 && <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 12 }}>→</div>}
+          {i < gates.length - 1 && <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>→</div>}
         </div>
         )
       })}
@@ -358,13 +359,13 @@ function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefr
         {h?.primaryError && (
           <div style={{ margin: '10px 0 16px', padding: '12px 14px', borderRadius: 10, background: 'rgba(248,113,113,.10)', border: '1px solid rgba(248,113,113,.4)' }}>
             <div style={{ fontWeight: 700, color: '#fca5a5' }}>Primary issue — {h.primaryError.label}</div>
-            <div style={{ fontSize: 13, color: 'var(--muted)' }}>{h.primaryError.message}</div>
+            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)' }}>{h.primaryError.message}</div>
           </div>
         )}
 
         {/* billing window (the server is the meter) */}
         {d.billing && (
-          <div style={{ margin: '4px 0 14px', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 13 }}>
+          <div style={{ margin: '4px 0 14px', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 'var(--fs-body)' }}>
             <span><span style={{ color: 'var(--faint)' }}>Billing </span>{d.billing.billable ? <b style={{ color: '#fbbf24' }}>● metering</b> : <b style={{ color: 'var(--muted)' }}>idle</b>}</span>
             <span><span style={{ color: 'var(--faint)' }}>Live time this run </span>{fmtDur(d.billing.elapsedSec)}</span>
             <span><span style={{ color: 'var(--faint)' }}>Instance </span>{d.billing.instance}</span>
@@ -376,11 +377,11 @@ function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefr
           {gates.map((g, i) => (
             <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 8, flex: '1 1 160px' }}>
               <div style={{ flex: 1, border: `1px solid ${GATE_COLOR[g.status]}55`, background: `${GATE_COLOR[g.status]}12`, borderRadius: 10, padding: '10px 12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
-                  <span>{GATE_META[g.gate]?.icon}</span>{g.label}{g.billable && <span title="billable while up" style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 10 }}>● billable</span>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
+                  <span>{GATE_META[g.gate]?.icon}</span>{g.label}{g.billable && <span title="billable while up" style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 'var(--fs-micro)' }}>● billable</span>}
                 </div>
-                <div style={{ fontWeight: 700, color: GATE_COLOR[g.status], textTransform: 'uppercase', fontSize: 13, marginTop: 4 }}>{g.status}</div>
-                <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 2, wordBreak: 'break-word' }}>{g.detail}</div>
+                <div style={{ fontWeight: 700, color: GATE_COLOR[g.status], textTransform: 'uppercase', fontSize: 'var(--fs-body)', marginTop: 4 }}>{g.status}</div>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', marginTop: 2, wordBreak: 'break-word' }}>{g.detail}</div>
               </div>
               {i < gates.length - 1 && <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)' }}>→</div>}
             </div>
@@ -388,11 +389,11 @@ function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefr
         </div>
 
         {/* the real logs behind the gates */}
-        <h3 style={{ margin: '10px 0 6px' }}>Real logs <span style={{ color: 'var(--faint)', fontWeight: 400, fontSize: 12 }}>· encoder + pipeline events</span></h3>
+        <h3 style={{ margin: '10px 0 6px' }}>Real logs <span style={{ color: 'var(--faint)', fontWeight: 400, fontSize: 'var(--fs-sm)' }}>· encoder + pipeline events</span></h3>
         <div style={{ maxHeight: 320, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
           {(d.log || []).length === 0 && <div style={{ padding: 14, color: 'var(--faint)' }}>No log lines yet.</div>}
           {(d.log || []).map((l, i) => (
-            <div key={i} style={{ display: 'flex', gap: 10, padding: '7px 12px', borderTop: i ? '1px solid var(--border)' : undefined, fontSize: 12.5 }}>
+            <div key={i} style={{ display: 'flex', gap: 10, padding: '7px 12px', borderTop: i ? '1px solid var(--border)' : undefined, fontSize: 'var(--fs-sm)' }}>
               <span className={`dot-s ${l.level}`} style={{ marginTop: 5 }} />
               <span style={{ color: 'var(--faint)', width: 62, flexShrink: 0 }}>{l.ts}</span>
               <span style={{ fontWeight: 600, width: 96, flexShrink: 0, color: l.level === 'down' ? '#fca5a5' : 'var(--muted)' }}>{l.title}</span>
@@ -485,7 +486,7 @@ function ShareDrawer({ d, onClose }: { d: CD; onClose: () => void }) {
             <div style={{ display: 'grid', gap: 14, margin: '12px 0' }}>
               {/* 1 — delivery */}
               <div>
-                <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 }}>How do you want to share it?</div>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 6 }}>How do you want to share it?</div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className={`btn ${delivery === 'link' ? 'primary' : 'ghost'}`} onClick={() => setDelivery('link')} style={{ flex: 1 }}
                     title="Create a URL you copy into your own email, WhatsApp or any app">Create a share URL</button>
@@ -495,20 +496,20 @@ function ShareDrawer({ d, onClose }: { d: CD; onClose: () => void }) {
               </div>
               {(needRecipients) && (
                 <label style={{ display: 'grid', gap: 5 }}>
-                  <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                  <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
                     Recipient email{delivery === 'email' ? 's (the system sends the invitation to each)' : ' (needed for email verification)'} — separate with commas
                   </span>
                   <input value={recipients} onChange={e => setRecipients(e.target.value)} placeholder="client@example.com, reviewer@example.com" />
                 </label>
               )}
               <label style={{ display: 'grid', gap: 5 }}>
-                <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Message to recipient (optional{delivery === 'email' ? ', included in the email' : ''})</span>
+                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>Message to recipient (optional{delivery === 'email' ? ', included in the email' : ''})</span>
                 <textarea value={message} onChange={e => setMessage(e.target.value)} rows={2} placeholder="Please review and let me know if we're good to go live." style={{ resize: 'vertical' }} />
               </label>
 
               {/* 2 — expiry */}
               <div>
-                <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 }}>When does the link expire?</div>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 6 }}>When does the link expire?</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <button className={`btn ${expiryMode === 'time' ? 'primary' : 'ghost'}`} onClick={() => setExpiryMode('time')}>After a period</button>
                   <button className={`btn ${expiryMode === 'views' ? 'primary' : 'ghost'}`} onClick={() => setExpiryMode('views')}>After a number of views</button>
@@ -519,7 +520,7 @@ function ShareDrawer({ d, onClose }: { d: CD; onClose: () => void }) {
                   ) : (
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                       <input value={maxViews} onChange={e => setMaxViews(e.target.value.replace(/[^0-9]/g, ''))} inputMode="numeric" style={{ width: 64 }} />
-                      <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>view{Number(maxViews) === 1 ? '' : 's'} (1 = single open; 30-day backstop)</span>
+                      <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>view{Number(maxViews) === 1 ? '' : 's'} (1 = single open; 30-day backstop)</span>
                     </span>
                   )}
                 </div>
@@ -527,18 +528,18 @@ function ShareDrawer({ d, onClose }: { d: CD; onClose: () => void }) {
 
               {/* 3 — security */}
               <div>
-                <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 }}>Who can open it?</div>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 6 }}>Who can open it?</div>
                 <div style={{ display: 'grid', gap: 6 }}>
-                  <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-body)' }}>
                     <input type="radio" checked={authMode === 'none'} onChange={() => setAuthMode('none')} />
                     Anyone with the link
                   </label>
-                  <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-body)' }}>
                     <input type="radio" checked={authMode === 'pin'} onChange={() => setAuthMode('pin')} />
                     Anyone with the link and a PIN you set
                     {authMode === 'pin' && <input value={pin} onChange={e => setPin(e.target.value)} inputMode="numeric" placeholder="e.g. 4823" style={{ width: 90 }} />}
                   </label>
-                  <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 'var(--fs-body)' }}>
                     <input type="radio" checked={authMode === 'email_pin'} onChange={() => setAuthMode('email_pin')} style={{ marginTop: 3 }} />
                     <span>Verified recipients only (most secure): the viewer confirms the email the link was sent to, receives a one-time code by email, and enters it to watch.</span>
                   </label>
@@ -546,7 +547,7 @@ function ShareDrawer({ d, onClose }: { d: CD; onClose: () => void }) {
               </div>
 
               <label style={{ display: 'grid', gap: 5 }}>
-                <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Internal label (optional, only you see it)</span>
+                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>Internal label (optional, only you see it)</span>
                 <input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Client approval — cooking show" />
               </label>
             </div>
@@ -565,10 +566,10 @@ function ShareDrawer({ d, onClose }: { d: CD; onClose: () => void }) {
                 {created.emailed > 0 ? `Invitation emailed to ${created.emailed} recipient${created.emailed === 1 ? '' : 's'}` : 'Share URL created'}
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <code style={{ flex: 1, fontSize: 12.5, wordBreak: 'break-all', background: 'rgba(148,163,184,.12)', padding: '8px 10px', borderRadius: 8 }}>{created.url}</code>
+                <code style={{ flex: 1, fontSize: 'var(--fs-sm)', wordBreak: 'break-all', background: 'rgba(148,163,184,.12)', padding: '8px 10px', borderRadius: 8 }}>{created.url}</code>
                 <button className="btn primary" onClick={copy} style={{ whiteSpace: 'nowrap' }}>{copied ? 'Copied' : 'Copy'}</button>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginTop: 8 }}>
                 Expires {new Date(created.expiresAt).toLocaleString()}
                 {expiryMode === 'views' ? ` or after ${Math.max(1, Number(maxViews) || 1)} view${Number(maxViews) === 1 ? '' : 's'}, whichever comes first` : ''}
                 {authMode === 'pin' ? ' · PIN protected (share the PIN separately)' : authMode === 'email_pin' ? ' · verified recipients only' : ''}. The full link is shown once here.
@@ -583,9 +584,9 @@ function ShareDrawer({ d, onClose }: { d: CD; onClose: () => void }) {
 
         {links.length > 0 && (
           <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: 14 }}>Existing links for this channel</h3>
+            <h3 style={{ margin: '0 0 8px', fontSize: 'var(--fs-h3)' }}>Existing links for this channel</h3>
             {links.map(l => (
-              <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--border)', fontSize: 12.5 }}>
+              <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--border)', fontSize: 'var(--fs-sm)' }}>
                 <span className={`dot-s ${l.revoked ? 'idle' : new Date(l.expires_at).getTime() < Date.now() ? 'warn' : 'live'}`} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.label || l.token_prefix + '…'}</div>
@@ -667,7 +668,7 @@ function OutputError({ d }: { d: CD }) {
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
           <div style={{ maxWidth: 360 }}>
             <div style={{ fontWeight: 700, color: col, marginBottom: 6 }}>{degraded ? 'Output degraded' : 'Output is not being produced'}</div>
-            <div style={{ fontSize: 13, color: 'var(--muted)', wordBreak: 'break-word' }}>{g?.detail || 'the encoder is not delivering output'}</div>
+            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)', wordBreak: 'break-word' }}>{g?.detail || 'the encoder is not delivering output'}</div>
           </div>
         </div>
         <div className="ptime">{degraded ? 'degraded' : 'no output'}</div>
@@ -947,7 +948,7 @@ function AudioDock({ eng, tracks, currentTrack, onSelectTrack, controlsShown }: 
           style={{ width: 64, accentColor: 'var(--brand)' }} />
         {tracks.length > 1 && (
           <select value={currentTrack} onChange={e => onSelectTrack(Number(e.target.value))}
-            title="Audio track" aria-label="Audio track" style={{ fontSize: 11, padding: '2px 4px' }}>
+            title="Audio track" aria-label="Audio track" style={{ fontSize: 'var(--fs-label)', padding: '2px 4px' }}>
             {tracks.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
           </select>
         )}
@@ -1036,7 +1037,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
               <div style={{ fontWeight: 700, color: '#fca5a5', marginBottom: 6 }}>
                 {inputFailed ? 'Source error' : 'Source is valid, but the encoder has failed'}
               </div>
-              <div style={{ fontSize: 12.5, color: 'var(--muted)', wordBreak: 'break-word' }}>
+              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', wordBreak: 'break-word' }}>
                 {inputFailed ? (inGate?.detail || 'no signal') : 'nothing can be previewed until the encoder recovers'}
               </div>
             </div>
@@ -1048,7 +1049,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
               <button className="btn primary" onClick={onSendSource} disabled={busy} style={{ transform: 'scale(1.05)' }}>
                 {busy ? 'Starting…' : `▶  ${sendLabel}`}
               </button>
-              {configured?.ingest_url && <div style={{ marginTop: 10, fontSize: 11, color: 'var(--faint)', maxWidth: 340, wordBreak: 'break-all' }}>{configured.ingest_url}</div>}
+              {configured?.ingest_url && <div style={{ marginTop: 10, fontSize: 'var(--fs-label)', color: 'var(--faint)', maxWidth: 340, wordBreak: 'break-all' }}>{configured.ingest_url}</div>}
             </div>
           </div>
         )}
@@ -1058,7 +1059,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
         <span className={`dot-s ${srcErrored ? 'down' : sourceUp ? 'live' : 'idle'}`} /> {srcErrored ? (inputFailed ? 'Source not arriving' : 'Source OK · encoder failed downstream') : sourceUp ? `Ingesting ${srcHost || proto} · repackaging` : configured ? `Source configured · ${proto} · ${srcHost || 'ingest'}` : 'No source — send one to enable output'}
       </div>
       {sourceUp && ts.sourceNote && (
-        <div style={{ padding: '9px 12px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--warn)', display: 'flex', gap: 8 }}>
+        <div style={{ padding: '9px 12px', borderTop: '1px solid var(--border)', fontSize: 'var(--fs-sm)', color: 'var(--warn)', display: 'flex', gap: 8 }}>
           <span>⚠</span><span>{ts.sourceNote}</span>
         </div>
       )}
@@ -1100,7 +1101,7 @@ function IdleOutput({ sourceUp, onGoLive, warming, sinceMs, captionsOn }: {
         <div className="badge-live" style={{ background: sourceUp ? 'rgba(56,189,248,.8)' : 'rgba(102,112,138,.7)' }}><span className="d" />{warming ? 'STARTING' : sourceUp ? 'READY' : 'IDLE'}</div>
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
           {warming ? (
-            <div style={{ color: 'var(--muted)', fontSize: 13, maxWidth: 340 }}>
+            <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-body)', maxWidth: 340 }}>
               <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', marginBottom: 6 }}>{warmSec}s</div>
               <div style={{ fontWeight: 600, marginBottom: 4 }}>Preparing the output</div>
               First playable output takes a moment: {expect}. This is normal start-up, not a fault.
@@ -1110,10 +1111,10 @@ function IdleOutput({ sourceUp, onGoLive, warming, sinceMs, captionsOn }: {
               <button className="btn primary" onClick={onGoLive} style={{ transform: 'scale(1.05)' }}>
                 <span className="dot-s live" style={{ marginRight: 6 }} />Go live
               </button>
-              <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>Source is receiving. Take the output live.</div>
+              <div style={{ marginTop: 12, fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>Source is receiving. Take the output live.</div>
             </div>
           ) : (
-            <div style={{ color: 'var(--faint)', fontSize: 13, maxWidth: 300 }}>
+            <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-body)', maxWidth: 300 }}>
               <div style={{ fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>Waiting for source</div>
               Send a source first: the output can only go live once the source is arriving.
             </div>
@@ -1479,7 +1480,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         <div style={{
           position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
           display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
-          fontSize: 11, fontWeight: 700, letterSpacing: .4, padding: '4px 10px', borderRadius: 999,
+          fontSize: 'var(--fs-label)', fontWeight: 700, letterSpacing: .4, padding: '4px 10px', borderRadius: 999,
           background: onAir ? 'rgba(74,222,128,.18)' : 'rgba(56,189,248,.18)',
           border: `1px solid ${onAir ? 'rgba(74,222,128,.55)' : 'rgba(56,189,248,.55)'}`,
           color: onAir ? '#4ade80' : '#38bdf8', backdropFilter: 'blur(2px)',
@@ -1495,7 +1496,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           <div style={{
             position: 'absolute', left: '50%', bottom: 20, transform: 'translateX(-50%)',
             background: 'rgba(0,0,0,.72)', color: '#fff', padding: '6px 14px', borderRadius: 6,
-            fontSize: 15, fontWeight: 600, maxWidth: '88%', textAlign: 'center', lineHeight: 1.35, whiteSpace: 'pre-line',
+            fontSize: 'var(--fs-h2)', fontWeight: 600, maxWidth: '88%', textAlign: 'center', lineHeight: 1.35, whiteSpace: 'pre-line',
           }}>{cue}</div>
         )}
         {stalled && (
@@ -1504,8 +1505,8 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
             background: 'rgba(2,6,14,.55)', backdropFilter: 'blur(1px)',
           }}>
             <div style={{ textAlign: 'center', color: '#fecaca' }}>
-              <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: '.06em' }}>PLAYBACK STALLED</div>
-              <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>The playhead stopped advancing. Recovering automatically…</div>
+              <div style={{ fontWeight: 800, fontSize: 'var(--fs-h2)', letterSpacing: '.06em' }}>PLAYBACK STALLED</div>
+              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginTop: 4 }}>The playhead stopped advancing. Recovering automatically…</div>
             </div>
           </div>
         )}
@@ -1527,11 +1528,11 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
             style={{ flex: 1, accentColor: liveNow ? 'var(--live)' : 'var(--warn)' }} aria-label="DVR timeline — right is live, drag left to go back" />
           <button className="chip" style={{ padding: '5px 10px' }} disabled={liveNow} onClick={goLive}>Go live</button>
         </div>
-        <div style={{ display: 'flex', gap: 6, justifyContent: 'space-between', fontSize: 11, color: 'var(--faint)' }}>
+        <div style={{ display: 'flex', gap: 6, justifyContent: 'space-between', fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>
           <span>{d.dvr_mode === 'event_start' ? 'Event start' : `${fmtWindow(winSec)} DVR available`}</span>
           <span style={{ display: 'flex', gap: 6 }}>
-            <button className="chip" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => seekBehind(behind + 15)}>« 15s</button>
-            <button className="chip" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => seekBehind(behind + 60)}>« 1m</button>
+            <button className="chip" style={{ padding: '3px 8px', fontSize: 'var(--fs-label)' }} onClick={() => seekBehind(behind + 15)}>« 15s</button>
+            <button className="chip" style={{ padding: '3px 8px', fontSize: 'var(--fs-label)' }} onClick={() => seekBehind(behind + 60)}>« 1m</button>
           </span>
           <span style={{ color: liveNow ? 'var(--live)' : 'var(--faint)' }}>Live ▸</span>
         </div>
@@ -1543,7 +1544,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           <span title={latency.exact
             ? 'Estimated latency from the encoder writing a segment to it playing here, measured from the manifest wall-clock stamps. Add a few seconds of ingest/encode ahead of that for full input to output.'
             : 'Approximate latency (no wall-clock stamps in this manifest): distance behind the newest buffered content plus packaging time.'}
-            style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 10 }}>
+            style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)', marginLeft: 10 }}>
             latency {latency.exact ? '≈' : '~'}{latency.sec}s
           </span>
         )}
@@ -1557,7 +1558,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
             </span>
           )}
           {capStatus && capStatus.kind === 'error' && (
-            <span title={capStatus.hint || 'captions engine error — see the QC log'} style={{ fontSize: 11, color: '#fca5a5', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span title={capStatus.hint || 'captions engine error — see the QC log'} style={{ fontSize: 'var(--fs-label)', color: '#fca5a5', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               captions failed: {capStatus.reason}
             </span>
           )}
@@ -1565,7 +1566,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
               diagnose anything. The per-chunk alignment story (chunk id, audio wall
               window, mapped video PTS) now lives in the QC event log instead. */}
           {capStatus && capStatus.kind === 'starting' && (
-            <span style={{ fontSize: 11, color: 'var(--faint)' }}>captions starting…</span>
+            <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>captions starting…</span>
           )}
           <button className={`chip ${subOn ? 'active' : ''}`} style={{ padding: '5px 10px' }} onClick={() => setSubOn(!subOn)}>CC</button>
           {subOn && (
@@ -1640,18 +1641,18 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
   return (
     <div className="card" style={{ marginBottom: 18, padding: '14px 16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
-        <b style={{ fontSize: 14 }}>Failover control</b>
-        <span className={`tag ${real ? 'live' : 'idle'}`} style={{ fontSize: 10.5 }}>
+        <b style={{ fontSize: 'var(--fs-h3)' }}>Failover control</b>
+        <span className={`tag ${real ? 'live' : 'idle'}`} style={{ fontSize: 'var(--fs-micro)' }}>
           <span className={`dot-s ${real ? 'live' : 'idle'}`} />{real ? 'ENABLED' : 'NOT ENABLED'}
         </span>
-        {real && mode !== 'auto' && <span className="tag warn" style={{ fontSize: 10.5 }}>ACTIVE: {active?.label || mode}</span>}
+        {real && mode !== 'auto' && <span className="tag warn" style={{ fontSize: 'var(--fs-micro)' }}>ACTIVE: {active?.label || mode}</span>}
       </div>
       {real ? (
         <>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 8 }}>
             On total input loss the filler is <b style={{ color: 'var(--text)' }}>{loopDesc}</b>. Set this in Settings, under Filler on total loss.
           </div>
-          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
+          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 12 }}>
             A pre-flight test and a live manual switch: force a path and the real output switches within a second or two, then Resume. You can also use it on purpose, to move off a primary or bring it back.
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1678,7 +1679,7 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
           {err && <div className="err" style={{ marginTop: 10 }}>{err}</div>}
         </>
       ) : (
-        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
           Input failover is off for this channel, so there is nothing to switch yet. Turn on <b style={{ color: 'var(--text)' }}>Enable input failover</b> in Settings and add a backup source, then start the channel. This panel will then let you test each failover path and switch sources on purpose, with the result shown in the output player above.
         </div>
       )}
@@ -1702,7 +1703,7 @@ function EpgStrip({ d, onAddEpg, onHideEpg }: { d: CD; onAddEpg: () => void; onH
         <span className="tag idle"><span className="dot-s idle" />NO EPG</span>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 600 }}>No programme guide for this channel</div>
-          <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Add programmes to show now/next and a schedule, or hide this panel.</div>
+          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>Add programmes to show now/next and a schedule, or hide this panel.</div>
         </div>
         <button className="btn primary" onClick={onAddEpg}>Add EPG</button>
         <button className="btn ghost" onClick={onHideEpg}>Hide</button>
@@ -1753,7 +1754,7 @@ function ViewersCard({ d, live }: { d: CD; live: boolean }) {
       <div className="card-b">
         <div className="viewer-head" style={{ marginBottom: 8 }}>
           <div className="bignum">{live && <span className="lv" />}<span>{d.viewers.current.toLocaleString()}</span></div>
-          <div style={{ color: 'var(--muted)', fontSize: 13 }}>
+          <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>
             <span className={`trend ${d.viewers.trendPct >= 0 ? 'up' : 'down'}`}>{d.viewers.trendPct >= 0 ? '▲' : '▼'} {Math.abs(d.viewers.trendPct)}%</span> vs 1h ago · peak <b style={{ color: 'var(--text)' }}>{d.viewers.peak.toLocaleString()}</b>
           </div>
         </div>
@@ -1786,14 +1787,14 @@ function StatusBoard({ d, live }: { d: CD; live: boolean }) {
           <div className="brow"><span className="k">Packager</span><span className="v"><span className={`dot-s ${live ? 'live' : 'idle'}`} />{d.statusBoard.packager}</span></div>
           <div className="brow"><span className="k">DVR window</span><span className="v">{d.dvr_mode === 'event_start' ? 'To event start' : fmtWindow(d.dvr.effective_sec)}{d.dvr.source === 'channel' ? ' · channel' : ' · profile'}</span></div>
         </div>
-        <div style={{ fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 }}>Inputs</div>
+        <div style={{ fontSize: 'var(--fs-label)', letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 }}>Inputs</div>
         <div className="src-lights" style={{ marginBottom: 16 }}>
           {d.statusBoard.inputs.map((s: any, i: number) => (
             <div className="src" key={i}><span className={`dot-s ${s.state}`} /><span className="nm">{s.role[0].toUpperCase() + s.role.slice(1)} · {s.protocol}</span><span className="st">{s.detail}</span></div>
           ))}
         </div>
         {ladder.length > 0 && <>
-          <div style={{ fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 9 }}>Rendition ladder</div>
+          <div style={{ fontSize: 'var(--fs-label)', letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 9 }}>Rendition ladder</div>
           <div className="ladder">
             {ladder.map((r, i) => (
               <div className="rung" key={i}><span className="q">{r.height}p</span><span className="bar"><i style={{ width: `${Math.round((r.bitrate_kbps / maxBr) * 100)}%` }} /></span><span className="br">{(r.bitrate_kbps / 1000).toFixed(1)} Mbps</span></div>
@@ -2108,15 +2109,15 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
               <div className="field"><label>Position</label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6, maxWidth: 260 }}>
                   {([['tl','Top L'],['tc','Top C'],['tr','Top R'],['bl','Bot L'],['bc','Bot C'],['br','Bot R']] as const).map(([p, lbl]) => (
-                    <button key={p} type="button" className={`btn ${wmPos === p ? 'primary' : 'ghost'}`} style={{ padding: '6px 4px', fontSize: 12 }} onClick={() => setWmPos(p)}>{lbl}</button>
+                    <button key={p} type="button" className={`btn ${wmPos === p ? 'primary' : 'ghost'}`} style={{ padding: '6px 4px', fontSize: 'var(--fs-sm)' }} onClick={() => setWmPos(p)}>{lbl}</button>
                   ))}
                 </div>
               </div>
               <div className="field"><label>Offsets (px from the edge)</label>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span style={{ color: 'var(--faint)', fontSize: 12 }}>X</span>
+                  <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>X</span>
                   <input className="inp" style={{ width: 90 }} inputMode="numeric" value={wmX} onChange={e => setWmX(e.target.value.replace(/[^0-9]/g, ''))} />
-                  <span style={{ color: 'var(--faint)', fontSize: 12 }}>Y</span>
+                  <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Y</span>
                   <input className="inp" style={{ width: 90 }} inputMode="numeric" value={wmY} onChange={e => setWmY(e.target.value.replace(/[^0-9]/g, ''))} />
                 </div>
               </div>
@@ -2144,4 +2145,4 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   )
 }
 
-const SEC: React.CSSProperties = { fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', margin: '18px 0 10px', fontWeight: 700 }
+const SEC: React.CSSProperties = { fontSize: 'var(--fs-label)', letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', margin: '18px 0 10px', fontWeight: 700 }

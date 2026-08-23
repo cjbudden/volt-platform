@@ -77,7 +77,7 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
       </div>
       <div className="page-head" style={{ marginBottom: 10 }}>
         <div>
-          <h1>{ownerRow?.name ?? 'Guide'} <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--faint)' }}>{owner.kind === 'channel' ? 'channel guide' : 'event schedule'}</span></h1>
+          <h1>{ownerRow?.name ?? 'Guide'} <span style={{ fontSize: 'var(--fs-body)', fontWeight: 400, color: 'var(--faint)' }}>{owner.kind === 'channel' ? 'channel guide' : 'event schedule'}</span></h1>
           <p>Add programmes, copy days, and control each slot: geo access, replacement, and post-airing clip automation.</p>
         </div>
         <div className="spacer" />
@@ -96,7 +96,7 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
           style={{ width: 160 }} />
         <button className="btn ghost" onClick={() => shiftDay(1)}>Next →</button>
         <button className="btn ghost" onClick={() => { const d = new Date(); d.setHours(0, 0, 0, 0); setDay(d) }}>Today</button>
-        <span style={{ color: 'var(--faint)', fontSize: 12, marginLeft: 'auto' }}>{day.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+        <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', marginLeft: 'auto' }}>{day.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
       </div>
 
       {err && <div className="err">{err}</div>}
@@ -127,13 +127,13 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
                     <td style={{ fontFamily: 'ui-monospace,monospace', color: 'var(--muted)' }}>{fmtT(p.ends_at)}</td>
                     <td style={{ color: 'var(--muted)' }}>{fmtDur(Date.parse(p.ends_at) - Date.parse(p.starts_at))}</td>
                     <td><b>{p.title}</b>{live && <span className="badge live" style={{ marginLeft: 8 }}>ON NOW</span>}
-                      {p.metadata?.description && <div style={{ fontSize: 11.5, color: 'var(--faint)', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.metadata.description}</div>}
+                      {p.metadata?.description && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.metadata.description}</div>}
                     </td>
-                    <td style={{ color: p.geo_mode === 'worldwide' ? 'var(--faint)' : 'var(--warn,#e2b64f)', fontSize: 12.5 }}>
+                    <td style={{ color: p.geo_mode === 'worldwide' ? 'var(--faint)' : 'var(--warn,#e2b64f)', fontSize: 'var(--fs-sm)' }}>
                       {GEO_LABEL[p.geo_mode]}{p.geo_mode !== 'worldwide' && p.geo_countries.length ? ` (${p.geo_countries.slice(0, 3).join(',')}${p.geo_countries.length > 3 ? '…' : ''})` : ''}
                     </td>
-                    <td style={{ color: p.replacement_kind === 'none' ? 'var(--faint)' : 'var(--brand)', fontSize: 12.5 }}>{REPL_LABEL[p.replacement_kind]}</td>
-                    <td style={{ fontSize: 12.5 }}>
+                    <td style={{ color: p.replacement_kind === 'none' ? 'var(--faint)' : 'var(--brand)', fontSize: 'var(--fs-sm)' }}>{REPL_LABEL[p.replacement_kind]}</td>
+                    <td style={{ fontSize: 'var(--fs-sm)' }}>
                       {!p.auto_vod ? <span style={{ color: 'var(--faint)' }}>—</span>
                         : p.clip_status === 'created' ? <span style={{ color: 'var(--ok,#3fbf6f)' }}>created</span>
                         : p.clip_status === 'error' ? <span style={{ color: 'var(--down,#f87171)' }} title={p.clip_error || ''}>failed</span>
@@ -156,7 +156,7 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
       {copyOpen && <CopyDayModal owner={owner} day={day} count={progs?.length ?? 0}
         onClose={() => setCopyOpen(false)} onDone={(msg) => { setCopyOpen(false); flash(msg); load() }} />}
       {toast && (
-        <div style={{ position: 'fixed', left: '50%', bottom: 26, transform: 'translateX(-50%)', zIndex: 60, background: 'var(--panel-3,#161b26)', border: '1px solid var(--border)', padding: '10px 16px', borderRadius: 10, fontSize: 13 }}>{toast}</div>
+        <div style={{ position: 'fixed', left: '50%', bottom: 26, transform: 'translateX(-50%)', zIndex: 60, background: 'var(--panel-3,#161b26)', border: '1px solid var(--border)', padding: '10px 16px', borderRadius: 10, fontSize: 'var(--fs-body)' }}>{toast}</div>
       )}
     </>
   )
@@ -277,7 +277,7 @@ function ProgrammeDrawer({ owner, day, programme: p, onClose, onDone }: {
             <div className={`sw ${autoVod ? '' : 'off'}`} onClick={() => setAutoVod(v => !v)}><i /></div>
           </div>
           {isEdit && p!.clip_status === 'error' && <div className="err">Last auto-clip failed: {p!.clip_error}</div>}
-          {isEdit && p!.clip_status === 'created' && <div style={{ color: 'var(--ok,#3fbf6f)', fontSize: 12.5 }}>Auto-clip created — see the VOD library.</div>}
+          {isEdit && p!.clip_status === 'created' && <div style={{ color: 'var(--ok,#3fbf6f)', fontSize: 'var(--fs-sm)' }}>Auto-clip created — see the VOD library.</div>}
 
           {conflictNote && <div className="hintxt" style={{ color: 'var(--warn)' }}>{conflictNote}</div>}
           {err && <div className="err">{err}</div>}
@@ -324,17 +324,17 @@ function CopyDayModal({ owner, day, count, onClose, onDone }: {
     <div className="drawer-scrim" onClick={onClose} style={{ alignItems: 'center', justifyContent: 'center' }}>
       <div className="card" onClick={e => e.stopPropagation()} style={{ width: 460, maxWidth: '95vw', padding: 20 }}>
         <h3 style={{ margin: '0 0 4px' }}>Copy day</h3>
-        <p style={{ color: 'var(--muted)', fontSize: 12.5, margin: '0 0 12px' }}>
+        <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', margin: '0 0 12px' }}>
           Copy the {count} programme(s) of {day.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' })} onto other days (same times, independent copies).
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-body)', cursor: 'pointer' }}>
             <input type="radio" checked={mode === 'tomorrow'} onChange={() => setMode('tomorrow')} /> Tomorrow
           </label>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-body)', cursor: 'pointer' }}>
             <input type="radio" checked={mode === 'week'} onChange={() => setMode('week')} /> Each of the next 7 days
           </label>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-body)', cursor: 'pointer' }}>
             <input type="radio" checked={mode === 'custom'} onChange={() => setMode('custom')} /> Specific dates
           </label>
           {mode === 'custom' && (
@@ -345,7 +345,7 @@ function CopyDayModal({ owner, day, count, onClose, onDone }: {
                   <button className="xbtn" onClick={() => setCustomDates(ds => ds.filter((_, j) => j !== i))}>✕</button>
                 </div>
               ))}
-              <button className="btn ghost" style={{ alignSelf: 'flex-start', padding: '4px 10px', fontSize: 12 }}
+              <button className="btn ghost" style={{ alignSelf: 'flex-start', padding: '4px 10px', fontSize: 'var(--fs-sm)' }}
                 onClick={() => setCustomDates(ds => [...ds, toDateInput(new Date(day.getTime() + 86_400_000))])}>+ Add date</button>
             </div>
           )}

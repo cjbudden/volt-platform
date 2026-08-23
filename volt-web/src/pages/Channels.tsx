@@ -158,7 +158,7 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
                     return (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <StatusTag label={m.label} cls={m.cls} />
-                        {c.billable && <span title="encoder up (billable)" style={{ fontSize: 10, color: '#fbbf24' }}>● billable</span>}
+                        {c.billable && <span title="encoder up (billable)" style={{ fontSize: 'var(--fs-micro)', color: '#fbbf24' }}>● billable</span>}
                       </div>
                     )
                   })()}
@@ -326,7 +326,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
                       onClick={() => setLadder(l => l.map((x, j) => j === i ? { ...x, on: !x.on } : x))}>{r.height}p</div>
                     <input className="inp" style={{ maxWidth: 130, opacity: r.on ? 1 : 0.45 }} disabled={!r.on}
                       value={r.bitrateKbps} onChange={e => setLadder(l => l.map((x, j) => j === i ? { ...x, bitrateKbps: Number(e.target.value.replace(/[^0-9]/g, '')) || 0 } : x))} />
-                    <span style={{ fontSize: 12, color: 'var(--faint)' }}>kbps</span>
+                    <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>kbps</span>
                   </div>
                 ))}
                 <div className="hintxt">We encode the single source into every selected rendition.</div>

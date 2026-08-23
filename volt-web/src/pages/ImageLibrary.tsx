@@ -124,7 +124,7 @@ export default function ImageLibrary() {
             <FolderRow key={f.path} label={f.name} active={folder === f.path} onClick={() => setFolder(f.path)} count={f.count} depth={f.path.split('/').length} />
           ))}
           {folders.length === 0 && (
-            <div style={{ padding: '10px 8px', fontSize: 12, color: 'var(--faint)' }}>
+            <div style={{ padding: '10px 8px', fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
               No folders yet. Quick-create:
               <div className="chipset" style={{ marginTop: 8 }}>
                 {STD_FOLDERS.map(name => <div key={name} className="selchip" onClick={async () => { await api.createFolder(name); await loadFolders(); setFolder(name) }}>{name}</div>)}
@@ -160,12 +160,12 @@ export default function ImageLibrary() {
                       <img src={thumbUrl(f.url, 300, 190)} alt={f.name} loading="lazy" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
                     </div>
                     <div style={{ padding: '9px 11px' }}>
-                      <div style={{ fontWeight: 650, fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={f.path}>{f.name}</div>
+                      <div style={{ fontWeight: 650, fontSize: 'var(--fs-sm)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={f.path}>{f.name}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                        <span className="tag type" style={{ fontSize: 10 }}>{f.kind}</span>
-                        <span style={{ fontSize: 11, color: 'var(--faint)' }}>{f.width && f.height ? `${f.width}×${f.height}` : ''} · {human(f.size_bytes)}</span>
+                        <span className="tag type" style={{ fontSize: 'var(--fs-micro)' }}>{f.kind}</span>
+                        <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>{f.width && f.height ? `${f.width}×${f.height}` : ''} · {human(f.size_bytes)}</span>
                       </div>
-                      {f.folder && <div style={{ fontSize: 10.5, color: 'var(--faint)', marginTop: 2 }}>{f.folder}/</div>}
+                      {f.folder && <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', marginTop: 2 }}>{f.folder}/</div>}
                     </div>
                   </div>
                 ))}
@@ -179,8 +179,8 @@ export default function ImageLibrary() {
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(11,15,22,.7)', display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
           <div style={{ border: '2px dashed var(--brand)', borderRadius: 16, padding: '48px 64px', textAlign: 'center', color: '#dbe6ff', background: 'var(--brand-dim)' }}>
             <div style={{ fontSize: 30, marginBottom: 8 }}>⬇</div>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>Drop images to add</div>
-            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>You’ll set the usage type before they upload.</div>
+            <div style={{ fontWeight: 700, fontSize: 'var(--fs-h2)' }}>Drop images to add</div>
+            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginTop: 4 }}>You’ll set the usage type before they upload.</div>
           </div>
         </div>
       )}
@@ -231,11 +231,11 @@ export default function ImageLibrary() {
             </div>
             <div style={{ padding: 18 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>{preview.name}</div>
+                <div style={{ fontWeight: 700, fontSize: 'var(--fs-h2)' }}>{preview.name}</div>
                 <span className="spacer" style={{ flex: 1 }} />
                 <button className="xbtn" title="Delete" onClick={() => setConfirm({ file: preview })}>🗑</button>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--faint)', margin: '2px 0 12px' }}>{preview.folder ? preview.folder + '/' : '(root)'} · {preview.width && preview.height ? `${preview.width}×${preview.height}` : 'unknown size'} · {human(preview.size_bytes)} · {preview.content_type}</div>
+              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', margin: '2px 0 12px' }}>{preview.folder ? preview.folder + '/' : '(root)'} · {preview.width && preview.height ? `${preview.width}×${preview.height}` : 'unknown size'} · {human(preview.size_bytes)} · {preview.content_type}</div>
               <div className="field"><label>Usage type</label>
                 <select className="inp" value={preview.kind} onChange={e => changeKind(preview, e.target.value)}>
                   {ASSIGNABLE.map(k => <option key={k} value={k}>{k}</option>)}
@@ -254,7 +254,7 @@ export default function ImageLibrary() {
       {builder && <UrlBuilder file={builder} onClose={() => setBuilder(null)} notify={m => { setToast(m); setTimeout(() => setToast(''), 2200) }} />}
 
       {toast && (
-        <div style={{ position: 'fixed', left: '50%', bottom: 26, transform: 'translateX(-50%)', zIndex: 60, background: 'var(--panel-3)', border: '1px solid var(--border-2)', color: 'var(--text)', padding: '10px 16px', borderRadius: 10, fontSize: 13, boxShadow: 'var(--shadow)' }}>{toast}</div>
+        <div style={{ position: 'fixed', left: '50%', bottom: 26, transform: 'translateX(-50%)', zIndex: 60, background: 'var(--panel-3)', border: '1px solid var(--border-2)', color: 'var(--text)', padding: '10px 16px', borderRadius: 10, fontSize: 'var(--fs-body)', boxShadow: 'var(--shadow)' }}>{toast}</div>
       )}
 
       {folderModal !== null && (
@@ -262,7 +262,7 @@ export default function ImageLibrary() {
           <form className="card" onClick={e => e.stopPropagation()} style={{ width: 420, padding: 20 }}
             onSubmit={e => { e.preventDefault(); createFolder(folderModal) }}>
             <h3 style={{ margin: '0 0 4px' }}>New folder</h3>
-            <p style={{ color: 'var(--muted)', fontSize: 12.5, margin: '0 0 12px' }}>Use “/” for nested folders, e.g. <span style={{ fontFamily: 'ui-monospace,monospace' }}>slates/news</span>.</p>
+            <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', margin: '0 0 12px' }}>Use “/” for nested folders, e.g. <span style={{ fontFamily: 'ui-monospace,monospace' }}>slates/news</span>.</p>
             <input className="inp" autoFocus value={folderModal} onChange={e => setFolderModal(e.target.value)} placeholder="slates/news" />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
               <button type="button" className="btn ghost" onClick={() => setFolderModal(null)}>Cancel</button>
@@ -276,7 +276,7 @@ export default function ImageLibrary() {
         <div className="drawer-scrim" onClick={() => setConfirm(null)} style={{ alignItems: 'center', justifyContent: 'center' }}>
           <div className="card" onClick={e => e.stopPropagation()} style={{ width: 420, padding: 20 }}>
             <h3 style={{ margin: '0 0 8px' }}>Delete image?</h3>
-            <p style={{ color: 'var(--muted)', fontSize: 13 }}><b>{confirm.file.path}</b> — this can’t be undone.</p>
+            <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-body)' }}><b>{confirm.file.path}</b> — this can’t be undone.</p>
             {confirm.inUse && confirm.inUse.length > 0 && (
               <div className="err" style={{ marginBottom: 8 }}>In use as a slate by {confirm.inUse.length} channel(s): {confirm.inUse.map((c: any) => c.name).join(', ')}. Force-delete anyway?</div>
             )}
@@ -299,7 +299,7 @@ function FolderRow({ label, active, onClick, count, depth }: { label: string; ac
       style={{ paddingLeft: 8 + depth * 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, borderRadius: 8 }}>
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
       <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-      <span style={{ fontSize: 11, color: 'var(--faint)' }}>{count}</span>
+      <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>{count}</span>
     </div>
   )
 }
@@ -438,11 +438,11 @@ function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () =>
           <div>
             {/* -------- the ONE preview: filters live, focus + crop overlaid -------- */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <button className={`btn ${mode === 'focus' ? 'primary' : 'ghost'}`} style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setMode('focus')}>Focus point</button>
-              <button className={`btn ${mode === 'crop' ? 'primary' : 'ghost'}`} style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setMode('crop')}>Crop</button>
-              {focus && <button className="btn ghost" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setFocus(null)}>clear focus</button>}
-              {crop && <button className="btn ghost" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setCrop(null)}>clear crop</button>}
-              <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 'auto' }}>{srcW}×{srcH}</span>
+              <button className={`btn ${mode === 'focus' ? 'primary' : 'ghost'}`} style={{ padding: '4px 10px', fontSize: 'var(--fs-sm)' }} onClick={() => setMode('focus')}>Focus point</button>
+              <button className={`btn ${mode === 'crop' ? 'primary' : 'ghost'}`} style={{ padding: '4px 10px', fontSize: 'var(--fs-sm)' }} onClick={() => setMode('crop')}>Crop</button>
+              {focus && <button className="btn ghost" style={{ padding: '4px 10px', fontSize: 'var(--fs-sm)' }} onClick={() => setFocus(null)}>clear focus</button>}
+              {crop && <button className="btn ghost" style={{ padding: '4px 10px', fontSize: 'var(--fs-sm)' }} onClick={() => setCrop(null)}>clear crop</button>}
+              <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)', marginLeft: 'auto' }}>{srcW}×{srcH}</span>
             </div>
             <div style={{ display: 'grid', placeItems: 'center', background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 18px 18px', borderRadius: 10, padding: 8 }}>
               <div ref={box} className="src-view" onPointerDown={down} onPointerMove={move} onPointerUp={up}
@@ -479,7 +479,7 @@ function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () =>
             <div className="field" style={{ marginTop: 10 }}>
               <label>URL — paste anywhere; resized and cached on first request</label>
               <div style={{ display: 'flex', gap: 8 }}>
-                <input className="inp url-out" readOnly value={absolute} onFocus={e => e.currentTarget.select()} style={{ flex: 1, fontFamily: 'ui-monospace,monospace', fontSize: 12 }} />
+                <input className="inp url-out" readOnly value={absolute} onFocus={e => e.currentTarget.select()} style={{ flex: 1, fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)' }} />
                 <button className="btn ghost" onClick={() => window.open(absolute, '_blank')} title="Open the rendered output in a new tab">View</button>
                 <button className="btn primary" onClick={copy}>Copy</button>
               </div>
@@ -497,7 +497,7 @@ function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () =>
             </div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {([['16:9', 16 / 9], ['4:3', 4 / 3], ['1:1', 1], ['9:16', 9 / 16]] as const).map(([lbl, r]) => (
-                <button key={lbl} className="btn ghost" style={{ padding: '4px 10px', fontSize: 12 }}
+                <button key={lbl} className="btn ghost" style={{ padding: '4px 10px', fontSize: 'var(--fs-sm)' }}
                   onClick={() => setH(String(Math.max(1, Math.round((+w || 640) / r))))}>{lbl}</button>
               ))}
             </div>
@@ -509,19 +509,19 @@ function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () =>
                 <option value="fill">Fill — stretch to box</option>
               </select>
             </div>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--faint)', marginTop: 4 }}>Filters</div>
+            <div style={{ fontSize: 'var(--fs-label)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--faint)', marginTop: 4 }}>Filters</div>
             <Slider label="Brightness" value={bright} set={setBright} min={10} max={300} suffix="%" />
             <Slider label="Saturation" value={sat} set={setSat} min={0} max={300} suffix="%" />
             <Slider label="Blur" value={blur} set={setBlur} min={0} max={30} />
             <div style={{ display: 'flex', gap: 14 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-body)', cursor: 'pointer' }}>
                 <input type="checkbox" checked={gray} onChange={e => setGray(e.target.checked)} /> Grayscale
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-body)', cursor: 'pointer' }}>
                 <input type="checkbox" checked={sharpen} onChange={e => setSharpen(e.target.checked)} /> Sharpen
               </label>
             </div>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--faint)', marginTop: 4 }}>Output</div>
+            <div style={{ fontSize: 'var(--fs-label)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--faint)', marginTop: 4 }}>Output</div>
             <Slider label="Quality" value={q} set={setQ} min={30} max={100} />
             <div className="field" style={{ margin: 0 }}><label>Format</label>
               <select className="inp" value={fmt} onChange={e => setFmt(e.target.value as any)}>

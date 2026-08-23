@@ -75,7 +75,7 @@ export function ImagePicker({ open, onClose, onPick, kinds, title, allowUpload =
               </button>
             </>
           ) : uploadHint ? (
-            <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--faint)', maxWidth: 220 }}>{uploadHint}</span>
+            <span style={{ marginLeft: 8, fontSize: 'var(--fs-label)', color: 'var(--faint)', maxWidth: 220 }}>{uploadHint}</span>
           ) : null}
           <button className="xbtn" onClick={onClose} style={{ marginLeft: 8 }}>✕</button>
         </div>
@@ -83,7 +83,7 @@ export function ImagePicker({ open, onClose, onPick, kinds, title, allowUpload =
         <div className="card-b" style={{ overflow: 'auto' }}>
           {files === null ? <div className="loading">Loading…</div>
             : shown.length === 0 ? (
-              <div style={{ textAlign: 'center', color: 'var(--muted)', padding: 24, fontSize: 13 }}>
+              <div style={{ textAlign: 'center', color: 'var(--muted)', padding: 24, fontSize: 'var(--fs-body)' }}>
                 Nothing here yet. {allowUpload ? 'Use Upload above, or add items in ' : 'Add items in '}<b>Media → Image Library</b>.
               </div>
             ) : (
@@ -94,8 +94,8 @@ export function ImagePicker({ open, onClose, onPick, kinds, title, allowUpload =
                       <img src={thumbUrl(f.url, 240, 150)} alt={f.name} loading="lazy" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
                     </div>
                     <div style={{ padding: '7px 9px' }}>
-                      <div style={{ fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={f.path}>{f.name}</div>
-                      <div style={{ fontSize: 10, color: 'var(--faint)' }}>{f.kind} · {f.width && f.height ? `${f.width}×${f.height}` : ''}</div>
+                      <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={f.path}>{f.name}</div>
+                      <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)' }}>{f.kind} · {f.width && f.height ? `${f.width}×${f.height}` : ''}</div>
                     </div>
                   </div>
                 ))}

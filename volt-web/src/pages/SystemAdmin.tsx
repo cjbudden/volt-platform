@@ -83,7 +83,7 @@ export default function SystemAdmin() {
                     <td><span className="tag type chan" style={{ textTransform: 'capitalize' }}>{a.plan_tier}</span></td>
                     <td style={{ color: 'var(--muted)' }}>{a.channels ?? '—'}</td>
                     <td style={{ color: 'var(--muted)' }}>{a.users ?? '—'}</td>
-                    <td style={{ color: 'var(--muted)', fontSize: 12 }}>{a.max_channels} ch · {a.max_concurrent_sources ?? '—'} src</td>
+                    <td style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)' }}>{a.max_channels} ch · {a.max_concurrent_sources ?? '—'} src</td>
                     <td>{a.status === 'suspended' ? <StatusTag label="Suspended" cls="down" /> : <StatusTag label="Active" cls="live" />}</td>
                     <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                       <button className="btn primary" onClick={() => setEditing(a)}>Open</button>
@@ -112,8 +112,8 @@ function CredsOnceModal({ creds, onClose }: { creds: { account: string; email: s
   return (
     <div className="drawer-scrim" onClick={onClose} style={{ display: 'grid', placeItems: 'center' }}>
       <div className="card" onClick={e => e.stopPropagation()} style={{ width: 520, padding: 22 }}>
-        <div style={{ fontWeight: 700, fontSize: 16 }}>Client account created</div>
-        <div style={{ fontSize: 12.5, color: 'var(--warn,#fbbf24)', margin: '8px 0 12px' }}>
+        <div style={{ fontWeight: 700, fontSize: 'var(--fs-h2)' }}>Client account created</div>
+        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--warn,#fbbf24)', margin: '8px 0 12px' }}>
           Share these sign-in details with the client now. The password is not retrievable later.
         </div>
         <div className="field"><label>Account</label><input className="inp" readOnly value={creds.account} /></div>

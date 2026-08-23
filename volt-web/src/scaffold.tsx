@@ -25,8 +25,97 @@ import type { ReactNode } from 'react'
 // The shared building blocks below keep the two forms in lockstep.
 // ----------------------------------------------------------------------------
 
-/** Section header style used by every drawer form. */
-export const SEC: React.CSSProperties = { fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', margin: '20px 0 10px', fontWeight: 700 }
+/** Section header style used by every drawer form. Mirrors the `.sec-label`
+ *  class in index.css: both read from the same type-scale tokens, so a section
+ *  label is the same size and colour whether it is written in CSS or inline. */
+export const SEC: React.CSSProperties = {
+  fontSize: 'var(--fs-label)', letterSpacing: 'var(--ls-label)', textTransform: 'uppercase',
+  color: 'var(--faint)', margin: '20px 0 10px', fontWeight: 700,
+}
+
+// ============================================================================
+//  STATUS + IDENTITY — one definition, used by every page.
+//
+//  The rule: a page NEVER decides what a status looks like. It passes the
+//  pipeline state and gets the platform's pill. That is what keeps Channels,
+//  Radio, Events and Recordings reading identically, and it means a new state
+//  (or a colour change) is a one-line edit here rather than a hunt through
+//  pages.
+// ============================================================================
+
+/** The pipeline roll-up states the backend produces (services/pipelineHealth). */
+export type PipelineState = 'idle' | 'starting' | 'ready' | 'onair' | 'degraded' | 'error' | 'stopped'
+
+/** state -> { label, tag class }. `cls` maps onto the .tag/.dot-s colour set. */
+export const PIPELINE_STATE: Record<PipelineState, { label: string; cls: string }> = {
+  onair: { label: 'On air', cls: 'live' },
+  ready: { label: 'Ready · private', cls: 'sched' },
+  starting: { label: 'Starting', cls: 'sched' },
+  degraded: { label: 'Degraded', cls: 'warn' },
+  error: { label: 'Error', cls: 'down' },
+  stopped: { label: 'Stopped', cls: 'idle' },
+  idle: { label: 'Idle', cls: 'idle' },
+}
+
+/** THE status pill. Shape, case and colour come from the state, not the page. */
+export function StatusPill({ state, label, cls, sub, title }: {
+  state?: PipelineState | string | null
+  /** escape hatch for non-pipeline statuses (e.g. a recording's own status) */
+  label?: string; cls?: string
+  sub?: string; title?: string
+}) {
+  const m = (state && PIPELINE_STATE[state as PipelineState]) || null
+  const text = label ?? m?.label ?? 'Idle'
+  const klass = cls ?? m?.cls ?? 'idle'
+  const pill = (
+    <span className={`tag ${klass}`} title={title}>
+      <span className={`dot-s ${klass}`} />{text}
+    </span>
+  )
+  if (!sub) return pill
+  return (
+    <div>
+      {pill}
+      <div style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)', marginTop: 3 }}>{sub}</div>
+    </div>
+  )
+}
+
+/** What a thing IS (workflow / kind). No dot: type is not a live state. */
+export function TypeTag({ label, kind = 'chan' }: { label: string; kind?: 'chan' | 'event' | 'loop' }) {
+  return <span className={`tag type ${kind}`}>{label}</span>
+}
+
+/** The identity row every DETAIL page starts with: breadcrumb, then
+ *  thumb + title + tags, then the one-line summary. */
+export function PageIdentity({ crumbLabel, onCrumb, name, imgUrl, tags, sub, gradient }: {
+  crumbLabel: string
+  onCrumb: () => void
+  name: string
+  imgUrl?: string | null
+  tags?: ReactNode
+  sub?: ReactNode
+  gradient?: string
+}) {
+  return (
+    <div>
+      <div className="crumb" style={{ marginBottom: 6 }}>
+        <span className="lnk" style={{ cursor: 'pointer', color: 'var(--brand)' }} onClick={onCrumb}>{crumbLabel}</span>
+        &nbsp;/&nbsp; <b style={{ color: 'var(--text)' }}>{name}</b>
+      </div>
+      <h1 className="page-id">
+        {imgUrl
+          ? <span className="dthumb" style={{ background: '#0b0f16', overflow: 'hidden', padding: 0 }}>
+              <img src={imgUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            </span>
+          : <span className="dthumb" style={{ background: gradient || 'linear-gradient(135deg,#1d4ed8,#3b82f6)' }}>{initials(name)}</span>}
+        {name}
+        {tags}
+      </h1>
+      {sub && <p>{sub}</p>}
+    </div>
+  )
+}
 
 export type RetUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
 export const RET_UNIT_SEC: Record<RetUnit, number> = { minutes: 60, hours: 3600, days: 86400, weeks: 604800, months: 2592000 }
@@ -156,12 +245,9 @@ export function EntityCell({ name, sub, index = 0, imgUrl }: { name: string; sub
   )
 }
 
-/** Status pill (tag + dot) with an optional sub-line, e.g. a countdown. */
+/** Status pill (tag + dot) with an optional sub-line, e.g. a countdown.
+ *  Thin wrapper over StatusPill so existing list pages keep working while
+ *  everything renders from the one definition. */
 export function StatusTag({ label, cls, sub }: { label: string; cls: string; sub?: string }) {
-  return (
-    <div>
-      <span className={`tag ${cls}`}><span className={`dot-s ${cls}`} />{label}</span>
-      {sub && <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 3 }}>{sub}</div>}
-    </div>
-  )
+  return <StatusPill label={label} cls={cls} sub={sub} />
 }

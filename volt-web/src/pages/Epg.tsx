@@ -87,15 +87,15 @@ export default function Epg() {
         <div className="drawer-scrim" onClick={() => setPickerOpen(false)} style={{ alignItems: 'center', justifyContent: 'center' }}>
           <div className="card" onClick={e => e.stopPropagation()} style={{ width: 480, maxWidth: '95vw', padding: 20 }}>
             <h3 style={{ margin: '0 0 4px' }}>New EPG</h3>
-            <p style={{ color: 'var(--muted)', fontSize: 12.5, margin: '0 0 12px' }}>A guide belongs to a channel or an event. Pick one without programmes yet; guides that already exist open from the list.</p>
+            <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', margin: '0 0 12px' }}>A guide belongs to a channel or an event. Pick one without programmes yet; guides that already exist open from the list.</p>
             {empty.length === 0 ? (
-              <div style={{ color: 'var(--faint)', fontSize: 13 }}>Every channel and event already has a guide started. Open one from the list.</div>
+              <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-body)' }}>Every channel and event already has a guide started. Open one from the list.</div>
             ) : (
               <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
                 {empty.map(r => (
                   <div key={r.kind + r.id} onClick={() => open(r)}
                     style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '9px 12px', cursor: 'pointer', borderTop: '1px solid var(--border)' }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--brand)', width: 60, textTransform: 'uppercase' }}>{r.kind}</span>
+                    <span style={{ fontSize: 'var(--fs-micro)', fontWeight: 700, color: 'var(--brand)', width: 60, textTransform: 'uppercase' }}>{r.kind}</span>
                     <span style={{ flex: 1 }}>{r.name}</span>
                   </div>
                 ))}

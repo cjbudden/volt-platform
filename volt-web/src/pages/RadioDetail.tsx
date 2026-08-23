@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type RadioStationDetail, type RadioNowPlaying, type RadioLog, type RadioClass, type Group, type RadioLevelsFeed, type Gate } from '../api'
 import { thumbUrl } from '../api'
 import AudioVisualizer, { VERDICT_UI } from '../AudioVisualizer'
-import { SEC, initials } from '../scaffold'
-import { RadioDrawer, ClassChip, StateTag } from './Radio'
+import { SEC, PageIdentity, StatusPill, TypeTag } from '../scaffold'
+import { RadioDrawer, ClassChip } from './Radio'
 
 /* ============================================================================
    Radio station detail — the audio-only counterpart of the channel detail
@@ -31,6 +31,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
   const [cls, setCls] = useState<RadioClass | 'all'>('all')
   const [groups, setGroups] = useState<Group[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [qcOpen, setQcOpen] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [playing, setPlaying] = useState(false)
@@ -132,31 +133,28 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
 
   return (
     <>
-      {/* Header follows the CHANNEL pattern exactly: breadcrumb, then the
-          identity line (thumb + name + type + status), then the sub-line, with
-          the action buttons right-aligned in the same order and sizing. */}
+      {/* Identity row comes from the SHARED component, so the breadcrumb, thumb,
+          title size and pill alignment are literally the same code as Channels. */}
       <div className="page-head">
-        <div>
-          <div className="crumb" style={{ marginBottom: 6 }}>
-            <span className="lnk" style={{ cursor: 'pointer', color: 'var(--brand)' }} onClick={onBack}>Radio</span>
-            &nbsp;/&nbsp; <b style={{ color: 'var(--text)' }}>{st.name}</b>
-          </div>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {art
-              ? <span className="dthumb" style={{ background: '#0b0f16', overflow: 'hidden', padding: 0 }}><img src={art} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /></span>
-              : <span className="dthumb" style={{ background: 'linear-gradient(135deg,#1d4ed8,#3b82f6)' }}>{initials(st.name)}</span>}
-            {st.name}
-            <span className="tag type chan">{st.radio_config?.transcode ? 'TRANSCODE' : 'PACKAGING'}</span>
-            <StateTag state={st.pipelineState} onAir={onAir} />
-          </h1>
-          <p>
+        <PageIdentity
+          crumbLabel="Radio" onCrumb={onBack} name={st.name} imgUrl={art}
+          tags={<>
+            <TypeTag label={st.radio_config?.transcode ? 'Transcode' : 'Packaging'} kind="chan" />
+            <StatusPill state={st.pipelineState} />
+          </>}
+          sub={<>
             {st.group_name} · {(st.sources[0]?.protocol || 'icecast').toUpperCase()} in · {st.radio_config?.bitrateKbps ?? 128}k out
             {st.pipeline.running && st.pipeline.sourceCodec ? ` · source ${st.pipeline.sourceCodec}` : ''}
             {st.radio_config?.metadataCapture !== false ? ' · metadata log on' : ''}
             {st.recording_enabled !== false ? ' · recording on' : ''}
-          </p>
-        </div>
+          </>}
+        />
         <div className="spacer" />
+        {/* Same action order as a channel: QC, Settings, then the lifecycle. */}
+        <button className="btn ghost" onClick={() => setQcOpen(true)} title="Diagnose the pipeline (server → input → encoder → output) and see the audio QC"
+          style={st.health?.primaryError ? { color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' } : undefined}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>QC
+        </button>
         <button className="btn ghost" onClick={() => setSettingsOpen(true)}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>Settings
         </button>
@@ -195,10 +193,10 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           margin: '0 0 14px', padding: '12px 14px', borderRadius: 10, display: 'flex', gap: 12, alignItems: 'center',
           background: 'rgba(248,113,113,.10)', border: '1px solid rgba(248,113,113,.4)',
         }}>
-          <span style={{ fontSize: 18 }}>⚠</span>
+          <span style={{ fontSize: 'var(--fs-h2)' }}>⚠</span>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 700, color: '#fca5a5' }}>{st.health.primaryError.label} failed</div>
-            <div style={{ fontSize: 13, color: 'var(--muted)', wordBreak: 'break-word' }}>{st.health.primaryError.message}</div>
+            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)', wordBreak: 'break-word' }}>{st.health.primaryError.message}</div>
           </div>
         </div>
       )}
@@ -223,7 +221,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
                 : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" /></svg>}
             </div>
             <input type="range" min={0} max={1} step={0.02} value={vol} onChange={e => setVol(Number(e.target.value))} style={{ width: 120 }} />
-            <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--faint)' }}>
+            <div style={{ marginLeft: 'auto', fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
               {live ? (st.pipeline.running ? `${np?.listeners ?? st.pipeline.listeners ?? 0} MP3 listeners` : '') : 'Start the station to monitor the output'}
             </div>
           </div>
@@ -234,7 +232,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
             levels={levels?.samples} verdict={verdict} live={live}
             idleText="Station is off" />
           {live && (
-            <div style={{ display: 'flex', gap: 14, marginTop: 8, fontSize: 11.5, color: 'var(--faint)', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 14, marginTop: 8, fontSize: 'var(--fs-xs)', color: 'var(--faint)', flexWrap: 'wrap' }}>
               <span>Measured from the output, {playing ? 'listening locally' : 'no local playback needed'}</span>
               {levels?.level && <span style={{ fontFamily: 'ui-monospace,monospace' }}>
                 peak {levels.level.peakDb.toFixed(1)} dBFS · rms {levels.level.rmsDb.toFixed(1)} dBFS · crest {levels.level.crestDb.toFixed(1)} dB
@@ -250,7 +248,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
               {live ? (title || 'Untitled break') : 'Off air'}
             </div>
             <ClassChip cls={live ? titleClass : null} />
-            {live && np?.since && <span style={{ fontSize: 12, color: 'var(--faint)' }}>{fmtDur(Date.now() - np.since)} in</span>}
+            {live && np?.since && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>{fmtDur(Date.now() - np.since)} in</span>}
           </div>
         </div>
 
@@ -259,7 +257,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           <div className="card" style={{ padding: 16, minWidth: 0 }}>
             <div style={SEC}>Station metadata</div>
             {st.icy?.station?.name || np?.station?.name ? (
-              <div style={{ display: 'grid', gap: 6, fontSize: 13 }}>
+              <div style={{ display: 'grid', gap: 6, fontSize: 'var(--fs-body)' }}>
                 <MetaRow k="Station" v={np?.station?.name || st.icy?.station?.name} />
                 <MetaRow k="Genre" v={np?.station?.genre || st.icy?.station?.genre} />
                 <MetaRow k="Website" v={np?.station?.url || st.icy?.station?.url} />
@@ -267,17 +265,19 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
                 <MetaRow k="Content type" v={np?.station?.contentType || st.icy?.station?.contentType} />
                 <MetaRow k="Title changes" v={st.icy ? String(st.icy.changes) : undefined} />
               </div>
-            ) : <div style={{ fontSize: 12.5, color: 'var(--faint)' }}>ICY headers appear here when the station runs against an Icecast source.</div>}
+            ) : <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>ICY headers appear here when the station runs against an Icecast source.</div>}
           </div>
-          {/* QC PANEL — the audio equivalent of the channel QC surface */}
-          <div className="card" style={{ padding: 16, minWidth: 0 }}>
-            <div style={SEC}>Quality checks</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 999, background: VERDICT_UI[verdict]?.color ?? '#64748b' }} />
-              <b style={{ fontSize: 13 }}>{VERDICT_UI[verdict]?.label ?? verdict}</b>
-              <span style={{ fontSize: 12, color: 'var(--faint)' }}>{VERDICT_UI[verdict]?.note}</span>
+          {/* QC PANEL — the audio equivalent of the channel QC surface.
+              Layout here is Tailwind utilities; the card itself stays a
+              semantic class. That is the split the design system asks for. */}
+          <div className="card p-4 min-w-0">
+            <div className="sec-label">Quality checks</div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="w-2.5 h-2.5 rounded-full" style={{ background: VERDICT_UI[verdict]?.color ?? '#64748b' }} />
+              <b className="text-body">{VERDICT_UI[verdict]?.label ?? verdict}</b>
+              <span className="text-sm text-faint">{VERDICT_UI[verdict]?.note}</span>
             </div>
-            <div style={{ display: 'grid', gap: 5, fontSize: 12.5 }}>
+            <div className="grid gap-1.5 text-sm">
               <MetaRow k="Checks passed" v={st.qc ? `${st.qc.checks.ok} ok · ${st.qc.checks.failed} flagged` : undefined} />
               <MetaRow k="Segments live" v={st.qc?.segments != null ? String(st.qc.segments) : undefined} />
               <MetaRow k="Output age" v={st.qc?.outputFreshMs != null ? `${Math.round(st.qc.outputFreshMs / 1000)}s` : undefined} />
@@ -286,13 +286,13 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
             {st.qc?.issues?.length ? (
               <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
                 {st.qc.issues.slice(-5).reverse().map((i, n) => (
-                  <div key={n} style={{ fontSize: 12, color: 'var(--warn,#fbbf24)', marginTop: 4 }}>
-                    <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 10.5, opacity: .8 }}>{i.code}</span> · {i.message}
+                  <div key={n} style={{ fontSize: 'var(--fs-sm)', color: 'var(--warn,#fbbf24)', marginTop: 4 }}>
+                    <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-micro)', opacity: .8 }}>{i.code}</span> · {i.message}
                   </div>
                 ))}
               </div>
             ) : (
-              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--faint)' }}>
+              <div style={{ marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
                 No issues: playlist continuity, timing and audio level all pass.
               </div>
             )}
@@ -306,15 +306,15 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
               : ([['MP3', st.outputs.mp3], ['HLS', st.outputs.hls], ['DASH', st.outputs.dash]] as const)
             ).map(([label, url]) => (
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)', minWidth: 0 }}>
-                <span style={{ width: 44, flex: 'none', fontSize: 11, fontWeight: 700, color: url ? 'var(--brand)' : 'var(--faint)' }}>{label}</span>
-                <span title={url || undefined} style={{ flex: 1, minWidth: 0, fontFamily: 'ui-monospace,monospace', fontSize: 11.5, color: url ? 'var(--muted)' : 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ width: 44, flex: 'none', fontSize: 'var(--fs-label)', fontWeight: 700, color: url ? 'var(--brand)' : 'var(--faint)' }}>{label}</span>
+                <span title={url || undefined} style={{ flex: 1, minWidth: 0, fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-xs)', color: url ? 'var(--muted)' : 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {url || 'disabled'}
                 </span>
-                {url && <button className="btn ghost" style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => copy(url)}>Copy</button>}
+                {url && <button className="btn ghost" style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }} onClick={() => copy(url)}>Copy</button>}
               </div>
             ))}
             {st.openRecording && (
-              <div style={{ marginTop: 10, fontSize: 12.5 }}>
+              <div style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>
                 Recording since {new Date(Number(st.openRecording.start_epoch_ms)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ·{' '}
                 <a href={`/recordings/${st.openRecording.id}`} style={{ color: 'var(--brand)' }}
                   onClick={e => { e.preventDefault(); window.history.pushState({}, '', `/recordings/${st.openRecording!.id}`); window.dispatchEvent(new PopStateEvent('popstate')) }}>
@@ -332,7 +332,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           <div style={{ ...SEC, margin: 0 }}>Received metadata log</div>
           <div style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
             {(['all', 'song', 'ad', 'content'] as const).map(c => (
-              <div key={c} className={`chip ${cls === c ? 'active' : ''}`} style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => setCls(c)}>
+              <div key={c} className={`chip ${cls === c ? 'active' : ''}`} style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }} onClick={() => setCls(c)}>
                 {c === 'all' ? `All ${total}` : `${CLASS_LABEL[c]} ${counts[c] ?? 0}`}
               </div>
             ))}
@@ -341,7 +341,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
             placeholder="Search titles…" />
         </div>
         {!log || log.entries.length === 0 ? (
-          <div style={{ fontSize: 12.5, color: 'var(--faint)', padding: '14px 4px' }}>
+          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', padding: '14px 4px' }}>
             {q.trim() ? 'No entries match.' : 'Entries appear while the station runs against an Icecast source with the metadata log enabled: every now-playing change is captured with its time, classified as song, ad or content, and becomes searchable here and in Recordings.'}
           </div>
         ) : (
@@ -377,20 +377,20 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
       <div className="card" style={{ marginTop: 16, padding: 16 }}>
         <div style={{ ...SEC, marginTop: 0 }}>Event log</div>
         {!st.log?.length ? (
-          <div style={{ fontSize: 12.5, color: 'var(--faint)' }}>Nothing logged yet for this station.</div>
+          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>Nothing logged yet for this station.</div>
         ) : (
           <div style={{ maxHeight: 260, overflowY: 'auto' }}>
             {st.log.map((e, i) => (
               <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '5px 0', borderBottom: '1px solid var(--border)' }}>
                 <span style={{
-                  fontSize: 10, fontWeight: 700, width: 46, flex: 'none', textTransform: 'uppercase',
+                  fontSize: 'var(--fs-micro)', fontWeight: 700, width: 46, flex: 'none', textTransform: 'uppercase',
                   color: e.level === 'down' ? 'var(--down,#f87171)' : e.level === 'warn' ? 'var(--warn,#fbbf24)' : 'var(--faint)',
                 }}>{e.level}</span>
-                <span style={{ fontSize: 11.5, color: 'var(--faint)', width: 74, flex: 'none', fontVariantNumeric: 'tabular-nums' }}>
+                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)', width: 74, flex: 'none', fontVariantNumeric: 'tabular-nums' }}>
                   {e.ts === 'encoder' ? 'encoder' : fmtClock(e.ts)}
                 </span>
-                <span style={{ fontSize: 12.5, fontWeight: 600, width: 128, flex: 'none' }}>{e.title}</span>
-                <span style={{ fontSize: 12.5, color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.detail}</span>
+                <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, width: 128, flex: 'none' }}>{e.title}</span>
+                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.detail}</span>
               </div>
             ))}
           </div>
@@ -401,11 +401,123 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
         <RadioDrawer groups={groups} station={st} onClose={() => setSettingsOpen(false)}
           onDone={() => { setSettingsOpen(false); load() }} />
       )}
+
+      {qcOpen && <RadioQcPanel st={st} verdict={verdict} levels={levels}
+        onClose={() => setQcOpen(false)} onRefresh={load} />}
     </>
   )
 }
 
 const CLASS_LABEL: Record<string, string> = { song: 'Songs', ad: 'Ads', content: 'Content' }
+
+/* ------------------------------------------------------------- QC panel
+   The radio counterpart of the channel QC dialog: the same five gates in the
+   same layout, plus the audio-specific checks a station lives or dies by
+   (dead air, static-like signal, playlist continuity) and the event log. */
+function RadioQcPanel({ st, verdict, levels, onClose, onRefresh }: {
+  st: RadioStationDetail; verdict: string; levels: RadioLevelsFeed | null
+  onClose: () => void; onRefresh: () => void
+}) {
+  const gates = st.health?.gates || []
+  const qc = st.qc
+  const v = VERDICT_UI[verdict as keyof typeof VERDICT_UI] ?? VERDICT_UI.unknown
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 60, display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 'min(920px,96vw)', maxHeight: '92vh', overflow: 'auto', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+          <h2 style={{ margin: 0, fontSize: 'var(--fs-h1)', letterSpacing: 'var(--ls-title)' }}>QC · pipeline diagnose</h2>
+          <div style={{ flex: 1 }} />
+          <button className="btn ghost" onClick={onRefresh} style={{ marginRight: 8 }}>Refresh</button>
+          <button className="btn ghost" onClick={onClose}>Close</button>
+        </div>
+        <p style={{ color: 'var(--muted)', marginTop: 4, fontSize: 'var(--fs-body)' }}>
+          Each stage is a gate — a later stage can only be healthy if the ones before it are.
+          For a station the audio itself is also measured: silence and noise are faults you cannot see in a manifest.
+        </p>
+
+        {st.health?.primaryError && (
+          <div style={{ margin: '10px 0 16px', padding: '12px 14px', borderRadius: 10, background: 'rgba(248,113,113,.10)', border: '1px solid rgba(248,113,113,.4)' }}>
+            <div style={{ fontWeight: 700, color: '#fca5a5' }}>Primary issue — {st.health.primaryError.label}</div>
+            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)' }}>{st.health.primaryError.message}</div>
+          </div>
+        )}
+
+        {/* the five gates, left to right — same shape as the channel panel */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0 18px' }}>
+          {gates.map((g, i) => (
+            <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 8, flex: '1 1 160px' }}>
+              <div style={{ flex: 1, border: `1px solid ${GATE_COLOR[g.status]}55`, background: `${GATE_COLOR[g.status]}12`, borderRadius: 10, padding: '10px 12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
+                  {g.label}{g.billable && <span title="billable while up" style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 'var(--fs-micro)' }}>● billable</span>}
+                </div>
+                <div style={{ fontWeight: 700, color: GATE_COLOR[g.status], textTransform: 'uppercase', fontSize: 'var(--fs-h3)', marginTop: 4 }}>{g.status}</div>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', marginTop: 2, wordBreak: 'break-word' }}>{g.detail}</div>
+              </div>
+              {i < gates.length - 1 && <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)' }}>→</div>}
+            </div>
+          ))}
+        </div>
+
+        {/* audio QC — the part a video channel does not have */}
+        <div className="sec-label">Audio quality</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 999, background: v.color }} />
+          <b>{v.label}</b>
+          <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>{v.note}</span>
+          {levels?.level && (
+            <span style={{ marginLeft: 'auto', fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
+              peak {levels.level.peakDb.toFixed(1)} · rms {levels.level.rmsDb.toFixed(1)} dBFS · crest {levels.level.crestDb.toFixed(1)} dB · entropy {levels.level.entropy.toFixed(2)}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8, marginBottom: 16 }}>
+          <QcStat k="Checks passed" v={`${qc?.checks.ok ?? 0} ok · ${qc?.checks.failed ?? 0} flagged`} />
+          <QcStat k="Segments live" v={String(qc?.segments ?? 0)} />
+          <QcStat k="Output age" v={qc?.outputFreshMs != null ? `${Math.round(qc.outputFreshMs / 1000)}s` : '—'} />
+          <QcStat k="Dead air" v={qc?.silenceSinceMs ? `since ${fmtClock(new Date(qc.silenceSinceMs).toISOString())}` : 'none'} />
+        </div>
+
+        <div className="sec-label">Checks and issues</div>
+        {!qc?.issues?.length ? (
+          <div style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)' }}>
+            No issues. Playlist continuity, media sequence, timing (PDT) and audio level all pass.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 6 }}>
+            {qc.issues.slice(-12).reverse().map((i, n) => (
+              <div key={n} style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 'var(--fs-sm)' }}>
+                <span className="tag warn" style={{ fontSize: 'var(--fs-micro)' }}>{i.code}</span>
+                <span style={{ color: 'var(--muted)', flex: 1 }}>{i.message}</span>
+                <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-label)' }}>{fmtClock(new Date(i.at).toISOString())}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="sec-label">Recent events</div>
+        <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+          {(st.log || []).slice(0, 15).map((e, i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+              <span style={{ fontSize: 'var(--fs-micro)', fontWeight: 700, width: 46, flex: 'none', textTransform: 'uppercase', color: e.level === 'down' ? 'var(--down,#f87171)' : e.level === 'warn' ? 'var(--warn,#fbbf24)' : 'var(--faint)' }}>{e.level}</span>
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)', width: 74, flex: 'none' }}>{e.ts === 'encoder' ? 'encoder' : fmtClock(e.ts)}</span>
+              <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, width: 128, flex: 'none' }}>{e.title}</span>
+              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.detail}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function QcStat({ k, v }: { k: string; v: string }) {
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '8px 11px' }}>
+      <div style={{ fontSize: 'var(--fs-label)', letterSpacing: 'var(--ls-label)', textTransform: 'uppercase', color: 'var(--faint)' }}>{k}</div>
+      <div style={{ fontSize: 'var(--fs-h3)', fontWeight: 600, marginTop: 2 }}>{v}</div>
+    </div>
+  )
+}
 
 const GATE_COLOR: Record<string, string> = {
   idle: '#64748b', starting: '#fbbf24', ready: '#60a5fa', healthy: '#4ade80',
@@ -423,14 +535,14 @@ function PipelineStrip({ gates }: { gates: Gate[] }) {
         return (
           <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 6, flex: '1 1 130px' }}>
             <div title={g.detail} style={{ flex: 1, border: `1px solid ${color}55`, background: `${color}12`, borderRadius: 9, padding: '7px 10px', minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-label)', color: 'var(--muted)' }}>
                 <span className="dot-s" style={{ background: color }} />{g.label}
                 {g.billable && <span style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 9 }}>●</span>}
               </div>
-              <div style={{ fontWeight: 700, fontSize: 11.5, color, textTransform: 'uppercase' }}>{label}</div>
-              <div style={{ fontSize: 10.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.detail}</div>
+              <div style={{ fontWeight: 700, fontSize: 'var(--fs-xs)', color, textTransform: 'uppercase' }}>{label}</div>
+              <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.detail}</div>
             </div>
-            {i < gates.length - 1 && <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 12 }}>→</div>}
+            {i < gates.length - 1 && <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>→</div>}
           </div>
         )
       })}

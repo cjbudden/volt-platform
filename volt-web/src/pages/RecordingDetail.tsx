@@ -347,7 +347,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
       <div className="page-head" style={{ marginBottom: 10 }}>
         <div>
           <h1 style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>{rec.source_name || 'Recording'}
-            <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--faint)' }}>{KIND_LABEL[rec.kind] || rec.kind} · {fmtDate(domain.start)} {fmtClock(domain.start)} → {rec.end_epoch_ms != null ? fmtClock(domain.end) : 'recording…'}</span>
+            <span style={{ fontSize: 'var(--fs-body)', fontWeight: 400, color: 'var(--faint)' }}>{KIND_LABEL[rec.kind] || rec.kind} · {fmtDate(domain.start)} {fmtClock(domain.start)} → {rec.end_epoch_ms != null ? fmtClock(domain.end) : 'recording…'}</span>
           </h1>
           <p>{rec.title || 'Scrub with the keyboard, mark the range, cut the clip.'}</p>
         </div>
@@ -379,11 +379,11 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
             {tsLangs.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', maxHeight: 430 }}>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 10px', borderBottom: '1px solid var(--border)', flex: 'none' }}>
-                  <input className="inp ts-q" style={{ flex: 1, fontSize: 12.5, padding: '6px 9px' }} value={tsQ}
+                  <input className="inp ts-q" style={{ flex: 1, fontSize: 'var(--fs-sm)', padding: '6px 9px' }} value={tsQ}
                     onChange={e => setTsQ(e.target.value)}
                     placeholder="Search subtitles… (all words, any order)" />
                   {tsLangs.length > 1 && (
-                    <select className="inp" style={{ width: 64, fontSize: 12, padding: '6px 6px' }} value={tsLang} onChange={e => setTsLang(e.target.value)}>
+                    <select className="inp" style={{ width: 64, fontSize: 'var(--fs-sm)', padding: '6px 6px' }} value={tsLang} onChange={e => setTsLang(e.target.value)}>
                       <option value="">all</option>
                       {tsLangs.map(l => <option key={l} value={l}>{l}</option>)}
                     </select>
@@ -391,7 +391,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
                 </div>
                 <div ref={cueListRef} className="ts-hits" style={{ flex: 1, overflowY: 'auto' }}>
                   {cues.length === 0 ? (
-                    <div style={{ padding: '12px 12px', color: 'var(--faint)', fontSize: 12.5 }}>
+                    <div style={{ padding: '12px 12px', color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>
                       {tsQ.trim() ? `No spoken match for "${tsQ.trim()}".` : 'No subtitles in the loaded range.'}
                     </div>
                   ) : cues.map((m, i) => (
@@ -399,12 +399,12 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
                       style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '6px 10px', cursor: 'pointer',
                         borderLeft: i === activeCue ? '3px solid var(--brand)' : '3px solid transparent',
                         background: i === activeCue ? 'rgba(120,140,255,.12)' : 'transparent' }}>
-                      <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 11, color: 'var(--brand)', flex: 'none' }}>{fmtClock(m.tMs)}</span>
-                      <span style={{ fontSize: 12.5, flex: 1, color: i === activeCue ? 'var(--text,#fff)' : 'var(--muted)' }}>{m.text}</span>
+                      <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-label)', color: 'var(--brand)', flex: 'none' }}>{fmtClock(m.tMs)}</span>
+                      <span style={{ fontSize: 'var(--fs-sm)', flex: 1, color: i === activeCue ? 'var(--text,#fff)' : 'var(--muted)' }}>{m.text}</span>
                     </div>
                   ))}
                 </div>
-                <div style={{ padding: '5px 10px', borderTop: '1px solid var(--border)', fontSize: 10.5, color: 'var(--faint)', flex: 'none' }}>
+                <div style={{ padding: '5px 10px', borderTop: '1px solid var(--border)', fontSize: 'var(--fs-micro)', color: 'var(--faint)', flex: 'none' }}>
                   {tsMode === 'search' ? `${cues.length} match(es) across the recording — click to jump` : 'live transcript — click a line to jump there'}
                 </div>
               </div>
@@ -412,16 +412,16 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
           </div>
           {playerErr && <div className="err" style={{ marginTop: 6 }}>{playerErr}</div>}
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '8px 0 12px', flexWrap: 'wrap' }}>
-            <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 13 }}>
+            <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-body)' }}>
               <span style={{ color: 'var(--faint)' }}>Position </span>{playheadMs != null ? fmtClock(playheadMs) : '—'}
             </span>
-            <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 13 }}>
+            <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-body)' }}>
               <span style={{ color: 'var(--faint)' }}>In </span>{selFrom != null ? fmtClock(selFrom) : '—'}
               <span style={{ color: 'var(--faint)' }}> Out </span>{selTo != null ? fmtClock(selTo) : '—'}
               {selOk && <span style={{ color: 'var(--muted)' }}> ({fmtDur(selTo! - selFrom!)}{coveredMs < (selTo! - selFrom!) - 1500 ? `, ${fmtDur(coveredMs)} recorded` : ''})</span>}
             </span>
             <span style={{ flex: 1 }} />
-            <span style={{ fontSize: 11, color: 'var(--faint)' }}>
+            <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>
               <Kbd>space</Kbd> play/pause · <Kbd>←</Kbd><Kbd>→</Kbd> 10s · <Kbd>&lt;</Kbd><Kbd>&gt;</Kbd> frame · <Kbd>I</Kbd> in · <Kbd>O</Kbd> out
             </span>
           </div>
@@ -479,7 +479,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
             <button className="btn ghost" disabled={busy === 'download'} onClick={download}>{busy === 'download' ? '…' : 'Download MP4'}</button>
           </div>
           {actErr && <div className="err" style={{ marginTop: 8 }}>{actErr}</div>}
-          {msg && <div style={{ color: 'var(--ok,#3fbf6f)', fontSize: 13, marginTop: 8 }}>{msg}</div>}
+          {msg && <div style={{ color: 'var(--ok,#3fbf6f)', fontSize: 'var(--fs-body)', marginTop: 8 }}>{msg}</div>}
 
           {/* ------- clips already made from this recording ------- */}
           {vods.length > 0 && (
@@ -522,7 +522,7 @@ function BackRow({ onBack, name }: { onBack: () => void; name?: string }) {
 }
 
 function Kbd({ children }: { children: React.ReactNode }) {
-  return <span style={{ border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px', fontFamily: 'ui-monospace,monospace', fontSize: 10, margin: '0 1px' }}>{children}</span>
+  return <span style={{ border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px', fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-micro)', margin: '0 1px' }}>{children}</span>
 }
 
 /* The zoomable clipping timeline (waveform + metadata lane + scrub bar)
@@ -544,7 +544,7 @@ function RangeInput({ label, value, min, max, onChange }: {
   }
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ color: 'var(--faint)', fontSize: 12 }}>{label}</span>
+      <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>{label}</span>
       <input className="inp" style={{ width: 96, fontFamily: 'ui-monospace,monospace' }} value={text}
         onChange={e => setText(e.target.value)} onBlur={commit}
         onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />

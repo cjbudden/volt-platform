@@ -93,12 +93,12 @@ export function UploadIndicator() {
       {open && (
         <div className="card" style={{ position: 'absolute', right: 0, top: 42, width: 300, zIndex: 60, padding: 10, maxHeight: 340, overflow: 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-            <b style={{ fontSize: 13 }}>Uploads</b><span style={{ flex: 1 }} />
+            <b style={{ fontSize: 'var(--fs-body)' }}>Uploads</b><span style={{ flex: 1 }} />
             {u.failed > 0 && <button className="chip" onClick={retryFailed} style={{ padding: '3px 9px', marginRight: 6 }}>Retry failed</button>}
             <button className="chip" onClick={clearFinished} style={{ padding: '3px 9px' }}>Clear</button>
           </div>
           {u.jobs.slice().reverse().map(j => (
-            <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 2px', fontSize: 12 }}>
+            <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 2px', fontSize: 'var(--fs-sm)' }}>
               <span style={{ width: 16, textAlign: 'center' }}>{j.status === 'done' ? <span style={{ color: 'var(--live)' }}>✓</span> : j.status === 'error' ? <span style={{ color: 'var(--down)' }} title={j.error}>!</span> : j.status === 'uploading' ? <span className="dot-s warn" /> : '·'}</span>
               <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={j.error || j.name}>{j.name}</span>
               <span style={{ color: 'var(--faint)' }}>{j.folder || 'root'}</span>

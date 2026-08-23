@@ -240,7 +240,7 @@ export default function ClipTimeline({
     <div>
       {/* ---------- overview: the WHOLE recording + where you are ---------- */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-        <div style={{ fontSize: 10.5, color: 'var(--faint)', width: 58, flex: 'none' }}>
+        <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', width: 58, flex: 'none' }}>
           {dayOf(domain.start)}
         </div>
         <div
@@ -271,36 +271,36 @@ export default function ClipTimeline({
             background: 'rgba(90,220,150,.16)', border: '1px solid rgba(90,220,150,.8)', borderRadius: 4,
           }} />
         </div>
-        <div style={{ fontSize: 10.5, color: 'var(--faint)', width: 58, flex: 'none', textAlign: 'right' }}>
+        <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', width: 58, flex: 'none', textAlign: 'right' }}>
           {dayOf(domain.end)}
         </div>
       </div>
 
       {/* ---------- zoom controls ---------- */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: 'var(--faint)', marginRight: 2 }}>Zoom</span>
+        <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)', marginRight: 2 }}>Zoom</span>
         {PRESETS.map(([label, ms]) => (
           <button key={label} className={`chip ${Math.abs(VW - ms) / ms < 0.05 ? 'active' : ''}`}
-            style={{ padding: '3px 10px', fontSize: 11.5 }}
+            style={{ padding: '3px 10px', fontSize: 'var(--fs-xs)' }}
             disabled={ms > DW * 1.05}
             onClick={() => zoomTo(ms)}>{label}</button>
         ))}
-        <button className="chip" style={{ padding: '3px 10px', fontSize: 11.5 }}
+        <button className="chip" style={{ padding: '3px 10px', fontSize: 'var(--fs-xs)' }}
           onClick={() => setView({ start: domain.start, end: domain.end })}>Fit all</button>
         <div style={{ display: 'flex', gap: 4, marginLeft: 4 }}>
-          <button className="chip" style={{ padding: '3px 9px', fontSize: 11.5 }} title="Zoom out" onClick={() => zoomTo(VW * 2)}>−</button>
-          <button className="chip" style={{ padding: '3px 9px', fontSize: 11.5 }} title="Zoom in" onClick={() => zoomTo(VW / 2)}>+</button>
-          <button className="chip" style={{ padding: '3px 9px', fontSize: 11.5 }} title="Pan left" onClick={() => panBy(-VW / 3)}>◀</button>
-          <button className="chip" style={{ padding: '3px 9px', fontSize: 11.5 }} title="Pan right" onClick={() => panBy(VW / 3)}>▶</button>
+          <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title="Zoom out" onClick={() => zoomTo(VW * 2)}>−</button>
+          <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title="Zoom in" onClick={() => zoomTo(VW / 2)}>+</button>
+          <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title="Pan left" onClick={() => panBy(-VW / 3)}>◀</button>
+          <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title="Pan right" onClick={() => panBy(VW / 3)}>▶</button>
         </div>
         {from != null && to != null && to > from && (
-          <button className="chip" style={{ padding: '3px 10px', fontSize: 11.5 }}
+          <button className="chip" style={{ padding: '3px 10px', fontSize: 'var(--fs-xs)' }}
             title="Zoom to the current trim marks"
             onClick={() => { const pad = (to - from) * 0.25; setView({ start: Math.max(domain.start, from - pad), end: Math.min(domain.end, to + pad) }) }}>
             Zoom to marks
           </button>
         )}
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--faint)' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>
           showing {spanLabel(VW)} · {dayOf(view.start)} {clockOf(view.start, VW < 3600_000)} → {clockOf(view.end, VW < 3600_000)}
           {waveLoading ? ' · measuring audio…' : waveform?.mode === 'sampled' ? ' · sampled envelope' : ''}
         </span>
@@ -310,7 +310,7 @@ export default function ClipTimeline({
       <div style={{ position: 'relative', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: '#0b0f16' }}>
         <canvas ref={waveRef} style={{ width: '100%', height: 96, display: 'block' }} />
         {!waveform && (
-          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontSize: 11.5, color: 'var(--faint)', pointerEvents: 'none' }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontSize: 'var(--fs-xs)', color: 'var(--faint)', pointerEvents: 'none' }}>
             {waveLoading ? 'measuring audio…' : 'no audio measured for this window'}
           </div>
         )}
@@ -330,7 +330,7 @@ export default function ClipTimeline({
                 background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 5, cursor: 'pointer',
                 overflow: 'hidden', display: 'flex', alignItems: 'center', padding: '0 5px',
               }}>
-              <span style={{ fontSize: 10.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: c.fg }}>{p.title}</span>
+              <span style={{ fontSize: 'var(--fs-micro)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: c.fg }}>{p.title}</span>
             </div>
           )
         })}
@@ -373,12 +373,12 @@ export default function ClipTimeline({
       {/* ---------- ruler ---------- */}
       <div style={{ position: 'relative', height: 16, marginTop: 2 }}>
         {ticks.map(t => (
-          <div key={t.ms} style={{ position: 'absolute', left: pct(t.ms), transform: 'translateX(-50%)', fontSize: 10, color: t.major ? 'var(--muted)' : 'var(--faint)', whiteSpace: 'nowrap' }}>
+          <div key={t.ms} style={{ position: 'absolute', left: pct(t.ms), transform: 'translateX(-50%)', fontSize: 'var(--fs-micro)', color: t.major ? 'var(--muted)' : 'var(--faint)', whiteSpace: 'nowrap' }}>
             {t.label}
           </div>
         ))}
       </div>
-      <div style={{ fontSize: 10.5, color: 'var(--faint)', marginTop: 3 }}>
+      <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', marginTop: 3 }}>
         wheel = zoom · shift+wheel or alt+drag = pan · drag = mark in/out · click = seek · click a metadata item to trim to it
       </div>
     </div>

@@ -56,7 +56,7 @@ export default function Users() {
       <div className="filters">
         <FChip label="Users" n={users?.length ?? 0} on={tab === 'users'} onClick={() => setTab('users')} />
         <FChip label="User groups" n={groups?.length ?? 0} on={tab === 'groups'} onClick={() => setTab('groups')} />
-        {tab === 'users' && <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--faint)', alignSelf: 'center' }}>{activeN} active</span>}
+        {tab === 'users' && <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-sm)', color: 'var(--faint)', alignSelf: 'center' }}>{activeN} active</span>}
       </div>
 
       {tab === 'users' ? (
@@ -101,7 +101,7 @@ export default function Users() {
               {groups.map((g, i) => (
                 <tr key={g.id} onClick={() => setEditGroup(g)} style={{ cursor: 'pointer' }}>
                   <td><EntityCell name={g.name} sub={g.description || undefined} index={i} /></td>
-                  <td style={{ color: 'var(--muted)', fontSize: 12 }}>{permSummary(g.permissions, me)}</td>
+                  <td style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)' }}>{permSummary(g.permissions, me)}</td>
                   <td style={{ color: 'var(--muted)' }}>{g.member_count ?? 0}</td>
                   <td style={{ color: 'var(--muted)' }}>{fmtDate(g.created_at)}</td>
                   <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
@@ -118,7 +118,7 @@ export default function Users() {
         <div className="card" style={{ marginTop: 18, padding: 18 }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>How access works</div>
           {(me.model?.notes || []).map((n, i) => (
-            <div key={i} style={{ fontSize: 12.5, color: 'var(--faint)', marginTop: 4 }}>· {n}</div>
+            <div key={i} style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', marginTop: 4 }}>· {n}</div>
           ))}
         </div>
       )}
@@ -298,11 +298,11 @@ function GroupDrawer({ me, group, onClose, onDone }: {
           </div>
           {feats.map(f => (
             <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ flex: 1, fontSize: 13.5 }}>{FEATURE_LABEL[f] || f}</div>
+              <div style={{ flex: 1, fontSize: 'var(--fs-body)' }}>{FEATURE_LABEL[f] || f}</div>
               {(['none', 'view', 'manage'] as AccessLevel[]).map(lvl => (
                 <button key={lvl} type="button"
                   className={`chip ${perms[f] === lvl ? 'active' : ''}`}
-                  style={{ padding: '4px 12px', fontSize: 12 }}
+                  style={{ padding: '4px 12px', fontSize: 'var(--fs-sm)' }}
                   onClick={() => setPerms(p => ({ ...p, [f]: lvl }))}>
                   {lvl}
                 </button>

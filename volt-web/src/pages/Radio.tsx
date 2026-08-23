@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type RadioStationRow, type Group, type RadioCfg } from '../api'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
-import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, SEC, splitDuration, type RetUnit } from '../scaffold'
+import { PageHead, NewButton, FChip, EntityCell, StatusPill, Preset, RecordingSection, RET_UNIT_SEC, SEC, splitDuration, type RetUnit, type PipelineState } from '../scaffold'
 import { navigate } from '../router'
 import { thumbUrl } from '../api'
 
@@ -21,7 +21,7 @@ export const CLASS_CHIP: Record<string, { label: string; bg: string; fg: string 
 export function ClassChip({ cls }: { cls: string | null }) {
   const c = CLASS_CHIP[cls || ''] || null
   if (!c) return null
-  return <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: c.bg, color: c.fg, textTransform: 'uppercase', letterSpacing: '.04em' }}>{c.label}</span>
+  return <span style={{ fontSize: 'var(--fs-micro)', fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: c.bg, color: c.fg, textTransform: 'uppercase', letterSpacing: '.04em' }}>{c.label}</span>
 }
 
 /** Audio-valid source protocols only (the point of a radio form). */
@@ -38,26 +38,17 @@ const SIGNAL: Record<string, { label: string; color: string }> = {
 export function SignalChip({ verdict }: { verdict?: string }) {
   const s = SIGNAL[verdict || 'unknown'] ?? SIGNAL.unknown
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-sm)' }}>
       <span style={{ width: 8, height: 8, borderRadius: 999, background: s.color }} />
       <span style={{ color: 'var(--muted)' }}>{s.label}</span>
     </span>
   )
 }
 
-/** Roll-up state badge shared with the detail page (mirrors the channels list). */
+/** Roll-up state badge — delegates to the ONE platform definition so a station
+ *  and a channel in the same state always look and read the same. */
 export function StateTag({ state, onAir, sub }: { state?: string; onAir?: boolean; sub?: string }) {
-  const MAP: Record<string, { label: string; cls: string }> = {
-    onair: { label: 'On air', cls: 'live' },
-    ready: { label: 'Ready (private)', cls: 'sched' },
-    starting: { label: 'Starting', cls: 'sched' },
-    degraded: { label: 'Degraded', cls: 'warn' },
-    error: { label: 'Error', cls: 'down' },
-    stopped: { label: 'Stopped', cls: 'idle' },
-    idle: { label: 'Off', cls: 'idle' },
-  }
-  const m = MAP[state ?? (onAir ? 'onair' : 'idle')] ?? MAP.idle
-  return <StatusTag label={m.label} cls={m.cls} sub={sub} />
+  return <StatusPill state={(state ?? (onAir ? 'onair' : 'idle')) as PipelineState} sub={sub} />
 }
 
 export default function Radio() {
@@ -130,7 +121,7 @@ export default function Radio() {
             <FChip label="All" n={counts.all} on={filter === 'all'} onClick={() => setFilter('all')} />
             <FChip label="Running" n={counts.onair + counts.running} on={filter === 'live'} onClick={() => setFilter('live')} />
             <FChip label="Off" n={counts.off} on={filter === 'off'} onClick={() => setFilter('off')} />
-            <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--faint)', alignSelf: 'center' }}>{counts.onair} on air</span>
+            <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-sm)', color: 'var(--faint)', alignSelf: 'center' }}>{counts.onair} on air</span>
           </div>
           <div className="card">
             <table>
@@ -152,7 +143,7 @@ export default function Radio() {
                         ) : <span style={{ color: 'var(--faint)' }}>—</span>}
                       </td>
                       <td>{live ? <SignalChip verdict={r.signal} /> : <span style={{ color: 'var(--faint)' }}>—</span>}</td>
-                      <td style={{ color: 'var(--muted)', fontSize: 12 }}>{outs} · {r.radio_config?.bitrateKbps ?? 128}k</td>
+                      <td style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)' }}>{outs} · {r.radio_config?.bitrateKbps ?? 128}k</td>
                       <td><StateTag state={r.pipelineState} onAir={r.onAir}
                         sub={live && r.pipeline.running ? `${r.pipeline.listeners ?? 0} listener${(r.pipeline.listeners ?? 0) === 1 ? '' : 's'}` : undefined} /></td>
                       <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>

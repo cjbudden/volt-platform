@@ -258,14 +258,14 @@ function GlobalSearch() {
         onChange={e => { setQ(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)} />
       {open && q.trim() && (
         <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 10, boxShadow: '0 10px 30px rgba(0,0,0,.45)', zIndex: 70, overflow: 'hidden', maxHeight: 360, overflowY: 'auto' }}>
-          {hits === null ? <div style={{ padding: '10px 12px', color: 'var(--faint)', fontSize: 13 }}>Searching…</div>
-            : hits.length === 0 ? <div style={{ padding: '10px 12px', color: 'var(--faint)', fontSize: 13 }}>No matches for “{q.trim()}”.</div>
+          {hits === null ? <div style={{ padding: '10px 12px', color: 'var(--faint)', fontSize: 'var(--fs-body)' }}>Searching…</div>
+            : hits.length === 0 ? <div style={{ padding: '10px 12px', color: 'var(--faint)', fontSize: 'var(--fs-body)' }}>No matches for “{q.trim()}”.</div>
             : hits.map(h => (
               <div key={h.kind + h.id} onClick={() => go(h)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer', borderTop: '1px solid var(--border)' }}
                 onMouseDown={e => e.preventDefault()}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--brand)', width: 68, flex: 'none', textTransform: 'uppercase' }}>{KIND[h.kind] || h.kind}</span>
+                <span style={{ fontSize: 'var(--fs-micro)', fontWeight: 700, color: 'var(--brand)', width: 68, flex: 'none', textTransform: 'uppercase' }}>{KIND[h.kind] || h.kind}</span>
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.name}</span>
-                {h.sub && <span style={{ fontSize: 11, color: 'var(--faint)' }}>{h.sub}</span>}
+                {h.sub && <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>{h.sub}</span>}
               </div>
             ))}
         </div>

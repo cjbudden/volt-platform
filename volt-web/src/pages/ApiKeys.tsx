@@ -98,7 +98,7 @@ export default function ApiKeys() {
                         <tr key={a.id} onClick={() => setEditing(a)} style={{ cursor: 'pointer' }}>
                           <td><EntityCell name={a.name} sub={restrictionSummary(a)} index={i} /></td>
                           <td><span className="tag type chan">{TYPE_LABEL[a.type] || a.type}</span></td>
-                          <td style={{ color: 'var(--muted)', fontFamily: 'ui-monospace,monospace', fontSize: 12 }}>
+                          <td style={{ color: 'var(--muted)', fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)' }}>
                             {ak.length ? ak.map(k => k.key_prefix + '…').join(', ') : '—'}
                           </td>
                           <td style={{ color: 'var(--muted)' }}>{reqs.toLocaleString()}</td>
@@ -121,7 +121,7 @@ export default function ApiKeys() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div>
                 <div style={{ fontWeight: 700 }}>Account secret keys</div>
-                <div style={{ fontSize: 12.5, color: 'var(--faint)', marginTop: 3 }}>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', marginTop: 3 }}>
                   Server-to-server credentials (sk_…, management scope) with the same access as an admin session. Keep them out of frontend code.
                 </div>
               </div>
@@ -179,18 +179,18 @@ function KeyOnceModal({ title, k, onClose }: { title: string; k: MintedKey; onCl
   return (
     <div className="drawer-scrim" onClick={onClose} style={{ display: 'grid', placeItems: 'center' }}>
       <div className="card" onClick={e => e.stopPropagation()} style={{ width: 520, padding: 22 }}>
-        <div style={{ fontWeight: 700, fontSize: 16 }}>{title}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--warn,#fbbf24)', margin: '8px 0 12px' }}>
+        <div style={{ fontWeight: 700, fontSize: 'var(--fs-h2)' }}>{title}</div>
+        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--warn,#fbbf24)', margin: '8px 0 12px' }}>
           Copy it now: for security only a fingerprint is stored, so this full key is shown once and cannot be retrieved again.
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <input className="inp" readOnly value={k.key} style={{ fontFamily: 'ui-monospace,monospace', fontSize: 12.5 }}
+          <input className="inp" readOnly value={k.key} style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)' }}
             onFocus={e => e.currentTarget.select()} />
           <button className="btn primary" onClick={async () => { try { await navigator.clipboard.writeText(k.key) } catch {} setCopied(true); setTimeout(() => setCopied(false), 1500) }}>
             {copied ? 'Copied ✓' : 'Copy'}
           </button>
         </div>
-        <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 10 }}>
+        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', marginTop: 10 }}>
           Kind: {k.kind} · scopes: {(k.scopes || []).join(', ')} · prefix on record: <span style={{ fontFamily: 'ui-monospace,monospace' }}>{k.key_prefix}…</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
@@ -282,13 +282,13 @@ function AppDrawer({ app, onClose, onDone }: { app?: AppReg; onClose: () => void
           {type === 'web' ? (
             <div className="field"><label>Allowed origins <span style={{ color: 'var(--faint)' }}>— one per line, blank = any</span></label>
               <textarea className="inp" rows={3} value={origins} onChange={e => setOrigins(e.target.value)}
-                placeholder={'https://watch.example.com\n*.example.com'} style={{ resize: 'vertical', fontFamily: 'ui-monospace,monospace', fontSize: 12.5 }} />
+                placeholder={'https://watch.example.com\n*.example.com'} style={{ resize: 'vertical', fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)' }} />
               <div className="hintxt">The publishable key only answers requests whose Origin/Referer matches. Wildcards like *.example.com are supported.</div>
             </div>
           ) : type === 'server' ? (
             <div className="field"><label>IP allow-list <span style={{ color: 'var(--faint)' }}>— one per line, blank = any</span></label>
               <textarea className="inp" rows={3} value={ips} onChange={e => setIps(e.target.value)}
-                placeholder={'203.0.113.10\n203.0.113.11'} style={{ resize: 'vertical', fontFamily: 'ui-monospace,monospace', fontSize: 12.5 }} />
+                placeholder={'203.0.113.10\n203.0.113.11'} style={{ resize: 'vertical', fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)' }} />
             </div>
           ) : (
             <div className="hintxt" style={{ marginBottom: 8 }}>Mobile and TV apps are bound by device attestation (App Attest / Play Integrity) handled by the client SDK; no manual restriction needed here.</div>

@@ -2,7 +2,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// https://vite.dev/config/
+// STYLING: Tailwind utilities + our design tokens as ONE system.
+// src/index.css imports Tailwind's theme and utilities layers and feeds it our
+// tokens via @theme, so `text-body`, `bg-panel`, `text-muted` resolve to the
+// same values as the semantic component classes. See DESIGN_SYSTEM.md.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {

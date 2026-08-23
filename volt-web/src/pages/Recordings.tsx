@@ -91,7 +91,7 @@ export default function Recordings() {
                       <td><EntityCell name={r.source_name || 'Recording'} sub={r.title || undefined} index={i} /></td>
                       <td>
                         <span className={`tag type ${r.kind === 'event' ? 'event' : 'chan'}`}>{KIND_LABEL[r.kind] || r.kind}</span>
-                        {r.matched_by && <div style={{ fontSize: 10, color: 'var(--brand)', marginTop: 3 }}>{MATCH_LABEL[r.matched_by] || r.matched_by}</div>}
+                        {r.matched_by && <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--brand)', marginTop: 3 }}>{MATCH_LABEL[r.matched_by] || r.matched_by}</div>}
                       </td>
                       <td style={{ color: 'var(--muted)' }}>{fmtDate(start)} {fmtClock(start)} → {end != null ? fmtClock(end) : '…'}</td>
                       <td style={{ color: 'var(--muted)' }}>{end != null ? fmtDur(end - start) : fmtDur(Date.now() - start)}</td>
