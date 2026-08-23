@@ -291,3 +291,116 @@ export function stopIcyCapture(channelId: string): void {
 export function icyState(channelId: string): IcyState | null {
   return captures.get(channelId)?.state ?? null;
 }
+
+/* ============================================================================
+   PROBE — read a source's metadata ONCE, before it is ever used.
+
+   The settings form needs the answer to "what does this URL say it is?" while
+   the operator is still typing it: the station's own name, genre, homepage,
+   bitrate, codec, what is playing right now, and any artwork URL it publishes.
+   That is exactly what an Icecast mount announces in its ICY headers and its
+   first interleaved metadata block, so we ask for it, take one block, and hang
+   up. Nothing is stored and no pipeline is started — the operator decides which
+   of these values to keep.
+
+   Bounded on purpose: one metadata block, a hard timeout, and a cap on bytes
+   read, because an unbounded read of a live stream never ends.
+   ========================================================================== */
+export interface IcyProbe {
+  ok: boolean;
+  url: string;             // after playlist (.m3u/.pls) resolution
+  resolved: boolean;       // the URL we were given pointed at a playlist
+  error: string | null;
+  station: { name?: string; genre?: string; url?: string; bitrateKbps?: number; contentType?: string; description?: string; public?: boolean };
+  nowPlaying: string | null;
+  streamUrl: string | null;   // StreamUrl from the metadata block
+  artworkUrl: string | null;  // streamUrl when it points at an image
+  hasMetadata: boolean;       // the mount interleaves ICY metadata at all
+  metaIntervalBytes: number | null;
+}
+
+const IMAGE_RE = /\.(png|jpe?g|gif|webp|avif)(\?|$)/i;
+
+export async function probeIcySource(rawUrl: string, timeoutMs = 8000): Promise<IcyProbe> {
+  const out: IcyProbe = {
+    ok: false, url: rawUrl, resolved: false, error: null, station: {},
+    nowPlaying: null, streamUrl: null, artworkUrl: null,
+    hasMetadata: false, metaIntervalBytes: null,
+  };
+  let url: string;
+  try {
+    url = await resolveStreamUrl(rawUrl);
+  } catch { url = rawUrl; }
+  out.url = url;
+  out.resolved = url !== rawUrl;
+
+  await new Promise<void>((done) => {
+    let settled = false;
+    const finish = (err?: string) => {
+      if (settled) return;
+      settled = true;
+      if (err) out.error = err;
+      clearTimeout(timer);
+      try { req?.destroy(); } catch { /* ignore */ }
+      done();
+    };
+    const timer = setTimeout(() => finish(out.ok ? null as any : 'timed out waiting for the stream'), timeoutMs);
+    const lib = url.startsWith('https') ? https : http;
+    const req = lib.get(url, {
+      headers: { 'Icy-MetaData': '1', 'User-Agent': 'VOLT-Radio/1.0', Accept: '*/*' },
+    }, (res) => {
+      const h = res.headers as Record<string, string>;
+      if (res.statusCode && res.statusCode >= 400) { finish(`server answered ${res.statusCode}`); return; }
+      out.ok = true;
+      out.station = {
+        name: h['icy-name'] || undefined,
+        genre: h['icy-genre'] || undefined,
+        url: h['icy-url'] || undefined,
+        bitrateKbps: h['icy-br'] ? parseInt(String(h['icy-br']), 10) : undefined,
+        contentType: h['content-type'] || undefined,
+        description: h['icy-description'] || undefined,
+        public: h['icy-pub'] != null ? String(h['icy-pub']) === '1' : undefined,
+      };
+      const metaint = parseInt(String(h['icy-metaint'] || '0'), 10);
+      out.metaIntervalBytes = metaint || null;
+      out.hasMetadata = metaint > 0;
+      if (!metaint) { finish(); return; }        // headers only: still a useful answer
+
+      // Skip one metadata interval of audio, then read exactly one block.
+      let audioLeft = metaint, metaNeed = 0, read = 0;
+      let metaBuf: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => {
+        read += chunk.length;
+        if (read > metaint * 3 + 65536) { finish(); return; }   // hard byte cap
+        let i = 0;
+        while (i < chunk.length) {
+          if (metaNeed > 0) {
+            const take = Math.min(metaNeed, chunk.length - i);
+            metaBuf.push(chunk.subarray(i, i + take));
+            metaNeed -= take; i += take;
+            if (metaNeed === 0) {
+              const text = Buffer.concat(metaBuf).toString('utf8').replace(/\0+$/g, '');
+              const parsed = parseIcyBlock(text);
+              out.nowPlaying = parsed.title;
+              out.streamUrl = parsed.streamUrl;
+              out.artworkUrl = parsed.streamUrl && IMAGE_RE.test(parsed.streamUrl) ? parsed.streamUrl : null;
+              finish();
+              return;
+            }
+          } else if (audioLeft === 0) {
+            metaNeed = chunk[i] * 16; i += 1;
+            if (metaNeed === 0) audioLeft = metaint;   // empty block: nothing changed
+          } else {
+            const skip = Math.min(audioLeft, chunk.length - i);
+            audioLeft -= skip; i += skip;
+          }
+        }
+      });
+      res.on('error', (e: Error) => finish(e.message));
+      res.on('end', () => finish());
+    });
+    req.on('error', (e: Error) => finish(e.message));
+    req.setTimeout(timeoutMs, () => finish('timed out connecting'));
+  });
+  return out;
+}

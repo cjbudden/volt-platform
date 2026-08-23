@@ -3,6 +3,7 @@ import { api, type RadioStationRow, type Group, type RadioCfg } from '../api'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { PageHead, NewButton, FChip, EntityCell, StatusPill, Preset, RecordingSection, RET_UNIT_SEC, splitDuration, type RetUnit, type PipelineState } from '../scaffold'
+import { SourceMetadataButton } from '../SourceMetadata'
 import { navigate } from '../router'
 import { thumbUrl } from '../api'
 
@@ -286,6 +287,20 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
 
           <div className="sec-label">Source</div>
           <SourceInput protocols={radioProtocols} value={primary} onChange={setPrimary} label="Audio source" />
+          {/* The stream already announces its name, genre, bitrate, codec and
+              often a logo. Read it here and adopt what is useful, rather than
+              retyping it from the station's website. */}
+          <div className="flex items-center gap-2" style={{ marginTop: 8 }}>
+            <SourceMetadataButton url={primary.url} targets={{
+              onName: (v) => setName(v),
+              onArtwork: (v) => setArtRef(v),
+              onBitrate: (v) => setBitrate(v),
+              onUrl: (v) => setPrimary(p => ({ ...p, url: v })),
+            }} />
+            <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
+              Reads the stream's own name, genre, bitrate and artwork. Nothing is saved until you apply it.
+            </span>
+          </div>
           {isIcecast && <div className="hintxt">Icecast mounts carry now-playing (ICY) metadata: enable the log below to capture it.</div>}
 
           <div className="sec-label">Outputs — single bitrate</div>

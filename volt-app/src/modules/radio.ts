@@ -20,7 +20,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
 import { orchestrator } from '../services/orchestrator';
 import { radioStatus } from '../services/radio/pipeline';
-import { icyState } from '../services/radio/icyMeta';
+import { icyState, probeIcySource } from '../services/radio/icyMeta';
 import { radioLevels } from '../services/radio/monitor';
 import { loadRadioHealth, radioEventLog, radioQc, radioStatusBoard, radioHasValidContent } from '../services/radio/detail';
 import { writeAudit, actor } from '../services/audit';
@@ -58,6 +58,24 @@ function publicUrls(id: string, cfg: any) {
     dash: outs.dash ? `/live/${id}/manifest.mpd` : null,
   };
 }
+
+/**
+ * PROBE a source URL before it is saved — "what does this stream say it is?"
+ *
+ * The settings form calls this while the operator is still typing the URL, so
+ * they can see the station's own name, genre, homepage, bitrate, codec, what is
+ * playing and any artwork it publishes, and choose which of those to adopt
+ * rather than retyping them. Nothing is written and no pipeline starts: this
+ * reads the ICY headers plus one metadata block and hangs up.
+ *
+ * It is registered BEFORE '/:id' so the literal path wins over the parameter.
+ */
+radioRouter.post('/probe', asyncHandler(async (req, res) => {
+  const body = z.object({ url: z.string().min(4) }).parse(req.body);
+  const url = body.url.trim();
+  if (!/^https?:\/\//i.test(url)) throw badRequest('Source URL must start with http:// or https://');
+  res.json(await probeIcySource(url));
+}));
 
 radioRouter.get('/', asyncHandler(async (req, res) => {
   const rows = await query<any>(

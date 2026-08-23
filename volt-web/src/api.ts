@@ -198,6 +198,21 @@ export interface RecordingSourceQuery {
   recordingNow?: '1' | '0'
 }
 
+
+/** What a source URL says about itself, read before anything is saved. */
+export interface IcyProbe {
+  ok: boolean
+  url: string
+  resolved: boolean
+  error: string | null
+  station: { name?: string; genre?: string; url?: string; bitrateKbps?: number; contentType?: string; description?: string; public?: boolean }
+  nowPlaying: string | null
+  streamUrl: string | null
+  artworkUrl: string | null
+  hasMetadata: boolean
+  metaIntervalBytes: number | null
+}
+
 export const api = {
   login: (email: string, password: string) =>
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
@@ -303,6 +318,9 @@ export const api = {
   /** Sources roll-up: one row per channel / radio station / event that has
    *  recordings. Sorting and filtering are server-side because the counts and
    *  the available range are computed in SQL. */
+  /** Ask a source URL what it is, before saving it. Nothing is written. */
+  probeRadioSource: (url: string): Promise<IcyProbe> =>
+    req('/radio/probe', { method: 'POST', body: JSON.stringify({ url }) }),
   recordingSources: (p: RecordingSourceQuery = {}): Promise<RecordingSourcesFeed> => {
     const qs = new URLSearchParams()
     for (const [k, v] of Object.entries(p)) if (v != null && v !== '') qs.set(k, String(v))
