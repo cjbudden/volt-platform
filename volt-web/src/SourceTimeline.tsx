@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type TimelineFeed, type DaypartStrip, type TimelineProgramme, type ChannelWaveform } from './api'
+import { api, type TimelineFeed, type DaypartStrip, type TimelineProgramme, type ChannelWaveform, type ThumbStrip } from './api'
 
 /* ============================================================================
    THE THREE-LANE TIMELINE
@@ -75,6 +75,7 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
   const [sel, setSel] = useState<TimelineSelection | null>(null)
   const [hover, setHover] = useState<number | null>(null)
   const [wave, setWave] = useState<ChannelWaveform | null>(null)
+  const [strip, setStrip] = useState<ThumbStrip | null>(null)
   const waveRef = useRef<HTMLCanvasElement | null>(null)
   const railRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ mode: 'select' | 'pan'; x: number; from: number; to: number } | null>(null)
@@ -167,6 +168,47 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
     return () => { dead = true; timers.forEach(clearTimeout) }
     /* eslint-disable-next-line */
   }, [channelId, feed?.kind, win?.from, win?.to])
+
+  // THE FILMSTRIP, for video sources. The same job the waveform does for audio:
+  // a flat block says a recording exists, a strip of frames says WHICH recording
+  // and where the cut points are. Frame count follows the width actually drawn,
+  // so it never asks for more pictures than can be seen.
+  useEffect(() => {
+    if (!win || !feed || feed.kind !== 'video') { setStrip(null); return }
+    let dead = false
+    const timers: number[] = []
+    const attempt = (n: number) => {
+      const h = window.setTimeout(async () => {
+        if (dead) return
+        const px = railRef.current?.clientWidth ?? 900
+        // One frame per 160px: the width of a 16:9 frame at the lane's height.
+        const count = Math.max(2, Math.min(40, Math.floor(px / 160)))
+        try {
+          const s = await api.channelThumbs(channelId, win.from, win.to, count)
+          if (!dead) setStrip(s)
+        } catch {
+          if (!dead && n < 4) attempt(n + 1)
+        }
+      }, n === 0 ? 300 : 500 * 2 ** n)
+      timers.push(h)
+    }
+    attempt(0)
+    return () => { dead = true; timers.forEach(clearTimeout) }
+    /* eslint-disable-next-line */
+  }, [channelId, feed?.kind, win?.from, win?.to])
+
+  // Frames still being extracted arrive on a later pass, same as the waveform.
+  useEffect(() => {
+    if (!strip || strip.complete || !win) return
+    const h = setTimeout(async () => {
+      const px = railRef.current?.clientWidth ?? 900
+      const count = Math.max(2, Math.min(40, Math.floor(px / 160)))
+      try { setStrip(await api.channelThumbs(channelId, win.from, win.to, count, false)) }
+      catch { /* ignore */ }
+    }, 1500)
+    return () => clearTimeout(h)
+    /* eslint-disable-next-line */
+  }, [strip?.complete, strip?.pending])
 
   // A wide window answers from the peak cache and reports what is still
   // missing; the server primes the rest in the background, so poll briefly
@@ -310,6 +352,7 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
   const programmes = feed?.programmes ?? []
   const atCursor = hover ?? null
   const isAudio = feed?.kind === 'audio'
+  const isVideo = feed?.kind === 'video'
 
   if (err) return <div className="err">{err}</div>
   if (!feed || !win) return <div className="loading">Loading timeline…</div>
@@ -341,7 +384,7 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
              For audio this is the WAVEFORM, which is the whole point of the lane
              on a radio source: it shows where to cut. For video it stays run
              blocks until keyframe thumbnails land. */}
-        <Lane label={isAudio ? 'Audio' : 'Media'} tall={isAudio}>
+        <Lane label={isAudio ? 'Audio' : isVideo ? 'Video' : 'Media'} tall={isAudio || isVideo}>
           {/* The lane is drawn as GAP-BY-DEFAULT and filled where media exists,
               so a hole is visible rather than implied. */}
           <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(45deg,rgba(148,163,184,.07) 0 6px,transparent 6px 12px)' }} />
@@ -366,6 +409,34 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
               position: 'absolute', inset: 0, width: '100%', height: '100%',
               display: 'block', pointerEvents: 'none',
             }} />
+          )}
+          {/* THE FILMSTRIP. Each frame is placed at the instant it was actually
+              taken from, not at the slot it was asked for: a frame from four
+              seconds away is still an honest picture of a different moment, and
+              putting it where it came from is what keeps the lane truthful. */}
+          {isVideo && strip && strip.thumbs.map((th, i) => th && (
+            <img key={`${th.runId}-${th.seq}`} src={th.url} alt=""
+              title={fmtFull.format(th.t)}
+              style={{
+                position: 'absolute', top: 3, bottom: 3,
+                left: `${msToPct(th.t)}%`,
+                // Width is the SLOT this frame stands for, not the frame's own
+                // aspect ratio. Sized by aspect the frames sat at their own
+                // times with lane showing through between them, which reads as
+                // gaps in the recording where there are none. Sized by slot they
+                // tile, and the picture covers exactly the time it represents.
+                width: `${(strip.slotMs / Math.max(1, spanMs)) * 100}%`,
+                height: 'calc(100% - 6px)',
+                objectFit: 'cover', pointerEvents: 'none',
+                borderLeft: i === 0 ? 'none' : '1px solid rgba(0,0,0,.35)',
+              }} />
+          ))}
+          {isVideo && strip && !strip.complete && (
+            <div style={{
+              position: 'absolute', right: 6, top: 3, fontSize: 'var(--fs-micro)',
+              color: 'var(--faint)', background: 'rgba(0,0,0,.45)', padding: '1px 5px',
+              borderRadius: 4, pointerEvents: 'none',
+            }}>extracting… {strip.pending} left</div>
           )}
           {isAudio && wave && !wave.complete && (
             <div style={{

@@ -21,6 +21,7 @@ import { plan } from '../services/clips/extract';
 import { isAudioOnly, recordingSpans } from '../services/localRecordingIndex';
 import { containersInRange, daysForChannel } from '../services/containers';
 import { waveform, primeWaveformCache, isPriming } from '../services/waveform';
+import { thumbStrip, primeThumbs, isThumbPriming } from '../services/thumbs';
 import {
   DAYPART_PRESETS, applyPreset, getDayparts, setDayparts, validateDayparts,
   stripsInRange, channelDayConfig, presetById,
@@ -206,6 +207,32 @@ timelineRouter.get('/:id/waveform', asyncHandler(async (req, res) => {
     priming: isPriming(ch.id),
     buckets: wf.buckets,
   });
+}));
+
+/**
+ * THUMBNAILS for a window: the video half of the media lane.
+ *
+ * The counterpart to /waveform, and for the same reason. On a video source a
+ * flat block only says a recording exists; a filmstrip says WHICH recording, and
+ * where the cut points are: the studio going to the pitch, the titles rolling,
+ * the goal. Frames come from segment keyframes, which are free to reach because
+ * the encoder forces one on every segment boundary, so every segment decodes
+ * alone.
+ *
+ * Slot count follows the frames the caller can actually fit, so it never
+ * extracts more pictures than can be seen.
+ */
+timelineRouter.get('/:id/thumbs', asyncHandler(async (req, res) => {
+  const ch = await ownedChannel(req);
+  const q = windowQuery.extend({
+    count: z.coerce.number().int().min(2).max(60).default(12),
+    prime: z.enum(['0', '1']).optional(),
+  }).parse(req.query);
+  checkWindow(q.from, q.to);
+
+  const strip = await thumbStrip(ch.id, q.from, q.to, q.count);
+  if (q.prime === '1' && !strip.complete) primeThumbs(ch.id, q.from, q.to);
+  res.json({ ...strip, priming: isThumbPriming(ch.id) });
 }));
 
 // ---------------------------------------------------------------- dayparts

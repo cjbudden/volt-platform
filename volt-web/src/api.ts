@@ -480,6 +480,9 @@ export const api = {
 
   recordingDownload: (id: string): Promise<{ status: 'exporting' | 'ready'; url?: string; message?: string }> =>
     req(`/recordings/${id}/download`),
+  /** Keyframe thumbnails across a window: the video half of the media lane. */
+  channelThumbs: (id: string, from: number, to: number, count: number, prime = true): Promise<ThumbStrip> =>
+    req(`/channels/${id}/thumbs?from=${Math.round(from)}&to=${Math.round(to)}&count=${count}${prime ? '&prime=1' : ''}`),
   /** What a finished clip was built from, back to the physical segments. */
   clipProvenance: (assetId: string): Promise<ClipProvenance> => req(`/vod/${assetId}/provenance`),
   /** The reverse: what a capture produced, and whether it is safe to prune. */
@@ -876,6 +879,25 @@ export interface RetentionRuleRow {
 export interface SweepPreview {
   dryRun: boolean; considered: number; cooled: number; archived: number
   deleted: number; skippedOnHold: number; failed: number; unavailable: number
+}
+
+/** One frame of the video media lane's filmstrip. */
+export interface Thumb {
+  /** The instant the frame is actually FROM, not the slot it was asked for. */
+  t: number
+  url: string
+  runId: string
+  seq: number
+}
+export interface ThumbStrip {
+  streamId: string
+  from: number; to: number
+  slotMs: number
+  width: number; height: number
+  complete: boolean
+  pending: number
+  priming: boolean
+  thumbs: (Thumb | null)[]
 }
 
 export interface VodAssetRow {
