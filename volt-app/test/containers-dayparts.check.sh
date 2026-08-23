@@ -55,6 +55,34 @@ RADIO_KIND=$($PSQL "
    WHERE c.radio_config IS NOT NULL")
 check "and are still STORED as channel_day" "$RADIO_KIND" "channel_day"
 
+# ---- 1b. a recording opened while the server runs gets filed ---------------
+# Filing used to happen only at boot, so a recording opened at 09:00 stayed
+# unfiled until the next restart: invisible to every question asked by broadcast
+# day. The orchestrator now files on its tick, and this waits for that to happen
+# rather than asserting the function in isolation, because the wiring is the part
+# that was missing.
+TESTCH=$($PSQL "
+  SELECT c.id FROM channels c
+    JOIN groups g ON g.id = c.group_id JOIN accounts a ON a.id = g.account_id
+   WHERE a.name='AdminCo' LIMIT 1")
+NOWMS=$($PSQL "SELECT (extract(epoch from now())*1000)::bigint")
+NEWREC=$($PSQL "
+  INSERT INTO recordings(kind, channel_id, day_utc, status, hi_res_rendition, master_key,
+                         start_epoch_ms, end_epoch_ms, duration_ms)
+  VALUES ('channel_day', '$TESTCH', (now() at time zone 'utc')::date + 400, 'complete', '720p',
+          'test/unfiled', $NOWMS, $NOWMS + 1000, 1000)
+  RETURNING id" | head -1)
+FILED=no
+for _ in $(seq 1 22); do
+  HAS=$($PSQL "SELECT count(*) FROM recordings WHERE id='$NEWREC' AND container_id IS NOT NULL")
+  [ "$HAS" = "1" ] && { FILED=yes; break; }
+  sleep 2
+done
+check "a recording opened while the server runs is filed on the tick" "$FILED" "yes"
+NEWTYPE=$($PSQL "SELECT count(*) FROM recordings WHERE id='$NEWREC' AND recording_type IS NOT NULL")
+check "and is given its recording type" "$NEWTYPE" "1"
+$PSQL "DELETE FROM recordings WHERE id='$NEWREC'" > /dev/null
+
 # ---- 2. containers freeze their clock --------------------------------------
 FROZEN=$($PSQL "SELECT count(*) FROM recording_containers WHERE tz IS NULL OR anchor_hour IS NULL")
 check "every container froze its tz and anchor" "$FROZEN" "0"

@@ -448,6 +448,10 @@ export const api = {
     req(`/recordings/${id}/publish`, { method: 'POST', body: JSON.stringify({ title }) }),
   recordingDownload: (id: string): Promise<{ status: 'exporting' | 'ready'; url?: string; message?: string }> =>
     req(`/recordings/${id}/download`),
+  /** What a finished clip was built from, back to the physical segments. */
+  clipProvenance: (assetId: string): Promise<ClipProvenance> => req(`/vod/${assetId}/provenance`),
+  /** The reverse: what a capture produced, and whether it is safe to prune. */
+  recordingDerived: (id: string): Promise<DerivedAssets> => req(`/recordings/${id}/derived`),
 
   fileFolders: (): Promise<{ folders: { path: string; name: string; count: number }[] }> => req('/files/folders'),
   createFolder: (path: string): Promise<{ path: string }> => req('/files/folders', { method: 'POST', body: JSON.stringify({ path }) }),
@@ -786,6 +790,56 @@ export interface VodAssetRow {
   recording_id: string | null; start_epoch_ms: number | string; end_epoch_ms: number | string
   duration_ms: number | string | null; output_kind?: string | null
   thumb_status?: string | null; created_at: string
+  /** Written when the clip is built, from the same resolution that produced the
+   *  media. Absent on assets made before provenance was recorded. */
+  source_block_count?: number | null; source_run_count?: number | null
+  source_container_count?: number | null; source_segment_count?: number | null
+  source_coverage_pct?: number | string | null; build_strategy?: string | null
+}
+
+/** One contiguous stretch of source media inside a finished clip. */
+export interface ProvenanceBlock {
+  ordinal: number
+  runId: string
+  blockIndex: number
+  rendition: string
+  segments: { first: number; last: number; count: number }
+  source: { fromMs: number; toMs: number }
+  clip: { offsetMs: number; durationMs: number }
+  trimmed: { head: boolean; tail: boolean }
+  recording: { id: string; title: string | null; status: string } | null
+  container: { id: string; day: string; tz: string } | null
+  /** False once retention has taken the source media away: the clip still plays,
+   *  but it can no longer be re-cut at a different length. */
+  sourceMediaPresent: boolean
+}
+
+export interface ClipProvenance {
+  assetId: string
+  title: string | null
+  streamId: string | null
+  requested: { fromMs: number; toMs: number; ms: number }
+  counts: {
+    blocks: number; runs: number; containers: number; segments: number
+    recordingsLinked: number; recordingsGone: number
+  }
+  coveragePct: number | null
+  gapMs: number | null
+  buildStrategy: string | null
+  builtAt: string | null
+  spansBroadcastDays: boolean
+  blocks: ProvenanceBlock[]
+  /** False for assets produced before the chain was recorded, which is not the
+   *  same as an asset with no sources. */
+  recorded: boolean
+  note: string | null
+}
+
+export interface DerivedAssets {
+  recordingId: string
+  assets: { assetId: string; title: string | null; published: boolean; fromMs: number; toMs: number; segments: number; blocks: number }[]
+  counts: { total: number; published: number }
+  safeToPrune: boolean
 }
 
 /** Authenticated range-playback master manifest for a recording (bearer goes via

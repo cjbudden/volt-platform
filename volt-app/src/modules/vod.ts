@@ -5,6 +5,8 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
 import { validateMetadata, SchemaField } from '../services/metadataValidator';
 import { videoObjectFromAsset } from '../services/schemaOrg';
+import { traceClip } from '../services/clips/provenance';
+import { originBaseFor } from '../services/liveOrigin';
 
 /**
  * VOD Library — assets DERIVED from a recording (auto-published, clips, exports).
@@ -55,6 +57,34 @@ vodRouter.get(
     }
     const pubs = await query('SELECT platform, external_url, views, published_at, status FROM publications WHERE vod_asset_id=$1', [req.params.id]);
     res.json({ ...row, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any) });
+  })
+);
+
+/**
+ * PROVENANCE — what this asset was actually built from.
+ *
+ * The chain outward: clip -> contiguous blocks of source media -> the runs and
+ * segment ranges on disk -> the recordings and broadcast days they belonged to.
+ * It reports what is STILL PRESENT as well as what was used, because a clip
+ * whose sources have been pruned cannot be re-cut at a different length and the
+ * operator should learn that here, not from a job that fails an hour later.
+ */
+vodRouter.get(
+  '/:id/provenance',
+  asyncHandler(async (req, res) => {
+    const row = await fetchOwned(req.params.id, accountId(req));
+    if (!row) throw notFound('VOD asset not found');
+    const trace = await traceClip(req.params.id, originBaseFor);
+    if (!trace) throw notFound('VOD asset not found');
+    res.json({
+      ...trace,
+      // A chain with no rows is not the same as a chain that says "no sources":
+      // assets built before provenance existed have nothing recorded, and saying
+      // so is more useful than reporting zero blocks as though it were a fact.
+      recorded: trace.blocks.length > 0,
+      note: trace.blocks.length > 0 ? null
+        : 'This asset was produced before its sources were recorded. Re-cut it to establish the chain.',
+    });
   })
 );
 

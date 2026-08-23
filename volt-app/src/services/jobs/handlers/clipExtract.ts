@@ -16,6 +16,7 @@ import { one, query } from '../../../db';
 import { config } from '../../../config';
 import { resolveRange, assessRange, segmentCount } from '../../clips/resolve';
 import { extract, plan, type OutputFormat } from '../../clips/extract';
+import { recordProvenance } from '../../clips/provenance';
 import { PermanentError, registerHandler, type JobContext } from '../worker';
 
 export interface ClipExtractPayload {
@@ -66,7 +67,7 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
   const shape = plan(resolution);
   console.log(
     `[clip.extract] ${p.vodAssetId}: ${segmentCount(resolution)} segment(s) across ` +
-    `${resolution.runs.length} run(s), ${shape.strategy}, ` +
+    `${resolution.blocks.length} contiguous block(s) across ${resolution.runCount} run(s), ${shape.strategy}, ` +
     `${((resolution.requestedMs) / 1000).toFixed(1)}s requested`
   );
 
@@ -109,10 +110,27 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
     ]
   );
 
+  // ---- record what it was actually built from ------------------------------
+  // AFTER the media exists, from the same resolution that produced it, so the
+  // chain can never describe a clip that was not made. Not fatal on failure: a
+  // playable clip with no provenance row is recoverable by re-recording the
+  // chain, whereas throwing here would fail a job whose real work is done and
+  // send a retry through the whole extraction again.
+  try {
+    const chain = await recordProvenance({
+      vodAssetId: p.vodAssetId, streamId: p.streamId,
+      resolution, strategy: result.strategy,
+    });
+    await ctx.progress(100, `recorded ${chain.length} source block(s)`);
+  } catch (e) {
+    console.error(`[clip.extract] ${p.vodAssetId}: provenance not recorded:`, e);
+  }
+
   return {
     durationMs: result.durationMs,
     strategy: result.strategy,
     runsUsed: result.runsUsed,
+    blocksUsed: result.blocksUsed,
     segmentsUsed: result.segmentsUsed,
     outputs: {
       hls: hls ? publicPath(p.vodAssetId, 'hls/index.m3u8') : null,

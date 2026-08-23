@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, recordingRangeUrl, type RecordingRow, type RecordingTimeline, type VodAssetRow, type RecordingProgramme, type TranscriptSearch } from '../api'
 import AudioVisualizer from '../AudioVisualizer'
 import ClipTimeline from '../ClipTimeline'
+import { ClipProvenancePanel } from '../ClipProvenance'
 import type { Waveform } from '../api'
 
 /* ============================================================================
@@ -64,6 +65,9 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   const [clipTitle, setClipTitle] = useState('')
   const [outputKind, setOutputKind] = useState<'manifest' | 'progressive' | 'both'>('manifest')
   const [busy, setBusy] = useState('')
+  /** Which clip has its source chain open. One at a time: the panel is a
+   *  record you consult, not a column you scan. */
+  const [openProv, setOpenProv] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
   const [actErr, setActErr] = useState('')
 
@@ -480,24 +484,41 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
           {actErr && <div className="err" style={{ marginTop: 8 }}>{actErr}</div>}
           {msg && <div style={{ color: 'var(--ok,#3fbf6f)', fontSize: 'var(--fs-body)', marginTop: 8 }}>{msg}</div>}
 
-          {/* ------- clips already made from this recording ------- */}
+          {/* ------- clips already made from this recording -------
+               Each row can open its SOURCES: the runs and segment ranges the
+               clip was actually built from. Start and end times only say what
+               was asked for; the chain says what was used, and whether the media
+               behind it still exists. */}
           {vods.length > 0 && (
             <div style={{ marginTop: 14 }}>
               <table>
-                <thead><tr><th>Title</th><th>Kind</th><th>Range</th><th>Duration</th><th>Output</th><th>Created</th><th></th></tr></thead>
+                <thead><tr><th>Title</th><th>Kind</th><th>Range</th><th>Duration</th><th>Sources</th><th>Output</th><th>Created</th><th></th></tr></thead>
                 <tbody>
                   {vods.map(v => (
-                    <tr key={v.id}>
-                      <td><b>{v.title || '—'}</b></td>
-                      <td style={{ color: 'var(--muted)' }}>{v.kind === 'clip' ? 'Clip' : 'Full VOD'}</td>
-                      <td style={{ color: 'var(--muted)' }}>{fmtClock(Number(v.start_epoch_ms))} → {fmtClock(Number(v.end_epoch_ms))}</td>
-                      <td style={{ color: 'var(--muted)' }}>{v.duration_ms != null ? fmtDur(Number(v.duration_ms)) : '—'}</td>
-                      <td style={{ color: 'var(--muted)' }}>{v.output_kind || 'manifest'}</td>
-                      <td style={{ color: 'var(--muted)' }}>{new Date(v.created_at).toLocaleString()}</td>
-                      <td style={{ textAlign: 'right' }}>
-                        {v.kind === 'clip' && <button className="btn ghost" onClick={() => jumpTo(Number(v.start_epoch_ms), Number(v.end_epoch_ms))}>Review</button>}
-                      </td>
-                    </tr>
+                    <Fragment key={v.id}>
+                      <tr>
+                        <td><b>{v.title || '—'}</b></td>
+                        <td style={{ color: 'var(--muted)' }}>{v.kind === 'clip' ? 'Clip' : 'Full VOD'}</td>
+                        <td style={{ color: 'var(--muted)' }}>{fmtClock(Number(v.start_epoch_ms))} → {fmtClock(Number(v.end_epoch_ms))}</td>
+                        <td style={{ color: 'var(--muted)' }}>{v.duration_ms != null ? fmtDur(Number(v.duration_ms)) : '—'}</td>
+                        <td style={{ color: 'var(--muted)' }}>{sourceSummary(v)}</td>
+                        <td style={{ color: 'var(--muted)' }}>{v.output_kind || 'manifest'}</td>
+                        <td style={{ color: 'var(--muted)' }}>{new Date(v.created_at).toLocaleString()}</td>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <button className="btn ghost" onClick={() => setOpenProv(openProv === v.id ? null : v.id)}>
+                            {openProv === v.id ? 'Hide sources' : 'Sources'}
+                          </button>
+                          {v.kind === 'clip' && <button className="btn ghost" style={{ marginLeft: 6 }} onClick={() => jumpTo(Number(v.start_epoch_ms), Number(v.end_epoch_ms))}>Review</button>}
+                        </td>
+                      </tr>
+                      {openProv === v.id && (
+                        <tr>
+                          <td colSpan={8} style={{ background: 'var(--panel-2)' }}>
+                            <ClipProvenancePanel assetId={v.id} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -549,4 +570,20 @@ function RangeInput({ label, value, min, max, onChange }: {
         onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
     </div>
   )
+}
+
+/**
+ * The one-line answer in the list: how many separate stretches of media went in.
+ *
+ * "1 block" is the ordinary case and says the clip is one continuous piece.
+ * Anything more means it crosses a restart or a hole, which is the thing worth
+ * seeing without opening the panel. An asset built before the chain was recorded
+ * says so rather than reporting zero as though it were a fact.
+ */
+function sourceSummary(v: VodAssetRow): string {
+  if (v.source_block_count == null) return 'not recorded'
+  const parts = [`${v.source_block_count} block${v.source_block_count === 1 ? '' : 's'}`]
+  if ((v.source_container_count ?? 0) > 1) parts.push(`${v.source_container_count} days`)
+  else if ((v.source_run_count ?? 0) > 1) parts.push(`${v.source_run_count} runs`)
+  return parts.join(' · ')
 }

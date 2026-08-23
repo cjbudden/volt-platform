@@ -77,31 +77,35 @@ async function main() {
   const to = Math.min(span.endMs - 2_600, from + 20_000);
   const r = resolveRange(streamId, from, to, kind as 'video' | 'audio');
 
-  truthy('resolution finds at least one run', r.runs.length >= 1);
+  truthy('resolution finds at least one contiguous block', r.blocks.length >= 1);
   truthy('resolution selects segments', segmentCount(r) >= 1);
   check('resolution reports the requested span', r.requestedMs, to - from);
   check('a range inside one run has no gaps', r.gaps.length, 0);
   check('full coverage reads 100%', r.coveragePct, 100);
   truthy('an off-grid range needs trimming', r.needsTrim);
 
-  const firstSeg = r.runs[0].segments[0];
+  const firstSeg = r.blocks[0].segments[0];
   truthy('the first segment is partial', firstSeg.partial);
   truthy('the first segment records where to cut in', firstSeg.takeFromMs > 0);
-  const lastRun = r.runs[r.runs.length - 1];
+  const lastRun = r.blocks[r.blocks.length - 1];
   const lastSeg = lastRun.segments[lastRun.segments.length - 1];
   truthy('the last segment is partial', lastSeg.partial);
   truthy('the last segment records where to cut out', lastSeg.takeToMs < (lastSeg.endMs - lastSeg.startMs));
 
   // segments must be contiguous and ordered, by measured time
   let ordered = true, contiguous = true;
-  for (const run of r.runs) {
+  for (const run of r.blocks) {
     for (let i = 1; i < run.segments.length; i++) {
       if (run.segments[i].startMs < run.segments[i - 1].startMs) ordered = false;
       if (Math.abs(run.segments[i].startMs - run.segments[i - 1].endMs) > 50) contiguous = false;
     }
   }
   check('segments are in time order', ordered, true);
-  check('segments within a run are contiguous', contiguous, true);
+  check('segments within a block are contiguous', contiguous, true);
+  // A block is contiguous BY CONSTRUCTION now: a hole inside a run ends the
+  // block rather than being byte-joined over. So a single-block resolution
+  // over a fully covered range is also a claim that the media has no holes.
+  check('a fully covered range resolves to one block per run', r.blocks.length, r.runCount);
 
   const plan1 = plan(r);
   check('an off-grid range plans a full render', plan1.strategy, 'full-render');

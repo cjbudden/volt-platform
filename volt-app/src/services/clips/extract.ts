@@ -30,7 +30,7 @@
 import { spawn } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Resolution, ResolvedRun } from './resolve';
+import type { Resolution, ResolvedBlock } from './resolve';
 
 export type OutputFormat = 'hls' | 'mp4' | 'mp3';
 
@@ -57,6 +57,7 @@ export interface ExtractResult {
   durationMs: number;
   strategy: 'full-render' | 'copy';
   runsUsed: number;
+  blocksUsed: number;
   segmentsUsed: number;
 }
 
@@ -69,13 +70,13 @@ export function plan(r: Resolution): {
   /** Segments a smart render would have to re-encode, once that path exists. */
   smartRenderSegments: number;
 } {
-  const segments = r.runs.reduce((n, run) => n + run.segments.length, 0);
-  const partial = r.runs.reduce((n, run) => n + run.segments.filter((s) => s.partial).length, 0);
+  const segments = r.blocks.reduce((n, b) => n + b.segments.length, 0);
+  const partial = r.blocks.reduce((n, b) => n + b.segments.filter((s) => s.partial).length, 0);
   return {
     strategy: r.needsTrim ? 'full-render' : 'copy',
     segments,
     partialSegments: partial,
-    spansRuns: r.runs.length > 1,
+    spansRuns: r.runCount > 1,
     smartRenderSegments: partial,
   };
 }
@@ -88,7 +89,7 @@ export function plan(r: Resolution): {
  * read and a write, no decode, and it is what lets the accurate-seek pass below
  * treat a run as a single input.
  */
-async function concatRun(run: ResolvedRun, dest: string): Promise<void> {
+async function concatRun(run: ResolvedBlock, dest: string): Promise<void> {
   if (!existsSync(run.initPath)) {
     throw new Error(`run ${run.runId} has no init.mp4 at ${run.initPath}`);
   }
@@ -155,7 +156,7 @@ export async function extract(req: ExtractRequest): Promise<ExtractResult> {
   const report = async (pct: number, note: string) => { await req.onProgress?.(pct, note); };
   const cancelled = () => req.isCancelled?.() === true;
 
-  if (!r.runs.length) throw new Error('nothing to extract: the range resolved to no media');
+  if (!r.blocks.length) throw new Error('nothing to extract: the range resolved to no media');
   mkdirSync(outDir, { recursive: true });
   const work = join(outDir, '.work');
   mkdirSync(work, { recursive: true });
@@ -169,12 +170,12 @@ export async function extract(req: ExtractRequest): Promise<ExtractResult> {
     // ---- 1. per-run contiguous sources ------------------------------------
     await report(2, `joining ${p.segments} segment${p.segments === 1 ? '' : 's'}`);
     const runFiles: { path: string; startMs: number; endMs: number }[] = [];
-    for (const [i, run] of r.runs.entries()) {
+    for (const [i, run] of r.blocks.entries()) {
       if (cancelled()) throw new Error('cancelled');
       const dest = join(work, `run-${i}.mp4`);
       await concatRun(run, dest);
       runFiles.push({ path: dest, startMs: run.startMs, endMs: run.endMs });
-      await report(2 + Math.round((i + 1) / r.runs.length * 8), `joined run ${i + 1} of ${r.runs.length}`);
+      await report(2 + Math.round((i + 1) / r.blocks.length * 8), `joined block ${i + 1} of ${r.blocks.length}`);
     }
 
     // ---- 2. accurate trim, per run ----------------------------------------
@@ -274,7 +275,8 @@ export async function extract(req: ExtractRequest): Promise<ExtractResult> {
       files,
       durationMs: totalMs,
       strategy: p.strategy,
-      runsUsed: r.runs.length,
+      runsUsed: r.runCount,
+      blocksUsed: r.blocks.length,
       segmentsUsed: p.segments,
     };
   } finally {

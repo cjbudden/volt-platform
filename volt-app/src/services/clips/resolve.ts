@@ -37,8 +37,23 @@ export interface ResolvedSegment {
   partial: boolean;
 }
 
-export interface ResolvedRun {
+/**
+ * A CONTIGUOUS BLOCK of media: segments that follow each other with no hole, all
+ * from one run and one rendition.
+ *
+ * This is deliberately not the same thing as a run, and the difference is the
+ * bug it exists to prevent. A run can have a hole in the middle of it — the disk
+ * filled, the process was killed between writes, retention pruned from the wrong
+ * end. Treated as one span, the segments either side of that hole get byte-joined
+ * into a single file, and the clip comes out shorter than asked for with the
+ * missing minutes silently absent and every trim point after the hole wrong. The
+ * gap has to be seen at RESOLUTION time, where it can be reported, refused, or
+ * accepted deliberately.
+ */
+export interface ResolvedBlock {
   runId: string;
+  /** Which contiguous block of that run this is: 0 unless the run has holes. */
+  blockIndex: number;
   rendition: string;
   /** init.mp4 for this run and rendition. Segments are undecodable without it. */
   initPath: string;
@@ -51,7 +66,7 @@ export interface Gap {
   fromMs: number;
   toMs: number;
   ms: number;
-  reason: 'no-recording' | 'between-runs';
+  reason: 'no-recording' | 'between-runs' | 'missing-media';
 }
 
 export interface Resolution {
@@ -59,8 +74,11 @@ export interface Resolution {
   requestedFromMs: number;
   requestedToMs: number;
   requestedMs: number;
-  /** Runs in chronological order. More than one means the clip spans a restart. */
-  runs: ResolvedRun[];
+  /** Contiguous blocks in chronological order. More than one means the range
+   *  crosses a restart, or a hole inside a run. */
+  blocks: ResolvedBlock[];
+  /** Distinct capture runs contributing, which is <= blocks.length. */
+  runCount: number;
   gaps: Gap[];
   coveredMs: number;
   coveragePct: number;
@@ -93,7 +111,8 @@ export function resolveRange(
 ): Resolution {
   const from = Math.min(fromMs, toMs);
   const to = Math.max(fromMs, toMs);
-  const runs: ResolvedRun[] = [];
+  const blocks: ResolvedBlock[] = [];
+  const runIds = new Set<string>();
 
   for (const runId of listRuns(streamId)) {
     const pick = pickRenditions(streamId, runId);
@@ -104,6 +123,7 @@ export function resolveRange(
 
     const segs = segmentsIn(streamId, runId, rendition, from, to);
     if (!segs.length) continue;
+    runIds.add(runId);
 
     const dir = join(originBaseFor(streamId), 'runs', runId, rendition);
     const resolved: ResolvedSegment[] = segs.map((s) => {
@@ -123,49 +143,63 @@ export function resolveRange(
       };
     });
 
-    runs.push({
-      runId, rendition,
-      initPath: join(dir, 'init.mp4'),
-      segments: resolved,
-      startMs: resolved[0].startMs,
-      endMs: resolved[resolved.length - 1].endMs,
-    });
+    // Split the run wherever the media stops being contiguous. Everything
+    // downstream — the byte join, the trim offsets, the coverage figure — assumes
+    // a block has no holes in it, so the holes have to be found HERE.
+    for (const part of splitContiguous(resolved)) {
+      blocks.push({
+        runId,
+        blockIndex: blocks.filter((b) => b.runId === runId).length,
+        rendition,
+        initPath: join(dir, 'init.mp4'),
+        segments: part,
+        startMs: part[0].startMs,
+        endMs: part[part.length - 1].endMs,
+      });
+    }
   }
 
-  runs.sort((a, b) => a.startMs - b.startMs);
+  blocks.sort((a, b) => a.startMs - b.startMs);
 
   // ---- coverage and gaps ---------------------------------------------------
-  // Walk the covered intervals in order; anything the request wanted that no run
-  // provides is a hole, and the operator has to be told before work is queued.
+  // Walk the covered intervals in order; anything the request wanted that no
+  // block provides is a hole, and the operator has to be told before work is
+  // queued. The REASON matters: media missing inside one run is a different
+  // fault from a channel that simply was not recording.
   const gaps: Gap[] = [];
   let coveredMs = 0;
   let cursor = from;
-  for (const run of runs) {
-    const runFrom = Math.max(from, run.startMs);
-    const runTo = Math.min(to, run.endMs);
-    if (runFrom > cursor) {
+  let prev: ResolvedBlock | null = null;
+  for (const block of blocks) {
+    const blockFrom = Math.max(from, block.startMs);
+    const blockTo = Math.min(to, block.endMs);
+    if (blockFrom > cursor) {
       gaps.push({
-        fromMs: cursor, toMs: runFrom, ms: runFrom - cursor,
-        reason: runs.indexOf(run) === 0 ? 'no-recording' : 'between-runs',
+        fromMs: cursor, toMs: blockFrom, ms: blockFrom - cursor,
+        reason: !prev ? 'no-recording'
+          : prev.runId === block.runId ? 'missing-media'
+          : 'between-runs',
       });
     }
-    coveredMs += Math.max(0, runTo - Math.max(cursor, runFrom));
-    cursor = Math.max(cursor, runTo);
+    coveredMs += Math.max(0, blockTo - Math.max(cursor, blockFrom));
+    cursor = Math.max(cursor, blockTo);
+    prev = block;
   }
   if (cursor < to) {
     gaps.push({ fromMs: cursor, toMs: to, ms: to - cursor, reason: 'no-recording' });
   }
 
-  const first = runs[0];
-  const last = runs[runs.length - 1];
-  const needsTrim = runs.some((r) => r.segments.some((s) => s.partial));
+  const first = blocks[0];
+  const last = blocks[blocks.length - 1];
+  const needsTrim = blocks.some((b) => b.segments.some((s) => s.partial));
 
   return {
     streamId,
     requestedFromMs: from,
     requestedToMs: to,
     requestedMs: to - from,
-    runs,
+    blocks,
+    runCount: runIds.size,
     gaps,
     coveredMs,
     coveragePct: to > from ? Math.round((coveredMs / (to - from)) * 1000) / 10 : 0,
@@ -176,9 +210,38 @@ export function resolveRange(
   };
 }
 
-/** Total segments across every run — a rough cost signal for the UI. */
+/**
+ * How far consecutive segments may drift apart and still count as contiguous.
+ *
+ * Placement comes from write-completion times, which jitter: measured on real
+ * runs the neighbour-to-neighbour delta sits within about a quarter of a second
+ * either way, occasionally more under load. A genuinely missing segment leaves a
+ * hole of a whole segment, four seconds, so a one-second threshold separates the
+ * two cleanly without splitting a healthy run on noise.
+ */
+const CONTINUITY_TOLERANCE_MS = 1000;
+
+/** Break a run's segments wherever the media is not continuous. */
+function splitContiguous(segs: ResolvedSegment[]): ResolvedSegment[][] {
+  const out: ResolvedSegment[][] = [];
+  let cur: ResolvedSegment[] = [];
+  for (const s of segs) {
+    const prev = cur[cur.length - 1];
+    // A skipped sequence number means a segment is not on disk, whatever the
+    // clock says; a forward jump beyond tolerance means media is missing even
+    // when the numbering looks intact. Either one ends the block.
+    const broken = prev != null
+      && (s.seq !== prev.seq + 1 || s.startMs - prev.endMs > CONTINUITY_TOLERANCE_MS);
+    if (broken) { out.push(cur); cur = []; }
+    cur.push(s);
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+
+/** Total segments across every block — a rough cost signal for the UI. */
 export function segmentCount(r: Resolution): number {
-  return r.runs.reduce((n, run) => n + run.segments.length, 0);
+  return r.blocks.reduce((n, b) => n + b.segments.length, 0);
 }
 
 /**
@@ -191,7 +254,7 @@ export function segmentCount(r: Resolution): number {
 export function assessRange(r: Resolution, opts: { maxGapMs?: number } = {}):
   { ok: true } | { ok: false; code: string; message: string } {
   const maxGap = opts.maxGapMs ?? 0;
-  if (!r.runs.length) {
+  if (!r.blocks.length) {
     return { ok: false, code: 'no_media',
       message: `Nothing is recorded between ${new Date(r.requestedFromMs).toISOString()} and ${new Date(r.requestedToMs).toISOString()}.` };
   }

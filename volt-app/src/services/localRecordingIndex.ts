@@ -100,17 +100,26 @@ export function scanRun(streamId: string, runId: string, rendition: string): Loc
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
     const nxt = entries[i + 1];
-    // A tfdt DELTA is only a duration when the media timeline actually ran
-    // forward across the pair. It does not always: an encoder that restarts
-    // inside a run rebases tfdt, and the delta then comes out negative — one
-    // real run here produced -1,264,001 ms. Used unchecked that is not a small
-    // error, it is a segment placed twenty-one minutes into the FUTURE (start is
-    // mtime minus duration), which paints media over a gap, offers a clip range
-    // that has nothing behind it, and puts a stray bar on the waveform far from
-    // any recording. So a delta is accepted only if it is plausible, and an
-    // implausible one falls back to the neighbouring segment's measured length.
-    const raw = (e.tfdt != null && nxt?.tfdt != null)
-      ? Number((nxt.tfdt - e.tfdt) * 1000n / BigInt(ts))
+    // A tfdt DELTA is this segment's duration only when the next entry is the
+    // segment that genuinely follows it. Two ways that fails, both seen on real
+    // runs, and both placing media badly wrong rather than slightly wrong —
+    // because a segment's start is its write time MINUS its duration, so a wrong
+    // duration moves the segment, not just its length:
+    //
+    //   REBASED TIMELINE. An encoder restarting inside a run resets tfdt and the
+    //   delta comes out negative; one real run produced -1,264,001 ms, placing a
+    //   segment twenty-one minutes into the future.
+    //
+    //   A MISSING NEIGHBOUR. When a segment is absent — pruned, lost to a killed
+    //   process — the next entry is not seq+1, and the delta measures across the
+    //   hole. The segment before a five-segment hole took a 24s duration and was
+    //   placed 20s early, on top of its own predecessors.
+    //
+    // So: consecutive sequence numbers AND a plausible value, or fall back to
+    // the neighbouring segment's measured length.
+    const consecutive = nxt != null && nxt.seq === e.seq + 1;
+    const raw = (consecutive && e.tfdt != null && nxt!.tfdt != null)
+      ? Number((nxt!.tfdt - e.tfdt) * 1000n / BigInt(ts))
       : null;
     const plausible = raw != null && raw > 0 && raw <= MAX_SEGMENT_MS;
     const durMs = plausible ? raw

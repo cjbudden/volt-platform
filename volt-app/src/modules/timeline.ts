@@ -80,10 +80,11 @@ timelineRouter.get('/:id/coverage', asyncHandler(async (req, res) => {
     coveredMs: resolution.coveredMs,
     effectiveFromMs: resolution.effectiveFromMs,
     effectiveToMs: resolution.effectiveToMs,
-    runs: resolution.runs.map((r) => ({
-      runId: r.runId, rendition: r.rendition,
-      startMs: r.startMs, endMs: r.endMs, segments: r.segments.length,
+    runs: resolution.blocks.map((b) => ({
+      runId: b.runId, blockIndex: b.blockIndex, rendition: b.rendition,
+      startMs: b.startMs, endMs: b.endMs, segments: b.segments.length,
     })),
+    runCount: resolution.runCount,
     gaps: resolution.gaps,
     segments: segmentCount(resolution),
     clippable: verdict.ok,
@@ -138,9 +139,11 @@ timelineRouter.get('/:id/timeline', asyncHandler(async (req, res) => {
     kind,
     media: {
       coveragePct: resolution.coveragePct,
-      runs: resolution.runs.map((r) => ({
-        runId: r.runId, startMs: r.startMs, endMs: r.endMs, segments: r.segments.length,
+      runs: resolution.blocks.map((b) => ({
+        runId: b.runId, blockIndex: b.blockIndex,
+        startMs: b.startMs, endMs: b.endMs, segments: b.segments.length,
       })),
+      runCount: resolution.runCount,
       gaps: resolution.gaps,
     },
     days: days.map((d) => ({

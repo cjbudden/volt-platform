@@ -7,6 +7,7 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { createClipVod, formatsFor } from '../services/clips';
 import { resolveRange, assessRange, segmentCount } from '../services/clips/resolve';
 import { plan, type OutputFormat } from '../services/clips/extract';
+import { clipsFromRecording } from '../services/clips/provenance';
 import { enqueue } from '../services/jobs/queue';
 import { CLIP_EXTRACT } from '../services/jobs/handlers/clipExtract';
 import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions, isAudioOnly } from '../services/localRecordingIndex';
@@ -569,10 +570,38 @@ recordingsRouter.post(
       state: job.state,
       resolution: {
         coveragePct: resolution.coveragePct,
-        runs: resolution.runs.length,
+        runs: resolution.runCount,
+        blocks: resolution.blocks.length,
         segments: segmentCount(resolution),
         strategy: plan(resolution).strategy,
       },
+    });
+  })
+);
+
+/**
+ * WHAT CAME OUT OF THIS RECORDING.
+ *
+ * The reverse of a clip's provenance, and the question retention has to ask
+ * before it prunes anything: what did this capture produce that is still
+ * published? Answered from the provenance chain rather than from the recording,
+ * so it keeps working after the media itself is gone.
+ */
+recordingsRouter.get(
+  '/:id/derived',
+  asyncHandler(async (req, res) => {
+    const rec = await fetchOwned(req.params.id, accountId(req));
+    if (!rec) throw notFound('Recording not found');
+    const assets = await clipsFromRecording(rec.id);
+    res.json({
+      recordingId: rec.id,
+      assets,
+      counts: {
+        total: assets.length,
+        published: assets.filter((a) => a.published).length,
+      },
+      // The line an operator needs before agreeing to a deletion.
+      safeToPrune: assets.every((a) => !a.published),
     });
   })
 );

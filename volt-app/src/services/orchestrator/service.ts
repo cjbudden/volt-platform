@@ -5,6 +5,7 @@ import { resolveCaptionsPlan, buildCaptionsJobConfig } from '../captionsPlan';
 import { createClipVod, deriveEventVod } from '../clips';
 import { TaskLauncher, makeLauncher } from './launcher';
 import { startRadio, stopRadio } from '../radio/pipeline';
+import { backfillContainers, closeFinishedContainers } from '../containers';
 
 /**
  * The orchestrator turns channel/event lifecycle into real running tasks and
@@ -314,6 +315,15 @@ export class Orchestrator {
     //    'Recording' on a stopped channel. Close them, ending at the REAL last
     //    segment on disk rather than the sweep time.
     await this.reconcileOrphanRecordings();
+    // 6) file any recording that does not yet belong to a broadcast day.
+    //    Filing used to happen only at boot, so a recording opened at 09:00
+    //    stayed unfiled until the next restart: invisible to every question
+    //    asked by broadcast day, and to the provenance chain that reaches a
+    //    container through it. On the tick it is filed within thirty seconds,
+    //    whatever path created it.
+    await backfillContainers(200).catch((e) => console.error('[containers] tick backfill failed', e));
+    // and close days that have ended and hold nothing still recording
+    await closeFinishedContainers().catch((e) => console.error('[containers] close failed', e));
     return { started: due.length, stopped: over.length };
   }
 
