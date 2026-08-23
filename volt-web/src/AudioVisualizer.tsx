@@ -177,14 +177,19 @@ export default function AudioVisualizer({
       g.fillStyle = streamLevel > 0.02 ? v.color : '#475569'
       g.fillRect(10, h - 16, (w - 20) * Math.min(1, streamLevel * 1.1), 7)
 
-      g.font = '600 11px system-ui'
-      g.textAlign = 'left'
-      g.fillStyle = v.color
-      g.fillText(v.label.toUpperCase(), 12, 18)
-      const labelW = g.measureText(v.label.toUpperCase()).width
-      g.fillStyle = 'rgba(255,255,255,.45)'
-      g.font = '11px system-ui'
-      g.fillText(v.note, 12 + labelW + 12, 18)
+      // The verdict badge belongs to a LIVE station (server-measured levels).
+      // In the recording workbench there is no such feed, so it is omitted
+      // rather than reporting "no measurement" about a finished capture.
+      if (levels) {
+        g.font = '600 11px system-ui'
+        g.textAlign = 'left'
+        g.fillStyle = v.color
+        g.fillText(v.label.toUpperCase(), 12, 18)
+        const labelW = g.measureText(v.label.toUpperCase()).width
+        g.fillStyle = 'rgba(255,255,255,.45)'
+        g.font = '11px system-ui'
+        g.fillText(v.note, 12 + labelW + 12, 18)
+      }
 
       if (!live) {
         g.fillStyle = 'rgba(255,255,255,.32)'
@@ -195,7 +200,7 @@ export default function AudioVisualizer({
     }
     draw()
     return () => { cancelAnimationFrame(raf); media?.removeEventListener('play', resume) }
-  }, [media, idleText, verdict, live])
+  }, [media, idleText, verdict, live, levels])
 
   return (
     <canvas ref={canvasRef} style={{

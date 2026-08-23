@@ -79,7 +79,7 @@ export function listRuns(streamId: string): string[] {
 }
 
 /** Scan ONE rendition of ONE run into wall-clock placed segments. */
-function scanRun(streamId: string, runId: string, rendition: string): LocalSegment[] {
+export function scanRun(streamId: string, runId: string, rendition: string): LocalSegment[] {
   const dir = join(originBaseFor(streamId), 'runs', runId, rendition);
   let files: string[];
   try {
@@ -116,6 +116,20 @@ export function pickRenditions(streamId: string, runId: string): { video: string
   const vids = rends.filter((r) => r !== 'audio' && r !== 'subtitles')
     .map((r) => ({ r, h: parseInt(r, 10) || 0 })).sort((a, b) => b.h - a.h);
   return { video: vids[0]?.r ?? null, audio: rends.includes('audio') };
+}
+
+/** AUDIO segments of every run overlapping [fromMs..toMs], in time order.
+ *  The waveform service uses this: audio is the cheap rendition to decode and
+ *  is present for both TV channels and radio stations. */
+export function audioSegmentsInRange(streamId: string, fromMs: number, toMs: number): LocalSegment[] {
+  const out: LocalSegment[] = [];
+  for (const runId of listRuns(streamId)) {
+    if (!pickRenditions(streamId, runId).audio) continue;
+    for (const s of scanRun(streamId, runId, 'audio')) {
+      if (s.startMs + s.durMs > fromMs && s.startMs < toMs) out.push(s);
+    }
+  }
+  return out.sort((a, b) => a.startMs - b.startMs);
 }
 
 /** True when NO run of this stream has a video rendition (radio / audio-only). */

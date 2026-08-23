@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type RadioStationDetail, type RadioNowPlaying, type RadioLog, type RadioClass, type Group, type RadioLevelsFeed, type Gate } from '../api'
 import { thumbUrl } from '../api'
 import AudioVisualizer, { VERDICT_UI } from '../AudioVisualizer'
-import { StatusTag, SEC, initials, THUMB_BG } from '../scaffold'
-import { RadioDrawer, ClassChip } from './Radio'
+import { SEC, initials } from '../scaffold'
+import { RadioDrawer, ClassChip, StateTag } from './Radio'
 
 /* ============================================================================
    Radio station detail — the audio-only counterpart of the channel detail
@@ -132,51 +132,87 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
 
   return (
     <>
+      {/* Header follows the CHANNEL pattern exactly: breadcrumb, then the
+          identity line (thumb + name + type + status), then the sub-line, with
+          the action buttons right-aligned in the same order and sizing. */}
       <div className="page-head">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <button className="btn ghost" onClick={onBack} style={{ padding: '6px 10px' }}>←</button>
-          {art
-            ? <div style={{ width: 52, height: 52, borderRadius: 12, overflow: 'hidden', background: '#0b0f16', flex: 'none' }}><img src={art} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></div>
-            : <div className="thumb" style={{ width: 52, height: 52, borderRadius: 12, background: THUMB_BG[0], fontSize: 18 }}>{initials(st.name)}</div>}
-          <div>
-            <h1 style={{ margin: 0 }}>{st.name}</h1>
-            <p style={{ margin: '3px 0 0' }}>{st.group_name} · {st.sources[0]?.protocol?.toUpperCase() || 'no source'} in · {st.radio_config?.bitrateKbps ?? 128}k out{st.pipeline.running && st.pipeline.sourceCodec ? ` · source ${st.pipeline.sourceCodec}` : ''}</p>
+        <div>
+          <div className="crumb" style={{ marginBottom: 6 }}>
+            <span className="lnk" style={{ cursor: 'pointer', color: 'var(--brand)' }} onClick={onBack}>Radio</span>
+            &nbsp;/&nbsp; <b style={{ color: 'var(--text)' }}>{st.name}</b>
           </div>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {art
+              ? <span className="dthumb" style={{ background: '#0b0f16', overflow: 'hidden', padding: 0 }}><img src={art} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /></span>
+              : <span className="dthumb" style={{ background: 'linear-gradient(135deg,#1d4ed8,#3b82f6)' }}>{initials(st.name)}</span>}
+            {st.name}
+            <span className="tag type chan">{st.radio_config?.transcode ? 'TRANSCODE' : 'PACKAGING'}</span>
+            <StateTag state={st.pipelineState} onAir={onAir} />
+          </h1>
+          <p>
+            {st.group_name} · {(st.sources[0]?.protocol || 'icecast').toUpperCase()} in · {st.radio_config?.bitrateKbps ?? 128}k out
+            {st.pipeline.running && st.pipeline.sourceCodec ? ` · source ${st.pipeline.sourceCodec}` : ''}
+            {st.radio_config?.metadataCapture !== false ? ' · metadata log on' : ''}
+            {st.recording_enabled !== false ? ' · recording on' : ''}
+          </p>
         </div>
         <div className="spacer" />
-        <OverallTag state={st.pipelineState} onAir={onAir} />
-        <button className="btn ghost" onClick={() => setSettingsOpen(true)}>Settings</button>
+        <button className="btn ghost" onClick={() => setSettingsOpen(true)}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>Settings
+        </button>
         {/* TWO STEPS, same as channels: run the station (private), then publish. */}
-        {live
-          ? <button className="btn ghost" disabled={busy} onClick={() => startStop('stop')}>{busy ? '…' : 'Stop station'}</button>
-          : <button className="btn primary" disabled={busy} onClick={() => startStop('start')}>{busy ? '…' : 'Start station'}</button>}
-        {onAir
-          ? <button className="btn ghost" style={{ color: 'var(--warn,#fbbf24)' }} disabled={busy} onClick={() => setAir(false)}>{busy ? '…' : 'Take off air'}</button>
-          : <button className="btn primary" disabled={busy || !live || !st.publicAvailable && !readyToAir} title={live ? 'Open the public URLs' : 'Start the station first'}
-              onClick={() => setAir(true)}>{busy ? '…' : 'Go on air'}</button>}
+        {!live ? (
+          <button className="btn primary" disabled={busy} onClick={() => startStop('start')}
+            title="Brings the audio pipeline up and starts receiving the source">
+            {busy ? 'Starting…' : 'Start station'}
+          </button>
+        ) : (
+          <>
+            {!onAir ? (
+              <button className="btn primary" disabled={busy || !readyToAir}
+                onClick={() => setAir(true)}
+                title={readyToAir ? 'Open the public URLs and go on air' : 'Output must be producing valid audio first'}>
+                <span className="dot-s live" style={{ marginRight: 6 }} />{busy ? 'Going on air…' : 'Go on air'}
+              </button>
+            ) : (
+              <button className="btn ghost" disabled={busy} onClick={() => setAir(false)}
+                title="Close the public URLs (the station keeps running and recording)">
+                {busy ? 'Taking off air…' : 'Take off air'}
+              </button>
+            )}
+            <button className="btn ghost" disabled={busy} onClick={() => startStop('stop')}
+              style={{ color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }}>
+              {busy ? 'Stopping…' : 'Stop station'}
+            </button>
+          </>
+        )}
       </div>
       {err && <div className="err">{err}</div>}
 
       {/* PRIMARY ERROR banner — the first failed/degraded gate, same as channels */}
       {st.health?.primaryError && (
-        <div className="err" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <b style={{ textTransform: 'uppercase', fontSize: 11 }}>{st.health.primaryError.label}</b>
-          <span>{st.health.primaryError.message}</span>
-        </div>
-      )}
-
-      {/* FIVE GATES: server → input → encoder → output → on air */}
-      {st.health && (
-        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0,1fr))', gap: 10 }}>
-            {st.health.gates.map((g: Gate) => <GateCell key={g.gate} g={g} />)}
+        <div style={{
+          margin: '0 0 14px', padding: '12px 14px', borderRadius: 10, display: 'flex', gap: 12, alignItems: 'center',
+          background: 'rgba(248,113,113,.10)', border: '1px solid rgba(248,113,113,.4)',
+        }}>
+          <span style={{ fontSize: 18 }}>⚠</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, color: '#fca5a5' }}>{st.health.primaryError.label} failed</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', wordBreak: 'break-word' }}>{st.health.primaryError.message}</div>
           </div>
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) minmax(280px,1fr)', gap: 16, alignItems: 'start' }}>
-        {/* ---- player: visualiser instead of a 16:9 video ---- */}
-        <div className="card" style={{ padding: 16 }}>
+      {/* FIVE GATES — identical strip to the channel page (no extra container:
+          the gates ARE the status line for the station). */}
+      <PipelineStrip gates={st.health?.gates || []} />
+
+      {/* same two-column proportions and gap as the channel page (.grid-2) */}
+      <div className="grid-2" style={{ alignItems: 'start' }}>
+        {/* ---- player: visualiser instead of a 16:9 video ----
+             minWidth:0 matters: without it a long monospace URL in the other
+             column stretches the grid past the page width. */}
+        <div className="card" style={{ padding: 16, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <button className="btn primary" disabled={!live} onClick={() => setPlaying(p => !p)}>
               {playing ? 'Stop listening' : 'Listen'}
@@ -219,8 +255,8 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
         </div>
 
         {/* ---- station metadata + outputs ---- */}
-        <div style={{ display: 'grid', gap: 16 }}>
-          <div className="card" style={{ padding: 16 }}>
+        <div style={{ display: 'grid', gap: 18, minWidth: 0 }}>
+          <div className="card" style={{ padding: 16, minWidth: 0 }}>
             <div style={SEC}>Station metadata</div>
             {st.icy?.station?.name || np?.station?.name ? (
               <div style={{ display: 'grid', gap: 6, fontSize: 13 }}>
@@ -234,7 +270,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
             ) : <div style={{ fontSize: 12.5, color: 'var(--faint)' }}>ICY headers appear here when the station runs against an Icecast source.</div>}
           </div>
           {/* QC PANEL — the audio equivalent of the channel QC surface */}
-          <div className="card" style={{ padding: 16 }}>
+          <div className="card" style={{ padding: 16, minWidth: 0 }}>
             <div style={SEC}>Quality checks</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <span style={{ width: 10, height: 10, borderRadius: 999, background: VERDICT_UI[verdict]?.color ?? '#64748b' }} />
@@ -262,7 +298,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
             )}
           </div>
 
-          <div className="card" style={{ padding: 16 }}>
+          <div className="card" style={{ padding: 16, minWidth: 0 }}>
             <div style={SEC}>{onAir ? 'Public URLs (on air)' : 'Preview URLs (private)'}</div>
             {!onAir && <div className="hintxt" style={{ marginTop: -4, marginBottom: 6 }}>These are private monitoring URLs. Go on air to open the public ones.</div>}
             {(onAir
@@ -301,8 +337,8 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
               </div>
             ))}
           </div>
-          <input className="inp" style={{ width: 260, marginLeft: 'auto' }} value={q} onChange={e => setQ(e.target.value)}
-            placeholder="Search titles (what was played when)…" />
+          <input className="inp" style={{ width: 260, maxWidth: '100%', marginLeft: 'auto' }} value={q} onChange={e => setQ(e.target.value)}
+            placeholder="Search titles…" />
         </div>
         {!log || log.entries.length === 0 ? (
           <div style={{ fontSize: 12.5, color: 'var(--faint)', padding: '14px 4px' }}>
@@ -372,38 +408,34 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
 const CLASS_LABEL: Record<string, string> = { song: 'Songs', ad: 'Ads', content: 'Content' }
 
 const GATE_COLOR: Record<string, string> = {
-  healthy: '#4ade80', ready: '#60a5fa', starting: '#fbbf24',
-  degraded: '#fb923c', failed: '#f87171', stopped: '#64748b', idle: '#64748b',
+  idle: '#64748b', starting: '#fbbf24', ready: '#60a5fa', healthy: '#4ade80',
+  degraded: '#fb923c', failed: '#f87171', stopped: '#64748b',
 }
-/** One of the five pipeline gates, same model and wording as channels. */
-function GateCell({ g }: { g: Gate }) {
-  const c = GATE_COLOR[g.status] ?? '#64748b'
+/** The five-gate strip — same markup, sizing and arrows as the channel page,
+ *  so a station and a channel read identically at a glance. */
+function PipelineStrip({ gates }: { gates: Gate[] }) {
+  if (!gates.length) return null
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 11px', background: 'rgba(255,255,255,.02)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <span style={{ width: 8, height: 8, borderRadius: 999, background: c, flex: 'none' }} />
-        <span style={{ fontSize: 12, fontWeight: 700 }}>{g.label}</span>
-        {g.billable && <span style={{ fontSize: 9, color: 'var(--faint)', marginLeft: 'auto' }}>£</span>}
-      </div>
-      <div style={{ fontSize: 10.5, fontWeight: 700, color: c, textTransform: 'uppercase', marginTop: 3 }}>{g.status}</div>
-      <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 3, lineHeight: 1.35 }}>{g.detail}</div>
+    <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 0 14px', flexWrap: 'wrap' }}>
+      {gates.map((g, i) => {
+        const label = (g.gate === 'public' && g.status === 'healthy') ? 'ON AIR' : g.status
+        const color = GATE_COLOR[g.status] ?? '#64748b'
+        return (
+          <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 6, flex: '1 1 130px' }}>
+            <div title={g.detail} style={{ flex: 1, border: `1px solid ${color}55`, background: `${color}12`, borderRadius: 9, padding: '7px 10px', minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)' }}>
+                <span className="dot-s" style={{ background: color }} />{g.label}
+                {g.billable && <span style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 9 }}>●</span>}
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 11.5, color, textTransform: 'uppercase' }}>{label}</div>
+              <div style={{ fontSize: 10.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.detail}</div>
+            </div>
+            {i < gates.length - 1 && <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 12 }}>→</div>}
+          </div>
+        )
+      })}
     </div>
   )
-}
-
-/** The single roll-up badge (same states the channels list uses). */
-function OverallTag({ state, onAir }: { state?: string; onAir?: boolean }) {
-  const MAP: Record<string, { label: string; cls: string }> = {
-    onair: { label: 'On air', cls: 'live' },
-    ready: { label: 'Ready (private)', cls: 'sched' },
-    starting: { label: 'Starting', cls: 'sched' },
-    degraded: { label: 'Degraded', cls: 'warn' },
-    error: { label: 'Error', cls: 'down' },
-    stopped: { label: 'Stopped', cls: 'idle' },
-    idle: { label: 'Off', cls: 'idle' },
-  }
-  const m = MAP[state ?? (onAir ? 'onair' : 'idle')] ?? MAP.idle
-  return <StatusTag label={m.label} cls={m.cls} />
 }
 
 function MetaRow({ k, v }: { k: string; v?: string | null }) {

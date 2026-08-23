@@ -7,6 +7,7 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { createClipVod, formatsFor } from '../services/clips';
 import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions } from '../services/localRecordingIndex';
 import { transcriptForStream, searchTranscript, transcriptMatches } from '../services/recordingSearch';
+import { waveform, primeWaveformCache } from '../services/waveform';
 
 /**
  * Recordings library — the raw captures. An event recording is one bounded run;
@@ -67,6 +68,33 @@ recordingsRouter.get(
       audioOnly: hasAudio && !hasVideo,   // radio: player shows the visualiser
       spans,
     });
+  })
+);
+
+/**
+ * WAVEFORM for the clipping timeline: the audio envelope over [from..to] in
+ * `buckets` columns. Cheap and bounded by design (see services/waveform.ts):
+ * short windows are decoded exactly, wide ones are sampled per bucket, and
+ * every decoded segment is cached per run so panning and zooming reuse work.
+ * `pending > 0` means "ask again to fill the rest" rather than a long block.
+ */
+const waveQuery = z.object({
+  from: z.coerce.number().int().nonnegative(),
+  to: z.coerce.number().int().positive(),
+  buckets: z.coerce.number().int().min(16).max(1200).default(600),
+});
+recordingsRouter.get(
+  '/:id/waveform',
+  asyncHandler(async (req, res) => {
+    const r = await ownedRecording(req);
+    const q = waveQuery.parse(req.query);
+    if (q.to <= q.from) throw badRequest('to must be after from');
+    const streamId = r.channel_id ?? r.event_id;
+    // measure the whole recording once in the background: after that every zoom
+    // level is instant, which is what makes a multi-day capture workable
+    primeWaveformCache(streamId, Number(r.start_epoch_ms),
+      r.end_epoch_ms != null ? Number(r.end_epoch_ms) : Date.now());
+    res.json(await waveform(streamId, q.from, q.to, q.buckets));
   })
 );
 
@@ -198,17 +226,29 @@ recordingsRouter.get(
   asyncHandler(async (req, res) => {
     const r = await ownedRecording(req);
     if (!r.channel_id) return res.json({ programmes: [] });   // events carry their own identity
-    const fromMs = Number(r.start_epoch_ms);
-    const toMs = r.end_epoch_ms != null ? Number(r.end_epoch_ms) : Date.now();
+    // The lane is drawn for the VISIBLE window, not the whole recording: a 24x7
+    // channel with a long retention rule can hold tens of thousands of entries
+    // (every radio now-playing change is one), so the client passes its zoom.
+    const recStart = Number(r.start_epoch_ms);
+    const recEnd = r.end_epoch_ms != null ? Number(r.end_epoch_ms) : Date.now();
+    const q = z.object({
+      from: z.coerce.number().int().nonnegative().optional(),
+      to: z.coerce.number().int().positive().optional(),
+      limit: z.coerce.number().int().min(1).max(4000).default(1500),
+    }).parse(req.query);
+    const fromMs = Math.max(recStart, q.from ?? recStart);
+    const toMs = Math.min(recEnd, q.to ?? recEnd);
     const rows = await query(
-      `SELECT id, title, starts_at, ends_at, actual_start, actual_end, status
+      `SELECT id, title, starts_at, ends_at, actual_start, actual_end, status,
+              metadata->>'class' AS class, metadata->>'source' AS source
          FROM programmes
         WHERE channel_id = $1
           AND span && tstzrange(to_timestamp($2::bigint/1000.0), to_timestamp($3::bigint/1000.0), '[)')
-        ORDER BY starts_at`,
-      [r.channel_id, fromMs, toMs]
+        ORDER BY starts_at LIMIT $4`,
+      [r.channel_id, fromMs, toMs, q.limit]
     );
     res.json({
+      window: { from: fromMs, to: toMs },
       programmes: rows.map((p: any) => ({
         id: p.id,
         title: p.title,
@@ -216,6 +256,9 @@ recordingsRouter.get(
         endMs: new Date(p.actual_end ?? p.ends_at).getTime(),
         asRun: p.actual_start != null,
         status: p.status,
+        // radio now-playing entries carry a class (song/ad/content); EPG rows do not
+        class: p.class ?? null,
+        source: p.source ?? 'epg',
       })),
     });
   })

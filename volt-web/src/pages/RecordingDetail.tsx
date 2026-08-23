@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, recordingRangeUrl, type RecordingRow, type RecordingTimeline, type VodAssetRow, type RecordingProgramme, type TranscriptSearch } from '../api'
 import { SEC } from '../scaffold'
 import AudioVisualizer from '../AudioVisualizer'
+import ClipTimeline from '../ClipTimeline'
+import type { Waveform } from '../api'
 
 /* ============================================================================
    Recording detail — the review/trim/clip page, following the same structural
@@ -44,6 +46,10 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   const [selTo, setSelTo] = useState<number | null>(null)
   const [loaded, setLoaded] = useState<{ from: number; to: number } | null>(null)
   const [playheadMs, setPlayheadMs] = useState<number | null>(null)
+  // ZOOM window over the recording (a 24x7 capture can span days) + its waveform
+  const [view, setView] = useState<{ start: number; end: number } | null>(null)
+  const [wave, setWave] = useState<Waveform | null>(null)
+  const [waveBusy, setWaveBusy] = useState(false)
   const [playerErr, setPlayerErr] = useState('')
   const videoRef = useRef<HTMLVideoElement | null>(null)
   // transcript side panel: cues for the LOADED range (live-follows the playhead)
@@ -102,6 +108,59 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     setSelFrom(Math.max(last.startMs, last.endMs - 5 * 60_000)); setSelTo(last.endMs)
     /* eslint-disable-next-line */
   }, [tl])
+
+  // OPENING ZOOM: the last 30 minutes of material, so a long 24x7 recording
+  // starts where the work usually is instead of squashed across days.
+  useEffect(() => {
+    if (!domain || view) return
+    const end = domain.end
+    const start = Math.max(domain.start, end - 30 * 60_000)
+    setView({ start, end })
+    /* eslint-disable-next-line */
+  }, [domain])
+
+  // WAVEFORM for the visible window. Debounced (zooming fires a lot), one
+  // bucket per ~2px, and re-requested while the server reports `pending` so a
+  // wide window fills in progressively instead of blocking.
+  useEffect(() => {
+    if (!view) return
+    let cancelled = false
+    const t = setTimeout(async () => {
+      setWaveBusy(true)
+      try {
+        const buckets = Math.max(120, Math.min(900, Math.round((window.innerWidth - 420) / 2)))
+        let w = await api.recordingWaveform(id, view.start, view.end, buckets)
+        if (cancelled) return
+        setWave(w)
+        // The server measures the whole recording in the background; poll while
+        // it fills so a wide window sharpens up instead of blocking on open.
+        for (let i = 0; i < 8 && !cancelled && (w.pending > 0 || w.priming); i++) {
+          await new Promise(r => setTimeout(r, 1800))
+          if (cancelled) return
+          w = await api.recordingWaveform(id, view.start, view.end, buckets)
+          if (cancelled) return
+          setWave(w)
+        }
+      } catch { if (!cancelled) setWave(null) } finally { if (!cancelled) setWaveBusy(false) }
+    }, 260)
+    return () => { cancelled = true; clearTimeout(t) }
+    /* eslint-disable-next-line */
+  }, [id, view?.start, view?.end])
+
+  // metadata lane follows the zoom: a 24x7 radio recording can hold tens of
+  // thousands of now-playing entries, so only the visible window is fetched
+  useEffect(() => {
+    if (!view) return
+    let cancelled = false
+    const t = setTimeout(() => {
+      const pad = (view.end - view.start) * 0.1
+      api.recordingProgrammes(id, { from: view.start - pad, to: view.end + pad })
+        .then(r => { if (!cancelled) setProgrammes(r.programmes) })
+        .catch(() => { /* lane is optional */ })
+    }, 260)
+    return () => { cancelled = true; clearTimeout(t) }
+    /* eslint-disable-next-line */
+  }, [id, view?.start, view?.end])
 
   // side panel content: debounced — search term set = whole-recording search;
   // empty = the cues inside the loaded player range
@@ -284,7 +343,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
 
   return (
     <>
-      <BackRow onBack={onBack} />
+      <BackRow onBack={onBack} name={rec.source_name || 'Recording'} />
       <div className="page-head" style={{ marginBottom: 10 }}>
         <div>
           <h1 style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>{rec.source_name || 'Recording'}
@@ -367,16 +426,29 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
             </span>
           </div>
 
-          {/* ------- timeline: coverage + loaded range + marks + playhead ------- */}
-          {tl && <TimelineBar domain={domain} spans={tl.spans} from={selFrom} to={selTo}
-            loaded={loaded} playheadMs={playheadMs} flash={flash}
+          {/* ------- ZOOMABLE clipping timeline: waveform + metadata + scrub -------
+              A 24x7 channel can hold days of retained material, so the view is a
+              zoom window over the recording rather than the whole thing squashed
+              into one bar. The waveform shows where the content actually is, and
+              the metadata lane turns "clip that item" into one click. */}
+          {tl && view && <ClipTimeline
+            domain={domain} spans={tl.spans} view={view} setView={setView}
+            programmes={programmes} waveform={wave} waveLoading={waveBusy}
+            from={selFrom} to={selTo} loaded={loaded} playheadMs={playheadMs} flash={flash}
             onChange={(f, t) => { setSelFrom(f); setSelTo(t) }}
             onSeek={(ms) => {
               const v = videoRef.current
               if (v && loaded && ms >= loaded.from && ms <= loaded.to) v.currentTime = (ms - loaded.from) / 1000
               else loadRange(ms, Math.max(ms + 60_000, selTo ?? ms + 60_000))
+            }}
+            onPickProgramme={(p) => {
+              // trim to exactly this item and pre-fill the clip title from it
+              setSelFrom(p.startMs); setSelTo(p.endMs)
+              setFlash({ from: p.startMs, to: p.endMs })
+              setTimeout(() => setFlash(null), 1600)
+              if (!clipTitle.trim()) setClipTitle(p.title)
+              jumpTo(p.startMs, p.endMs)
             }} />}
-          {programmes.length > 0 && <ProgrammeLane domain={domain} programmes={programmes} onPick={p => jumpTo(p.startMs, p.endMs)} />}
 
           {/* ------- marks + CLIP CREATION, right under the player ------- */}
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', margin: '10px 0 4px', flexWrap: 'wrap' }}>
@@ -438,13 +510,13 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   )
 }
 
-function BackRow({ onBack }: { onBack: () => void }) {
+/** Breadcrumb, matching Channels/Events/Radio — the platform navigates by
+ *  breadcrumb, never by a floating back arrow. */
+function BackRow({ onBack, name }: { onBack: () => void; name?: string }) {
   return (
-    <div style={{ marginBottom: 10 }}>
-      <button className="btn ghost" onClick={onBack}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14 }}><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
-        Recordings
-      </button>
+    <div className="crumb" style={{ marginBottom: 8 }}>
+      <span className="lnk" style={{ cursor: 'pointer', color: 'var(--brand)' }} onClick={onBack}>Recordings</span>
+      {name && <>&nbsp;/&nbsp; <b style={{ color: 'var(--text)' }}>{name}</b></>}
     </div>
   )
 }
@@ -453,114 +525,8 @@ function Kbd({ children }: { children: React.ReactNode }) {
   return <span style={{ border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px', fontFamily: 'ui-monospace,monospace', fontSize: 10, margin: '0 1px' }}>{children}</span>
 }
 
-/* --------------------------------------------------------------- timeline */
-/** Coverage bar with trim marks, the loaded player range, and the playhead.
- *  Drag = set marks; click (no drag) = seek the playhead. */
-function TimelineBar({ domain, spans, from, to, loaded, playheadMs, flash, onChange, onSeek }: {
-  domain: { start: number; end: number }
-  spans: { runId: string; startMs: number; endMs: number }[]
-  from: number | null; to: number | null
-  loaded: { from: number; to: number } | null
-  playheadMs: number | null
-  flash?: { from: number; to: number } | null
-  onChange: (from: number, to: number) => void
-  onSeek: (ms: number) => void
-}) {
-  const barRef = useRef<HTMLDivElement | null>(null)
-  const drag = useRef<{ mode: 'new' | 'from' | 'to'; anchor: number; startX: number; moved: boolean } | null>(null)
-  const W = domain.end - domain.start
-  const pct = (ms: number) => `${Math.max(0, Math.min(100, ((ms - domain.start) / W) * 100))}%`
-  const msAt = (clientX: number) => {
-    const el = barRef.current!; const r = el.getBoundingClientRect()
-    const f = Math.max(0, Math.min(1, (clientX - r.left) / r.width))
-    return domain.start + f * W
-  }
-  function down(e: React.PointerEvent, mode: 'new' | 'from' | 'to') {
-    e.preventDefault(); (e.target as Element).setPointerCapture?.(e.pointerId)
-    const at = msAt(e.clientX)
-    drag.current = { mode, anchor: mode === 'new' ? at : (mode === 'from' ? (to ?? at) : (from ?? at)), startX: e.clientX, moved: false }
-  }
-  function move(e: React.PointerEvent) {
-    if (!drag.current) return
-    if (Math.abs(e.clientX - drag.current.startX) > 3) drag.current.moved = true
-    if (!drag.current.moved) return
-    const at = msAt(e.clientX); const a = drag.current.anchor
-    onChange(Math.min(a, at), Math.max(a, at))
-  }
-  function up(e: React.PointerEvent) {
-    if (drag.current && !drag.current.moved && drag.current.mode === 'new') onSeek(msAt(e.clientX))
-    drag.current = null
-  }
-
-  return (
-    <div>
-      <div ref={barRef} className="rec-timeline" onPointerDown={e => down(e, 'new')} onPointerMove={move} onPointerUp={up}
-        style={{ position: 'relative', height: 44, background: '#0b0f16', border: '1px solid var(--border)', borderRadius: 8, cursor: 'crosshair', userSelect: 'none', touchAction: 'none' }}>
-        {loaded && (
-          <div style={{ position: 'absolute', top: 0, bottom: 0, left: pct(loaded.from), width: `calc(${pct(loaded.to)} - ${pct(loaded.from)})`, background: 'rgba(120,150,255,.07)', borderLeft: '1px dashed rgba(120,150,255,.4)', borderRight: '1px dashed rgba(120,150,255,.4)', pointerEvents: 'none' }} />
-        )}
-        {spans.map(s => (
-          <div key={s.runId} title={`${fmtClock(s.startMs)} → ${fmtClock(s.endMs)}`}
-            style={{ position: 'absolute', top: 6, bottom: 6, left: pct(s.startMs), width: `calc(${pct(s.endMs)} - ${pct(s.startMs)})`, background: 'rgba(120,150,255,.35)', borderRadius: 4, minWidth: 2, pointerEvents: 'none' }} />
-        ))}
-        {from != null && to != null && to > from && (
-          <>
-            <div style={{ position: 'absolute', top: 0, bottom: 0, left: pct(from), width: `calc(${pct(to)} - ${pct(from)})`, background: 'rgba(90,220,150,.18)', border: '1px solid rgba(90,220,150,.7)', borderRadius: 6, pointerEvents: 'none' }} />
-            <div onPointerDown={e => { e.stopPropagation(); down(e, 'from') }} onPointerMove={move} onPointerUp={up}
-              style={{ position: 'absolute', top: -2, bottom: -2, left: pct(from), width: 10, marginLeft: -5, cursor: 'ew-resize', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ width: 4, height: '100%', background: 'rgba(90,220,150,.95)', borderRadius: 2 }} />
-            </div>
-            <div onPointerDown={e => { e.stopPropagation(); down(e, 'to') }} onPointerMove={move} onPointerUp={up}
-              style={{ position: 'absolute', top: -2, bottom: -2, left: pct(to), width: 10, marginLeft: -5, cursor: 'ew-resize', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ width: 4, height: '100%', background: 'rgba(90,220,150,.95)', borderRadius: 2 }} />
-            </div>
-          </>
-        )}
-        {flash && (
-          <div style={{ position: 'absolute', top: 2, bottom: 2, left: pct(flash.from),
-            width: `max(3px, calc(${pct(flash.to)} - ${pct(flash.from)}))`,
-            background: 'rgba(255,200,80,.55)', border: '1px solid rgba(255,210,110,.9)', borderRadius: 4,
-            pointerEvents: 'none', transition: 'opacity .4s', animation: 'pulse 1.2s ease-in-out infinite' }} />
-        )}
-        {playheadMs != null && (
-          <div style={{ position: 'absolute', top: -3, bottom: -3, left: pct(playheadMs), width: 2, marginLeft: -1, background: '#fff', boxShadow: '0 0 6px rgba(255,255,255,.6)', pointerEvents: 'none' }} />
-        )}
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--faint)', fontSize: 11, marginTop: 4 }}>
-        <span>{fmtDate(domain.start)} {fmtClock(domain.start)}</span>
-        <span>filled = recorded · green = marks · white = playhead · click to seek, drag to mark</span>
-        <span>{fmtClock(domain.end)}</span>
-      </div>
-    </div>
-  )
-}
-
-/* --------------------------------------------------------- programme lane */
-function ProgrammeLane({ domain, programmes, onPick }: {
-  domain: { start: number; end: number }
-  programmes: RecordingProgramme[]
-  onPick: (p: RecordingProgramme) => void
-}) {
-  const W = domain.end - domain.start
-  const pct = (ms: number) => Math.max(0, Math.min(100, ((ms - domain.start) / W) * 100))
-  return (
-    <div className="prog-lane" style={{ position: 'relative', height: 26, marginTop: 4 }}>
-      {programmes.map(p => {
-        const l = pct(p.startMs), r = pct(p.endMs)
-        if (r <= l) return null
-        return (
-          <div key={p.id} onClick={() => onPick(p)}
-            title={`${p.title} · ${fmtClock(p.startMs)} → ${fmtClock(p.endMs)}${p.asRun ? ' (as run)' : ' (scheduled)'}`}
-            style={{ position: 'absolute', top: 2, bottom: 2, left: `${l}%`, width: `${Math.max(r - l, 0.6)}%`,
-              background: 'rgba(200,160,60,.22)', border: '1px solid rgba(220,180,80,.55)', borderRadius: 5,
-              cursor: 'pointer', overflow: 'hidden', display: 'flex', alignItems: 'center', padding: '0 6px' }}>
-            <span style={{ fontSize: 10.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--muted)' }}>{p.title}</span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
+/* The zoomable clipping timeline (waveform + metadata lane + scrub bar)
+   now lives in ../ClipTimeline.tsx, shared and self-contained. */
 
 /* ------------------------------------------------------------ time input */
 function RangeInput({ label, value, min, max, onChange }: {

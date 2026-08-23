@@ -283,8 +283,16 @@ export const api = {
     if (p.to != null) qs.set('to', String(Math.round(p.to)))
     return req(`/recordings/${id}/transcript` + (qs.toString() ? '?' + qs : ''))
   },
-  recordingProgrammes: (id: string): Promise<{ programmes: RecordingProgramme[] }> =>
-    req(`/recordings/${id}/programmes`),
+  recordingProgrammes: (id: string, p: { from?: number; to?: number; limit?: number } = {}): Promise<{ window?: { from: number; to: number }; programmes: RecordingProgramme[] }> => {
+    const qs = new URLSearchParams()
+    if (p.from != null) qs.set('from', String(Math.round(p.from)))
+    if (p.to != null) qs.set('to', String(Math.round(p.to)))
+    if (p.limit) qs.set('limit', String(p.limit))
+    return req(`/recordings/${id}/programmes` + (qs.toString() ? '?' + qs : ''))
+  },
+  /** Audio envelope for the clipping timeline over [from..to] in `buckets` columns. */
+  recordingWaveform: (id: string, from: number, to: number, buckets: number): Promise<Waveform> =>
+    req(`/recordings/${id}/waveform?from=${Math.round(from)}&to=${Math.round(to)}&buckets=${Math.round(buckets)}`),
   recording: (id: string): Promise<RecordingRow & { vod_assets: VodAssetRow[] }> => req(`/recordings/${id}`),
   recordingTimeline: (id: string): Promise<RecordingTimeline> => req(`/recordings/${id}/timeline`),
   clipRecording: (id: string, b: { title: string; startMs: number; endMs: number; outputKind?: 'manifest' | 'progressive' | 'both' }): Promise<VodAssetRow> =>
@@ -602,6 +610,18 @@ export interface TranscriptSearch {
 
 export interface RecordingProgramme {
   id: string; title: string; startMs: number; endMs: number; asRun: boolean; status: string
+  /** radio now-playing entries carry song/ad/content; EPG programmes do not */
+  class?: 'song' | 'ad' | 'content' | null
+  source?: string
+}
+
+export interface WaveBucket { t: number; peak: number; rms: number }
+export interface Waveform {
+  streamId: string; from: number; to: number; bucketMs: number
+  mode: 'exact' | 'sampled'
+  complete: boolean; pending: number
+  priming?: boolean       // a background pass is still measuring the recording
+  buckets: (WaveBucket | null)[]
 }
 
 export interface RecordingTimeline {
