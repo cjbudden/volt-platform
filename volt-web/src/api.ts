@@ -421,7 +421,8 @@ export interface RadioOutputs { mp3: string | null; hls: string | null; dash: st
 export interface RadioLevelSample {
   t: number; peakDb: number; rmsDb: number; crestDb: number
   entropy: number; silence: boolean; verdict: SignalVerdict
-  frames: number[]     // ~100ms momentary-loudness frames across the segment
+  frames: number[]     // ~100ms momentary loudness (EBU R128 M, LUFS)
+  peaks?: number[]     // ~100ms true peak (dBFS) — this is what the waveform draws
 }
 export interface RadioLevelsFeed {
   stationId: string; running: boolean; verdict: SignalVerdict; lastSampleAt: number | null

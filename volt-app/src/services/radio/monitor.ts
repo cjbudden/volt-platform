@@ -41,9 +41,17 @@ export interface LevelSample {
   entropy: number;      // 0..1: ~0.9+ is noise-like, ~0.7 tonal
   silence: boolean;     // silencedetect fired inside the segment
   verdict: SignalVerdict;
-  /** ~100ms momentary-loudness frames (EBU R128 M, dBFS-ish) across the segment.
-   *  This is what drives the moving meter when nobody is listening locally. */
+  /** ~100ms momentary-loudness frames (EBU R128 M, LUFS) across the segment.
+   *  Kept for loudness reporting. NOT for the waveform: broadcast music is
+   *  loudness-normalised and compressed, so M barely moves (a real Groove Salad
+   *  segment measured -17.8 to -14.0 LUFS, under 4 LU of range). Drawn as bar
+   *  heights that is a solid block near the top with no dynamics at all. */
   frames: number[];
+  /** ~100ms TRUE PEAK frames (dBFS, loudest channel) across the segment.
+   *  THIS is the waveform. Peak amplitude is what a waveform display shows,
+   *  and it has the shape the loudness frames lack: the same segment ran -13.1
+   *  to -4.1 dBFS, tracking the actual transients of the audio. */
+  peaks: number[];
 }
 
 export interface QcIssue {
@@ -111,20 +119,31 @@ export function analyseSegment(initPath: string, segPath: string): LevelSample |
     const entropy = num(grab('Entropy'), 0);
     const silence = /silence_start:/.test(out) || rmsDb <= SILENT_DB;
     const crestDb = Math.max(0, peakDb - rmsDb);
-    // momentary loudness frames (M: -120.7 means silence in R128 terms)
+    // Per-frame loudness (M) and TRUE PEAK (FTPK) from the same ebur128 pass.
+    // FTPK prints one value per channel; the waveform takes the loudest.
     const frames: number[] = [];
-    const fx = /^\[Parsed_ebur128[^\]]*\].*?\sM:\s*(-?[\d.]+)/gm;
-    let fm: RegExpExecArray | null;
-    while ((fm = fx.exec(out)) !== null) {
-      const m = parseFloat(fm[1]);
-      if (Number.isFinite(m)) frames.push(m <= -70 ? -100 : m);
+    const peaks: number[] = [];
+    // One pass per ebur128 line, two independent field reads. (Doing it as a
+    // single regex with an optional trailing group silently matched nothing:
+    // the lazy `.*?` before the optional FTPK group is happy to stop early.)
+    for (const line of out.split('\n')) {
+      if (!line.includes('[Parsed_ebur128')) continue;
+      const m = /\sM:\s*(-?[\d.]+)/.exec(line);
+      if (m) { const v = parseFloat(m[1]); if (Number.isFinite(v)) frames.push(v <= -70 ? -100 : v); }
+      const fp = /\sFTPK:\s*((?:\s*-?(?:[\d.]+|inf))+?)\s*dBFS/.exec(line);
+      if (fp) {
+        const ch = fp[1].trim().split(/\s+/)
+          .map(v => (v === '-inf' || v === 'inf' ? -100 : parseFloat(v)))
+          .filter(v => Number.isFinite(v));
+        if (ch.length) peaks.push(Math.max(-100, Math.max(...ch)));
+      }
     }
     let verdict: SignalVerdict;
     if (rmsDb <= SILENT_DB) verdict = 'silent';
     else if (entropy >= STATIC_ENTROPY && crestDb <= STATIC_CREST_DB) verdict = 'static';
     else if (rmsDb <= QUIET_DB) verdict = 'quiet';
     else verdict = 'audio';
-    return { t: Date.now(), peakDb, rmsDb, crestDb, entropy, silence, verdict, frames };
+    return { t: Date.now(), peakDb, rmsDb, crestDb, entropy, silence, verdict, frames, peaks };
   } catch { return null; }
 }
 

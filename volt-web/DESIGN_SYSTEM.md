@@ -187,6 +187,16 @@ Three things live on the radio surface and must not be confused with each other:
    waveform: a second local-analyser overlay used to be drawn on top while
    playing, which invited the reading "the picture changes when I press play".
    Local playback and mute change nothing on it.
+
+   **It plots TRUE PEAK on a LINEAR amplitude scale**, the same scale a
+   SoundCloud-style waveform uses: `amp = 10^(dBFS/20)`, so -4 dBFS is 0.63 of
+   full height and -13 dBFS is 0.22, and transients read as transients. Do not
+   plot loudness here. Broadcast audio is loudness-normalised and compressed, so
+   momentary loudness barely moves — a real station segment measured -17.8 to
+   -14.0 LUFS, under 4 LU — and mapped over a dB window every value lands in the
+   same narrow band near the top. That is what made the meter look like the
+   station was pinned at 100% with no dynamics. The local-analyser fallback
+   measures peak amplitude too, so both paths draw the same picture.
 2. **Listening is local.** Listen / Stop listening and the mute and volume
    controls change what *you* hear on *this device*, never the broadcast. The
    button is a fixed 150px and the row a fixed 46px, so switching state swaps a
