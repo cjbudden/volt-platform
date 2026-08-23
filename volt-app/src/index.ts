@@ -2,6 +2,8 @@ import { createServer } from './server';
 import { config } from './config';
 import { pool, query } from './db';
 import { startScheduler } from './services/orchestrator';
+import { migrate } from './services/migrate';
+import { startWorker } from './services/jobs/worker';
 import { reapAllEncoders } from './services/orchestrator/encoderCleanup';
 import { stopAllRadio } from './services/radio/pipeline';
 
@@ -88,9 +90,18 @@ async function ensureSchema(): Promise<void> {
   await query(`ALTER TYPE ingest_protocol ADD VALUE IF NOT EXISTS 'icecast'`);
 }
 
+// BOOT ORDER MATTERS. Migrations run to completion BEFORE anything that reads
+// or writes the new tables: the scheduler, the worker and the first request all
+// assume the schema they were written against. A failure here is fatal rather
+// than logged, because a half-migrated database serving traffic is worse than a
+// process that refuses to start.
+async function boot(): Promise<void> {
+  await migrate();
+  await ensureSchema();
+}
+
 const server = app.listen(config.port, () => {
   console.log(`Volt control plane listening on :${config.port} (${config.env})`);
-  ensureSchema().catch((e) => console.error('[schema] ensure failed', e));
   // BOOT CLEANUP: a control-plane (re)start reaps any orphaned encoder/ffmpeg/
   // packager from a previous run so nothing is left holding the bus ports. Only
   // meaningful for the local/docker launcher; a no-op with mock/ecs.
@@ -100,12 +111,22 @@ const server = app.listen(config.port, () => {
   }
 });
 
-// orchestrator background scheduler (event provisioning, recording roll, retention sweep)
-const stopScheduler = startScheduler();
+// orchestrator background scheduler (event provisioning, recording roll, retention
+// sweep) and the job worker, both started only once the schema is in place.
+let stopScheduler: () => void = () => {};
+let worker: { stop: () => Promise<void> } | null = null;
+boot().then(() => {
+  stopScheduler = startScheduler();
+  worker = startWorker();
+}).catch((e) => {
+  console.error('[boot] schema preparation failed — refusing to serve', e);
+  process.exit(1);
+});
 
 async function shutdown(signal: string) {
   console.log(`\n${signal} received — shutting down`);
   stopScheduler();
+  if (worker) await worker.stop();   // let in-flight jobs unwind; the reaper covers the rest
   stopAllRadio();   // detached ffmpeg trees would otherwise outlive the control plane
   server.close(async () => {
     await pool.end();
