@@ -81,7 +81,6 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
   // The configured contribution source, shown under the idle start button
   // exactly as the channel page shows its ingest URL.
   const srcRow = st?.sources?.find(s => s.role === 'primary' && s.ingest_url) || st?.sources?.find(s => s.ingest_url) || st?.sources?.[0]
-  const srcProto = (srcRow?.protocol || 'icecast').toUpperCase()
   const srcUrl = srcRow?.ingest_url || null
 
   // ---- playback: MP3 fan-out when enabled (native, same-origin), else HLS ----
@@ -242,7 +241,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
             levels={levels?.samples} verdict={verdict} live={live}
             idleText="Station is off"
             /* SAME CALL TO ACTION AS A CHANNEL. On the channel page the idle
-               video surface carries the big "▶ Start channel (HLS)" button with
+               video surface carries the big "▶ Start channel" button with
                the source URL under it; the audio surface is the same surface for
                radio, so it gets the same affordance rather than a flat caption.
                One primary start button on the page: this and the header button
@@ -252,7 +251,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
                 <button className="btn primary" disabled={busy} onClick={() => startStop('start')}
                   style={{ transform: 'scale(1.05)' }}
                   title="Brings the audio pipeline up and starts receiving the source">
-                  {busy ? 'Starting…' : `▶  Start station (${srcProto})`}
+                  {busy ? 'Starting…' : '▶  Start station'}
                 </button>
                 {srcUrl && (
                   <div style={{ marginTop: 10, fontSize: 'var(--fs-label)', color: 'var(--faint)', maxWidth: 340, wordBreak: 'break-all' }}>

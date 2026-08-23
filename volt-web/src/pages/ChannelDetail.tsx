@@ -809,7 +809,10 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   const proto = (configured?.protocol || d.sources[0]?.protocol || 'SRT').toUpperCase()
   const ts = d.testStream
   const srcHost = hostOf(ts.sourceUrl || configured?.ingest_url)
-  const sendLabel = configured ? `Start channel (${proto})` : 'Start with test source'
+  // The button says WHAT it starts, not HOW. The protocol is already on the
+  // identity line, the source badge and the gate strip; repeating it inside the
+  // primary action only makes the action harder to read.
+  const sendLabel = configured ? 'Start channel' : 'Start with test source'
   // Reflect the pipeline: the source can only be previewed via the encoder output,
   // so if the input gate failed, or the source is valid but the ENCODER failed, we
   // must NOT show a green RECEIVING. Show the real error instead.
