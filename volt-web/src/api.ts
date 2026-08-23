@@ -213,6 +213,61 @@ export interface IcyProbe {
   metaIntervalBytes: number | null
 }
 
+
+// ---- timeline, coverage and dayparts ---------------------------------------
+export interface TimelineRun { runId: string; startMs: number; endMs: number; segments: number }
+export interface TimelineGap { fromMs: number; toMs: number; ms: number; reason: string }
+export interface BroadcastDayRow {
+  day: string; startMs: number; endMs: number; hours: number
+  /** 'forward' on a 23-hour day, 'back' on a 25-hour day, else null. */
+  clockChange: 'forward' | 'back' | null
+}
+export interface ContainerRow {
+  id: string; day: string; startMs: number; endMs: number
+  recordings: number; recordedMs: number; coveragePct: number; state: 'open' | 'closed'
+}
+export interface DaypartStrip { name: string; startMs: number; endMs: number }
+export interface TimelineProgramme {
+  id: string; title: string; startMs: number; endMs: number
+  asRun: boolean; status: string; class: string | null; source: string
+}
+export interface TimelineFeed {
+  channelId: string; name: string
+  window: { from: number; to: number; ms: number }
+  clock: { tz: string; anchorHour: number; presetId: string | null }
+  kind: 'video' | 'audio'
+  media: { coveragePct: number; runs: TimelineRun[]; gaps: TimelineGap[] }
+  days: BroadcastDayRow[]
+  containers: ContainerRow[]
+  dayparts: DaypartStrip[]
+  programmes: TimelineProgramme[]
+}
+export interface CoverageFeed {
+  channelId: string
+  window: { from: number; to: number; ms: number }
+  coveragePct: number; coveredMs: number
+  effectiveFromMs: number | null; effectiveToMs: number | null
+  runs: (TimelineRun & { rendition: string })[]
+  gaps: TimelineGap[]
+  segments: number
+  clippable: boolean
+  reason: { code: string; message: string } | null
+  strategy: 'full-render' | 'copy'
+}
+export interface DaypartDef { name: string; startsLocal: string; daysMask?: number }
+export interface DaypartPreset {
+  id: string; label: string; market: string; appliesTo: string; dayparts: DaypartDef[]
+}
+export interface JobRow {
+  id: string; type: string; state: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  progress_pct: number; progress_note: string | null
+  attempts: number; max_attempts: number
+  last_error: string | null; error_code: string | null
+  result?: any
+  created_at: string; started_at: string | null; finished_at: string | null
+  source_name?: string | null
+}
+
 export const api = {
   login: (email: string, password: string) =>
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
@@ -321,6 +376,24 @@ export const api = {
   /** Ask a source URL what it is, before saving it. Nothing is written. */
   probeRadioSource: (url: string): Promise<IcyProbe> =>
     req('/radio/probe', { method: 'POST', body: JSON.stringify({ url }) }),
+  /** The three lanes in one call, so they cannot disagree about a boundary. */
+  channelTimeline: (id: string, from: number, to: number): Promise<TimelineFeed> =>
+    req(`/channels/${id}/timeline?from=${Math.round(from)}&to=${Math.round(to)}`),
+  channelCoverage: (id: string, from: number, to: number): Promise<CoverageFeed> =>
+    req(`/channels/${id}/coverage?from=${Math.round(from)}&to=${Math.round(to)}`),
+  channelDayparts: (id: string): Promise<{ presetId: string | null; tz: string; anchorHour: number; dayparts: DaypartDef[] }> =>
+    req(`/channels/${id}/dayparts`),
+  setChannelDayparts: (id: string, body: { presetId?: string; dayparts?: DaypartDef[]; tz?: string; anchorHour?: number }) =>
+    req(`/channels/${id}/dayparts`, { method: 'PUT', body: JSON.stringify(body) }),
+  daypartPresets: (): Promise<{ presets: DaypartPreset[] }> => req('/daypart-presets'),
+  job: (id: string): Promise<JobRow & { attempts: any[] }> => req(`/jobs/${id}`),
+  jobs: (p: { type?: string; state?: string; channelId?: string } = {}): Promise<{ jobs: JobRow[] }> => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(p)) if (v) qs.set(k, String(v))
+    return req('/jobs' + (qs.toString() ? '?' + qs : ''))
+  },
+  retryJob: (id: string) => req(`/jobs/${id}/retry`, { method: 'POST' }),
+  cancelJob: (id: string) => req(`/jobs/${id}/cancel`, { method: 'POST' }),
   recordingSources: (p: RecordingSourceQuery = {}): Promise<RecordingSourcesFeed> => {
     const qs = new URLSearchParams()
     for (const [k, v] of Object.entries(p)) if (v != null && v !== '') qs.set(k, String(v))

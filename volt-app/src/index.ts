@@ -5,6 +5,7 @@ import { startScheduler } from './services/orchestrator';
 import { migrate } from './services/migrate';
 import { startWorker } from './services/jobs/worker';
 import { registerClipHandlers } from './services/jobs/handlers/clipExtract';
+import { backfillContainers } from './services/containers';
 import { reapAllEncoders } from './services/orchestrator/encoderCleanup';
 import { stopAllRadio } from './services/radio/pipeline';
 
@@ -99,6 +100,10 @@ async function ensureSchema(): Promise<void> {
 async function boot(): Promise<void> {
   await migrate();
   await ensureSchema();
+  // Give existing recordings their broadcast-day container. Additive and
+  // idempotent: it only fills container_id where it is NULL, and no row's
+  // day_utc or unique index is touched, so the old roll logic keeps working.
+  await backfillContainers().catch((e) => console.error('[containers] backfill failed', e));
 }
 
 const server = app.listen(config.port, () => {

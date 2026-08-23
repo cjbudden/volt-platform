@@ -14,6 +14,7 @@ import { statusRouter, ingestRouter } from './modules/status';
 import { mediaIngestRouter } from './modules/mediaIngest';
 import { recordingsRouter } from './modules/recordings';
 import { jobsRouter } from './modules/jobs';
+import { timelineRouter, daypartPresetsRouter } from './modules/timeline';
 import { vodRouter } from './modules/vod';
 import { metadataSchemasRouter } from './modules/metadataSchemas';
 import { fillerAssetsRouter } from './modules/fillerAssets';
@@ -194,6 +195,10 @@ export function createServer() {
   app.use('/api/media', mediaIngestRouter); // thumbnailer -> POST /api/media/thumbnails
   app.use('/api/recordings', recordingsRouter);         // recordings library (+ publish/clip)
   app.use('/api/jobs', jobsRouter);                     // long-running work: progress, reasons, retry
+  // Timeline, coverage and dayparts hang off a channel, so they mount UNDER the
+  // channels prefix and after it — the channels router owns /:id itself.
+  app.use('/api/channels', timelineRouter);
+  app.use('/api/daypart-presets', daypartPresetsRouter);
   app.use('/api/vod', vodRouter);                        // derived VOD assets + metadata
   app.use('/api/metadata-schemas', metadataSchemasRouter); // named metadata schemas
   app.use('/api/filler-assets', fillerAssetsRouter);     // slates & loops

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type RecordingRow, type RecordingSource } from '../api'
 import { PageIdentity, StatusPill, TypeTag } from '../scaffold'
 import { navigate } from '../router'
+import { SourceTimeline, type TimelineSelection } from '../SourceTimeline'
 
 /* ============================================================================
    RECORDINGS — TIER 2: one source, everything it has recorded.
@@ -34,11 +35,25 @@ const toLocalInput = (ms: number) => {
 }
 const fromLocalInput = (v: string) => new Date(v).getTime()
 
+/** An instant in the CHANNEL's timezone, not the browser's. */
+function inZone(ms: number, tz?: string, timeOnly = false): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz, hour12: false,
+    ...(timeOnly ? {} : { day: '2-digit', month: 'short' }),
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).format(ms)
+}
+
 export default function RecordingSourceView({ id, onBack }: { id: string; onBack: () => void }) {
   const [src, setSrc] = useState<RecordingSource | null>(null)
   const [rows, setRows] = useState<RecordingRow[] | null>(null)
   const [err, setErr] = useState('')
   const [jump, setJump] = useState('')
+  const [sel, setSel] = useState<TimelineSelection | null>(null)
+  // The channel's clock, so every time on this page reads in the SAME zone
+  // the timeline draws in. Mixing the browser's zone with the channel's puts
+  // the same instant an hour apart on one screen.
+  const [clock, setClock] = useState<{ tz: string; anchorHour: number } | null>(null)
 
   useEffect(() => {
     let dead = false
@@ -103,6 +118,35 @@ export default function RecordingSourceView({ id, onBack }: { id: string; onBack
         <div className="spacer" />
       </div>
       {err && <div className="err">{err}</div>}
+
+      {/* THE TIMELINE. Three lanes on one wall-clock axis, spanning every
+          capture this source holds, so a programme that crosses a boundary
+          reads as one thing. Selecting on it fills the clip range below. */}
+      {src?.type !== 'event' && (
+        <div style={{ marginBottom: 16 }}>
+          <SourceTimeline channelId={id} onSelect={setSel} onClock={setClock} />
+        </div>
+      )}
+      {sel && sel.toMs > sel.fromMs && (
+        <div className="card p-4" style={{ marginBottom: 16 }}>
+          <div className="sec-label">Selected range</div>
+          <div className="flex flex-wrap items-center gap-3">
+            <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)' }}>
+              {inZone(sel.fromMs, clock?.tz)} → {inZone(sel.toMs, clock?.tz, true)}
+            </span>
+            {clock && <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-micro)' }}>{clock.tz}</span>}
+            <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>
+              {fmtDur(sel.toMs - sel.fromMs)}
+            </span>
+            <div className="flex-1" />
+            <button className="btn primary" onClick={() => {
+              const hit = captureAt(sel.fromMs)
+              if (!hit) { setErr('Nothing was recorded at the start of that range.'); return }
+              navigate(`/recordings/${hit.id}?from=${Math.round(sel.fromMs)}&to=${Math.round(sel.toMs)}`)
+            }}>Open in the clipper</button>
+          </div>
+        </div>
+      )}
 
       {/* JUMP TO A MOMENT — the control that makes capture boundaries invisible.
           Type a date and time anywhere in the retained range and land there,
