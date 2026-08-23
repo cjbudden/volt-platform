@@ -5,7 +5,11 @@ import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
 import { createClipVod, formatsFor } from '../services/clips';
-import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions } from '../services/localRecordingIndex';
+import { resolveRange, assessRange, segmentCount } from '../services/clips/resolve';
+import { plan, type OutputFormat } from '../services/clips/extract';
+import { enqueue } from '../services/jobs/queue';
+import { CLIP_EXTRACT } from '../services/jobs/handlers/clipExtract';
+import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions, isAudioOnly } from '../services/localRecordingIndex';
 import { transcriptForStream, searchTranscript, transcriptMatches } from '../services/recordingSearch';
 import { waveform, primeWaveformCache } from '../services/waveform';
 
@@ -519,6 +523,17 @@ recordingsRouter.post(
     if (!rec) throw notFound('Recording not found');
     if (body.startMs < rec.start_epoch_ms || (rec.end_epoch_ms && body.endMs > rec.end_epoch_ms))
       throw badRequest('Clip range is outside the recording');
+    const streamId = rec.channel_id ?? rec.event_id;
+
+    // RESOLVE BEFORE PROMISING. The old path inserted a row naming files nobody
+    // would write, so an impossible range still returned 201 and the operator
+    // discovered the problem when the player failed. Now the range is checked
+    // against the media on disk first and a bad one is refused here.
+    const kind = isAudioOnly(streamId) ? 'audio' : 'video';
+    const resolution = resolveRange(streamId, body.startMs, body.endMs, kind);
+    const verdict = assessRange(resolution);
+    if (!verdict.ok) throw badRequest(verdict.message);
+
     const row = await createClipVod({
       ownerCol: rec.event_id ? 'event_id' : 'channel_id',
       ownerId: rec.event_id ?? rec.channel_id,
@@ -529,29 +544,100 @@ recordingsRouter.post(
       outputKind: body.outputKind,
       masterKeyBase: rec.master_key ?? 'vod',
     });
-    res.status(201).json(row);
+
+    // Formats follow the requested output kind, plus MP3 for audio-only sources
+    // where a listener download is the obvious thing to want.
+    const formats: OutputFormat[] = [];
+    if (body.outputKind !== 'progressive') formats.push('hls');
+    if (body.outputKind !== 'manifest') formats.push('mp4');
+    if (!formats.length) formats.push('mp4');
+    if (kind === 'audio') formats.push('mp3');
+
+    const job = await enqueue({
+      type: CLIP_EXTRACT,
+      payload: { vodAssetId: row.id, streamId, fromMs: body.startMs, toMs: body.endMs, formats, kind },
+      channelId: rec.channel_id, eventId: rec.event_id,
+      // One clip per asset: a retried request returns the running job rather
+      // than extracting the same range twice.
+      dedupeKey: `clip.extract:${row.id}`,
+      priority: 50,
+    });
+
+    res.status(202).json({
+      ...row,
+      jobId: job.id,
+      state: job.state,
+      resolution: {
+        coveragePct: resolution.coveragePct,
+        runs: resolution.runs.length,
+        segments: segmentCount(resolution),
+        strategy: plan(resolution).strategy,
+      },
+    });
   })
 );
 
 /**
- * Download a recording. Returns a URL to the MP4 export (presign stubbed here;
- * wire to S3 in the orchestrator). A large recording is exported to MP4
- * asynchronously; if no export exists yet we report that so the UI can poll.
+ * Download a recording as MP4.
+ *
+ * This endpoint could never succeed before: it read `rec.export_mp4_key`, a
+ * column that does not exist on `recordings` (it is on `vod_assets`), so the
+ * value was always undefined and the answer was always 202 "exporting" with
+ * nothing exporting. The UI polled forever.
+ *
+ * A recording is not itself a file — it is a window over segments on disk — so
+ * downloading one means extracting that window, which is exactly a clip. We
+ * queue a real job and hand back its id to poll.
  */
 recordingsRouter.get(
   '/:id/download',
   asyncHandler(async (req, res) => {
     const rec = await fetchOwned(req.params.id, accountId(req));
     if (!rec) throw notFound('Recording not found');
-    const key = rec.export_mp4_key ?? null;
-    if (!key) {
-      return res.status(202).json({
-        status: 'exporting',
-        message: 'MP4 export queued; poll this endpoint until a url is returned.',
-      });
+    const streamId = rec.channel_id ?? rec.event_id;
+
+    // An export of this recording is a vod_asset over its whole window.
+    const existing = await one<any>(
+      `SELECT * FROM vod_assets
+        WHERE recording_id = $1 AND kind = 'export'
+        ORDER BY created_at DESC LIMIT 1`, [rec.id]
+    );
+    if (existing?.export_mp4_key) {
+      return res.json({ status: 'ready', url: existing.export_mp4_key, assetId: existing.id });
     }
-    const url = `https://${config.aws.s3Bucket}.s3.${config.aws.region}.amazonaws.com/${key}`;
-    res.json({ status: 'ready', url });
+
+    const fromMs = Number(rec.start_epoch_ms);
+    const toMs = rec.end_epoch_ms != null ? Number(rec.end_epoch_ms) : Date.now();
+    const kind = isAudioOnly(streamId) ? 'audio' : 'video';
+    const resolution = resolveRange(streamId, fromMs, toMs, kind);
+    const verdict = assessRange(resolution, { maxGapMs: 30_000 });
+    if (!verdict.ok) {
+      return res.status(409).json({ status: 'unavailable', code: verdict.code, message: verdict.message });
+    }
+
+    const asset = existing ?? await one<any>(
+      `INSERT INTO vod_assets(${rec.event_id ? 'event_id' : 'channel_id'}, recording_id, kind, title,
+                              master_key, start_epoch_ms, end_epoch_ms, duration_ms,
+                              output_kind, formats, thumb_status)
+       VALUES ($1,$2,'export',$3,'',$4,$5,$6,'progressive',
+               '{"hls":false,"dash":false,"progressive":true}'::jsonb,'processing')
+       RETURNING *`,
+      [rec.event_id ?? rec.channel_id, rec.id, rec.title ?? 'Export',
+       fromMs, toMs, toMs - fromMs]
+    );
+
+    const job = await enqueue({
+      type: CLIP_EXTRACT,
+      payload: { vodAssetId: asset.id, streamId, fromMs, toMs,
+                 formats: kind === 'audio' ? ['mp3', 'mp4'] : ['mp4'], kind },
+      channelId: rec.channel_id, eventId: rec.event_id,
+      dedupeKey: `clip.extract:${asset.id}`,
+      priority: 80,
+    });
+    res.status(202).json({
+      status: 'exporting', assetId: asset.id, jobId: job.id,
+      message: 'Export queued. Poll /api/jobs/{jobId} for progress, then this endpoint for the URL.',
+    });
   })
 );
 

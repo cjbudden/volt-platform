@@ -13,6 +13,7 @@ import { profilesRouter } from './modules/outputProfiles';
 import { statusRouter, ingestRouter } from './modules/status';
 import { mediaIngestRouter } from './modules/mediaIngest';
 import { recordingsRouter } from './modules/recordings';
+import { jobsRouter } from './modules/jobs';
 import { vodRouter } from './modules/vod';
 import { metadataSchemasRouter } from './modules/metadataSchemas';
 import { fillerAssetsRouter } from './modules/fillerAssets';
@@ -53,6 +54,11 @@ export function createServer() {
 
   // Local test console (same-origin, no CORS): visit /console
   app.use(express.static('public'));
+  // Generated clips and their renditions, served like origin. Immutable once
+  // written, so unlike origin they may be cached hard.
+  app.use('/clips', express.static(config.clips.dir, {
+    setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'),
+  }));
   app.get('/console', (_req, res) => res.redirect('/console.html'));
 
   // TEST BUILD origin: serve the locally-generated HLS/DASH/WebVTT so the app player
@@ -187,6 +193,7 @@ export function createServer() {
   app.use('/api/streams', ingestRouter);  // encoder -> POST /api/streams/:id/report
   app.use('/api/media', mediaIngestRouter); // thumbnailer -> POST /api/media/thumbnails
   app.use('/api/recordings', recordingsRouter);         // recordings library (+ publish/clip)
+  app.use('/api/jobs', jobsRouter);                     // long-running work: progress, reasons, retry
   app.use('/api/vod', vodRouter);                        // derived VOD assets + metadata
   app.use('/api/metadata-schemas', metadataSchemasRouter); // named metadata schemas
   app.use('/api/filler-assets', fillerAssetsRouter);     // slates & loops

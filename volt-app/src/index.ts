@@ -4,6 +4,7 @@ import { pool, query } from './db';
 import { startScheduler } from './services/orchestrator';
 import { migrate } from './services/migrate';
 import { startWorker } from './services/jobs/worker';
+import { registerClipHandlers } from './services/jobs/handlers/clipExtract';
 import { reapAllEncoders } from './services/orchestrator/encoderCleanup';
 import { stopAllRadio } from './services/radio/pipeline';
 
@@ -117,6 +118,9 @@ let stopScheduler: () => void = () => {};
 let worker: { stop: () => Promise<void> } | null = null;
 boot().then(() => {
   stopScheduler = startScheduler();
+  // Handlers are registered BEFORE the worker starts polling: the worker only
+  // claims types it can handle, so an unregistered type would sit queued.
+  registerClipHandlers();
   worker = startWorker();
 }).catch((e) => {
   console.error('[boot] schema preparation failed — refusing to serve', e);

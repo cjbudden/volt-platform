@@ -53,6 +53,14 @@ export const config = {
     encoderBin: process.env.ENCODER_BIN ?? `${process.cwd()}/../volt-encoder/bin`,
     pythonBin: process.env.PYTHON_BIN ?? 'python3',
   },
+  // GENERATED CLIP OUTPUT. Kept OUT of the origin tree on purpose: origin is the
+  // encoder's live namespace and is pruned per the channel's retention rules, so
+  // a clip written inside it would be deleted along with the run it came from.
+  // A clip must outlive its source.
+  clips: {
+    dir: process.env.CLIPS_DIR ?? `${process.cwd()}/clips`,
+    ffmpegBin: process.env.FFMPEG_BIN ?? 'ffmpeg',
+  },
   // Image library store: local base dir for local runs, S3 bucket+prefix in cloud.
   imageStore: {
     driver: (process.env.IMAGE_STORE_DRIVER ?? 'local') as 'local' | 's3',
