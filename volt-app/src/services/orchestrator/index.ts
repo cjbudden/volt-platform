@@ -16,6 +16,12 @@ export const orchestrator = new Orchestrator();
  */
 export function startScheduler(): () => void {
   const o = config.orchestrator;
+  // FIRST, before any tick: the stored 'live' flags are a cache of a running
+  // process, and a crash leaves them stale. Reconcile them against what is
+  // actually running so nothing downstream reports a status that is not true.
+  orchestrator.reconcileStreamStatus()
+    .then((n) => { if (n) console.log(`[orchestrator] boot reconcile corrected ${n} stream status row(s)`); })
+    .catch((e) => console.error('[orchestrator] boot reconcile failed', e));
   const tick = setInterval(
     () => orchestrator.tick().catch((e) => console.error('[orchestrator] tick error', e)),
     o.tickSeconds * 1000

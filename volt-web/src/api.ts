@@ -164,6 +164,40 @@ export interface FailoverTestState {
   hasBackup: boolean
 }
 
+
+/** What a recording source IS (never `recordings.kind`, which is how the capture
+ *  is sliced: a radio station's captures are 'channel_day' too). */
+export type RecordingSourceType = 'channel' | 'radio' | 'event'
+export interface RecordingSource {
+  id: string
+  name: string
+  type: RecordingSourceType
+  brandRef: string | null
+  createdAt: string
+  recordings: number
+  firstStartMs: number | null
+  lastEndMs: number | null
+  lastStartMs: number | null
+  totalDurationMs: number
+  /** Truthful: something is capturing RIGHT NOW, asked of the pipeline. */
+  capturing: boolean
+  state: 'recording' | 'idle' | 'off'
+  retentionDays: number | null
+  nextExpiry: string | null
+}
+export interface RecordingSourcesFeed {
+  sources: RecordingSource[]
+  counts: { all: number; channel: number; radio: number; event: number; capturing: number }
+}
+export interface RecordingSourceQuery {
+  type?: string; q?: string
+  sort?: 'name' | 'recorded' | 'created' | 'count' | 'duration'
+  dir?: 'asc' | 'desc'
+  recordedFrom?: number; recordedTo?: number
+  createdFrom?: number; createdTo?: number
+  recordingNow?: '1' | '0'
+}
+
 export const api = {
   login: (email: string, password: string) =>
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
@@ -266,10 +300,19 @@ export const api = {
     req('/epg/clear-day', { method: 'POST', body: JSON.stringify({ ...(owner.kind === 'event' ? { eventId: owner.id } : { channelId: owner.id }), fromStart, fromEnd }) }),
 
   // recordings library + range playback + clip/VOD creation
-  recordings: (p: { kind?: string; channelId?: string; q?: string } = {}): Promise<RecordingRow[]> => {
+  /** Sources roll-up: one row per channel / radio station / event that has
+   *  recordings. Sorting and filtering are server-side because the counts and
+   *  the available range are computed in SQL. */
+  recordingSources: (p: RecordingSourceQuery = {}): Promise<RecordingSourcesFeed> => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(p)) if (v != null && v !== '') qs.set(k, String(v))
+    return req('/recordings/sources' + (qs.toString() ? '?' + qs : ''))
+  },
+  recordings: (p: { kind?: string; channelId?: string; sourceId?: string; q?: string } = {}): Promise<RecordingRow[]> => {
     const qs = new URLSearchParams()
     if (p.kind) qs.set('kind', p.kind)
     if (p.channelId) qs.set('channelId', p.channelId)
+    if (p.sourceId) qs.set('sourceId', p.sourceId)
     if (p.q) qs.set('q', p.q)
     return req('/recordings' + (qs.toString() ? '?' + qs : ''))
   },
@@ -595,7 +638,9 @@ export interface ProgrammeConflict {
 export interface RecordingRow {
   id: string; kind: 'event' | 'channel_day' | string
   channel_id: string | null; event_id: string | null; source_name: string | null
-  title: string | null; status: 'recording' | 'closed' | string
+  title: string | null; status: 'recording' | 'complete' | 'error' | string
+  /** Derived server-side from the source, not from `kind`. */
+  source_type?: RecordingSourceType
   start_epoch_ms: number | string; end_epoch_ms: number | string | null
   duration_ms: number | string | null; expires_at: string | null
   vod_count?: number

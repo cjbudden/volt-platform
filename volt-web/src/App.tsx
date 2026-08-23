@@ -5,6 +5,7 @@ import ChannelDetail from './pages/ChannelDetail'
 import ImageLibrary from './pages/ImageLibrary'
 import Recordings from './pages/Recordings'
 import RecordingDetail from './pages/RecordingDetail'
+import RecordingSourceView from './pages/RecordingSource'
 import Events from './pages/Events'
 import Epg from './pages/Epg'
 import EpgDetail from './pages/EpgDetail'
@@ -197,6 +198,8 @@ export default function App() {
             : section === 'recordings'
             ? (route.recordingId
                 ? <RecordingDetail key={route.recordingId} id={route.recordingId} onBack={() => navigate('/recordings')} />
+                : route.recordingSource
+                ? <RecordingSourceView key={route.recordingSource.id} id={route.recordingSource.id} onBack={() => navigate('/recordings')} />
                 : <Recordings />)
             : section === 'events'
             ? <Events />

@@ -32,7 +32,9 @@ const OWNED = `
 /** Owned recording row or 404 (tenant scoped). */
 async function ownedRecording(req: any): Promise<any> {
   const row = await one<any>(
-    `SELECT r.*, COALESCE(c.name, e.name) AS source_name ${OWNED}
+    `SELECT r.*, COALESCE(c.name, e.name) AS source_name,
+            CASE WHEN c.radio_config IS NOT NULL THEN 'radio'
+                 WHEN c.id IS NOT NULL THEN 'channel' ELSE 'event' END AS source_type ${OWNED}
       WHERE r.id = $1 AND g.account_id = $2`,
     [req.params.id, accountId(req)]
   );
@@ -141,6 +143,10 @@ recordingsRouter.get(
   asyncHandler(async (req, res) => {
     const kind = typeof req.query.kind === 'string' ? req.query.kind : null;
     const channelId = typeof req.query.channelId === 'string' ? req.query.channelId : null;
+    // sourceId matches EITHER owner column: the Recordings section is grouped by
+    // source, and a source is a channel, a radio station (also a channel) or an
+    // event. The caller should not have to know which column applies.
+    const sourceId = typeof req.query.sourceId === 'string' ? req.query.sourceId : null;
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     // With a search term, a recording matches when its own title/source matches,
     // when an EPG programme AIRING INSIDE ITS WINDOW matches (find content by
@@ -148,6 +154,11 @@ recordingsRouter.get(
     // contains the words (find content by what was SAID).
     const rows = await query(
       `SELECT r.*, COALESCE(c.name, e.name) AS source_name,
+              -- WHAT THE SOURCE IS, not how the capture is sliced. r.kind is
+              -- 'channel_day' for radio too, which is why radio stations used to
+              -- list as "CHANNEL DAY".
+              CASE WHEN c.radio_config IS NOT NULL THEN 'radio'
+                   WHEN c.id IS NOT NULL THEN 'channel' ELSE 'event' END AS source_type,
               (SELECT count(*)::int FROM vod_assets v WHERE v.recording_id = r.id) AS vod_count,
               CASE WHEN $4::text IS NULL THEN NULL
                    WHEN r.title ILIKE '%'||$4||'%' OR COALESCE(c.name, e.name) ILIKE '%'||$4||'%' THEN 'title'
@@ -162,8 +173,9 @@ recordingsRouter.get(
        WHERE g.account_id = $1
          AND ($2::text IS NULL OR r.kind = $2::recording_kind)
          AND ($3::uuid IS NULL OR r.channel_id = $3)
+         AND ($5::uuid IS NULL OR r.channel_id = $5 OR r.event_id = $5)
        ORDER BY r.start_epoch_ms DESC`,
-      [accountId(req), kind, channelId, q || null]
+      [accountId(req), kind, channelId, q || null, sourceId]
     );
     if (!q) return res.json(rows);
     const out: any[] = [];
@@ -265,6 +277,151 @@ recordingsRouter.get(
 );
 
 /**
+ * SOURCES — the top level of the Recordings section.
+ *
+ * Recordings are grouped by the thing that produced them, and there is NO
+ * parent row in the database for that grouping: a channel, a radio station and
+ * an event ARE the container, and `recordings.channel_id` / `recordings.event_id`
+ * already carry the link (both indexed). Inventing a parent recording row would
+ * duplicate identity that already exists, add a write path that can drift (create
+ * a channel, forget the parent) and need its own retention lifecycle. A GROUP BY
+ * gives the same answer and cannot get out of step.
+ *
+ * TYPE is derived here, not read from `recordings.kind`. `kind` records how the
+ * capture is sliced (`event` = one bounded run, `channel_day` = per calendar day)
+ * which is storage truth and says nothing about what the source IS. A radio
+ * station is a channel with a radio_config, so its recordings are `channel_day`
+ * and the old list showed radio stations as "CHANNEL DAY". The source knows what
+ * it is; ask the source.
+ *
+ * STATUS is derived from what is RUNNING, never from the stored flag alone. See
+ * reconcileStreamStatus() in the orchestrator: `channels.status` is a cache of a
+ * live process and goes stale on a crash, so a row can claim 'live' with nothing
+ * behind it. Here we ask the pipeline directly, so the badge is true even in the
+ * seconds before reconciliation catches up.
+ *
+ * Sort and filter are server-side because the counts and the available range are
+ * computed in SQL: sorting the page in the browser would sort one page of rows
+ * by numbers the browser would have to recompute.
+ */
+const sourcesQuery = z.object({
+  type: z.string().optional(),                    // csv: channel,radio,event
+  q: z.string().optional(),
+  sort: z.enum(['name', 'recorded', 'created', 'count', 'duration']).default('recorded'),
+  dir: z.enum(['asc', 'desc']).default('desc'),
+  recordedFrom: z.coerce.number().int().nonnegative().optional(),
+  recordedTo: z.coerce.number().int().positive().optional(),
+  createdFrom: z.coerce.number().int().nonnegative().optional(),
+  createdTo: z.coerce.number().int().positive().optional(),
+  recordingNow: z.enum(['1', '0']).optional(),    // only sources capturing right now
+});
+
+recordingsRouter.get(
+  '/sources',
+  asyncHandler(async (req, res) => {
+    const q = sourcesQuery.parse(req.query);
+    const types = (q.type ?? '').split(',').map((t) => t.trim()).filter(Boolean);
+    const wantAll = types.length === 0;
+    const rows = await query<any>(
+      `WITH src AS (
+         SELECT c.id, c.name, c.created_at, c.group_id, c.status AS src_status,
+                CASE WHEN c.radio_config IS NOT NULL THEN 'radio' ELSE 'channel' END AS type,
+                c.brand_ref, c.recording_enabled, c.recording_retention_days AS retention_days,
+                'channel'::text AS owner_kind
+           FROM channels c
+         UNION ALL
+         SELECT e.id, e.name, e.created_at, e.group_id, e.status AS src_status,
+                'event'::text AS type, NULL::text AS brand_ref, true AS recording_enabled,
+                NULL::int AS retention_days, 'event'::text AS owner_kind
+           FROM events e
+       )
+       SELECT s.id, s.name, s.type, s.owner_kind, s.brand_ref, s.created_at, s.src_status,
+              s.recording_enabled, s.retention_days,
+              count(r.id)::int                              AS recordings,
+              min(r.start_epoch_ms)                         AS first_start_ms,
+              max(COALESCE(r.end_epoch_ms, r.start_epoch_ms)) AS last_end_ms,
+              max(r.start_epoch_ms)                         AS last_start_ms,
+              COALESCE(sum(COALESCE(r.duration_ms, 0)), 0)  AS total_duration_ms,
+              count(*) FILTER (WHERE r.status = 'recording')::int AS open_rows,
+              min(r.expires_at) FILTER (WHERE r.expires_at IS NOT NULL) AS next_expiry
+         FROM src s
+         JOIN groups g ON g.id = s.group_id
+         LEFT JOIN recordings r
+                ON (s.owner_kind = 'channel' AND r.channel_id = s.id)
+                OR (s.owner_kind = 'event'   AND r.event_id   = s.id)
+        WHERE g.account_id = $1
+          AND ($2::text IS NULL OR s.name ILIKE '%'||$2||'%')
+          AND ($3::bigint IS NULL OR s.created_at >= to_timestamp($3::bigint/1000.0))
+          AND ($4::bigint IS NULL OR s.created_at <= to_timestamp($4::bigint/1000.0))
+        GROUP BY s.id, s.name, s.type, s.owner_kind, s.brand_ref, s.created_at,
+                 s.src_status, s.recording_enabled, s.retention_days
+       HAVING count(r.id) > 0
+          AND ($5::bigint IS NULL OR max(COALESCE(r.end_epoch_ms, r.start_epoch_ms)) >= $5)
+          AND ($6::bigint IS NULL OR min(r.start_epoch_ms) <= $6)`,
+      [accountId(req), q.q?.trim() || null,
+       q.createdFrom ?? null, q.createdTo ?? null, q.recordedFrom ?? null, q.recordedTo ?? null]
+    );
+
+    // LIVE TRUTH, per source. Radio runs in this process; anything else is only
+    // capturing while it still holds an un-terminated instance.
+    const { isRadioRunning } = await import('../services/radio/pipeline');
+    const liveInstances = new Set(
+      (await query<any>(
+        `SELECT COALESCE(channel_id, event_id) AS id FROM instances WHERE terminated_at IS NULL`
+      )).map((i: any) => i.id)
+    );
+    const out = rows
+      .filter((r) => wantAll || types.includes(r.type))
+      .map((r) => {
+        const capturing = r.type === 'radio' ? isRadioRunning(r.id) : liveInstances.has(r.id);
+        return {
+          id: r.id,
+          name: r.name,
+          type: r.type as 'channel' | 'radio' | 'event',
+          brandRef: r.brand_ref ?? null,
+          createdAt: r.created_at,
+          recordings: r.recordings,
+          firstStartMs: r.first_start_ms != null ? Number(r.first_start_ms) : null,
+          lastEndMs: r.last_end_ms != null ? Number(r.last_end_ms) : null,
+          lastStartMs: r.last_start_ms != null ? Number(r.last_start_ms) : null,
+          totalDurationMs: Number(r.total_duration_ms),
+          // The badge. `open_rows` alone is the stale flag that produced
+          // "RECORDING" on a dead station, so it only counts when something is
+          // genuinely running.
+          capturing,
+          state: capturing ? 'recording' : (r.recording_enabled === false ? 'off' : 'idle'),
+          retentionDays: r.retention_days ?? null,
+          nextExpiry: r.next_expiry ?? null,
+        };
+      })
+      .filter((r) => q.recordingNow !== '1' || r.capturing);
+
+    const dir = q.dir === 'asc' ? 1 : -1;
+    const key = (r: any) => {
+      switch (q.sort) {
+        case 'name': return r.name.toLowerCase();
+        case 'created': return new Date(r.createdAt).getTime();
+        case 'count': return r.recordings;
+        case 'duration': return r.totalDurationMs;
+        default: return r.lastEndMs ?? r.lastStartMs ?? 0;      // 'recorded'
+      }
+    };
+    out.sort((a, b) => {
+      const ka = key(a), kb = key(b);
+      if (ka === kb) return a.name.localeCompare(b.name);
+      return ka > kb ? dir : -dir;
+    });
+    res.json({ sources: out, counts: {
+      all: out.length,
+      channel: out.filter((r) => r.type === 'channel').length,
+      radio: out.filter((r) => r.type === 'radio').length,
+      event: out.filter((r) => r.type === 'event').length,
+      capturing: out.filter((r) => r.capturing).length,
+    } });
+  })
+);
+
+/**
  * Channel roll-up for the Recordings > Channels tab: one row per channel that
  * has recordings, with the recording count, latest recording, and the channel's
  * retention rule. The admin drills into GET /?channelId=... from here.
@@ -291,7 +448,11 @@ recordingsRouter.get(
 );
 
 async function fetchOwned(id: string, acct: string) {
-  return one<any>(`SELECT r.*, COALESCE(c.name, e.name) AS source_name ${OWNED} WHERE r.id = $1 AND g.account_id = $2`, [id, acct]);
+  return one<any>(
+    `SELECT r.*, COALESCE(c.name, e.name) AS source_name,
+            CASE WHEN c.radio_config IS NOT NULL THEN 'radio'
+                 WHEN c.id IS NOT NULL THEN 'channel' ELSE 'event' END AS source_type
+     ${OWNED} WHERE r.id = $1 AND g.account_id = $2`, [id, acct]);
 }
 
 recordingsRouter.get(

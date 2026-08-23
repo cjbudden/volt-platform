@@ -317,6 +317,62 @@ export class Orchestrator {
     return { started: due.length, stopped: over.length };
   }
 
+  /**
+   * BOOT RECONCILIATION — make the stored status agree with reality.
+   *
+   * `channels.status` / `events.status` are a CACHE of a live fact: a process is
+   * running, or it is not. The cache is only written on a clean start/stop, so a
+   * crash, a kill, or the control plane going down mid-run leaves rows saying
+   * 'live' forever. Everything downstream then lies in a different way:
+   *   - the Radio list asks the pipeline and correctly says STOPPED;
+   *   - Recordings trusts the flag and shows RECORDING on a dead station;
+   *   - reconcileOrphanRecordings() is gated on the flag, so it never fires and
+   *     the stale rows never get closed.
+   *
+   * So on boot we ask the truth (is anything actually running for this stream?)
+   * and write it back. After this pass the orphan sweep does its job normally.
+   * Returns the number of rows corrected.
+   */
+  async reconcileStreamStatus(): Promise<number> {
+    const { isRadioRunning } = await import('../radio/pipeline');
+    const live = await query<any>(
+      `SELECT c.id, c.name, 'channel' AS kind, (c.radio_config IS NOT NULL) AS is_radio
+         FROM channels c WHERE c.status = 'live'
+       UNION ALL
+       SELECT e.id, e.name, 'event' AS kind, false AS is_radio
+         FROM events e WHERE e.status = 'live'`
+    );
+    let fixed = 0;
+    for (const row of live) {
+      // A radio station's truth is its ffmpeg pipeline in THIS process. Anything
+      // else is truthful only if it still has an un-terminated instance.
+      let running: boolean;
+      if (row.is_radio) {
+        running = isRadioRunning(row.id);
+      } else {
+        const col = row.kind === 'channel' ? 'channel_id' : 'event_id';
+        const inst = await one<any>(
+          `SELECT 1 FROM instances WHERE ${col} = $1 AND terminated_at IS NULL LIMIT 1`, [row.id]
+        );
+        running = !!inst;
+      }
+      if (running) continue;
+      const table = row.kind === 'channel' ? 'channels' : 'events';
+      // 'ended' is what a clean stopStream() writes for both kinds, so a
+      // reconciled row is indistinguishable from a properly stopped one.
+      const next = 'ended';
+      await query(`UPDATE ${table} SET status = $2::asset_status, updated_at = now() WHERE id = $1`,
+        [row.id, next]);
+      fixed++;
+      console.log(`[orchestrator] reconciled ${row.kind} ${row.name} (${row.id}): live -> ${next} (nothing running)`);
+    }
+    if (fixed) {
+      // Their recordings are now closeable by the normal path.
+      await this.reconcileOrphanRecordings();
+    }
+    return fixed;
+  }
+
   /** Close recording rows whose owner is not live any more. End time comes from
    *  the newest recorded segment on disk inside the recording window (falls back
    *  to now if nothing is on disk). Runs every tick; matches nothing normally. */

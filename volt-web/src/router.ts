@@ -13,6 +13,9 @@ export interface Route {
   section: string
   channelId: string | null
   recordingId: string | null
+  /** Recordings is TIERED: /recordings lists sources, /recordings/source/:id is
+   *  one source's continuous timeline, /recordings/:id is a single capture. */
+  recordingSource: { id: string } | null
   radioId: string | null
   epgOwner: { kind: 'channel' | 'event'; id: string } | null
   create: boolean
@@ -36,6 +39,7 @@ export function parseRoute(pathname: string, search = ''): Route {
   const parts = pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)
   const create = new URLSearchParams(search).has('new')
   const base = { channelId: null as string | null, recordingId: null as string | null,
+    recordingSource: null as Route['recordingSource'],
     radioId: null as string | null,
     epgOwner: null as Route['epgOwner'], create, path: pathname }
   if (parts.length === 0) return { ...base, section: 'channels' }
@@ -43,6 +47,9 @@ export function parseRoute(pathname: string, search = ''): Route {
     if (parts[1] === 'new') return { ...base, section: 'channels', create: true }
     if (parts[1]) return { ...base, section: 'channels', channelId: decodeURIComponent(parts[1]), create: false }
     return { ...base, section: 'channels' }
+  }
+  if (parts[0] === 'recordings' && parts[1] === 'source' && parts[2]) {
+    return { ...base, section: 'recordings', recordingSource: { id: decodeURIComponent(parts[2]) } }
   }
   if (parts[0] === 'recordings' && parts[1]) {
     return { ...base, section: 'recordings', recordingId: decodeURIComponent(parts[1]) }
