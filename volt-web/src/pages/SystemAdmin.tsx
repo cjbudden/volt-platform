@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type PlatformAccountRow } from '../api'
-import { PageHead, NewButton, FChip, EntityCell, StatusTag, SEC } from '../scaffold'
+import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 
 /* ============================================================================
    System Admin — SaaS-provider controls, visible ONLY to platform staff
@@ -192,7 +192,7 @@ function AccountDrawer({ account, onClose, onDone }: {
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. RTM Broadcasting" />
           </div>
 
-          <div style={SEC}>Plan & quotas</div>
+          <div className="sec-label">Plan & quotas</div>
           <div className="field"><label>Plan</label>
             <select className="inp" value={plan} onChange={e => setPlan(e.target.value as any)}>
               <option value="standard">Standard</option>
@@ -211,7 +211,7 @@ function AccountDrawer({ account, onClose, onDone }: {
 
           {!isEdit && (
             <>
-              <div style={SEC}>Primary admin user</div>
+              <div className="sec-label">Primary admin user</div>
               <div className="field"><label>Email</label>
                 <input className="inp" value={ownerEmail} onChange={e => setOwnerEmail(e.target.value)} placeholder="admin@client.com" />
                 <div className="hintxt">Created as the account's OWNER: full access, including managing the client's own users.</div>
@@ -229,7 +229,7 @@ function AccountDrawer({ account, onClose, onDone }: {
 
           {isEdit && (
             <>
-              <div style={SEC}>Access</div>
+              <div className="sec-label">Access</div>
               <div className="toggle-row">
                 <div>
                   <div className="tt">{suspended ? 'Account suspended' : 'Account active'}</div>

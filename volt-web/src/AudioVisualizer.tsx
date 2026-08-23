@@ -1,18 +1,22 @@
 // ============================================================================
 //  AudioVisualizer — the radio replacement for the 16:9 video surface.
 //
-//  TWO SOURCES, because the operator's question is "are we RECEIVING audio?",
-//  not "is my laptop playing it":
+//  ONE WAVEFORM, ONE MEANING: the signal actually leaving the platform.
 //
-//   1. STREAM LEVELS (default). Server-measured levels from the broadcast
-//      output (ffmpeg ebur128/astats in the radio monitor). These arrive
-//      whether or not anyone is listening, so the meter moves with the SIGNAL
-//      even when the page is muted or playback is stopped. Frames are played
-//      back on a timer at their real ~100ms cadence, so the motion is honest
-//      rather than an animation.
-//   2. LOCAL ANALYSER (overlay). When the operator is actually listening, the
-//      Web Audio AnalyserNode gives a live spectrum for detail. It is the
-//      cherry on top, never the proof of signal.
+//  There used to be a second, blue local-spectrum overlay drawn on top while
+//  the operator was listening. It had to go. Two waveforms in one box invite
+//  the reading "the picture changes when I press play", and the whole point of
+//  this surface is the opposite: it answers "are we RECEIVING audio?", never
+//  "is my laptop playing it". Muting or stopping local playback now changes
+//  nothing on screen except the mute icon.
+//
+//  The bars are SERVER-MEASURED levels from the broadcast output (ffmpeg
+//  ebur128/astats in the radio monitor), pushed through a queue that drains at
+//  their real ~100ms cadence so the motion is the stream's, not an animation.
+//
+//  FALLBACK: with no server feed (the recording workbench, which visualises a
+//  local file), the same single waveform is fed from the Web Audio analyser at
+//  the same cadence and drawn identically. One visual language either way.
 //
 //  A VERDICT badge states what the signal actually is — programme audio, low,
 //  DEAD AIR, or noise/static — so "something is coming in" is distinguishable
@@ -75,7 +79,10 @@ export default function AudioVisualizer({
   live?: boolean
 }) {
   const hasOverlay = !!idleOverlay
+  const hasFeed = !!(levels && levels.length)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const recRef = useRef<{ ctx: AudioContext; analyser: AnalyserNode } | null>(null)
+  const pcmRef = useRef<Uint8Array | null>(null)
   // rolling ring of recent level values (0..1), fed by the stream frames
   const ringRef = useRef<number[]>(new Array(120).fill(0))
   const queueRef = useRef<number[]>([])
@@ -103,6 +110,20 @@ export default function AudioVisualizer({
     if (queueRef.current.length > 240) queueRef.current = queueRef.current.slice(-240)
   }, [levels])
 
+  /** RMS of the local analyser, 0..1 on the same scale as a server frame, so
+   *  the fallback path produces the same picture as the measured path. */
+  function localLevel(): number {
+    const rec = recRef.current
+    if (!rec || !media || media.paused) return 0
+    const buf = pcmRef.current && pcmRef.current.length === rec.analyser.fftSize
+      ? pcmRef.current : (pcmRef.current = new Uint8Array(rec.analyser.fftSize))
+    rec.analyser.getByteTimeDomainData(buf as any)
+    let sum = 0
+    for (let i = 0; i < buf.length; i++) { const d = (buf[i] - 128) / 128; sum += d * d }
+    const rms = Math.sqrt(sum / buf.length)
+    return dbToUnit(20 * Math.log10(Math.max(rms, 1e-5)))
+  }
+
   useEffect(() => {
     const id = setInterval(() => {
       const q = queueRef.current
@@ -110,21 +131,28 @@ export default function AudioVisualizer({
       // drain a couple of frames per tick when we are behind, else hold the last
       const take = q.length > 60 ? 2 : 1
       for (let i = 0; i < take; i++) {
-        const v = q.length ? q.shift()! : (live ? ring[ring.length - 1] * 0.88 : 0)
+        // WITH a server feed the local analyser is never consulted, so local
+        // playback and mute cannot move these bars.
+        const v = hasFeed
+          ? (q.length ? q.shift()! : (live ? ring[ring.length - 1] * 0.88 : 0))
+          : localLevel()
         ring.push(v)
         if (ring.length > 120) ring.shift()
       }
     }, 100)
     return () => clearInterval(id)
-  }, [live])
+    /* eslint-disable-next-line */
+  }, [live, hasFeed, media])
 
   useEffect(() => {
     if (!canvasRef.current) return
+    // The analyser stays wired for the fallback path (and to keep audio audible
+    // through the graph); nothing is drawn from it while a server feed exists.
     const rec = media ? wire(media) : null
+    recRef.current = rec
     const canvas = canvasRef.current
     const g = canvas.getContext('2d')!
     let raf = 0
-    const freq = rec ? new Uint8Array(rec.analyser.frequencyBinCount) : null
     const resume = () => { rec?.ctx.resume().catch(() => {}) }
     media?.addEventListener('play', resume)
 
@@ -143,7 +171,7 @@ export default function AudioVisualizer({
       const ring = ringRef.current
       const plotH = h - 44
 
-      // ---- 1) STREAM HISTORY: the received signal over the last ~12s --------
+      // ---- 1) THE WAVEFORM: the received signal over the last ~12s ----------
       const bars = ring.length
       const bw = (w - 20) / bars
       let streamLevel = 0
@@ -159,25 +187,7 @@ export default function AudioVisualizer({
       }
       g.globalAlpha = 1
 
-      // ---- 2) LOCAL SPECTRUM overlay while actually listening ---------------
-      if (rec && freq && media && !media.paused) {
-        rec.analyser.getByteFrequencyData(freq as any)
-        const n = 48
-        const step = Math.floor(freq.length / n)
-        const sw = (w - 20) / n
-        g.globalAlpha = 0.5
-        for (let i = 0; i < n; i++) {
-          let sum = 0
-          for (let j = 0; j < step; j++) sum += freq[i * step + j]
-          const val = sum / step / 255
-          const bh = Math.max(1, val * plotH)
-          g.fillStyle = '#7dd3fc'
-          g.fillRect(10 + i * sw + 1, h - 26 - bh, Math.max(1, sw - 3), bh)
-        }
-        g.globalAlpha = 1
-      }
-
-      // ---- 3) SIGNAL BAR + verdict ------------------------------------------
+      // ---- 2) SIGNAL BAR + verdict ------------------------------------------
       g.fillStyle = 'rgba(255,255,255,.08)'
       g.fillRect(10, h - 16, w - 20, 7)
       g.fillStyle = streamLevel > 0.02 ? v.color : '#475569'

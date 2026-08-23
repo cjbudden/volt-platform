@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type AppReg, type AppType, type ApiKeyRow, type MintedKey, type AccountKeyRow } from '../api'
-import { PageHead, NewButton, FChip, EntityCell, StatusTag, SEC } from '../scaffold'
+import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 
 /* ============================================================================
    API Keys & Apps — the admin surface for frontend application access.
@@ -278,7 +278,7 @@ function AppDrawer({ app, onClose, onDone }: { app?: AppReg; onClose: () => void
             {isEdit && <div className="hintxt">The platform is fixed once registered; register a new app to change it.</div>}
           </div>
 
-          <div style={SEC}>Restrictions</div>
+          <div className="sec-label">Restrictions</div>
           {type === 'web' ? (
             <div className="field"><label>Allowed origins <span style={{ color: 'var(--faint)' }}>— one per line, blank = any</span></label>
               <textarea className="inp" rows={3} value={origins} onChange={e => setOrigins(e.target.value)}
@@ -301,7 +301,7 @@ function AppDrawer({ app, onClose, onDone }: { app?: AppReg; onClose: () => void
                 <div className={`sw ${enabled ? '' : 'off'}`} onClick={() => setEnabled(v => !v)}><i /></div>
               </div>
 
-              <div style={SEC}>Keys</div>
+              <div className="sec-label">Keys</div>
               {keys === null ? <div className="loading">Loading keys…</div> : keys.length === 0 ? (
                 <div className="hintxt">No keys. Issue one below.</div>
               ) : (

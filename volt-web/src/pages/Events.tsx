@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type EventRow, type Group } from '../api'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
-import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, SEC, splitDuration, type RetUnit } from '../scaffold'
+import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, splitDuration, type RetUnit } from '../scaffold'
 import { ShareDrawer } from '../ShareDrawer'
 
 /* ============================================================================
@@ -266,7 +266,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
             </div>
           )}
 
-          <div style={SEC}>Schedule</div>
+          <div className="sec-label">Schedule</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div className="field"><label>On-air start</label>
               <input className="inp" type="datetime-local" value={start} onChange={e => setStart(e.target.value)} />
@@ -286,7 +286,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
             <div className="hintxt">The scheduler starts the encoder automatically at that time and stops it when the window ends. You can also Start now from the list.</div>
           </div>
 
-          <div style={SEC}>Source</div>
+          <div className="sec-label">Source</div>
           <SourceInput protocols={protocols} value={primary} onChange={setPrimary} label="Primary source" />
           <div className="toggle-row">
             <div><div className="tt">Backup source</div><div className="td">Optional failover input of the same feed.</div></div>
@@ -294,7 +294,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
           </div>
           {backupOn && <SourceInput protocols={protocols} value={backup} onChange={setBackup} label="Backup source" />}
 
-          <div style={SEC}>Filler on total loss</div>
+          <div className="sec-label">Filler on total loss</div>
           <div className="field"><label>When no source is available</label>
             <select className="inp" value={lossBehavior} onChange={e => setLossBehavior(e.target.value as any)}>
               <option value="none">Show nothing (output stops)</option>
@@ -317,7 +317,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
             uploadKind="slate" uploadFolder="slates" allowUpload={lossBehavior !== 'vod_loop'}
             onClose={() => setPickerOpen(false)} onPick={(url) => { setSlateRef(url); setPickerOpen(false) }} />
 
-          <div style={SEC}>Delivery</div>
+          <div className="sec-label">Delivery</div>
           <div className="field"><label>Purchasing mode</label>
             <select className="inp" value={purchasing} onChange={e => setPurchasing(e.target.value)}>
               <option value="reserved">Reserved</option>

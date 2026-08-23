@@ -151,15 +151,51 @@ invalid HTML that browsers handle inconsistently.
   monospace URL stretches the column and the page breaks out of its width. This
   was a real bug on the radio page; it is the first thing to check if a page
   looks wider than its neighbours.
-- Section labels use `.sec-label` (or the `SEC` style object, which reads the
-  same tokens).
+- Section labels use `.sec-label` (see below).
+
+## Section labels
+
+`className="sec-label"` — **not** `style={SEC}`. The class and the object carry
+the same tokens, but only the class can also say `:first-child { margin-top: 0 }`.
+A card whose first child was `style={SEC}` opened with 20px of dead space above
+the label on top of the card's own padding, and every card in the app did it.
+`SEC` survives only for the rare place that must merge extra properties.
+
+Result: every card's content starts at the same 17px from its top edge.
 
 ## The five-gate strip
 
-Server → Input → Encoder → Output → On air, rendered identically on channels and
-radio: a flat row of tinted cards with `→` between them, **no wrapping card**.
+Server → Input → Encoder → Output → On air, from **one component**
+(`<PipelineStrip gates={…} />` in `scaffold.tsx`, used by both Channels and
+Radio): a flat row of tinted cards with `→` between them, **no wrapping card**.
 The gates *are* the status line for the entity; boxing them makes them read as
 an aside instead.
+
+**Five steps, one line, always.** Gates are `flex: 1 1 0` with `min-width: 0`, so
+each takes an equal share of the row whatever it contains and long detail
+ellipsises inside its own box (full text on hover via `title`). The earlier
+`flex: 1 1 130px` let a gate with a long detail line — an Icecast station name, a
+source URL — grow past its share and push "On air" onto a second row, at which
+point the strip stops reading as a pipeline.
+
+## The audio player (radio)
+
+Three things live on the radio surface and must not be confused with each other:
+
+1. **The waveform is the broadcast output.** Server-measured levels from the
+   packager, drawn whether or not anyone is listening. There is exactly ONE
+   waveform: a second local-analyser overlay used to be drawn on top while
+   playing, which invited the reading "the picture changes when I press play".
+   Local playback and mute change nothing on it.
+2. **Listening is local.** Listen / Stop listening and the mute and volume
+   controls change what *you* hear on *this device*, never the broadcast. The
+   button is a fixed 150px and the row a fixed 46px, so switching state swaps a
+   fill for an outline and a glyph for a dot — nothing resizes or moves.
+3. **Output previews are per-rendition checks.** One compact play button per
+   packaged format (MP3, HLS, DASH) beside its URL and Copy, deliberately with
+   no waveform: the question is "does this rendition play", not "is the signal
+   good". One sound at a time — starting a preview stops the live listen and
+   vice versa.
 
 ## Checklist for a new page
 

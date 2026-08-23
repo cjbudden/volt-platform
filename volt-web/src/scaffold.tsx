@@ -25,9 +25,13 @@ import type { ReactNode } from 'react'
 // The shared building blocks below keep the two forms in lockstep.
 // ----------------------------------------------------------------------------
 
-/** Section header style used by every drawer form. Mirrors the `.sec-label`
- *  class in index.css: both read from the same type-scale tokens, so a section
- *  label is the same size and colour whether it is written in CSS or inline. */
+/** Section header style, kept for the rare place that must MERGE extra
+ *  properties (`style={{ ...SEC, marginTop: 0 }}`).
+ *
+ *  Everywhere else use `className="sec-label"`. The class is identical but also
+ *  carries `:first-child { margin-top: 0 }`, which an inline style cannot
+ *  express — that is why cards whose first child was `style={SEC}` opened with
+ *  20px of dead space above the label on top of the card's own padding. */
 export const SEC: React.CSSProperties = {
   fontSize: 'var(--fs-label)', letterSpacing: 'var(--ls-label)', textTransform: 'uppercase',
   color: 'var(--faint)', margin: '20px 0 10px', fontWeight: 700,
@@ -152,7 +156,7 @@ export function RecordingSection({ ctx, recOn, setRecOn, retNum, setRetNum, retU
 }) {
   return (
     <>
-      <div style={SEC}>Recording</div>
+      <div className="sec-label">Recording</div>
       <div className="toggle-row">
         <div>
           <div className="tt">Recording and clipping</div>
@@ -250,4 +254,58 @@ export function EntityCell({ name, sub, index = 0, imgUrl }: { name: string; sub
  *  everything renders from the one definition. */
 export function StatusTag({ label, cls, sub }: { label: string; cls: string; sub?: string }) {
   return <StatusPill label={label} cls={cls} sub={sub} />
+}
+
+// ============================================================================
+//  THE FIVE-GATE STRIP — Server → Input → Encoder → Output → On air.
+//
+//  One definition, used by Channels and Radio. It was duplicated in both pages
+//  and had drifted; worse, both copies wrapped. Each gate was `flex: 1 1 130px`,
+//  so a gate with a long detail line (an Icecast station name, a source URL)
+//  grew past its share and pushed "On air" onto a second row. The strip is a
+//  PIPELINE: five steps in one line, or it stops reading as a pipeline.
+//
+//  Fix: `flex: 1 1 0` with `min-width: 0`. Every gate takes an equal share of
+//  the row whatever it contains, and long detail ellipsises inside its own box
+//  (the full text stays available on hover via `title`).
+// ============================================================================
+export const GATE_COLOR: Record<string, string> = {
+  healthy: '#4ade80', degraded: '#fbbf24', failed: '#f87171',
+  ready: '#38bdf8', starting: '#60a5fa', stopped: '#94a3b8', idle: '#64748b',
+}
+
+export interface StripGate {
+  gate: string; label: string; status: string; detail?: string; billable?: boolean
+}
+
+export function PipelineStrip({ gates }: { gates: StripGate[] }) {
+  if (!gates.length) return null
+  return (
+    <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 0 14px' }}>
+      {gates.map((g, i) => {
+        // A healthy PUBLIC gate is the one that means we are truly on air.
+        const label = (g.gate === 'public' && g.status === 'healthy') ? 'ON AIR' : g.status
+        const color = GATE_COLOR[g.status] ?? '#64748b'
+        return (
+          <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 6, flex: '1 1 0', minWidth: 0 }}>
+            <div title={g.detail} style={{
+              flex: 1, minWidth: 0, border: `1px solid ${color}55`, background: `${color}12`,
+              borderRadius: 9, padding: '7px 10px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-label)', color: 'var(--muted)' }}>
+                <span className="dot-s" style={{ background: color }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.label}</span>
+                {g.billable && <span style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 9 }}>●</span>}
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 'var(--fs-xs)', color, textTransform: 'uppercase' }}>{label}</div>
+              <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.detail}</div>
+            </div>
+            {i < gates.length - 1 && (
+              <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 'var(--fs-sm)', flex: 'none' }}>→</div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }

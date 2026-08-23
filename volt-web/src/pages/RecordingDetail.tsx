@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, recordingRangeUrl, type RecordingRow, type RecordingTimeline, type VodAssetRow, type RecordingProgramme, type TranscriptSearch } from '../api'
-import { SEC } from '../scaffold'
 import AudioVisualizer from '../AudioVisualizer'
 import ClipTimeline from '../ClipTimeline'
 import type { Waveform } from '../api'

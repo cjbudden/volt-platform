@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type RadioStationRow, type Group, type RadioCfg } from '../api'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
-import { PageHead, NewButton, FChip, EntityCell, StatusPill, Preset, RecordingSection, RET_UNIT_SEC, SEC, splitDuration, type RetUnit, type PipelineState } from '../scaffold'
+import { PageHead, NewButton, FChip, EntityCell, StatusPill, Preset, RecordingSection, RET_UNIT_SEC, splitDuration, type RetUnit, type PipelineState } from '../scaffold'
 import { navigate } from '../router'
 import { thumbUrl } from '../api'
 
@@ -284,11 +284,11 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
             </div>
           </div>
 
-          <div style={SEC}>Source</div>
+          <div className="sec-label">Source</div>
           <SourceInput protocols={radioProtocols} value={primary} onChange={setPrimary} label="Audio source" />
           {isIcecast && <div className="hintxt">Icecast mounts carry now-playing (ICY) metadata: enable the log below to capture it.</div>}
 
-          <div style={SEC}>Outputs — single bitrate</div>
+          <div className="sec-label">Outputs — single bitrate</div>
           <div className="toggle-row"><div><div className="tt">MP3 stream</div><div className="td">Universal HTTP audio (hardware receivers, old apps, VLC). Now-playing titles pass through.</div></div>
             <div className={`sw ${outMp3 ? '' : 'off'}`} onClick={() => setOutMp3(v => !v)}><i /></div></div>
           <div className="toggle-row"><div><div className="tt">HLS (audio-only)</div><div className="td">Apple and modern web players; also what recording and clipping use.</div></div>
@@ -304,7 +304,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
 
           {isIcecast && (
             <>
-              <div style={SEC}>Metadata log</div>
+              <div className="sec-label">Metadata log</div>
               <div className="toggle-row">
                 <div><div className="tt">Capture now-playing log</div><div className="td">Every ICY title change becomes a timed entry (stored on the programme guide), classified as song, ad or content. Drives search, trimming and clipping.</div></div>
                 <div className={`sw ${metaCapture ? '' : 'off'}`} onClick={() => setMetaCapture(v => !v)}><i /></div>
@@ -317,7 +317,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
 
           {isIcecast && (
             <>
-              <div style={SEC}>Transcription</div>
+              <div className="sec-label">Transcription</div>
               <div className="toggle-row">
                 <div><div className="tt">Transcribe speech segments</div><div className="td">Uses the metadata log to transcribe only the parts classified as content (DJ talk, news, interviews). Songs and adverts are skipped. Only offered for Icecast sources, where metadata can tell speech from music.</div></div>
                 <div className={`sw ${transcription ? '' : 'off'}`} onClick={() => setTranscription(v => !v)}><i /></div>

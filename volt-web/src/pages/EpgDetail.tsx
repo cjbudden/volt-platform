@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type EpgOwner, type EpgOwnerRow, type ProgrammeRow, type ProgrammeConflict, type ProgrammeBody } from '../api'
-import { SEC } from '../scaffold'
 import { ImagePicker } from '../ImagePicker'
 
 /* ============================================================================
@@ -238,7 +237,7 @@ function ProgrammeDrawer({ owner, day, programme: p, onClose, onDone }: {
             </div>
           </div>
 
-          <div style={SEC}>Slot controls</div>
+          <div className="sec-label">Slot controls</div>
           <div className="field"><label>Geo access for this period</label>
             <select className="inp" value={geoMode} onChange={e => setGeoMode(e.target.value as any)}>
               <option value="worldwide">Worldwide</option>

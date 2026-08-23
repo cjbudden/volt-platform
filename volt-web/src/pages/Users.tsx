@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type Me, type UserRow, type UserGroupRow, type TenantRole, type AccessLevel } from '../api'
-import { PageHead, NewButton, FChip, EntityCell, StatusTag, SEC } from '../scaffold'
+import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 
 /* ============================================================================
    User Management — the account's users and USER GROUPS.
@@ -196,7 +196,7 @@ function UserDrawer({ me, groups, user, onClose, onDone }: {
             </div>
           )}
 
-          <div style={SEC}>Role</div>
+          <div className="sec-label">Role</div>
           <div className="field">
             <select className="inp" value={role} disabled={roleLocked || isSelf} onChange={e => setRole(e.target.value as TenantRole)}>
               <option value="viewer">Viewer</option>
@@ -211,7 +211,7 @@ function UserDrawer({ me, groups, user, onClose, onDone }: {
 
           {grouped && (
             <>
-              <div style={SEC}>User group</div>
+              <div className="sec-label">User group</div>
               <div className="field"><label>Feature access <span style={{ color: 'var(--faint)' }}>— the group decides which features this user can use</span></label>
                 <select className="inp" value={groupId} onChange={e => setGroupId(e.target.value)}>
                   <option value="">No group (role default: {role === 'viewer' ? 'view everything' : 'manage everything'})</option>
@@ -290,7 +290,7 @@ function GroupDrawer({ me, group, onClose, onDone }: {
             <input className="inp" value={desc} onChange={e => setDesc(e.target.value)} placeholder="What this group is for" />
           </div>
 
-          <div style={SEC}>Feature access</div>
+          <div className="sec-label">Feature access</div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
             <button type="button" className="btn ghost" onClick={() => setAll('manage')}>All manage</button>
             <button type="button" className="btn ghost" onClick={() => setAll('view')}>All view</button>

@@ -5,7 +5,7 @@ import { subscribeLive } from '../liveStatus'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
-import { RecordingSection, RET_UNIT_SEC, splitDuration, type RetUnit } from '../scaffold'
+import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, GATE_COLOR, type RetUnit } from '../scaffold'
 import { ShareDrawer } from '../ShareDrawer'
 function fmtOffset(sec: number) {
   if (sec <= 0) return 'LIVE'
@@ -212,7 +212,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         </div>
       )}
 
-      <PipelineStrip d={d} onQc={() => setQcOpen(true)} onAir={published} />
+      <PipelineStrip gates={d.health?.gates || []} />
 
       {published && d.public?.url && (
         <div style={{
@@ -299,35 +299,6 @@ function StartConfirm({ d, onCancel, onConfirm }: { d: CD; onCancel: () => void;
    relabel that as ON AIR — and FAILED (red) when published but the public stream is
    broken. `onAir` (published intent) is accepted for API stability but the status is
    authoritative from the backend. */
-function PipelineStrip({ d, onQc }: { d: CD; onQc: () => void; onAir?: boolean }) {
-  const gates = d.health?.gates || []
-  if (!gates.length) return null
-  return (
-    <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 0 14px', flexWrap: 'wrap' }}>
-      {gates.map((g, i) => {
-        // public gate: a green (healthy) public gate means we are truly on air.
-        const status = g.status
-        const label = (g.gate === 'public' && g.status === 'healthy') ? 'ON AIR' : g.status
-        const detail = g.detail
-        const color = GATE_COLOR[status]
-        return (
-        <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 6, flex: '1 1 130px' }}>
-          <div title={detail} style={{ flex: 1, border: `1px solid ${color}55`, background: `${color}12`, borderRadius: 9, padding: '7px 10px', minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-label)', color: 'var(--muted)' }}>
-              <span className="dot-s" style={{ background: color }} />{g.label}
-              {g.billable && <span style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 9 }}>●</span>}
-            </div>
-            <div style={{ fontWeight: 700, fontSize: 'var(--fs-xs)', color, textTransform: 'uppercase' }}>{label}</div>
-            <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{detail}</div>
-          </div>
-          {i < gates.length - 1 && <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>→</div>}
-        </div>
-        )
-      })}
-    </div>
-  )
-}
-
 /* ------------------------------------------------------------- QC / diagnose */
 const GATE_META: Record<string, { icon: string; hint: string }> = {
   server:  { icon: '▣', hint: 'Encoder compute (this is the billable unit)' },
@@ -335,10 +306,6 @@ const GATE_META: Record<string, { icon: string; hint: string }> = {
   encoder: { icon: '⚙', hint: 'Transcode/package running & keeping up?' },
   output:  { icon: '⬆', hint: 'Are packaged segments advancing?' },
   public:  { icon: '📡', hint: 'Is the output being served to viewers?' },
-}
-const GATE_COLOR: Record<string, string> = {
-  healthy: '#4ade80', degraded: '#fbbf24', failed: '#f87171',
-  ready: '#38bdf8', starting: '#60a5fa', stopped: '#94a3b8', idle: '#64748b',
 }
 function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefresh: () => void }) {
   const h = d.health
@@ -1769,11 +1736,11 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             uploadKind="brand" uploadFolder="brands"
             onClose={() => setBrandPickerOpen(false)} onPick={(url) => { setBrandRef(url); setBrandPickerOpen(false) }} />
 
-          <div style={SEC}>Source</div>
+          <div className="sec-label">Source</div>
           <SourceInput protocols={protocols} value={primary} onChange={setPrimary} label="Primary source" />
           <SourceInput protocols={protocols} value={backup} onChange={setBackup} label="Backup source (optional)" />
 
-          <div style={SEC}>Failover</div>
+          <div className="sec-label">Failover</div>
           <div className="toggle-row">
             <div><div className="tt">Enable input failover</div><div className="td">If the primary source fails, switch to the backup, then to the filler, to keep the output live. Works on transcode and packaged channels.</div></div>
             <div className={`sw ${failover ? '' : 'off'}`} onClick={() => setFailover(v => !v)}><i /></div>
@@ -1785,7 +1752,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             </div>
           )}
 
-          <div style={SEC}>Filler on total loss</div>
+          <div className="sec-label">Filler on total loss</div>
           <div className="field"><label>When no source is available</label>
             <select className="inp" value={lossBehavior} onChange={e => setLossBehavior(e.target.value as any)}>
               <option value="none">None (output stops)</option>
@@ -1820,7 +1787,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             allowUpload={false} uploadHint="Uploading video loops arrives with Broadcast videos; pick an existing asset for now"
             onClose={() => setLoopPickerOpen(false)} onPick={(url) => { setSlateRef(url); setLoopPickerOpen(false) }} />
 
-          <div style={SEC}>DVR / catch-up</div>
+          <div className="sec-label">DVR / catch-up</div>
           <div className="field"><label>DVR mode</label>
             <div className="presets">
               <div className={`preset ${dvrMode === 'sliding' ? 'sel' : ''}`} onClick={() => setDvrMode('sliding')}>
@@ -1839,7 +1806,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             </div>
           )}
 
-          <div style={SEC}>Source geo rules</div>
+          <div className="sec-label">Source geo rules</div>
           <div className="field"><label>Access</label>
             <select className="inp" value={geoMode} onChange={e => setGeoMode(e.target.value as any)}>
               <option value="worldwide">Worldwide (no restriction)</option>
@@ -1853,7 +1820,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
 
           {d.profile?.workflow_type === 'transcode' && (
             <>
-              <div style={SEC}>Output bitrates (ABR ladder)</div>
+              <div className="sec-label">Output bitrates (ABR ladder)</div>
               <div className="td" style={{ marginBottom: 8 }}>Rungs the encoder produces. Keep the top rung at or below the source resolution — don’t upscale.</div>
               {rungs.map((r, i) => (
                 <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
@@ -1872,13 +1839,13 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             </>
           )}
 
-          <div style={SEC}>Programme guide (EPG)</div>
+          <div className="sec-label">Programme guide (EPG)</div>
           <div className="toggle-row">
             <div><div className="tt">Show programme guide panel</div><div className="td">Off hides the EPG / now-next panel for this channel.</div></div>
             <div className={`sw ${epgOn ? '' : 'off'}`} onClick={() => setEpgOn(v => !v)}><i /></div>
           </div>
 
-          <div style={SEC}>Subtitles</div>
+          <div className="sec-label">Subtitles</div>
           <div className="toggle-row">
             <div><div className="tt">Live captions / subtitles</div><div className="td">Applies to this channel’s output profile.</div></div>
             <div className={`sw ${capOn ? '' : 'off'}`} onClick={() => setCapOn(v => !v)}><i /></div>
@@ -1901,7 +1868,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
               ? `Will be raised to the DVR window (${fmtWindow(dvrMinNum * 60)}) — retention can’t be shorter than DVR.` : null} />
 
           {d.profile?.workflow_type === 'transcode' && (<>
-          <div style={SEC}>Watermark <span style={{ color: 'var(--faint)', fontWeight: 400 }}>: burned into the transcode output</span></div>
+          <div className="sec-label">Watermark <span style={{ color: 'var(--faint)', fontWeight: 400 }}>: burned into the transcode output</span></div>
           <div className="toggle-row">
             <div><div className="tt">Overlay a brand watermark</div><div className="td">Burned into the output for this transcode channel.</div></div>
             <div className={`sw ${wmEnabled ? '' : 'off'}`} onClick={() => setWmEnabled(v => !v)}><i /></div>
@@ -1954,4 +1921,3 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   )
 }
 
-const SEC: React.CSSProperties = { fontSize: 'var(--fs-label)', letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', margin: '18px 0 10px', fontWeight: 700 }

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type RadioStationDetail, type RadioNowPlaying, type RadioLog, type RadioClass, type Group, type RadioLevelsFeed, type Gate } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import { api, type RadioStationDetail, type RadioNowPlaying, type RadioLog, type RadioClass, type Group, type RadioLevelsFeed } from '../api'
 import { thumbUrl } from '../api'
 import AudioVisualizer, { VERDICT_UI } from '../AudioVisualizer'
-import { SEC, PageIdentity, StatusPill, TypeTag } from '../scaffold'
+import { SEC, PageIdentity, StatusPill, TypeTag, PipelineStrip, GATE_COLOR } from '../scaffold'
 import { RadioDrawer, ClassChip } from './Radio'
 import { ShareDrawer } from '../ShareDrawer'
 
@@ -37,6 +37,13 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [playing, setPlaying] = useState(false)
+  // which OUTPUT PREVIEW is sounding ('MP3' | 'HLS' | 'DASH' | null). One at a
+  // time, and never together with the live listen: three streams of the same
+  // station overlapping tells you nothing.
+  const [preview, setPreview] = useState<string | null>(null)
+  // Station artwork often comes from an ICY StreamUrl we do not control. If it
+  // 404s we show the placeholder rather than a broken-image box.
+  const [artBroken, setArtBroken] = useState(false)
   const [muted, setMuted] = useState(false)
   const [vol, setVol] = useState(0.9)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -111,7 +118,8 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
     /* eslint-disable-next-line */
   }, [playing, live, st?.outputs.mp3, st?.outputs.hls])
   useEffect(() => { const a = audioRef.current; if (a) { a.muted = muted; a.volume = vol } }, [muted, vol])
-  useEffect(() => { if (!live) setPlaying(false) }, [live])
+  useEffect(() => { if (!live) { setPlaying(false); setPreview(null) } }, [live])
+  useEffect(() => { if (playing) setPreview(null) }, [playing])
 
   async function startStop(action: 'start' | 'stop') {
     setBusy(true); setErr('')
@@ -127,6 +135,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
 
   const art = st?.brand_ref ? thumbUrl(st.brand_ref, 320, 320, 'cover')
     : isImg(np?.streamUrl) ? np!.streamUrl! : null
+  useEffect(() => { setArtBroken(false) }, [art])
 
   const counts = log?.counts ?? {}
   const total = (counts.song ?? 0) + (counts.ad ?? 0) + (counts.content ?? 0)
@@ -214,29 +223,69 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           the gates ARE the status line for the station). */}
       <PipelineStrip gates={st.health?.gates || []} />
 
-      {/* same two-column proportions and gap as the channel page (.grid-2) */}
+      {/* Same two-column proportions and gap as the channel page (.grid-2).
+          LEFT is the live signal and what you can do with it: the player, then
+          a preview of each packaged rendition. RIGHT is the context you consult
+          while watching it: what the station says it is, whether QC is happy,
+          and what the pipeline has been doing.
+          minWidth:0 on both columns matters: without it a long monospace URL
+          stretches its column and the page breaks out of its width. */}
       <div className="grid-2" style={{ alignItems: 'start' }}>
-        {/* ---- player: visualiser instead of a 16:9 video ----
-             minWidth:0 matters: without it a long monospace URL in the other
-             column stretches the grid past the page width. */}
+        <div style={{ display: 'grid', gap: 18, minWidth: 0 }}>
+        {/* ---- player: visualiser instead of a 16:9 video ---- */}
         <div className="card" style={{ padding: 16, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-            <button className="btn primary" disabled={!live} onClick={() => setPlaying(p => !p)}>
-              {playing ? 'Stop listening' : 'Listen'}
+          {/* NOW PLAYING sits WITH the controls and the waveform, because they
+              are one question: what is going out, and do I want to hear it.
+              The row's geometry is fixed — 46px artwork, a 150px listen button —
+              so nothing resizes or shifts when the state changes. */}
+          <div className="flex items-center gap-3" style={{ marginBottom: 12, minHeight: 46 }}>
+            <div style={{
+              width: 46, height: 46, borderRadius: 10, flex: 'none', overflow: 'hidden',
+              background: 'var(--panel-3)', display: 'grid', placeItems: 'center',
+            }}>
+              {art && !artBroken
+                ? <img src={art} alt="" onError={() => setArtBroken(true)}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : <span style={{ fontSize: 'var(--fs-h3)', color: 'var(--faint)' }}>♪</span>}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {live ? (title || 'Untitled break') : 'Off air'}
+                </span>
+                <ClassChip cls={live ? titleClass : null} />
+              </div>
+              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
+                {live
+                  ? [np?.since ? `${fmtDur(Date.now() - np.since)} in` : 'on now',
+                     st.pipeline.running ? `${np?.listeners ?? st.pipeline.listeners ?? 0} MP3 listeners` : null]
+                    .filter(Boolean).join(' · ')
+                  : 'Start the station to monitor the output'}
+              </div>
+            </div>
+            {/* LOCAL LISTENING ONLY. This button and the mute control change what
+                YOU hear; they never touch the broadcast or the waveform. Filled
+                = not listening (the invitation), outlined + live dot = listening
+                (the state). Same width either way. */}
+            <button className={`btn ${playing ? 'ghost' : 'primary'}`} disabled={!live}
+              onClick={() => setPlaying(p => !p)}
+              title={playing ? 'Stop local playback (the station keeps broadcasting)' : 'Listen to the output on this device'}
+              style={{ width: 150, flex: 'none', justifyContent: 'center' }}>
+              {playing
+                ? <><span className="dot-s live" />Stop listening</>
+                : <><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z" /></svg>Listen</>}
             </button>
             <div className="icon-btn" title={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted(m => !m)}>
               {muted
                 ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6" /></svg>
                 : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" /></svg>}
             </div>
-            <input type="range" min={0} max={1} step={0.02} value={vol} onChange={e => setVol(Number(e.target.value))} style={{ width: 120 }} />
-            <div style={{ marginLeft: 'auto', fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
-              {live ? (st.pipeline.running ? `${np?.listeners ?? st.pipeline.listeners ?? 0} MP3 listeners` : '') : 'Start the station to monitor the output'}
-            </div>
+            <input type="range" min={0} max={1} step={0.02} value={vol} onChange={e => setVol(Number(e.target.value))}
+              style={{ width: 110, flex: 'none' }} />
           </div>
-          {/* The meter is fed by SERVER-MEASURED levels from the broadcast output,
-              so it moves whether or not you are listening; the local analyser is an
-              overlay while playing. */}
+          {/* ONE waveform, and it is the BROADCAST OUTPUT: server-measured levels
+              from the packager, drawn whether or not anyone is listening. Mute
+              and Stop listening cannot change a single bar of it. */}
           <AudioVisualizer media={mediaEl} height={230}
             levels={levels?.samples} verdict={verdict} live={live}
             idleText="Station is off"
@@ -261,8 +310,8 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
               </div>
             } />
           {live && (
-            <div style={{ display: 'flex', gap: 14, marginTop: 8, fontSize: 'var(--fs-xs)', color: 'var(--faint)', flexWrap: 'wrap' }}>
-              <span>Measured from the output, {playing ? 'listening locally' : 'no local playback needed'}</span>
+            <div className="flex flex-wrap items-center gap-3" style={{ marginTop: 8, fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
+              <span>Measured from the broadcast output</span>
               {levels?.level && <span style={{ fontFamily: 'ui-monospace,monospace' }}>
                 peak {levels.level.peakDb.toFixed(1)} dBFS · rms {levels.level.rmsDb.toFixed(1)} dBFS · crest {levels.level.crestDb.toFixed(1)} dB
               </span>}
@@ -270,21 +319,46 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
             </div>
           )}
           <audio ref={audioRef} crossOrigin="anonymous" style={{ display: 'none' }} />
-          {/* now playing strip under the visualiser */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, minHeight: 30 }}>
-            {isImg(np?.streamUrl) && <img src={np!.streamUrl!} alt="" style={{ width: 30, height: 30, borderRadius: 6, objectFit: 'cover' }} />}
-            <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {live ? (title || 'Untitled break') : 'Off air'}
-            </div>
-            <ClassChip cls={live ? titleClass : null} />
-            {live && np?.since && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>{fmtDur(Date.now() - np.since)} in</span>}
-          </div>
         </div>
 
-        {/* ---- station metadata + outputs ---- */}
+        {/* ---- OUTPUT PREVIEWS: verify each generated stream on its own ----
+             This sits under the player, not in the metadata column, because it
+             is playback: the operator checks MP3, then HLS, then DASH without
+             leaving the surface that shows the signal. */}
+        <div className="card" style={{ padding: 16, minWidth: 0 }}>
+          <div className="sec-label">{onAir ? 'Output previews (public URLs)' : 'Output previews (private URLs)'}</div>
+          <div className="hintxt" style={{ marginTop: -4, marginBottom: 8 }}>
+            {onAir
+              ? 'These URLs are open to the public. Each player below checks one packaged format independently.'
+              : 'Private monitoring URLs. Go on air to open the public ones. Each player checks one packaged format independently.'}
+          </div>
+          {(onAir
+            ? ([['MP3', st.publicUrls?.mp3, 'mp3'], ['HLS', st.publicUrls?.hls, 'hls'], ['DASH', st.publicUrls?.dash, 'dash']] as const)
+            : ([['MP3', st.outputs.mp3, 'mp3'], ['HLS', st.outputs.hls, 'hls'], ['DASH', st.outputs.dash, 'dash']] as const)
+          ).map(([label, url, kind]) => (
+            <OutputPreview key={label} label={label} url={url || null} kind={kind}
+              playing={preview === label} onToggle={() => {
+                // one sound at a time: a preview stops the live listen, and vice versa
+                setPreview(cur => { const next = cur === label ? null : label; if (next) setPlaying(false); return next })
+              }}
+              onCopy={() => url && copy(url)} />
+          ))}
+          {st.openRecording && (
+            <div style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>
+              Recording since {new Date(Number(st.openRecording.start_epoch_ms)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ·{' '}
+              <a href={`/recordings/${st.openRecording.id}`} style={{ color: 'var(--brand)' }}
+                onClick={e => { e.preventDefault(); window.history.pushState({}, '', `/recordings/${st.openRecording!.id}`); window.dispatchEvent(new PopStateEvent('popstate')) }}>
+                open in the clipping workbench
+              </a>
+            </div>
+          )}
+        </div>
+        </div>
+
+        {/* ---- station metadata, QC and pipeline history ---- */}
         <div style={{ display: 'grid', gap: 18, minWidth: 0 }}>
           <div className="card" style={{ padding: 16, minWidth: 0 }}>
-            <div style={SEC}>Station metadata</div>
+            <div className="sec-label">Station metadata</div>
             {st.icy?.station?.name || np?.station?.name ? (
               <div style={{ display: 'grid', gap: 6, fontSize: 'var(--fs-body)' }}>
                 <MetaRow k="Station" v={np?.station?.name || st.icy?.station?.name} />
@@ -327,31 +401,31 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
             )}
           </div>
 
-          <div className="card" style={{ padding: 16, minWidth: 0 }}>
-            <div style={SEC}>{onAir ? 'Public URLs (on air)' : 'Preview URLs (private)'}</div>
-            {!onAir && <div className="hintxt" style={{ marginTop: -4, marginBottom: 6 }}>These are private monitoring URLs. Go on air to open the public ones.</div>}
-            {(onAir
-              ? ([['MP3', st.publicUrls?.mp3], ['HLS', st.publicUrls?.hls], ['DASH', st.publicUrls?.dash]] as const)
-              : ([['MP3', st.outputs.mp3], ['HLS', st.outputs.hls], ['DASH', st.outputs.dash]] as const)
-            ).map(([label, url]) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)', minWidth: 0 }}>
-                <span style={{ width: 44, flex: 'none', fontSize: 'var(--fs-label)', fontWeight: 700, color: url ? 'var(--brand)' : 'var(--faint)' }}>{label}</span>
-                <span title={url || undefined} style={{ flex: 1, minWidth: 0, fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-xs)', color: url ? 'var(--muted)' : 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {url || 'disabled'}
-                </span>
-                {url && <button className="btn ghost" style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }} onClick={() => copy(url)}>Copy</button>}
-              </div>
-            ))}
-            {st.openRecording && (
-              <div style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>
-                Recording since {new Date(Number(st.openRecording.start_epoch_ms)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ·{' '}
-                <a href={`/recordings/${st.openRecording.id}`} style={{ color: 'var(--brand)' }}
-                  onClick={e => { e.preventDefault(); window.history.pushState({}, '', `/recordings/${st.openRecording!.id}`); window.dispatchEvent(new PopStateEvent('popstate')) }}>
-                  open in the clipping workbench
-                </a>
-              </div>
-            )}
-          </div>
+        {/* ---- event log: lifecycle, input/encoder errors and QC alarms.
+                It lives in this column, not full width below, because it is read
+                ALONGSIDE the gates and QC when something looks wrong. ---- */}
+        <div className="card" style={{ padding: 16, minWidth: 0 }}>
+          <div className="sec-label">Event log</div>
+          {!st.log?.length ? (
+            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>Nothing logged yet for this station.</div>
+          ) : (
+            <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+              {st.log.map((e, i) => (
+                <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '5px 0', borderBottom: '1px solid var(--border)' }}>
+                  <span style={{
+                    fontSize: 'var(--fs-micro)', fontWeight: 700, width: 46, flex: 'none', textTransform: 'uppercase',
+                    color: e.level === 'down' ? 'var(--down,#f87171)' : e.level === 'warn' ? 'var(--warn,#fbbf24)' : 'var(--faint)',
+                  }}>{e.level}</span>
+                  <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)', width: 74, flex: 'none', fontVariantNumeric: 'tabular-nums' }}>
+                    {e.ts === 'encoder' ? 'encoder' : fmtClock(e.ts)}
+                  </span>
+                  <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, width: 128, flex: 'none' }}>{e.title}</span>
+                  <span title={e.detail} style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.detail}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         </div>
       </div>
 
@@ -399,30 +473,6 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
               })}
             </tbody>
           </table>
-        )}
-      </div>
-
-      {/* ---- event log: lifecycle, input/encoder errors and QC alarms ---- */}
-      <div className="card" style={{ marginTop: 16, padding: 16 }}>
-        <div style={{ ...SEC, marginTop: 0 }}>Event log</div>
-        {!st.log?.length ? (
-          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>Nothing logged yet for this station.</div>
-        ) : (
-          <div style={{ maxHeight: 260, overflowY: 'auto' }}>
-            {st.log.map((e, i) => (
-              <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '5px 0', borderBottom: '1px solid var(--border)' }}>
-                <span style={{
-                  fontSize: 'var(--fs-micro)', fontWeight: 700, width: 46, flex: 'none', textTransform: 'uppercase',
-                  color: e.level === 'down' ? 'var(--down,#f87171)' : e.level === 'warn' ? 'var(--warn,#fbbf24)' : 'var(--faint)',
-                }}>{e.level}</span>
-                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)', width: 74, flex: 'none', fontVariantNumeric: 'tabular-nums' }}>
-                  {e.ts === 'encoder' ? 'encoder' : fmtClock(e.ts)}
-                </span>
-                <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, width: 128, flex: 'none' }}>{e.title}</span>
-                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.detail}</span>
-              </div>
-            ))}
-          </div>
         )}
       </div>
 
@@ -550,33 +600,99 @@ function QcStat({ k, v }: { k: string; v: string }) {
   )
 }
 
-const GATE_COLOR: Record<string, string> = {
-  idle: '#64748b', starting: '#fbbf24', ready: '#60a5fa', healthy: '#4ade80',
-  degraded: '#fb923c', failed: '#f87171', stopped: '#64748b',
-}
 /** The five-gate strip — same markup, sizing and arrows as the channel page,
  *  so a station and a channel read identically at a glance. */
-function PipelineStrip({ gates }: { gates: Gate[] }) {
-  if (!gates.length) return null
+/* ============================================================================
+   OUTPUT PREVIEW — one packaged format, checked on its own.
+   
+   Deliberately NOT a waveform. The waveform above answers "is the signal
+   good"; this answers a different question, "does THIS rendition actually
+   play", so it is a play button, an elapsed clock and any error the player
+   reported. MP3 plays natively, HLS via hls.js (native on Safari) and DASH via
+   dash.js, all into one hidden element so nothing here can be heard twice.
+   The URL and Copy stay on the row: verifying and sharing are the same errand.
+   ========================================================================== */
+function OutputPreview({ label, url, kind, playing, onToggle, onCopy }: {
+  label: string; url: string | null; kind: 'mp3' | 'hls' | 'dash'
+  playing: boolean; onToggle: () => void; onCopy: () => void
+}) {
+  const ref = useRef<HTMLAudioElement | null>(null)
+  const [err, setErr] = useState('')
+  const [secs, setSecs] = useState(0)
+
+  useEffect(() => {
+    const a = ref.current
+    if (!a) return
+    let killed = false
+    let hls: any = null
+    let dash: any = null
+    setErr('')
+    async function attach() {
+      if (!playing || !url || !a) return
+      // HLS and DASH here are fMP4/AAC. A browser without an AAC decoder (a
+      // plain Chromium build, some Linux Firefox packages) fails deep inside
+      // the player with a codec error that reads like a stream fault. Say what
+      // it actually is, so nobody goes hunting for a packaging bug.
+      if (kind !== 'mp3' && typeof MediaSource !== 'undefined'
+          && !MediaSource.isTypeSupported('audio/mp4; codecs="mp4a.40.2"')
+          && !a.canPlayType('application/vnd.apple.mpegurl')) {
+        setErr('this browser cannot decode AAC'); return
+      }
+      try {
+        if (kind === 'mp3' || a.canPlayType('application/vnd.apple.mpegurl')) {
+          if (kind === 'mp3' || kind === 'hls') { a.src = url; await a.play(); return }
+        }
+        if (kind === 'hls') {
+          const Hls = (await import('hls.js')).default
+          if (killed) return
+          if (!Hls.isSupported()) { setErr('HLS is not supported in this browser'); return }
+          hls = new Hls({ liveDurationInfinity: true })
+          hls.loadSource(url); hls.attachMedia(a)
+          hls.on(Hls.Events.MANIFEST_PARSED, () => a.play().catch(() => {}))
+          hls.on(Hls.Events.ERROR, (_e: any, d: any) => { if (d?.fatal) setErr(d.details || 'playback failed') })
+          return
+        }
+        const dashjs: any = (await import('dashjs')).default
+        if (killed) return
+        dash = dashjs.MediaPlayer().create()
+        dash.initialize(a, url, true)
+        try { dash.on(dashjs.MediaPlayer.events.ERROR, (e: any) => setErr(e?.error?.message || 'playback failed')) } catch { /* ignore */ }
+      } catch (e: any) { setErr(e?.message || 'playback failed') }
+    }
+    if (playing) attach()
+    else { a.pause(); a.removeAttribute('src'); a.load(); setSecs(0) }
+    return () => {
+      killed = true
+      if (hls) { try { hls.destroy() } catch { /* ignore */ } }
+      if (dash) { try { dash.reset() } catch { /* ignore */ } }
+    }
+    /* eslint-disable-next-line */
+  }, [playing, url, kind])
+
+  useEffect(() => {
+    if (!playing) return
+    const t = setInterval(() => setSecs(Math.floor(ref.current?.currentTime || 0)), 1000)
+    return () => clearInterval(t)
+  }, [playing])
+
+  const state = err ? err : playing ? `playing · ${fmtDur(secs * 1000)}` : ''
   return (
-    <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 0 14px', flexWrap: 'wrap' }}>
-      {gates.map((g, i) => {
-        const label = (g.gate === 'public' && g.status === 'healthy') ? 'ON AIR' : g.status
-        const color = GATE_COLOR[g.status] ?? '#64748b'
-        return (
-          <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 6, flex: '1 1 130px' }}>
-            <div title={g.detail} style={{ flex: 1, border: `1px solid ${color}55`, background: `${color}12`, borderRadius: 9, padding: '7px 10px', minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-label)', color: 'var(--muted)' }}>
-                <span className="dot-s" style={{ background: color }} />{g.label}
-                {g.billable && <span style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 9 }}>●</span>}
-              </div>
-              <div style={{ fontWeight: 700, fontSize: 'var(--fs-xs)', color, textTransform: 'uppercase' }}>{label}</div>
-              <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.detail}</div>
-            </div>
-            {i < gates.length - 1 && <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>→</div>}
-          </div>
-        )
-      })}
+    <div className="flex items-center gap-2" style={{ padding: '7px 0', borderBottom: '1px solid var(--border)', minWidth: 0 }}>
+      <button className="icon-btn" disabled={!url} onClick={onToggle} aria-label={playing ? `Stop ${label} preview` : `Play ${label} preview`}
+        title={url ? (playing ? `Stop the ${label} preview` : `Play the ${label} output`) : `${label} output is disabled`}
+        style={{ flex: 'none', opacity: url ? 1 : .4, cursor: url ? 'pointer' : 'default' }}>
+        {playing
+          ? <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
+          : <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z" /></svg>}
+      </button>
+      <span style={{ width: 42, flex: 'none', fontSize: 'var(--fs-label)', fontWeight: 700, color: url ? 'var(--brand)' : 'var(--faint)' }}>{label}</span>
+      <span title={url || undefined} style={{
+        flex: 1, minWidth: 0, fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-xs)',
+        color: url ? 'var(--muted)' : 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>{url || 'disabled'}</span>
+      {state && <span style={{ flex: 'none', fontSize: 'var(--fs-micro)', color: err ? '#fca5a5' : '#4ade80' }}>{state}</span>}
+      {url && <button className="btn ghost" style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)', flex: 'none' }} onClick={onCopy}>Copy</button>}
+      <audio ref={ref} crossOrigin="anonymous" style={{ display: 'none' }} />
     </div>
   )
 }

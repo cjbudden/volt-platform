@@ -4,7 +4,7 @@ import { subscribeLive } from '../liveStatus'
 import { useProtocols, protoOf, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
-import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, SEC, type RetUnit } from '../scaffold'
+import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, type RetUnit } from '../scaffold'
 
 type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
 
@@ -310,7 +310,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
 
           {type === 'transcode' ? (
             <>
-              <div style={SEC}>Source</div>
+              <div className="sec-label">Source</div>
               <SourceInput protocols={protocols} value={tSrc} onChange={setTSrc} label="Primary source" />
               <div className="toggle-row">
                 <div><div className="tt">Backup source</div><div className="td">Optional failover input of the same feed.</div></div>
@@ -318,7 +318,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
               </div>
               {tBackupOn && <SourceInput protocols={protocols} value={tBackup} onChange={setTBackup} label="Backup source" />}
 
-              <div style={SEC}>Output rendition ladder</div>
+              <div className="sec-label">Output rendition ladder</div>
               <div className="field">
                 {ladder.map((r, i) => (
                   <div key={r.height} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
@@ -334,7 +334,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
             </>
           ) : (
             <>
-              <div style={SEC}>Sent renditions (your pre-encoded ladder)</div>
+              <div className="sec-label">Sent renditions (your pre-encoded ladder)</div>
               <div className="field">
                 {rows.map((r, i) => (
                   <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 11, padding: 11, marginBottom: 10 }}>
@@ -354,7 +354,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
                 <div className="hintxt">Each rendition is packaged 1:1 to the matching output. Height is read from the label (e.g. 1080p).</div>
               </div>
 
-              <div style={SEC}>Fallback</div>
+              <div className="sec-label">Fallback</div>
               <div className="field"><label>On source loss</label>
                 <select className="inp" value={fallbackMode} onChange={e => setFallbackMode(e.target.value as any)}>
                   <option value="none">None</option>
@@ -371,7 +371,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
             </>
           )}
 
-          <div style={SEC}>Filler on total loss</div>
+          <div className="sec-label">Filler on total loss</div>
           <div className="field"><label>When no source is available</label>
             <select className="inp" value={lossBehavior} onChange={e => setLossBehavior(e.target.value as any)}>
               <option value="none">None (output stops)</option>
@@ -407,7 +407,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
             allowUpload={false} uploadHint="Uploading video loops arrives with Broadcast videos"
             onClose={() => setLoopPickerOpen(false)} onPick={(url) => { setSlateRef(url); setLoopPickerOpen(false) }} />
 
-          <div style={SEC}>Subtitles</div>
+          <div className="sec-label">Subtitles</div>
           <div className="toggle-row">
             <div><div className="tt">Live captions / subtitles</div><div className="td">The spoken language is detected automatically, chunk by chunk, and translated into each selected output language.</div></div>
             <div className={`sw ${capOn ? '' : 'off'}`} onClick={() => setCapOn(v => !v)}><i /></div>
@@ -418,7 +418,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
             </div>
           )}
 
-          <div style={SEC}>Delivery</div>
+          <div className="sec-label">Delivery</div>
           <div className="field"><label>Purchasing mode</label>
             <select className="inp" value={purchasing} onChange={e => setPurchasing(e.target.value)}>
               <option value="reserved">Reserved</option>
