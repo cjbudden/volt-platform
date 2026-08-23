@@ -6,6 +6,9 @@ import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
 import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, GATE_COLOR, type RetUnit } from '../scaffold'
+// The meter reads the SAME quantity as the radio waveform and the clipping
+// workbench: linear peak amplitude. See audioLevel.ts.
+import { analyserPeak } from '../audioLevel'
 import { ShareDrawer } from '../ShareDrawer'
 function fmtOffset(sec: number) {
   if (sec <= 0) return 'LIVE'
@@ -527,10 +530,12 @@ function hostOf(url?: string | null) { try { return url ? new URL(url).host : ''
 // element keeps playing through its own native path — unmute is just element.muted,
 // which is why audio actually plays. hls.js feeds the element through MSE (a
 // same-origin blob), so the capture is not cross-origin tainted even for a CDN
-// source. The meter reads the REAL level whenever the browser lets it; when it
-// cannot (context not yet resumed, or a browser that mutes the capture), it falls
-// back to a motion driven by playback progress so the bars are ALWAYS alive while
-// audio is flowing, muted or not. Audio is muted by default on this page.
+// source. The meter reads the REAL level whenever the browser lets it. When it cannot
+// (context not yet resumed, or a browser that mutes the capture) it reports NO
+// MEASUREMENT and the bars sit flat and grey. It used to synthesise motion from
+// playback progress instead, so the strip was "always alive": a meter that
+// invents movement cannot answer the only question it exists to answer, which
+// is whether audio is actually arriving. Audio is muted by default on this page.
 type AudioTrackOpt = { id: number; label: string }
 const AUDIO_BARS = 14      // analysis bands (drive the fallback motion)
 const HIST_COLS = 16       // scrolling meter: 16 BARS x 250ms = ~4s of history
@@ -549,15 +554,19 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
   const [history, setHistory] = useState<number[]>(() => new Array(HIST_COLS).fill(0))
   const histRef = useRef<number[]>(new Array(HIST_COLS).fill(0))
   const lastPushRef = useRef(0)
+  // Did the local capture actually yield a signal this tick? Drives the
+  // difference between "silent" and "we cannot measure here".
+  const measuringRef = useRef(false)
+  const [measuring, setMeasuring] = useState(false)
   const ctxRef = useRef<AudioContext | null>(null)
   const anRef = useRef<AnalyserNode | null>(null)
-  const dataRef = useRef<Uint8Array | null>(null)
+  const dataRef = useRef<Uint8Array | null>(null)      // frequency bins (band display)
+  const pcmRef = useRef<Uint8Array | null>(null)       // time domain (the LEVEL)
   const edgesRef = useRef<number[] | null>(null)
   const dispRef = useRef<number[]>(new Array(AUDIO_BARS).fill(0))  // smoothed bar heights
   const rafRef = useRef<number | null>(null)
   const triedRef = useRef(false)   // captureStream attempted (and failed) — stop retrying
   const lastTimeRef = useRef(-1)
-  const phaseRef = useRef(0)
 
   // AUDIBILITY is the native element only (reliable). We never route the element
   // through Web Audio, so unmuting simply un-mutes the element and it plays.
@@ -589,6 +598,7 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
         ctx.createMediaStreamSource(cap).connect(analyser)  // analysis only — no destination
         ctxRef.current = ctx; anRef.current = analyser
         dataRef.current = new Uint8Array(analyser.frequencyBinCount)
+        pcmRef.current = new Uint8Array(analyser.fftSize)
         edgesRef.current = null
         resume()
       } catch { triedRef.current = true }  // tainted / unsupported — synthesized motion only
@@ -599,7 +609,6 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
       const v = videoRef.current
       if (v) {
         build()
-        const playing = !v.paused && !v.ended && v.readyState >= 2 && v.currentTime !== lastTimeRef.current
         lastTimeRef.current = v.currentTime
         const an = anRef.current, data = dataRef.current
         const disp = dispRef.current
@@ -629,33 +638,35 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
             disp[b] = val >= disp[b] ? val : disp[b] * 0.7 + val * 0.3
             peak = Math.max(peak, disp[b])
           }
-          real = peak > 0.02
+          // "real" = the capture is delivering a decodable signal at all, which is
+          // what separates NO MEASUREMENT from measured silence.
+          real = peak > 0.02 || (!!pcmRef.current && analyserPeak(an, pcmRef.current) > 0.002)
         }
-        // overall level for the scrolling history. Computed from the RAW spectrum RMS,
-        // NOT the boosted display bands: those carry a strong perceptual gain for the
-        // per-band look and sit near 1.0 for any normal audio, which made the meter
-        // read as a constant 100% wall. Raw RMS with a gentle curve keeps real
-        // dynamics: silence near 0, speech mid, loud music high but not pinned.
+        // OVERALL LEVEL: linear PEAK AMPLITUDE from the time domain, the same
+        // quantity the radio waveform and the clipping workbench plot.
+        //
+        // It used to be an RMS over getByteFrequencyData with a ^0.6 boost. Those
+        // bytes are already a dB mapping (minDecibels..maxDecibels scaled to
+        // 0..255), so that was an RMS over decibels, lifted further by the curve:
+        // anything audible landed near the top and the strip read as a constant
+        // wall. Peak amplitude has the dynamics — see audioLevel.ts.
         let lvl = 0
-        if (real && dataRef.current) {
-          const dd = dataRef.current
-          const used = Math.max(8, Math.floor(dd.length * 0.78))
-          let acc = 0
-          for (let i = 0; i < used; i++) { const v = dd[i] / 255; acc += v * v }
-          lvl = Math.min(1, Math.pow(Math.sqrt(acc / used), 0.6) * 1.15)
-        } else if (playing) {
-          phaseRef.current += 0.09
-          lvl = 0.25 + 0.28 * Math.abs(Math.sin(phaseRef.current)) * (0.6 + 0.4 * Math.sin(phaseRef.current * 0.37))
+        if (real && anRef.current && pcmRef.current) {
+          lvl = analyserPeak(anRef.current, pcmRef.current)
         } else {
+          // No measurement (or measured silence): decay to flat rather than
+          // inventing motion. `measuring` below tells the meter which it is.
           const h = histRef.current
           lvl = Math.max(0, (h[h.length - 1] || 0) * 0.7)
         }
+        measuringRef.current = real
         const nowMs = performance.now()
         if (nowMs - lastPushRef.current >= 250) {   // one bar per 250ms
           lastPushRef.current = nowMs
           const h = histRef.current
           h.shift(); h.push(Math.min(1, lvl))
           setHistory(h.slice())
+          setMeasuring(measuringRef.current)
         }
       }
       rafRef.current = requestAnimationFrame(loop)
@@ -673,7 +684,7 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
 
   const toggleMute = () => { try { ctxRef.current?.resume() } catch { /* ignore */ }; setMuted(m => !m) }
   const setVol = (val: number) => { try { ctxRef.current?.resume() } catch { /* ignore */ }; setVolume(val); setMuted(val <= 0) }
-  return { muted, volume, history, toggleMute, setVol }
+  return { muted, volume, history, measuring, toggleMute, setVol }
 }
 
 type AudioEngine = ReturnType<typeof useAudioEngine>
@@ -704,8 +715,10 @@ function AudioDock({ eng, tracks, currentTrack, onSelectTrack, controlsShown }: 
   eng: AudioEngine; tracks: AudioTrackOpt[]; currentTrack: number; onSelectTrack: (i: number) => void; controlsShown: boolean
 }) {
   const icon = eng.muted || eng.volume <= 0 ? SPK_MUTE : eng.volume < 0.5 ? SPK_LO : SPK_HI
-  // audio counts as present when the RECENT history (last ~1.5s) carries real level
-  const active = eng.history.slice(-15).some(b => b > 0.12)
+  // Audio counts as present when the RECENT history carries real level. The
+  // threshold is on LINEAR amplitude now, so 0.03 is roughly -30 dBFS: quiet
+  // speech still registers, a dead line does not.
+  const active = eng.history.slice(-15).some(b => b > 0.03)
   return (
     <div style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 5, display: 'flex', alignItems: 'center', gap: 8, pointerEvents: 'none' }}>
       <div style={{
@@ -726,8 +739,11 @@ function AudioDock({ eng, tracks, currentTrack, onSelectTrack, controlsShown }: 
           </select>
         )}
       </div>
-      <div title="Audio level (last ~7 seconds, newest on the right)" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 32, padding: '5px 8px', borderRadius: 9, background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(2px)' }}>
-        <ScrollMeter history={eng.history} active={active} />
+      <div title={eng.measuring
+        ? 'Audio level, peak amplitude (last ~4 seconds, newest on the right)'
+        : 'No local audio measurement: this browser will not let the page tap the stream'}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 32, padding: '5px 8px', borderRadius: 9, background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(2px)' }}>
+        <ScrollMeter history={eng.history} active={active && eng.measuring} />
       </div>
     </div>
   )
@@ -735,8 +751,8 @@ function AudioDock({ eng, tracks, currentTrack, onSelectTrack, controlsShown }: 
 
 // Right-to-left scrolling BAR meter: each bar is 250ms of overall level, the newest
 // enters on the RIGHT and the history steps LEFT (~4s across the strip). Discrete
-// rounded bars like the original meter, not a filled area: quiet is short, loud is
-// tall, and the level is real (raw-signal RMS), so it is not pinned at 100%.
+// rounded bars, not a filled area: quiet is short, loud is tall, and the level is
+// linear PEAK AMPLITUDE (audioLevel.ts), so it is never pinned at 100%.
 function ScrollMeter({ history, active }: { history: number[]; active: boolean }) {
   const ref = useRef<HTMLCanvasElement | null>(null)
   const BAR = 4, GAP = 2

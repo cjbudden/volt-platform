@@ -207,6 +207,29 @@ Three things live on the radio surface and must not be confused with each other:
    good". One sound at a time — starting a preview stops the live listen and
    vice versa.
 
+## Audio level: one definition, everywhere
+
+`src/audioLevel.ts` is the single source. Every meter and waveform in the app
+plots **linear peak amplitude** and reads it through the same helpers:
+
+| Surface | Source of the number |
+|---|---|
+| Radio waveform | server true-peak frames (`peaks`) → `dbToAmp` |
+| Video page dock meter | `analyserPeak` on the captured stream (time domain) |
+| Clipping workbench | server `peakRms` per bucket → linear amplitude |
+| Recording workbench visualiser | `analyserPeak` on the local element |
+
+**Never plot loudness, and never map dB linearly onto the bar height.** Both
+compress real programme audio into a band at the top of the meter: over a 60 dB
+window, -1 dBFS is 0.98 and -13 dBFS is 0.78, so a 12 dB swing draws as a 20%
+difference. On the linear scale those are 0.89 and 0.22.
+
+**Never plot a number you did not measure.** The video meter used to synthesise
+motion from playback progress whenever the browser refused the audio capture, so
+the bars were "always alive". A meter that invents movement cannot answer the one
+question it exists to answer. It now reports no measurement: flat, grey, and the
+tooltip says why.
+
 ## Checklist for a new page
 
 1. `<PageIdentity>` for the header, `<StatusPill>` / `<TypeTag>` for state.

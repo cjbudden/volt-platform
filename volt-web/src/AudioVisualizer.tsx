@@ -24,6 +24,9 @@
 // ============================================================================
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { RadioLevelSample, SignalVerdict } from './api'
+// ONE definition of waveform height, shared with the video meter and the
+// clipping workbench. See audioLevel.ts for why it is linear peak amplitude.
+import { dbToAmp, dbToUnit, analyserPeak } from './audioLevel'
 
 /** One AudioContext + source node per media element for the page's lifetime —
  *  createMediaElementSource can only ever be called once per element. */
@@ -52,29 +55,6 @@ export const VERDICT_UI: Record<SignalVerdict, { label: string; color: string; n
   silent: { label: 'Dead air', color: '#f87171', note: 'no audio in the output' },
   static: { label: 'Static-like', color: '#fb923c', note: 'noise-like, not programme audio' },
   unknown: { label: 'No measurement', color: '#64748b', note: 'waiting for the first segment' },
-}
-
-/** dBFS → LINEAR AMPLITUDE 0..1. This is the waveform scale, the same one a
- *  SoundCloud-style view uses, and it is why the bars have shape: -4 dBFS is
- *  0.63 of full scale, -13 dBFS is 0.22, so transients read as transients.
- *
- *  What it replaced, and why: the meter used to plot momentary LOUDNESS mapped
- *  linearly in dB over a 60 dB window. Broadcast audio is loudness-normalised
- *  and compressed, so momentary loudness barely moves — a real Groove Salad
- *  segment measured -17.8 to -14.0 LUFS, under 4 LU — and every one of those
- *  values lands at 0.70-0.77 on that scale. The result was a solid block of
- *  near-full-height bars: it looked like the station was pinned at 100% and
- *  showed no dynamics at all. */
-function dbToAmp(db: number): number {
-  if (!Number.isFinite(db) || db <= -60) return 0
-  return Math.max(0, Math.min(1, Math.pow(10, db / 20)))
-}
-
-/** dBFS (-100..0) → 0..1 over a 60 dB window. Fallback only, for a feed that
- *  predates per-frame true peak and carries loudness frames alone. */
-function dbToUnit(db: number): number {
-  if (!Number.isFinite(db) || db <= -60) return 0
-  return Math.max(0, Math.min(1, (db + 60) / 60))
 }
 
 /** One sample's ~100ms frames as waveform units: true peak when the feed has
@@ -142,13 +122,7 @@ export default function AudioVisualizer({
     if (!rec || !media || media.paused) return 0
     const buf = pcmRef.current && pcmRef.current.length === rec.analyser.fftSize
       ? pcmRef.current : (pcmRef.current = new Uint8Array(rec.analyser.fftSize))
-    rec.analyser.getByteTimeDomainData(buf as any)
-    let peak = 0
-    for (let i = 0; i < buf.length; i++) {
-      const d = Math.abs((buf[i] - 128) / 128)
-      if (d > peak) peak = d
-    }
-    return Math.max(0, Math.min(1, peak))
+    return analyserPeak(rec.analyser, buf)
   }
 
   useEffect(() => {

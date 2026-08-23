@@ -48,10 +48,24 @@ export interface WaveformResult {
   buckets: (WaveBucket | null)[];
 }
 
-/** dBFS -> 0..1 for drawing (floor at -60 dB). */
+/**
+ * dBFS -> 0..1 for drawing: LINEAR AMPLITUDE, floored at -60 dBFS.
+ *
+ * This is what a waveform view draws, and it is the same scale the live radio
+ * meter and the video page's dock meter use, so the clipping surface and the
+ * live surface agree about how loud a thing looked.
+ *
+ * It was `(db + 60) / 60` — linear in DECIBELS over a 60 dB window. On real
+ * programme audio that puts -4 dBFS at 0.93 and -13 dBFS at 0.78: a 9 dB swing
+ * drawn as a 15% difference in height, so the waveform came out as a fat block
+ * with no shape to trim against. Linear amplitude puts those at 0.63 and 0.22.
+ *
+ * The per-run cache stores dB, not units, so this changes the picture without
+ * invalidating a single cached file.
+ */
 function dbToUnit(db: number): number {
   if (!Number.isFinite(db) || db <= -60) return 0;
-  return Math.max(0, Math.min(1, (db + 60) / 60));
+  return Math.max(0, Math.min(1, Math.pow(10, db / 20)));
 }
 
 // ---- per-run peak cache -----------------------------------------------------
