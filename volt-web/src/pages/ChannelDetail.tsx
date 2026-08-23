@@ -106,7 +106,6 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   const outputReady = outGate?.status === 'healthy'   // output packaged + advancing
   // ONE consistent status: the header uses the SAME `overall` roll-up the list uses, so
   // they never disagree. error > degraded > on air > ready > starting > stopped/idle.
-  const trulyOnAir = published && d.onAir
   const ov = d.health?.overall || (sourceUp ? 'starting' : 'idle')
   const OVMAP: Record<string, { label: string; cls: string }> = {
     onair: { label: 'ON AIR', cls: 'live' },
@@ -614,7 +613,10 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
         const disp = dispRef.current
         let real = false
         if (an && data && ctxRef.current && ctxRef.current.state === 'running') {
-          an.getByteFrequencyData(data)
+          // The DOM lib now types this parameter as Uint8Array<ArrayBuffer>
+          // while our buffer is Uint8Array<ArrayBufferLike>. Same bytes, and
+          // an analyser never writes into a SharedArrayBuffer.
+          an.getByteFrequencyData(data as Uint8Array<ArrayBuffer>)
           const bins = data.length
           // log-spaced band edges so each bar covers a musically meaningful range (low
           // bass dominates a linear split — that was the "single bar" look). Computed once.
@@ -1099,6 +1101,9 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           const at = player.getTracksFor('audio') || []
           setAudioTracks(at.map((t: any, i: number) => ({ id: i, label: (t.labels && t.labels[0]?.text) || t.lang || `Audio ${i + 1}` })))
         } catch { /* ignore */ }
+        // STREAM_INITIALIZED can arrive after the element has been torn down
+        // (a fast format switch, or leaving the page mid-load).
+        if (!video) return
         softMute(video); video.play().catch(() => {}); snapSoon()
       }
       try { player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, onInit) } catch { /* ignore */ }

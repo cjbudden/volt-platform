@@ -135,6 +135,13 @@ export interface ChannelSettingsPatch {
   name?: string
   recordingEnabled?: boolean
   recordingRetentionDays?: number | null
+  /** Retention in SECONDS, which is what the settings form actually sends: the
+   *  UI offers minutes, hours and days and converts. The API has accepted this
+   *  since retention became sub-day; the client type had not caught up, so every
+   *  save was an untyped property that happened to work. */
+  recordingRetentionSec?: number | null
+  /** Transcode rungs. Same story: sent, accepted, undeclared. */
+  outputLadder?: { height: number; bitrateKbps: number }[] | null
   dvrWindowSec?: number | null
   dvrMode?: 'sliding' | 'event_start'
   geoMode?: 'worldwide' | 'allow' | 'block'
@@ -446,6 +453,31 @@ export const api = {
     req(`/recordings/${id}/clip`, { method: 'POST', body: JSON.stringify(b) }),
   publishRecording: (id: string, title?: string): Promise<VodAssetRow> =>
     req(`/recordings/${id}/publish`, { method: 'POST', body: JSON.stringify({ title }) }),
+  // ---- media lifecycle ----
+  storageCapabilities: (): Promise<StorageCapabilities> => req('/storage/capabilities'),
+  mediaObjects: (q: { limit?: number; state?: string; channelId?: string; recordingId?: string } = {}):
+    Promise<{ objects: MediaObjectRow[]; count: number }> => {
+    const p = new URLSearchParams()
+    if (q.limit) p.set('limit', String(q.limit))
+    if (q.state) p.set('state', q.state)
+    if (q.channelId) p.set('channelId', q.channelId)
+    if (q.recordingId) p.set('recordingId', q.recordingId)
+    return req(`/storage/objects?${p.toString()}`)
+  },
+  mediaObject: (id: string): Promise<any> => req(`/storage/objects/${id}`),
+  restoreMedia: (id: string, speed?: 'expedited' | 'standard' | 'bulk'): Promise<any> =>
+    req(`/storage/objects/${id}/restore`, { method: 'POST', body: JSON.stringify({ speed }) }),
+  holdMedia: (id: string, hold: boolean, reason?: string): Promise<MediaObjectRow> =>
+    req(`/storage/objects/${id}/hold`, { method: 'POST', body: JSON.stringify({ hold, reason }) }),
+  retentionRules: (): Promise<{ rules: RetentionRuleRow[]; capabilities: StorageCapabilities }> =>
+    req('/storage/retention'),
+  saveRetentionRule: (b: {
+    ruleId?: string; name: string; channelId?: string; eventId?: string
+    accountScope?: boolean; appliesTo?: 'recording' | 'asset' | 'both'
+    stages: RetentionStageInput[]
+  }): Promise<RetentionRuleRow> => req('/storage/retention', { method: 'PUT', body: JSON.stringify(b) }),
+  previewSweep: (): Promise<SweepPreview> => req('/storage/retention/preview', { method: 'POST' }),
+
   recordingDownload: (id: string): Promise<{ status: 'exporting' | 'ready'; url?: string; message?: string }> =>
     req(`/recordings/${id}/download`),
   /** What a finished clip was built from, back to the physical segments. */
@@ -783,6 +815,67 @@ export interface RecordingTimeline {
   startMs: number; endMs: number | null; live: boolean; hasAudio: boolean
   audioOnly?: boolean   // radio recordings: player shows the audio visualiser
   spans: { runId: string; startMs: number; endMs: number; segments: number }[]
+}
+
+
+// ---- media lifecycle: what exists, where it lives, what happens next -------
+export type StorageTierId =
+  | 'local' | 's3_standard' | 's3_ia' | 's3_glacier_ir'
+  | 's3_glacier_flexible' | 's3_deep_archive'
+export type RetentionActionId = 'keep' | 'to_cold' | 'to_archive' | 'delete'
+
+export interface StorageCapabilities {
+  driver: 'local' | 's3'
+  tiers: StorageTierId[]
+  archiveEnabled: boolean
+  actions: RetentionActionId[]
+  defaultColdTier: StorageTierId | null
+  defaultArchiveTier: StorageTierId | null
+  /** Why archiving is unavailable, when it is. Shown rather than left to guess. */
+  archiveUnavailableReason: string | null
+  defaultLadder: { afterDays: number; action: RetentionActionId; targetTier?: StorageTierId | null }[]
+}
+
+export interface MediaLocationRow {
+  id?: string; tier: StorageTierId; uri: string
+  bytes: number | string | null; verified_at?: string | null
+}
+
+export interface MediaObjectRow {
+  id: string
+  logical_key: string
+  kind: string
+  rendition: string | null
+  /** Can it be read right now, and if not what is happening. Separate from the
+   *  TIER, which says where the bytes are and what reading them costs. */
+  state: 'pending' | 'writing' | 'available' | 'archiving' | 'archived'
+       | 'restoring' | 'restored' | 'deleting' | 'deleted'
+  bytes: number | string | null
+  duration_ms: number | string | null
+  segment_count: number | null
+  hold: boolean
+  hold_reason: string | null
+  restore_expected_by: string | null
+  restore_expires_at: string | null
+  source_name: string | null
+  recording_title: string | null
+  locations: MediaLocationRow[] | null
+}
+
+export interface RetentionStageInput {
+  afterDays: number; action: RetentionActionId; targetTier?: StorageTierId | string
+}
+
+export interface RetentionRuleRow {
+  id: string
+  account_id: string | null; channel_id: string | null; event_id: string | null
+  name: string; applies_to: 'recording' | 'asset' | 'both'; enabled: boolean
+  stages: { id?: string; afterDays: number; action: RetentionActionId; targetTier: StorageTierId | null }[]
+}
+
+export interface SweepPreview {
+  dryRun: boolean; considered: number; cooled: number; archived: number
+  deleted: number; skippedOnHold: number; failed: number; unavailable: number
 }
 
 export interface VodAssetRow {

@@ -6,6 +6,10 @@ import { createClipVod, deriveEventVod } from '../clips';
 import { TaskLauncher, makeLauncher } from './launcher';
 import { startRadio, stopRadio } from '../radio/pipeline';
 import { backfillContainers, closeFinishedContainers } from '../containers';
+import { sweep, ruleFor } from '../media/retention';
+import { transition, locationsOf, pollRestores } from '../media/objects';
+import { storageDriver } from '../media/storage';
+import { reconcileAll } from '../media/reconcile';
 
 /**
  * The orchestrator turns channel/event lifecycle into real running tasks and
@@ -324,6 +328,13 @@ export class Orchestrator {
     await backfillContainers(200).catch((e) => console.error('[containers] tick backfill failed', e));
     // and close days that have ended and hold nothing still recording
     await closeFinishedContainers().catch((e) => console.error('[containers] close failed', e));
+    // 7) bring the media lifecycle in line with what is on disk, and move
+    //    outstanding restores forward. Both are cheap when there is nothing to
+    //    do, and both are the difference between a lifecycle that describes the
+    //    media and one that describes what it wishes were there.
+    await reconcileAll({ actor: 'orchestrator:tick' })
+      .catch((e) => console.error('[media] reconcile failed', e));
+    await pollRestores().catch((e) => console.error('[media] restore poll failed', e));
     return { started: due.length, stopped: over.length };
   }
 
@@ -563,16 +574,63 @@ export class Orchestrator {
   }
 
   // ---- retention sweep -----------------------------------------------------
+  /**
+   * Walk the retention ladder.
+   *
+   * This used to be `DELETE FROM recordings WHERE expires_at < now()` with a
+   * TODO where the storage cleanup should be — which lost the record along with
+   * the bytes, had exactly one action, and left the actual files on disk. It now
+   * walks each object's ladder: cool it, archive it, or delete it, with every
+   * transition logged and the row kept as a tombstone so "what happened to the
+   * 3rd of March" has an answer.
+   *
+   * The legacy `expires_at` column is still honoured for recordings that have
+   * one and no rule, so upgrading a deployment does not silently stop expiring
+   * things that were already set to expire.
+   */
   async sweepRetention(): Promise<number> {
-    // delete recordings past their expiry (S3 object cleanup is enqueued
-    // separately; here we drop the index rows so they leave the library).
-    const expired = await query<any>(
-      `DELETE FROM recordings WHERE expires_at IS NOT NULL AND expires_at < now() RETURNING id, master_key`
-    );
-    if (expired.length) {
-      console.log(`[retention] swept ${expired.length} expired recording(s)`);
-      // TODO: enqueue S3 prefix deletion for each master_key.
+    const result = await sweep({ actor: 'retention:sweep' });
+    if (result.cooled || result.archived || result.deleted || result.failed || result.unavailable) {
+      console.log(
+        `[retention] ${result.considered} considered: ${result.cooled} cooled, ` +
+        `${result.archived} archived, ${result.deleted} deleted, ` +
+        `${result.skippedOnHold} on hold, ${result.unavailable} unavailable, ${result.failed} failed`
+      );
     }
-    return expired.length;
+
+    // LEGACY PATH. Recordings carrying an expires_at from before the ladder
+    // existed, and governed by no rule, still expire — but they are now marked
+    // rather than deleted outright, so the library keeps the knowledge that they
+    // were there and the provenance chain still reaches them.
+    const legacy = await query<any>(
+      `SELECT r.id, r.channel_id, r.event_id FROM recordings r
+        WHERE r.expires_at IS NOT NULL AND r.expires_at < now()
+          AND r.storage_state IS DISTINCT FROM 'deleted'
+        LIMIT 200`
+    );
+    let legacyDone = 0;
+    for (const rec of legacy) {
+      const rule = await ruleFor({ channelId: rec.channel_id, eventId: rec.event_id, appliesTo: 'recording' });
+      if (rule) continue;            // the ladder owns it; leave it alone
+      const objs = await query<any>(`SELECT id FROM media_objects WHERE recording_id = $1`, [rec.id]);
+      for (const o of objs) {
+        try {
+          await transition(o.id, 'deleting', { action: 'delete', actor: 'retention:legacy-expiry' });
+          for (const l of await locationsOf(o.id)) {
+            await storageDriver().remove(l.uri);
+            await query(`UPDATE media_locations SET present = false, removed_at = now() WHERE id = $1`, [l.id]);
+          }
+          await transition(o.id, 'deleted', {
+            action: 'delete', actor: 'retention:legacy-expiry',
+            detail: 'expires_at passed and no retention rule governs this channel',
+          });
+        } catch (e) { console.error('[retention] legacy expiry failed for', o.id, e); }
+      }
+      await query(`UPDATE recordings SET storage_state = 'deleted' WHERE id = $1`, [rec.id]);
+      legacyDone++;
+    }
+    if (legacyDone) console.log(`[retention] ${legacyDone} recording(s) expired under the legacy expires_at column`);
+
+    return result.deleted + legacyDone;
   }
 }

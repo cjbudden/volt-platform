@@ -15,6 +15,7 @@ import { mediaIngestRouter } from './modules/mediaIngest';
 import { recordingsRouter } from './modules/recordings';
 import { jobsRouter } from './modules/jobs';
 import { timelineRouter, daypartPresetsRouter } from './modules/timeline';
+import { storageRouter } from './modules/storage';
 import { vodRouter } from './modules/vod';
 import { metadataSchemasRouter } from './modules/metadataSchemas';
 import { fillerAssetsRouter } from './modules/fillerAssets';
@@ -199,6 +200,10 @@ export function createServer() {
   // channels prefix and after it — the channels router owns /:id itself.
   app.use('/api/channels', timelineRouter);
   app.use('/api/daypart-presets', daypartPresetsRouter);
+  // Media lifecycle: what exists, where it lives, whether it can be read now,
+  // and what retention will do to it next. NOT /api/media — that prefix is the
+  // thumbnailer's ingest callback and belongs to a different concern entirely.
+  app.use('/api/storage', storageRouter);
   app.use('/api/vod', vodRouter);                        // derived VOD assets + metadata
   app.use('/api/metadata-schemas', metadataSchemasRouter); // named metadata schemas
   app.use('/api/filler-assets', fillerAssetsRouter);     // slates & loops

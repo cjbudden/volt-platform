@@ -6,6 +6,7 @@ import ImageLibrary from './pages/ImageLibrary'
 import Recordings from './pages/Recordings'
 import RecordingDetail from './pages/RecordingDetail'
 import RecordingSourceView from './pages/RecordingSource'
+import StoragePage from './pages/Storage'
 import Events from './pages/Events'
 import Epg from './pages/Epg'
 import EpgDetail from './pages/EpgDetail'
@@ -36,6 +37,7 @@ const I = {
   key: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.8 7.8 5.5 5.5 0 017.8-7.8zm0 0L15 8m-2 2 4-4m0 0 3 3 3-3-3-3" /></svg>,
   users: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" /></svg>,
   shield: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>,
+  storage: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5" /><path d="M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6" /></svg>,
 }
 
 /** Which FEATURE (from /auth/me) each content nav item belongs to; items whose
@@ -45,7 +47,10 @@ const NAV_FEATURE: Record<string, string> = {
   recordings: 'recordings', vod: 'vod', images: 'media', analytics: 'analytics',
 }
 
-const NAV: { group: string; items: { key: string; label: string; icon: ReactElement; badge?: string }[] }[] = [
+interface NavItem { key: string; label: string; icon: ReactElement; badge?: string }
+interface NavGroup { group: string; items: NavItem[] }
+
+const NAV: NavGroup[] = [
   { group: 'Overview', items: [
     { key: 'dashboard', label: 'Dashboard', icon: I.dash },
     { key: 'live', label: 'Live Streams', icon: I.live },
@@ -63,6 +68,7 @@ const NAV: { group: string; items: { key: string; label: string; icon: ReactElem
     { key: 'vod', label: 'VOD Library', icon: I.vod },
     { key: 'images', label: 'Image Library', icon: I.images },
     { key: 'multiview', label: 'Multiview', icon: I.multiview },
+    { key: 'storage', label: 'Storage', icon: I.storage },
   ] },
   { group: 'Insight', items: [
     { key: 'analytics', label: 'Analytics', icon: I.analytics },
@@ -111,7 +117,7 @@ export default function App() {
     if (!f) return 'view'                        // unmapped items stay visible
     return me.features?.[f] ?? 'manage'
   }
-  const nav = [
+  const nav: NavGroup[] = [
     ...NAV.map(g => ({ ...g, items: g.items.filter(it => featureLevel(it.key) !== 'none') }))
       .filter(g => g.items.length > 0),
     ...(isAdmin ? [{ group: 'Admin', items: [
@@ -201,6 +207,8 @@ export default function App() {
                 : route.recordingSource
                 ? <RecordingSourceView key={route.recordingSource.id} id={route.recordingSource.id} onBack={() => navigate('/recordings')} />
                 : <Recordings />)
+            : section === 'storage'
+            ? <StoragePage />
             : section === 'events'
             ? <Events />
             : section === 'epg'

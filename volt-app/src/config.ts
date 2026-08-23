@@ -61,6 +61,29 @@ export const config = {
     dir: process.env.CLIPS_DIR ?? `${process.cwd()}/clips`,
     ffmpegBin: process.env.FFMPEG_BIN ?? 'ffmpeg',
   },
+  // MEDIA STORE — where recorded media lives, and whether this deployment has
+  // an archive at all.
+  //
+  // Archiving is offered ONLY when the driver is 's3' AND it is explicitly
+  // enabled. A local deployment has one tier, so cold and archive actions are
+  // not offered and a retention rule that names one is refused at write time
+  // rather than accepted and silently never fired. See services/media/storage.ts.
+  mediaStore: {
+    driver: (process.env.MEDIA_STORE_DRIVER ?? 'local') as 'local' | 's3',
+    archiveEnabled: (process.env.MEDIA_ARCHIVE_ENABLED ?? 'false') === 'true',
+    // Which tier each rung of the ladder means here. Glacier Instant Retrieval
+    // is the default cold tier because it still serves a byte range with no
+    // restore step, so cooling costs nothing in latency.
+    coldTier: (process.env.MEDIA_COLD_TIER ?? 's3_glacier_ir') as
+      's3_ia' | 's3_glacier_ir',
+    archiveTier: (process.env.MEDIA_ARCHIVE_TIER ?? 's3_glacier_flexible') as
+      's3_glacier_flexible' | 's3_deep_archive',
+    // Default restore speed when a request does not name one.
+    restoreSpeed: (process.env.MEDIA_RESTORE_SPEED ?? 'standard') as
+      'expedited' | 'standard' | 'bulk',
+    // How long a restored copy stays readable before lapsing back to archived.
+    restoreKeepDays: Number(process.env.MEDIA_RESTORE_KEEP_DAYS ?? 7),
+  },
   // Image library store: local base dir for local runs, S3 bucket+prefix in cloud.
   imageStore: {
     driver: (process.env.IMAGE_STORE_DRIVER ?? 'local') as 'local' | 's3',

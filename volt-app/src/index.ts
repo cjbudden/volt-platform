@@ -6,6 +6,7 @@ import { migrate } from './services/migrate';
 import { startWorker } from './services/jobs/worker';
 import { registerClipHandlers } from './services/jobs/handlers/clipExtract';
 import { backfillContainers } from './services/containers';
+import { reconcileAll } from './services/media/reconcile';
 import { reapAllEncoders } from './services/orchestrator/encoderCleanup';
 import { stopAllRadio } from './services/radio/pipeline';
 
@@ -104,6 +105,10 @@ async function boot(): Promise<void> {
   // idempotent: it only fills container_id where it is NULL, and no row's
   // day_utc or unique index is touched, so the old roll logic keeps working.
   await backfillContainers().catch((e) => console.error('[containers] backfill failed', e));
+  // Register what is on disk into the media lifecycle before anything reads it.
+  // Retention governs media_objects, so a deployment that has never reconciled
+  // has a ladder pointed at an empty set while the disk fills.
+  await reconcileAll({ actor: 'boot' }).catch((e) => console.error('[media] boot reconcile failed', e));
 }
 
 const server = app.listen(config.port, () => {
