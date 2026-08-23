@@ -17,6 +17,7 @@ fuser -k "$PORT"/tcp 2>/dev/null; fuser -k "$SIMPORT"/tcp 2>/dev/null; sleep 0.4
 
 pass=0; fail=0
 ok(){ if eval "$2"; then echo "PASS $1"; pass=$((pass+1)); else echo "FAIL $1"; fail=$((fail+1)); fi; }
+code(){ curl -s -o /dev/null -w '%{http_code}' "$@"; }
 J(){ python3 -c "
 import json,sys
 try:
@@ -108,13 +109,65 @@ ok "log entries are real EPG programme rows" 'python3 -c "
 import json,sys; d=json.loads(sys.argv[1]); assert len(d)>=3
 " "$EPG"'
 
+# ---- monitoring parity: five gates, QC, levels, event log --------------------------
+sleep 10   # let the monitor take a few level samples
+QC=$(curl -s "$B/radio/$CID/qc" -H "$A")
+ok "five gates reported (server/input/encoder/output/public)" 'python3 -c "
+import json,sys; d=json.loads(sys.argv[1])
+gs=[g[\"gate\"] for g in d[\"health\"][\"gates\"]]
+assert gs==[\"server\",\"input\",\"encoder\",\"output\",\"public\"], gs
+" "$QC"'
+ok "gates healthy while running (server/input/encoder/output)" 'python3 -c "
+import json,sys; d=json.loads(sys.argv[1])
+g={x[\"gate\"]:x[\"status\"] for x in d[\"health\"][\"gates\"]}
+assert all(g[k]==\"healthy\" for k in (\"server\",\"input\",\"encoder\",\"output\")), g
+" "$QC"'
+ok "not published yet: public gate READY, overall ready" '[ "$(J "$QC" health.overall)" = ready ]'
+ok "QC verdict is real programme audio" '[ "$(J "$QC" qc.verdict)" = audio ]'
+ok "QC playlist invariant checks are passing" 'python3 -c "
+import json,sys; d=json.loads(sys.argv[1])[\"qc\"]
+assert d[\"checks\"][\"ok\"] >= 1 and d[\"checks\"][\"failed\"] == 0, d[\"checks\"]
+" "$QC"'
+LV=$(curl -s "$B/radio/$CID/levels?limit=5" -H "$A")
+ok "levels feed carries measured dBFS + ~100ms frames" 'python3 -c "
+import json,sys; d=json.loads(sys.argv[1])
+s=d[\"samples\"][-1]
+assert -60 < s[\"rmsDb\"] < 0, s[\"rmsDb\"]
+assert len(s[\"frames\"]) >= 10, len(s[\"frames\"])
+assert d[\"level\"] and d[\"verdict\"]==\"audio\"
+" "$LV"'
+EVL=$(curl -s "$B/radio/$CID/events" -H "$A")
+ok "event log records the station start" 'echo "$EVL" | grep -q "Station started"'
+ok "event log is clean (no false errors from decoder chatter)" 'python3 -c "
+import json,sys; d=json.loads(sys.argv[1])[\"entries\"]
+bad=[e for e in d if e[\"level\"]==\"down\"]
+assert not bad, bad[:2]
+" "$EVL"'
+
+# ---- on-air split: start = private, go on air = public ------------------------------
+ok "public MP3 is CLOSED before going on air" '[ "$(code "http://localhost:$PORT/live/$CID/stream.mp3")" = 404 ]'
+ok "public HLS is CLOSED before going on air" '[ "$(code "http://localhost:$PORT/live/$CID/master.m3u8")" = 404 ]'
+ok "private preview MP3 still serves" '[ "$(code --max-time 3 "http://localhost:$PORT/radio/$CID/stream.mp3")" = 200 ]'
+AIR=$(curl -s -X POST "$B/radio/$CID/air" -H "$A" -H 'content-type:application/json' -d '{"on":true}')
+ok "go on air succeeds" '[ "$(J "$AIR" on_air)" = True ]'
+sleep 1
+ok "public MP3 now serves" '[ "$(code --max-time 3 "http://localhost:$PORT/live/$CID/stream.mp3")" = 200 ]'
+ok "public HLS now redirects to the origin" '[ "$(code "http://localhost:$PORT/live/$CID/master.m3u8")" = 302 ]'
+ok "public DASH now redirects to the origin" '[ "$(code "http://localhost:$PORT/live/$CID/manifest.mpd")" = 302 ]'
+QC2=$(curl -s "$B/radio/$CID/qc" -H "$A")
+ok "on air: public gate healthy, overall onair" '[ "$(J "$QC2" health.overall)" = onair ] && [ "$(J "$QC2" health.onAir)" = True ]'
+ok "take off air closes the public URLs again" '[ "$(code -X POST "$B/radio/$CID/air" -H "$A" -H "content-type:application/json" -d "{\"on\":false}")" = 200 ] && [ "$(code "http://localhost:$PORT/live/$CID/stream.mp3")" = 404 ]'
+curl -s -X POST "$B/radio/$CID/air" -H "$A" -H 'content-type:application/json' -d '{"on":true}' >/dev/null
+
 # ---- stop + recording ------------------------------------------------------------
 RECID=$(psql "$DATABASE_URL" -tA -c "SELECT id FROM recordings WHERE channel_id='$CID' ORDER BY created_at DESC LIMIT 1" | head -1 | tr -cd 'a-f0-9-')
 ok "recording opened on start" '[ -n "$RECID" ]'
 curl -s -X POST "$B/radio/$CID/stop" -H "$A" >/dev/null
 sleep 2
 ok "stop closes the recording" '[ "$(psql "$DATABASE_URL" -tA -c "SELECT status FROM recordings WHERE id='"'"'$RECID'"'"'" | head -1)" = complete ]'
+ok "stopping also takes the station off air" '[ "$(psql "$DATABASE_URL" -tA -c "SELECT on_air FROM channels WHERE id='"'"'$CID'"'"'" | head -1)" = f ]'
 ok "mp3 endpoint 404s when off" '[ "$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/radio/$CID/stream.mp3")" = 404 ]'
+ok "event log records the stop" 'curl -s "$B/radio/$CID/events" -H "$A" | grep -q "Station stopped"'
 TL=$(curl -s "$B/recordings/$RECID/timeline" -H "$A")
 ok "timeline: audioOnly with spans" '[ "$(J "$TL" audioOnly)" = True ] && [ -n "$(J "$TL" spans.0.startMs)" ]'
 FROMMS=$(python3 -c "import json;d=json.loads('''$TL''');print(int(d['spans'][0]['startMs']))")

@@ -27,6 +27,39 @@ export function ClassChip({ cls }: { cls: string | null }) {
 /** Audio-valid source protocols only (the point of a radio form). */
 export const RADIO_PROTOCOLS = ['icecast', 'hls', 'srt']
 
+/** Signal verdict chip: is what we are receiving actually programme audio? */
+const SIGNAL: Record<string, { label: string; color: string }> = {
+  audio: { label: 'Audio', color: '#4ade80' },
+  quiet: { label: 'Low', color: '#fbbf24' },
+  silent: { label: 'Dead air', color: '#f87171' },
+  static: { label: 'Static', color: '#fb923c' },
+  unknown: { label: 'No data', color: '#64748b' },
+}
+export function SignalChip({ verdict }: { verdict?: string }) {
+  const s = SIGNAL[verdict || 'unknown'] ?? SIGNAL.unknown
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+      <span style={{ width: 8, height: 8, borderRadius: 999, background: s.color }} />
+      <span style={{ color: 'var(--muted)' }}>{s.label}</span>
+    </span>
+  )
+}
+
+/** Roll-up state badge shared with the detail page (mirrors the channels list). */
+export function StateTag({ state, onAir, sub }: { state?: string; onAir?: boolean; sub?: string }) {
+  const MAP: Record<string, { label: string; cls: string }> = {
+    onair: { label: 'On air', cls: 'live' },
+    ready: { label: 'Ready (private)', cls: 'sched' },
+    starting: { label: 'Starting', cls: 'sched' },
+    degraded: { label: 'Degraded', cls: 'warn' },
+    error: { label: 'Error', cls: 'down' },
+    stopped: { label: 'Stopped', cls: 'idle' },
+    idle: { label: 'Off', cls: 'idle' },
+  }
+  const m = MAP[state ?? (onAir ? 'onair' : 'idle')] ?? MAP.idle
+  return <StatusTag label={m.label} cls={m.cls} sub={sub} />
+}
+
 export default function Radio() {
   const [rows, setRows] = useState<RadioStationRow[] | null>(null)
   const [groups, setGroups] = useState<Group[]>([])
@@ -50,14 +83,26 @@ export default function Radio() {
     catch (e: any) { setErr(e.message) } finally { setBusy('') }
   }
 
+  async function setAir(r: RadioStationRow, on: boolean) {
+    setBusy(r.id); setErr('')
+    try { await api.radioSetAir(r.id, on); await load() }
+    catch (e: any) { setErr(e.message) } finally { setBusy('') }
+  }
+
   const counts = useMemo(() => {
     const c = rows || []
-    return { all: c.length, live: c.filter(r => r.status === 'live').length, off: c.filter(r => r.status !== 'live').length }
+    return {
+      all: c.length,
+      onair: c.filter(r => r.onAir).length,
+      running: c.filter(r => r.status === 'live' && !r.onAir).length,
+      off: c.filter(r => r.status !== 'live').length,
+    }
   }, [rows])
   const shown = useMemo(() => {
     if (!rows) return []
     if (filter === 'all') return rows
-    return rows.filter(r => (filter === 'live' ? r.status === 'live' : r.status !== 'live'))
+    if (filter === 'live') return rows.filter(r => r.status === 'live')
+    return rows.filter(r => r.status !== 'live')
   }, [rows, filter])
 
   const open = (r: RadioStationRow) => navigate(`/radio/${r.id}`)
@@ -83,12 +128,13 @@ export default function Radio() {
         <>
           <div className="filters">
             <FChip label="All" n={counts.all} on={filter === 'all'} onClick={() => setFilter('all')} />
-            <FChip label="On air" n={counts.live} on={filter === 'live'} onClick={() => setFilter('live')} />
+            <FChip label="Running" n={counts.onair + counts.running} on={filter === 'live'} onClick={() => setFilter('live')} />
             <FChip label="Off" n={counts.off} on={filter === 'off'} onClick={() => setFilter('off')} />
+            <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--faint)', alignSelf: 'center' }}>{counts.onair} on air</span>
           </div>
           <div className="card">
             <table>
-              <thead><tr><th>Station</th><th>Now playing</th><th>Outputs</th><th>Status</th><th>Recording</th><th></th></tr></thead>
+              <thead><tr><th>Station</th><th>Now playing</th><th>Signal</th><th>Outputs</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 {shown.map((r, i) => {
                   const live = r.status === 'live'
@@ -97,7 +143,7 @@ export default function Radio() {
                     <tr key={r.id} onClick={() => open(r)} style={{ cursor: 'pointer' }}>
                       <td><EntityCell name={r.name} sub={r.group_name} index={i}
                         imgUrl={r.brand_ref ? thumbUrl(r.brand_ref, 80, 80, 'cover') : undefined} /></td>
-                      <td style={{ maxWidth: 260 }}>
+                      <td style={{ maxWidth: 230 }}>
                         {live && r.nowPlaying != null ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.nowPlaying || 'Untitled break'}</span>
@@ -105,12 +151,19 @@ export default function Radio() {
                           </div>
                         ) : <span style={{ color: 'var(--faint)' }}>—</span>}
                       </td>
+                      <td>{live ? <SignalChip verdict={r.signal} /> : <span style={{ color: 'var(--faint)' }}>—</span>}</td>
                       <td style={{ color: 'var(--muted)', fontSize: 12 }}>{outs} · {r.radio_config?.bitrateKbps ?? 128}k</td>
-                      <td>{live ? <StatusTag label="On air" cls="live" sub={r.pipeline.running ? `${r.pipeline.listeners ?? 0} MP3 listener${(r.pipeline.listeners ?? 0) === 1 ? '' : 's'}` : undefined} /> : <StatusTag label="Off" cls="idle" />}</td>
-                      <td style={{ color: 'var(--muted)' }}>{r.recording_enabled !== false ? 'on' : 'off'}</td>
-                      <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                      <td><StateTag state={r.pipelineState} onAir={r.onAir}
+                        sub={live && r.pipeline.running ? `${r.pipeline.listeners ?? 0} listener${(r.pipeline.listeners ?? 0) === 1 ? '' : 's'}` : undefined} /></td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                        {/* two steps, like channels: run it, then publish it */}
                         {live
-                          ? <button className="btn ghost" disabled={busy === r.id} onClick={() => startStop(r, 'stop')}>{busy === r.id ? '…' : 'Stop'}</button>
+                          ? <>
+                              {r.onAir
+                                ? <button className="btn ghost" style={{ color: 'var(--warn,#fbbf24)' }} disabled={busy === r.id} onClick={() => setAir(r, false)}>{busy === r.id ? '…' : 'Off air'}</button>
+                                : <button className="btn primary" disabled={busy === r.id} onClick={() => setAir(r, true)}>{busy === r.id ? '…' : 'Go on air'}</button>}
+                              <button className="btn ghost" style={{ marginLeft: 6 }} disabled={busy === r.id} onClick={() => startStop(r, 'stop')}>Stop</button>
+                            </>
                           : <button className="btn primary" disabled={busy === r.id} onClick={() => startStop(r, 'start')}>{busy === r.id ? '…' : 'Start'}</button>}
                       </td>
                     </tr>

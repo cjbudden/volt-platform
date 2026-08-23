@@ -23,12 +23,21 @@
 //  ICY metadata capture runs alongside (icyMeta.ts) for icecast sources.
 // ============================================================================
 import { spawn, spawnSync, ChildProcess } from 'node:child_process';
-import { mkdirSync, writeFileSync, openSync } from 'node:fs';
+import { mkdirSync, writeFileSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from '../../config';
 import { originBaseFor } from '../liveOrigin';
 import { startIcyCapture, stopIcyCapture, icyState } from './icyMeta';
+import { startRadioMonitor, stopRadioMonitor } from './monitor';
+import { query } from '../../db';
 import type { Response } from 'express';
+
+/** Lifecycle/error telemetry — the same stream_events table channels use, so the
+ *  radio detail page's event log and the five-gate health read one source. */
+function radioEvent(channelId: string, type: string, detail: Record<string, any>): void {
+  query(`INSERT INTO stream_events(channel_id, type, detail, ts) VALUES ($1,$2,$3::jsonb, now())`,
+    [channelId, type, JSON.stringify(detail)]).catch(() => {});
+}
 
 export interface RadioConfig {
   outputs?: { mp3?: boolean; hls?: boolean; dash?: boolean };
@@ -146,28 +155,55 @@ export function startRadio(opts: StartRadioOpts): { runId: string; pid: number }
     child.stdout.on('data', (chunk: Buffer) => broadcastMp3(proc, chunk));
     child.stdout.on('error', () => { /* listeners handle their own teardown */ });
   }
-  child.on('exit', (code) => {
-    // natural exit (source ended / network) — leave recordings intact; the
-    // channel status is reconciled by stop or the orphan sweep.
-    if (running.get(opts.channelId)?.child === child) {
+  child.on('exit', (code, signal) => {
+    const ours = running.get(opts.channelId)?.child === child;
+    if (ours) {
       for (const res of proc.mp3Clients) { try { res.end(); } catch { /* */ } }
       proc.mp3Clients.clear();
     }
-    if (code && code !== 0) console.error(`[radio] ffmpeg exited ${code} for ${opts.channelId}`);
+    // A non-zero exit we did NOT ask for is a real failure: log the reason from
+    // the run's ffmpeg log so the event feed says WHY, exactly like channels.
+    if (ours && code && code !== 0) {
+      console.error(`[radio] ffmpeg exited ${code} for ${opts.channelId}`);
+      radioEvent(opts.channelId, 'input.error', { message: `${errorTail(runDir) || `encoder exited rc=${code}`}`, rc: code, signal });
+      radioEvent(opts.channelId, 'channel.stop', { reason: `exited rc=${code}` });
+      running.delete(opts.channelId);
+      stopRadioMonitor(opts.channelId);
+    }
   });
 
   // ICY now-playing capture (icecast/http sources only)
   if (opts.protocol === 'icecast' && cfg.metadataCapture !== false) {
     startIcyCapture(opts.channelId, opts.url, true);
   }
+  // QC + telemetry loop (levels, playlist invariants, stream_status, events)
+  startRadioMonitor(opts.channelId, runId);
+  radioEvent(opts.channelId, 'channel.start', {
+    run_id: runId, protocol: opts.protocol, source: opts.url,
+    outputs: Object.entries(outs).filter(([, v]) => v).map(([k]) => k).join('+'),
+    bitrate_kbps: cfg.bitrateKbps, workflow: mp3Copy ? 'package' : 'transcode',
+  });
   return { runId, pid: child.pid ?? 0 };
 }
 
-export function stopRadio(channelId: string): void {
+/** Last real error line from this run's ffmpeg log (for the event detail). */
+function errorTail(runDir: string): string {
+  try {
+    const lines = readFileSync(join(runDir, 'radio.log'), 'utf8').split(/\r?\n/).filter(Boolean);
+    const rx = /error|failed|Invalid|No such|Could not|Connection|refused|timed out|denied|404|403|Server returned/i;
+    const noise = /invalid concatenated file|Error submitting packet to decoder|Audio packet of size|Header missing|skipping \d+ bytes/i;
+    const hit = lines.filter((l) => rx.test(l) && !noise.test(l)).slice(-1)[0];
+    return hit ? hit.slice(0, 300) : '';
+  } catch { return ''; }
+}
+
+export function stopRadio(channelId: string, reason = 'operator'): void {
   const proc = running.get(channelId);
   stopIcyCapture(channelId);
+  stopRadioMonitor(channelId);
   if (!proc) return;
   running.delete(channelId);
+  radioEvent(channelId, 'channel.stop', { reason });
   for (const res of proc.mp3Clients) { try { res.end(); } catch { /* */ } }
   proc.mp3Clients.clear();
   try { if (proc.child.pid) process.kill(-proc.child.pid, 'SIGTERM'); } catch { try { proc.child.kill('SIGTERM'); } catch { /* */ } }

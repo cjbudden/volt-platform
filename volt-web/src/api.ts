@@ -305,6 +305,15 @@ export const api = {
   radioStation: (id: string): Promise<RadioStationDetail> => req(`/radio/${id}`),
   radioStartStop: (id: string, action: 'start' | 'stop') =>
     req(`/radio/${id}/${action}`, { method: 'POST' }),
+  // second, explicit step: open/close PUBLIC delivery (same contract as channels)
+  radioSetAir: (id: string, on: boolean): Promise<{ id: string; on_air: boolean; publicUrls: RadioOutputs | null }> =>
+    req(`/radio/${id}/air`, { method: 'POST', body: JSON.stringify({ on }) }),
+  // server-measured levels: the visualiser moves whether or not anyone listens
+  radioLevels: (id: string, limit = 30): Promise<RadioLevelsFeed> => req(`/radio/${id}/levels?limit=${limit}`),
+  radioQc: (id: string): Promise<{ stationId: string; health: PipelineHealth; qc: RadioQc; statusBoard: Record<string, string> }> =>
+    req(`/radio/${id}/qc`),
+  radioEvents: (id: string): Promise<{ stationId: string; entries: { ts: string; level: string; title: string; detail: string }[] }> =>
+    req(`/radio/${id}/events`),
   radioNowPlaying: (id: string): Promise<RadioNowPlaying> => req(`/radio/${id}/nowplaying`),
   radioLog: (id: string, p: { from?: string; to?: string; q?: string; class?: RadioClass; limit?: number } = {}): Promise<RadioLog> => {
     const qs = new URLSearchParams()
@@ -399,6 +408,26 @@ export interface RadioIcyState {
   title: string | null; streamUrl: string | null
   class: RadioClass | null; since: number | null; changes: number; lastError: string | null
 }
+export type SignalVerdict = 'audio' | 'quiet' | 'silent' | 'static' | 'unknown'
+export interface RadioOutputs { mp3: string | null; hls: string | null; dash: string | null }
+export interface RadioLevelSample {
+  t: number; peakDb: number; rmsDb: number; crestDb: number
+  entropy: number; silence: boolean; verdict: SignalVerdict
+  frames: number[]     // ~100ms momentary-loudness frames across the segment
+}
+export interface RadioLevelsFeed {
+  stationId: string; running: boolean; verdict: SignalVerdict; lastSampleAt: number | null
+  level: { peakDb: number; rmsDb: number; crestDb: number; entropy: number } | null
+  samples: RadioLevelSample[]
+}
+export interface RadioQc {
+  verdict: SignalVerdict; lastSampleAt: number | null
+  checks: { ok: number; failed: number }
+  issues: { code: string; message: string; at: number }[]
+  segments: number; outputFreshMs: number | null
+  silenceSinceMs: number | null; staticSinceMs: number | null
+  level: { peakDb: number; rmsDb: number; crestDb: number; entropy: number } | null
+}
 export interface RadioStationRow {
   id: string; name: string; status: string; group_id: string; group_name?: string
   kind: 'radio'; radio_config: RadioCfg | null
@@ -406,7 +435,11 @@ export interface RadioStationRow {
   brand_ref?: string | null; on_air?: boolean; created_at: string; version: number
   pipeline: RadioPipelineState
   nowPlaying: string | null; nowPlayingClass: RadioClass | null
-  outputs: { mp3: string | null; hls: string | null; dash: string | null }
+  outputs: RadioOutputs
+  publicUrls?: RadioOutputs
+  pipelineState?: PipelineHealth['overall']
+  onAir?: boolean
+  signal?: SignalVerdict
 }
 export interface RadioLogEntry {
   id: string; title: string; starts_at: string; ends_at: string; status: string
@@ -417,6 +450,11 @@ export interface RadioStationDetail extends RadioStationRow {
   icy: RadioIcyState | null
   openRecording: { id: string; start_epoch_ms: number | string; status: string } | null
   recentLog: (RadioLogEntry & { metadata?: any })[]
+  health: PipelineHealth
+  qc: RadioQc
+  statusBoard: Record<string, string>
+  log: { ts: string; level: string; title: string; detail: string }[]
+  publicAvailable: boolean
 }
 export interface RadioNowPlaying {
   running: boolean; listeners: number

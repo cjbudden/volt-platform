@@ -49,11 +49,35 @@ export function publicPlaybackUrl(channelId: string, file: 'master.m3u8' | 'mani
 
 export const publicLiveRouter = Router();
 
+/**
+ * PUBLIC RADIO delivery. Same contract as the video surface: nothing is public
+ * until the operator takes the station ON AIR, and then only while the output
+ * is valid. /radio/:id/stream.mp3 remains the PRIVATE preview (the audio
+ * equivalent of /origin), so monitoring never leaks to listeners.
+ */
+publicLiveRouter.get(
+  '/live/:id/stream.mp3',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const ch = await one<any>(`SELECT id, name, status, on_air, kind FROM channels WHERE id=$1 AND kind='radio'`, [id]);
+    if (!ch || !ch.on_air) { res.status(404).json({ available: false, reason: 'not_on_air' }); return; }
+    const { attachMp3Listener } = await import('../services/radio/pipeline');
+    const { radioHasValidContent } = await import('../services/radio/detail');
+    if (ch.status !== 'live' || !radioHasValidContent(id)) {
+      res.status(503).json({ available: false, reason: 'no_valid_content' });
+      return;
+    }
+    if (!attachMp3Listener(id, req as any, res as any, ch.name)) {
+      res.status(503).json({ available: false, reason: 'no_valid_content' });
+    }
+  })
+);
+
 publicLiveRouter.get(
   '/live/:id/:file(master.m3u8|manifest.mpd)',
   asyncHandler(async (req, res) => {
     const { id, file } = req.params;
-    const ch = await one<any>('SELECT id, status, on_air FROM channels WHERE id = $1', [id]);
+    const ch = await one<any>('SELECT id, status, on_air, kind FROM channels WHERE id = $1', [id]);
     // Off air: the public URL exposes nothing. This is the whole point of "On means
     // available to the public" — private previews never leak here.
     if (!ch || !ch.on_air) {
@@ -62,7 +86,12 @@ publicLiveRouter.get(
     }
     // On air but the encoder isn't producing valid content -> the public stream is
     // broken; say so honestly rather than 302 to a dead manifest.
-    if (ch.status !== 'live' || !outputHasValidContent(id)) {
+    // Radio writes its master ONCE and advances audio/index.m3u8, so it has its own
+    // freshness probe; TV rewrites the master every segment.
+    const valid = ch.kind === 'radio'
+      ? (await import('../services/radio/detail')).radioHasValidContent(id)
+      : outputHasValidContent(id);
+    if (ch.status !== 'live' || !valid) {
       res.status(503).json({ available: false, reason: 'no_valid_content' });
       return;
     }
@@ -73,6 +102,8 @@ publicLiveRouter.get(
       res.redirect(302, `${cdn.replace(/\/$/, '')}/channel/${id}/${file}`);
       return;
     }
-    res.redirect(302, `${liveUrlBase(id)}/${file}`);
+    // Radio packages DASH under the run's dash/ dir; HLS master sits at the run root.
+    const path = ch.kind === 'radio' && file === 'manifest.mpd' ? 'dash/manifest.mpd' : file;
+    res.redirect(302, `${liveUrlBase(id)}/${path}`);
   })
 );

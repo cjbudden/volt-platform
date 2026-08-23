@@ -21,6 +21,9 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { orchestrator } from '../services/orchestrator';
 import { radioStatus } from '../services/radio/pipeline';
 import { icyState } from '../services/radio/icyMeta';
+import { radioLevels } from '../services/radio/monitor';
+import { loadRadioHealth, radioEventLog, radioQc, radioStatusBoard, radioHasValidContent } from '../services/radio/detail';
+import { writeAudit, actor } from '../services/audit';
 
 export const radioRouter = Router();
 radioRouter.use(requireAuth);
@@ -35,12 +38,24 @@ async function ownedStation(req: any) {
   return row;
 }
 
+/** PREVIEW urls: private monitoring paths, available as soon as the station runs
+ *  (the radio equivalent of a channel's /origin preview). */
 function outputUrls(id: string, cfg: any) {
   const outs = { mp3: true, hls: true, dash: true, ...(cfg?.outputs ?? {}) };
   return {
     mp3: outs.mp3 ? `/radio/${id}/stream.mp3` : null,
     hls: outs.hls ? `/origin/${id}/live/master.m3u8` : null,
     dash: outs.dash ? `/origin/${id}/live/dash/manifest.mpd` : null,
+  };
+}
+
+/** PUBLIC urls: only serve once the station is ON AIR (see publicLive/radio gate). */
+function publicUrls(id: string, cfg: any) {
+  const outs = { mp3: true, hls: true, dash: true, ...(cfg?.outputs ?? {}) };
+  return {
+    mp3: outs.mp3 ? `/live/${id}/stream.mp3` : null,
+    hls: outs.hls ? `/live/${id}/master.m3u8` : null,
+    dash: outs.dash ? `/live/${id}/manifest.mpd` : null,
   };
 }
 
@@ -53,17 +68,24 @@ radioRouter.get('/', asyncHandler(async (req, res) => {
       WHERE g.account_id=$1 AND c.kind='radio' ORDER BY c.created_at DESC`,
     [accountId(req)]
   );
-  res.json(rows.map((r) => {
+  const out = await Promise.all(rows.map(async (r) => {
     const rs = radioStatus(r.id);
     const icy = rs.running ? rs.icy : icyState(r.id);
+    const health = await loadRadioHealth(r);
     return {
       ...r,
       pipeline: rs,
       nowPlaying: icy?.title ?? null,
       nowPlayingClass: icy?.class ?? null,
       outputs: outputUrls(r.id, r.radio_config),
+      publicUrls: publicUrls(r.id, r.radio_config),
+      // same roll-up the channels list uses, so radio and TV statuses agree
+      pipelineState: health.overall,
+      onAir: health.onAir,
+      signal: radioQc(r.id).verdict,
     };
   }));
+  res.json(out);
 }));
 
 radioRouter.get('/:id', asyncHandler(async (req, res) => {
@@ -80,14 +102,25 @@ radioRouter.get('/:id', asyncHandler(async (req, res) => {
     `SELECT id, title, starts_at, ends_at, status, metadata
        FROM programmes WHERE channel_id=$1 AND metadata->>'source'='icy'
       ORDER BY starts_at DESC LIMIT 20`, [c.id]);
+  const health = await loadRadioHealth(c);
+  const qc = radioQc(c.id);
   res.json({
     ...c,
     sources,
     pipeline: rs,
     icy: rs.running ? rs.icy : icyState(c.id),
     outputs: outputUrls(c.id, c.radio_config),
+    publicUrls: publicUrls(c.id, c.radio_config),
     openRecording: openRec ?? null,
     recentLog: recent,
+    // parity with the channel control page: gates, QC, event log, status board
+    health,
+    pipelineState: health.overall,
+    onAir: health.onAir,
+    qc,
+    statusBoard: radioStatusBoard(health, qc),
+    log: await radioEventLog(c.id),
+    publicAvailable: c.on_air === true && radioHasValidContent(c.id),
   });
 }));
 
@@ -104,8 +137,74 @@ radioRouter.post('/:id/start', asyncHandler(async (req, res) => {
 
 radioRouter.post('/:id/stop', asyncHandler(async (req, res) => {
   const c = await ownedStation(req);
+  // Stopping the station also takes it off air: nothing public may outlive the run.
+  if (c.on_air) {
+    await query(`UPDATE channels SET on_air=false, updated_at=now() WHERE id=$1`, [c.id]);
+    await query(`INSERT INTO stream_events(channel_id, type, detail, ts)
+                 VALUES ($1,'channel.off_air','{"reason":"station stopped"}'::jsonb, now())`, [c.id]);
+  }
   await orchestrator.stopStream('channel', c.id, 'operator');
-  res.json({ id: c.id, status: 'ended' });
+  res.json({ id: c.id, status: 'ended', on_air: false });
+}));
+
+/**
+ * GO ON AIR / TAKE OFF AIR — the second, explicit step (same contract as
+ * channels). Starting a station only receives, encodes and records: the output
+ * is a PRIVATE preview. Going on air is what opens the public URLs
+ * (/live/:id/stream.mp3 | master.m3u8 | manifest.mpd).
+ */
+radioRouter.post('/:id/air', asyncHandler(async (req, res) => {
+  const c = await ownedStation(req);
+  const on = z.object({ on: z.boolean() }).parse(req.body).on;
+  if (on) {
+    if (c.status !== 'live') throw badRequest('Start the station before going on air');
+    if (!radioHasValidContent(c.id)) throw badRequest('No valid output yet: wait for the first audio segments');
+  }
+  const row = await one<any>(
+    `UPDATE channels SET on_air=$2, updated_at=now() WHERE id=$1 RETURNING id, name, on_air, status`,
+    [c.id, on]);
+  await query(`INSERT INTO stream_events(channel_id, type, detail, ts) VALUES ($1,$2,$3::jsonb, now())`,
+    [c.id, on ? 'channel.air' : 'channel.off_air',
+     JSON.stringify({ message: on ? 'public delivery opened' : 'public delivery closed' })]);
+  const who = actor(req);
+  await writeAudit(null, {
+    accountId: accountId(req), userId: who.userId, label: who.label,
+    action: 'update', entityType: 'channel', entityId: c.id,
+    snapshot: { name: c.name, kind: 'radio', on_air: on },
+  }).catch(() => {});
+  res.json({ ...row, publicUrls: on ? publicUrls(c.id, c.radio_config) : null });
+}));
+
+/** LEVELS FEED — server-measured audio levels for the visualiser. This is what
+ *  makes the meter move whether or not anyone is listening: it is measured from
+ *  the broadcast output, not from the operator's speakers. */
+radioRouter.get('/:id/levels', asyncHandler(async (req, res) => {
+  const c = await ownedStation(req);
+  const limit = Math.min(120, Math.max(1, parseInt(String(req.query.limit ?? '30'), 10) || 30));
+  const l = radioLevels(c.id, limit);
+  const qc = radioQc(c.id);
+  res.json({
+    stationId: c.id,
+    running: radioStatus(c.id).running,
+    verdict: l.verdict,
+    lastSampleAt: l.lastSampleAt,
+    level: qc.level,
+    samples: l.samples,
+  });
+}));
+
+/** QC panel: verdict, invariant checks, issues, gates. */
+radioRouter.get('/:id/qc', asyncHandler(async (req, res) => {
+  const c = await ownedStation(req);
+  const health = await loadRadioHealth(c);
+  res.json({ stationId: c.id, health, qc: radioQc(c.id), statusBoard: radioStatusBoard(health, radioQc(c.id)) });
+}));
+
+/** Event log (lifecycle + errors + QC), newest first. Distinct from /log, which
+ *  is the station's now-playing METADATA log. */
+radioRouter.get('/:id/events', asyncHandler(async (req, res) => {
+  const c = await ownedStation(req);
+  res.json({ stationId: c.id, entries: await radioEventLog(c.id) });
 }));
 
 radioRouter.get('/:id/nowplaying', asyncHandler(async (req, res) => {

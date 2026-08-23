@@ -141,14 +141,131 @@ scans, so recordings appear in the same library with the same range playback,
 transcript/EPG/name search and clip creation. The metadata log gives clip
 candidates their in/out times and names.
 
+### 8. Monitoring parity with channels: five gates, event log, QC
+
+Reason: a station that is on air is a service, and it must be operable the same
+way a TV channel is. If radio had its own ad-hoc status, an operator would have
+to learn two mental models and the two could disagree about the same situation.
+
+Support: radio reuses the SAME five-gate pipeline model
+(`services/pipelineHealth.ts`) that channels use, fed by radio ground truth:
+
+- **Server**: the station's pipeline process is up.
+- **Input**: audio is actually arriving (measured from the output, plus the ICY
+  connection state and ffmpeg error lines).
+- **Encoder**: ffmpeg alive and the packager writing segments.
+- **Output**: the live audio playlist is advancing right now (mtime ground
+  truth, the same rule the TV output gate uses).
+- **On air**: published AND serving valid content, which is exactly what the
+  public URL would do.
+
+The same roll-up (`idle / starting / ready / onair / degraded / error /
+stopped`) drives the badge on both the list and the detail page, so radio and
+TV never disagree. A radio-specific event log writes to the shared
+`stream_events` table (station start/stop, on air/off air, input errors,
+output stalled/resumed, QC alarms) and merges the run's real ffmpeg error
+lines, with known-benign decoder chatter filtered out so a healthy station does
+not read as broken.
+
+### 9. QC support for radio
+
+Reason: channels have QC for picture and packaging; the audio equivalents are
+"is there actually sound", "is it programme audio or just noise", and "is the
+packaging still sane". Those are the faults that silently ruin a radio service.
+
+Support: a monitor tick (`services/radio/monitor.ts`) analyses the newest
+complete output segment with ffmpeg (`astats` + `silencedetect` + `ebur128`)
+and checks the live playlist, producing:
+
+- **Signal verdict**: `audio`, `quiet`, `silent` (dead air), or `static`
+  (noise-like: high entropy with low crest factor sustained). Dead air and
+  sustained static raise events after a hold-down period, so a momentary gap is
+  not an alarm.
+- **Level measurements**: peak / RMS dBFS, crest factor, entropy, shown on the
+  QC panel and used by the meter.
+- **Playlist invariants**, the audio equivalent of `playcheck.py`: stale
+  playlist, media-sequence regression, duplicate URIs, PDT going backwards or
+  jumping, no segments.
+- **Metadata stall**: the ICY connection dropping is reported, since a station
+  can keep streaming audio while its metadata feed dies.
+
+The monitor also keeps `stream_status` current, which is what lets the shared
+gate model read radio like any other stream.
+
+### 10. Start, then go on air (two explicit steps)
+
+Reason: the same contract channels already have. Starting a station is an
+engineering action (receive, encode, record, check it); publishing is an
+editorial one. They must be separable so an operator can bring a station up,
+confirm the signal, and only then open it to the public.
+
+Support: **Start station** runs the pipeline and opens the recording, with the
+output reachable only on PRIVATE preview URLs (`/radio/:id/stream.mp3`,
+`/origin/:id/live/...`), the audio counterpart of a channel's preview. **Go on
+air** flips `on_air`, and only then do the PUBLIC URLs serve:
+`/live/:id/stream.mp3`, `/live/:id/master.m3u8`, `/live/:id/manifest.mpd`.
+Off air they return 404, and on air without valid content they return 503
+rather than pointing at a dead manifest. Going on air is refused until the
+first valid segments exist, and stopping a station always takes it off air, so
+nothing public can outlive the run. The detail page shows whichever URL set is
+currently real, labelled as private preview or public.
+
+### 11. The visualiser proves RECEPTION, not local playback
+
+Reason: the operator's question is "are we receiving something, and is it more
+than static", and that must be answerable with the speakers muted or with
+nobody listening at all. A meter driven only by local playback answers a
+different, useless question.
+
+Support: the meter is fed by SERVER-MEASURED levels from the broadcast output
+(the monitor's ~100ms EBU R128 momentary-loudness frames, served by
+`/api/radio/:id/levels`), polled continuously by the page. It moves whenever
+the station is receiving audio, regardless of local playback state, and the
+frames are played back at their measured cadence so the motion is honest rather
+than decorative. The verdict badge on the meter states what the signal IS
+(audio present / low level / dead air / static-like) with the dBFS figures
+beside it. When the operator does press Listen, the Web Audio analyser adds a
+live spectrum overlay on top: detail, never the proof of signal.
+
 ## Test setup
 
 Local dev has an Icecast simulator (`volt-app/test/icecast-sim.js`) that loops
 generated audio and rotates ICY titles through songs, adverts and DJ talk, so
-the whole chain (capture, classification, log, search, visualiser) is testable
-offline; `volt-app/test/radio.check.sh` runs the e2e. On a real network, create
-stations from the three SomaFM URLs above and the same flows run against live
-radio.
+the whole chain (capture, classification, log, search, visualiser, QC) is
+testable offline; `volt-app/test/radio.check.sh` runs the e2e and
+`volt-app/test/radio-classify.check.ts` pins the classifier rules.
+
+`volt-app/scripts/seed-radio.ts` is an OPTIONAL manual step that adds real test
+stations (nothing is seeded automatically):
+
+```
+npx tsx scripts/seed-radio.ts                      # music set (SomaFM)
+npx tsx scripts/seed-radio.ts --all                # + speech/news set
+npx tsx scripts/seed-radio.ts --all --account RTM  # pick the account
+npx tsx scripts/seed-radio.ts --list               # show without writing
+```
+
+Two sets, because they exercise different halves of the feature:
+
+- **Music** (SomaFM Groove Salad / Secret Agent / Drone Zone): dense, well
+  formed `Artist - Title` metadata. Tests the log, classification and metadata
+  driven clipping.
+- **Speech / news**: NPO Radio 1 (sends programme + broadcaster, e.g.
+  `NPO Radio 1 - De Ochtend - KRO-NCRV`, the strongest programme-metadata
+  test), WPLN 90.3 and WPLN International (NPR / BBC talk), KPFA (interviews
+  and public affairs), WFMU Freeform (alternates programme and track
+  metadata), and NA0D Baxter Stream (ham/GMRS/weather: sparse metadata and
+  long silences, which is what exercises the dead-air and static QC checks).
+
+Classifier behaviour was tuned against what these stations actually send, and
+the observed formats are pinned in the classifier test: `Artist - Title`
+(SomaFM), `"Title" by Artist on Show` (WFMU), three-part programme lines
+(NPO), and blank titles. The blank case takes context: on a station that names
+its tracks a blank title is an ad break, while on a speech station it simply
+means the stream carries no track metadata, so it is treated as content rather
+than mislabelling every news stream as advertising. Playlist-style URLs
+(`.m3u` / `.pls`) are resolved to the underlying mount, since that is what many
+stations publish.
 
 ## Production notes / follow-ups
 

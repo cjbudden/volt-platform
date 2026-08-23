@@ -36,14 +36,49 @@ export interface IcyState {
   lastError: string | null;
 }
 
-/** Heuristic classifier for a now-playing title. Kept deliberately readable. */
-export function classifyIcyTitle(title: string): IcyClass {
+/**
+ * Heuristic classifier for a now-playing title: song / ad / content.
+ *
+ * Tuned against how real stations actually label things (verified live):
+ *   SomaFM        "Alex Cortiz - Funked up flow"                  -> song
+ *   WFMU          "\"Wonderful Thing\" by Ralfi Pagan on ..."      -> song
+ *   NPO Radio 1   "NPO Radio 1 - De Ochtend - KRO-NCRV"           -> content (programme)
+ *   WPLN / NA0D   ""  (speech stations send no track titles)      -> content
+ *   any station   ""  BETWEEN songs on a music station            -> ad (break)
+ *
+ * The empty-title case is why this takes CONTEXT: a blank title means "ad
+ * break" on a station that normally names its tracks, and simply "this station
+ * does not send titles" on a news/talk stream. Passing songsSeen lets one rule
+ * serve both without mislabelling every speech station as advertising.
+ */
+export interface ClassifyCtx {
+  /** icy-name of the station: a title that merely repeats it is station/programme info. */
+  stationName?: string | null;
+  /** how many song-shaped titles this run has already seen. */
+  songsSeen?: number;
+}
+
+export function classifyIcyTitle(title: string, ctx: ClassifyCtx = {}): IcyClass {
   const t = (title || '').trim();
-  if (!t) return 'ad'; // stations blank the title during ad breaks
-  if (/\b(advert(isement)?s?|commercials?|sponsor(ed)?|promo(tion)?|ad\s*break|jingle)\b/i.test(t)) return 'ad';
-  if (/\b(news|weather|traffic|bulletin|interview|talk\s*show|phone[- ]?in|dj|host|presenter|station\s*id|live\s*session|drivetime|breakfast\s*show)\b/i.test(t)) return 'content';
-  // The Icecast convention for music is "Artist - Title"
-  if (/\s-\s/.test(t)) return 'song';
+  // ---- no title -----------------------------------------------------------
+  if (!t) return (ctx.songsSeen ?? 0) >= 2 ? 'ad' : 'content';
+
+  // ---- explicit advertising language --------------------------------------
+  if (/\b(advert(isement)?s?|commercials?|sponsor(ed)?( by)?|promo(tion)?|ad\s*break|underwriting)\b/i.test(t)) return 'ad';
+
+  // ---- station / programme identification ---------------------------------
+  // A title that leads with the station's own name is the station telling you
+  // WHAT IS ON, not what track is playing (NPO Radio 1, most news streams).
+  const station = (ctx.stationName || '').trim();
+  if (station && t.toLowerCase().startsWith(station.toLowerCase().slice(0, Math.min(station.length, 14)))) return 'content';
+  // three-part "Station - Programme - Broadcaster" shapes are programme info
+  if (t.split(/\s+-\s+/).length >= 3 && !/\bft\.?\b|\bfeat\b|remix/i.test(t)) return 'content';
+  if (/\b(news|nieuws|weather|traffic|bulletin|headlines|interview|talk\s*show|phone[- ]?in|call[- ]?in|presenter|station\s*id|drivetime|breakfast\s*show|morning\s*edition|all\s*things\s*considered|repeater|net\s*control|live\s*from)\b/i.test(t)) return 'content';
+
+  // ---- song shapes --------------------------------------------------------
+  if (/\s[-–—]\s/.test(t)) return 'song';                 // Artist - Title (the Icecast convention)
+  if (/^".+"\s+by\s+.+/i.test(t)) return 'song';          // "Title" by Artist   (WFMU)
+  if (/\bby\s+\S+/i.test(t) && t.length < 120) return 'song';
   return 'content';
 }
 
@@ -51,6 +86,42 @@ function parseIcyBlock(block: string): { title: string | null; streamUrl: string
   const m = /StreamTitle='((?:[^'\\]|\\.|'(?!;))*)';?/.exec(block);
   const u = /StreamUrl='((?:[^'\\]|\\.|'(?!;))*)';?/.exec(block);
   return { title: m ? m[1] : null, streamUrl: u ? u[1] : null };
+}
+
+/**
+ * Some station "stream URLs" are actually PLAYLISTS (.m3u / .pls) naming the
+ * real mount. Resolve one level so an operator can paste whatever the station's
+ * website gives them. Returns the original URL when it is already a stream.
+ */
+export async function resolveStreamUrl(url: string, depth = 0): Promise<string> {
+  if (depth > 1) return url;
+  const looksPlaylist = /\.(m3u|m3u8|pls)(\?|$)/i.test(url);
+  if (!looksPlaylist) return url;
+  try {
+    const body = await new Promise<string>((resolve, reject) => {
+      const lib = url.startsWith('https') ? https : http;
+      const req = lib.get(url, { headers: { 'User-Agent': 'VOLT-Radio/1.0' } }, (res) => {
+        const ct = String(res.headers['content-type'] || '');
+        // StreamGuys and friends serve real audio from a .m3u-looking path
+        if (/^audio\/(mpeg|aac|mp4|ogg)/i.test(ct)) { res.destroy(); reject(new Error('is-audio')); return; }
+        let s = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => { s += c; if (s.length > 8192) { res.destroy(); } });
+        res.on('end', () => resolve(s));
+        res.on('close', () => resolve(s));
+        res.on('error', reject);
+      });
+      req.on('error', reject);
+      req.setTimeout(6000, () => { req.destroy(new Error('timeout')); });
+    });
+    const line = body.split(/\r?\n/)
+      .map((l) => l.trim())
+      .map((l) => (/^File\d+\s*=\s*/i.test(l) ? l.replace(/^File\d+\s*=\s*/i, '') : l))
+      .find((l) => /^https?:\/\//i.test(l));
+    return line ? await resolveStreamUrl(line, depth + 1) : url;
+  } catch {
+    return url;   // already audio, or unreachable: let the caller try it directly
+  }
 }
 
 class IcyCapture {
@@ -62,6 +133,9 @@ class IcyCapture {
   private stopped = false;
   private retryTimer: NodeJS.Timeout | null = null;
   private openProgrammeId: string | null = null;
+  /** how many song-shaped titles this run has seen: decides what a BLANK title
+   *  means (ad break on a music station, no-metadata on a speech station). */
+  private songsSeen = 0;
 
   constructor(private channelId: string, private url: string, private writeLog: boolean) {}
 
@@ -76,10 +150,13 @@ class IcyCapture {
         [this.channelId]
       ).catch(() => {});
     }
-    this.connect();
+    void this.connect();
   }
 
-  private connect() {
+  private async connect() {
+    if (this.stopped) return;
+    // a station may hand us a .m3u/.pls playlist instead of the mount itself
+    this.url = await resolveStreamUrl(this.url);
     if (this.stopped) return;
     const lib = this.url.startsWith('https') ? https : http;
     try {
@@ -140,7 +217,7 @@ class IcyCapture {
     this.state.connected = false;
     this.state.lastError = reason;
     if (this.stopped) return;
-    this.retryTimer = setTimeout(() => this.connect(), 5000);
+    this.retryTimer = setTimeout(() => { void this.connect(); }, 5000);
   }
 
   private async onMeta(block: string) {
@@ -148,7 +225,8 @@ class IcyCapture {
     if (streamUrl != null) this.state.streamUrl = streamUrl || null;
     if (title == null || title === this.state.title) return;
     const now = Date.now();
-    const cls = classifyIcyTitle(title);
+    const cls = classifyIcyTitle(title, { stationName: this.state.station?.name, songsSeen: this.songsSeen });
+    if (cls === 'song') this.songsSeen++;
     // close the previous entry at the moment of change
     await this.closeOpenEntry(now).catch(() => {});
     this.state.title = title;

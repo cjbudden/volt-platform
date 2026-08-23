@@ -201,7 +201,7 @@ export class Orchestrator {
       `SELECT * FROM instances WHERE ${kind === 'channel' ? 'channel_id' : 'event_id'}=$1 AND terminated_at IS NULL`,
       [id]
     );
-    if (kind === 'channel') stopRadio(id);   // no-op unless a radio pipeline is up
+    if (kind === 'channel') stopRadio(id, origin);   // no-op unless a radio pipeline is up
     for (const inst of running) {
       if (inst.task_arn && !String(inst.task_arn).startsWith('radio:')) {
         try {

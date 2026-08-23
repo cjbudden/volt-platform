@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type RadioStationDetail, type RadioNowPlaying, type RadioLog, type RadioClass, type Group } from '../api'
+import { api, type RadioStationDetail, type RadioNowPlaying, type RadioLog, type RadioClass, type Group, type RadioLevelsFeed, type Gate } from '../api'
 import { thumbUrl } from '../api'
-import AudioVisualizer from '../AudioVisualizer'
+import AudioVisualizer, { VERDICT_UI } from '../AudioVisualizer'
 import { StatusTag, SEC, initials, THUMB_BG } from '../scaffold'
 import { RadioDrawer, ClassChip } from './Radio'
 
@@ -25,6 +25,7 @@ const isImg = (u?: string | null) => !!u && /\.(png|jpe?g|gif|webp|avif)(\?|$)/i
 export default function RadioDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const [st, setSt] = useState<RadioStationDetail | null>(null)
   const [np, setNp] = useState<RadioNowPlaying | null>(null)
+  const [levels, setLevels] = useState<RadioLevelsFeed | null>(null)
   const [log, setLog] = useState<RadioLog | null>(null)
   const [q, setQ] = useState('')
   const [cls, setCls] = useState<RadioClass | 'all'>('all')
@@ -51,6 +52,16 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
     api.radioNowPlaying(id).then(setNp).catch(() => {})
     return () => clearInterval(t)
   }, [id])
+  // SERVER LEVELS: polled continuously so the visualiser proves reception even
+  // when nobody is listening. Also refreshes the gates/QC/event log with it.
+  useEffect(() => {
+    const poll = () => {
+      api.radioLevels(id, 4).then(setLevels).catch(() => {})
+      api.radioStation(id).then(setSt).catch(() => {})
+    }
+    const t = setInterval(poll, 4000)
+    return () => clearInterval(t)
+  }, [id])
   useEffect(() => {
     loadLog()
     const t = setInterval(loadLog, 12_000)
@@ -59,6 +70,9 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
   }, [id, q, cls])
 
   const live = st?.status === 'live'
+  const onAir = st?.onAir === true || st?.on_air === true
+  const readyToAir = st?.health?.gates?.find(g => g.gate === 'public')?.status === 'ready'
+  const verdict = levels?.verdict ?? st?.qc?.verdict ?? 'unknown'
   const title = np?.title ?? st?.nowPlaying ?? null
   const titleClass = np?.class ?? st?.nowPlayingClass ?? null
 
@@ -97,6 +111,12 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
     try { await api.radioStartStop(id, action); await load(); if (action === 'stop') setPlaying(false) }
     catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
+  // step two: open / close PUBLIC delivery
+  async function setAir(on: boolean) {
+    setBusy(true); setErr('')
+    try { await api.radioSetAir(id, on); await load() }
+    catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
 
   const art = st?.brand_ref ? thumbUrl(st.brand_ref, 320, 320, 'cover')
     : isImg(np?.streamUrl) ? np!.streamUrl! : null
@@ -124,13 +144,35 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           </div>
         </div>
         <div className="spacer" />
-        {live ? <StatusTag label="On air" cls="live" /> : <StatusTag label="Off" cls="idle" />}
+        <OverallTag state={st.pipelineState} onAir={onAir} />
         <button className="btn ghost" onClick={() => setSettingsOpen(true)}>Settings</button>
+        {/* TWO STEPS, same as channels: run the station (private), then publish. */}
         {live
           ? <button className="btn ghost" disabled={busy} onClick={() => startStop('stop')}>{busy ? '…' : 'Stop station'}</button>
           : <button className="btn primary" disabled={busy} onClick={() => startStop('start')}>{busy ? '…' : 'Start station'}</button>}
+        {onAir
+          ? <button className="btn ghost" style={{ color: 'var(--warn,#fbbf24)' }} disabled={busy} onClick={() => setAir(false)}>{busy ? '…' : 'Take off air'}</button>
+          : <button className="btn primary" disabled={busy || !live || !st.publicAvailable && !readyToAir} title={live ? 'Open the public URLs' : 'Start the station first'}
+              onClick={() => setAir(true)}>{busy ? '…' : 'Go on air'}</button>}
       </div>
       {err && <div className="err">{err}</div>}
+
+      {/* PRIMARY ERROR banner — the first failed/degraded gate, same as channels */}
+      {st.health?.primaryError && (
+        <div className="err" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <b style={{ textTransform: 'uppercase', fontSize: 11 }}>{st.health.primaryError.label}</b>
+          <span>{st.health.primaryError.message}</span>
+        </div>
+      )}
+
+      {/* FIVE GATES: server → input → encoder → output → on air */}
+      {st.health && (
+        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0,1fr))', gap: 10 }}>
+            {st.health.gates.map((g: Gate) => <GateCell key={g.gate} g={g} />)}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) minmax(280px,1fr)', gap: 16, alignItems: 'start' }}>
         {/* ---- player: visualiser instead of a 16:9 video ---- */}
@@ -149,8 +191,21 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
               {live ? (st.pipeline.running ? `${np?.listeners ?? st.pipeline.listeners ?? 0} MP3 listeners` : '') : 'Start the station to monitor the output'}
             </div>
           </div>
+          {/* The meter is fed by SERVER-MEASURED levels from the broadcast output,
+              so it moves whether or not you are listening; the local analyser is an
+              overlay while playing. */}
           <AudioVisualizer media={mediaEl} height={230}
-            idleText={live ? (playing ? 'Waiting for audio…' : 'Press Listen to monitor the output') : 'Station is off'} />
+            levels={levels?.samples} verdict={verdict} live={live}
+            idleText="Station is off" />
+          {live && (
+            <div style={{ display: 'flex', gap: 14, marginTop: 8, fontSize: 11.5, color: 'var(--faint)', flexWrap: 'wrap' }}>
+              <span>Measured from the output, {playing ? 'listening locally' : 'no local playback needed'}</span>
+              {levels?.level && <span style={{ fontFamily: 'ui-monospace,monospace' }}>
+                peak {levels.level.peakDb.toFixed(1)} dBFS · rms {levels.level.rmsDb.toFixed(1)} dBFS · crest {levels.level.crestDb.toFixed(1)} dB
+              </span>}
+              {levels?.lastSampleAt && <span>updated {Math.max(0, Math.round((Date.now() - levels.lastSampleAt) / 1000))}s ago</span>}
+            </div>
+          )}
           <audio ref={audioRef} crossOrigin="anonymous" style={{ display: 'none' }} />
           {/* now playing strip under the visualiser */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, minHeight: 30 }}>
@@ -178,12 +233,45 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
               </div>
             ) : <div style={{ fontSize: 12.5, color: 'var(--faint)' }}>ICY headers appear here when the station runs against an Icecast source.</div>}
           </div>
+          {/* QC PANEL — the audio equivalent of the channel QC surface */}
           <div className="card" style={{ padding: 16 }}>
-            <div style={SEC}>Outputs</div>
-            {([['MP3', st.outputs.mp3], ['HLS', st.outputs.hls], ['DASH', st.outputs.dash]] as const).map(([label, url]) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-                <span style={{ width: 44, fontSize: 11, fontWeight: 700, color: url ? 'var(--brand)' : 'var(--faint)' }}>{label}</span>
-                <span style={{ flex: 1, fontFamily: 'ui-monospace,monospace', fontSize: 11.5, color: url ? 'var(--muted)' : 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={SEC}>Quality checks</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 999, background: VERDICT_UI[verdict]?.color ?? '#64748b' }} />
+              <b style={{ fontSize: 13 }}>{VERDICT_UI[verdict]?.label ?? verdict}</b>
+              <span style={{ fontSize: 12, color: 'var(--faint)' }}>{VERDICT_UI[verdict]?.note}</span>
+            </div>
+            <div style={{ display: 'grid', gap: 5, fontSize: 12.5 }}>
+              <MetaRow k="Checks passed" v={st.qc ? `${st.qc.checks.ok} ok · ${st.qc.checks.failed} flagged` : undefined} />
+              <MetaRow k="Segments live" v={st.qc?.segments != null ? String(st.qc.segments) : undefined} />
+              <MetaRow k="Output age" v={st.qc?.outputFreshMs != null ? `${Math.round(st.qc.outputFreshMs / 1000)}s` : undefined} />
+              <MetaRow k="Entropy / crest" v={st.qc?.level ? `${st.qc.level.entropy.toFixed(2)} / ${st.qc.level.crestDb.toFixed(1)} dB` : undefined} />
+            </div>
+            {st.qc?.issues?.length ? (
+              <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+                {st.qc.issues.slice(-5).reverse().map((i, n) => (
+                  <div key={n} style={{ fontSize: 12, color: 'var(--warn,#fbbf24)', marginTop: 4 }}>
+                    <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 10.5, opacity: .8 }}>{i.code}</span> · {i.message}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--faint)' }}>
+                No issues: playlist continuity, timing and audio level all pass.
+              </div>
+            )}
+          </div>
+
+          <div className="card" style={{ padding: 16 }}>
+            <div style={SEC}>{onAir ? 'Public URLs (on air)' : 'Preview URLs (private)'}</div>
+            {!onAir && <div className="hintxt" style={{ marginTop: -4, marginBottom: 6 }}>These are private monitoring URLs. Go on air to open the public ones.</div>}
+            {(onAir
+              ? ([['MP3', st.publicUrls?.mp3], ['HLS', st.publicUrls?.hls], ['DASH', st.publicUrls?.dash]] as const)
+              : ([['MP3', st.outputs.mp3], ['HLS', st.outputs.hls], ['DASH', st.outputs.dash]] as const)
+            ).map(([label, url]) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)', minWidth: 0 }}>
+                <span style={{ width: 44, flex: 'none', fontSize: 11, fontWeight: 700, color: url ? 'var(--brand)' : 'var(--faint)' }}>{label}</span>
+                <span title={url || undefined} style={{ flex: 1, minWidth: 0, fontFamily: 'ui-monospace,monospace', fontSize: 11.5, color: url ? 'var(--muted)' : 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {url || 'disabled'}
                 </span>
                 {url && <button className="btn ghost" style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => copy(url)}>Copy</button>}
@@ -249,6 +337,30 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
         )}
       </div>
 
+      {/* ---- event log: lifecycle, input/encoder errors and QC alarms ---- */}
+      <div className="card" style={{ marginTop: 16, padding: 16 }}>
+        <div style={{ ...SEC, marginTop: 0 }}>Event log</div>
+        {!st.log?.length ? (
+          <div style={{ fontSize: 12.5, color: 'var(--faint)' }}>Nothing logged yet for this station.</div>
+        ) : (
+          <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+            {st.log.map((e, i) => (
+              <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '5px 0', borderBottom: '1px solid var(--border)' }}>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, width: 46, flex: 'none', textTransform: 'uppercase',
+                  color: e.level === 'down' ? 'var(--down,#f87171)' : e.level === 'warn' ? 'var(--warn,#fbbf24)' : 'var(--faint)',
+                }}>{e.level}</span>
+                <span style={{ fontSize: 11.5, color: 'var(--faint)', width: 74, flex: 'none', fontVariantNumeric: 'tabular-nums' }}>
+                  {e.ts === 'encoder' ? 'encoder' : fmtClock(e.ts)}
+                </span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, width: 128, flex: 'none' }}>{e.title}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.detail}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {settingsOpen && (
         <RadioDrawer groups={groups} station={st} onClose={() => setSettingsOpen(false)}
           onDone={() => { setSettingsOpen(false); load() }} />
@@ -258,6 +370,41 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
 }
 
 const CLASS_LABEL: Record<string, string> = { song: 'Songs', ad: 'Ads', content: 'Content' }
+
+const GATE_COLOR: Record<string, string> = {
+  healthy: '#4ade80', ready: '#60a5fa', starting: '#fbbf24',
+  degraded: '#fb923c', failed: '#f87171', stopped: '#64748b', idle: '#64748b',
+}
+/** One of the five pipeline gates, same model and wording as channels. */
+function GateCell({ g }: { g: Gate }) {
+  const c = GATE_COLOR[g.status] ?? '#64748b'
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 11px', background: 'rgba(255,255,255,.02)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 999, background: c, flex: 'none' }} />
+        <span style={{ fontSize: 12, fontWeight: 700 }}>{g.label}</span>
+        {g.billable && <span style={{ fontSize: 9, color: 'var(--faint)', marginLeft: 'auto' }}>£</span>}
+      </div>
+      <div style={{ fontSize: 10.5, fontWeight: 700, color: c, textTransform: 'uppercase', marginTop: 3 }}>{g.status}</div>
+      <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 3, lineHeight: 1.35 }}>{g.detail}</div>
+    </div>
+  )
+}
+
+/** The single roll-up badge (same states the channels list uses). */
+function OverallTag({ state, onAir }: { state?: string; onAir?: boolean }) {
+  const MAP: Record<string, { label: string; cls: string }> = {
+    onair: { label: 'On air', cls: 'live' },
+    ready: { label: 'Ready (private)', cls: 'sched' },
+    starting: { label: 'Starting', cls: 'sched' },
+    degraded: { label: 'Degraded', cls: 'warn' },
+    error: { label: 'Error', cls: 'down' },
+    stopped: { label: 'Stopped', cls: 'idle' },
+    idle: { label: 'Off', cls: 'idle' },
+  }
+  const m = MAP[state ?? (onAir ? 'onair' : 'idle')] ?? MAP.idle
+  return <StatusTag label={m.label} cls={m.cls} />
+}
 
 function MetaRow({ k, v }: { k: string; v?: string | null }) {
   if (!v) return null
