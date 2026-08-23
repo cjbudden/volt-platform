@@ -30,6 +30,12 @@ export interface LocalSegment {
 
 export interface RunSpan { runId: string; startMs: number; endMs: number; segments: number }
 
+/** What a segment is nominally cut at, when nothing measurable says otherwise. */
+const NOMINAL_SEGMENT_MS = 4000;
+/** The longest a single segment can credibly be. Anything beyond this is not a
+ *  long segment, it is a rebased timeline being read as a duration. */
+const MAX_SEGMENT_MS = 60_000;
+
 // ---- fMP4 box peeks (same logic the encoder uses) ---------------------------
 function readHead(path: string, n = 65536): Buffer | null {
   try {
@@ -94,12 +100,21 @@ export function scanRun(streamId: string, runId: string, rendition: string): Loc
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
     const nxt = entries[i + 1];
-    let durMs = 4000;
-    if (e.tfdt != null && nxt?.tfdt != null) {
-      durMs = Number((nxt.tfdt - e.tfdt) * 1000n / BigInt(ts));
-    } else if (i > 0) {
-      durMs = out[i - 1].durMs;   // last segment: assume previous duration
-    }
+    // A tfdt DELTA is only a duration when the media timeline actually ran
+    // forward across the pair. It does not always: an encoder that restarts
+    // inside a run rebases tfdt, and the delta then comes out negative — one
+    // real run here produced -1,264,001 ms. Used unchecked that is not a small
+    // error, it is a segment placed twenty-one minutes into the FUTURE (start is
+    // mtime minus duration), which paints media over a gap, offers a clip range
+    // that has nothing behind it, and puts a stray bar on the waveform far from
+    // any recording. So a delta is accepted only if it is plausible, and an
+    // implausible one falls back to the neighbouring segment's measured length.
+    const raw = (e.tfdt != null && nxt?.tfdt != null)
+      ? Number((nxt.tfdt - e.tfdt) * 1000n / BigInt(ts))
+      : null;
+    const plausible = raw != null && raw > 0 && raw <= MAX_SEGMENT_MS;
+    const durMs = plausible ? raw
+      : (i > 0 ? out[i - 1].durMs : NOMINAL_SEGMENT_MS);
     out.push({
       runId, rendition, file: e.f, seq: e.seq,
       startMs: e.mtimeMs - durMs,   // measured write clock, same rule as live PDT

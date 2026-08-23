@@ -266,35 +266,58 @@ export async function waveform(streamId: string, fromMs: number, toMs: number, b
   }
 
   // ---- SAMPLED: one representative segment per bucket -----------------------
+  //
+  //  A segment's measured peak describes its WHOLE duration, so it paints every
+  //  bucket it overlaps, not just the one holding its midpoint. This matters as
+  //  soon as a bucket is narrower than a segment — at a half-hour zoom on a
+  //  900px lane a bucket is ~1.4s against a 4s segment, and painting only the
+  //  midpoint bucket left two of every three columns blank. The result read as a
+  //  picket fence rather than an envelope, which is worse than useless when the
+  //  job is to find the quiet moment to cut on.
   base.mode = 'sampled';
-  const chosen = new Map<number, LocalSegment>();   // bucket index -> segment
+  const segForBucket: (LocalSegment | null)[] = new Array(n).fill(null);
   for (const s of segs) {
-    const mid = s.startMs + s.durMs / 2;
-    const i = Math.floor((mid - from) / bucketMs);
-    if (i < 0 || i >= n) continue;
-    if (!chosen.has(i)) chosen.set(i, s);           // first segment in the bucket
+    const b0 = Math.floor((s.startMs - from) / bucketMs);
+    const b1 = Math.floor((s.startMs + Math.max(1, s.durMs) - 1 - from) / bucketMs);
+    if (b1 < 0 || b0 >= n) continue;
+    for (let i = Math.max(0, b0); i <= Math.min(n - 1, b1); i++) {
+      if (!segForBucket[i]) segForBucket[i] = s;    // first segment wins the bucket
+    }
   }
+
+  interface Paint { seg: LocalSegment; buckets: number[] }
+  const paint = new Map<string, Paint>();
+  for (let i = 0; i < n; i++) {
+    const s = segForBucket[i];
+    if (!s) continue;
+    const key = `${s.runId}/${s.seq}`;
+    let e = paint.get(key);
+    if (!e) { e = { seg: s, buckets: [] }; paint.set(key, e); }
+    e.buckets.push(i);
+  }
+  const apply = (e: Paint, peakDb: number, rmsDb: number) => {
+    for (const i of e.buckets) {
+      out[i] = { t: from + i * bucketMs, peak: dbToUnit(peakDb), rms: dbToUnit(rmsDb) };
+    }
+  };
+
   // fill from cache first (free), then decode what is missing within budget
-  const missing: [number, LocalSegment][] = [];
-  for (const [i, s] of chosen) {
-    const cached = loadCache(streamId, s.runId)[String(s.seq)];
-    if (cached) out[i] = { t: from + i * bucketMs, peak: dbToUnit(cached[0]), rms: dbToUnit(cached[1]) };
-    else missing.push([i, s]);
+  const missing: Paint[] = [];
+  for (const e of paint.values()) {
+    const cached = loadCache(streamId, e.seg.runId)[String(e.seg.seq)];
+    if (cached) apply(e, cached[0], cached[1]);
+    else missing.push(e);
   }
   const take = missing.slice(0, MAX_SAMPLES);
   const started = Date.now();
-  const results = await pool(take.map(([, s]) => async () => {
+  const results = await pool(take.map((e) => async () => {
     if (Date.now() - started > BUDGET_MS) return null;
-    return segmentPeak(streamId, s, 2500);
+    return segmentPeak(streamId, e.seg, 2500);
   }), 8);
-  results.forEach((r, k) => {
-    if (!r) return;
-    const [i] = take[k];
-    out[i] = { t: from + i * bucketMs, peak: dbToUnit(r[0]), rms: dbToUnit(r[1]) };
-  });
-  for (const runId of new Set(take.map(([, s]) => s.runId))) saveCache(streamId, runId);
+  results.forEach((r, k) => { if (r) apply(take[k], r[0], r[1]) });
+  for (const runId of new Set(take.map((e) => e.seg.runId))) saveCache(streamId, runId);
 
-  base.pending = Array.from(chosen.keys()).filter((i) => out[i] === null).length;
+  base.pending = out.reduce<number>((acc, b, i) => acc + (b === null && segForBucket[i] ? 1 : 0), 0);
   base.complete = base.pending === 0;
   base.priming = isPriming(streamId);
   return base;

@@ -20,6 +20,7 @@ import { resolveRange, assessRange, segmentCount } from '../services/clips/resol
 import { plan } from '../services/clips/extract';
 import { isAudioOnly, recordingSpans } from '../services/localRecordingIndex';
 import { containersInRange, daysForChannel } from '../services/containers';
+import { waveform, primeWaveformCache, isPriming } from '../services/waveform';
 import {
   DAYPART_PRESETS, applyPreset, getDayparts, setDayparts, validateDayparts,
   stripsInRange, channelDayConfig, presetById,
@@ -161,6 +162,46 @@ timelineRouter.get('/:id/timeline', asyncHandler(async (req, res) => {
       asRun: p.actual_start != null,
       status: p.status, class: p.class ?? null, source: p.source ?? 'epg',
     })),
+  });
+}));
+
+/**
+ * WAVEFORM for an arbitrary window on a channel's timeline.
+ *
+ * For an audio source this IS the media lane. A flat block tells you a recording
+ * exists; the waveform tells you where the speech stops and the song starts,
+ * which is the whole job when you are looking for a clipping point.
+ *
+ * Per CHANNEL rather than per recording, because the timeline spans containers
+ * and a capture boundary must not interrupt the picture. The underlying service
+ * already works on a stream id and already spans runs.
+ *
+ * Bucket count follows the pixels the caller is drawing into, so it never
+ * decodes more detail than can be seen. The service picks EXACT mode for a
+ * window under fifteen minutes and a sampled pass beyond that, with a per-run
+ * peak cache behind both.
+ */
+timelineRouter.get('/:id/waveform', asyncHandler(async (req, res) => {
+  const ch = await ownedChannel(req);
+  const q = windowQuery.extend({
+    buckets: z.coerce.number().int().min(16).max(1200).default(600),
+    prime: z.enum(['0', '1']).optional(),
+  }).parse(req.query);
+  checkWindow(q.from, q.to);
+
+  const wf = await waveform(ch.id, q.from, q.to, q.buckets);
+
+  // A wide window answers from whatever the cache holds and reports what is
+  // still missing, rather than blocking the request until every segment has
+  // been decoded. The client redraws when the priming pass lands.
+  if (q.prime === '1' && !wf.complete) primeWaveformCache(ch.id, q.from, q.to);
+
+  res.json({
+    channelId: ch.id,
+    from: wf.from, to: wf.to, bucketMs: wf.bucketMs,
+    mode: wf.mode, complete: wf.complete, pending: wf.pending,
+    priming: isPriming(ch.id),
+    buckets: wf.buckets,
   });
 }));
 

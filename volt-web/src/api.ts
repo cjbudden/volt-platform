@@ -268,6 +268,16 @@ export interface JobRow {
   source_name?: string | null
 }
 
+
+export interface WaveBucket { t: number; peak: number; rms: number }
+export interface ChannelWaveform {
+  channelId: string
+  from: number; to: number; bucketMs: number
+  mode: 'exact' | 'sampled'
+  complete: boolean; pending: number; priming: boolean
+  buckets: (WaveBucket | null)[]
+}
+
 export const api = {
   login: (email: string, password: string) =>
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
@@ -379,6 +389,9 @@ export const api = {
   /** The three lanes in one call, so they cannot disagree about a boundary. */
   channelTimeline: (id: string, from: number, to: number): Promise<TimelineFeed> =>
     req(`/channels/${id}/timeline?from=${Math.round(from)}&to=${Math.round(to)}`),
+  /** The waveform for a window, at the caller's pixel resolution. */
+  channelWaveform: (id: string, from: number, to: number, buckets: number, prime = true): Promise<ChannelWaveform> =>
+    req(`/channels/${id}/waveform?from=${Math.round(from)}&to=${Math.round(to)}&buckets=${Math.round(buckets)}${prime ? '&prime=1' : ''}`),
   channelCoverage: (id: string, from: number, to: number): Promise<CoverageFeed> =>
     req(`/channels/${id}/coverage?from=${Math.round(from)}&to=${Math.round(to)}`),
   channelDayparts: (id: string): Promise<{ presetId: string | null; tz: string; anchorHour: number; dayparts: DaypartDef[] }> =>

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type TimelineFeed, type DaypartStrip, type TimelineProgramme } from './api'
+import { api, type TimelineFeed, type DaypartStrip, type TimelineProgramme, type ChannelWaveform } from './api'
 
 /* ============================================================================
    THE THREE-LANE TIMELINE
 
    Three lanes, one x-axis, moving in unison:
 
-     MEDIA      what actually exists on disk, with gaps drawn as gaps
+     MEDIA      the WAVEFORM for an audio source, run blocks for video, with
+                gaps drawn as gaps in both
      TIME       the broadcast day, its daypart strips, and the clock ruler
      ON AIR     what was playing, from the EPG or the now-playing log
 
@@ -19,6 +20,15 @@ import { api, type TimelineFeed, type DaypartStrip, type TimelineProgramme } fro
    06:00 anchor lives in two containers and must read as one thing. So the x-axis
    is wall-clock time and container edges are drawn as marks ON it, never as the
    ends of it.
+
+   WHY THE WAVEFORM IS THE MEDIA LANE FOR AUDIO. A flat block only says a
+   recording exists. The waveform says where the speech stops and the song
+   starts, where the applause is, where the silence between items falls — which
+   is the entire job when you are hunting for a clipping point. On a radio
+   source the block would be the least useful thing we could draw in the space.
+
+   It is fetched for the VISIBLE window at the pixel resolution being drawn, so
+   zooming in decodes more detail rather than stretching what was already there.
 
    ZOOM IS BOUNDED at both ends, deliberately. Too far in and you are scrubbing
    inside one segment with no useful detail; too far out and the server is asked
@@ -64,6 +74,8 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
   const [win, setWin] = useState<{ from: number; to: number } | null>(initialWindow ?? null)
   const [sel, setSel] = useState<TimelineSelection | null>(null)
   const [hover, setHover] = useState<number | null>(null)
+  const [wave, setWave] = useState<ChannelWaveform | null>(null)
+  const waveRef = useRef<HTMLCanvasElement | null>(null)
   const railRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ mode: 'select' | 'pan'; x: number; from: number; to: number } | null>(null)
 
@@ -123,6 +135,95 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
     return () => clearTimeout(t)
     /* eslint-disable-next-line */
   }, [win?.from, win?.to])
+
+  // THE WAVEFORM, for audio sources. Fetched separately from the timeline
+  // because it is the expensive half: the lanes must appear immediately and the
+  // waveform fills in behind them, rather than the whole surface waiting on a
+  // decode. Bucket count follows the drawn width, so detail matches the zoom.
+  useEffect(() => {
+    if (!win || feed?.kind !== 'audio') { setWave(null); return }
+    let dead = false
+    const timers: number[] = []
+    // A COLD cache is the normal first visit: nothing has been decoded for this
+    // stream yet, the first request comes back thin or fails outright while the
+    // server is busy priming, and the poll below only runs once an answer has
+    // landed. So the first fetch retries on its own — without this a single
+    // failed request left the lane permanently blank with no way back except a
+    // reload.
+    const attempt = (n: number) => {
+      const t = window.setTimeout(async () => {
+        if (dead) return
+        const px = railRef.current?.clientWidth ?? 900
+        try {
+          const w = await api.channelWaveform(channelId, win.from, win.to, Math.min(1200, Math.max(120, Math.round(px))))
+          if (!dead) setWave(w)
+        } catch {
+          if (!dead && n < 4) attempt(n + 1)   // 0.9s, 1.8s, 3.6s
+        }
+      }, n === 0 ? 260 : 450 * 2 ** n)
+      timers.push(t)
+    }
+    attempt(0)
+    return () => { dead = true; timers.forEach(clearTimeout) }
+    /* eslint-disable-next-line */
+  }, [channelId, feed?.kind, win?.from, win?.to])
+
+  // A wide window answers from the peak cache and reports what is still
+  // missing; the server primes the rest in the background, so poll briefly
+  // until the picture is whole rather than leaving it half-drawn.
+  useEffect(() => {
+    if (!wave || wave.complete || !win) return
+    const t = setTimeout(async () => {
+      const px = railRef.current?.clientWidth ?? 900
+      try {
+        const w = await api.channelWaveform(channelId, win.from, win.to, Math.min(1200, Math.max(120, Math.round(px))), false)
+        setWave(w)
+      } catch { /* ignore */ }
+    }, 1500)
+    return () => clearTimeout(t)
+    /* eslint-disable-next-line */
+  }, [wave?.complete, wave?.pending])
+
+  // ---- draw the waveform ---------------------------------------------------
+  useEffect(() => {
+    const cv = waveRef.current
+    if (!cv || !win) return
+    const w = cv.clientWidth, h = cv.clientHeight
+    const dpr = window.devicePixelRatio || 1
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr)
+    }
+    const g = cv.getContext('2d')
+    if (!g) return
+    g.setTransform(dpr, 0, 0, dpr, 0, 0)
+    g.clearRect(0, 0, w, h)
+    if (!wave?.buckets.length) return
+
+    const mid = h / 2
+    g.strokeStyle = 'rgba(255,255,255,.10)'
+    g.beginPath(); g.moveTo(0, mid); g.lineTo(w, mid); g.stroke()
+
+    // Peak behind, RMS in front — the same treatment as the clipping surface, so
+    // the two read as one instrument rather than two different pictures of the
+    // same audio. Values are linear amplitude (see audioLevel.ts): this is a
+    // waveform, not a loudness plot.
+    const span = wave.to - wave.from
+    const bw = Math.max(0.7, (w / wave.buckets.length))
+    for (let i = 0; i < wave.buckets.length; i++) {
+      const b = wave.buckets[i]
+      if (!b) continue
+      const t = wave.from + (i / wave.buckets.length) * span
+      const x = ((t - win.from) / (win.to - win.from)) * w
+      if (x < -bw || x > w + bw) continue
+      const ph = Math.max(0.7, b.peak * (mid - 1))
+      const rh = Math.max(0.5, b.rms * (mid - 1))
+      g.fillStyle = 'rgba(125,211,252,.42)'
+      g.fillRect(x, mid - ph, bw, ph * 2)
+      g.fillStyle = 'rgba(63,123,255,.95)'
+      g.fillRect(x, mid - rh, bw, rh * 2)
+    }
+    /* eslint-disable-next-line */
+  }, [wave, win?.from, win?.to])
 
   useEffect(() => { onSelect?.(sel) /* eslint-disable-next-line */ }, [sel])
   useEffect(() => {
@@ -208,6 +309,7 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
   const strips = feed?.dayparts ?? []
   const programmes = feed?.programmes ?? []
   const atCursor = hover ?? null
+  const isAudio = feed?.kind === 'audio'
 
   if (err) return <div className="err">{err}</div>
   if (!feed || !win) return <div className="loading">Loading timeline…</div>
@@ -235,8 +337,11 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
         onPointerUp={onPointerUp} onPointerLeave={() => setHover(null)}
         style={{ position: 'relative', userSelect: 'none', cursor: 'crosshair', touchAction: 'none' }}>
 
-        {/* ---------------- LANE 1: media ---------------- */}
-        <Lane label="Media">
+        {/* ---------------- LANE 1: media ----------------
+             For audio this is the WAVEFORM, which is the whole point of the lane
+             on a radio source: it shows where to cut. For video it stays run
+             blocks until keyframe thumbnails land. */}
+        <Lane label={isAudio ? 'Audio' : 'Media'} tall={isAudio}>
           {/* The lane is drawn as GAP-BY-DEFAULT and filled where media exists,
               so a hole is visible rather than implied. */}
           <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(45deg,rgba(148,163,184,.07) 0 6px,transparent 6px 12px)' }} />
@@ -245,10 +350,30 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
               style={{
                 position: 'absolute', top: 3, bottom: 3,
                 left: `${msToPct(r.startMs)}%`, width: `${Math.max(0.2, msToPct(r.endMs) - msToPct(r.startMs))}%`,
-                background: 'linear-gradient(180deg,rgba(74,222,128,.5),rgba(74,222,128,.28))',
-                border: '1px solid rgba(74,222,128,.55)', borderRadius: 3,
+                // OPAQUE, even for audio. The lane's hatching means "no media";
+                // a translucent block let the hatch show through the recorded
+                // stretch too, so recorded and missing looked the same behind the
+                // waveform. The base hides the hatch, the tint says recorded.
+                backgroundColor: isAudio ? 'var(--panel-2)' : undefined,
+                backgroundImage: isAudio
+                  ? 'linear-gradient(rgba(74,222,128,.09),rgba(74,222,128,.09))'
+                  : 'linear-gradient(180deg,rgba(74,222,128,.5),rgba(74,222,128,.28))',
+                border: `1px solid rgba(74,222,128,${isAudio ? '.35' : '.55'})`, borderRadius: 3,
               }} />
           ))}
+          {isAudio && (
+            <canvas ref={waveRef} style={{
+              position: 'absolute', inset: 0, width: '100%', height: '100%',
+              display: 'block', pointerEvents: 'none',
+            }} />
+          )}
+          {isAudio && wave && !wave.complete && (
+            <div style={{
+              position: 'absolute', right: 6, top: 3, fontSize: 'var(--fs-micro)',
+              color: 'var(--faint)', background: 'rgba(0,0,0,.45)', padding: '1px 5px',
+              borderRadius: 4, pointerEvents: 'none',
+            }}>drawing… {wave.pending} left</div>
+          )}
           {/* Container edges: marks ON the axis, not ends OF it. */}
           {feed.containers.map((c) => (
             <div key={c.id} title={`broadcast day ${c.day} · ${c.coveragePct}% recorded`}
@@ -264,7 +389,15 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
           {strips.map((s, i) => (
             <Strip key={`${s.startMs}-${i}`} s={s} i={i} msToPct={msToPct} />
           ))}
-          {feed.days.map((d) => (
+          {/* The day in view, pinned, when its 06:00 boundary is off to the left.
+              Otherwise zooming inside a day removes the date from the screen. */}
+          {feed.days.length > 0 && feed.days[0].startMs < win.from && (
+            <div style={{
+              position: 'absolute', top: 1, left: 4, whiteSpace: 'nowrap',
+              fontSize: 'var(--fs-micro)', color: 'var(--faint)',
+            }}>{fmtDay.format(feed.days[0].startMs)}</div>
+          )}
+          {feed.days.filter((d) => msToPct(d.startMs) >= 0 && msToPct(d.startMs) <= 100).map((d) => (
             <div key={d.day} style={{ position: 'absolute', top: 0, bottom: 0, left: `${msToPct(d.startMs)}%` }}>
               <div style={{ borderLeft: '1px solid rgba(148,163,184,.5)', height: '100%' }} />
               <div style={{
@@ -343,7 +476,11 @@ function fmtDur(ms: number) {
            : `${m}:${String(ss).padStart(2, '0')}`
 }
 
-function Lane({ label, children }: { label: string; children: React.ReactNode }) {
+function Lane({ label, children, tall }: {
+  label: string; children: React.ReactNode
+  /** The waveform needs room to be readable; a 34px strip is a smear. */
+  tall?: boolean
+}) {
   return (
     <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, marginBottom: 4 }}>
       <div style={{
@@ -351,7 +488,7 @@ function Lane({ label, children }: { label: string; children: React.ReactNode })
         textTransform: 'uppercase', letterSpacing: 'var(--ls-label)', paddingTop: 8,
       }}>{label}</div>
       <div style={{
-        position: 'relative', flex: 1, minWidth: 0, height: 34,
+        position: 'relative', flex: 1, minWidth: 0, height: tall ? 92 : 34,
         background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 6,
         overflow: 'hidden',
       }}>{children}</div>
@@ -362,17 +499,28 @@ function Lane({ label, children }: { label: string; children: React.ReactNode })
 function Strip({ s, i, msToPct }: { s: DaypartStrip; i: number; msToPct: (ms: number) => number }) {
   const left = msToPct(s.startMs), right = msToPct(s.endMs)
   if (right < -5 || left > 105) return null
+  // CLAMPED TO THE VIEWPORT, deliberately. Zoom into the middle of Breakfast and
+  // the strip's true left edge is off-screen; drawn unclamped, its name goes with
+  // it and the lane becomes an unlabelled grey band at exactly the zoom where
+  // knowing which daypart you are in matters most. So the box is clipped to what
+  // is visible, the name rides the visible edge, and the border is drawn ONLY
+  // when the real boundary is in view — a clamped edge must never be mistaken
+  // for a daypart starting there.
+  const vLeft = Math.max(0, left), vRight = Math.min(100, right)
+  const startsInView = left >= 0
   return (
     <div title={`${s.name} — click to select this strip`} style={{
       position: 'absolute', top: 15, bottom: 2,
-      left: `${left}%`, width: `${Math.max(0.2, right - left)}%`,
+      left: `${vLeft}%`, width: `${Math.max(0.2, vRight - vLeft)}%`,
       // Alternating tint: adjacent strips are otherwise one grey band and the
       // boundary an operator is looking for disappears.
       background: i % 2 ? 'rgba(148,163,184,.20)' : 'rgba(148,163,184,.10)',
-      borderLeft: '1px solid rgba(148,163,184,.45)',
+      borderLeft: startsInView ? '1px solid rgba(148,163,184,.45)' : 'none',
       display: 'flex', alignItems: 'center', paddingLeft: 5, overflow: 'hidden',
     }}>
-      <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--muted)', whiteSpace: 'nowrap' }}>{s.name}</span>
+      <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+        {startsInView ? s.name : `← ${s.name}`}
+      </span>
     </div>
   )
 }
@@ -382,17 +530,27 @@ function Programme({ p, msToPct, onPick }: {
 }) {
   const left = msToPct(p.startMs), right = msToPct(p.endMs)
   if (right < -5 || left > 105) return null
+  // Same clamping rule as the daypart strip: a programme running in from before
+  // the window keeps its title on screen, and only a REAL start gets a rounded,
+  // bordered left edge, so a clipped edge is never read as a boundary.
+  const vLeft = Math.max(0, left), vRight = Math.min(100, right)
+  const startsInView = left >= 0, endsInView = right <= 100
   return (
     <div title={`${p.title} — click to select this range`}
       onPointerDown={(e) => { e.stopPropagation(); onPick() }}
       style={{
         position: 'absolute', top: 3, bottom: 3,
-        left: `${left}%`, width: `${Math.max(0.15, right - left)}%`,
+        left: `${vLeft}%`, width: `${Math.max(0.15, vRight - vLeft)}%`,
         background: CLASS_COLOR[p.class ?? ''] ?? 'rgba(99,102,241,.35)',
-        border: '1px solid rgba(255,255,255,.12)', borderRadius: 3,
+        border: '1px solid rgba(255,255,255,.12)',
+        borderLeftStyle: startsInView ? 'solid' : 'none',
+        borderRightStyle: endsInView ? 'solid' : 'none',
+        borderRadius: `${startsInView ? 3 : 0}px ${endsInView ? 3 : 0}px ${endsInView ? 3 : 0}px ${startsInView ? 3 : 0}px`,
         display: 'flex', alignItems: 'center', paddingLeft: 4, overflow: 'hidden', cursor: 'pointer',
       }}>
-      <span style={{ fontSize: 'var(--fs-micro)', color: '#eaf0f7', whiteSpace: 'nowrap' }}>{p.title}</span>
+      <span style={{ fontSize: 'var(--fs-micro)', color: '#eaf0f7', whiteSpace: 'nowrap' }}>
+        {startsInView ? p.title : `← ${p.title}`}
+      </span>
     </div>
   )
 }
