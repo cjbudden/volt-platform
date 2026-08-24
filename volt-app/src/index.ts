@@ -5,6 +5,7 @@ import { startScheduler } from './services/orchestrator';
 import { migrate } from './services/migrate';
 import { startWorker } from './services/jobs/worker';
 import { registerClipHandlers } from './services/jobs/handlers/clipExtract';
+import { registerQcHandlers } from './services/jobs/handlers/qcRun';
 import { backfillContainers } from './services/containers';
 import { reconcileAll } from './services/media/reconcile';
 import { reapAllEncoders } from './services/orchestrator/encoderCleanup';
@@ -131,6 +132,7 @@ boot().then(() => {
   // Handlers are registered BEFORE the worker starts polling: the worker only
   // claims types it can handle, so an unregistered type would sit queued.
   registerClipHandlers();
+  registerQcHandlers();
   worker = startWorker();
 }).catch((e) => {
   console.error('[boot] schema preparation failed — refusing to serve', e);

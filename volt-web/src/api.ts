@@ -480,6 +480,14 @@ export const api = {
 
   recordingDownload: (id: string): Promise<{ status: 'exporting' | 'ready'; url?: string; message?: string }> =>
     req(`/recordings/${id}/download`),
+  // ---- review and QC ----
+  reviewQueue: (): Promise<{ queue: ReviewQueueRow[]; count: number }> => req('/vod/review/queue'),
+  assetReview: (id: string): Promise<AssetReview> => req(`/vod/${id}/review`),
+  decideReview: (id: string, to: ReviewStateId, note?: string): Promise<any> =>
+    req(`/vod/${id}/review`, { method: 'POST', body: JSON.stringify({ to, note }) }),
+  rerunQc: (id: string): Promise<{ jobId: string; state: string }> =>
+    req(`/vod/${id}/qc`, { method: 'POST' }),
+
   /** Keyframe thumbnails across a window: the video half of the media lane. */
   channelThumbs: (id: string, from: number, to: number, count: number, prime = true): Promise<ThumbStrip> =>
     req(`/channels/${id}/thumbs?from=${Math.round(from)}&to=${Math.round(to)}&count=${count}${prime ? '&prime=1' : ''}`),
@@ -898,6 +906,67 @@ export interface ThumbStrip {
   pending: number
   priming: boolean
   thumbs: (Thumb | null)[]
+}
+
+// ---- review and QC --------------------------------------------------------
+export type ReviewStateId = 'draft' | 'in_review' | 'changes_requested' | 'approved' | 'rejected'
+
+/** What a machine measured, not what anyone decided. */
+export interface QcFinding {
+  check_name: string
+  severity: 'info' | 'warning' | 'error'
+  from_ms: number | null
+  to_ms: number | null
+  measured: string | null
+  expected: string | null
+  message: string
+  at: string
+}
+
+export interface ReviewDecisionRow {
+  at: string
+  actor_label: string
+  from_state: ReviewStateId | null
+  to_state: ReviewStateId
+  note: string | null
+  /** Set when the decision was taken with QC findings outstanding. The mark that
+   *  makes a soft gate mean something. */
+  overrode_qc: boolean
+  qc_state_at_decision: string | null
+}
+
+export interface AssetReview {
+  assetId: string
+  state: ReviewStateId
+  reviewedAt: string | null
+  qc: { state: string | null; at: string | null; findings: QcFinding[] }
+  history: ReviewDecisionRow[]
+  gate: {
+    allowed: boolean
+    code: 'ok' | 'not_approved' | 'qc_failed'
+    message: string
+    reviewState: ReviewStateId
+    qcState: string | null
+    wouldOverride: boolean
+  }
+}
+
+export interface ReviewQueueRow {
+  id: string
+  title: string | null
+  kind: string
+  review_state: ReviewStateId
+  qc_state: string | null
+  qc_errors: number
+  qc_warnings: number
+  created_at: string
+  duration_ms: number | string | null
+  start_epoch_ms: number | string
+  end_epoch_ms: number | string
+  source_name: string | null
+  source_block_count: number | null
+  source_coverage_pct: number | string | null
+  recording_id?: string | null
 }
 
 export interface VodAssetRow {

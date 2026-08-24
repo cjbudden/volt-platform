@@ -17,6 +17,8 @@ import { config } from '../../../config';
 import { resolveRange, assessRange, segmentCount } from '../../clips/resolve';
 import { extract, plan, type OutputFormat } from '../../clips/extract';
 import { recordProvenance } from '../../clips/provenance';
+import { enqueue } from '../queue';
+import { QC_RUN } from './qcRun';
 import { PermanentError, registerHandler, type JobContext } from '../worker';
 
 export interface ClipExtractPayload {
@@ -124,6 +126,21 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
     await ctx.progress(100, `recorded ${chain.length} source block(s)`);
   } catch (e) {
     console.error(`[clip.extract] ${p.vodAssetId}: provenance not recorded:`, e);
+  }
+
+  // QC runs on its own job, so every clip reaches the review queue with its
+  // findings already attached. A reviewer who opens a clip and sees "not checked
+  // yet" is a reviewer who approves it unchecked.
+  try {
+    await enqueue({
+      type: QC_RUN,
+      payload: { vodAssetId: p.vodAssetId },
+      channelId: asset.channel_id, eventId: asset.event_id,
+      dedupeKey: `qc.run:${p.vodAssetId}`,
+      priority: 40,
+    });
+  } catch (e) {
+    console.error(`[clip.extract] ${p.vodAssetId}: QC not queued:`, e);
   }
 
   return {

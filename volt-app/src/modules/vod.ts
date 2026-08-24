@@ -6,7 +6,12 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { validateMetadata, SchemaField } from '../services/metadataValidator';
 import { videoObjectFromAsset } from '../services/schemaOrg';
 import { traceClip } from '../services/clips/provenance';
+import { decide, historyOf as reviewHistory, publishGate, queue as reviewQueue, IllegalReview } from '../services/review';
+import { qcFindings } from '../services/qc';
+import { enqueue } from '../services/jobs/queue';
+import { QC_RUN } from '../services/jobs/handlers/qcRun';
 import { originBaseFor } from '../services/liveOrigin';
+import { actorId, actorLabel } from '../util/actor';
 
 /**
  * VOD Library — assets DERIVED from a recording (auto-published, clips, exports).
@@ -88,6 +93,94 @@ vodRouter.get(
   })
 );
 
+
+/**
+ * THE REVIEW QUEUE — what is waiting for somebody.
+ *
+ * Deliberately not "all clips filtered by state": the queue is a place of work,
+ * ordered oldest first, carrying the QC counts so a reviewer can see what needs
+ * attention before opening anything.
+ */
+vodRouter.get(
+  '/review/queue',
+  asyncHandler(async (req, res) => {
+    const rows = await reviewQueue(accountId(req));
+    res.json({ queue: rows, count: rows.length });
+  })
+);
+
+/** A clip's review history, its QC findings, and whether it may be published. */
+vodRouter.get(
+  '/:id/review',
+  asyncHandler(async (req, res) => {
+    const row = await fetchOwned(req.params.id, accountId(req));
+    if (!row) throw notFound('VOD asset not found');
+    res.json({
+      assetId: row.id,
+      state: row.review_state ?? 'draft',
+      reviewedAt: row.reviewed_at,
+      qc: { state: row.qc_state ?? null, at: row.qc_at ?? null, findings: await qcFindings(row.id) },
+      history: await reviewHistory(row.id),
+      gate: await publishGate(row.id),
+    });
+  })
+);
+
+/**
+ * Move a clip through review.
+ *
+ * The reason is required for anything that is not an approval, because a
+ * rejection with no reason is a rejection somebody has to come and ask about.
+ */
+vodRouter.post(
+  '/:id/review',
+  asyncHandler(async (req, res) => {
+    const row = await fetchOwned(req.params.id, accountId(req));
+    if (!row) throw notFound('VOD asset not found');
+    const body = z.object({
+      to: z.enum(['draft', 'in_review', 'changes_requested', 'approved', 'rejected']),
+      note: z.string().max(2000).optional(),
+    }).parse(req.body);
+
+    if (body.to !== 'approved' && body.to !== 'in_review' && !body.note?.trim()) {
+      throw badRequest(`Say why: a decision of "${body.to.replace('_', ' ')}" needs a note.`);
+    }
+    try {
+      const updated = await decide({
+        assetId: row.id, to: body.to,
+        actorId: actorId(req),
+        actorLabel: await actorLabel(req),
+        note: body.note ?? null,
+      });
+      res.json({
+        ...updated,
+        history: await reviewHistory(row.id),
+        gate: await publishGate(row.id),
+      });
+    } catch (e: any) {
+      if (e instanceof IllegalReview) throw badRequest(e.message);
+      throw e;
+    }
+  })
+);
+
+/** Run QC again, on the queue. Used after a re-cut, or when a check was added. */
+vodRouter.post(
+  '/:id/qc',
+  asyncHandler(async (req, res) => {
+    const row = await fetchOwned(req.params.id, accountId(req));
+    if (!row) throw notFound('VOD asset not found');
+    const job = await enqueue({
+      type: QC_RUN,
+      payload: { vodAssetId: row.id },
+      channelId: row.channel_id, eventId: row.event_id,
+      dedupeKey: `qc.run:${row.id}`,
+      priority: 40,
+    });
+    res.status(202).json({ jobId: job.id, state: job.state });
+  })
+);
+
 /** schema.org VideoObject (JSON-LD) — for the portal, SEO, and social metadata. */
 vodRouter.get(
   '/:id/schema.org',
@@ -134,6 +227,27 @@ vodRouter.put(
         if (Object.keys(values).length > 0)
           throw badRequest('Assign a metadata schema before setting metadata');
         cleanMeta = {};
+      }
+    }
+
+    // THE PUBLISH GATE. Both blocking rules are per account and both default to
+    // off, so this changes nothing for a deployment that has not asked for it.
+    // Where it IS on, publishing over a QC finding is still allowed and is
+    // recorded on the review trail: a check that blocks outright is a check
+    // people learn to route around.
+    if (body.published === true && !asset.published) {
+      const gate = await publishGate(asset.id);
+      if (!gate.allowed) throw badRequest(gate.message);
+      if (gate.wouldOverride) {
+        await query(
+          `INSERT INTO asset_reviews
+             (vod_asset_id, actor_id, actor_label, from_state, to_state, note,
+              overrode_qc, qc_state_at_decision)
+           VALUES ($1,$2,$3,$4::review_state,$4::review_state,$5,true,$6)`,
+          [asset.id, actorId(req), await actorLabel(req),
+           asset.review_state ?? 'draft',
+           `Published with QC ${gate.qcState}.`, gate.qcState]
+        );
       }
     }
 

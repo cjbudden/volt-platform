@@ -24,6 +24,7 @@ import {
   type RetentionStage,
 } from '../services/media/retention';
 import { reconcileStream } from '../services/media/reconcile';
+import { actorLabel } from '../util/actor';
 
 export const storageRouter = Router();
 storageRouter.use(requireAuth);
@@ -105,7 +106,7 @@ storageRouter.post('/objects/:id/restore', asyncHandler(async (req, res) => {
   const body = z.object({
     speed: z.enum(['expedited', 'standard', 'bulk']).optional(),
   }).parse(req.body ?? {});
-  const out = await requestRestore(obj.id, body.speed, `user:${(req as any).user?.sub ?? 'unknown'}`);
+  const out = await requestRestore(obj.id, body.speed, `user:${await actorLabel(req)}`);
   if (!out.ok) throw badRequest(out.message);
   res.status(202).json({
     object: out.object,
@@ -118,7 +119,7 @@ storageRouter.post('/objects/:id/hold', asyncHandler(async (req, res) => {
   const obj = await ownedObject(req);
   const body = z.object({ hold: z.boolean(), reason: z.string().max(500).optional() }).parse(req.body ?? {});
   if (body.hold && !body.reason) throw badRequest('A hold needs a reason.');
-  const out = await setHold(obj.id, body.hold, body.reason ?? null, `user:${(req as any).user?.sub ?? 'unknown'}`);
+  const out = await setHold(obj.id, body.hold, body.reason ?? null, `user:${await actorLabel(req)}`);
   res.json(out);
 }));
 
@@ -209,5 +210,5 @@ storageRouter.post('/reconcile', asyncHandler(async (req, res) => {
     [body.streamId, accountId(req)]
   );
   if (!owned) throw notFound('Stream not found');
-  res.json(await reconcileStream(body.streamId, { actor: `user:${(req as any).user?.sub ?? 'unknown'}` }));
+  res.json(await reconcileStream(body.streamId, { actor: `user:${await actorLabel(req)}` }));
 }));
