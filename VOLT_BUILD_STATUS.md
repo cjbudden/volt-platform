@@ -226,3 +226,64 @@ implemented.** Design is ~2 chats ahead of build.
   audio visualiser instead of the 16:9 video, station artwork + live metadata.
   NOTE: the 16 Aug audio-only channel work was lost in the two-session merge
   (d460f5b); the new build supersedes it.
+
+---
+
+## Recording, clipping, VOD and the media lifecycle
+
+*Added 23–24 Aug. Every row below is verified by an assertion in `volt-app/test/`,
+against real media on disk rather than fixtures. 481 assertions across 13 suites.*
+
+| Capability | Status | Notes |
+|---|---|---|
+| **Migration runner** | ✅ | Numbered `NNNN_name.sql`, one transaction each, advisory-locked, adopts pre-runner databases, refuses `ALTER TYPE … ADD VALUE`. Boot refuses to serve on a failed migration |
+| **Durable job system** | ✅ | `jobs` rows claimed `FOR UPDATE SKIP LOCKED` against a LEASE, not a flag; reaper for expired leases; exponential backoff; `PermanentError` skips retries; `dedupe_key` for idempotent enqueue; `job_attempts` history. `test/jobs.check.ts` 43 |
+| **Frame-accurate clips** | ✅ | Output seeking (`-ss` after `-i`), per-block render then concat demuxer. A 20,000ms request produces 20,023ms of media. `test/clip-extract.check.ts` 36 |
+| **Broadcast-day containers** | ✅ | 06:00→06:00 in channel-local time; a clock-change day is 23 or 25 hours. tz and anchor FROZEN on the container so editing the channel cannot re-file history. Verified across both UK changes, New York and Sydney. `test/broadcast-day.check.ts` 35 |
+| **Dayparts** | ✅ | Anchors only — a start time per channel, each running to the next, so gaps and overlaps are unrepresentable. UK presets default. `test/containers-dayparts.check.sh` 23 |
+| **Three-lane timeline** | ✅ | Media, time, on-air on one wall-clock axis from ONE response, so the lanes cannot disagree about a boundary. Spans containers: a capture boundary is a mark on the axis, never the end of it |
+| **Audio waveform in the media lane** | ✅ | True peak on a LINEAR amplitude scale, per-run cache, progressive fill. A flat block says a recording exists; the waveform says where to cut. `test/waveform.check.sh` 10 |
+| **Video thumbnails in the media lane** | ✅ | Keyframe extraction, free because the encoder forces an IDR on every segment boundary. Cold strip of six: 263ms. A slot with no media stays empty rather than borrowing a neighbour's frame. `test/thumbs.check.ts` 27 |
+| **Clip provenance chain** | ✅ | `clip_segments`: one row per contiguous block, back to run, rendition, segment range, recording and broadcast day. ON DELETE SET NULL so the chain OUTLIVES its sources. `GET /api/vod/:id/provenance`, and `GET /api/recordings/:id/derived` in reverse. `test/clip-provenance.check.ts` 57 |
+| **Media lifecycle** | ✅ | `media_objects` (what it is, can it be read now) separate from `media_locations` (where the bytes are, what reading them costs). Nine states. Deletion leaves a tombstone with its logical key, size and history |
+| **Retention ladder** | ✅ | Ordered rungs: cool, archive, delete. Walked oldest-first, so year-old media is deleted directly rather than cooled, archived and deleted across three sweeps. Holds outrank every rule. Dry run before it fires |
+| **Feature-gated archive** | ✅ | Cold and archive actions offered ONLY on S3 (or compatible) with archiving explicitly enabled. On local storage a rule naming them is refused at WRITE time with the reason. Restore records the tier's published window and says "expected by", never "ready at"; a restored copy lapses back on its own timer. `test/media-lifecycle.check.ts` 97 |
+| **QC** | ✅ | Duration against the request, coverage from the chain, silence, black frames, loudness and true peak — one ffmpeg pass. Findings with a time range and a measurement, not verdicts. Checks that could not run are recorded, because "we did not look" and "we looked and it was fine" are different answers |
+| **Review** | ✅ | Decisions kept as events with a name and a note. The publish gate is SOFT by default: publishing over a QC warning is allowed and is written down. Two hard blocks per account, both off by default. `test/review-qc.check.ts` 51 |
+| **Analytics retention** | ✅ | Reports outlive the events they were computed from. Recompute → seal → prune, with the seal check inside the DELETE's own predicate. Raw window per account, default 90 days. `test/analytics-retention.check.ts` 33 |
+| **Publication provenance** | ✅ | A publication stamps the build time, review state, QC state and who published. A rebuild marks existing publications stale |
+| Smart render (re-encode only the two partial end segments) | 📐 | `plan()` already reports the saving. Must be validated frame-for-frame against the full-render output before it replaces it |
+| Segment duration per profile | 📐 | Frame accuracy made 4s a performance question rather than an accuracy one |
+
+### Defects found and fixed while building this
+
+Each of these was live, and each was found by a test written to prove something
+else:
+
+* **Negative segment durations.** `scanRun` read a duration from the tfdt delta
+  between consecutive segments. An encoder rebasing its timeline inside a run
+  makes that delta negative — one real run measured -1,264,001 ms — and start is
+  mtime minus duration, so the segment was placed twenty-one minutes into the
+  future.
+* **Durations measured across a hole.** With a segment missing, the delta spans
+  the gap: the segment before a five-segment hole took a 24s duration and was
+  placed 20s early, on top of its own predecessors. Media that looks present, in
+  the wrong place, with no gap reported.
+* **A run treated as one contiguous span.** Segments either side of a hole were
+  byte-joined, so a clip came out shorter than asked for, with the missing
+  minutes silently absent and every trim point after the hole wrong, at 100%
+  reported coverage.
+* **The waveform plotted loudness, not amplitude.** Real programme audio came
+  out pinned near full scale with no shape to trim against.
+* **Recordings filed only at boot.** A recording opened at 09:00 stayed unfiled
+  until the next restart, invisible to every question asked by broadcast day.
+* **Media objects duplicating.** Two identity bugs, both producing the same
+  media described twice with two histories and two separate retention futures.
+* **Unique views were not unique.** The rollup added one to total_views and one
+  to unique_views per session, so the columns were always equal.
+* **The account-scope rollup had no uniqueness at all.** scope_id is NULL for
+  that scope and Postgres treats NULLs as distinct in a unique constraint, so
+  `ON CONFLICT DO UPDATE` never fired and every write inserted instead of
+  accumulating.
+* **Every audit trail wrote the actor as "unknown."** The code read `req.user`;
+  the access claim is `req.auth`.
