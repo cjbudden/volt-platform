@@ -61,6 +61,15 @@ export const config = {
     dir: process.env.CLIPS_DIR ?? `${process.cwd()}/clips`,
     ffmpegBin: process.env.FFMPEG_BIN ?? 'ffmpeg',
   },
+  // UPLOADS — resumable chunk staging, and where finished filler bytes land.
+  //
+  // Chunks are staged OUTSIDE the finished-media directory on purpose: a partial
+  // upload is not an asset, and anything that scans the media directory must not
+  // find half a file sitting in it.
+  uploads: {
+    dir: process.env.UPLOAD_STAGING_DIR ?? `${process.cwd()}/uploads-staging`,
+    fillerDir: process.env.FILLER_DIR ?? `${process.cwd()}/filler`,
+  },
   // MEDIA STORE — where recorded media lives, and whether this deployment has
   // an archive at all.
   //

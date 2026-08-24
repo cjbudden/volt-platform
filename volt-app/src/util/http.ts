@@ -26,7 +26,14 @@ export function errorHandler(err: any, _req: Request, res: Response, _next: Next
   if (err?.name === 'ZodError') {
     return res.status(422).json({ error: 'ValidationError', details: err.issues });
   }
-  const status = err instanceof ApiError ? err.status : 500;
+  // A SERVICE MAY REFUSE A REQUEST TOO, and it should not have to import the
+  // HTTP layer to do it. An error carrying a plausible `status` is honoured, so
+  // "that chunk is the wrong size" reaches the client as a 400 it can act on,
+  // rather than a 500 that reads as our fault and invites a blind retry.
+  const declared = typeof err?.status === 'number'
+    && Number.isInteger(err.status) && err.status >= 400 && err.status <= 599
+      ? err.status : null;
+  const status = err instanceof ApiError ? err.status : (declared ?? 500);
   if (status >= 500) console.error(err);
   res.status(status).json({ error: err.message ?? 'Internal error' });
 }

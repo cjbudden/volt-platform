@@ -7,6 +7,7 @@ import Recordings from './pages/Recordings'
 import RecordingDetail from './pages/RecordingDetail'
 import RecordingSourceView from './pages/RecordingSource'
 import StoragePage from './pages/Storage'
+import LoopsPage from './pages/Loops'
 import ReviewPage from './pages/Review'
 import Events from './pages/Events'
 import Epg from './pages/Epg'
@@ -212,6 +213,8 @@ export default function App() {
                 : <Recordings />)
             : section === 'review'
             ? <ReviewPage />
+            : section === 'loops'
+            ? <LoopsPage />
             : section === 'storage'
             ? <StoragePage />
             : section === 'events'

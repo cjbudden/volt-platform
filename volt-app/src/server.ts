@@ -19,6 +19,7 @@ import { storageRouter } from './modules/storage';
 import { vodRouter } from './modules/vod';
 import { metadataSchemasRouter } from './modules/metadataSchemas';
 import { fillerAssetsRouter } from './modules/fillerAssets';
+import { uploadsRouter, uploadChunksRouter } from './modules/uploads';
 import { scheduledClipsRouter } from './modules/scheduledClips';
 import { publishTargetsRouter, publicationsRouter } from './modules/publishing';
 import { epgRouter } from './modules/epg';
@@ -207,6 +208,17 @@ export function createServer() {
   app.use('/api/vod', vodRouter);                        // derived VOD assets + metadata
   app.use('/api/metadata-schemas', metadataSchemasRouter); // named metadata schemas
   app.use('/api/filler-assets', fillerAssetsRouter);     // slates & loops
+  // Resumable uploads. Chunk bodies are raw octets carrying their own capability
+  // token, so they mount BEFORE the JSON parser's reach and without requireAuth;
+  // session management is an ordinary tenant operation and sits behind both.
+  // Finished filler bytes, served so a loop can be previewed in the browser.
+  // Immutable once written: the asset id IS the filename, so a new upload is a
+  // new id rather than a new version of the same URL.
+  app.use('/filler', express.static(config.uploads.fillerDir, {
+    setHeaders: (res) => { res.setHeader('Cache-Control', 'public, max-age=31536000, immutable') },
+  }));
+  app.use('/api/uploads', uploadChunksRouter);
+  app.use('/api/uploads', uploadsRouter);
   app.use('/api/scheduled-clips', scheduledClipsRouter); // timeline clip scheduling
   app.use('/api/epg', epgRouter);                        // EPG / programme scheduling
   app.use('/api/radio', radioRouter);                    // radio (audio-only) stations

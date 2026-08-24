@@ -480,6 +480,14 @@ export const api = {
 
   recordingDownload: (id: string): Promise<{ status: 'exporting' | 'ready'; url?: string; message?: string }> =>
     req(`/recordings/${id}/download`),
+  // ---- loops & fillers ----
+  fillerAssets: (kind?: 'slate' | 'loop'): Promise<FillerAsset[]> =>
+    req(`/filler-assets${kind ? `?kind=${kind}` : ''}`),
+  patchFillerAsset: (id: string, b: { name?: string }): Promise<FillerAsset> =>
+    req(`/filler-assets/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteFillerAsset: (id: string): Promise<null> =>
+    req(`/filler-assets/${id}`, { method: 'DELETE' }),
+
   // ---- analytics retention ----
   analyticsRetention: (): Promise<AnalyticsRetention> => req('/analytics/retention'),
   setAnalyticsRetention: (rawRetentionDays: number | null): Promise<AnalyticsRetention> =>
@@ -983,6 +991,27 @@ export interface AnalyticsRetention {
   raw: { sessions: number; oldest: string | null; newest: string | null }
   reports: { days: number; sealed: number; oldest: string | null }
   note: string
+}
+
+/** A slate (a still) or a loop (a short video): what a channel falls back to
+ *  when its input goes away. */
+export interface FillerAsset {
+  id: string
+  kind: 'slate' | 'loop'
+  name: string
+  source_key: string | null
+  width: number | null
+  height: number | null
+  duration_ms: number | string | null
+  poster_key: string | null
+  status: 'uploading' | 'processing' | 'ready' | 'error'
+  bytes: number | string | null
+  content_type: string | null
+  filename: string | null
+  uploaded_at: string | null
+  error: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface VodAssetRow {

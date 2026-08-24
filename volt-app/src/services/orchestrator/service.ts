@@ -11,6 +11,7 @@ import { transition, locationsOf, pollRestores } from '../media/objects';
 import { storageDriver } from '../media/storage';
 import { reconcileAll } from '../media/reconcile';
 import { sweepAnalytics } from '../analyticsRetention';
+import { sweepUploads } from '../uploads';
 
 /**
  * The orchestrator turns channel/event lifecycle into real running tasks and
@@ -637,6 +638,12 @@ export class Orchestrator {
     // Reports outlive the events they were computed from; that is the promise,
     // and the ordering is what keeps it.
     await sweepAnalytics().catch((e) => console.error('[analytics] sweep failed', e));
+
+    // Abandoned uploads hold staged chunks on disk, and a half-uploaded loop is
+    // the one thing nobody comes back for. The expiry is extended by every chunk
+    // that arrives, so only a session that has been silent for the whole window
+    // is swept.
+    await sweepUploads().catch((e) => console.error('[uploads] sweep failed', e));
 
     return result.deleted + legacyDone;
   }

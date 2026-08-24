@@ -1,8 +1,18 @@
-// Background upload manager. Lives outside the component tree (module singleton) so
-// uploads keep running while you navigate between pages. A global indicator (topbar)
-// shows progress; pages subscribe via useUploads() and refresh as items complete.
+// IMAGE-LIBRARY UPLOADS. A module singleton so uploads keep running while you
+// navigate; pages subscribe via useUploads() and refresh as items complete.
+//
+// This path sends a whole file as a data URL through the JSON API, which is fine
+// for the stills the image library holds and hopeless for anything large: the
+// file is base64'd (a third bigger), buffered whole in memory, and cannot be
+// resumed. Large media goes through uploadManager.ts instead, which chunks.
+//
+// The two are separate mechanisms with one shared job: telling you what is in
+// flight. UploadIndicator below therefore reports BOTH, because an upload that
+// does not appear in the one place that lists uploads is an upload people think
+// has stopped.
 import { useSyncExternalStore, useEffect, useState } from 'react'
 import { api } from './api'
+import { subscribe as subscribeChunked, type UploadItem } from './uploadManager'
 
 export type UpStatus = 'queued' | 'uploading' | 'done' | 'error'
 export interface UploadJob { id: string; name: string; folder: string; kind: string; size: number; status: UpStatus; error?: string }
@@ -67,28 +77,43 @@ export function useUploads() {
   }
 }
 
-/** Compact topbar indicator — shows while uploads run, a done flash after, and errors. */
+/** Compact topbar indicator — shows while uploads run, a done flash after, and errors.
+ *  Covers both upload paths: the image library's, and the chunked one used for
+ *  loops and other large media. */
 export function UploadIndicator() {
   const u = useUploads()
+  const [chunked, setChunked] = useState<UploadItem[]>([])
   const [open, setOpen] = useState(false)
   const [flash, setFlash] = useState(false)
 
+  useEffect(() => subscribeChunked(setChunked), [])
+
+  const cActive = chunked.filter(c => c.status === 'uploading' || c.status === 'queued'
+    || c.status === 'assembling' || c.status === 'background').length
+  const cDone = chunked.filter(c => c.status === 'done').length
+  const cFailed = chunked.filter(c => c.status === 'error').length
+
+  const active = u.active + cActive
+  const done = u.done + cDone
+  const failed = u.failed + cFailed
+  const total = u.total + chunked.length
+
   useEffect(() => {
-    if (u.total > 0 && u.active === 0 && u.failed === 0) {
+    if (total > 0 && active === 0 && failed === 0) {
       setFlash(true)
       const t = setTimeout(() => { setFlash(false); clearFinished() }, 3000)
       return () => clearTimeout(t)
     }
-  }, [u.active, u.total, u.failed])
+  }, [active, total, failed])
 
-  if (u.total === 0) return null
-  const label = u.active > 0 ? `↑ ${u.done}/${u.total}` : u.failed > 0 ? `${u.failed} failed` : flash ? `✓ ${u.done}` : null
+  if (total === 0) return null
+  const label = active > 0 ? `↑ ${done}/${total}` : failed > 0 ? `${failed} failed` : flash ? `✓ ${done}` : null
   if (label === null) return null
 
   return (
     <div style={{ position: 'relative' }}>
-      <button className="btn ghost" onClick={() => setOpen(o => !o)} style={u.failed ? { color: '#fca5a5' } : undefined}>
-        {u.active > 0 && <span className="dot-s warn" style={{ marginRight: 6 }} />}{label}
+      <button className="btn ghost" onClick={() => setOpen(o => !o)} style={failed ? { color: '#fca5a5' } : undefined}>
+        {active > 0 && <span className="dot-s warn" style={{ marginRight: 6 }} />}{label}
       </button>
       {open && (
         <div className="card" style={{ position: 'absolute', right: 0, top: 42, width: 300, zIndex: 60, padding: 10, maxHeight: 340, overflow: 'auto' }}>
@@ -97,6 +122,25 @@ export function UploadIndicator() {
             {u.failed > 0 && <button className="chip" onClick={retryFailed} style={{ padding: '3px 9px', marginRight: 6 }}>Retry failed</button>}
             <button className="chip" onClick={clearFinished} style={{ padding: '3px 9px' }}>Clear</button>
           </div>
+          {chunked.slice().reverse().map(c => {
+            const pct = c.totalBytes ? Math.round((c.sentBytes / c.totalBytes) * 100) : 0
+            return (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 2px', fontSize: 'var(--fs-sm)' }}>
+                <span style={{ width: 16, textAlign: 'center' }}>
+                  {c.status === 'done' ? <span style={{ color: 'var(--live)' }}>✓</span>
+                    : c.status === 'error' ? <span style={{ color: 'var(--down)' }} title={c.error ?? ''}>!</span>
+                    : <span className="dot-s warn" />}
+                </span>
+                <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  title={c.error || c.name}>{c.name}</span>
+                <span style={{ color: 'var(--faint)' }}>
+                  {c.status === 'done' ? c.kind
+                    : c.status === 'background' ? `${pct}% bg`
+                    : c.status === 'error' ? 'failed' : `${pct}%`}
+                </span>
+              </div>
+            )
+          })}
           {u.jobs.slice().reverse().map(j => (
             <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 2px', fontSize: 'var(--fs-sm)' }}>
               <span style={{ width: 16, textAlign: 'center' }}>{j.status === 'done' ? <span style={{ color: 'var(--live)' }}>✓</span> : j.status === 'error' ? <span style={{ color: 'var(--down)' }} title={j.error}>!</span> : j.status === 'uploading' ? <span className="dot-s warn" /> : '·'}</span>

@@ -20,6 +20,8 @@ export default defineConfig({
       '/library': 'http://localhost:8080', // image-library original bytes
       '/img': 'http://localhost:8080',     // resized preview derivatives
       '/radio': 'http://localhost:8080',   // live MP3 fan-out (radio stations)
+      '/filler': 'http://localhost:8080',  // uploaded slates & loops
+      '/clips': 'http://localhost:8080',   // rendered clip outputs
     },
   },
 })
