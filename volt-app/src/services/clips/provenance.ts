@@ -139,6 +139,18 @@ export async function recordProvenance(opts: {
     ]
   );
 
+  // A REBUILD MAKES EVERY EXISTING PUBLICATION STALE. The copy on YouTube is
+  // now a different cut from the one here, and the publication row still says
+  // what it was approved as. Marking it is the only honest option: silently
+  // leaving it looking current is how "the published version was approved"
+  // becomes false without anyone noticing.
+  await query(
+    `UPDATE publications SET stale = true
+      WHERE vod_asset_id = $1 AND stale = false
+        AND (published_build_at IS NULL OR published_build_at < now())`,
+    [vodAssetId]
+  );
+
   return rows;
 }
 

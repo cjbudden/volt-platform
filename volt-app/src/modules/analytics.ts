@@ -10,6 +10,7 @@ import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, badRequest, ApiError } from '../util/http';
 import { verifyPlaybackToken } from '../services/apiKeys';
+import { retentionStatus, setRawRetention, sweepAnalytics } from '../services/analyticsRetention';
 import { ingest, liveConcurrency } from '../services/analytics';
 
 // ---- public beacon (playback-token auth) -----------------------------------
@@ -58,6 +59,47 @@ analyticsBeaconRouter.post(
 // ---- tenant reports (JWT) --------------------------------------------------
 export const analyticsRouter = Router();
 analyticsRouter.use(requireAuth);
+
+/**
+ * DATA RETENTION — what is kept, and for how long.
+ *
+ * The distinction this endpoint exists to make plain: REPORTS are kept
+ * indefinitely; the RAW event data they were computed from ages out. A day's
+ * figures are sealed from complete raw data before that raw data is deleted, so
+ * a report gives the same answer before and after the prune.
+ */
+analyticsRouter.get(
+  '/retention',
+  asyncHandler(async (req, res) => {
+    res.json(await retentionStatus(accountId(req)));
+  })
+);
+
+analyticsRouter.put(
+  '/retention',
+  asyncHandler(async (req, res) => {
+    const b = z.object({
+      // null means keep raw data forever. There is no zero: an account either
+      // keeps raw events for at least a day or keeps them always.
+      rawRetentionDays: z.number().int().min(1).nullable(),
+    }).parse(req.body);
+    await setRawRetention(accountId(req), b.rawRetentionDays);
+    res.json(await retentionStatus(accountId(req)));
+  })
+);
+
+/**
+ * Seal what is due and prune what is safe, now.
+ *
+ * The same sweep the scheduler runs hourly, exposed so the effect of a retention
+ * change can be seen rather than waited for.
+ */
+analyticsRouter.post(
+  '/retention/sweep',
+  asyncHandler(async (_req, res) => {
+    res.json(await sweepAnalytics());
+  })
+);
 
 /** Realtime: current concurrency across the tenant's streams + total. */
 analyticsRouter.get(

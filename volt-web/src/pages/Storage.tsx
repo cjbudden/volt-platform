@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   api, type StorageCapabilities, type MediaObjectRow, type RetentionRuleRow,
-  type RetentionStageInput, type SweepPreview,
+  type RetentionStageInput, type SweepPreview, type AnalyticsRetention,
 } from '../api'
 
 /* ============================================================================
@@ -302,6 +302,90 @@ function ObjectDetail({ id, caps, onChanged }: { id: string; caps: StorageCapabi
   )
 }
 
+
+// ---------------------------------------------------------------------------
+//  Event data, which is a different lifetime from media
+// ---------------------------------------------------------------------------
+function EventRetention() {
+  const [r, setR] = useState<AnalyticsRetention | null>(null)
+  const [days, setDays] = useState('')
+  const [forever, setForever] = useState(false)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+  const [swept, setSwept] = useState<string>('')
+
+  async function load() {
+    try {
+      const v = await api.analyticsRetention()
+      setR(v); setForever(v.rawRetentionDays == null)
+      setDays(String(v.rawRetentionDays ?? 90)); setErr('')
+    } catch (e: any) { setErr(e.message) }
+  }
+  useEffect(() => { load() }, [])
+
+  if (err && !r) return <div className="card p-4"><div className="err">{err}</div></div>
+  if (!r) return <div className="card p-4"><div className="loading">Loading…</div></div>
+
+  return (
+    <div className="card p-4" style={{ marginBottom: 16 }}>
+      <div className="sec-label">Event data</div>
+      {/* The distinction this panel exists to make: reports and the events they
+          were computed from do not have the same lifetime, and only one of them
+          ages out. */}
+      <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginTop: 0 }}>
+        {r.note}
+      </p>
+
+      <div className="flex flex-wrap items-center gap-4" style={{ fontSize: 'var(--fs-sm)', marginBottom: 12 }}>
+        <span>
+          <span style={{ color: 'var(--faint)' }}>Raw sessions </span>
+          {r.raw.sessions.toLocaleString()}
+          {r.raw.oldest && <span style={{ color: 'var(--faint)' }}> from {r.raw.oldest}</span>}
+        </span>
+        <span>
+          <span style={{ color: 'var(--faint)' }}>Report days </span>
+          {r.reports.days}
+          <span style={{ color: 'var(--faint)' }}> ({r.reports.sealed} sealed)</span>
+        </span>
+        {r.reports.oldest && (
+          <span><span style={{ color: 'var(--faint)' }}>Reports from </span>{r.reports.oldest}</span>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-2" style={{ fontSize: 'var(--fs-sm)' }}>
+          <input type="checkbox" checked={forever} onChange={e => setForever(e.target.checked)} />
+          Keep raw events forever
+        </label>
+        {!forever && (
+          <>
+            <input type="number" min={1} value={days} onChange={e => setDays(e.target.value)}
+              style={{ width: 90 }} />
+            <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>days</span>
+          </>
+        )}
+        <button className="btn primary" disabled={!!busy} onClick={async () => {
+          setBusy('save'); setErr('')
+          try { setR(await api.setAnalyticsRetention(forever ? null : Number(days))) }
+          catch (e: any) { setErr(e.message) } finally { setBusy('') }
+        }}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
+        <div className="flex-1" />
+        <button className="btn ghost" disabled={!!busy} onClick={async () => {
+          setBusy('sweep'); setErr('')
+          try {
+            const s = await api.sweepAnalyticsRetention()
+            setSwept(`Sealed ${s.seal.sealed} day(s), pruned ${s.prune.sessionsDeleted} session(s)` +
+              (s.prune.heldForUnsealed ? `, held ${s.prune.heldForUnsealed} unsealed` : '') + '.')
+            await load()
+          } catch (e: any) { setErr(e.message) } finally { setBusy('') }
+        }}>Seal and prune now</button>
+      </div>
+      {swept && <div style={{ color: 'var(--ok,#4ade80)', fontSize: 'var(--fs-sm)', marginTop: 8 }}>{swept}</div>}
+      {err && <div className="err" style={{ marginTop: 8 }}>{err}</div>}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 export default function StoragePage() {
   const [caps, setCaps] = useState<StorageCapabilities | null>(null)
@@ -378,6 +462,8 @@ export default function StoragePage() {
       <div style={{ marginBottom: 16 }}>
         <LadderEditor caps={caps} rule={rules[0] ?? null} onSaved={load} />
       </div>
+
+      <EventRetention />
 
       {/* SEE IT BEFORE IT HAPPENS. A ladder deletes things; being able to look
           first is the difference between a policy someone switches on and one

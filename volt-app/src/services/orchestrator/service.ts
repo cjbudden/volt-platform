@@ -10,6 +10,7 @@ import { sweep, ruleFor } from '../media/retention';
 import { transition, locationsOf, pollRestores } from '../media/objects';
 import { storageDriver } from '../media/storage';
 import { reconcileAll } from '../media/reconcile';
+import { sweepAnalytics } from '../analyticsRetention';
 
 /**
  * The orchestrator turns channel/event lifecycle into real running tasks and
@@ -630,6 +631,12 @@ export class Orchestrator {
       legacyDone++;
     }
     if (legacyDone) console.log(`[retention] ${legacyDone} recording(s) expired under the legacy expires_at column`);
+
+    // ANALYTICS RETENTION, on the same sweep. Seal each finished day's figures
+    // from complete raw data, then delete the raw data behind sealed days only.
+    // Reports outlive the events they were computed from; that is the promise,
+    // and the ordering is what keeps it.
+    await sweepAnalytics().catch((e) => console.error('[analytics] sweep failed', e));
 
     return result.deleted + legacyDone;
   }

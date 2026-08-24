@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
+import { publishGate } from '../services/review';
+import { actorLabel } from '../util/actor';
 
 /**
  * Publishing & social distribution.
@@ -125,12 +127,34 @@ publicationsRouter.post(
     const asset = await ownedAsset(req.params.id, accountId(req));
     if (!asset) throw notFound('Asset not found');
 
+    // THE SAME GATE the library's publish flag uses, applied here too. Two doors
+    // into publishing with a check on only one of them is not a gate.
+    const gate = await publishGate(asset.id);
+    if (!gate.allowed) throw badRequest(gate.message);
+    const who = await actorLabel(req);
+
+    // What a publication is a record OF. Without this the row says which
+    // platform and which asset, and goes on saying it after the asset has been
+    // re-cut into something else — so "the thing that went out was approved"
+    // stops being a claim about the thing that actually went out.
+    const stamp = {
+      buildAt: asset.built_at ?? null,
+      review: asset.review_state ?? 'draft',
+      qc: asset.qc_state ?? null,
+      durationMs: asset.duration_ms ?? null,
+      by: who,
+    };
+
     if (b.platform === 'portal') {
       await query(`UPDATE vod_assets SET portal_visible=true, published=true, updated_at=now() WHERE id=$1`, [req.params.id]);
       const row = await one(
-        `INSERT INTO publications(vod_asset_id, platform, status, external_url, published_at)
-         VALUES ($1,'portal','published',$2, now()) RETURNING *`,
-        [req.params.id, `/portal/watch/${req.params.id}`]
+        `INSERT INTO publications
+           (vod_asset_id, platform, status, external_url, published_at,
+            published_build_at, published_review_state, published_qc_state,
+            published_duration_ms, published_by)
+         VALUES ($1,'portal','published',$2, now(), $3, $4, $5, $6, $7) RETURNING *`,
+        [req.params.id, `/portal/watch/${req.params.id}`,
+         stamp.buildAt, stamp.review, stamp.qc, stamp.durationMs, stamp.by]
       );
       return res.status(201).json(row);
     }
@@ -147,9 +171,13 @@ publicationsRouter.post(
     // asynchronously and fills external_id/url + status. Here we simulate the
     // accepted-for-upload state so the record + tracking exist end-to-end.
     const pub = await one<any>(
-      `INSERT INTO publications(vod_asset_id, platform, target_id, status)
-       VALUES ($1,$2::publish_platform,$3,'pending') RETURNING *`,
-      [req.params.id, b.platform, b.targetId]
+      `INSERT INTO publications
+         (vod_asset_id, platform, target_id, status,
+          published_build_at, published_review_state, published_qc_state,
+          published_duration_ms, published_by)
+       VALUES ($1,$2::publish_platform,$3,'pending',$4,$5,$6,$7,$8) RETURNING *`,
+      [req.params.id, b.platform, b.targetId,
+       stamp.buildAt, stamp.review, stamp.qc, stamp.durationMs, stamp.by]
     );
     // TODO(adapter): real OAuth upload. For now mark published with a placeholder URL.
     const done = await one(

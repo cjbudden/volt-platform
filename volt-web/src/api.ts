@@ -480,6 +480,13 @@ export const api = {
 
   recordingDownload: (id: string): Promise<{ status: 'exporting' | 'ready'; url?: string; message?: string }> =>
     req(`/recordings/${id}/download`),
+  // ---- analytics retention ----
+  analyticsRetention: (): Promise<AnalyticsRetention> => req('/analytics/retention'),
+  setAnalyticsRetention: (rawRetentionDays: number | null): Promise<AnalyticsRetention> =>
+    req('/analytics/retention', { method: 'PUT', body: JSON.stringify({ rawRetentionDays }) }),
+  sweepAnalyticsRetention: (): Promise<any> =>
+    req('/analytics/retention/sweep', { method: 'POST' }),
+
   // ---- review and QC ----
   reviewQueue: (): Promise<{ queue: ReviewQueueRow[]; count: number }> => req('/vod/review/queue'),
   assetReview: (id: string): Promise<AssetReview> => req(`/vod/${id}/review`),
@@ -967,6 +974,15 @@ export interface ReviewQueueRow {
   source_block_count: number | null
   source_coverage_pct: number | string | null
   recording_id?: string | null
+}
+
+/** What is kept, and for how long. Reports and raw events are not the same
+ *  thing and do not have the same lifetime. */
+export interface AnalyticsRetention {
+  rawRetentionDays: number | null
+  raw: { sessions: number; oldest: string | null; newest: string | null }
+  reports: { days: number; sealed: number; oldest: string | null }
+  note: string
 }
 
 export interface VodAssetRow {
