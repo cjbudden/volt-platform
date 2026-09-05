@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
-import { config } from './config';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { config, staleConsoleWarning } from './config';
 import { currentRunId } from './services/liveOrigin';
 import { errorHandler } from './util/http';
 import { authRouter } from './auth/routes';
@@ -11,6 +13,9 @@ import { groupsRouter } from './modules/groups';
 import { eventsRouter } from './modules/events';
 import { profilesRouter } from './modules/outputProfiles';
 import { statusRouter, ingestRouter } from './modules/status';
+import { monitoringRouter } from './modules/monitoring';
+import { fleetRouter } from './modules/fleet';
+import { playerRouter, playerAdminRouter } from './modules/player';
 import { mediaIngestRouter } from './modules/mediaIngest';
 import { recordingsRouter } from './modules/recordings';
 import { jobsRouter } from './modules/jobs';
@@ -22,12 +27,14 @@ import { fillerAssetsRouter } from './modules/fillerAssets';
 import { uploadsRouter, uploadChunksRouter } from './modules/uploads';
 import { scheduledClipsRouter } from './modules/scheduledClips';
 import { publishTargetsRouter, publicationsRouter } from './modules/publishing';
+import { publishingRulesRouter } from './modules/publishingRules';
 import { epgRouter } from './modules/epg';
 import { appsRouter, availabilityRouter, accessRouter } from './modules/apps';
 import { usersRouter } from './modules/users';
 import { userGroupsRouter } from './modules/userGroups';
 import { radioRouter } from './modules/radio';
 import { attachMp3Listener } from './services/radio/pipeline';
+import { icecastAuthRouter } from './modules/icecastAuth';
 import { analyticsRouter, analyticsBeaconRouter } from './modules/analytics';
 import { platformRouter } from './modules/platform';
 import { platformAuthRouter } from './modules/platformAuth';
@@ -42,6 +49,7 @@ import { INGEST_PROTOCOLS } from './services/ingestProtocols';
 import { mediaFilesRouter } from './modules/mediaFiles';
 import { imageStore } from './services/imageStore';
 import { parseSpec, resizeFromStore } from './services/imageResize';
+import { isBootReconciled } from './services/orchestrator';
 
 export function createServer() {
   const app = express();
@@ -53,7 +61,13 @@ export function createServer() {
   app.use('/api/files', express.json({ limit: '30mb' }));
   app.use(express.json({ limit: '1mb' }));
 
-  app.get('/health', (_req, res) => res.json({ ok: true, service: 'volt-control-plane' }));
+  // ok = the process is up and can answer. reconciled = boot reconciliation has
+  // settled, so stream statuses and instance rows are no longer going to be
+  // rewritten underneath a reader. Two different questions: a process that is
+  // up but still reconciling should keep serving, and should not yet be trusted
+  // for a decision that turns on what is running.
+  app.get('/health', (_req, res) =>
+    res.json({ ok: true, service: 'volt-control-plane', reconciled: isBootReconciled() }));
 
   // Local test console (same-origin, no CORS): visit /console
   app.use(express.static('public'));
@@ -62,7 +76,12 @@ export function createServer() {
   app.use('/clips', express.static(config.clips.dir, {
     setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'),
   }));
-  app.get('/console', (_req, res) => res.redirect('/console.html'));
+  // /console WAS a 205-line single-file test console in public/, built before
+  // volt-web existed. It is retired to volt-app/dev/console.html: it is not the
+  // product's console, it looked like one, and somebody finding it reasonably
+  // concluded the app had a second, older front end. The real console is the
+  // volt-web bundle served at / (see resolveWebDist).
+  app.get('/console', (_req, res) => res.redirect('/'));
 
   // TEST BUILD origin: serve the locally-generated HLS/DASH/WebVTT so the app player
   // can play back a real live test stream.
@@ -91,7 +110,49 @@ export function createServer() {
     if (/\.(m3u8|mpd)$/.test(req.path)) res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     else if (/\.(m4s|mp4|ts|vtt)$/.test(req.path)) res.setHeader('Cache-Control', 'no-cache');
     next();
-  }, express.static(config.testStream.originDir, {
+  },
+  /* ------------------------------------------------------------------------
+   *  TIMED IN-STREAM METADATA — VIDEO. `EXT-X-DATERANGE` for the programmes a
+   *  media playlist's window covers, added HERE rather than by the encoder.
+   *
+   *  The schedule lives in Postgres and keeps changing after the segment was
+   *  written: a programme is renamed, an override lands, an ad break moves.
+   *  Baking tags in at encode time would freeze a decision still being made and
+   *  would push the EPG across a boundary the encoder has no business knowing
+   *  about. The control plane already rewrites these URLs, so it annotates on
+   *  the way out.
+   *
+   *  ONLY MEDIA PLAYLISTS, and that is structural rather than a filename check:
+   *  `annotatePlaylist` returns the input untouched when there is no
+   *  PROGRAM-DATE-TIME, and a multivariant master has none. So a master cannot
+   *  accidentally receive tags that are illegal in it.
+   *
+   *  FAILS OPEN, ALWAYS. Anything that goes wrong here — unreadable file,
+   *  database down, a schedule query that throws — falls through to the plain
+   *  static handler. Metadata is an enhancement; playback is the product, and no
+   *  viewer should lose a stream because an EPG lookup timed out.
+   * --------------------------------------------------------------------- */
+  async (req, res, next) => {
+    if (!req.path.endsWith('.m3u8')) return next();
+    const m = /^\/([A-Za-z0-9-]+)\//.exec(req.path);
+    if (!m) return next();
+    try {
+      const { join } = await import('node:path');
+      const { readFile } = await import('node:fs/promises');
+      const file = join(config.testStream.originDir, decodeURIComponent(req.path));
+      // Never let a crafted path climb out of the origin directory.
+      if (!file.startsWith(config.testStream.originDir)) return next();
+      const text = await readFile(file, 'utf8');
+      const { annotatePlaylist, playlistWindow, scheduleFor } = await import('./services/timedMetadata');
+      const win = playlistWindow(text);
+      if (!win) return next();                       // master, or no wall clock
+      const sched = await scheduleFor(m[1], win.from, win.to);
+      if (!sched.length) return next();              // nothing to say
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      return res.end(annotatePlaylist(text, sched));
+    } catch { return next(); }
+  },
+  express.static(config.testStream.originDir, {
     cacheControl: false,   // don't let express.static re-add its own Cache-Control
     setHeaders: (res, p) => {
       if (p.endsWith('.m3u8')) res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -109,6 +170,19 @@ export function createServer() {
       const ch = await (await import('./db')).one<any>(
         `SELECT id, name, kind FROM channels WHERE id=$1 AND kind='radio'`, [req.params.id]);
       if (!ch) return res.status(404).end();
+      // CONTAINER MODE: there is no local pipeline to attach to. The preview
+      // and the public URL resolve to the same relay mount, which is a real
+      // change in meaning worth stating: with the station in a container there
+      // is ONE stream, and "preview before going on air" is enforced by
+      // Icecast's listener auth rather than by which endpoint you called.
+      const { radioIsContainerised, radioRunState } = await import('./services/radio/state');
+      if (radioIsContainerised()) {
+        if (!(await radioRunState(ch.id)).running) {
+          return res.status(404).json({ error: 'station is not live' });
+        }
+        const { publicMp3Url } = await import('./services/radio/jobConfig');
+        return res.redirect(302, publicMp3Url(ch.id));
+      }
       const ok = attachMp3Listener(ch.id, req as any, res as any, ch.name);
       if (!ok) return res.status(404).json({ error: 'station is not live' });
     } catch { res.status(400).end(); }
@@ -193,6 +267,12 @@ export function createServer() {
     } catch { res.status(400).end(); }
   });
   app.use('/api/status', statusRouter);   // admin: polling REST + SSE live push
+  // The fleet, computed server-side: one request draws the live board or the
+  // alert list, rather than the page fanning out per channel.
+  app.use('/api/monitoring', monitoringRouter);
+  app.use('/api/fleet', fleetRouter);
+  // The console's own player configuration. Session auth.
+  app.use('/api/player-config', playerAdminRouter);
   app.use('/api/streams', ingestRouter);  // encoder -> POST /api/streams/:id/report
   app.use('/api/media', mediaIngestRouter); // thumbnailer -> POST /api/media/thumbnails
   app.use('/api/recordings', recordingsRouter);         // recordings library (+ publish/clip)
@@ -221,10 +301,19 @@ export function createServer() {
   app.use('/api/uploads', uploadsRouter);
   app.use('/api/scheduled-clips', scheduledClipsRouter); // timeline clip scheduling
   app.use('/api/epg', epgRouter);                        // EPG / programme scheduling
+  // Icecast asks this before admitting a listener; it is the on-air gate now
+  // that the control plane is not the one holding the socket. Mounted BEFORE
+  // the authed radio router because the caller is the relay, not a user.
+  app.use('/api/radio/icecast', icecastAuthRouter);
   app.use('/api/radio', radioRouter);                    // radio (audio-only) stations
   app.use('/api/apps', appsRouter);                      // app registration + API keys
   app.use('/api/users', usersRouter);                    // tenant user management (admin+)
   app.use('/api/user-groups', userGroupsRouter);         // per-feature access groups (admin+)
+  // THE PLAYER'S PUBLIC SURFACE. Publishable-key + origin allow-list, never a
+  // JWT: this is called from a browser on somebody else's website. Mounted
+  // beside the other publishable-key routes rather than under the authed /api
+  // tree, because a stray requireAuth here would break every embed silently.
+  app.use('/api/player', playerRouter);
   app.use('/api/availability', availabilityRouter);      // public play-gate → mints playback token (publishable key)
   app.use('/api/access', accessRouter);                  // public check-access → booleans, no token (publishable key)
   app.use('/api/analytics/beacon', analyticsBeaconRouter); // public session beacon (playback-token)
@@ -238,7 +327,90 @@ export function createServer() {
   app.use('/api/platform/tickets', platformTicketsRouter); // SaaS-admin ticket triage
   app.use('/api/publish-targets', publishTargetsRouter); // social account config
   app.use('/api/publications', publicationsRouter);      // publish + view tracking
+  app.use('/api/publishing-rules', publishingRulesRouter); // the ladder + publishing points
   // TODO: /api/groups, /api/accounts, /api/instances
+
+  // An unmatched API route answers as an API, in JSON. Express's default 404 is
+  // an HTML page, which was merely odd before and is actively misleading now
+  // that this server also serves an HTML app: a client with a typo'd endpoint
+  // got a page back and had to guess why its parser failed.
+  app.use(['/api', '/origin', '/clips', '/filler', '/live'], (req, res) => {
+    res.status(404).json({ error: 'not found', path: req.originalUrl });
+  });
+
+  // ---- the console --------------------------------------------------------
+  //
+  // Served by the control plane, same origin, so there is one thing to deploy
+  // and no CORS to configure. The router in volt-web has always SAID this is
+  // how production works; until now nothing implemented it, so a built bundle
+  // had nowhere to be served from and `docker compose up` gave you an API and
+  // no interface.
+  //
+  // MOUNTED LAST, and after every /api router, which is the part that matters.
+  // A catch-all placed earlier would swallow unmatched /api requests and answer
+  // them with HTML, so a typo'd endpoint would return 200 and an index page
+  // instead of a 404 the caller could act on.
+  // THE PLAYER BUNDLE, served from the same origin as the API.
+  //
+  // Cached hard and served with permissive CORS, because by definition it is
+  // fetched by a <script> tag on a domain that is not ours. Mounted before the
+  // console's catch-all so the SPA fallback cannot swallow it and return an
+  // HTML page with a javascript content type, which fails in a way that reads
+  // as "the player is broken" rather than "the path is wrong".
+  if (config.player.bundleDir && existsSync(join(config.player.bundleDir, 'volt-player.js'))) {
+    console.log(`[player] serving the embed bundle from ${config.player.bundleDir}`);
+    app.use('/player', (_req, res, next) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      next();
+    }, express.static(config.player.bundleDir, {
+      index: false,
+      setHeaders: (res, p) => {
+        if (/\.js$/.test(p)) res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+        // Not immutable: the filename is unhashed, so a customer's page holds
+        // whatever it cached. Ten minutes keeps it fast without making a fix
+        // take a day to reach the sites carrying it.
+        res.setHeader('Cache-Control', 'public, max-age=600');
+      },
+    }));
+  }
+
+  const webDist = config.webDistDir;
+  if (webDist && existsSync(join(webDist, 'index.html'))) {
+    console.log(`[console] serving the built console from ${webDist}`);
+    // LOUD, because the alternative is silent. A stale copy serves an old
+    // version of the app with no error anywhere: every page loads, every page
+    // works, and the work you just did is simply not there. Nothing else in
+    // the system can tell you that, so the boot log has to.
+    const stale = staleConsoleWarning(webDist);
+    if (stale) console.warn(stale);
+    // Hashed assets are immutable; index.html must never be cached or a deploy
+    // leaves browsers holding a page that references assets that no longer
+    // exist.
+    app.use(express.static(webDist, {
+      index: false,
+      setHeaders: (res, p) => {
+        if (p.endsWith('index.html')) res.setHeader('Cache-Control', 'no-store');
+        else if (/\/assets\//.test(p)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      },
+    }));
+    // SPA fallback: the console uses history routing, so /channels/<id> is a
+    // real URL a person can reload or share and the server has to answer it
+    // with the app rather than a 404.
+    app.get('*', (req, res, next) => {
+      // Anything that belongs to a real backend surface is NOT the app, even
+      // when it did not match: those must keep their own 404s and their own
+      // content types.
+      if (/^\/(api|origin|clips|filler|live|radio|share|img|library|health)\b/.test(req.path)) return next();
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+      // A request that wants JSON is a client, not a browser navigating.
+      if (req.accepts(['html', 'json']) !== 'html') return next();
+      res.setHeader('Cache-Control', 'no-store');
+      res.sendFile(join(webDist, 'index.html'));
+    });
+  } else if (config.env !== 'test') {
+    console.warn(`[web] no console bundle at ${webDist || '(unset)'}; serving the API only. ` +
+      'Run `npm run build` in volt-web, or build the image, which does it for you.');
+  }
 
   // SSE keep-alive so proxies don't drop idle status streams.
   const hb = setInterval(heartbeat, 25_000);

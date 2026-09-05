@@ -7,6 +7,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
+import { requireMinRole } from '../auth/roles';
 import { asyncHandler, notFound, badRequest, ApiError } from '../util/http';
 import { generateKey, verifyKey, checkRestrictions, mintPlaybackToken, type AppRow } from '../services/apiKeys';
 import { evaluateAccess } from '../services/rights';
@@ -14,6 +15,12 @@ import { evaluateAccess } from '../services/rights';
 // ---- management (JWT-auth) --------------------------------------------------
 export const appsRouter = Router();
 appsRouter.use(requireAuth);
+// Belt and braces, the way /api/users and /api/user-groups already do it. The
+// central matrix lists /api/apps as admin-only, but this router mints
+// management-scoped account keys — a credential that IS tenant admin — so it
+// must not depend on a single prefix comparison being the only thing standing
+// between an operator and full control of the account.
+appsRouter.use(requireMinRole('admin'));
 
 const appSchema = z.object({
   name: z.string().min(1),
@@ -107,7 +114,50 @@ const availSchema = z.object({
   appKey: z.string().min(8),
   assetId: z.string().min(1),
   geo: z.string().length(2).optional(),
+  /** The app vouches that this viewer holds an entitlement (or has paid).
+   *  A placeholder for the entitlement service: the paywall model is an
+   *  open question in DESIGN_media_library.md. */
+  entitled: z.boolean().optional(),
 });
+
+/**
+ * DOES THIS ACCOUNT OWN THIS ASSET?
+ *
+ * The gate is public and the caller supplies the asset id, so without this the
+ * only thing a publishable key proved was that the caller had SOME key. Any
+ * tenant could mint a playback token for another tenant's channel, and the
+ * 200 / 451 / mode:'replacement' split was a cross-tenant oracle over guessed
+ * uuids: it disclosed whether a channel existed and whether it was currently
+ * blacked out. Worse downstream, the analytics beacon trusts the token's asset
+ * id and stream_concurrency is keyed without an account, so a token minted for
+ * a victim's channel let one tenant claim or overwrite the victim's realtime
+ * row — and their live viewer count then vanished from their own dashboard.
+ *
+ * An id that names nothing is answered the same way as one belonging to
+ * somebody else, so the endpoint stops distinguishing the two.
+ */
+async function assetKindFor(acct: string, assetId: string): Promise<'channel' | 'event' | 'vod' | null> {
+  const row = await one<any>(
+    `SELECT 'channel' AS kind
+       FROM channels c JOIN groups g ON g.id = c.group_id
+      WHERE c.id = $1 AND g.account_id = $2
+      UNION ALL
+     SELECT 'event' FROM events e JOIN groups g2 ON g2.id = e.group_id
+      WHERE e.id = $1 AND g2.account_id = $2
+      UNION ALL
+     SELECT 'vod' FROM vod_assets v
+       LEFT JOIN channels c2 ON c2.id = v.channel_id
+       LEFT JOIN events   e2 ON e2.id = v.event_id
+       JOIN groups g3 ON g3.id = COALESCE(c2.group_id, e2.group_id)
+      WHERE v.id = $1 AND g3.account_id = $2
+      LIMIT 1`,
+    [assetId, acct]
+  );
+  return (row?.kind as any) ?? null;
+}
+
+/** The asset id is a uuid column everywhere it is looked up. */
+const ASSET_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Player pre-flight. Validates the publishable key + the app's restriction, then
@@ -128,16 +178,31 @@ availabilityRouter.post(
       ip: req.ip,
     });
     if (reason) throw new ApiError(403, `blocked: ${reason}`);
+    const kind = ASSET_UUID_RE.test(b.assetId) ? await assetKindFor(key.account_id, b.assetId) : null;
+    if (!kind) throw new ApiError(404, 'unknown asset');
     // geo / rights (blackout → replacement)
-    const rights = await evaluateAccess(b.assetId, b.geo);
+    const rights = await evaluateAccess(b.assetId, b.geo, { appId: key.app_id, entitled: b.entitled === true });
     if (!rights.allowed) {
       if (rights.replacementAssetId) {
-        const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: rights.replacementAssetId, geo: b.geo });
+        // The replacement is named by the PROGRAMME, so its kind is looked up
+        // rather than assumed — and it must belong to the same account too.
+        const rk = await assetKindFor(key.account_id, String(rights.replacementAssetId));
+        if (!rk) {
+          // The programme names a replacement that no longer exists, or never
+          // did. Blocking is the safe answer, but silence is not: the operator
+          // configured a blackout slate and viewers are getting a hard block.
+          console.warn(
+            `[availability] programme replacement ${rights.replacementAssetId} is not an asset of ` +
+            `account ${key.account_id}; serving a hard block instead of the slate`
+          );
+          return res.status(451).json({ available: false, mode: 'blocked', reason: rights.reason });
+        }
+        const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: rights.replacementAssetId, assetKind: rk, geo: b.geo });
         return res.json({ available: true, mode: 'replacement', assetId: rights.replacementAssetId, reason: rights.reason, playbackToken: tok.token, expiresIn: tok.expiresIn });
       }
       return res.status(451).json({ available: false, mode: 'blocked', reason: rights.reason });
     }
-    const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: b.assetId, geo: b.geo });
+    const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: b.assetId, assetKind: kind, geo: b.geo });
     res.json({ available: true, mode: 'play', assetId: b.assetId, playbackToken: tok.token, expiresIn: tok.expiresIn });
   })
 );
@@ -159,7 +224,13 @@ accessRouter.post(
       origin: req.get('origin') || undefined,
       ip: req.ip,
     });
-    const rights = await evaluateAccess(b.assetId, b.geo);
+    // Same ownership rule as /availability. This endpoint mints no token, but
+    // it answers the same question, so without the check it was the quieter
+    // half of the same cross-tenant oracle.
+    if (!ASSET_UUID_RE.test(b.assetId) || !(await assetKindFor(key.account_id, b.assetId))) {
+      throw new ApiError(404, 'unknown asset');
+    }
+    const rights = await evaluateAccess(b.assetId, b.geo, { appId: key.app_id, entitled: b.entitled === true });
     const reasons = [reason, rights.allowed ? null : rights.reason].filter(Boolean);
     res.json({ allowed: !reason && rights.allowed, assetId: b.assetId, reasons, replacementAssetId: rights.replacementAssetId ?? null });
   })

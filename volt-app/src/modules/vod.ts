@@ -17,6 +17,10 @@ import type { OutputFormat } from '../services/clips/extract';
 import { QC_RUN } from '../services/jobs/handlers/qcRun';
 import { originBaseFor } from '../services/liveOrigin';
 import { actorId, actorLabel } from '../util/actor';
+import { actor, writeAudit } from '../services/audit';
+import { publish, withdraw, republish, NotPublishable } from '../services/availability';
+import { resolveForAsset } from '../services/publishingRules';
+import { cleanSettings } from './publishingRules';
 
 /**
  * VOD Library — assets DERIVED from a recording (auto-published, clips, exports).
@@ -264,21 +268,17 @@ vodRouter.put(
     // recorded on the review trail: a check that blocks outright is a check
     // people learn to route around.
     if (body.published === true && !asset.published) {
-      const gate = await publishGate(asset.id);
-      if (!gate.allowed) throw badRequest(gate.message);
-      if (gate.wouldOverride) {
-        await query(
-          `INSERT INTO asset_reviews
-             (vod_asset_id, actor_id, actor_label, from_state, to_state, note,
-              overrode_qc, qc_state_at_decision)
-           VALUES ($1,$2,$3,$4::review_state,$4::review_state,$5,true,$6)`,
-          [asset.id, actorId(req), await actorLabel(req),
-           asset.review_state ?? 'draft',
-           `Published with QC ${gate.qcState}.`, gate.qcState]
-        );
-      }
+      // THROUGH THE ONE DOOR. `published: true` used to flip a flag and mark
+      // portal visibility; it now runs the asset's publishing plan (the
+      // ladder), which creates the publications and the window as well.
+      try { await publish(asset.id, await actorLabel(req)); }
+      catch (e: any) { if (e instanceof NotPublishable) throw badRequest(e.message); throw e; }
+      body.published = undefined;
     }
-
+    if (body.published === false && asset.published) {
+      await withdraw(asset.id, await actorLabel(req), 'unpublished from the library');
+      body.published = undefined;
+    }
     const row = await one(
       `UPDATE vod_assets SET
          title = COALESCE($3, title),
@@ -405,6 +405,79 @@ vodRouter.patch(
     });
   })
 );
+
+/**
+ * AVAILABILITY. The asset's own rung of the ladder, the resolved plan (what a
+ * publish would do and why), and the three actions: publish through the
+ * plan (optionally to a subset of its targets for this one publish),
+ * withdraw (remove access, keep the asset), republish.
+ */
+vodRouter.get('/:id/availability', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  const plan = await resolveForAsset(accountId(req), asset);
+  const pubs = await query(
+    `SELECT p.id, p.platform, p.status, p.external_url, p.published_at, p.app_id, a.name AS app_name, t.name AS target_name
+       FROM publications p LEFT JOIN apps a ON a.id = p.app_id LEFT JOIN publish_targets t ON t.id = p.target_id
+      WHERE p.vod_asset_id = $1 ORDER BY p.created_at DESC`, [asset.id]);
+  res.json({
+    state: asset.availability_state ?? 'draft',
+    availableFrom: asset.available_from, availableUntil: asset.available_until,
+    withdrawnAt: asset.withdrawn_at, withdrawnBy: asset.withdrawn_by,
+    applied: asset.availability ?? null, appliedSources: asset.availability_sources ?? null,
+    override: asset.availability_override ?? {},
+    plan, publications: pubs,
+  });
+}));
+
+vodRouter.patch('/:id/availability', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  // The asset's rung: replace it wholesale (an empty object = back to the ladder).
+  const override = await cleanSettings(accountId(req), req.body?.override ?? req.body ?? {});
+  await query(`UPDATE vod_assets SET availability_override = $2::jsonb, updated_at = now() WHERE id = $1`, [asset.id, JSON.stringify(override)]);
+  // A published asset re-applies its plan so the change takes effect now.
+  let outcome: any = null;
+  if (['available', 'scheduled'].includes(asset.availability_state)) {
+    try { outcome = await publish(asset.id, await actorLabel(req)); }
+    catch (e: any) { if (e instanceof NotPublishable) throw badRequest(e.message); throw e; }
+    await query(`DELETE FROM publications WHERE vod_asset_id = $1 AND status = 'published' AND id <> ALL($2::uuid[])`,
+      [asset.id, outcome.publications.map((p: any) => p.id)]).catch(() => {});
+  }
+  const who = actor(req);
+  await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
+    action: 'update', entityType: 'vod_asset', entityId: asset.id,
+    changes: { availability_override: { from: asset.availability_override ?? {}, to: override } } }).catch(() => {});
+  res.json({ override, reapplied: !!outcome, state: outcome?.state ?? asset.availability_state });
+}));
+
+vodRouter.post('/:id/publish', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  const b = z.object({ targets: z.array(z.any()).optional() }).parse(req.body ?? {});
+  const targets = b.targets ? (await cleanSettings(accountId(req), { targets: b.targets })).targets : undefined;
+  try {
+    const out = ['withdrawn', 'expired'].includes(asset.availability_state)
+      ? await republish(asset.id, await actorLabel(req))
+      : await publish(asset.id, await actorLabel(req), { targets });
+    res.status(201).json({ state: out.state, asset: out.asset, publications: out.publications, sources: out.plan.sources });
+  } catch (e: any) {
+    if (e instanceof NotPublishable) return res.status(409).json({ error: e.message, code: e.code });
+    throw e;
+  }
+}));
+
+vodRouter.post('/:id/withdraw', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
+  const row = await withdraw(asset.id, await actorLabel(req), reason);
+  const who = actor(req);
+  await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
+    action: 'update', entityType: 'vod_asset', entityId: asset.id,
+    changes: { availability_state: { from: asset.availability_state, to: 'withdrawn' } }, snapshot: { reason } }).catch(() => {});
+  res.json(row);
+}));
 
 vodRouter.delete(
   '/:id',

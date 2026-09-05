@@ -7,6 +7,7 @@
  * allowed until per-asset rights are modelled.
  */
 import { one } from '../db';
+import { onDemandAccess } from './availability';
 
 export interface AccessDecision {
   allowed: boolean;
@@ -20,7 +21,22 @@ export interface AccessDecision {
  * geo = ISO-3166 alpha-2 (from the edge / client). No geo → treated as unknown,
  * which is allowed unless a rule requires an explicit allow-list match.
  */
-export async function evaluateAccess(assetId: string, geo?: string): Promise<AccessDecision> {
+/** `programmes.channel_id` is a uuid column. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function evaluateAccess(assetId: string, geo?: string, ctx: { appId?: string | null; entitled?: boolean } = {}): Promise<AccessDecision> {
+  // The asset id arrives from an UNAUTHENTICATED caller on the public play
+  // gate. Handing a non-uuid to a uuid column raised 22P02 and the gate
+  // answered 500 — a bad answer, and a free oracle besides: a stranger could
+  // separate malformed ids from real ones by status code alone. An id that
+  // cannot name a channel has no programme governing it, which is the same
+  // answer as a channel with no programme on air.
+  if (!UUID_RE.test(assetId)) return { allowed: true };
+  // ON DEMAND FIRST. An asset with an availability record answers from it:
+  // state, window, per-app publication, geo, access. Only a live owner falls
+  // through to the programme rules below.
+  const od = await onDemandAccess(assetId, geo, ctx.appId ?? null, ctx.entitled === true);
+  if (od) return od.allowed ? { allowed: true } : { allowed: false, reason: od.reason, replacementAssetId: null };
   const prog = await one<any>(
     `SELECT geo_mode, geo_countries, replacement_asset_id
        FROM programmes WHERE channel_id=$1 AND span @> now()

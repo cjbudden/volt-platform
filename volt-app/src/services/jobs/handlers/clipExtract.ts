@@ -198,7 +198,14 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
     console.error(`[clip.extract] ${p.vodAssetId}: QC not queued:`, e);
   }
 
+  // THE RULES MAY PUBLISH IT NOW. After the files and the ladder are in
+  // place; a rule that says manual, or a gate that says no, simply leaves it.
+  const auto = await import('../../availability').then((m) => m.autoPublishOnBuild(p.vodAssetId)).catch((e) => {
+    console.warn('[clip.extract] auto-publish check failed for', p.vodAssetId, e); return 'skipped' as const;
+  });
+
   return {
+    autoPublish: auto,
     durationMs: result.durationMs,
     strategy: result.strategy,
     runsUsed: result.runsUsed,

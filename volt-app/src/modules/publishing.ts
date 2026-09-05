@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
-import { publishGate } from '../services/review';
+import { publish, NotPublishable } from '../services/availability';
+import { validateTargets, type Target } from '../services/publishingRules';
 import { actorLabel } from '../util/actor';
 
 /**
@@ -115,78 +116,41 @@ publicationsRouter.get(
 );
 
 const publishSchema = z.object({
-  platform: z.enum(PLATFORMS),
-  targetId: z.string().uuid().optional(), // required for social platforms
+  platform: z.enum([...PLATFORMS, 'app'] as any),
+  targetId: z.string().uuid().optional(), // a social account (publish_targets) or an app (apps)
 });
 
-/** Publish an asset to the portal or a social platform. */
+/**
+ * Publish an asset to ONE point: the portal, a registered app, or a social
+ * account. The same door as the library's Publish (services/availability):
+ * the ladder's gate, window and geo apply, and only this one target is sent.
+ */
 publicationsRouter.post(
   '/vod/:id/publish',
   asyncHandler(async (req, res) => {
     const b = publishSchema.parse(req.body);
     const asset = await ownedAsset(req.params.id, accountId(req));
     if (!asset) throw notFound('Asset not found');
-
-    // THE SAME GATE the library's publish flag uses, applied here too. Two doors
-    // into publishing with a check on only one of them is not a gate.
-    const gate = await publishGate(asset.id);
-    if (!gate.allowed) throw badRequest(gate.message);
     const who = await actorLabel(req);
-
-    // What a publication is a record OF. Without this the row says which
-    // platform and which asset, and goes on saying it after the asset has been
-    // re-cut into something else — so "the thing that went out was approved"
-    // stops being a claim about the thing that actually went out.
-    const stamp = {
-      buildAt: asset.built_at ?? null,
-      review: asset.review_state ?? 'draft',
-      qc: asset.qc_state ?? null,
-      durationMs: asset.duration_ms ?? null,
-      by: who,
-    };
-
-    if (b.platform === 'portal') {
-      await query(`UPDATE vod_assets SET portal_visible=true, published=true, updated_at=now() WHERE id=$1`, [req.params.id]);
-      const row = await one(
-        `INSERT INTO publications
-           (vod_asset_id, platform, status, external_url, published_at,
-            published_build_at, published_review_state, published_qc_state,
-            published_duration_ms, published_by)
-         VALUES ($1,'portal','published',$2, now(), $3, $4, $5, $6, $7) RETURNING *`,
-        [req.params.id, `/portal/watch/${req.params.id}`,
-         stamp.buildAt, stamp.review, stamp.qc, stamp.durationMs, stamp.by]
-      );
-      return res.status(201).json(row);
+    let target: Target;
+    if (b.platform === 'portal') target = { kind: 'portal' };
+    else if (b.platform === 'app') {
+      if (!b.targetId) throw badRequest('targetId (a registered app) is required');
+      target = { kind: 'app', appId: b.targetId };
+    } else {
+      if (!b.targetId) throw badRequest('targetId (a configured account) is required for social platforms');
+      target = { kind: 'social', targetId: b.targetId, platform: String(b.platform) };
     }
-
-    // social platform: needs a configured, enabled target
-    if (!b.targetId) throw badRequest('targetId (a configured account) is required for social platforms');
-    const target = await one<any>(
-      `SELECT * FROM publish_targets WHERE id=$1 AND account_id=$2 AND platform=$3::publish_platform AND enabled=true`,
-      [b.targetId, accountId(req), b.platform]
-    );
-    if (!target) throw badRequest('No enabled target for that platform');
-
-    // Create the publication in 'pending'; the adapter (stub) performs the push
-    // asynchronously and fills external_id/url + status. Here we simulate the
-    // accepted-for-upload state so the record + tracking exist end-to-end.
-    const pub = await one<any>(
-      `INSERT INTO publications
-         (vod_asset_id, platform, target_id, status,
-          published_build_at, published_review_state, published_qc_state,
-          published_duration_ms, published_by)
-       VALUES ($1,$2::publish_platform,$3,'pending',$4,$5,$6,$7,$8) RETURNING *`,
-      [req.params.id, b.platform, b.targetId,
-       stamp.buildAt, stamp.review, stamp.qc, stamp.durationMs, stamp.by]
-    );
-    // TODO(adapter): real OAuth upload. For now mark published with a placeholder URL.
-    const done = await one(
-      `UPDATE publications SET status='published',
-         external_id=$2, external_url=$3, published_at=now()
-       WHERE id=$1 RETURNING *`,
-      [pub.id, `stub-${pub.id.slice(0, 8)}`, `https://${b.platform}.example/watch/${pub.id.slice(0, 8)}`]
-    );
-    res.status(201).json(done);
+    let targets: Target[];
+    try { targets = (await validateTargets(accountId(req), [target]))!; }
+    catch (e: any) { throw badRequest(e.message); }
+    try {
+      const out = await publish(asset.id, who, { targets });
+      res.status(201).json(out.publications[0] ?? { state: out.state });
+    } catch (e: any) {
+      if (e instanceof NotPublishable) throw badRequest(e.message);
+      throw e;
+    }
   })
 );
 

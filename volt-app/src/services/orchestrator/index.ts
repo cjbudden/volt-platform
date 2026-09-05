@@ -1,11 +1,40 @@
 import { config } from '../../config';
 import { Orchestrator } from './service';
+import { reconcileFleet } from '../fleet/reconcile';
+import { meterOnce } from '../fleet/meter';
+import { sampleFleet, pruneSamples } from '../fleet/metrics';
+import { resumeOnce } from './resume';
+import { closeOrphanAirSessions } from '../airSessions';
 
 export { Orchestrator } from './service';
 export * from './launcher';
 
 /** Shared orchestrator instance used by routes and the scheduler. */
 export const orchestrator = new Orchestrator();
+
+// ---------------------------------------------------------------------------
+//  BOOT RECONCILIATION IS NOT INSTANT, AND SAYING SO IS PART OF BEING HEALTHY.
+//
+//  The process starts listening long before it has finished deciding what is
+//  actually running: the boot chain below is four or five round trips against
+//  the launcher and the database, and on a real fleet it is one launcher call
+//  per open instance row. Until it settles, `status` columns are a cache of a
+//  pre-crash world and open instance rows are unverified claims. Anything that
+//  reads them in that window reads history.
+//
+//  So the readiness of the control plane is published separately from its
+//  liveness. /health has always answered "the process is up"; it now also
+//  answers "and it has finished working out the truth", which is what a load
+//  balancer, a deploy gate, and a fixture that seeds rows all actually want.
+//  A fixture that skips this races the reaper and watches its rows get closed
+//  underneath it, which is exactly the failure this replaces.
+// ---------------------------------------------------------------------------
+let bootReconcileDone = false;
+
+/** True once boot reconciliation has settled. Never resets. */
+export function isBootReconciled(): boolean {
+  return bootReconcileDone;
+}
 
 /**
  * Start the background scheduler: provision/stop scheduled events, roll channel
@@ -19,9 +48,45 @@ export function startScheduler(): () => void {
   // FIRST, before any tick: the stored 'live' flags are a cache of a running
   // process, and a crash leaves them stale. Reconcile them against what is
   // actually running so nothing downstream reports a status that is not true.
+  //
+  // TWO PASSES, IN THIS ORDER, AND BOTH ARE NEEDED.
+  //
+  // reconcileStreamStatus corrects owners that say 'live' when nothing is
+  // running. reapOrphanInstances handles the mirror case it cannot see: an
+  // owner already marked 'ended' whose instance row is still open. That row is
+  // invisible to the status reconciler (it only visits 'live' owners) and it
+  // blocks the orphan-recording sweep, which is how a station ends up showing
+  // as recording forever with nothing running. Done at boot rather than left
+  // to the first tick so the very first screen an operator sees is truthful.
   orchestrator.reconcileStreamStatus()
     .then((n) => { if (n) console.log(`[orchestrator] boot reconcile corrected ${n} stream status row(s)`); })
-    .catch((e) => console.error('[orchestrator] boot reconcile failed', e));
+    .then(() => orchestrator.reapOrphanInstances())
+    .then((n) => { if (n) console.log(`[orchestrator] boot reconcile closed ${n} orphaned instance row(s)`); })
+    .then(() => orchestrator.reconcileOrphanRecordings())
+    .then((n) => { if (n) console.log(`[orchestrator] boot reconcile closed ${n} orphaned recording(s)`); })
+    // AND THE AIR LEDGER, for the same reason and in the same place. An open
+    // air window grows on its own: a control plane killed mid-broadcast leaves
+    // one, and every later read of "hours on air" would include the time since
+    // the process died. Closed AFTER the instance reaper above, so the
+    // "is anything running" test it makes is asked of a settled fleet.
+    .then(() => closeOrphanAirSessions())
+    // AND THEN PUT THE FLEET BACK. Last, because it depends on everything
+    // above having settled: a stream cannot be adopted or restarted while a
+    // stale claim still says something is running for it.
+    .then(() => (o.resumeEnabled ? resumeOnce(orchestrator) : null))
+    .then((r) => {
+      if (!r) return;
+      if (r.adopted || r.started || r.waiting || r.failed || r.gaveUp) {
+        console.log(`[resume] boot: ${r.adopted} adopted, ${r.started} started, ${r.waiting} waiting, ${r.failed} retrying, ${r.gaveUp} gave up`);
+      }
+    })
+    .catch((e) => console.error('[orchestrator] boot reconcile failed', e))
+    // READY EVEN IF IT FAILED. A reconcile that threw leaves us no better
+    // informed, but staying "not ready" forever would take the control plane
+    // out of service over a pass whose whole job is tidying. The error is
+    // logged above; readiness means "we are no longer going to change these
+    // rows out from under you", and that is true either way.
+    .finally(() => { bootReconcileDone = true; });
   const tick = setInterval(
     () => orchestrator.tick().catch((e) => console.error('[orchestrator] tick error', e)),
     o.tickSeconds * 1000
@@ -30,11 +95,89 @@ export function startScheduler(): () => void {
     () => orchestrator.sweepRetention().catch((e) => console.error('[orchestrator] sweep error', e)),
     o.retentionSweepSeconds * 1000
   );
+  // THE AVAILABILITY CLOCK: open scheduled windows, close expired ones. Once a
+  // minute is plenty; the windows are set in days and hours, not seconds.
+  const avail = setInterval(
+    () => import('../availability').then((m) => m.sweepAvailability())
+      .then((r) => { if (r.opened || r.expired) console.log(`[availability] opened ${r.opened}, expired ${r.expired}`); })
+      .catch((e) => console.error('[availability] sweep error', e)),
+    60_000
+  );
+  avail.unref?.();
+
+  // THE FLEET PASS, kept on its own interval and its own error boundary.
+  //
+  // It observes and meters; it can start nothing and stop nothing. Keeping it
+  // out of orchestrator.tick() means a throttled AWS describe or a slow meter
+  // batch can never delay or fail the pass that actually keeps channels on
+  // air. The reverse is also true and also wanted: a stream that fails to
+  // start does not cost us the usage record for the forty that are running.
+  const fleet = setInterval(
+    () => fleetPass().catch((e) => console.error('[fleet] pass error', e)),
+    o.fleetTickSeconds * 1000
+  );
+  // Prune telemetry on the same schedule as retention; the ledger is never
+  // pruned, because it is the billable record.
+  const prune = setInterval(
+    () => pruneSamples(o.sampleRetentionDays).catch((e) => console.error('[fleet] prune error', e)),
+    o.retentionSweepSeconds * 1000
+  );
+
+  // THE RETRY LOOP, on its own interval at the retry interval itself.
+  //
+  // Not folded into the orchestrator tick: that runs every thirty seconds and
+  // the requirement is twenty, and more importantly a resume pass that shares
+  // an error boundary with provisioning could take provisioning down with it.
+  // Each pass only acts on candidates whose cooldown has elapsed, so running
+  // it often is cheap and running it late costs only latency.
+  const resume = o.resumeEnabled ? setInterval(
+    () => resumeOnce(orchestrator)
+      .then((r) => {
+        if (r.started || r.adopted || r.gaveUp) {
+          console.log(`[resume] ${r.adopted} adopted, ${r.started} started, ${r.gaveUp} gave up`);
+        }
+      })
+      .catch((e) => console.error('[resume] pass error', e)),
+    o.resumeRetrySeconds * 1000
+  ) : null;
+
   tick.unref?.();
   sweep.unref?.();
-  console.log(`[orchestrator] scheduler up (tick ${o.tickSeconds}s, retention sweep ${o.retentionSweepSeconds}s, launcher=${o.launcher})`);
+  fleet.unref?.();
+  prune.unref?.();
+  resume?.unref?.();
+  console.log(`[orchestrator] scheduler up (tick ${o.tickSeconds}s, retention sweep ${o.retentionSweepSeconds}s, fleet ${o.fleetTickSeconds}s, auto-connect ${o.resumeEnabled ? `${o.resumeRetrySeconds}s x${o.resumeMaxAttempts}` : 'off'}, launcher=${o.launcher})`);
   return () => {
     clearInterval(tick);
-    clearInterval(sweep);
+    clearInterval(sweep); clearInterval(avail);
+    clearInterval(fleet);
+    clearInterval(prune);
+    if (resume) clearInterval(resume);
   };
+}
+
+/**
+ * One fleet pass: observe placement, then meter, then measure.
+ *
+ * THE ORDER IS LOAD-BEARING. Placement first, because the meter reads the
+ * host's instance type to price the window and a task with no host yet is
+ * metered unpriced. Metering second, so the seconds are captured even if the
+ * metrics provider is unreachable. Measurement last, because it is the only
+ * part nobody is billed for.
+ *
+ * Each stage has its own try/catch for the same reason they are in this order:
+ * a failure in a later, less important stage must not discard the work of an
+ * earlier, more important one.
+ */
+export async function fleetPass(): Promise<void> {
+  try {
+    await reconcileFleet(orchestrator.launcherForFleet());
+  } catch (e) { console.error('[fleet] placement reconcile failed', e); }
+  try {
+    const m = await meterOnce();
+    if (m.windows) console.log(`[fleet] metered ${m.windows} window(s), ${m.seconds}s across ${m.considered} task(s)`);
+  } catch (e) { console.error('[fleet] meter failed', e); }
+  try {
+    await sampleFleet();
+  } catch (e) { console.error('[fleet] telemetry sample failed', e); }
 }
