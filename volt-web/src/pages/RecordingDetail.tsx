@@ -390,15 +390,28 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     loadRange(f, t)
   }
 
-  async function createClip() {
+  /* A GAP the operator can accept. When the server refuses a clip or an
+     export because the range crosses missing media, it says where the holes
+     are and how long they add up to. That is kept here so the message can
+     carry a button that retries with exactly that much accepted, instead of
+     advice ("accept the gaps") with nothing to press. */
+  const [gapOffer, setGapOffer] = useState<{ action: 'clip' | 'download'; totalGapMs: number; gaps: { fromMs: number; toMs: number; ms: number; reason: string }[] } | null>(null)
+  function offerGaps(e: any, action: 'clip' | 'download'): boolean {
+    const b = e?.body
+    if (!b || b.code !== 'coverage_gap' || !Array.isArray(b.gaps)) return false
+    setGapOffer({ action, totalGapMs: Number(b.totalGapMs ?? 0), gaps: b.gaps })
+    return true
+  }
+
+  async function createClip(acceptGapsMs?: number) {
     if (!selOk) { setActErr('Set the trim marks first (I and O, or drag on the timeline)'); return }
     if (!clipTitle.trim()) { setActErr('Give the clip a title'); return }
-    setActErr(''); setMsg(''); setBusy('clip')
+    setActErr(''); setMsg(''); setGapOffer(null); setBusy('clip')
     try {
-      await api.clipRecording(id, { title: clipTitle.trim(), startMs: Math.round(selFrom!), endMs: Math.round(selTo!), outputKind })
-      setMsg('Clip created — listed below and in the Media Library.')
+      await api.clipRecording(id, { title: clipTitle.trim(), startMs: Math.round(selFrom!), endMs: Math.round(selTo!), outputKind, acceptGapsMs })
+      setMsg(acceptGapsMs ? 'Clip created across the gap. Listed below and in the Media Library.' : 'Clip created. Listed below and in the Media Library.')
       setClipTitle(''); loadRec()
-    } catch (e: any) { setActErr(e.message) } finally { setBusy('') }
+    } catch (e: any) { setActErr(e.message); offerGaps(e, 'clip') } finally { setBusy('') }
   }
   async function publishFull() {
     setActErr(''); setMsg(''); setBusy('publish')
@@ -406,17 +419,17 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     catch (e: any) { setActErr(e.message) } finally { setBusy('') }
   }
   const [altDownloads, setAltDownloads] = useState<{ format: string; label: string; url: string }[]>([])
-  async function download() {
-    setActErr(''); setMsg(''); setBusy('download')
+  async function download(acceptGapsMs?: number) {
+    setActErr(''); setMsg(''); setGapOffer(null); setBusy('download')
     try {
-      const r = await api.recordingDownload(id)
+      const r = await api.recordingDownload(id, acceptGapsMs)
       if (r.status === 'ready' && r.url) {
         window.open(r.url, '_blank')
         setAltDownloads(r.alternatives ?? [])
       } else {
         setMsg(`${(r.format ?? 'mp4').toUpperCase()} export is being prepared. Check back shortly.`)
       }
-    } catch (e: any) { setActErr(e.message) } finally { setBusy('') }
+    } catch (e: any) { setActErr(e.message); offerGaps(e, 'download') } finally { setBusy('') }
   }
 
   // Only when there is nothing to show. `err` is also written by the actions
@@ -556,7 +569,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
                 <option value="both">Streaming + MP4</option>
               </select>
             </div>
-            <button className="btn primary" disabled={busy === 'clip' || !selOk} onClick={createClip}>{busy === 'clip' ? 'Creating…' : 'Create clip'}</button>
+            <button className="btn primary" disabled={busy === 'clip' || !selOk} onClick={() => createClip()}>{busy === 'clip' ? 'Creating…' : 'Create clip'}</button>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
             <span style={{ flex: 1 }} />
@@ -566,7 +579,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
             </button>
             {/* An audio recording downloads as audio: MP3, with the AAC (.m4a)
                 offered beside it once the export exists. Video stays MP4. */}
-            <button className="btn ghost" disabled={busy === 'download'} onClick={download}
+            <button className="btn ghost" disabled={busy === 'download'} onClick={() => download()}
               title={tl?.audioOnly ? 'Export the whole recording as an MP3 (an AAC .m4a is produced alongside)' : 'Export the whole recording as an MP4'}>
               {busy === 'download' ? '…' : tl?.audioOnly ? 'Download MP3' : 'Download MP4'}
             </button>
@@ -575,6 +588,27 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
             ))}
           </div>
           {actErr && <div className="err" style={{ marginTop: 8 }}>{actErr}</div>}
+          {gapOffer && (
+            <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8, background: 'rgba(251,191,36,.08)', border: '1px solid rgba(251,191,36,.35)', fontSize: 'var(--fs-sm)' }}>
+              <div style={{ color: 'var(--text)', marginBottom: 4 }}>
+                <b>What the gap is.</b> The recording has no media for {(gapOffer.totalGapMs / 1000).toFixed(1)}s inside this range: the station or encoder was not writing segments then (a restart, a lost source, or segments since pruned). The output can be built anyway; the missing time is simply skipped, so the result is {(gapOffer.totalGapMs / 1000).toFixed(1)}s shorter and the audio jumps at each gap.
+              </div>
+              {gapOffer.gaps.slice(0, 6).map((g, i) => (
+                <div key={i} style={{ fontFamily: 'ui-monospace,monospace', color: 'var(--muted)' }}>
+                  {fmtClock(g.fromMs)} → {fmtClock(g.toMs)} · {(g.ms / 1000).toFixed(1)}s · {g.reason.replace('-', ' ')}
+                </div>
+              ))}
+              {gapOffer.gaps.length > 6 && <div style={{ color: 'var(--faint)' }}>and {gapOffer.gaps.length - 6} more</div>}
+              <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                <button className="btn primary" disabled={!!busy}
+                  onClick={() => { const accept = gapOffer.totalGapMs + 1000; gapOffer.action === 'clip' ? createClip(accept) : download(accept) }}>
+                  Accept the gap and {gapOffer.action === 'clip' ? 'create the clip' : 'export'}
+                </button>
+                <button className="btn ghost" onClick={() => setGapOffer(null)}>Cancel</button>
+                {gapOffer.action === 'clip' && <span style={{ color: 'var(--faint)' }}>or move the in/out marks so the range avoids it</span>}
+              </div>
+            </div>
+          )}
           {msg && <div style={{ color: 'var(--ok,#3fbf6f)', fontSize: 'var(--fs-body)', marginTop: 8 }}>{msg}</div>}
 
           {/* ------- clips already made from this recording -------

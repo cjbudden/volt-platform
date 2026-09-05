@@ -138,9 +138,13 @@ export class ApiError extends Error {
   // because it is TypeScript that EMITS code rather than TypeScript that is
   // merely erased.
   status: number
-  constructor(status: number, message: string) {
+  /** The response body, when it was JSON: routes that refuse with a reason the
+   *  page can act on (a coverage gap, say) put the details here. */
+  body: any
+  constructor(status: number, message: string, body?: any) {
     super(message)
     this.status = status
+    this.body = body ?? null
     this.name = 'ApiError'
   }
   /** The session is gone. Nothing the page can do about it. */
@@ -184,14 +188,15 @@ async function req(path: string, opts: RequestInit = {}) {
 
   if (!r.ok) {
     let msg = `${r.status}`
+    let body: any = null
     // Some routes answer with `message` rather than `error` (the 409 from a
     // download whose range has a hole, for one). A bare status code on screen
     // is the least useful thing the server could have said.
-    try { const j = await r.json(); msg = j.error || j.message || msg } catch { try { msg = await r.text() } catch { /* no body */ } }
+    try { body = await r.json(); msg = body.error || body.message || msg } catch { try { msg = await r.text() } catch { /* no body */ } }
     // Only now is it really over: either there was no refresh token, or the
     // exchange was refused, or the retry failed on its own merits.
     if (r.status === 401 && token) { clearSession(); onUnauthorized?.() }
-    throw new ApiError(r.status, msg)
+    throw new ApiError(r.status, msg, body)
   }
   if (r.status === 204) return null
   return r.json()
@@ -790,7 +795,7 @@ export const api = {
     req(`/recordings/${id}/waveform?from=${Math.round(from)}&to=${Math.round(to)}&buckets=${Math.round(buckets)}`),
   recording: (id: string): Promise<RecordingRow & { vod_assets: VodAssetRow[] }> => req(`/recordings/${id}`),
   recordingTimeline: (id: string): Promise<RecordingTimeline> => req(`/recordings/${id}/timeline`),
-  clipRecording: (id: string, b: { title: string; startMs: number; endMs: number; outputKind?: 'manifest' | 'progressive' | 'both' }): Promise<VodAssetRow> =>
+  clipRecording: (id: string, b: { title: string; startMs: number; endMs: number; outputKind?: 'manifest' | 'progressive' | 'both'; acceptGapsMs?: number }): Promise<VodAssetRow> =>
     req(`/recordings/${id}/clip`, { method: 'POST', body: JSON.stringify(b) }),
   publishRecording: (id: string, title?: string): Promise<VodAssetRow> =>
     req(`/recordings/${id}/publish`, { method: 'POST', body: JSON.stringify({ title }) }),
@@ -821,11 +826,11 @@ export const api = {
 
   /** Export the whole recording for download. Video comes back as MP4; an
    *  audio-only recording as MP3 with the M4A (AAC as broadcast) alongside. */
-  recordingDownload: (id: string): Promise<{
+  recordingDownload: (id: string, acceptGapsMs?: number): Promise<{
     status: 'exporting' | 'ready'; kind?: 'audio' | 'video'; format?: 'mp3' | 'mp4'
     url?: string; message?: string; alternatives?: { format: string; label: string; url: string }[]
   }> =>
-    req(`/recordings/${id}/download`),
+    req(`/recordings/${id}/download${acceptGapsMs != null ? `?acceptGaps=${Math.round(acceptGapsMs)}` : ''}`),
   // ---- VOD library ----
   vodAssets: (published?: boolean): Promise<VodAssetRow[]> =>
     req(`/vod${published === undefined ? '' : `?published=${published}`}`),

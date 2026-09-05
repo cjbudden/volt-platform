@@ -574,7 +574,16 @@ recordingsRouter.post(
     const kind = isAudioOnly(streamId) ? 'audio' : 'video';
     const resolution = resolveRange(streamId, body.startMs, body.endMs, kind);
     const verdict = assessRange(resolution, { maxGapMs: body.acceptGapsMs });
-    if (!verdict.ok) throw badRequest(verdict.message);
+    // A refusal the console can ACT on: the gaps themselves, so the operator
+    // can see where they are and accept exactly that much, rather than a
+    // sentence that recommends an option they have no button for.
+    if (!verdict.ok) {
+      return res.status(409).json({
+        error: verdict.message, code: verdict.code,
+        gaps: resolution.gaps, totalGapMs: resolution.gaps.reduce((n, g) => n + g.ms, 0),
+        coveragePct: resolution.coveragePct,
+      });
+    }
 
     const row = await createClipVod({
       ownerCol: rec.event_id ? 'event_id' : 'channel_id',
@@ -671,6 +680,10 @@ recordingsRouter.get(
     const fromMs = Number(rec.start_epoch_ms);
     const toMs = rec.end_epoch_ms != null ? Number(rec.end_epoch_ms) : Date.now();
     const kind = isAudioOnly(streamId) ? 'audio' : 'video';
+    // How much missing media the operator accepts, in total ms. 30s by default
+    // (a normal encoder restart); ?acceptGaps=<ms> to take more, which the
+    // console offers once it has been told the gaps.
+    const acceptGapsMs = Math.max(0, Math.min(600_000, parseInt(String(req.query.acceptGaps ?? '30000'), 10) || 30_000));
 
     // AN AUDIO RECORDING DOWNLOADS AS AUDIO. A radio export used to hand back
     // clip.mp4, an MP4 with only an AAC track in it, under a button that said
@@ -688,9 +701,13 @@ recordingsRouter.get(
       return res.json({ status: 'ready', kind, format: 'mp4', url: existing.export_mp4_key, assetId: existing.id, alternatives: [] });
     }
     const resolution = resolveRange(streamId, fromMs, toMs, kind);
-    const verdict = assessRange(resolution, { maxGapMs: 30_000 });
+    const verdict = assessRange(resolution, { maxGapMs: acceptGapsMs });
     if (!verdict.ok) {
-      return res.status(409).json({ status: 'unavailable', code: verdict.code, message: verdict.message });
+      return res.status(409).json({
+        status: 'unavailable', code: verdict.code, message: verdict.message,
+        gaps: resolution.gaps, totalGapMs: resolution.gaps.reduce((n, g) => n + g.ms, 0),
+        coveragePct: resolution.coveragePct,
+      });
     }
 
     const asset = existing ?? await one<any>(
@@ -709,7 +726,7 @@ recordingsRouter.get(
       // Same 30s tolerance the range was assessed with just above.
       payload: { vodAssetId: asset.id, streamId, fromMs, toMs,
                  formats: kind === 'audio' ? ['mp3', 'm4a'] : ['mp4'], kind,
-                 acceptGapsMs: 30_000 },
+                 acceptGapsMs },
       channelId: rec.channel_id, eventId: rec.event_id,
       dedupeKey: `clip.extract:${asset.id}`,
       priority: 80,
