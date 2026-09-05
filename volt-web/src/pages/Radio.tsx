@@ -6,6 +6,9 @@ import { PageHead, NewButton, FChip, EntityCell, StatusPill, Preset, RecordingSe
 import { SourceMetadataButton } from '../SourceMetadata'
 import { navigate } from '../router'
 import { thumbUrl } from '../api'
+import { pressable } from '../a11y'
+import { TypePicker, MetadataForm } from '../ContentTypeFields'
+import { RuleEditor } from '../RuleEditor'
 
 /* ============================================================================
    Radio — audio-only stations on the shared design language (same base
@@ -178,6 +181,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
   groups: Group[]
   station?: {
     id: string; name: string; version: number; brand_ref?: string | null
+    schema_id?: string | null; metadata?: Record<string, any>
     radio_config: RadioCfg | null; recording_enabled?: boolean
     recording_retention_sec?: number | string | null
     sources?: { role: string; protocol: string; ingest_url: string | null; stream_key?: string | null }[]
@@ -193,6 +197,10 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
     [protocols])
   const cfg = station?.radio_config ?? {}
   const [name, setName] = useState(station?.name ?? '')
+  // CONTENT TYPE: a station always has one (Radio station by default); its
+  // metadata is the base entry when nothing is scheduled or playing.
+  const [typeId, setTypeId] = useState<string | null>(station?.schema_id ?? null)
+  const [meta, setMeta] = useState<Record<string, any>>(station?.metadata ?? {})
   // Packaging is the default; transcode exists to change bitrate or format.
   const [transcode, setTranscode] = useState(cfg.transcode === true)
   const src0 = station?.sources?.find(s => s.role === 'primary')
@@ -241,6 +249,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
         await api.updateChannel(station!.id, {
           name: name.trim(), radio, recordingEnabled: recOn, recordingRetentionSec: retention,
           ...(sources.length ? { sources } : {}), brandRef: artRef.trim() || null,
+          ...(typeId ? { schemaId: typeId, metadata: meta } : {}),
           version: station!.version,
         } as any)
         onDone()
@@ -249,6 +258,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
           groupId, name: name.trim(), kind: 'radio', radio,
           recordingEnabled: recOn, recordingRetentionSec: retention,
           sources, brandRef: artRef.trim() || null,
+          ...(typeId ? { schemaId: typeId, metadata: meta } : {}),
         })
         onDone(ch.id)
       }
@@ -259,13 +269,16 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
   }
 
   return (
-    <div className="drawer-scrim" onClick={onClose}>
-      <div className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="">
+      <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">{isEdit ? 'Station settings' : 'New station'}</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
           <div className="field"><label>Station name</label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Groove Salad" />
           </div>
+          <TypePicker appliesTo="radio" value={typeId} onChange={(id) => setTypeId(id)}
+            hint="The station's identity (schema.org RadioStation). Its metadata is what the guide and now/next show when nothing is scheduled." />
+          <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact />
           <div className="field"><label>Station artwork <span style={{ color: 'var(--faint)' }}>— shown on the detail page and player</span></label>
             <div style={{ display: 'flex', gap: 8 }}>
               <input className="inp" value={artRef} onChange={e => setArtRef(e.target.value)} placeholder="Pick from library or paste a URL" />
@@ -305,11 +318,11 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
 
           <div className="sec-label">Outputs — single bitrate</div>
           <div className="toggle-row"><div><div className="tt">MP3 stream</div><div className="td">Universal HTTP audio (hardware receivers, old apps, VLC). Now-playing titles pass through.</div></div>
-            <div className={`sw ${outMp3 ? '' : 'off'}`} onClick={() => setOutMp3(v => !v)}><i /></div></div>
+            <div className={`sw ${outMp3 ? '' : 'off'}`} {...pressable((e: any) => { ((() => setOutMp3(v => !v)) as any)(e) })} data-a11y-click=""><i /></div></div>
           <div className="toggle-row"><div><div className="tt">HLS (audio-only)</div><div className="td">Apple and modern web players; also what recording and clipping use.</div></div>
-            <div className={`sw ${outHls ? '' : 'off'}`} onClick={() => setOutHls(v => !v)}><i /></div></div>
+            <div className={`sw ${outHls ? '' : 'off'}`} {...pressable((e: any) => { ((() => setOutHls(v => !v)) as any)(e) })} data-a11y-click=""><i /></div></div>
           <div className="toggle-row"><div><div className="tt">DASH</div><div className="td">Android and TV stacks.</div></div>
-            <div className={`sw ${outDash ? '' : 'off'}`} onClick={() => setOutDash(v => !v)}><i /></div></div>
+            <div className={`sw ${outDash ? '' : 'off'}`} {...pressable((e: any) => { ((() => setOutDash(v => !v)) as any)(e) })} data-a11y-click=""><i /></div></div>
           <div className="field"><label>Output bitrate</label>
             <select className="inp" value={bitrate} onChange={e => setBitrate(Number(e.target.value))}>
               {[64, 96, 128, 192, 256, 320].map(b => <option key={b} value={b}>{b} kbps</option>)}
@@ -322,7 +335,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
               <div className="sec-label">Metadata log</div>
               <div className="toggle-row">
                 <div><div className="tt">Capture now-playing log</div><div className="td">Every ICY title change becomes a timed entry (stored on the programme guide), classified as song, ad or content. Drives search, trimming and clipping.</div></div>
-                <div className={`sw ${metaCapture ? '' : 'off'}`} onClick={() => setMetaCapture(v => !v)}><i /></div>
+                <div className={`sw ${metaCapture ? '' : 'off'}`} {...pressable((e: any) => { ((() => setMetaCapture(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
               </div>
             </>
           )}
@@ -335,12 +348,18 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
               <div className="sec-label">Transcription</div>
               <div className="toggle-row">
                 <div><div className="tt">Transcribe speech segments</div><div className="td">Uses the metadata log to transcribe only the parts classified as content (DJ talk, news, interviews). Songs and adverts are skipped. Only offered for Icecast sources, where metadata can tell speech from music.</div></div>
-                <div className={`sw ${transcription ? '' : 'off'}`} onClick={() => setTranscription(v => !v)}><i /></div>
+                <div className={`sw ${transcription ? '' : 'off'}`} {...pressable((e: any) => { ((() => setTranscription(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
               </div>
             </>
           )}
           {!isIcecast && <div className="hintxt" style={{ marginTop: 10 }}>Transcription is available for Icecast sources only: without now-playing metadata there is no way to tell speech from songs and adverts, and transcripts of music are noise.</div>}
 
+          {isEdit && (
+            <>
+              <div className="sec-label">Publishing</div>
+              <RuleEditor scopeKind="owner" scopeId={station!.id} compact resolveQuery={{ channelId: station!.id, schemaId: typeId }} />
+            </>
+          )}
           {err && <div className="err">{err}</div>}
         </div>
         <div className="drawer-f">

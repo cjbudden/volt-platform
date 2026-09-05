@@ -241,6 +241,7 @@ export interface Billing {
 }
 
 export interface ChannelDetail extends Channel {
+  schemaId?: string | null; metadata?: Record<string, any>
   kind: 'channel'
   /** Put this channel back on air after a control-plane restart. Default true. */
   autoConnect?: boolean
@@ -342,6 +343,8 @@ export interface TestStreamStatus {
 export interface ChannelSettingsPatch {
   name?: string
   autoConnect?: boolean
+  schemaId?: string
+  metadata?: Record<string, any>
   recordingEnabled?: boolean
   recordingRetentionDays?: number | null
   /** Retention in SECONDS, which is what the settings form actually sends: the
@@ -641,6 +644,8 @@ export const api = {
     brandRef?: string | null
     kind?: 'tv' | 'radio'
     radio?: RadioCfg
+    schemaId?: string
+    metadata?: Record<string, any>
   }): Promise<Channel> => req('/channels', { method: 'POST', body: JSON.stringify(b) }),
   search: (q: string): Promise<{ results: SearchHit[] }> => req('/search?q=' + encodeURIComponent(q)),
   startStop: (id: string, action: 'start' | 'stop') =>
@@ -831,11 +836,44 @@ export const api = {
     url?: string; message?: string; alternatives?: { format: string; label: string; url: string }[]
   }> =>
     req(`/recordings/${id}/download${acceptGapsMs != null ? `?acceptGaps=${Math.round(acceptGapsMs)}` : ''}`),
+  // ---- content types (metadata schemas) ----
+  contentTypes: (appliesTo?: 'radio' | 'tv' | 'event' | 'vod'): Promise<ContentType[]> =>
+    req('/metadata-schemas' + (appliesTo ? `?appliesTo=${appliesTo}` : '')),
+  contentType: (id: string): Promise<ContentType> => req(`/metadata-schemas/${id}`),
+  contentTypeFields: (id: string): Promise<{ targetKind: string; fields: SchemaField[] }> => req(`/metadata-schemas/${id}/effective-fields`),
+  createContentType: (b: ContentTypeBody): Promise<ContentType> => req('/metadata-schemas', { method: 'POST', body: JSON.stringify(b) }),
+  patchContentType: (id: string, b: Partial<ContentTypeBody>): Promise<ContentType> => req(`/metadata-schemas/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteContentType: (id: string) => req(`/metadata-schemas/${id}`, { method: 'DELETE' }),
+  ownerDefaults: (owner: { kind: 'channel' | 'event'; id: string }): Promise<OwnerBaseEntry> =>
+    req(`/epg/owner-defaults?${owner.kind === 'event' ? 'eventId' : 'channelId'}=${owner.id}`),
+
+  // ---- publishing rules (the ladder) + availability ----
+  publishingRules: (): Promise<PublishingRule[]> => req('/publishing-rules'),
+  publishingPoints: (): Promise<PublishingPoints> => req('/publishing-rules/points'),
+  publishingRule: (scopeKind: RuleScope, scopeId?: string | null): Promise<PublishingRule & { missing?: boolean }> =>
+    req(`/publishing-rules/${scopeKind}${scopeId ? '/' + scopeId : ''}`),
+  putPublishingRule: (scopeKind: RuleScope, scopeId: string | null, settings: RuleSettings): Promise<PublishingRule> =>
+    req(`/publishing-rules/${scopeKind}${scopeId ? '/' + scopeId : ''}`, { method: 'PUT', body: JSON.stringify({ settings }) }),
+  deletePublishingRule: (scopeKind: RuleScope, scopeId: string) =>
+    req(`/publishing-rules/${scopeKind}/${scopeId}`, { method: 'DELETE' }),
+  resolvePublishing: (q: { assetId?: string; schemaId?: string | null; channelId?: string | null; eventId?: string | null }): Promise<ResolvedRules> => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(q)) if (v) qs.set(k, v)
+    return req('/publishing-rules/resolve?' + qs)
+  },
+  vodAvailability: (id: string): Promise<AssetAvailability> => req(`/vod/${id}/availability`),
+  setVodAvailability: (id: string, override: RuleSettings): Promise<{ override: RuleSettings; reapplied: boolean; state: string }> =>
+    req(`/vod/${id}/availability`, { method: 'PATCH', body: JSON.stringify({ override }) }),
+  publishVod: (id: string, targets?: PublishTarget[]): Promise<{ state: string; publications: any[] }> =>
+    req(`/vod/${id}/publish`, { method: 'POST', body: JSON.stringify(targets ? { targets } : {}) }),
+  withdrawVod: (id: string, reason?: string): Promise<VodAssetRow> =>
+    req(`/vod/${id}/withdraw`, { method: 'POST', body: JSON.stringify({ reason }) }),
+
   // ---- VOD library ----
   vodAssets: (published?: boolean): Promise<VodAssetRow[]> =>
     req(`/vod${published === undefined ? '' : `?published=${published}`}`),
   vodAsset: (id: string): Promise<any> => req(`/vod/${id}`),
-  patchVodAsset: (id: string, b: { title?: string; published?: boolean }): Promise<any> =>
+  patchVodAsset: (id: string, b: { title?: string; published?: boolean; schemaId?: string | null; metadata?: Record<string, any> }): Promise<any> =>
     req(`/vod/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   publishToPortal: (id: string): Promise<any> =>
     req(`/publications/vod/${id}/publish`, { method: 'POST', body: JSON.stringify({ platform: 'portal' }) }),
@@ -1063,6 +1101,7 @@ export interface RadioQc {
 }
 export interface RadioStationRow {
   id: string; name: string; status: string; group_id: string; group_name?: string
+  schema_id?: string | null; metadata?: Record<string, any>
   kind: 'radio'; radio_config: RadioCfg | null
   recording_enabled?: boolean; recording_retention_sec?: number | string | null
   brand_ref?: string | null; on_air?: boolean; created_at: string; version: number
@@ -1182,6 +1221,7 @@ export interface EventSourceRow {
 }
 export interface EventRow {
   id: string; group_id: string; name: string; status: string
+  schema_id?: string | null; metadata?: Record<string, any>
   scheduled_start: string; scheduled_end: string
   server_start: string | null; server_stop: string | null
   public_start: string | null; public_end: string | null
@@ -1208,6 +1248,9 @@ export interface EventCreateBody {
   inputFailoverEnabled?: boolean; autoFailback?: boolean
   inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
   fillerSlateRef?: string | null
+  /** Content type (required in practice: omitted = the standard Broadcast event). */
+  schemaId?: string
+  metadata?: Record<string, any>
 }
 export interface EventPatchBody extends Partial<Omit<EventCreateBody, 'groupId'>> { version?: number }
 
@@ -1640,6 +1683,10 @@ export interface VodAssetRow {
   recording_id: string | null; start_epoch_ms: number | string; end_epoch_ms: number | string
   duration_ms: number | string | null; output_kind?: string | null
   thumb_status?: string | null; created_at: string
+  /** Availability (publishing rules): state, window. */
+  availability_state?: 'draft' | 'scheduled' | 'available' | 'expired' | 'withdrawn'
+  available_from?: string | null; available_until?: string | null
+  schema_id?: string | null; metadata?: Record<string, any>
   /** Audio-only sources: the MP3 and the AAC (.m4a) produced beside the clip. */
   export_mp3_key?: string | null; export_m4a_key?: string | null
   /** Written when the clip is built, from the same resolution that produced the
@@ -1738,4 +1785,74 @@ export function thumbUrl(libraryUrl: string, w: number, h: number, fit: 'cover' 
   const key = libraryUrl.replace(/^\//, '')
   if (!key.startsWith('library/')) return libraryUrl
   return `/img/${w}x${h},${fit}/${key}`
+}
+
+// ---- content types ---------------------------------------------------------
+export interface SchemaField {
+  key: string; label?: string
+  type: 'string' | 'text' | 'number' | 'boolean' | 'date' | 'enum' | 'url' | 'tags' | 'reference'
+  required?: boolean; options?: string[]; multiple?: boolean; refDomain?: string
+  /** EPG slot: title | sub-title | description | category | episode | language | icon | credits.<role> | custom:<name> */
+  epg?: string
+  schemaOrg?: string
+}
+export interface ContentType {
+  id: string; account_id: string; name: string; description: string | null
+  fields: SchemaField[]; target_kind: 'vod' | 'event' | 'channel' | 'any'; domain: string | null
+  extends_id: string | null; is_standard: boolean; standard_key: string | null
+  schema_org_type: string | null; applies_to: ('radio' | 'tv' | 'event' | 'vod')[]
+  version?: number; created_at: string; updated_at: string
+}
+export interface ContentTypeBody {
+  name: string; description?: string; fields: SchemaField[]
+  targetKind?: 'vod' | 'event' | 'channel' | 'any'; domain?: string; extendsId?: string
+  appliesTo?: ('radio' | 'tv' | 'event' | 'vod')[]; schemaOrgType?: string
+}
+export interface OwnerBaseEntry {
+  title: string; subTitle: string | null; description: string | null; categories: string[]
+  episode: string | null; language: string | null; icon: string | null
+  credits: { role: string; name: string }[]; custom: Record<string, any>; schemaId: string | null
+}
+
+// ---- publishing rules ------------------------------------------------------
+export type RuleScope = 'account' | 'schema' | 'owner'
+export type PublishTarget =
+  | { kind: 'portal' }
+  | { kind: 'app'; appId: string }
+  | { kind: 'social'; targetId: string; platform?: string }
+export interface RuleSettings {
+  targets?: PublishTarget[]
+  autoPublish?: boolean
+  availableFrom?: { mode: 'publish' } | { mode: 'at'; at: string }
+  expire?: { mode: 'never' } | { mode: 'days'; days: number } | { mode: 'at'; at: string }
+  geo?: { mode: 'worldwide' | 'allow' | 'block'; countries: string[] }
+  access?: 'free' | 'entitled' | 'paid'
+  paywall?: { tier?: string; priceCents?: number; currency?: string } | null
+  gate?: { requireReview: boolean; blockOnQcFail: boolean }
+}
+export type RuleKey = keyof RuleSettings
+export type Rung = 'baseline' | 'account' | 'schema' | 'owner' | 'asset'
+export interface PublishingRule {
+  id: string; account_id: string; scope_kind: RuleScope; scope_id: string | null
+  settings: RuleSettings; version: number; updated_at: string; scope_name?: string
+}
+export interface PublishingPoints {
+  portal: { kind: 'portal'; name: string }
+  apps: { kind: 'app'; appId: string; name: string; type: string; enabled: boolean }[]
+  social: { kind: 'social'; targetId: string; platform: string; name: string; account: string | null; enabled: boolean }[]
+}
+export interface ResolvedRules {
+  settings: Required<Omit<RuleSettings, 'paywall'>> & { paywall: RuleSettings['paywall'] }
+  sources: Record<RuleKey, Rung>
+  rungs: { rung: Rung; id: string | null; scopeId: string | null; settings: RuleSettings }[]
+}
+export type AvailabilityState = 'draft' | 'scheduled' | 'available' | 'expired' | 'withdrawn'
+export interface AssetAvailability {
+  state: AvailabilityState
+  availableFrom: string | null; availableUntil: string | null
+  withdrawnAt: string | null; withdrawnBy: string | null
+  applied: ResolvedRules['settings'] | null; appliedSources: Record<RuleKey, Rung> | null
+  override: RuleSettings
+  plan: ResolvedRules
+  publications: { id: string; platform: string; status: string; external_url: string | null; published_at: string | null; app_id: string | null; app_name: string | null; target_name: string | null }[]
 }

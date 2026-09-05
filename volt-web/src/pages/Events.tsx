@@ -4,6 +4,9 @@ import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, splitDuration, type RetUnit } from '../scaffold'
 import { ShareDrawer } from '../ShareDrawer'
+import { pressable } from '../a11y'
+import { TypePicker, MetadataForm } from '../ContentTypeFields'
+import { RuleEditor } from '../RuleEditor'
 
 /* ============================================================================
    Events — one-off broadcasts on the SAME core workflow as channels (sources,
@@ -161,6 +164,9 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
   const isEdit = !!ev
   const protocols = useProtocols()
   const [name, setName] = useState(ev?.name ?? '')
+  // CONTENT TYPE, required: decides the metadata captured here and on everything derived.
+  const [typeId, setTypeId] = useState<string | null>(ev?.schema_id ?? null)
+  const [meta, setMeta] = useState<Record<string, any>>(ev?.metadata ?? {})
   // Type presets pick the group by workflow — the SAME control as the channel
   // form, so both drawers open identically: Name → Type → …
   const byType = useMemo(() => ({
@@ -234,6 +240,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
       inputFailoverEnabled: sources.some(s => s.role === 'backup'),
       inputLossBehavior: lossBehavior,
       fillerSlateRef: (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && slateRef.trim() ? slateRef.trim() : null,
+      ...(typeId ? { schemaId: typeId, metadata: meta } : {}),
     }
     setBusy(true)
     try {
@@ -247,16 +254,21 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
   }
 
   return (
-    <div className="drawer-scrim" onClick={onClose}>
-      <div className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="">
+      <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">{isEdit ? 'Event settings' : 'New event'}</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
           <div className="field"><label>Event name</label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Cup Final 2026" />
           </div>
 
+          {/* THE EVENT'S KIND comes first: a town hall, a match, a service.
+              It decides the fields under it and the EPG fields they fill. */}
+          <TypePicker appliesTo="event" value={typeId} onChange={(id) => setTypeId(id)} />
+          <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact />
+
           {!isEdit && (
-            <div className="field"><label>Type</label>
+            <div className="field"><label>Workflow</label>
               <div className="presets">
                 <Preset sel={type === 'transcode'} onClick={() => setType('transcode')} title="Transcode"
                   desc="One source in. We build the ABR ladder with FFmpeg." meta="1 input → many outputs" />
@@ -290,7 +302,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
           <SourceInput protocols={protocols} value={primary} onChange={setPrimary} label="Primary source" />
           <div className="toggle-row">
             <div><div className="tt">Backup source</div><div className="td">Optional failover input of the same feed.</div></div>
-            <div className={`sw ${backupOn ? '' : 'off'}`} onClick={() => setBackupOn(v => !v)}><i /></div>
+            <div className={`sw ${backupOn ? '' : 'off'}`} {...pressable((e: any) => { ((() => setBackupOn(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
           </div>
           {backupOn && <SourceInput protocols={protocols} value={backup} onChange={setBackup} label="Backup source" />}
 
@@ -329,6 +341,14 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
           <RecordingSection ctx="event" recOn={recOn} setRecOn={setRecOn}
             retNum={retNum} setRetNum={setRetNum} retUnit={retUnit} setRetUnit={setRetUnit}
             autoVod={autoVod} setAutoVod={setAutoVod} />
+
+          {isEdit && (
+            <>
+              <div className="sec-label">Publishing</div>
+              <RuleEditor scopeKind="owner" scopeId={ev!.id} compact
+                resolveQuery={{ eventId: ev!.id, schemaId: typeId }} />
+            </>
+          )}
 
           {err && <div className="err">{err}</div>}
         </div>

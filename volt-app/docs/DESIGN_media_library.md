@@ -1,8 +1,31 @@
 # Media Library: publishing rules, metadata by type, availability
 
-Status: DESIGN (5 Sep 2026). Built so far from this doc: the rename (VOD Library
-becomes Media Library) and a preview that works for every asset with the right
-surface for audio and for video. Everything else below is proposed for review.
+Status: BUILT (5 Sep 2026), first release. What exists:
+
+- Rename (Media Library, route /vod) and the preview (MediaPreview.tsx).
+- Content types (§3): migration 0026, services/contentTypes.ts (standard
+  table, seed, defaults, inheritance, EPG mapping), required on radio / TV /
+  event, inherited by clips, /api/epg/now-next `base` + /owner-defaults.
+  Console: Admin → Content Types (field editor with EPG slot + schema.org),
+  TypePicker + MetadataForm on the event, channel and station forms, and a
+  Metadata tab on each library asset.
+- Publishing rules and availability (§4): migration 0027, publishing_rules
+  (account < schema < owner, per-field inherit), services/publishingRules.ts
+  (resolver, target validation against the client's apps + social accounts,
+  window), services/availability.ts (publish / withdraw / republish / sweep /
+  autoPublishOnBuild / onDemandAccess), /api/publishing-rules, /api/vod/:id/
+  availability | publish | withdraw, play gate through rights.evaluateAccess,
+  apps as publishing points (publications.platform 'app'). Console: Admin →
+  Publishing Rules (account default, points, type + owner rules), the same
+  RuleEditor in each channel / station / event's Settings and on a content
+  type, and an Availability tab per library asset (state, window, publish,
+  remove access, per-item overrides, publishing points).
+
+Not yet built: the entitlement service behind access = entitled / paid (the
+gate takes an `entitled` claim from the app as a placeholder); real social
+upload adapters (stubbed); the encoding profile display for uploads (§5);
+XMLTV export of the EPG mapping (the mapping is stored and served; the
+exporter is DESIGN_epg_xmltv.md's).
 
 ## What Christian asked for (5 Sep)
 

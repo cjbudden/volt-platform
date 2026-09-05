@@ -3,6 +3,9 @@ import { api, type VodAssetRow } from '../api'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import { navigate } from '../router'
 import MediaPreview from '../MediaPreview'
+import { RuleEditor } from '../RuleEditor'
+import { MetadataForm, TypePicker } from '../ContentTypeFields'
+import type { AssetAvailability } from '../api'
 
 /* ============================================================================
    MEDIA LIBRARY — everything that was cut or uploaded, and what state it is in.
@@ -58,7 +61,7 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   const [d, setD] = useState<any>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
-  const [tab, setTab] = useState<'play' | 'sources' | 'publishing'>('play')
+  const [tab, setTab] = useState<'play' | 'sources' | 'publishing' | 'availability' | 'metadata'>('play')
   async function load() {
     try { setD(await api.vodAsset(id)); setErr('') } catch (e: any) { setErr(e.message) }
   }
@@ -87,13 +90,14 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   return (
     <div style={{ padding: '8px 2px 14px' }}>
       <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 12 }}>
-        {(['play', 'sources', 'publishing'] as const).map(t => (
+        {(['play', 'metadata', 'availability', 'sources', 'publishing'] as const).map(t => (
           <button key={t} className={`btn ${tab === t ? 'primary' : 'ghost'}`}
             style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }}
             onClick={() => setTab(t)}>
-            {t === 'play' ? 'Preview' : t === 'sources' ? 'Where it came from' : 'Where it went'}
+            {t === 'play' ? 'Preview' : t === 'metadata' ? 'Metadata' : t === 'availability' ? 'Availability' : t === 'sources' ? 'Where it came from' : 'Where it went'}
           </button>
         ))}
+        <AvailabilityBadge state={d.availability_state} until={d.available_until} />
         <div className="flex-1" />
         {d.recording_id && (
           <button className="btn ghost" onClick={() => navigate(`/recordings/${d.recording_id}`)}>
@@ -181,7 +185,9 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
               <tbody>
                 {pubs.map((p: any, i: number) => (
                   <tr key={i}>
-                    <td>{p.platform}</td>
+                    <td>{p.platform === 'app'
+                      ? <span>App: {p.app_name ?? p.app_id?.slice(0, 8)} <button className="btn ghost" style={{ padding: '0 6px', fontSize: 'var(--fs-micro)' }} onClick={() => navigate('/apikeys')}>registration</button></span>
+                      : p.target_name ? `${p.platform}: ${p.target_name}` : p.platform}</td>
                     <td style={{ color: 'var(--muted)' }}>{p.status}</td>
                     <td style={{ color: 'var(--muted)' }}>
                       {p.published_at ? new Date(p.published_at).toLocaleString() : '—'}
@@ -208,20 +214,120 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
               </tbody>
             </table>
           )}
-          <div style={{ marginTop: 12 }}>
-            <button className="btn primary" disabled={!!busy || d.published}
-              onClick={() => act(() => api.publishToPortal(d.id), 'pub')}>
-              {d.published ? 'Already on the portal' : busy === 'pub' ? 'Publishing…' : 'Publish to the portal'}
-            </button>
-            {d.published && (
-              <button className="btn ghost" style={{ marginLeft: 6 }} disabled={!!busy}
-                onClick={() => act(() => api.patchVodAsset(d.id, { published: false }), 'unpub')}>
-                Unpublish
-              </button>
-            )}
+          <div style={{ marginTop: 12, fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
+            Publishing goes through the asset's rules: see the Availability tab. App publications link to the app's registration under API Keys & Apps.
           </div>
         </div>
       )}
+
+      {tab === 'metadata' && (
+        <AssetMetadata d={d} onSaved={() => { load(); onChanged() }} />
+      )}
+
+      {tab === 'availability' && (
+        <AvailabilityPanel d={d} onChanged={() => { load(); onChanged() }} />
+      )}
+      {err && <div className="err" style={{ marginTop: 8 }}>{err}</div>}
+    </div>
+  )
+}
+
+const STATE_UI: Record<string, { label: string; color: string }> = {
+  draft: { label: 'Not published', color: 'var(--faint)' },
+  scheduled: { label: 'Scheduled', color: 'var(--brand,#3f7bff)' },
+  available: { label: 'Available', color: 'var(--ok,#4ade80)' },
+  expired: { label: 'Expired', color: 'var(--warn,#fbbf24)' },
+  withdrawn: { label: 'Access removed', color: 'var(--danger,#f87171)' },
+}
+function AvailabilityBadge({ state, until }: { state?: string | null; until?: string | null }) {
+  const ui = STATE_UI[state ?? 'draft'] ?? STATE_UI.draft
+  return (
+    <span style={{ fontSize: 'var(--fs-sm)', color: ui.color, fontWeight: 600, marginLeft: 6 }} title={until ? `until ${new Date(until).toLocaleString()}` : undefined}>
+      ● {ui.label}{state === 'available' && until ? ` until ${new Date(until).toLocaleDateString()}` : ''}
+    </span>
+  )
+}
+
+/* The asset's type and metadata. Inherited from the owner at creation, editable here. */
+function AssetMetadata({ d, onSaved }: { d: any; onSaved: () => void }) {
+  const [typeId, setTypeId] = useState<string | null>(d.schema_id ?? null)
+  const [meta, setMeta] = useState<Record<string, any>>(d.metadata ?? {})
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  return (
+    <div style={{ maxWidth: 820 }}>
+      <TypePicker appliesTo="vod" value={typeId} onChange={(id) => setTypeId(id)}
+        hint="Inherited from the channel, station or event it was cut from. Change it to describe this item differently." />
+      <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact />
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button className="btn primary" disabled={busy} onClick={async () => {
+          setBusy(true); setErr('')
+          try { await api.patchVodAsset(d.id, { schemaId: typeId, metadata: meta } as any); onSaved() } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+        }}>{busy ? 'Saving…' : 'Save metadata'}</button>
+        {err && <span style={{ color: '#fca5a5', fontSize: 'var(--fs-sm)' }}>{err}</span>}
+      </div>
+    </div>
+  )
+}
+
+/* WHERE IT GOES AND HOW LONG IT STAYS. The resolved plan (with the rung each
+   field came from), the item's own overrides, and the three actions. */
+function AvailabilityPanel({ d, onChanged }: { d: any; onChanged: () => void }) {
+  const [a, setA] = useState<AssetAvailability | null>(null)
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const [msg, setMsg] = useState('')
+  async function load() { try { setA(await api.vodAvailability(d.id)) } catch (e: any) { setErr(e.message) } }
+  useEffect(() => { load() /* eslint-disable-next-line */ }, [d.id])
+  async function act(label: string, fn: () => Promise<any>, ok: string) {
+    setBusy(label); setErr(''); setMsg('')
+    try { await fn(); setMsg(ok); await load(); onChanged() } catch (e: any) { setErr(e.message) } finally { setBusy('') }
+  }
+  if (!a) return <div className="loading">{err || 'Loading availability…'}</div>
+  const ui = STATE_UI[a.state] ?? STATE_UI.draft
+  const live = a.state === 'available' || a.state === 'scheduled'
+  return (
+    <div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', padding: '10px 12px', borderRadius: 8, border: `1px solid ${ui.color}55`, background: `${ui.color}10`, marginBottom: 12 }}>
+        <b style={{ color: ui.color }}>{ui.label}</b>
+        {a.availableFrom && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>from {new Date(a.availableFrom).toLocaleString()}</span>}
+        {a.availableUntil && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>until {new Date(a.availableUntil).toLocaleString()}</span>}
+        {a.state === 'withdrawn' && a.withdrawnAt && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>removed {new Date(a.withdrawnAt).toLocaleString()} by {a.withdrawnBy}</span>}
+        <span style={{ flex: 1 }} />
+        {!live && (
+          <button className="btn primary" disabled={!!busy} onClick={() => act('pub', () => api.publishVod(d.id), 'Published through its rules.')}>
+            {busy === 'pub' ? 'Publishing…' : a.state === 'draft' ? 'Publish' : 'Publish again'}
+          </button>
+        )}
+        {live && (
+          <button className="btn ghost" disabled={!!busy} style={{ color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }}
+            onClick={() => { const r = window.prompt('Remove access to this item now? The item is kept; nothing will serve it. Reason (optional):'); if (r !== null) act('wd', () => api.withdrawVod(d.id, r || undefined), 'Access removed.') }}>
+            {busy === 'wd' ? 'Removing…' : 'Remove access'}
+          </button>
+        )}
+      </div>
+
+      <div className="sec-label">What a publish does for this item</div>
+      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 8 }}>
+        Resolved from the ladder: account default, then its content type, then its channel / event / station, then this item.
+        {a.applied && ' The values applied at the last publish are shown in "Where it went".'}
+      </div>
+      <RuleEditor scopeKind="asset" scopeId={d.id} compact resolveQuery={{ assetId: d.id }} onSaved={() => { load(); onChanged() }} />
+
+      {a.publications.length > 0 && (
+        <>
+          <div className="sec-label">Publishing points</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {a.publications.map(p => (
+              <span key={p.id} className="chip" style={{ padding: '3px 10px', fontSize: 'var(--fs-xs)', opacity: p.status === 'published' ? 1 : .6 }}
+                title={`${p.status}${p.published_at ? ` · ${new Date(p.published_at).toLocaleString()}` : ''}`}>
+                {p.platform === 'app' ? `App: ${p.app_name ?? ''}` : p.platform === 'portal' ? 'Catalogue' : `${p.platform}: ${p.target_name ?? ''}`} · {p.status}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+      {msg && <div style={{ color: 'var(--ok,#4ade80)', fontSize: 'var(--fs-sm)', marginTop: 8 }}>{msg}</div>}
       {err && <div className="err" style={{ marginTop: 8 }}>{err}</div>}
     </div>
   )
@@ -300,7 +406,7 @@ export default function VodPage() {
         </div>
         <table>
           <thead>
-            <tr><th>Title</th><th>Source</th><th>Length</th><th>Sources</th><th>Review</th><th>QC</th><th>Published</th><th>Cut</th><th /></tr>
+            <tr><th>Title</th><th>Source</th><th>Length</th><th>Sources</th><th>Review</th><th>QC</th><th>Availability</th><th>Cut</th><th /></tr>
           </thead>
           <tbody>
             {shown.map(a => {
@@ -325,11 +431,13 @@ export default function VodPage() {
                       {x.qc_state ?? 'not run'}
                     </td>
                     <td style={{ fontSize: 'var(--fs-sm)' }}>
-                      {x.published
-                        ? x.has_stale_publication
-                          ? <span style={{ color: 'var(--warn,#fbbf24)' }}>yes, copy is old</span>
-                          : <span style={{ color: 'var(--ok,#4ade80)' }}>yes</span>
-                        : <span style={{ color: 'var(--faint)' }}>no</span>}
+                      {(() => {
+                        const st = (x.availability_state ?? (x.published ? 'available' : 'draft')) as string
+                        const ui = STATE_UI[st] ?? STATE_UI.draft
+                        return <span style={{ color: ui.color }} title={x.available_until ? `until ${new Date(x.available_until).toLocaleString()}` : undefined}>
+                          {ui.label}{st === 'available' && x.has_stale_publication ? ', copy is old' : ''}
+                        </span>
+                      })()}
                     </td>
                     <td style={{ color: 'var(--muted)' }}>{new Date(a.created_at).toLocaleDateString()}</td>
                     <td style={{ textAlign: 'right' }}>

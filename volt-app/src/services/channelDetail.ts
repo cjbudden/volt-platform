@@ -23,6 +23,9 @@ export interface ChannelDetail {
   epgEnabled: boolean;
   /** Put this channel back on air after a control-plane restart. */
   autoConnect: boolean;
+  /** Content type + its metadata: the base entry when no programme is on. */
+  schemaId: string | null;
+  metadata: Record<string, any>;
   /** Whether it is MEANT to be running, which survives a crash. */
   desiredState: 'running' | 'stopped';
   /** Set only when auto-connect has stopped trying; carries the reason. */
@@ -356,6 +359,8 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     kind: 'channel', group: group ? { id: group.id, name: group.name } : null, profile, dvr, captions,
     epgEnabled: channel.epg_enabled !== false,
     autoConnect: channel.auto_connect !== false,
+    schemaId: channel.schema_id ?? null,
+    metadata: (channel.metadata && typeof channel.metadata === 'object') ? channel.metadata : {},
     desiredState: (channel.desired_state ?? 'stopped') as 'running' | 'stopped',
     resumeGaveUpAt: channel.resume_gave_up_at ?? null,
     resumeLastError: channel.resume_last_error ?? null,

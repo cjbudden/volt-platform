@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, originUrl, thumbUrl, type ChannelDetail as CD, type ChannelSettingsPatch, type WatermarkCfg, type FailoverMode, type FailoverTestState } from '../api'
 import { navigate } from '../router'
+import { TypePicker, MetadataForm } from '../ContentTypeFields'
+import { RuleEditor } from '../RuleEditor'
 import { subscribeLive } from '../liveStatus'
+import { useRecordWatch, LiveEditNotice } from '../liveRecord'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
@@ -1682,6 +1685,11 @@ function EventLog({ d }: { d: CD }) {
 
 /* ------------------------------------------------------------ settings drawer */
 function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; onSaved: () => void }) {
+  // WHILE THIS FORM IS OPEN, the record underneath it can move. The 409 on save
+  // already catches that and is the wrong end of the problem: by then the
+  // operator has retyped a form against a record they cannot see. This says so
+  // while there is still time to do something about it. See liveRecord.tsx.
+  const live = useRecordWatch('channel', d.id, d.version)
   const [name, setName] = useState(d.name)
   // retention as number + unit dropdown (minutes..months). Seed from seconds if set,
   // else from the legacy days field. Blank number = keep forever.
@@ -1711,6 +1719,9 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   // programme guide (EPG) panel visibility
   const [epgOn, setEpgOn] = useState(d.epgEnabled !== false)
   const [autoConn, setAutoConn] = useState(d.autoConnect !== false)
+  // CONTENT TYPE + the base metadata entry (what the guide shows with no programme on).
+  const [typeId, setTypeId] = useState<string | null>(d.schemaId ?? null)
+  const [meta, setMeta] = useState<Record<string, any>>(d.metadata ?? {})
   // subtitles
   const [capOn, setCapOn] = useState(d.captions.enabled)
   const [capLangs, setCapLangs] = useState<string[]>(d.captions.targets.length ? d.captions.targets : ['en'])
@@ -1768,6 +1779,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     // programme guide panel
     if (epgOn !== (d.epgEnabled !== false)) patch.epgEnabled = epgOn
     if (autoConn !== (d.autoConnect !== false)) patch.autoConnect = autoConn
+    if (typeId && (typeId !== d.schemaId || JSON.stringify(meta) !== JSON.stringify(d.metadata ?? {}))) { patch.schemaId = typeId; patch.metadata = meta }
     // captions
     patch.captions = { enabled: capOn, targets: capOn ? capLangs : [],
       offsetSec: Math.max(-30, Math.min(30, Number(capTrim) || 0)) }
@@ -1801,7 +1813,15 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
       <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">Channel settings</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
+          {/* Reload here means "close and reopen against the current record",
+              which is the only honest offer: the form cannot merge somebody
+              else's change into half-typed fields without lying about which
+              values are whose. */}
+          <LiveEditNotice change={live.change} onReload={() => { onSaved(); onClose() }} onDismiss={live.clear} />
           <div className="field"><label>Channel name</label><input className="inp" value={name} onChange={e => setName(e.target.value)} /></div>
+          <TypePicker appliesTo="tv" value={typeId} onChange={(id) => setTypeId(id)}
+            hint="The channel's identity. Its metadata is what the guide and now/next show when no programme is scheduled." />
+          <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact />
 
           <div className="field"><label>Channel brand image <span style={{ color: 'var(--faint)' }}>— shown in place of the initials box</span></label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1942,6 +1962,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           {/* Auto-connect stops after five failed attempts and records why. If
               that has happened the operator has to be told, or the channel is
               simply off with no explanation anywhere. Pressing Start clears it. */}
+          <div className="sec-label">Publishing</div>
+          <RuleEditor scopeKind="owner" scopeId={d.id} compact resolveQuery={{ channelId: d.id, schemaId: typeId }} />
           {d.resumeGaveUpAt && (
             <div className="err" style={{ marginTop: 6 }}>
               Auto reconnect gave up on {new Date(d.resumeGaveUpAt).toLocaleString()} after repeated failures

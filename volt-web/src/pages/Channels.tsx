@@ -5,6 +5,8 @@ import { useProtocols, protoOf, SourceInput, type SourceValue } from '../protoco
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, type RetUnit } from '../scaffold'
+import { pressable } from '../a11y'
+import { TypePicker, MetadataForm } from '../ContentTypeFields'
 
 type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
 
@@ -24,12 +26,22 @@ export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
   const [channels, setChannels] = useState<any[] | null>(null)
   const [groups, setGroups] = useState<Group[]>([])
   const [filter, setFilter] = useState<'all' | 'transcode' | 'package_only'>('all')
+  const [err, setErr] = useState('')
 
+  // This is the app's DEFAULT route, and it had no error path at all: `load()`
+  // was uncaught, so a user whose group sets channels to 'none' — or any 500 —
+  // left "Loading channels…" on screen forever while an unhandled rejection
+  // fired every six seconds for the life of the tab.
   async function load() {
-    const [chs, gs] = await Promise.all([api.channels('tv'), api.groups()])
-    const gmap = new Map(gs.map(g => [g.id, g]))
-    setChannels(chs.map(c => ({ ...c, _g: gmap.get(c.group_id) })))
-    setGroups(gs)
+    try {
+      const [chs, gs] = await Promise.all([api.channels('tv'), api.groups()])
+      const gmap = new Map(gs.map(g => [g.id, g]))
+      setChannels(chs.map(c => ({ ...c, _g: gmap.get(c.group_id) })))
+      setGroups(gs)
+      setErr('')
+    } catch (e: any) {
+      setErr(e?.forbidden ? 'Your access does not include channels.' : (e?.message || 'Could not load channels'))
+    }
   }
   useEffect(() => { load() }, [])
   // live: refresh the list on any stream status/event change (one shared SSE socket)
@@ -66,8 +78,15 @@ export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
       <PageHead title="Channels" sub="24×7 live channels. Transcode builds the rendition ladder for you; packaging takes a pre-encoded ladder."
         action={<NewButton label="New channel" onClick={() => setCreateOpen(true)} />} />
 
+      {err && (
+        <div className="err" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ flex: 1 }}>{err}</span>
+          <button className="btn ghost" onClick={load}>Retry</button>
+        </div>
+      )}
+
       {channels === null ? (
-        <div className="loading">Loading channels…</div>
+        err ? null : <div className="loading">Loading channels…</div>
       ) : channels.length === 0 ? (
         <EmptyState onCreate={() => setCreateOpen(true)} />
       ) : (
@@ -106,13 +125,26 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 
 function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChanged: () => void; onOpen?: (id: string) => void }) {
   const [busy, setBusy] = useState<string | null>(null)
+  const [err, setErr] = useState('')
+  // try/finally with no catch: a viewer pressing Start watched the button
+  // flicker to "…" and back with no explanation at all, and the rejection went
+  // to the console. Starting a channel is not a silent operation.
   async function toggle(c: any) {
-    setBusy(c.id)
+    setBusy(c.id); setErr('')
     try { await api.startStop(c.id, c.status === 'live' ? 'stop' : 'start'); await onChanged() }
+    catch (e: any) {
+      setErr(`${c.name}: ${e?.forbidden ? 'you do not have permission to do that' : (e?.message || 'failed')}`)
+    }
     finally { setBusy(null) }
   }
   return (
     <div className="card">
+      {err && (
+        <div className="err" style={{ margin: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ flex: 1 }}>{err}</span>
+          <button className="btn ghost" onClick={() => setErr('')}>Dismiss</button>
+        </div>
+      )}
       <table>
         <thead>
           <tr>
@@ -191,6 +223,8 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   }), [groups])
   const [type, setType] = useState<'transcode' | 'package_only'>('transcode')
   const [name, setName] = useState('')
+  const [typeId, setTypeId] = useState<string | null>(null)
+  const [meta, setMeta] = useState<Record<string, any>>({})
   const [purchasing, setPurchasing] = useState('reserved')
   const [recOn, setRecOn] = useState(true)
   const [retNum, setRetNum] = useState<string>('7')
@@ -279,6 +313,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
         inputLossBehavior: lossBehavior,
         fillerSlateRef: (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && slateRef.trim() ? slateRef.trim() : null,
         fallbackTranscode,
+        ...(typeId ? { schemaId: typeId, metadata: meta } : {}),
       })
       // captions ride on the group's shared output profile, so they are applied via the
       // same channel-update path the settings drawer uses (after the channel exists)
@@ -291,13 +326,15 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   }
 
   return (
-    <div className="drawer-scrim" onClick={onClose}>
-      <div className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="">
+      <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">New channel</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
           <div className="field"><label>Channel name</label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. RTM News 24" />
           </div>
+          <TypePicker appliesTo="tv" value={typeId} onChange={(id) => setTypeId(id)} />
+          <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact />
 
           <div className="field"><label>Type</label>
             <div className="presets">
@@ -314,7 +351,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
               <SourceInput protocols={protocols} value={tSrc} onChange={setTSrc} label="Primary source" />
               <div className="toggle-row">
                 <div><div className="tt">Backup source</div><div className="td">Optional failover input of the same feed.</div></div>
-                <div className={`sw ${tBackupOn ? '' : 'off'}`} onClick={() => setTBackupOn(v => !v)}><i /></div>
+                <div className={`sw ${tBackupOn ? '' : 'off'}`} {...pressable((e: any) => { ((() => setTBackupOn(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
               </div>
               {tBackupOn && <SourceInput protocols={protocols} value={tBackup} onChange={setTBackup} label="Backup source" />}
 
@@ -323,7 +360,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
                 {ladder.map((r, i) => (
                   <div key={r.height} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                     <div className={`selchip ${r.on ? 'sel' : ''}`} style={{ minWidth: 78, justifyContent: 'center' }}
-                      onClick={() => setLadder(l => l.map((x, j) => j === i ? { ...x, on: !x.on } : x))}>{r.height}p</div>
+                      {...pressable((e: any) => { ((() => setLadder(l => l.map((x, j) => j === i ? { ...x, on: !x.on } : x))) as any)(e) })} data-a11y-click="">{r.height}p</div>
                     <input className="inp" style={{ maxWidth: 130, opacity: r.on ? 1 : 0.45 }} disabled={!r.on}
                       value={r.bitrateKbps} onChange={e => setLadder(l => l.map((x, j) => j === i ? { ...x, bitrateKbps: Number(e.target.value.replace(/[^0-9]/g, '')) || 0 } : x))} />
                     <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>kbps</span>
@@ -410,7 +447,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
           <div className="sec-label">Subtitles</div>
           <div className="toggle-row">
             <div><div className="tt">Live captions / subtitles</div><div className="td">The spoken language is detected automatically, chunk by chunk, and translated into each selected output language.</div></div>
-            <div className={`sw ${capOn ? '' : 'off'}`} onClick={() => setCapOn(v => !v)}><i /></div>
+            <div className={`sw ${capOn ? '' : 'off'}`} {...pressable((e: any) => { ((() => setCapOn(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
           </div>
           {capOn && (
             <div className="field"><label>Output languages</label>
