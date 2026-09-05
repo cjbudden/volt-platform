@@ -9,7 +9,7 @@ import { config } from '../config';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { liveDirFor } from './liveOrigin';
-import { computePipelineHealth, type PipelineHealth } from './pipelineHealth';
+import { computePipelineHealth, recoveryOf, type PipelineHealth } from './pipelineHealth';
 import { recommendInstance, buildBilling, type Billing } from './billing';
 
 const DVR_MAX_SEC = 14400; // 4h cap for 24x7 channels
@@ -21,6 +21,17 @@ export interface ChannelDetail {
   dvr: { effective_sec: number; max_sec: number; mode: string; source: 'channel' | 'profile'; capped: boolean };
   captions: { enabled: boolean; targets: string[]; source_lang: string };
   epgEnabled: boolean;
+  /** Put this channel back on air after a control-plane restart. */
+  autoConnect: boolean;
+  /** Whether it is MEANT to be running, which survives a crash. */
+  desiredState: 'running' | 'stopped';
+  /** Set only when auto-connect has stopped trying; carries the reason. */
+  resumeGaveUpAt: string | null;
+  resumeLastError: string | null;
+  /** Set once this run showed server, input, encoder and output all healthy:
+   *  only then will auto connect put it back after a fault. */
+  resumeArmedAt: string | null;
+  resumeAttempts: number;
   ladder: { height: number; bitrate_kbps: number }[];
   sources: any[];
   viewers: { current: number; peak: number; peakAt: string; trendPct: number; series: { t: number; v: number }[] };
@@ -79,16 +90,43 @@ function encoderLogTail(channelId: string): { ts: string; level: string; title: 
   } catch { return []; }
 }
 
-/** Newest HLS/DASH manifest mtime (ms) under the channel's origin — 0 if none.
- *  Shaka rewrites these every new segment, so a recent mtime = output is advancing. */
+/**
+ * Newest HLS/DASH manifest mtime (ms) under the stream's origin — 0 if none.
+ * Shaka rewrites these on every new segment, so a recent mtime means the
+ * output is advancing.
+ *
+ * IT MUST LOOK ONE LEVEL DOWN AS WELL. For TV, Shaka writes master.m3u8 and
+ * manifest.mpd into the run root and keeps rewriting them, so the root scan
+ * was enough. Radio does not work that way: the run-root master.m3u8 is
+ * written ONCE at start and ffmpeg advances audio/index.m3u8 in a
+ * subdirectory. Scanning only the root therefore measured the age of a file
+ * that never changes, and every healthy station's output age grew from the
+ * moment it started — degraded after fifteen seconds, "no new segments for
+ * 3600s" after an hour. The radio detail page read the right file and said
+ * healthy, so the channels list and the live board contradicted it all day.
+ */
 function newestManifestMtimeMs(channelId: string): number {
+  const newestIn = (dir: string): number => {
+    let newest = 0;
+    try {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (e.isFile() && (e.name.endsWith('.m3u8') || e.name.endsWith('.mpd'))) {
+          try { const m = statSync(join(dir, e.name)).mtimeMs; if (m > newest) newest = m; } catch { /* ignore */ }
+        }
+      }
+    } catch { /* ignore */ }
+    return newest;
+  };
   try {
     const dir = liveDirFor(channelId);   // per-run namespace: probe the CURRENT run
-    let newest = 0;
-    for (const f of readdirSync(dir)) {
-      if (f.endsWith('.m3u8') || f.endsWith('.mpd')) {
-        try { const m = statSync(join(dir, f)).mtimeMs; if (m > newest) newest = m; } catch { /* ignore */ }
-      }
+    let newest = newestIn(dir);
+    // One level of rendition directories (audio/, 720p/, …). Not deeper: the
+    // point is to find the playlist a packager is rewriting, and those live
+    // beside their segments.
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      const m = newestIn(join(dir, e.name));
+      if (m > newest) newest = m;
     }
     return newest;
   } catch { return 0; }
@@ -101,32 +139,41 @@ function newestManifestMtimeMs(channelId: string): number {
 /** launched_at (ms) of the running encoder instance, or null when none is running.
  *  Status/events older than this belong to a PREVIOUS run: using them while a new run
  *  boots painted a flash of stale errors on every clean start. */
-async function runningSinceMs(channelId: string): Promise<number | null> {
+export async function runningSinceMs(channelId: string, kind: OwnerKind = 'channel'): Promise<number | null> {
+  const col = kind === 'event' ? 'event_id' : 'channel_id';
   const inst = await one<any>(
-    `SELECT min(launched_at) AS since FROM instances WHERE channel_id = $1 AND terminated_at IS NULL`,
+    `SELECT min(launched_at) AS since FROM instances WHERE ${col} = $1 AND terminated_at IS NULL`,
     [channelId]);
   return inst?.since ? new Date(inst.since).getTime() : null;
 }
+
+/** Channels and events run the SAME encoder and report through the SAME tables;
+ *  only the owning column differs. Everything keyed by the owner's id on disk
+ *  (the origin dir, encoder.log, the manifests) is identical for both. */
+export type OwnerKind = 'channel' | 'event';
 const RUN_GRACE_MS = 2000;
 
-function scopeToRun<T extends { ts: string }>(evs: T[], runSince: number | null): T[] {
+export function scopeToRun<T extends { ts: string }>(evs: T[], runSince: number | null): T[] {
   if (!runSince) return evs;
   return evs.filter((e) => new Date(e.ts).getTime() >= runSince - RUN_GRACE_MS);
 }
 
-function scopeStatusToRun(st: any, runSince: number | null): any {
+export function scopeStatusToRun(st: any, runSince: number | null): any {
   if (!st || !runSince) return st;
   const upd = st.updated_at ? new Date(st.updated_at).getTime() : 0;
   return upd < runSince - RUN_GRACE_MS ? null : st;   // stale report from the previous run
 }
 
-export async function loadChannelHealthLite(channel: any, nowMs: number): Promise<PipelineHealth> {
-  const runSince = await runningSinceMs(channel.id);
+export async function loadChannelHealthLite(
+  channel: any, nowMs: number, kind: OwnerKind = 'channel'
+): Promise<PipelineHealth> {
+  const col = kind === 'event' ? 'event_id' : 'channel_id';
+  const runSince = await runningSinceMs(channel.id, kind);
   const st = scopeStatusToRun(await one<any>(
     `SELECT output_available, active_source, fallback_in_use, filler_in_use, packager_ok, sources, updated_at
-       FROM stream_status WHERE channel_id = $1`, [channel.id]), runSince);
+       FROM stream_status WHERE ${col} = $1`, [channel.id]), runSince);
   const evs = scopeToRun(await query<any>(
-    `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]), runSince);
+    `SELECT seq, type, detail, ts FROM stream_events WHERE ${col} = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]), runSince);
   const encTail = encoderLogTail(channel.id);
   const logTailErrors = encTail.filter((l) => l.level === 'down' || l.level === 'warn').map((l) => l.detail).reverse();
   const outMtime = newestManifestMtimeMs(channel.id);
@@ -136,12 +183,14 @@ export async function loadChannelHealthLite(channel: any, nowMs: number): Promis
     ownerStatus: channel.status,
     st,
     events: evs,
+    runStartedAt: runSince,
     logTailErrors,
     hasPrimarySource: Object.keys(sstates).length > 0,
     packagingLabel: '',
     outputFresh: outputAgeMs != null ? outputAgeMs < 15000 : false,
     outputAgeMs,
     onAirPublished: channel.on_air === true,
+    recovery: recoveryOf(channel),
   });
 }
 
@@ -212,12 +261,14 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     ownerStatus: channel.status,
     st,
     events: evs,
+    runStartedAt: runSince,
     logTailErrors,
     hasPrimarySource: sources.some((s: any) => s.role === 'primary' && s.ingest_url) || sources.length > 0,
     packagingLabel: packagingLabel(profile),
     outputFresh,
     outputAgeMs: outMtime > 0 ? (nowMs - outMtime) : null,
     onAirPublished: channel.on_air === true,
+    recovery: recoveryOf(channel),
   });
   // back-compat: `degraded` now means "a gate is failed or degraded" (a REAL problem,
   // not merely 'starting'). This kills the false OUTPUT ERROR during warm-up.
@@ -304,6 +355,12 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   return {
     kind: 'channel', group: group ? { id: group.id, name: group.name } : null, profile, dvr, captions,
     epgEnabled: channel.epg_enabled !== false,
+    autoConnect: channel.auto_connect !== false,
+    desiredState: (channel.desired_state ?? 'stopped') as 'running' | 'stopped',
+    resumeGaveUpAt: channel.resume_gave_up_at ?? null,
+    resumeLastError: channel.resume_last_error ?? null,
+    resumeArmedAt: channel.resume_armed_at ?? null,
+    resumeAttempts: Number(channel.resume_attempts ?? 0) || 0,
     ladder, sources, viewers, epg, statusBoard, log, health, billing, degraded,
     onAir, public: publicBlock,
     watermark: {

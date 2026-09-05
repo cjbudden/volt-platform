@@ -1,7 +1,128 @@
 // Typed client for the Volt control-plane API (same-origin via the Vite proxy).
+
+/* ============================================================================
+ *  THE SESSION, AND WHY IT USED TO END EVERY FIFTEEN MINUTES.
+ *
+ *  The control plane issues a short access token AND a fourteen-day refresh
+ *  token, stores the refresh token's hash, and exposes POST /auth/refresh to
+ *  exchange it. All of that worked. Nothing in the console ever called it: the
+ *  sign-in screen read `r.access` and dropped `r.refresh` on the floor, and the
+ *  only 401 handling anywhere was `token = ''` followed by a bounce to the
+ *  login form.
+ *
+ *  So session length was ACCESS_TTL of WALL CLOCK, and nothing an operator did
+ *  could extend it. Fifteen minutes into a broadcast, mid-edit, signed out.
+ *
+ *  WHAT REPLACES IT, and the three things that make it safe:
+ *
+ *  SINGLE FLIGHT. This console fires a lot of concurrent requests -- the level
+ *  poll every four seconds, the live board, the station list. When the access
+ *  token lapses they do not fail one at a time, they all fail at once, and a
+ *  refresh per failure would be a stampede against an endpoint that ROTATES the
+ *  token: the first response invalidates the credential the other nine are
+ *  still holding, and the operator is signed out by the fix. One shared promise;
+ *  everybody waits on the same exchange.
+ *
+ *  RETRY ONCE, NEVER LOOP. A 401 triggers at most one refresh-and-retry per
+ *  request. If the retry is refused too then the session really is over, and
+ *  saying so once beats a page that reloads itself forever.
+ *
+ *  THE REFRESH TOKEN LIVES IN MEMORY, exactly where the access token already
+ *  lived. Persisting it would keep a session across a page reload, which is
+ *  worth having and is a DIFFERENT decision with a different risk: anything in
+ *  localStorage is readable by any script that gets onto the page. Not smuggled
+ *  in under a bug fix.
+ *
+ *  IDLE IS NOT ACTIVITY, and that distinction matters here more than in most
+ *  apps, because this console polls whether or not a human is present. A tab
+ *  left open overnight generates constant traffic; treating that as "the
+ *  operator is working" would renew the session until the fourteen-day cap. So
+ *  the PROACTIVE refresh -- the one that keeps a working session from ever
+ *  seeing a 401 -- is gated on real user input. The REACTIVE one is not:
+ *  whatever a page was doing when the token lapsed, coming back and clicking
+ *  must work rather than dump the operator at a login screen.
+ * ========================================================================= */
 let token = ''
+let refreshToken = ''
+/** Epoch ms when the current access token expires. 0 = unknown. */
+let accessExpiresAt = 0
+/** Last real user input. Deliberately NOT updated by API traffic. */
+let lastInputAt = Date.now()
+
+/** Renew this long before expiry, so a request never races the boundary. */
+const REFRESH_LEAD_MS = 60_000
+/** Proactive refresh only if the operator did something within this window. */
+const ACTIVE_WINDOW_MS = 10 * 60_000
+
 export function setToken(t: string) { token = t }
 export function getToken() { return token }
+
+/** Called by the sign-in screen with the whole login response. */
+export function setSession(s: { access: string; refresh?: string; expiresIn?: number }) {
+  token = s.access
+  if (s.refresh) refreshToken = s.refresh
+  accessExpiresAt = s.expiresIn ? Date.now() + s.expiresIn * 1000 : 0
+  lastInputAt = Date.now()
+}
+
+export function clearSession() { token = ''; refreshToken = ''; accessExpiresAt = 0 }
+
+/** The refresh token, for the logout call that revokes it server-side. */
+export function getRefreshToken() { return refreshToken }
+
+/** Mark real operator input. Wired to pointer and key events in App.tsx. */
+export function noteActivity() { lastInputAt = Date.now() }
+const activeRecently = () => Date.now() - lastInputAt < ACTIVE_WINDOW_MS
+
+/** The shared in-flight exchange. See SINGLE FLIGHT above. */
+let refreshing: Promise<boolean> | null = null
+
+async function refreshAccess(): Promise<boolean> {
+  if (!refreshToken) return false
+  if (refreshing) return refreshing
+  refreshing = (async () => {
+    try {
+      const r = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ refresh: refreshToken }),
+      })
+      if (!r.ok) {
+        // The server has REFUSED this credential: expired, revoked, or the user
+        // disabled. It will not start working again, so drop it and let the
+        // caller's 401 reach the sign-out handler.
+        refreshToken = ''
+        return false
+      }
+      const d = await r.json()
+      if (!d?.access) { refreshToken = ''; return false }
+      token = d.access
+      // The server ROTATES, so the reply carries the next refresh token and the
+      // one just sent is already revoked. Dropping it here would sign the
+      // operator out at the FOLLOWING refresh rather than this one, which is
+      // the kind of bug that presents as intermittent.
+      if (d.refresh) refreshToken = d.refresh
+      accessExpiresAt = d.expiresIn ? Date.now() + d.expiresIn * 1000 : 0
+      return true
+    } catch {
+      // A dropped packet is not an expired session, so the refresh token is
+      // KEPT and the next request tries again. Returning false only means this
+      // attempt failed; the caller surfaces its original error.
+      return false
+    } finally {
+      refreshing = null
+    }
+  })()
+  return refreshing
+}
+
+/** Renew before the token lapses, but only for a console someone is using. */
+async function refreshIfDueSoon() {
+  if (!refreshToken || !accessExpiresAt) return
+  if (Date.now() < accessExpiresAt - REFRESH_LEAD_MS) return
+  if (!activeRecently()) return
+  await refreshAccess()
+}
 
 /**
  * An API failure that still knows what KIND of failure it was.
@@ -37,19 +158,36 @@ export class ApiError extends Error {
 let onUnauthorized: (() => void) | null = null
 export function setUnauthorizedHandler(fn: (() => void) | null) { onUnauthorized = fn }
 
+const send = (path: string, opts: RequestInit) => fetch('/api' + path, {
+  ...opts,
+  headers: {
+    'content-type': 'application/json',
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+    ...(opts.headers || {}),
+  },
+})
+
 async function req(path: string, opts: RequestInit = {}) {
-  const r = await fetch('/api' + path, {
-    ...opts,
-    headers: {
-      'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...(opts.headers || {}),
-    },
-  })
+  // The token is about to lapse and somebody is working: renew first, so this
+  // request never sees the boundary at all.
+  await refreshIfDueSoon()
+
+  let r = await send(path, opts)
+
+  // THE SESSION MIGHT NOT BE OVER. It used to be assumed to be. One exchange,
+  // one retry; `refreshAccess` is single-flight, so ten simultaneous 401s cause
+  // one refresh and ten retries rather than ten refreshes that revoke each
+  // other. The retry cannot itself retry: there is no recursion here.
+  if (r.status === 401 && token && refreshToken) {
+    if (await refreshAccess()) r = await send(path, opts)
+  }
+
   if (!r.ok) {
     let msg = `${r.status}`
     try { msg = (await r.json()).error || msg } catch { try { msg = await r.text() } catch { /* no body */ } }
-    if (r.status === 401 && token) { token = ''; onUnauthorized?.() }
+    // Only now is it really over: either there was no refresh token, or the
+    // exchange was refused, or the retry failed on its own merits.
+    if (r.status === 401 && token) { clearSession(); onUnauthorized?.() }
     throw new ApiError(r.status, msg)
   }
   if (r.status === 204) return null
@@ -103,6 +241,10 @@ export interface ChannelDetail extends Channel {
   /** Set only once auto-connect has stopped trying. Carries the reason. */
   resumeGaveUpAt?: string | null
   resumeLastError?: string | null
+  /** Set once this run showed server, input, encoder and output all healthy;
+   *  auto connect only puts back a stream that has this. */
+  resumeArmedAt?: string | null
+  resumeAttempts?: number
   group: { id: string; name: string } | null
   profile: {
     name: string; workflow_type: 'transcode' | 'package_only'; packaging: string
@@ -155,6 +297,22 @@ export interface PipelineHealth {
   onAir: boolean
   live: boolean
   overall: 'idle' | 'starting' | 'ready' | 'onair' | 'degraded' | 'error' | 'stopped'
+  settling?: boolean
+  settlingReason?: string | null
+  /** What the platform thinks went wrong, when something did. */
+  diagnosis?: FailureDiagnosis | null
+}
+
+/** The server's reading of a failure: a verdict, why, what to do, and the raw
+ *  lines it was built from. See volt-app/src/services/failureDiagnosis.ts. */
+export interface FailureDiagnosis {
+  gate: string
+  verdict: string
+  reason: string
+  nextStep: string
+  confidence: 'high' | 'medium' | 'low'
+  evidence: string[]
+  retry: { willRetry: boolean; note: string }
 }
 
 export interface TestStreamStatus {
@@ -450,8 +608,12 @@ export interface PlayerReport {
 }
 
 export const api = {
-  login: (email: string, password: string) =>
+  login: (email: string, password: string): Promise<{ access: string; refresh?: string; expiresIn?: number }> =>
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  /** Revoke the refresh token server-side. Signing out without this leaves a
+   *  fourteen-day credential live for a session the operator believes is over. */
+  logout: () =>
+    req('/auth/logout', { method: 'POST', body: JSON.stringify({ refresh: getRefreshToken() }) }),
   groups: (): Promise<Group[]> => req('/groups'),
   // caption OUTPUT languages the pipeline can deliver (single source of truth for pickers)
   captionLanguages: (): Promise<{ languages: { code: string; label: string }[] }> => req('/caption-languages'),
@@ -475,6 +637,10 @@ export const api = {
   search: (q: string): Promise<{ results: SearchHit[] }> => req('/search?q=' + encodeURIComponent(q)),
   startStop: (id: string, action: 'start' | 'stop') =>
     req(`/channels/${id}/${action}`, { method: 'POST' }),
+  /** Stop (or resume) auto connect by hand. Off halts retries and leaves the
+   *  evidence untouched; on makes the stream eligible once seen healthy. */
+  setAutoConnect: (kind: 'channel' | 'event' | 'radio', id: string, enabled: boolean) =>
+    req(`/${kind === 'radio' ? 'radio' : kind + 's'}/${id}/auto-connect`, { method: 'POST', body: JSON.stringify({ enabled }) }),
   // Go on air / take off air — the PUBLIC publish toggle (opens/closes /live/:id/...).
   setAir: (id: string, on: boolean): Promise<Channel> =>
     req(`/channels/${id}/air`, { method: 'POST', body: JSON.stringify({ on }) }),
@@ -888,7 +1054,14 @@ export interface RadioStationRow {
   recording_enabled?: boolean; recording_retention_sec?: number | string | null
   brand_ref?: string | null; on_air?: boolean; created_at: string; version: number
   pipeline: RadioPipelineState
+  /** Everyone receiving the station, across delivery paths. */
+  listeners?: ListenerCounts
+  /** Whether the SOURCE protocol can send a now-playing title at all. Decided
+   *  on the server so the console does not keep a weaker second copy of the
+   *  rule. Absent on a payload from an older API. */
+  carriesTitles?: boolean
   nowPlaying: string | null; nowPlayingClass: RadioClass | null
+  nowPlayingView?: NowPlayingView
   outputs: RadioOutputs
   publicUrls?: RadioOutputs
   pipelineState?: PipelineHealth['overall']
@@ -910,8 +1083,21 @@ export interface RadioStationDetail extends RadioStationRow {
   log: { ts: string; level: string; title: string; detail: string }[]
   publicAvailable: boolean
 }
+/** The resolved now-playing line. The server makes the four-way decision (see
+ *  services/radio/nowPlaying.ts); the console only paints it, so the list, the
+ *  detail payload and this poll cannot drift apart the way they did when the
+ *  render site did `title || 'Untitled break'`. */
+export type NowKind = 'off' | 'icy' | 'epg' | 'gap' | 'no_metadata'
+export interface NowPlayingView { kind: NowKind; text: string; note: string | null }
+/** Everyone receiving the station. `total` is the only figure that carries the
+ *  bare word "listeners"; `mp3` alone is what the console used to show. */
+export interface ListenerCounts { mp3: number; players: number; total: number }
 export interface RadioNowPlaying {
-  running: boolean; listeners: number
+  running: boolean
+  /** THE TOTAL across delivery paths, not just the MP3 clients. */
+  listeners: number
+  listenerCounts?: ListenerCounts
+  nowPlayingView?: NowPlayingView
   station: RadioIcyState['station'] | null
   title: string | null; class: RadioClass | null; since: number | null; streamUrl: string | null
   entry: { id: string; title: string; starts_at: string; metadata?: any } | null

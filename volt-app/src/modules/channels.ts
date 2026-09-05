@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, one, tx } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
-import { asyncHandler, notFound, conflict } from '../util/http';
+import { asyncHandler, notFound, conflict, badRequest } from '../util/http';
 import { orchestrator } from '../services/orchestrator';
 import { validateEntityMetadata } from './metadataSchemas';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
@@ -24,6 +24,9 @@ const CHANNEL_EDITABLE = [
   'watermark_enabled', 'watermark_ref', 'watermark_position',
   'watermark_offset_x', 'watermark_offset_y', 'watermark_opacity', 'watermark_scale',
   'brand_ref', 'radio_config',
+  // AUTO CONNECT. Whether a reboot puts this channel back on air if it was
+  // running and nobody recorded a stop. Default true; see migration 0017.
+  'auto_connect',
 ];
 
 // Watermark / channel brand overlay. `ref` is a library image URL (like filler_slate_ref);
@@ -221,6 +224,9 @@ channelsRouter.post(
 const editSchema = z.object({
   name: z.string().min(1).optional(),
   enabled: z.boolean().optional(),
+  // Put this channel back on air after a control-plane reboot, if it was
+  // running and nobody recorded a stop. Default true (migration 0017).
+  autoConnect: z.boolean().optional(),
   recordingRetentionDays: z.number().int().positive().nullable().optional(),
   recordingEnabled: z.boolean().optional(),
   schemaId: z.string().uuid().nullable().optional(),
@@ -272,6 +278,7 @@ const editChannel = asyncHandler(async (req, res) => {
   const patch: Record<string, any> = {};
   if (has('name')) patch.name = body.name;
   if (has('enabled')) patch.enabled = body.enabled;
+  if (has('autoConnect')) patch.auto_connect = body.autoConnect;
   if (has('recordingEnabled')) patch.recording_enabled = body.recordingEnabled;
   if (has('recordingRetentionDays')) patch.recording_retention_days = body.recordingRetentionDays ?? null;
   if (has('recordingRetentionSec')) {
@@ -401,7 +408,33 @@ channelsRouter.get(
 channelsRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    // In production: terminate any running encoder first, then delete.
+    // STOP IT FIRST. The comment here used to say "in production: terminate any
+    // running encoder first" and then delete anyway.
+    //
+    // That was survivable while the instances FK was ON DELETE SET NULL, since
+    // the row lingered. Migration 0013 made it CASCADE, which is right — but it
+    // means deleting a live channel now takes the ONLY record of its encoder
+    // with it. The task keeps running, keeps writing to the origin, and keeps
+    // costing, and nothing in the system can reach it any more: stopStream
+    // looks up instances by channel_id and the channel is gone.
+    //
+    // Events already refuse this. Channels now do too, with the same words.
+    const owned = await one<any>(
+      `SELECT c.id, c.status FROM channels c JOIN groups g ON g.id = c.group_id
+        WHERE c.id = $1 AND g.account_id = $2`,
+      [req.params.id, accountId(req)]
+    );
+    if (!owned) throw notFound('Channel not found');
+    if (owned.status === 'live') throw badRequest('Stop the channel before deleting it');
+    // A channel that is not `live` can still have an instance the reconciler
+    // has not caught up with yet. Deleting that is the same orphan by a slower
+    // route, so it is refused for the same reason.
+    const running = await one<any>(
+      `SELECT 1 FROM instances WHERE channel_id = $1 AND terminated_at IS NULL LIMIT 1`,
+      [req.params.id]
+    );
+    if (running) throw badRequest('This channel still has a running encoder. Stop it before deleting.');
+
     const row = await one<any>(
       `DELETE FROM channels c USING groups g
         WHERE c.group_id = g.id AND c.id = $1 AND g.account_id = $2 RETURNING c.id, c.name`,
@@ -547,7 +580,14 @@ channelsRouter.post(
     if (on && (chan.status !== 'live' || !outputHasValidContent(chan.id))) {
       throw conflict('Output is not ready: cannot go on air until the packaged output is producing valid content.');
     }
-    await query('UPDATE channels SET on_air = $1 WHERE id = $2', [on, chan.id]);
+    // The column and the ledger move together. See services/airSessions.ts:
+    // this used to be a bare UPDATE and it left no record at all, which is why
+    // "total hours on air" had no source for channels.
+    const { setOnAir } = await import('../services/airSessions');
+    await setOnAir('channel', chan.id, on, {
+      actor: actor(req).label,
+      reason: on ? undefined : 'operator',
+    });
     const row = await one('SELECT * FROM channels WHERE id = $1', [chan.id]);
     res.json(row);
   })
@@ -566,10 +606,46 @@ channelsRouter.post(
     if (!owned) throw notFound('Channel not found');
     if (req.params.action === 'start') await orchestrator.startStream('channel', req.params.id);
     else {
-      await orchestrator.stopStream('channel', req.params.id, `api:operator (user ${accountId(req)})`);
-      // stopping the encoder also takes the channel off air (the public URL closes)
-      await query('UPDATE channels SET on_air = false WHERE id = $1', [req.params.id]);
+      await orchestrator.stopStream('channel', req.params.id, `api:operator (user ${accountId(req)})`, 'operator');
+      // Stopping the encoder also takes the channel off air (the public URL
+      // closes). Recorded with its own reason: an availability report has to be
+      // able to separate "the operator ended the broadcast" from "the stream
+      // fell over", and both arrive here as on_air going false.
+      const { setOnAir } = await import('../services/airSessions');
+      await setOnAir('channel', req.params.id, false, {
+        actor: actor(req).label, reason: 'stream stopped',
+      });
     }
+    const row = await one('SELECT * FROM channels WHERE id = $1', [req.params.id]);
+    res.json(row);
+  })
+);
+
+/**
+ * AUTO CONNECT, BY HAND. `{ enabled: false }` stops the retry loop right now
+ * and leaves the counters, the last error and the log exactly as they are, so
+ * the operator can read why the stream fell over without it being relaunched
+ * underneath them. `{ enabled: true }` puts it back; the stream still has to
+ * be seen healthy before it is armed.
+ */
+channelsRouter.post(
+  '/:id/auto-connect',
+  asyncHandler(async (req, res) => {
+    const owned = await one<any>(
+      `SELECT o.id, o.auto_connect FROM channels o JOIN groups g ON g.id = o.group_id
+        WHERE o.id = $1 AND g.account_id = $2`,
+      [req.params.id, accountId(req)]
+    );
+    if (!owned) throw notFound('Channel not found');
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
+    const { setAutoConnect } = await import('../services/orchestrator/resume');
+    const who = actor(req);
+    await setAutoConnect('channel', req.params.id, enabled, who.label);
+    await writeAudit(null, {
+      accountId: accountId(req), userId: who.userId, label: who.label,
+      action: 'update', entityType: 'channel', entityId: req.params.id,
+      changes: { auto_connect: { from: owned.auto_connect, to: enabled } },
+    }).catch(() => {});
     const row = await one('SELECT * FROM channels WHERE id = $1', [req.params.id]);
     res.json(row);
   })

@@ -18,6 +18,9 @@
 // ============================================================================
 
 export type GateName = 'server' | 'input' | 'encoder' | 'output' | 'public';
+import { config } from '../config';
+import { diagnoseFailure, eventLine, type FailureDiagnosis } from './failureDiagnosis';
+
 export type GateStatus = 'idle' | 'starting' | 'ready' | 'healthy' | 'degraded' | 'failed' | 'stopped';
 
 export interface Gate {
@@ -35,6 +38,13 @@ export interface PipelineHealth {
   primaryError: { gate: GateName; label: string; message: string } | null;
   onAir: boolean;
   live: boolean;
+  /**
+   * A fault was recorded, but the run is young enough that it is still being
+   * given a chance to recover. Presented as 'starting' rather than 'error'.
+   */
+  settling?: boolean;
+  /** The fault that was recorded, kept verbatim from the moment it happened. */
+  settlingReason?: string | null;
   // ONE consistent roll-up of the gates, used everywhere (list + detail) so the
   // channel's status never disagrees with itself:
   //   error    — a gate failed (blocks the pipeline)
@@ -44,6 +54,8 @@ export interface PipelineHealth {
   //   starting — live and warming up, no error yet
   //   stopped/idle — not running
   overall: OverallStatus;
+  /** What the platform thinks went wrong, when something did. See failureDiagnosis.ts. */
+  diagnosis?: FailureDiagnosis | null;
 }
 
 interface Ev { seq?: number; type: string; detail: any; ts?: any }
@@ -70,6 +82,40 @@ export interface HealthInput {
   outputFresh?: boolean;      // GROUND TRUTH: the origin manifest is advancing on disk now
   outputAgeMs?: number | null; // ms since the newest manifest was rewritten (null = none yet)
   onAirPublished?: boolean;   // the operator has taken this channel ON AIR (public URL open)
+  /**
+   * WHEN THE RUN NOW IN PROGRESS WAS LAUNCHED, epoch ms.
+   *
+   * The orchestrator writes status='live' the moment it launches the task, but
+   * the encoder does not post channel.start until a second or two later. In
+   * that gap the newest channel.start in the table belongs to the PREVIOUS run,
+   * and its channel.stop is newer still -- so the run window below would
+   * describe a station that is starting perfectly well using the reason the
+   * last one died. That is the error that flashes on screen at every startup
+   * and then vanishes.
+   *
+   * Optional, and absent means "no boundary known", which is exactly the old
+   * behaviour. A caller that cannot say when the run started is not made worse.
+   */
+  runStartedAt?: number | null;
+  /** Auto connect state, so the diagnosis can say whether a retry is coming. */
+  recovery?: {
+    autoConnect?: boolean; armed?: boolean; attempts?: number; maxAttempts?: number;
+    gaveUp?: boolean; lastError?: string | null;
+  } | null;
+}
+
+/** The auto connect columns of a channel or event row, in the shape the
+ *  diagnosis wants. One place, so the three health builders agree. */
+export function recoveryOf(row: any): NonNullable<HealthInput['recovery']> | null {
+  if (!row) return null;
+  return {
+    autoConnect: row.auto_connect !== false,
+    armed: row.resume_armed_at != null,
+    attempts: Number(row.resume_attempts ?? 0) || 0,
+    maxAttempts: config.orchestrator.resumeMaxAttempts,
+    gaveUp: row.resume_gave_up_at != null,
+    lastError: row.resume_last_error ?? null,
+  };
 }
 
 export function computePipelineHealth(inp: HealthInput): PipelineHealth {
@@ -77,9 +123,27 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   const live = ownerStatus === 'live';
   const ended = ownerStatus === 'ended';
 
-  // reason only about the CURRENT run: everything at/after the latest channel.start
-  const startIdx = events.findIndex((e) => e.type === 'channel.start');
-  const run = startIdx >= 0 ? events.slice(0, startIdx + 1) : events.slice();
+  // REASON ONLY ABOUT THE CURRENT RUN, and about nothing that predates it.
+  //
+  // Two boundaries, because one is not enough. The channel.start boundary finds
+  // the newest run the ENCODER has reported. The launch boundary discards
+  // anything older than the run the ORCHESTRATOR has actually started. During
+  // the gap between the two -- every startup passes through it -- only the
+  // second one exists, and without it the previous run's crash is read as this
+  // run's state.
+  const runStartedAt = inp.runStartedAt ?? null;
+  const fresh = runStartedAt == null
+    ? events
+    : events.filter((e) => {
+        const t = e.ts ? Date.parse(String(e.ts)) : NaN;
+        // A GRACE OF ONE SECOND on the boundary itself. The launch timestamp and
+        // the encoder's first event are written by different processes against
+        // different clocks, and losing a legitimate channel.start to a few
+        // milliseconds of skew would be a worse bug than the one being fixed.
+        return !Number.isFinite(t) || t >= runStartedAt - 1000;
+      });
+  const startIdx = fresh.findIndex((e) => e.type === 'channel.start');
+  const run = startIdx >= 0 ? fresh.slice(0, startIdx + 1) : fresh.slice();
   const firstOf = (rx: RegExp) => run.find((e) => rx.test(e.type));
   const unresolved = (failRx: RegExp, okRx: RegExp) => {
     const fi = run.findIndex((e) => failRx.test(e.type));
@@ -198,6 +262,47 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   }
   gates.push({ gate: 'public', label: 'On air', billable: false, status: pubStatus, detail: pubDetail });
 
+  // ==========================================================================
+  //  THE SETTLING WINDOW: record the fault now, present it as an error later.
+  //
+  //  A pipeline takes seconds to come up, and auto connect retries a genuine
+  //  failure every twenty seconds without anybody watching. So a fault in the
+  //  first moments is usually one of two things that need no operator: the
+  //  pipeline still starting, or a blip the system is about to fix. Showing red
+  //  for both is how an operator learns to ignore red.
+  //
+  //  WHAT THIS IS NOT. It does not suppress, delay or discard the fault. Every
+  //  gate keeps its real detail, `settling` names the reason, and the caller can
+  //  render "starting - retrying after <reason>". The only thing that changes is
+  //  the STATUS a failed gate reports, and only while the run is young.
+  //
+  //  It applies to a LIVE run inside the window and to nothing else. A stopped
+  //  station reads stopped immediately; a station that has been failing for two
+  //  minutes reads error, which is the case that actually needs a person.
+  // ==========================================================================
+  const settleMs = Math.max(0, config.health.settleSeconds * 1000);
+  const runAgeMs = runStartedAt == null ? null : Date.now() - runStartedAt;
+  // IN THE WINDOW is not the same as SETTLING. A healthy station in its first
+  // ninety seconds is healthy, not "starting": the flag has to mean "a fault was
+  // recorded and is being held back", or every station reads as still coming up
+  // for its first minute and a half and the word stops meaning anything.
+  const inWindow = live && runAgeMs != null && runAgeMs < settleMs;
+  let settlingReason: string | null = null;
+  if (inWindow) {
+    for (const g of gates) {
+      if (g.status !== 'failed') continue;
+      // The reason is kept verbatim and carried on the gate. Losing it here
+      // would mean re-deriving it later from whatever is left in the log, which
+      // is how a startup failure ends up reported as something else entirely.
+      settlingReason = settlingReason ?? g.detail;
+      g.status = 'starting';
+      g.detail = `starting — ${g.detail}`;
+    }
+  }
+
+  // Settling only if something was actually held back.
+  const settling = settlingReason != null;
+
   // ---- primary error: first failed/degraded gate, with its real reason ------
   const order: GateName[] = ['server', 'input', 'encoder', 'output', 'public'];
   let primaryError: PipelineHealth['primaryError'] = null;
@@ -213,7 +318,13 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   const anyFailed = gates.some((g) => g.status === 'failed');
   const anyDegraded = gates.some((g) => g.status === 'degraded');
   let overall: OverallStatus;
-  if (anyFailed) overall = 'error';
+  // SETTLING WINS over the crash-derived roll-up. Converting the gates alone
+  // was not enough: `effLive` is false whenever the run has recorded a crash, so
+  // a settling station rolled up to 'idle' -- which reads as "nothing is
+  // happening" for a station that is actively being retried. While the window
+  // is open the honest word is 'starting'.
+  if (settling) overall = 'starting';
+  else if (anyFailed) overall = 'error';
   else if (anyDegraded) overall = 'degraded';
   else if (published && outputValid) overall = 'onair';
   else if (!effLive) overall = ended ? 'stopped' : 'idle';
@@ -222,5 +333,19 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
 
   // `onAir` is TRUE only when actually live to the public: published AND serving valid
   // content. `live` = the encoder run is up (billable), regardless of publish state.
-  return { gates, primaryError, onAir: published && outputValid, live: effLive, overall };
+  const diagnosis = diagnoseFailure({
+    gates, primaryError, settlingReason,
+    eventLines: run.filter((e) => /error|stop|down|stall|fail|silence|static/i.test(e.type)).map(eventLine),
+    logLines: logTailErrors,
+    recovery: inp.recovery ?? null,
+  });
+
+  return {
+    gates, primaryError, onAir: published && outputValid, live: effLive, overall,
+    // Named so the console can say "starting, retrying" with the captured
+    // reason rather than either a bare spinner or a red box.
+    settling: settling || false,
+    settlingReason,
+    diagnosis,
+  };
 }

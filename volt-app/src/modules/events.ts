@@ -13,7 +13,11 @@ eventsRouter.use(requireAuth);
 const EVENT_EDITABLE = ['name', 'scheduled_start', 'scheduled_end', 'server_start', 'server_stop',
   'public_start', 'public_end', 'recording_enabled', 'recording_retention_days', 'recording_retention_sec',
   'auto_vod', 'input_failover_enabled', 'auto_failback', 'input_loss_behavior', 'filler_slate_ref',
-  'schema_id', 'metadata'];
+  'schema_id', 'metadata',
+  // AUTO CONNECT after a reboot. Separate from the event's SCHEDULE, which
+  // still decides when the event runs: this answers only "it was started and
+  // nobody stopped it, so put it back".
+  'auto_connect'];
 
 /** Same source shape the channel forms use — events share the core workflow. */
 const sourceSchema = z.object({
@@ -80,6 +84,7 @@ const createSchema = z
     recordingRetentionDays: z.number().int().positive().nullable().optional(), // retention rule
     recordingRetentionSec: z.number().int().positive().nullable().optional(),
     autoVod: z.boolean().optional(),                        // derive a full-event VOD on recording close
+    autoConnect: z.boolean().optional(),                    // put back on air after a control-plane reboot
     sources: z.array(sourceSchema).optional(),              // same shape as channel sources
     inputFailoverEnabled: z.boolean().optional(),
     autoFailback: z.boolean().optional(),
@@ -155,6 +160,7 @@ const editEventSchema = z.object({
   recordingRetentionDays: z.number().int().positive().nullable().optional(),
   recordingRetentionSec: z.number().int().positive().nullable().optional(),
   autoVod: z.boolean().optional(),
+  autoConnect: z.boolean().optional(),   // put back on air after a reboot
   sources: z.array(sourceSchema).optional(),
   inputFailoverEnabled: z.boolean().optional(),
   autoFailback: z.boolean().optional(),
@@ -186,6 +192,7 @@ const editEvent = asyncHandler(async (req, res) => {
   if (has('recordingRetentionDays')) patch.recording_retention_days = b.recordingRetentionDays ?? null;
   if (has('recordingRetentionSec')) patch.recording_retention_sec = b.recordingRetentionSec ?? null;
   if (has('autoVod')) patch.auto_vod = b.autoVod;
+  if (has('autoConnect')) patch.auto_connect = b.autoConnect;
   if (has('inputFailoverEnabled')) patch.input_failover_enabled = b.inputFailoverEnabled;
   if (has('autoFailback')) patch.auto_failback = b.autoFailback;
   if (has('inputLossBehavior')) patch.input_loss_behavior = b.inputLossBehavior;
@@ -235,10 +242,12 @@ eventsRouter.delete(
     );
     if (!owned) throw notFound('Event not found');
     if (owned.status === 'live') throw badRequest('Stop the event before deleting it');
-    // instance rows reference the event with ON DELETE SET NULL, but the table
-    // CHECK requires an owner — remove the event's (terminated) instances first
-    // or the delete 500s for any event that ever ran.
-    await query('DELETE FROM instances WHERE event_id = $1', [req.params.id]);
+    // The instances table used to need clearing by hand right here: its FK was
+    // ON DELETE SET NULL while its CHECK demanded an owner, so deleting an
+    // event that had ever run aborted the whole statement. Migration 0013 made
+    // both owner FKs CASCADE, so the database handles it — and the channel
+    // delete path, which never carried this workaround and therefore 500'd on
+    // every channel that had ever started, is fixed by the same change.
     const row = await one<any>(
       `DELETE FROM events e USING groups g
         WHERE e.group_id = g.id AND e.id = $1 AND g.account_id = $2 RETURNING e.id, e.name`,
@@ -262,7 +271,37 @@ eventsRouter.post(
     );
     if (!owned) throw notFound('Event not found');
     if (req.params.action === 'start') await orchestrator.startStream('event', req.params.id);
-    else await orchestrator.stopStream('event', req.params.id, `api:operator (user ${accountId(req)})`);
+    else await orchestrator.stopStream('event', req.params.id, `api:operator (user ${accountId(req)})`, 'operator');
+    const row = await one('SELECT * FROM events WHERE id = $1', [req.params.id]);
+    res.json(row);
+  })
+);
+
+/**
+ * AUTO CONNECT, BY HAND. `{ enabled: false }` stops the retry loop right now
+ * and leaves the counters, the last error and the log exactly as they are, so
+ * the operator can read why the stream fell over without it being relaunched
+ * underneath them. `{ enabled: true }` puts it back; the stream still has to
+ * be seen healthy before it is armed.
+ */
+eventsRouter.post(
+  '/:id/auto-connect',
+  asyncHandler(async (req, res) => {
+    const owned = await one<any>(
+      `SELECT o.id, o.auto_connect FROM events o JOIN groups g ON g.id = o.group_id
+        WHERE o.id = $1 AND g.account_id = $2`,
+      [req.params.id, accountId(req)]
+    );
+    if (!owned) throw notFound('Event not found');
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
+    const { setAutoConnect } = await import('../services/orchestrator/resume');
+    const who = actor(req);
+    await setAutoConnect('event', req.params.id, enabled, who.label);
+    await writeAudit(null, {
+      accountId: accountId(req), userId: who.userId, label: who.label,
+      action: 'update', entityType: 'event', entityId: req.params.id,
+      changes: { auto_connect: { from: owned.auto_connect, to: enabled } },
+    }).catch(() => {});
     const row = await one('SELECT * FROM events WHERE id = $1', [req.params.id]);
     res.json(row);
   })

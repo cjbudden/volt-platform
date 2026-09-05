@@ -5,11 +5,12 @@ import { subscribeLive } from '../liveStatus'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
-import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, GATE_COLOR, type RetUnit } from '../scaffold'
+import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, GATE_COLOR, RecoveryNote, DiagnosisBlock, type RetUnit } from '../scaffold'
 // The meter reads the SAME quantity as the radio waveform and the clipping
 // workbench: linear peak amplitude. See audioLevel.ts.
 import { analyserPeak } from '../audioLevel'
 import { ShareDrawer } from '../ShareDrawer'
+import { pressable } from '../a11y'
 function fmtOffset(sec: number) {
   if (sec <= 0) return 'LIVE'
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60)
@@ -31,7 +32,9 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   const [nowMs, setNowMs] = useState(Date.now())
 
   async function load() {
-    try { setD(await api.channel(id)) } catch (e: any) { setErr(e.message) }
+    // Clearing `err` on success is half the fix; the other half is at the
+    // render guard below. Between them, a transient failure no longer sticks.
+    try { setD(await api.channel(id)); setErr('') } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id])
   // LIVE STATUS via SSE (production path): the shared client pushes a change for this
@@ -92,7 +95,14 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
     try { await api.startStop(d.id, 'stop'); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
 
-  if (err) return <div className="err" style={{ margin: 20 }}>Couldn’t load channel: {err}</div>
+  // ONLY when there is nothing to show. `err` is also written by Go on air,
+  // by adding a source and by dropping one, so an unconditional guard here
+  // meant a single rejected action — a 409 from the air gate, a blip on the
+  // six-second poll — replaced the entire page, players and Stop button
+  // included, with one line of red text, mid-broadcast, with no way back
+  // except navigating away. A failure that happened while we already have the
+  // channel loaded is shown as a banner over the working page instead.
+  if (err && !d) return <div className="err" style={{ margin: 20 }}>Couldn’t load channel: {err}</div>
   if (!d) return <div className="loading">Loading channel…</div>
 
   const live = published && sourceUp
@@ -126,13 +136,25 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   // always be available. A running instance is the authoritative signal.
   const hasRunningInstance = Array.isArray((d as any).instances) && (d as any).instances.length > 0
   const serverUp = sourceUp || hasRunningInstance || !!d.billing?.billable || health?.gates.find(g => g.gate === 'server')?.status === 'healthy'
+  // NO SOURCE, NO START. A start with nowhere to pull from cannot succeed; it
+  // used to be allowed and then reported as a failure. The button says why.
+  const hasSource = d.sources.some(s => !!s.ingest_url)
+  const noSourceTitle = 'No input source is configured. Set the primary input in Settings first.'
 
   return (
     <>
+      {/* A failure that arrived while the channel is already on screen: shown
+          as a dismissable banner OVER the working page, never instead of it. */}
+      {err && (
+        <div className="err" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ flex: 1 }}>{err}</span>
+          <button className="btn ghost" onClick={() => setErr('')}>Dismiss</button>
+        </div>
+      )}
       <div className="page-head">
         <div>
           <div className="crumb" style={{ marginBottom: 6 }}>
-            <span className="lnk" style={{ cursor: 'pointer', color: 'var(--brand)' }} onClick={onBack}>Channels</span>
+            <span className="lnk" style={{ cursor: 'pointer', color: 'var(--brand)' }} {...pressable((e: any) => { ((onBack) as any)(e) })} data-a11y-click="">Channels</span>
             &nbsp;/&nbsp; <b style={{ color: 'var(--text)' }}>{d.name}</b>
           </div>
           {/* identity row: same classes/tokens as every other detail page */}
@@ -171,9 +193,9 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>Settings
         </button>
         {!serverUp ? (
-          <button className="btn primary" disabled={busy} onClick={() => setConfirmStart(true)}
-            title="Brings the encoder up and begins ingesting the configured source">
-            {busy ? 'Starting…' : 'Start channel'}
+          <button className="btn primary" disabled={busy || !hasSource} onClick={() => setConfirmStart(true)}
+            title={hasSource ? 'Brings the encoder up and begins ingesting the configured source' : noSourceTitle}>
+            {busy ? 'Starting…' : hasSource ? 'Start channel' : 'Start channel (no source)'}
           </button>
         ) : (
           <>
@@ -198,6 +220,16 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
           </>
         )}
       </div>
+
+      {/* WHAT AUTO-CONNECT IS DOING. The give-up notice lived in the Settings
+          drawer and only appeared once it had already stopped trying, so the
+          whole middle of the story -- being retried, and why -- was invisible.
+          UNDER THE HEADER, not above the breadcrumb: it belongs with the other
+          failure banners it sits beside, and a notice floating above the page's
+          own title reads as if it were about something else. */}
+      <RecoveryNote row={d} state={d.health?.overall}
+        onAutoConnect={async (on) => { setBusy(true); try { await api.setAutoConnect('channel', d.id, on); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } }}
+        togglingAuto={busy} />
 
       {perr && (
         <div style={{
@@ -273,8 +305,8 @@ function fmtDur(sec: number): string {
 function StartConfirm({ d, onCancel, onConfirm }: { d: CD; onCancel: () => void; onConfirm: () => void }) {
   const b = d.billing
   return (
-    <div onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 60, display: 'grid', placeItems: 'center', padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 'min(460px,94vw)', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
+    <div {...pressable((e: any) => { ((onCancel) as any)(e) })} data-a11y-click="" style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 60, display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 'min(460px,94vw)', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
         <h2 style={{ margin: '0 0 6px' }}>Bring the encoder up?</h2>
         <p style={{ color: 'var(--muted)', marginTop: 0 }}>
           This starts the encoder for <b>{d.name}</b> and begins the source ingest. The encoder
@@ -313,8 +345,8 @@ function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefr
   const h = d.health
   const gates = h?.gates || []
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 60, display: 'grid', placeItems: 'center', padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 'min(920px,96vw)', maxHeight: '92vh', overflow: 'auto', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
+    <div {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="" style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 60, display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 'min(920px,96vw)', maxHeight: '92vh', overflow: 'auto', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
           <h2 style={{ margin: 0 }}>QC · pipeline diagnose</h2>
           <div style={{ flex: 1 }} />
@@ -326,6 +358,7 @@ function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefr
           Red/amber shows exactly where the workflow is failing and why.
         </p>
 
+        <DiagnosisBlock diag={h?.diagnosis} />
         {h?.primaryError && (
           <div style={{ margin: '10px 0 16px', padding: '12px 14px', borderRadius: 10, background: 'rgba(248,113,113,.10)', border: '1px solid rgba(248,113,113,.4)' }}>
             <div style={{ fontWeight: 700, color: '#fca5a5' }}>Primary issue — {h.primaryError.label}</div>
@@ -805,10 +838,29 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   const inGate = h?.gates.find(g => g.gate === 'input')
   const inputFailed = inGate?.status === 'failed'
   const encFailed = !!h?.primaryError && (h.primaryError.gate === 'encoder' || h.primaryError.gate === 'output')
-  const srcErrored = inputFailed || (sourceUp && encFailed)
-  const badgeText = inputFailed ? 'SOURCE ERROR' : (sourceUp && encFailed) ? 'ENCODER FAILED' : sourceUp ? 'RECEIVING' : proto
-  const badgeBg = srcErrored ? 'rgba(248,113,113,.85)' : sourceUp ? 'rgba(74,222,128,.85)' : 'rgba(99,102,241,.85)'
-  const canPreview = sourceUp && !srcErrored
+  // RECEIVING IS A CLAIM ABOUT THE WORLD, SO IT NEEDS EVIDENCE.
+  //
+  // `sourceUp` is `d.status === 'live'`, which says only that somebody pressed
+  // Start and the row was updated. It is the same mistake as trusting the
+  // instance row: a claim, not an observation. A channel that had been started
+  // with no source at all showed a green RECEIVING and "Ingesting SRT" while
+  // the gate strip six inches above it said "connecting to source" — the same
+  // page contradicting itself, with the confident half being the wrong one.
+  //
+  // The input gate is the observation, so it decides. 'healthy' and 'degraded'
+  // both mean bytes are arriving (degraded is arriving-but-imperfect, which is
+  // still receiving); 'starting' means we are waiting and must say so.
+  const inputArriving = inGate?.status === 'healthy' || inGate?.status === 'degraded';
+  const receiving = sourceUp && inputArriving
+  const srcErrored = inputFailed || (receiving && encFailed)
+  const badgeText = inputFailed ? 'SOURCE ERROR'
+    : (receiving && encFailed) ? 'ENCODER FAILED'
+    : receiving ? 'RECEIVING'
+    : sourceUp ? 'CONNECTING' : proto
+  const badgeBg = srcErrored ? 'rgba(248,113,113,.85)'
+    : receiving ? 'rgba(74,222,128,.85)'
+    : sourceUp ? 'rgba(250,204,21,.85)' : 'rgba(99,102,241,.85)'
+  const canPreview = receiving && !srcErrored
   // If the contribution feed is a browser-playable HLS URL, preview the REAL source
   // directly (so this pane is the true source, not our packaged output) and fall back
   // to the packaged origin if the CDN blocks cross-origin playback. For SRT/RTMP the
@@ -850,7 +902,15 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
         <div className="ptime">{srcErrored ? '— error —' : sourceUp ? `${srcHost || 'source'} · live` : '— no signal —'}</div>
       </div>
       <div className="pfoot">
-        <span className={`dot-s ${srcErrored ? 'down' : sourceUp ? 'live' : 'idle'}`} /> {srcErrored ? (inputFailed ? 'Source not arriving' : 'Source OK · encoder failed downstream') : sourceUp ? `Ingesting ${srcHost || proto} · repackaging` : configured ? `Source configured · ${proto} · ${srcHost || 'ingest'}` : 'No source — send one to enable output'}
+        <span className={`dot-s ${srcErrored ? 'down' : receiving ? 'live' : sourceUp ? 'warn' : 'idle'}`} /> {
+          srcErrored ? (inputFailed ? 'Source not arriving' : 'Source OK · encoder failed downstream')
+          : receiving ? `Ingesting ${srcHost || proto} · repackaging`
+          // Started, but the input gate has not seen anything yet. Say what is
+          // actually happening rather than claiming an ingest that is not
+          // happening: the gate's own detail line is the honest wording.
+          : sourceUp ? (inGate?.detail || `Waiting for ${proto} · nothing arriving yet`)
+          : configured ? `Source configured · ${proto} · ${srcHost || 'ingest'}`
+          : 'No source — send one to enable output'}
       </div>
       {sourceUp && ts.sourceNote && (
         <div style={{ padding: '9px 12px', borderTop: '1px solid var(--border)', fontSize: 'var(--fs-sm)', color: 'var(--warn)', display: 'flex', gap: 8 }}>
@@ -1650,6 +1710,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     (d.ladder || []).map(r => ({ height: r.height, bitrateKbps: r.bitrate_kbps })))
   // programme guide (EPG) panel visibility
   const [epgOn, setEpgOn] = useState(d.epgEnabled !== false)
+  const [autoConn, setAutoConn] = useState(d.autoConnect !== false)
   // subtitles
   const [capOn, setCapOn] = useState(d.captions.enabled)
   const [capLangs, setCapLangs] = useState<string[]>(d.captions.targets.length ? d.captions.targets : ['en'])
@@ -1706,6 +1767,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     if (JSON.stringify(cleanRungs) !== origLadder) patch.outputLadder = cleanRungs
     // programme guide panel
     if (epgOn !== (d.epgEnabled !== false)) patch.epgEnabled = epgOn
+    if (autoConn !== (d.autoConnect !== false)) patch.autoConnect = autoConn
     // captions
     patch.captions = { enabled: capOn, targets: capOn ? capLangs : [],
       offsetSec: Math.max(-30, Math.min(30, Number(capTrim) || 0)) }
@@ -1735,8 +1797,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   }
 
   return (
-    <div className="drawer-scrim" onClick={onClose}>
-      <div className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="">
+      <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">Channel settings</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
           <div className="field"><label>Channel name</label><input className="inp" value={name} onChange={e => setName(e.target.value)} /></div>
@@ -1764,12 +1826,12 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           <div className="sec-label">Failover</div>
           <div className="toggle-row">
             <div><div className="tt">Enable input failover</div><div className="td">If the primary source fails, switch to the backup, then to the filler, to keep the output live. Works on transcode and packaged channels.</div></div>
-            <div className={`sw ${failover ? '' : 'off'}`} onClick={() => setFailover(v => !v)}><i /></div>
+            <div className={`sw ${failover ? '' : 'off'}`} {...pressable((e: any) => { ((() => setFailover(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
           </div>
           {failover && (
             <div className="toggle-row">
               <div><div className="tt">Auto failback to primary</div><div className="td">Return to the primary automatically once it has been healthy for a short hold. Off keeps the output on the backup until you intervene.</div></div>
-              <div className={`sw ${autoFailback ? '' : 'off'}`} onClick={() => setAutoFailback(v => !v)}><i /></div>
+              <div className={`sw ${autoFailback ? '' : 'off'}`} {...pressable((e: any) => { ((() => setAutoFailback(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
             </div>
           )}
 
@@ -1811,10 +1873,10 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           <div className="sec-label">DVR / catch-up</div>
           <div className="field"><label>DVR mode</label>
             <div className="presets">
-              <div className={`preset ${dvrMode === 'sliding' ? 'sel' : ''}`} onClick={() => setDvrMode('sliding')}>
+              <div className={`preset ${dvrMode === 'sliding' ? 'sel' : ''}`} {...pressable((e: any) => { ((() => setDvrMode('sliding')) as any)(e) })} data-a11y-click="">
                 <div className="pt">Sliding window</div><div className="px">24×7 — rolling catch-up up to 4h behind live.</div>
               </div>
-              <div className={`preset ${dvrMode === 'event_start' ? 'sel' : ''}`} onClick={() => setDvrMode('event_start')}>
+              <div className={`preset ${dvrMode === 'event_start' ? 'sel' : ''}`} {...pressable((e: any) => { ((() => setDvrMode('event_start')) as any)(e) })} data-a11y-click="">
                 <div className="pt">To event start</div><div className="px">Events — scrub back to the start of the stream.</div>
               </div>
             </div>
@@ -1860,16 +1922,43 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             </>
           )}
 
+          <div className="sec-label">Availability</div>
+          <div className="toggle-row">
+            <div>
+              <div className="tt">Reconnect automatically after a restart</div>
+              {/* The wording says what it does and, just as importantly, what it
+                  does NOT do. The commonest worry about a setting like this is
+                  that it will switch a channel back on after you deliberately
+                  switched it off, so that is answered in the sentence rather
+                  than left to be discovered. */}
+              <div className="td">
+                If the control plane restarts while this channel is on air, it is put back:
+                re-attached to its encoder if that is still running, otherwise started again.
+                A channel you stopped yourself stays stopped.
+              </div>
+            </div>
+            <div className={`sw ${autoConn ? '' : 'off'}`} {...pressable((e: any) => { ((() => setAutoConn(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
+          </div>
+          {/* Auto-connect stops after five failed attempts and records why. If
+              that has happened the operator has to be told, or the channel is
+              simply off with no explanation anywhere. Pressing Start clears it. */}
+          {d.resumeGaveUpAt && (
+            <div className="err" style={{ marginTop: 6 }}>
+              Auto reconnect gave up on {new Date(d.resumeGaveUpAt).toLocaleString()} after repeated failures
+              {d.resumeLastError ? `: ${d.resumeLastError}` : '.'} Starting the channel clears this.
+            </div>
+          )}
+
           <div className="sec-label">Programme guide (EPG)</div>
           <div className="toggle-row">
             <div><div className="tt">Show programme guide panel</div><div className="td">Off hides the EPG / now-next panel for this channel.</div></div>
-            <div className={`sw ${epgOn ? '' : 'off'}`} onClick={() => setEpgOn(v => !v)}><i /></div>
+            <div className={`sw ${epgOn ? '' : 'off'}`} {...pressable((e: any) => { ((() => setEpgOn(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
           </div>
 
           <div className="sec-label">Subtitles</div>
           <div className="toggle-row">
             <div><div className="tt">Live captions / subtitles</div><div className="td">Applies to this channel’s output profile.</div></div>
-            <div className={`sw ${capOn ? '' : 'off'}`} onClick={() => setCapOn(v => !v)}><i /></div>
+            <div className={`sw ${capOn ? '' : 'off'}`} {...pressable((e: any) => { ((() => setCapOn(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
           </div>
           {capOn && (
             <>
@@ -1892,7 +1981,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           <div className="sec-label">Watermark <span style={{ color: 'var(--faint)', fontWeight: 400 }}>: burned into the transcode output</span></div>
           <div className="toggle-row">
             <div><div className="tt">Overlay a brand watermark</div><div className="td">Burned into the output for this transcode channel.</div></div>
-            <div className={`sw ${wmEnabled ? '' : 'off'}`} onClick={() => setWmEnabled(v => !v)}><i /></div>
+            <div className={`sw ${wmEnabled ? '' : 'off'}`} {...pressable((e: any) => { ((() => setWmEnabled(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
           </div>
           {wmEnabled && (
             <>

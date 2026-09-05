@@ -124,6 +124,143 @@ used across the app.
 - Depends on: nothing above it; Watermark and Branding, filler slates / loops, and
   channel branding all pull images from here.
 
+### Fleet and Metering
+The servers the tasks land on, how hard they are working, and how much billable time
+each stream has caused. This is the one module whose rows are OBSERVATIONS rather than
+intent: everything else in the control plane records what was asked for, and this
+records what actually happened.
+
+Three records, and the distinction between them is the design:
+
+- `compute_hosts` — one row per MACHINE, upserted from the launcher's placement report.
+  Not the same thing as `instances`, which is one row per TASK: on EC2 capacity several
+  tasks share a host, and it is the host's CPU that answers "do I need more capacity".
+  A Fargate host carries exactly one task by construction and reports no host metric,
+  which is stated rather than faked.
+- `host_samples` — telemetry, from CloudWatch on ECS and from /proc on an on-box
+  deployment. A reading that could not be taken has no row, never a zero.
+- `usage_accruals` — the billable ledger. Each task carries a `metered_through` mark and
+  a pass accrues only the window between that mark and now, so a tick that runs twice
+  accrues nothing and a control plane that was down for an hour accrues that hour on its
+  next pass. Windows are cut at the UTC day boundary, which makes every roll-up a plain
+  SUM with no apportionment for anyone to get wrong. The account and a no-foreign-key
+  copy of the stream id are frozen onto each row, so a channel moved between accounts
+  does not rewrite last month, and a deleted channel does not erase its own history.
+
+The unit reported is TIME. `compute_rates` exists and every accrual freezes the rate that
+applied, but no API surface leads with a currency figure while those rates are seeded
+placeholders.
+
+- Code: `services/fleet/*`, `modules/fleet.ts`, migration `0016`, the fleet pass in
+  `services/orchestrator/index.ts`, `volt-web/src/pages/Fleet.tsx`.
+- Depends on: the launcher (for placement) and the orchestrator's instance rows. Nothing
+  depends on it: the fleet pass observes and can start or stop nothing, which is why it
+  runs on its own interval and its own error boundary.
+
+### Auto Connect (surviving a reboot)
+What should be running right now, and the fastest way back to it after the control
+plane restarts.
+
+The load-bearing idea is that INTENT AND OBSERVATION ARE DIFFERENT FACTS.
+`channels.status` / `events.status` are a cache of what was seen and are routinely
+wrong after a crash; `instances` is a claim that something was launched. Neither is a
+statement that a stream is meant to be on air. `desired_state` is, and it moves only on
+a deliberate act: starting sets it to `running`, a RECORDED stop sets it to `stopped`.
+Nothing observational touches it, so "not running, and nobody asked it to stop" becomes
+a queryable condition, which is exactly what auto-connect fires on.
+
+What counts as a recorded stop is declared, not inferred: `stopStream` takes a
+`StopIntent`. An operator pressing Stop and the scheduler closing an event's window are
+recorded. An encoder reporting a fatal fault, or the platform stopping something in
+order to restart it, are not, because those are the cases recovery exists for.
+
+On boot, and every `RESUME_RETRY_SECONDS` after it:
+
+- ADOPT BEFORE RESTART. A task container takes no inbound connections, so it does not
+  stop when the control plane does. If the launcher says the task is alive, the owner is
+  simply marked live again and the day's recording reopened. Nothing is launched and
+  nothing is interrupted.
+- Restart only what is DEFINITELY dead.
+- On `unknown`, do nothing and spend no attempt. An unreachable launcher is not a dead
+  task, and launching a second encoder into the same output namespace corrupts the live
+  edge rather than merely costing money.
+
+Five attempts, twenty seconds apart, then it stops and records the reason on the row.
+The counter is in the database so a crash mid-recovery cannot reset it and loop. Any
+operator start clears a give-up, so nothing is ever permanently written off.
+
+ARMED BY A HEALTHY RUN, NOT BY PRESSING START. Intent alone is not enough to be a
+candidate: `resume_armed_at` must be set, and the resume pass sets it (`armProvenStreams`)
+the first time a run shows SERVER, INPUT, ENCODER and OUTPUT all healthy at once
+(PUBLIC is a publishing decision, not evidence). A start that never gets there is a
+failed start, and relaunching a failed start five times only buries the reason under
+four copies of itself: it is left where it fell, the recovery note says "not armed",
+and the QC report's "What went wrong" block (`services/failureDiagnosis.ts`) states the
+likely cause with the raw lines it was read from and whether a retry is coming. The
+stamp is cleared by a person's Start (the new run proves itself again) and Stop, never
+by a fault. A person can also stop auto connect by hand mid-retry
+(`POST /:id/auto-connect {enabled:false}` on channels, events and radio); that halts
+the loop and touches nothing else, so the evidence stays readable.
+
+Events keep their own scheduling on top of this. The tick still provisions an event when
+its window opens and stops it when the window closes; auto-connect is not a second
+scheduler and never decides when an event should run. It answers only the reboot
+question, which the schedule cannot: "the window is open" is also true of an event a
+person deliberately stopped mid-flight.
+
+`auto_connect` defaults to true on channels, stations and events; `AUTO_CONNECT=false`
+disables the whole pass for a deployment that prefers to bring its fleet up by hand.
+
+- Code: `services/orchestrator/resume.ts`, `Orchestrator.adoptRunning` /
+  `reapOrphanInstances` / `StopIntent` / `StartIntent`, migration `0017`.
+- Depends on: the launcher's three-valued liveness answer. Everything here rests on
+  `unknown` being a first-class value rather than a boolean.
+
+### The Embeddable Player
+A Shaka-based audio player a customer pastes onto their own website, plus the now-playing
+enrichment that gives it something to show.
+
+NOW PLAYING. A station's ICY metadata is one line of text. `services/radio/trackMeta.ts`
+parses it, looks the recording up in MusicBrainz and takes the artwork from the Cover Art
+Archive. Both are open: no key, no account, no display terms. The iTunes Search API was
+rejected deliberately, despite better coverage, because Apple's terms require the artwork
+to sit beside a store badge for a promotional purpose, which would put every customer's
+skin in breach by default.
+
+MusicBrainz permits ONE request per second per application and enforces it by blocking
+the IP, so that limit is shared by every tenant whether the code acknowledges it or not.
+Three consequences shape the design: the lookup runs in the station's metadata reader and
+never in a request path; it goes through a single process-wide queue; and a MISS is
+cached as firmly as a hit, because a track nobody knows, retried on every poll for the
+twenty minutes it is on air, is what would quietly consume the whole budget. A
+low-scoring match is treated as a miss too: wrong artwork is worse than none, because
+nobody reports it.
+
+THE PLAYER. `volt-player/` builds one self-contained IIFE, served by the control plane at
+`/player/volt-player.js`, so an embed is one script tag from the same origin as the API
+and there is no CORS to open. MP3 is tried FIRST — it needs no Media Source Extensions,
+starts in one request, and is what a radio embed wants — with HLS and DASH behind it via
+Shaka; all three URLs arrive in the session response so a blocked format needs no second
+round trip. A layout receives state and commands only, never the Shaka instance, so a
+third-party skin can render badly but cannot break playback or reach the session.
+
+THE GATE. A publishable key ships in a web page and is not a secret; what it provides is
+attribution and revocation. The ORIGIN ALLOW-LIST is what stops a lifted key working
+elsewhere, checked server-side on every call. The station is checked against the key's
+account, and a station belonging to another tenant answers exactly like one that does not
+exist, so the endpoint is not an oracle for guessing ids.
+
+REPORTING. Player events go to `player_events`, carrying the origin from the request
+HEADER rather than the body — "it works on one of our sites and not the other" is the
+commonest support question and a client-supplied origin would answer it wrongly. The same
+events are forwarded to Google Analytics only if the host page already has it; injecting
+gtag.js into somebody's site because they embedded a player is not ours to do.
+
+- Code: `services/radio/trackMeta.ts`, `modules/player.ts`, `volt-player/*`, migration
+  `0018`, `volt-web/src/pages/PlayerSetup.tsx`.
+- Depends on: the ICY metadata reader for track changes, and the apps/api-keys module for
+  the key and origin check.
+
 ### Cross-cutting
 DVR and recording (the origin window is the live edge + DVR + recording), retention
 (seconds, floored to the DVR window), and the cleanup service live across the Packaging,

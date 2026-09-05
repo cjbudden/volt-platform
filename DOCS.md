@@ -104,6 +104,11 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
 - `waveform-cache.check.ts`, waveform: the 100ms envelope cache (a window measured once is
   served with no decode, legacy caches upgrade, primer progress) and the incremental segment
   index scan. Needs ffmpeg, no database.
+- `auto-connect.check.ts`, auto connect: intent vs status, adopt before restart, five
+  attempts then give up, armed only by a healthy run, stopped by hand (needs a DB).
+- `recovery-note.check.ts`, the console's one-sentence recovery notice (pure).
+- `failure-diagnosis.check.ts`, the QC "what went wrong" classifier: one fixture per
+  cause, evidence carried, retry note (pure).
 - `autovod.check.ts`, auto-VOD from a completed event recording.
 - `vod-extractor.check.ts`, VOD extractor pure logic: segment selection/snapping.
 - `retrim.check.sh`, non-destructive clip re-trim (change in/out, original preserved).

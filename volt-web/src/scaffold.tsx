@@ -1,3 +1,5 @@
+import { recoveryView } from './recovery'
+import type { FailureDiagnosis } from './api'
 // ============================================================================
 //  Shared page scaffold — the COMMON DESIGN LANGUAGE for list pages
 //  (Channels, Events, Recordings, and future sections like Radio).
@@ -15,6 +17,7 @@
 //                        the drawer, never on the row.
 // ============================================================================
 import type { ReactNode } from 'react'
+import { pressable } from './a11y'
 
 // ----------------------------------------------------------------------------
 // FORM design language: channel and event create/settings drawers share one
@@ -104,7 +107,7 @@ export function PageIdentity({ crumbLabel, onCrumb, name, imgUrl, tags, sub, gra
   return (
     <div>
       <div className="crumb" style={{ marginBottom: 6 }}>
-        <span className="lnk" style={{ cursor: 'pointer', color: 'var(--brand)' }} onClick={onCrumb}>{crumbLabel}</span>
+        <span className="lnk" style={{ cursor: 'pointer', color: 'var(--brand)' }} {...pressable((e: any) => { ((onCrumb) as any)(e) })} data-a11y-click="">{crumbLabel}</span>
         &nbsp;/&nbsp; <b style={{ color: 'var(--text)' }}>{name}</b>
       </div>
       <h1 className="page-id">
@@ -134,7 +137,7 @@ export function splitDuration(sec: number | null): { n: string; unit: RetUnit } 
 /** Type preset card (Transcode / Packaging) — same control in both forms. */
 export function Preset({ sel, onClick, title, desc, meta }: { sel: boolean; onClick: () => void; title: string; desc: string; meta: string }) {
   return (
-    <div className={`preset ${sel ? 'sel' : ''}`} onClick={onClick}>
+    <div className={`preset ${sel ? 'sel' : ''}`} {...pressable((e: any) => { ((onClick) as any)(e) })} data-a11y-click="">
       <div className="pt">{title}</div>
       <div className="px">{desc}</div>
       <div className="px" style={{ fontFamily: 'ui-monospace,monospace', marginTop: 8, color: 'var(--faint)' }}>{meta}</div>
@@ -164,7 +167,7 @@ export function RecordingSection({ ctx, recOn, setRecOn, retNum, setRetNum, retU
             ? "Keep the event's output as one contained recording: review it, clip highlights, publish VOD. Off means nothing can be clipped later."
             : 'Keep the live output as a recording: review it, clip highlights, and publish VOD assets. Off means segments are cleared after the DVR window and nothing can be clipped later.'}</div>
         </div>
-        <div className={`sw ${recOn ? '' : 'off'}`} onClick={() => setRecOn(v => !v)}><i /></div>
+        <div className={`sw ${recOn ? '' : 'off'}`} {...pressable((e: any) => { ((() => setRecOn(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
       </div>
       {recOn && (
         <>
@@ -185,7 +188,7 @@ export function RecordingSection({ ctx, recOn, setRecOn, retNum, setRetNum, retU
           {autoVod !== undefined && setAutoVod && (
             <div className="toggle-row">
               <div><div className="tt">Automatic VOD on end</div><div className="td">When the event's recording closes, publish it as a full-event VOD asset automatically (the event's metadata is carried over).</div></div>
-              <div className={`sw ${autoVod ? '' : 'off'}`} onClick={() => setAutoVod(v => !v)}><i /></div>
+              <div className={`sw ${autoVod ? '' : 'off'}`} {...pressable((e: any) => { ((() => setAutoVod(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
             </div>
           )}
         </>
@@ -207,7 +210,7 @@ export function initials(name: string) {
 /** Filter chip with a count — the standard list filter control. */
 export function FChip({ label, n, on, onClick }: { label: string; n: number; on: boolean; onClick: () => void }) {
   return (
-    <div className={`chip ${on ? 'active' : ''}`} onClick={onClick}>
+    <div className={`chip ${on ? 'active' : ''}`} {...pressable((e: any) => { ((onClick) as any)(e) })} data-a11y-click="">
       {label}<span className="ct">{n}</span>
     </div>
   )
@@ -306,6 +309,150 @@ export function PipelineStrip({ gates }: { gates: StripGate[] }) {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+/* ===========================================================================
+ *  RECOVERY — what auto-connect is doing about a stream that stopped.
+ *
+ *  This existed only as a give-up notice, buried in the Settings drawer, and
+ *  only once auto-connect had already stopped trying. So the whole middle of
+ *  the story was invisible: a stream could be failing and being retried and the
+ *  page said nothing at all, which reads exactly like a system that is not
+ *  trying. "Resume is not working" was the reasonable conclusion, and it was
+ *  not possible to tell from the console whether it was true.
+ *
+ *  Three states, and each of them is worth a sentence:
+ *
+ *    trying     attempts spent, not yet given up. The reason is the last error
+ *               recorded, which is what an operator needs BEFORE the fifth
+ *               attempt rather than after it.
+ *    gave up    it has stopped. Says so, says why, and says that pressing Start
+ *               clears it, because otherwise the only cure looks like a
+ *               database edit.
+ *    off        auto-connect is disabled on this stream, which is a legitimate
+ *               choice and a surprising one when a stream stays down. Only
+ *               mentioned when the stream is meant to be running.
+ *
+ *  Deliberately takes the raw row rather than a typed detail: the channel and
+ *  radio payloads spell these fields differently (one maps to camelCase, one
+ *  spreads the row) and a shared component that only works for one of them
+ *  would be shared in name only.
+ * ======================================================================== */
+export function RecoveryNote({ row, state, onDismiss, dismissing, onAutoConnect, togglingAuto }: {
+  row: any; state?: string | null
+  /** Offered only where a caller can act on it. A give-up notice is the one
+   *  kind an operator can put down without starting the stream: the others
+   *  describe something still in progress and will clear themselves. */
+  onDismiss?: () => void
+  dismissing?: boolean
+  /** Stop auto connect while it is retrying (leaves the evidence alone), or
+   *  switch it back on when it is off. */
+  onAutoConnect?: (enabled: boolean) => void
+  togglingAuto?: boolean
+}) {
+  // The DECISION lives in recovery.ts, pure and pinned by
+  // volt-app/test/recovery-note.check.ts. This component only paints it.
+  const v = recoveryView(row, state)
+  if (v.kind === 'none') return null
+
+  const bad = v.kind === 'gave_up'
+
+  // THE SAME BANNER AS EVERY OTHER FAILURE ON THESE PAGES: a tinted panel with
+  // its own full border, not a card with a coloured spine. The offset left rule
+  // read as an annotation hanging off the side of the page, which is the wrong
+  // weight for the one notice that stays true until somebody acts on it, and it
+  // did not match the primary-error banner sitting directly beneath it.
+  const tint = bad
+    ? { bg: 'rgba(248,113,113,.10)', line: 'rgba(248,113,113,.4)' }
+    : { bg: 'rgba(251,191,36,.10)',  line: 'rgba(251,191,36,.4)' }
+
+  return (
+    <div style={{
+      margin: '0 0 14px', padding: '12px 14px', borderRadius: 10,
+      display: 'flex', alignItems: 'flex-start', gap: 10, minWidth: 0,
+      background: tint.bg, border: `1px solid ${tint.line}`,
+    }}>
+      <span className={`dot-s ${bad ? 'down' : 'warn'}`} style={{ marginTop: 6, flex: 'none' }} />
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text)' }}>{v.text}</div>
+        {v.lastError && (
+          // THE REASON, VERBATIM. It is the encoder's own words, carried out of
+          // a task whose disk is gone, and paraphrasing it here would throw away
+          // the only specific thing anybody has to work with.
+          <div style={{
+            fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginTop: 3,
+            fontFamily: 'ui-monospace,monospace', wordBreak: 'break-word',
+          }}>{v.lastError}</div>
+        )}
+      </div>
+      {/* ONLY ON A GIVE-UP. "Retrying" and "auto reconnect is off" describe a
+          live situation that will change on its own or that a setting controls;
+          dismissing either would be hiding a true statement. A give-up is the
+          one that stays true until a person acts, so it is the one worth being
+          able to put down. The title says what dismissing actually DOES,
+          because it is not only a visual change. */}
+      {bad && onDismiss && (
+        <button className="btn ghost" disabled={dismissing} onClick={onDismiss}
+          title="Clears the notice and stands the stream down, so auto reconnect does not immediately start trying again. Press Start when the source is fixed."
+          style={{ flex: 'none', alignSelf: 'center', color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }}>
+          {dismissing ? 'Dismissing…' : 'Dismiss'}
+        </button>
+      )}
+      {/* STOP IT BY HAND. While auto reconnect is retrying, the one thing an
+          operator may want is for it to stop so the failure can be read as it
+          is. Off leaves every counter and log line untouched. */}
+      {v.kind === 'retrying' && onAutoConnect && (
+        <button className="btn ghost" disabled={togglingAuto} onClick={() => onAutoConnect(false)}
+          title="Stops auto reconnect for this stream now. Nothing is cleared: the log and the last error stay as they are so you can read why it failed."
+          style={{ flex: 'none', alignSelf: 'center' }}>
+          {togglingAuto ? 'Stopping…' : 'Stop auto reconnect'}
+        </button>
+      )}
+      {v.kind === 'auto_off' && onAutoConnect && (
+        <button className="btn ghost" disabled={togglingAuto} onClick={() => onAutoConnect(true)}
+          title="Switches auto reconnect back on. The stream still has to be seen healthy before it is put back automatically."
+          style={{ flex: 'none', alignSelf: 'center' }}>
+          {togglingAuto ? 'Switching on…' : 'Switch auto reconnect on'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/* ===========================================================================
+   WHAT WENT WRONG. The QC panel's reading of a failure: a verdict in plain
+   words, why, what to do first, the raw lines it was built from, and whether
+   auto reconnect is going to do anything about it. Shared by the channel and
+   radio panels so a failure reads the same on both. The evidence is shown
+   because a verdict without its evidence is an opinion.
+   ======================================================================== */
+export function DiagnosisBlock({ diag }: { diag: FailureDiagnosis | null | undefined }) {
+  if (!diag) return null
+  const conf = { high: 'high confidence', medium: 'likely', low: 'best guess' }[diag.confidence]
+  return (
+    <div style={{ margin: '10px 0 16px', padding: '12px 14px', borderRadius: 10, background: 'rgba(248,113,113,.08)', border: '1px solid rgba(248,113,113,.35)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ fontWeight: 700, color: '#fca5a5' }}>What went wrong: {diag.verdict}</div>
+        <span className="tag" style={{ fontSize: 'var(--fs-micro)' }}>{diag.gate}</span>
+        <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)' }}>{conf}</span>
+      </div>
+      <div style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)', marginTop: 4 }}>{diag.reason}</div>
+      <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text)', marginTop: 6 }}><b>Next:</b> {diag.nextStep}</div>
+      {diag.retry.note && (
+        <div style={{ fontSize: 'var(--fs-sm)', color: diag.retry.willRetry ? 'var(--warn,#fbbf24)' : 'var(--muted)', marginTop: 6 }}>
+          {diag.retry.note}
+        </div>
+      )}
+      {diag.evidence.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Evidence</div>
+          {diag.evidence.map((l, i) => (
+            <div key={i} style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)', color: 'var(--muted)', wordBreak: 'break-word', marginTop: 2 }}>{l}</div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -3,7 +3,7 @@ import { api, type RadioStationDetail, type RadioNowPlaying, type RadioLog, type
 import { navigate } from '../router'
 import { thumbUrl } from '../api'
 import AudioVisualizer, { VERDICT_UI } from '../AudioVisualizer'
-import { SEC, PageIdentity, StatusPill, TypeTag, PipelineStrip, GATE_COLOR, RecoveryNote } from '../scaffold'
+import { SEC, PageIdentity, StatusPill, TypeTag, PipelineStrip, GATE_COLOR, RecoveryNote, DiagnosisBlock } from '../scaffold'
 import { RadioDrawer, ClassChip } from './Radio'
 import { ShareDrawer } from '../ShareDrawer'
 import { pressable } from '../a11y'
@@ -149,10 +149,21 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
   const verdict = levels?.verdict ?? st?.qc?.verdict ?? 'unknown'
   const title = np?.title ?? st?.nowPlaying ?? null
   const titleClass = np?.class ?? st?.nowPlayingClass ?? null
+  // THE LINE ABOVE THE WAVEFORM, decided on the server. The poll is preferred
+  // because it is the fresher of the two; the detail payload covers the first
+  // render before the first poll lands.
+  const nowView = np?.nowPlayingView ?? st?.nowPlayingView ?? null
+  // EVERYONE RECEIVING THE STATION. `listeners` from the poll is already the
+  // total; the breakdown is only for the tooltip.
+  const heard = np?.listenerCounts ?? st?.listeners ?? null
+  const listeners = np?.listeners ?? heard?.total ?? null
   // The configured contribution source, shown under the idle start button
   // exactly as the channel page shows its ingest URL.
   const srcRow = st?.sources?.find(s => s.role === 'primary' && s.ingest_url) || st?.sources?.find(s => s.ingest_url) || st?.sources?.[0]
   const srcUrl = srcRow?.ingest_url || null
+  // NO SOURCE, NO START. The button is disabled and says why, rather than
+  // starting a pipeline that has nothing to receive and reporting a failure.
+  const noSourceTitle = 'No input source is configured. Set the source URL in Settings first.'
 
   // ---- playback: MP3 fan-out when enabled (native, same-origin), else HLS ----
   useEffect(() => {
@@ -275,8 +286,13 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
   }
 
   const srcProtocol = String(st.sources?.[0]?.protocol || 'icecast').toLowerCase()
-  const icyCapable = srcProtocol === 'icecast'
-  const PROTOCOL_LABEL: Record<string, string> = { hls: 'HLS', srt: 'SRT', icecast: 'Icecast' }
+  // THE SERVER OWNS THIS QUESTION (services/radio/nowPlaying.ts), because the
+  // rule it applies is stronger than the one that used to live here: an .m3u8
+  // is HLS whatever the protocol column says, and a station created before that
+  // column was populated carries the default. The local test stays only as a
+  // fallback for a payload from an older API.
+  const icyCapable = st.carriesTitles ?? (srcProtocol === 'icecast')
+  const PROTOCOL_LABEL: Record<string, string> = { hls: 'HLS', srt: 'SRT', icecast: 'Icecast', dash: 'DASH' }
   const srcLabel = PROTOCOL_LABEL[srcProtocol] ?? srcProtocol.toUpperCase()
 
   return (
@@ -319,9 +335,9 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
         </button>
         {/* TWO STEPS, same as channels: run the station (private), then publish. */}
         {!live ? (
-          <button className="btn primary" disabled={busy} onClick={() => startStop('start')}
-            title="Brings the audio pipeline up and starts receiving the source">
-            {busy ? 'Starting…' : 'Start station'}
+          <button className="btn primary" disabled={busy || !srcUrl} onClick={() => startStop('start')}
+            title={srcUrl ? 'Brings the audio pipeline up and starts receiving the source' : noSourceTitle}>
+            {busy ? 'Starting…' : srcUrl ? 'Start station' : 'Start station (no source)'}
           </button>
         ) : (
           <>
@@ -350,7 +366,9 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           station that is being retried used to say nothing at all, which is
           indistinguishable from a platform that is not trying. */}
       <RecoveryNote row={st} state={st.pipelineState ?? st.health?.overall}
-        onDismiss={dismissRecovery} dismissing={dismissing} />
+        onDismiss={dismissRecovery} dismissing={dismissing}
+        onAutoConnect={async (on) => { setBusy(true); try { await api.setAutoConnect('radio', id, on); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } }}
+        togglingAuto={busy} />
 
       {/* PRIMARY ERROR banner — the first failed/degraded gate, same as channels */}
       {st.health?.primaryError && (
@@ -397,18 +415,36 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 min-w-0">
+                {/* A SOURCE THAT CANNOT CARRY A TITLE is not "between titles",
+                    so its own name is the honest heading, and the class chip is
+                    withheld below because there is nothing to classify. */}
                 <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {live ? (title || 'Untitled break') : 'Off air'}
+                  {nowView ? nowView.text : (live ? (title || 'Untitled break') : 'Off air')}
                 </span>
-                <ClassChip cls={live ? titleClass : null} />
+                <ClassChip cls={live && nowView?.kind !== 'no_metadata' ? titleClass : null} />
               </div>
-              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
+              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}
+                title={heard ? `${heard.mp3} on MP3 · ${heard.players} on HLS/DASH` : undefined}>
                 {live
-                  ? [np?.since ? `${fmtDur(Date.now() - np.since)} in` : 'on now',
-                     st.pipeline.running ? `${np?.listeners ?? st.pipeline.listeners ?? 0} MP3 listeners` : null]
+                  ? [// "on now" is meaningless against a name rather than a title
+                     nowView?.kind === 'no_metadata'
+                       ? null
+                       : (np?.since ? `${fmtDur(Date.now() - np.since)} in` : 'on now'),
+                     // THE WHOLE AUDIENCE, not the MP3 clients. Null means we
+                     // have no measurement, which is not the same as nobody, so
+                     // the line is omitted rather than rendered as a zero.
+                     st.pipeline.running && listeners != null
+                       ? `${listeners} listener${listeners === 1 ? '' : 's'}` : null]
                     .filter(Boolean).join(' · ')
                   : 'Start the station to monitor the output'}
               </div>
+              {/* WHY THERE IS NO TITLE, said once, where the title would be.
+                  Without it an HLS station reads as a broken metadata pipeline. */}
+              {live && nowView?.note && (
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginTop: 2 }}>
+                  {nowView.note}
+                </div>
+              )}
             </div>
             {/* ONE CONTROL, and it is only about YOUR EARS. Muted is the normal
                 state: an operator watching a station is watching the waveform,
@@ -457,16 +493,14 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
                call the same startStop('start'). */
             idleOverlay={
               <div>
-                <button className="btn primary" disabled={busy} onClick={() => startStop('start')}
+                <button className="btn primary" disabled={busy || !srcUrl} onClick={() => startStop('start')}
                   style={{ transform: 'scale(1.05)' }}
-                  title="Brings the audio pipeline up and starts receiving the source">
+                  title={srcUrl ? 'Brings the audio pipeline up and starts receiving the source' : noSourceTitle}>
                   {busy ? 'Starting…' : '▶  Start station'}
                 </button>
-                {srcUrl && (
-                  <div style={{ marginTop: 10, fontSize: 'var(--fs-label)', color: 'var(--faint)', maxWidth: 340, wordBreak: 'break-all' }}>
-                    {srcUrl}
-                  </div>
-                )}
+                <div style={{ marginTop: 10, fontSize: 'var(--fs-label)', color: srcUrl ? 'var(--faint)' : 'var(--warn,#fbbf24)', maxWidth: 340, wordBreak: 'break-all' }}>
+                  {srcUrl ?? 'No input source configured: open Settings and set the source URL to enable Start.'}
+                </div>
               </div>
             } />
           {live && (
@@ -542,9 +576,31 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
                 <MetaRow k="Content type" v={np?.station?.contentType || st.icy?.station?.contentType} />
                 <MetaRow k="Title changes" v={st.icy ? String(st.icy.changes) : undefined} />
               </div>
-            ) : <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>{icyCapable
-                  ? 'ICY headers appear here once the source connects and announces itself.'
-                  : `This station's source is ${srcLabel}, which carries no ICY metadata. Station name, genre and now-playing come from an Icecast mount; there is nothing here to wait for.`}</div>}
+            ) : icyCapable ? (
+              // AN ICECAST SOURCE THAT HAS NOT ANNOUNCED ITSELF YET. There is
+              // something to wait for, so the panel says so and stays empty.
+              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
+                ICY headers appear here once the source connects and announces itself.
+              </div>
+            ) : (
+              // A SOURCE THAT CANNOT ANNOUNCE ITSELF. Three sentences explaining
+              // an absence is worse than an empty panel: it fills the space an
+              // operator scans with an apology. Show what the station IS
+              // instead, which is the same shape of answer the panel gives for
+              // an Icecast station, and put the explanation in one line at the
+              // bottom where it can be read once and ignored after that.
+              <div style={{ display: 'grid', gap: 6, fontSize: 'var(--fs-body)' }}>
+                <MetaRow k="Station" v={st.name} />
+                <MetaRow k="Source" v={srcLabel} />
+                <MetaRow k="Source URL" v={srcUrl} />
+                <MetaRow k="Output bitrate" v={`${st.radio_config?.bitrateKbps ?? 128} kbps`} />
+                {st.pipeline.running && st.pipeline.sourceCodec &&
+                  <MetaRow k="Source codec" v={st.pipeline.sourceCodec} />}
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', marginTop: 4 }}>
+                  {srcLabel} carries no track metadata, so there is no now-playing title to receive.
+                </div>
+              </div>
+            )}
           </div>
           {/* QC PANEL — the audio equivalent of the channel QC surface.
               Layout here is Tailwind utilities; the card itself stays a
@@ -619,22 +675,28 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
       <div className="card" style={{ marginTop: 16, padding: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
           <div style={{ ...SEC, margin: 0 }}>Received metadata log</div>
-          <div style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
-            {(['all', 'song', 'ad', 'content'] as const).map(c => (
-              <div key={c} className={`chip ${cls === c ? 'active' : ''}`} style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }} {...pressable((e: any) => { ((() => setCls(c)) as any)(e) })} data-a11y-click="">
-                {c === 'all' ? `All ${total}` : `${CLASS_LABEL[c]} ${counts[c] ?? 0}`}
-              </div>
-            ))}
-          </div>
-          <input className="inp" style={{ width: 260, maxWidth: '100%', marginLeft: 'auto' }} value={q} onChange={e => setQ(e.target.value)}
-            placeholder="Search titles…" />
+          {/* FOUR ZEROS AND A SEARCH BOX over a log that structurally cannot
+              fill is an invitation to conclude something is broken. A source
+              that cannot send titles gets the heading and one line, and the
+              filters appear when there is something to filter. */}
+          {icyCapable && <>
+            <div style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
+              {(['all', 'song', 'ad', 'content'] as const).map(c => (
+                <div key={c} className={`chip ${cls === c ? 'active' : ''}`} style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }} {...pressable((e: any) => { ((() => setCls(c)) as any)(e) })} data-a11y-click="">
+                  {c === 'all' ? `All ${total}` : `${CLASS_LABEL[c]} ${counts[c] ?? 0}`}
+                </div>
+              ))}
+            </div>
+            <input className="inp" style={{ width: 260, maxWidth: '100%', marginLeft: 'auto' }} value={q} onChange={e => setQ(e.target.value)}
+              placeholder="Search titles…" />
+          </>}
         </div>
         {!log || log.entries.length === 0 ? (
           <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', padding: '14px 4px' }}>
             {q.trim() ? 'No entries match.'
               : icyCapable
                 ? 'Entries appear while the station runs with the metadata log enabled: every now-playing change is captured with its time, classified as song, ad or content, and becomes searchable here and in Recordings.'
-                : `This station's source is ${srcLabel}. Now-playing titles arrive as ICY metadata on an Icecast mount, so this log stays empty for ${srcLabel} sources. Recording, clipping and QC are unaffected; only the title log depends on the source protocol.`}
+                : `${srcLabel} sources carry no track metadata, so this log stays empty. Enter an EPG schedule to say what is on.`}
           </div>
         ) : (
           <table>
@@ -705,6 +767,7 @@ function RadioQcPanel({ st, verdict, levels, onClose, onRefresh }: {
           For a station the audio itself is also measured: silence and noise are faults you cannot see in a manifest.
         </p>
 
+        <DiagnosisBlock diag={st.health?.diagnosis} />
         {st.health?.primaryError && (
           <div style={{ margin: '10px 0 16px', padding: '12px 14px', borderRadius: 10, background: 'rgba(248,113,113,.10)', border: '1px solid rgba(248,113,113,.4)' }}>
             <div style={{ fontWeight: 700, color: '#fca5a5' }}>Primary issue — {st.health.primaryError.label}</div>

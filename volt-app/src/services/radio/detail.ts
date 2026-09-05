@@ -15,8 +15,14 @@ import { one, query } from '../../db';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { liveDirFor } from '../liveOrigin';
-import { computePipelineHealth, type PipelineHealth } from '../pipelineHealth';
-import { radioStatus, isRadioRunning } from './pipeline';
+import { computePipelineHealth, recoveryOf, type PipelineHealth } from '../pipelineHealth';
+// THE SAME RUN BOUNDARY TELEVISION ALREADY USED. channelDetail solved this for
+// channels and radio never got it, which is the entire reason the error flash
+// showed on a station page and not on a channel page. Imported rather than
+// reimplemented: two copies of "which events belong to this run" would drift,
+// and the drifted one would be the one nobody was looking at.
+import { runningSinceMs, scopeToRun, scopeStatusToRun } from '../channelDetail';
+import { radioRunState } from './state';
 import { radioMonitorState } from './monitor';
 import { icyState } from './icyMeta';
 
@@ -55,12 +61,21 @@ export function radioLogTail(channelId: string): { ts: string; level: string; ti
 }
 
 export async function loadRadioHealth(station: any, nowMs = Date.now()): Promise<PipelineHealth> {
-  const running = isRadioRunning(station.id);
-  const st = await one<any>(
+  // Was `isRadioRunning(station.id)`: a lookup in this process's own Map, which
+  // is only ever true of the process that started the station. Now it comes
+  // from the instance row the reconciler audits, so it is the same answer from
+  // any process and stays right when the station is a container.
+  const running = (await radioRunState(station.id)).running;
+  // WHEN THIS RUN LAUNCHED. Everything older belongs to a previous run and is
+  // not evidence about this one -- including the crash that ended it, which is
+  // what was being read back as the new run's state during the second or two
+  // before the encoder posts its first event.
+  const runSince = await runningSinceMs(station.id);
+  const st = scopeStatusToRun(await one<any>(
     `SELECT output_available, active_source, packager_ok, sources, updated_at
-       FROM stream_status WHERE channel_id=$1`, [station.id]);
-  const evs = await query<any>(
-    `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id=$1 ORDER BY ts DESC LIMIT 30`, [station.id]);
+       FROM stream_status WHERE channel_id=$1`, [station.id]), runSince);
+  const evs = scopeToRun(await query<any>(
+    `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id=$1 ORDER BY ts DESC LIMIT 30`, [station.id]), runSince);
   const logTailErrors = radioLogTail(station.id).map((l) => l.detail).reverse();
   const outputAgeMs = radioOutputAgeMs(station.id, nowMs);
   const icy = icyState(station.id);
@@ -71,12 +86,14 @@ export async function loadRadioHealth(station: any, nowMs = Date.now()): Promise
     ownerStatus: running ? station.status : (station.status === 'live' ? 'ended' : station.status),
     st: st ? { ...st, sources } : null,
     events: evs,
+    runStartedAt: runSince,
     logTailErrors,
     hasPrimarySource: true,
     packagingLabel: 'MP3 + HLS + DASH',
     outputFresh: outputAgeMs != null ? outputAgeMs < 15000 : false,
     outputAgeMs,
     onAirPublished: station.on_air === true,
+    recovery: recoveryOf(station),
   });
 }
 
@@ -157,4 +174,4 @@ export function radioStatusBoard(health: PipelineHealth, qc: RadioDetailExtras['
   };
 }
 
-export { radioStatus };
+export { radioRunState };
