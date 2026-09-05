@@ -546,7 +546,7 @@ function ProgrammeDrawer({ owner, day, programme: p, vod, converting, onConvert,
               )}
               {vod.state === 'converted' && vod.assetTitle && (
                 <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', marginTop: 6 }}>
-                  Asset: {vod.assetTitle}{vod.assetState ? ` (${vod.assetState})` : ''} — find it in the VOD library.
+                  Asset: {vod.assetTitle}{vod.assetState ? ` (${vod.assetState})` : ''} — find it in the Media Library.
                 </div>
               )}
               {vod.state === 'failed' && vod.error && <div className="err" style={{ marginTop: 8 }}>{vod.error}</div>}

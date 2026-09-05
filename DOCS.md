@@ -53,6 +53,7 @@ current version is always the file in this repo.
 - [Frame-accurate media access](volt-app/docs/DESIGN_frame_access.md)
 - [On-the-fly image service](volt-app/docs/DESIGN_image_service.md)
 - [File manager + watchfolder ingest](volt-app/docs/DESIGN_file_manager_watchfolder.md)
+- [Media Library](volt-app/docs/DESIGN_media_library.md), publishing rules, metadata by content type (schema.org standard schemas, event types, EPG field mapping), availability / geo / paywall defaults with per-asset override, uploads + encoding profile. Preview + rename built.
 - [API access map (public vs admin)](volt-app/docs/API_ACCESS_MAP.md)
 - [Pages and embeds](volt-app/docs/DESIGN_pages_and_embeds.md), one Page object with three
   framings (public, iframe, share token), the module catalogue, composition templates, and

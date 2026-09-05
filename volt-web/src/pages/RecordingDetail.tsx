@@ -396,7 +396,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     setActErr(''); setMsg(''); setBusy('clip')
     try {
       await api.clipRecording(id, { title: clipTitle.trim(), startMs: Math.round(selFrom!), endMs: Math.round(selTo!), outputKind })
-      setMsg('Clip created — listed below and in the VOD library.')
+      setMsg('Clip created — listed below and in the Media Library.')
       setClipTitle(''); loadRec()
     } catch (e: any) { setActErr(e.message) } finally { setBusy('') }
   }

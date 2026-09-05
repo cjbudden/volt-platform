@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type Me, type UserRow, type UserGroupRow, type TenantRole, type AccessLevel } from '../api'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
+import { pressable } from '../a11y'
 
 /* ============================================================================
    User Management — the account's users and USER GROUPS.
@@ -20,7 +21,7 @@ const ROLE_DESC: Record<TenantRole, string> = {
 }
 const FEATURE_LABEL: Record<string, string> = {
   channels: 'Channels', events: 'Events', epg: 'EPG', recordings: 'Recordings',
-  vod: 'VOD Library', media: 'Image Library', sharing: 'Share links', analytics: 'Analytics',
+  vod: 'Media Library', media: 'Image Library', sharing: 'Share links', analytics: 'Analytics',
 }
 const fmtDate = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' }) : '—')
 
@@ -182,8 +183,8 @@ function UserDrawer({ me, groups, user, onClose, onDone }: {
   }
 
   return (
-    <div className="drawer-scrim" onClick={onClose}>
-      <div className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="">
+      <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">{isEdit ? 'User settings' : 'Add user'}</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
           <div className="field"><label>Email</label>
@@ -226,7 +227,7 @@ function UserDrawer({ me, groups, user, onClose, onDone }: {
           {isEdit && !isSelf && (
             <div className="toggle-row">
               <div><div className="tt">Account active</div><div className="td">Disabling signs the user out (at the next token refresh) and blocks sign-in until re-enabled.</div></div>
-              <div className={`sw ${status === 'active' ? '' : 'off'}`} onClick={() => setStatus(s => (s === 'active' ? 'disabled' : 'active'))}><i /></div>
+              <div className={`sw ${status === 'active' ? '' : 'off'}`} {...pressable((e: any) => { ((() => setStatus(s => (s === 'active' ? 'disabled' : 'active'))) as any)(e) })} data-a11y-click=""><i /></div>
             </div>
           )}
 
@@ -279,8 +280,8 @@ function GroupDrawer({ me, group, onClose, onDone }: {
   }
 
   return (
-    <div className="drawer-scrim" onClick={onClose}>
-      <div className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="">
+      <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">{isEdit ? 'Group settings' : 'New user group'}</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
           <div className="field"><label>Group name</label>

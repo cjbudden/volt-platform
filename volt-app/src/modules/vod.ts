@@ -81,7 +81,15 @@ vodRouter.get(
               published_by, published_duration_ms
          FROM publications WHERE vod_asset_id = $1
         ORDER BY published_at DESC NULLS LAST`, [req.params.id]);
-    res.json({ ...row, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any) });
+    // WHAT KIND OF THING THIS IS, so the library can put up the right player.
+    // The stream it was cut from knows (a radio station has no video
+    // rendition); an uploaded file with no stream is judged by the files it
+    // produced. Asked here, once, rather than guessed from a black rectangle.
+    const streamId = row.channel_id ?? row.event_id;
+    const audioOnly = streamId
+      ? isAudioOnly(streamId)
+      : !!(row.export_mp3_key || row.export_m4a_key) && !row.progressive_key;
+    res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any) });
   })
 );
 

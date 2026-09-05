@@ -2,9 +2,10 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { api, type VodAssetRow } from '../api'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import { navigate } from '../router'
+import MediaPreview from '../MediaPreview'
 
 /* ============================================================================
-   VOD LIBRARY — everything that was cut, and what state it is in.
+   MEDIA LIBRARY — everything that was cut or uploaded, and what state it is in.
 
    The list is organised around the question an operator actually arrives with,
    which is almost never "show me all assets". It is one of:
@@ -58,11 +59,6 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
   const [tab, setTab] = useState<'play' | 'sources' | 'publishing'>('play')
-  // Whether the rendered file actually has a picture. Asked of the element
-  // rather than assumed from the asset, because a clip cut from a radio station
-  // is audio and a 380px black rectangle is a poor way to say so.
-  const [hasPicture, setHasPicture] = useState<boolean | null>(null)
-
   async function load() {
     try { setD(await api.vodAsset(id)); setErr('') } catch (e: any) { setErr(e.message) }
   }
@@ -74,14 +70,13 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   if (err && !d) return <div className="err">{err}</div>
   if (!d) return <div className="loading">Loading…</div>
 
-  // A <video> can only play a PROGRESSIVE file directly. `master_key` is an
-  // HLS/DASH manifest, and this used to treat either as "playable" while
-  // handing the element only `progressive_key` — so a clip cut with the
-  // DEFAULT output (Streaming) rendered an inert black box with controls,
-  // forever, and the honest "no rendered file" branch became unreachable for
-  // exactly the assets that needed it.
-  const progressive = d.progressive_key || null
-  const manifestOnly = !progressive && !!d.master_key
+  // WHAT TO PLAY. A progressive file when there is one (instant seeking), the
+  // HLS manifest otherwise; MediaPreview handles both and puts up an audio
+  // surface or a video one on the server's word (`audioOnly`).
+  const audioOnly: boolean = d.audioOnly === true
+  const file = audioOnly ? (d.export_mp3_key || d.export_m4a_key || d.progressive_key || null) : (d.progressive_key || null)
+  const hls = d.master_key || null
+  const playable = !!(file || hls)
   const pubs = d.publications ?? []
 
   async function act(fn: () => Promise<any>, label: string) {
@@ -114,27 +109,8 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
       {tab === 'play' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, alignItems: 'start' }}>
           <div>
-            {progressive ? (
-              <video controls playsInline preload="metadata"
-                src={progressive}
-                onLoadedMetadata={e => setHasPicture((e.currentTarget as HTMLVideoElement).videoHeight > 0)}
-                style={hasPicture === false
-                  ? { width: '100%', height: 44, background: '#000', borderRadius: 8, border: '1px solid var(--border)' }
-                  : { width: '100%', maxHeight: 380, background: '#000', borderRadius: 8, border: '1px solid var(--border)' }} />
-            ) : manifestOnly ? (
-              <div style={{
-                height: 200, background: 'var(--panel-2)', borderRadius: 8,
-                display: 'grid', placeItems: 'center', gap: 6,
-                color: 'var(--muted)', fontSize: 'var(--fs-sm)', textAlign: 'center', padding: 16,
-              }}>
-                <div>This clip was built as a streaming manifest, not a single file.</div>
-                <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-micro)', fontFamily: 'ui-monospace,monospace' }}>
-                  {d.master_key}
-                </div>
-                <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-micro)' }}>
-                  Cut it with Output set to “Downloadable file” to preview it here.
-                </div>
-              </div>
+            {playable ? (
+              <MediaPreview sources={{ file, hls }} audioOnly={audioOnly} title={d.title} />
             ) : (
               <div style={{
                 height: 200, background: 'var(--panel-2)', borderRadius: 8,
@@ -146,9 +122,9 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
                 {d.thumb_status === 'processing' ? 'Still being extracted…' : 'No rendered file for this asset.'}
               </div>
             )}
-            {hasPicture === false && (
+            {audioOnly && (
               <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', marginTop: 8 }}>
-                Audio only — this clip was cut from a radio source.
+                Audio only{d.recording_id ? ': cut from an audio source' : ''}.
               </div>
             )}
           </div>
@@ -297,7 +273,7 @@ export default function VodPage() {
     <>
       <div className="page-head">
         <div>
-          <h1>VOD Library</h1>
+          <h1>Media Library</h1>
           <p>Everything that has been cut, where it came from, and where it went.</p>
         </div>
         <div className="spacer" />
