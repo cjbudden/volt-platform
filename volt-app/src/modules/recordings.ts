@@ -4,7 +4,7 @@ import { query, one } from '../db';
 import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
-import { createClipVod, formatsFor } from '../services/clips';
+import { createClipVod, formatsFor, enqueueClipBuild } from '../services/clips';
 import { resolveRange, assessRange, segmentCount } from '../services/clips/resolve';
 import { plan, type OutputFormat } from '../services/clips/extract';
 import { clipsFromRecording } from '../services/clips/provenance';
@@ -330,7 +330,16 @@ recordingsRouter.get(
     const rows = await query<any>(
       `WITH src AS (
          SELECT c.id, c.name, c.created_at, c.group_id, c.status AS src_status,
-                CASE WHEN c.radio_config IS NOT NULL THEN 'radio' ELSE 'channel' END AS type,
+                -- READ THE KIND COLUMN, do not infer it from a config blob.
+                --
+                -- This was radio_config IS NOT NULL, which is a guess that
+                -- happens to be right most of the time: a station whose config
+                -- had not been written yet read as a television channel, and a
+                -- channel that ever acquired a radio_config would read as a
+                -- station. channels.kind is the answer and has been since the
+                -- first migration. Same mistake as search.ts and epg.ts, in a
+                -- third dialect.
+                CASE WHEN c.kind = 'radio' THEN 'radio' ELSE 'channel' END AS type,
                 c.brand_ref, c.recording_enabled, c.recording_retention_days AS retention_days,
                 'channel'::text AS owner_kind
            FROM channels c
@@ -367,18 +376,35 @@ recordingsRouter.get(
        q.createdFrom ?? null, q.createdTo ?? null, q.recordedFrom ?? null, q.recordedTo ?? null]
     );
 
-    // LIVE TRUTH, per source. Radio runs in this process; anything else is only
-    // capturing while it still holds an un-terminated instance.
-    const { isRadioRunning } = await import('../services/radio/pipeline');
+    // LIVE TRUTH, per source, and now the SAME truth for all three kinds.
+    // Radio used to be special-cased here because it ran in this process; it
+    // does not any more, and an open instance row is what "still capturing"
+    // has always meant for a channel or an event.
     const liveInstances = new Set(
       (await query<any>(
         `SELECT COALESCE(channel_id, event_id) AS id FROM instances WHERE terminated_at IS NULL`
       )).map((i: any) => i.id)
     );
-    const out = rows
-      .filter((r) => wantAll || types.includes(r.type))
+    // EVERY source the SEARCH and the DATES admit, before the chips narrow it.
+    //
+    // The chip badges are counted from THIS, never from `out`. A badge on a
+    // filter answers "what would I get if I clicked this"; counting the
+    // already-filtered result makes it answer "what did I just get", which is
+    // the same number as the list next to it and therefore says nothing.
+    //
+    // The failure is total rather than partial, and that is what made it worth
+    // fixing: the type chips and "Recording now" combine, so selecting Events
+    // while a radio station was the only thing recording emptied the result and
+    // took EVERY badge to zero with it -- All, Channels and Radio included. The
+    // one moment the counts had something to tell you was the one moment they
+    // all read 0, and the empty state said "nothing matches those filters"
+    // beside a Radio chip that agreed with it.
+    //
+    // The text search and the date ranges stay INSIDE the count, because those
+    // narrow the library itself. The chips only partition what the search left.
+    const mapped = rows
       .map((r) => {
-        const capturing = r.type === 'radio' ? isRadioRunning(r.id) : liveInstances.has(r.id);
+        const capturing = liveInstances.has(r.id);
         return {
           id: r.id,
           name: r.name,
@@ -398,7 +424,10 @@ recordingsRouter.get(
           retentionDays: r.retention_days ?? null,
           nextExpiry: r.next_expiry ?? null,
         };
-      })
+      });
+
+    const out = mapped
+      .filter((r) => wantAll || types.includes(r.type))
       .filter((r) => q.recordingNow !== '1' || r.capturing);
 
     const dir = q.dir === 'asc' ? 1 : -1;
@@ -417,11 +446,11 @@ recordingsRouter.get(
       return ka > kb ? dir : -dir;
     });
     res.json({ sources: out, counts: {
-      all: out.length,
-      channel: out.filter((r) => r.type === 'channel').length,
-      radio: out.filter((r) => r.type === 'radio').length,
-      event: out.filter((r) => r.type === 'event').length,
-      capturing: out.filter((r) => r.capturing).length,
+      all: mapped.length,
+      channel: mapped.filter((r) => r.type === 'channel').length,
+      radio: mapped.filter((r) => r.type === 'radio').length,
+      event: mapped.filter((r) => r.type === 'event').length,
+      capturing: mapped.filter((r) => r.capturing).length,
     } });
   })
 );
@@ -517,6 +546,18 @@ recordingsRouter.post(
         startMs: z.number().int().nonnegative(),
         endMs: z.number().int().positive(),
         outputKind: z.enum(['manifest', 'progressive', 'both']).default('manifest'),
+        /**
+         * How much missing media the operator accepts, in total milliseconds.
+         *
+         * Zero is the right default: a clip that silently jumps over a hole is
+         * worse than no clip. But a range spanning an encoder restart is
+         * exactly when an editor still wants the clip, and the refusal already
+         * ended with "Shrink the range or accept the gaps" — advice the API
+         * gave no way to act on, because assessRange took a maxGapMs that
+         * nothing ever passed. An error recommending an impossible action is
+         * worse than a blunt one, so the option is real now.
+         */
+        acceptGapsMs: z.number().int().nonnegative().max(600_000).default(0),
       })
       .parse(req.body);
     if (body.endMs <= body.startMs) throw badRequest('endMs must be after startMs');
@@ -532,7 +573,7 @@ recordingsRouter.post(
     // against the media on disk first and a bad one is refused here.
     const kind = isAudioOnly(streamId) ? 'audio' : 'video';
     const resolution = resolveRange(streamId, body.startMs, body.endMs, kind);
-    const verdict = assessRange(resolution);
+    const verdict = assessRange(resolution, { maxGapMs: body.acceptGapsMs });
     if (!verdict.ok) throw badRequest(verdict.message);
 
     const row = await createClipVod({
@@ -546,22 +587,18 @@ recordingsRouter.post(
       masterKeyBase: rec.master_key ?? 'vod',
     });
 
-    // Formats follow the requested output kind, plus MP3 for audio-only sources
-    // where a listener download is the obvious thing to want.
-    const formats: OutputFormat[] = [];
-    if (body.outputKind !== 'progressive') formats.push('hls');
-    if (body.outputKind !== 'manifest') formats.push('mp4');
-    if (!formats.length) formats.push('mp4');
-    if (kind === 'audio') formats.push('mp3');
-
-    const job = await enqueue({
-      type: CLIP_EXTRACT,
-      payload: { vodAssetId: row.id, streamId, fromMs: body.startMs, toMs: body.endMs, formats, kind },
+    // Through the shared helper. Formats, the audio MP3 addition and the dedupe
+    // key are decided in one place now, because there were three callers of
+    // this and only this one queued anything at all.
+    //
+    // The gap tolerance the range was ACCEPTED under travels with the job, or
+    // the worker re-assesses at zero and permanently fails a clip the operator
+    // deliberately asked for across a restart.
+    const job = await enqueueClipBuild({
+      vodAssetId: row.id, streamId, fromMs: body.startMs, toMs: body.endMs,
+      outputKind: body.outputKind,
       channelId: rec.channel_id, eventId: rec.event_id,
-      // One clip per asset: a retried request returns the running job rather
-      // than extracting the same range twice.
-      dedupeKey: `clip.extract:${row.id}`,
-      priority: 50,
+      acceptGapsMs: body.acceptGapsMs,
     });
 
     res.status(202).json({
@@ -631,13 +668,25 @@ recordingsRouter.get(
         WHERE recording_id = $1 AND kind = 'export'
         ORDER BY created_at DESC LIMIT 1`, [rec.id]
     );
-    if (existing?.export_mp4_key) {
-      return res.json({ status: 'ready', url: existing.export_mp4_key, assetId: existing.id });
-    }
-
     const fromMs = Number(rec.start_epoch_ms);
     const toMs = rec.end_epoch_ms != null ? Number(rec.end_epoch_ms) : Date.now();
     const kind = isAudioOnly(streamId) ? 'audio' : 'video';
+
+    // AN AUDIO RECORDING DOWNLOADS AS AUDIO. A radio export used to hand back
+    // clip.mp4, an MP4 with only an AAC track in it, under a button that said
+    // MP4. The download for an audio-only source is the MP3 (plays anywhere)
+    // with the M4A (the AAC as broadcast, no re-encode) offered beside it. An
+    // older export that only ever produced the MP4 is re-run for the audio
+    // files rather than served as it is.
+    if (kind === 'audio' && existing?.export_mp3_key) {
+      return res.json({
+        status: 'ready', kind, format: 'mp3', url: existing.export_mp3_key, assetId: existing.id,
+        alternatives: existing.export_m4a_key ? [{ format: 'm4a', label: 'AAC (.m4a)', url: existing.export_m4a_key }] : [],
+      });
+    }
+    if (kind === 'video' && existing?.export_mp4_key) {
+      return res.json({ status: 'ready', kind, format: 'mp4', url: existing.export_mp4_key, assetId: existing.id, alternatives: [] });
+    }
     const resolution = resolveRange(streamId, fromMs, toMs, kind);
     const verdict = assessRange(resolution, { maxGapMs: 30_000 });
     if (!verdict.ok) {
@@ -657,14 +706,16 @@ recordingsRouter.get(
 
     const job = await enqueue({
       type: CLIP_EXTRACT,
+      // Same 30s tolerance the range was assessed with just above.
       payload: { vodAssetId: asset.id, streamId, fromMs, toMs,
-                 formats: kind === 'audio' ? ['mp3', 'mp4'] : ['mp4'], kind },
+                 formats: kind === 'audio' ? ['mp3', 'm4a'] : ['mp4'], kind,
+                 acceptGapsMs: 30_000 },
       channelId: rec.channel_id, eventId: rec.event_id,
       dedupeKey: `clip.extract:${asset.id}`,
       priority: 80,
     });
     res.status(202).json({
-      status: 'exporting', assetId: asset.id, jobId: job.id,
+      status: 'exporting', kind, format: kind === 'audio' ? 'mp3' : 'mp4', assetId: asset.id, jobId: job.id,
       message: 'Export queued. Poll /api/jobs/{jobId} for progress, then this endpoint for the URL.',
     });
   })

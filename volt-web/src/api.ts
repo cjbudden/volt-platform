@@ -184,7 +184,10 @@ async function req(path: string, opts: RequestInit = {}) {
 
   if (!r.ok) {
     let msg = `${r.status}`
-    try { msg = (await r.json()).error || msg } catch { try { msg = await r.text() } catch { /* no body */ } }
+    // Some routes answer with `message` rather than `error` (the 409 from a
+    // download whose range has a hole, for one). A bare status code on screen
+    // is the least useful thing the server could have said.
+    try { const j = await r.json(); msg = j.error || j.message || msg } catch { try { msg = await r.text() } catch { /* no body */ } }
     // Only now is it really over: either there was no refresh token, or the
     // exchange was refused, or the retry failed on its own merits.
     if (r.status === 401 && token) { clearSession(); onUnauthorized?.() }
@@ -816,7 +819,12 @@ export const api = {
   }): Promise<RetentionRuleRow> => req('/storage/retention', { method: 'PUT', body: JSON.stringify(b) }),
   previewSweep: (): Promise<SweepPreview> => req('/storage/retention/preview', { method: 'POST' }),
 
-  recordingDownload: (id: string): Promise<{ status: 'exporting' | 'ready'; url?: string; message?: string }> =>
+  /** Export the whole recording for download. Video comes back as MP4; an
+   *  audio-only recording as MP3 with the M4A (AAC as broadcast) alongside. */
+  recordingDownload: (id: string): Promise<{
+    status: 'exporting' | 'ready'; kind?: 'audio' | 'video'; format?: 'mp3' | 'mp4'
+    url?: string; message?: string; alternatives?: { format: string; label: string; url: string }[]
+  }> =>
     req(`/recordings/${id}/download`),
   // ---- VOD library ----
   vodAssets: (published?: boolean): Promise<VodAssetRow[]> =>
@@ -1620,6 +1628,8 @@ export interface VodAssetRow {
   recording_id: string | null; start_epoch_ms: number | string; end_epoch_ms: number | string
   duration_ms: number | string | null; output_kind?: string | null
   thumb_status?: string | null; created_at: string
+  /** Audio-only sources: the MP3 and the AAC (.m4a) produced beside the clip. */
+  export_mp3_key?: string | null; export_m4a_key?: string | null
   /** Written when the clip is built, from the same resolution that produced the
    *  media. Absent on assets made before provenance was recorded. */
   source_block_count?: number | null; source_run_count?: number | null

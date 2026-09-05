@@ -405,12 +405,17 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     try { await api.publishRecording(id, rec?.title || undefined); setMsg('Recording published as a full VOD asset.'); loadRec() }
     catch (e: any) { setActErr(e.message) } finally { setBusy('') }
   }
+  const [altDownloads, setAltDownloads] = useState<{ format: string; label: string; url: string }[]>([])
   async function download() {
     setActErr(''); setMsg(''); setBusy('download')
     try {
       const r = await api.recordingDownload(id)
-      if (r.status === 'ready' && r.url) window.open(r.url, '_blank')
-      else setMsg('MP4 export is being prepared — check back shortly.')
+      if (r.status === 'ready' && r.url) {
+        window.open(r.url, '_blank')
+        setAltDownloads(r.alternatives ?? [])
+      } else {
+        setMsg(`${(r.format ?? 'mp4').toUpperCase()} export is being prepared. Check back shortly.`)
+      }
     } catch (e: any) { setActErr(e.message) } finally { setBusy('') }
   }
 
@@ -559,7 +564,15 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
               title={rec.status === 'recording' ? 'Available when the recording closes' : 'Publish the whole recording as a VOD asset'}>
               {busy === 'publish' ? 'Publishing…' : 'Publish full VOD'}
             </button>
-            <button className="btn ghost" disabled={busy === 'download'} onClick={download}>{busy === 'download' ? '…' : 'Download MP4'}</button>
+            {/* An audio recording downloads as audio: MP3, with the AAC (.m4a)
+                offered beside it once the export exists. Video stays MP4. */}
+            <button className="btn ghost" disabled={busy === 'download'} onClick={download}
+              title={tl?.audioOnly ? 'Export the whole recording as an MP3 (an AAC .m4a is produced alongside)' : 'Export the whole recording as an MP4'}>
+              {busy === 'download' ? '…' : tl?.audioOnly ? 'Download MP3' : 'Download MP4'}
+            </button>
+            {altDownloads.map(a => (
+              <a key={a.format} className="btn ghost" href={a.url} download style={{ marginLeft: 6 }}>{a.label}</a>
+            ))}
           </div>
           {actErr && <div className="err" style={{ marginTop: 8 }}>{actErr}</div>}
           {msg && <div style={{ color: 'var(--ok,#3fbf6f)', fontSize: 'var(--fs-body)', marginTop: 8 }}>{msg}</div>}

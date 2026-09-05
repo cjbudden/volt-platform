@@ -28,6 +28,19 @@ export interface ClipExtractPayload {
   toMs: number;
   formats: OutputFormat[];
   kind?: 'video' | 'audio';
+  /**
+   * How much missing media the operator accepted when they asked for this.
+   *
+   * It MUST travel with the job. The route assesses the range with the
+   * caller's tolerance and then enqueued a payload without it, so the worker
+   * re-assessed with the default of zero and threw PermanentError. A clip
+   * explicitly requested across an encoder restart was accepted with a 202 and
+   * then failed permanently, leaving the asset stuck at thumb_status
+   * 'processing' pointing at files nobody would ever write. The recording
+   * export path, which sets a 30s tolerance for exactly this reason, failed
+   * the same way for every recording with a single gap in it.
+   */
+  acceptGapsMs?: number;
 }
 
 export const CLIP_EXTRACT = 'clip.extract';
@@ -60,7 +73,7 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
   // Refuse before doing work, with the reason the operator needs. These are
   // PERMANENT: a missing hour of recording will still be missing on a retry, and
   // three attempts with backoff only delays telling the operator.
-  const verdict = assessRange(resolution);
+  const verdict = assessRange(resolution, { maxGapMs: p.acceptGapsMs ?? 0 });
   if (!verdict.ok) {
     throw new PermanentError(verdict.message, verdict.code);
   }
@@ -94,12 +107,15 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
   const hls = result.files.find((f) => f.format === 'hls');
   const mp4 = result.files.find((f) => f.format === 'mp4');
   const mp3 = result.files.find((f) => f.format === 'mp3');
+  const m4a = result.files.find((f) => f.format === 'm4a');
 
   await query(
     `UPDATE vod_assets SET
        master_key      = COALESCE($2, master_key),
        progressive_key = COALESCE($3, progressive_key),
        export_mp4_key  = COALESCE($3, export_mp4_key),
+       export_mp3_key  = COALESCE($5, export_mp3_key),
+       export_m4a_key  = COALESCE($6, export_m4a_key),
        duration_ms     = $4,
        thumb_status    = 'ready',
        updated_at      = now()
@@ -109,8 +125,47 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
       hls ? publicPath(p.vodAssetId, 'hls/index.m3u8') : null,
       mp4 ? publicPath(p.vodAssetId, 'clip.mp4') : null,
       result.durationMs,
+      mp3 ? publicPath(p.vodAssetId, 'clip.mp3') : null,
+      m4a ? publicPath(p.vodAssetId, 'clip.m4a') : null,
     ]
   );
+
+  // ---- put the bytes on the retention ladder -------------------------------
+  //
+  // Extracted clip output was invisible to the media lifecycle: files under
+  // clips/<assetId>/ were never registered as media objects, so the ladder
+  // could not see them, no rung ever fired on them, and deleting the asset did
+  // not unlink them. They accumulated for the life of the deployment, and
+  // nothing in the storage view ever admitted they existed.
+  //
+  // Registering them with vod_asset_id set means the machinery that already
+  // exists does the rest: a rule scoped to the asset's channel applies to them
+  // like any other media, and when the asset is deleted the owner FK goes to
+  // NULL, which makes the object ownerless and the sweep's orphan reclaim
+  // collects it after its grace period. No new deletion path to get wrong.
+  try {
+    const { registerObject } = await import('../../media/objects');
+    const totalBytes = result.files.reduce((n, f) => n + (f.bytes ?? 0), 0);
+    await registerObject({
+      vodAssetId: p.vodAssetId,
+      channelId: (ctx.job as any).channel_id ?? null,
+      eventId: (ctx.job as any).event_id ?? null,
+      logicalKey: `clips/${p.vodAssetId}`,
+      kind: 'clip_output',
+      rendition: null,
+      tier: 'local',
+      uri: outDir,
+      bytes: totalBytes || null,
+      durationMs: result.durationMs ?? null,
+      segmentCount: null,
+      actor: 'clip.extract',
+    });
+  } catch (e) {
+    // Same reasoning as the provenance write below: the media exists and is
+    // playable. An unregistered object costs storage, which is recoverable;
+    // failing the job here would re-run an extraction that already succeeded.
+    console.error(`[clip.extract] could not register clip output for ${p.vodAssetId}`, e);
+  }
 
   // ---- record what it was actually built from ------------------------------
   // AFTER the media exists, from the same resolution that produced it, so the
@@ -153,6 +208,7 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
       hls: hls ? publicPath(p.vodAssetId, 'hls/index.m3u8') : null,
       mp4: mp4 ? publicPath(p.vodAssetId, 'clip.mp4') : null,
       mp3: mp3 ? publicPath(p.vodAssetId, 'clip.mp3') : null,
+      m4a: m4a ? publicPath(p.vodAssetId, 'clip.m4a') : null,
     },
     bytes: result.files.reduce((n, f) => n + f.bytes, 0),
   };

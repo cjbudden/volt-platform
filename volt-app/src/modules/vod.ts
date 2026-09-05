@@ -6,9 +6,14 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { validateMetadata, SchemaField } from '../services/metadataValidator';
 import { videoObjectFromAsset } from '../services/schemaOrg';
 import { traceClip } from '../services/clips/provenance';
+import { enqueueClipBuild } from '../services/clips';
 import { decide, historyOf as reviewHistory, publishGate, queue as reviewQueue, IllegalReview } from '../services/review';
 import { qcFindings } from '../services/qc';
 import { enqueue } from '../services/jobs/queue';
+import { CLIP_EXTRACT } from '../services/jobs/handlers/clipExtract';
+import { resolveRange, assessRange, segmentCount } from '../services/clips/resolve';
+import { isAudioOnly } from '../services/localRecordingIndex';
+import type { OutputFormat } from '../services/clips/extract';
 import { QC_RUN } from '../services/jobs/handlers/qcRun';
 import { originBaseFor } from '../services/liveOrigin';
 import { actorId, actorLabel } from '../util/actor';
@@ -34,7 +39,14 @@ vodRouter.get(
     const published =
       req.query.published === 'true' ? true : req.query.published === 'false' ? false : null;
     const rows = await query(
-      `SELECT v.*, ms.name AS schema_name, COALESCE(c.name, e.name) AS source_name
+      `SELECT v.*, ms.name AS schema_name, COALESCE(c.name, e.name) AS source_name,
+              -- Whether the copy that went out is still the copy that is here.
+              -- Computed in the list because it is a thing you filter on, and a
+              -- library that cannot answer "what did I publish that has since
+              -- changed" is a library you have to check by hand.
+              EXISTS (SELECT 1 FROM publications p
+                       WHERE p.vod_asset_id = v.id AND p.stale) AS has_stale_publication,
+              (SELECT count(*) FROM publications p WHERE p.vod_asset_id = v.id)::int AS publication_count
        ${OWNED}
        LEFT JOIN metadata_schemas ms ON ms.id = v.schema_id
        WHERE g.account_id = $1 AND ($2::boolean IS NULL OR v.published = $2)
@@ -60,7 +72,15 @@ vodRouter.get(
         row.schema_id,
       ]);
     }
-    const pubs = await query('SELECT platform, external_url, views, published_at, status FROM publications WHERE vod_asset_id=$1', [req.params.id]);
+    // The full publication row, not a summary: what was approved when it went
+    // out, and whether the copy out there is still that one, are the two things
+    // anyone asks about a published asset.
+    const pubs = await query(
+      `SELECT platform, external_url, views, published_at, status, stale,
+              published_build_at, published_review_state, published_qc_state,
+              published_by, published_duration_ms
+         FROM publications WHERE vod_asset_id = $1
+        ORDER BY published_at DESC NULLS LAST`, [req.params.id]);
     res.json({ ...row, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any) });
   })
 );
@@ -280,30 +300,101 @@ vodRouter.put(
  * key + duration) and marks it for re-derivation — the full source recording is
  * untouched, so a clip can be re-edited any number of times. Only clips.
  */
+/** The extractor's format list for an output kind. Mirrors the clip route. */
+function outputFormats(outputKind: string, audio: boolean): OutputFormat[] {
+  const formats: OutputFormat[] = [];
+  if (outputKind !== 'progressive') formats.push('hls');
+  if (outputKind !== 'manifest') formats.push('mp4');
+  if (!formats.length) formats.push('mp4');
+  if (audio) formats.push('mp3', 'm4a');
+  return formats;
+}
+
 vodRouter.patch(
   '/:id/trim',
   asyncHandler(async (req, res) => {
-    const b = z.object({ startMs: z.number().int().nonnegative(), endMs: z.number().int().positive() }).parse(req.body);
+    const b = z.object({
+      startMs: z.number().int().nonnegative(),
+      endMs: z.number().int().positive(),
+      // Same escape hatch the clip route offers: a re-cut across an encoder
+      // restart is a thing an editor legitimately asks for.
+      acceptGapsMs: z.number().int().nonnegative().max(600_000).default(0),
+    }).parse(req.body);
     if (b.endMs <= b.startMs) throw badRequest('endMs must be after startMs');
     const asset = await fetchOwned(req.params.id, accountId(req));
     if (!asset) throw notFound('VOD asset not found');
     if (asset.kind !== 'clip') throw badRequest('only clips can be re-trimmed');
-    const row = await one(
+    // REFUSE A RANGE THE MEDIA CANNOT COVER, before promising anything. The
+    // same rule creation applies: a row naming files nobody can write is how
+    // an operator finds out at playback time instead of now.
+    const streamId = asset.channel_id ?? asset.event_id;
+    const kind = isAudioOnly(streamId) ? 'audio' : 'video';
+    const resolution = resolveRange(streamId, b.startMs, b.endMs, kind);
+    const verdict = assessRange(resolution, { maxGapMs: b.acceptGapsMs });
+    if (!verdict.ok) throw badRequest(verdict.message);
+
+    // THE KEY IS REWRITTEN, NOT PATCHED. The old regexp_replace only matched a
+    // key already shaped `clip-<a>-<b>`, so a clip built by compose-clip (whose
+    // key is `vod/compose-<ts>/…`) silently kept pointing at the OLD media
+    // while the row advertised the new range. Building the key from the range
+    // is the same thing createClipVod does, and it cannot miss.
+    const stem = `clip-${b.startMs}-${b.endMs}`;
+    const row = await one<any>(
       `UPDATE vod_assets SET
          start_epoch_ms=$3::bigint, end_epoch_ms=$4::bigint, duration_ms=$4::bigint-$3::bigint,
-         master_key = regexp_replace(master_key, 'clip-[0-9]+-[0-9]+', 'clip-' || $3::text || '-' || $4::text),
+         master_key = 'clips/' || id::text || '/' || $5::text || '/master.m3u8',
          progressive_key = CASE WHEN progressive_key IS NULL THEN NULL
-                                ELSE regexp_replace(progressive_key, 'clip-[0-9]+-[0-9]+', 'clip-' || $3::text || '-' || $4::text) END,
+                                ELSE 'clips/' || id::text || '/' || $5::text || '/clip.mp4' END,
          export_mp4_key = NULL,           -- stale export invalidated
+         export_mp3_key = NULL, export_m4a_key = NULL,
          thumb_status='processing',       -- re-derive keyscreens
+         -- A RE-CUT IS NEW MEDIA, SO IT IS UNREVIEWED MEDIA.
+         -- These four columns were left alone, which meant an approved clip
+         -- could be re-trimmed to a completely different range and still
+         -- publish carrying its old approval and its old QC pass, stamped
+         -- against footage nobody had looked at. services/review.ts says this
+         -- in its own header as the thing that must not happen.
+         review_state = 'draft'::review_state,
+         reviewed_by = NULL, reviewed_at = NULL,
+         qc_state = NULL, qc_at = NULL,
+         built_at = NULL,
          updated_at = now()
        WHERE id=$1 AND EXISTS (SELECT 1 ${OWNED} WHERE v.id=$1 AND g.account_id=$2)
        RETURNING *`,
-      [req.params.id, accountId(req), b.startMs, b.endMs]
+      [req.params.id, accountId(req), b.startMs, b.endMs, stem]
     );
     if (!row) throw notFound('VOD asset not found');
-    // re-enqueue the vod-extractor for the new range (like createClipVod).
-    res.json(row);
+
+    // The QC findings belong to media that no longer exists.
+    await query(`DELETE FROM qc_events WHERE vod_asset_id = $1`, [row.id]);
+
+    // Anywhere this asset is already published is now serving an older cut
+    // than the row describes. That is precisely what `stale` is for.
+    await query(`UPDATE publications SET stale = true WHERE vod_asset_id = $1`, [row.id]);
+
+    // AND ACTUALLY BUILD IT. This line used to be a comment saying the
+    // extractor should be re-enqueued. Nothing was, so every re-trim left the
+    // asset at thumb_status 'processing' forever, pointing at a manifest that
+    // would never be written.
+    // Through the shared helper, so the three callers that build a clip cannot
+    // disagree about formats or dedupe key again.
+    const job = await enqueueClipBuild({
+      vodAssetId: row.id, streamId, fromMs: b.startMs, toMs: b.endMs,
+      outputKind: row.output_kind,
+      channelId: asset.channel_id, eventId: asset.event_id,
+      acceptGapsMs: b.acceptGapsMs,
+    });
+
+    res.json({
+      ...row,
+      jobId: job.id,
+      state: job.state,
+      resolution: {
+        coveragePct: resolution.coveragePct,
+        gaps: resolution.gaps.length,
+        segments: segmentCount(resolution),
+      },
+    });
   })
 );
 

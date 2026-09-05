@@ -79,3 +79,64 @@ export async function createClipVod(opts: {
   // thumb_status→ready. Proven end-to-end by e2e/extractor-test.sh (real ffmpeg/Shaka).
   return row;
 }
+
+/**
+ * ENQUEUE THE BUILD FOR A CLIP. One function, because there were three callers
+ * and only one of them did it.
+ *
+ * createClipVod writes the ROW. Something has to write the MEDIA, and that is a
+ * clip.extract job. The manual route on /api/recordings/:id/clip enqueued one;
+ * the orchestrator's post-airing EPG auto-clip and its scheduled-clip firing
+ * both created the asset, marked the programme `created` or the scheduled clip
+ * `done`, and queued nothing. So a clip an operator cut by hand got media, and
+ * the automation that exists precisely to do it unattended left an asset stuck
+ * at thumb_status `processing`, pointing at a manifest that would never be
+ * written, while the EPG page reported success.
+ *
+ * The fix is not to add the missing call twice. It is to make the enqueue part
+ * of the same helper the row creation lives beside, so a fourth caller cannot
+ * repeat the omission.
+ */
+export async function enqueueClipBuild(opts: {
+  vodAssetId: string;
+  /** The channel or event whose segments are being cut. */
+  streamId: string;
+  fromMs: number;
+  toMs: number;
+  outputKind: OutputKind;
+  channelId?: string | null;
+  eventId?: string | null;
+  /** Gap tolerance the range was ACCEPTED under; the worker re-assesses. */
+  acceptGapsMs?: number;
+}): Promise<{ id: string; state: string }> {
+  const { enqueue } = await import('./jobs/queue');
+  const { CLIP_EXTRACT } = await import('./jobs/handlers/clipExtract');
+  const { isAudioOnly } = await import('./localRecordingIndex');
+
+  const audio = isAudioOnly(opts.streamId);
+  const formats: string[] = [];
+  if (opts.outputKind !== 'progressive') formats.push('hls');
+  if (opts.outputKind !== 'manifest') formats.push('mp4');
+  if (!formats.length) formats.push('mp4');
+  // An audio clip also gets the two AUDIO files: MP3 for anywhere, M4A as
+  // the AAC exactly as broadcast. The VOD library offers them for download.
+  if (audio) formats.push('mp3', 'm4a');
+
+  const job = await enqueue({
+    type: CLIP_EXTRACT,
+    payload: {
+      vodAssetId: opts.vodAssetId, streamId: opts.streamId,
+      fromMs: opts.fromMs, toMs: opts.toMs,
+      formats, kind: audio ? 'audio' : 'video',
+      acceptGapsMs: opts.acceptGapsMs ?? 0,
+    },
+    channelId: opts.channelId ?? null,
+    eventId: opts.eventId ?? null,
+    // THE RANGE IS PART OF THE KEY. A re-cut REPLACES the previous build, so it
+    // must not be deduped against it, and a retried request for the same range
+    // must return the running job rather than extracting twice.
+    dedupeKey: `clip.extract:${opts.vodAssetId}:${opts.fromMs}-${opts.toMs}`,
+    priority: 50,
+  });
+  return { id: job.id, state: job.state };
+}
