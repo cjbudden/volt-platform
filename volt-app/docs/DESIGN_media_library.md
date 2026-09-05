@@ -134,9 +134,33 @@ platform. Concretely:
   publishable point immediately, disabling the app (or its keys) withdraws
   every publication to it.
 
-### 4.1 Default publishing rule (new: `publishing_rules`)
+### 4.1 Publishing rules: a ladder, not one default (new: `publishing_rules`)
 
-One per client account (later: per group / per owner override), with:
+Christian, 5 Sep: an account-level default, plus rules by CONTENT TYPE, plus
+rules at the level of an individual channel, event or station. So a rule has
+a SCOPE, and the most specific scope that matches an asset wins:
+
+| Precedence | Scope | `scope_kind` / `scope_id` | Example |
+|---|---|---|---|
+| 1 (highest) | the asset itself | (stored on the asset as `custom`) | this one clip goes nowhere |
+| 2 | one channel / station / event | `owner` / channels.id or events.id | Sky Sport clips auto-publish to YouTube and the TV app |
+| 3 | a content type | `schema` / metadata_schemas.id | every Sports match goes to X and the web app |
+| 4 (lowest) | the client account | `account` / null | everything else: web app only, geo worldwide, no paywall |
+
+Resolution is per FIELD, not per rule: a channel-level rule that sets only
+the social targets still takes its availability window and paywall from the
+content-type rule, and the rest from the account default. That keeps a
+station's rule to the two lines that differ. The resolved result is stored on
+the asset at publish time (`availability`, `publish_plan`) with the id of the
+rule each field came from, so "why did this go to TikTok" has an answer.
+
+One row per scope: `UNIQUE (account_id, scope_kind, scope_id)`. The account
+row is created with the account and cannot be deleted; owner and type rows
+are optional. The Settings page for a channel, station or event gains a
+"Publishing" section that shows the inherited values greyed and lets the
+operator override any of them; the Content type editor gets the same section.
+
+Each rule carries:
 
 - targets: which publications happen automatically on publish, chosen ONLY
   from the client's registered apps and enabled social accounts (see 4.0),
@@ -189,9 +213,10 @@ availability.
 5. Upload/encoding profile display in the library.
 
 Open questions for Christian: paywall model (entitlement token vs price tiers,
-and who bills); whether a client's default rule can also be overridden per
-group inside the client; whether "On Demand" should be the viewer-facing
-catalogue name while operators see "Media Library".
+and who bills); whether "On Demand" should be the viewer-facing catalogue name
+while operators see "Media Library".
 
 Answered 5 Sep: rules and defaults are client-account level; publishing points
-are the client's registered apps and its configured social accounts only.
+are the client's registered apps and its configured social accounts only;
+rules form a ladder: account default, then by content type, then per channel /
+event / station, then per asset (most specific wins, resolved per field).
