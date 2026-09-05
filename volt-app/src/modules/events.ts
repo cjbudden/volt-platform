@@ -5,6 +5,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, conflict, badRequest } from '../util/http';
 import { orchestrator } from '../services/orchestrator';
 import { validateEntityMetadata } from './metadataSchemas';
+import { defaultTypeId } from '../services/contentTypes';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
 
 export const eventsRouter = Router();
@@ -117,7 +118,11 @@ eventsRouter.post(
     );
     if (overlap.n >= group.max_concurrent) throw conflict(`Concurrent event limit reached (${group.max_concurrent})`);
 
-    const md = await validateEntityMetadata(accountId(req), b.schemaId ?? null, b.metadata, ['event']);
+    // AN EVENT IS GIVEN A TYPE AT SETUP. The type decides what is captured
+    // against it and against everything derived from it. None chosen = the
+    // generic Broadcast event.
+    const typeId = b.schemaId ?? await defaultTypeId(accountId(req), 'event');
+    const md = await validateEntityMetadata(accountId(req), typeId, b.metadata, ['event']);
     const who = actor(req);
     const row = await one<any>(
       `INSERT INTO events(group_id, name, scheduled_start, scheduled_end,
@@ -198,7 +203,8 @@ const editEvent = asyncHandler(async (req, res) => {
   if (has('inputLossBehavior')) patch.input_loss_behavior = b.inputLossBehavior;
   if (has('fillerSlateRef')) patch.filler_slate_ref = b.fillerSlateRef ?? null;
   if (has('schemaId') || has('metadata')) {
-    const md = await validateEntityMetadata(accountId(req), b.schemaId ?? null,
+    if (has('schemaId') && b.schemaId == null) throw badRequest('A content type is required. Choose another type instead of clearing it.');
+    const md = await validateEntityMetadata(accountId(req), (has('schemaId') ? b.schemaId : current.schema_id) ?? null,
       has('metadata') ? b.metadata : current.metadata, ['event']);
     patch.schema_id = md.schemaId;
     patch.metadata = md.metadata;

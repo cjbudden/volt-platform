@@ -5,6 +5,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, conflict, badRequest } from '../util/http';
 import { orchestrator } from '../services/orchestrator';
 import { validateEntityMetadata } from './metadataSchemas';
+import { defaultTypeId } from '../services/contentTypes';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
 import { buildChannelDetail, loadChannelHealthLite, DVR_MAX_SEC } from '../services/channelDetail';
 import { startTestStream, stopTestStream, testStreamStatus, isTestStreamAvailable } from '../services/testStream';
@@ -144,6 +145,11 @@ const createSchema = z.object({
   brandRef: z.string().nullable().optional(),   // channel brand/logo image (identity)
   kind: z.enum(['tv', 'radio']).default('tv'),  // radio = audio-only workflows
   radio: RADIO_CFG,
+  // CONTENT TYPE. A station or channel always has one: it is the base
+  // metadata entry the guide and public now/next fall back to. Omitted =
+  // the standard type for the kind (Radio station / TV channel).
+  schemaId: z.string().uuid().optional(),
+  metadata: z.record(z.any()).optional(),
 });
 
 /** Create a channel — enforces the group's max_channels entitlement. */
@@ -163,6 +169,8 @@ channelsRouter.post(
     const ladder = body.outputLadder?.length
       ? JSON.stringify(body.outputLadder.map((r) => ({ height: r.height, bitrate_kbps: r.bitrateKbps })))
       : null;
+    const typeId = body.schemaId ?? await defaultTypeId(accountId(req), body.kind === 'radio' ? 'radio' : 'tv');
+    const md = await validateEntityMetadata(accountId(req), typeId, body.metadata, ['channel']);
 
     // retention: seconds is the source of truth; derive the coarse day field in sync
     const retSec = body.recordingRetentionSec ?? (body.recordingRetentionDays != null ? body.recordingRetentionDays * 86400 : null);
@@ -182,6 +190,8 @@ channelsRouter.post(
          body.kind, body.kind === 'radio' ? JSON.stringify(body.radio ?? {}) : null,
          who.userId]
       )).rows[0];
+      await c.query(`UPDATE channels SET schema_id = $2, metadata = $3::jsonb WHERE id = $1`,
+        [ch.id, md.schemaId, JSON.stringify(md.metadata)]);
       for (const s of body.sources ?? []) {
         await c.query(
           `INSERT INTO stream_inputs(channel_id, role, protocol, ingest_url, stream_key, rendition_label, rendition_bitrate_kbps)
@@ -323,7 +333,9 @@ const editChannel = asyncHandler(async (req, res) => {
   }
   const touchMeta = has('schemaId') || has('metadata');
   if (touchMeta) {
-    const md = await validateEntityMetadata(accountId(req), body.schemaId ?? null,
+    // A type is required: clearing it is refused, changing it is allowed.
+    if (has('schemaId') && body.schemaId == null) throw badRequest('A content type is required. Choose another type instead of clearing it.');
+    const md = await validateEntityMetadata(accountId(req), (has('schemaId') ? body.schemaId : current.schema_id) ?? null,
       has('metadata') ? body.metadata : current.metadata, ['channel']);
     patch.schema_id = md.schemaId;
     patch.metadata = md.metadata;

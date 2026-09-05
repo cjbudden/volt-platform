@@ -5,8 +5,9 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, conflict, ApiError } from '../util/http';
 import { validateSchemaFields, validateMetadata, mergeFields, type SchemaField } from '../services/metadataValidator';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
+import { ensureStandardTypes } from '../services/contentTypes';
 
-const SCHEMA_EDITABLE = ['name', 'description', 'fields', 'target_kind', 'domain', 'extends_id'];
+const SCHEMA_EDITABLE = ['name', 'description', 'fields', 'target_kind', 'domain', 'extends_id', 'applies_to', 'schema_org_type'];
 
 /**
  * Resolve a schema's EFFECTIVE fields by walking its extends chain (parent
@@ -56,9 +57,16 @@ metadataSchemasRouter.use(requireAuth);
 metadataSchemasRouter.get(
   '/',
   asyncHandler(async (req, res) => {
+    // The standard types are part of every account: seed on first sight so a
+    // new client never meets an empty list. ?appliesTo=radio|tv|event|vod
+    // narrows to the types offered for that owner.
+    await ensureStandardTypes(accountId(req));
+    const applies = typeof req.query.appliesTo === 'string' ? req.query.appliesTo : null;
     const rows = await query(
-      `SELECT * FROM metadata_schemas WHERE account_id = $1 ORDER BY name`,
-      [accountId(req)]
+      `SELECT * FROM metadata_schemas WHERE account_id = $1
+         ${applies ? 'AND ($2 = ANY(applies_to) OR applies_to = \'{}\')' : ''}
+        ORDER BY is_standard DESC, name`,
+      applies ? [accountId(req), applies] : [accountId(req)]
     );
     res.json(rows);
   })
@@ -84,6 +92,8 @@ const fieldSchema = z.object({
   options: z.array(z.string()).optional(),
   multiple: z.boolean().optional(),
   refDomain: z.string().optional(),
+  epg: z.string().optional(),        // EPG slot, validated in validateSchemaFields
+  schemaOrg: z.string().optional(),  // schema.org property
 });
 const upsertSchema = z.object({
   name: z.string().min(1),
@@ -92,6 +102,8 @@ const upsertSchema = z.object({
   targetKind: z.enum(['vod', 'event', 'channel', 'any']).default('vod'),
   domain: z.string().optional(),
   extendsId: z.string().uuid().optional(), // schema composition (inherit fields)
+  appliesTo: z.array(z.enum(['radio', 'tv', 'event', 'vod'])).optional(),
+  schemaOrgType: z.string().optional(),
 });
 
 metadataSchemasRouter.post(
@@ -110,9 +122,10 @@ metadataSchemasRouter.post(
     if (exists) throw conflict(`Schema "${body.name}" already exists`);
     const who = actor(req);
     const row = await one<any>(
-      `INSERT INTO metadata_schemas(account_id, name, description, fields, target_kind, domain, extends_id, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING *`,
-      [accountId(req), body.name, body.description ?? null, JSON.stringify(body.fields), body.targetKind, body.domain ?? null, body.extendsId ?? null, who.userId]
+      `INSERT INTO metadata_schemas(account_id, name, description, fields, target_kind, domain, extends_id, applies_to, schema_org_type, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10) RETURNING *`,
+      [accountId(req), body.name, body.description ?? null, JSON.stringify(body.fields), body.targetKind, body.domain ?? null, body.extendsId ?? null,
+       body.appliesTo ?? [], body.schemaOrgType ?? null, who.userId]
     );
     await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
       action: 'create', entityType: 'metadata_schema', entityId: row.id, snapshot: { name: row.name } });
@@ -137,6 +150,8 @@ const editSchema = asyncHandler(async (req, res) => {
   if (has('targetKind')) patch.target_kind = body.targetKind;
   if (has('domain')) patch.domain = body.domain ?? null;
   if (has('extendsId')) patch.extends_id = body.extendsId ?? null;
+  if (has('appliesTo')) patch.applies_to = body.appliesTo ?? [];
+  if (has('schemaOrgType')) patch.schema_org_type = body.schemaOrgType ?? null;
 
   const im = req.get('If-Match');
   const expectedVersion = im ? parseInt(im.replace(/"/g, ''), 10) : (has('version') ? Number(body.version) : null);
@@ -179,6 +194,18 @@ metadataSchemasRouter.get(
 metadataSchemasRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
+    // A type that something is assigned to cannot go: the station, event or
+    // asset would be left with no type, which the rule above forbids. And a
+    // standard type is never deleted, only edited or cloned, so a client can
+    // always get back to the platform baseline.
+    const cur = await one<any>(`SELECT id, is_standard FROM metadata_schemas WHERE id = $1 AND account_id = $2`, [req.params.id, accountId(req)]);
+    if (!cur) throw notFound('Schema not found');
+    if (cur.is_standard) throw conflict('Standard types cannot be deleted. Edit it, or clone it and assign the clone.');
+    const use = await one<any>(
+      `SELECT (SELECT count(*) FROM channels WHERE schema_id = $1)
+            + (SELECT count(*) FROM events WHERE schema_id = $1)
+            + (SELECT count(*) FROM vod_assets WHERE schema_id = $1) AS n`, [req.params.id]);
+    if (Number(use?.n ?? 0) > 0) throw conflict(`This type is assigned to ${use.n} item(s). Reassign them first.`);
     const row = await one<any>(
       `DELETE FROM metadata_schemas WHERE id = $1 AND account_id = $2 RETURNING id, name`,
       [req.params.id, accountId(req)]

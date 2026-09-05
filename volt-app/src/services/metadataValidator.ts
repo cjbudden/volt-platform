@@ -20,6 +20,12 @@ export interface SchemaField {
   options?: string[];
   multiple?: boolean;
   refDomain?: string; // for type 'reference': the entity domain (e.g. 'sports-team')
+  /** The EPG slot this value lands in when a programme is made from the owner:
+   *  title | sub-title | description | category | episode | language | icon |
+   *  credits.<role> | custom:<name>. See services/contentTypes.ts. */
+  epg?: string;
+  /** The schema.org property this field maps to in JSON-LD output. */
+  schemaOrg?: string;
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}(T.*)?$/;
@@ -48,6 +54,8 @@ export function validateSchemaFields(fields: unknown): SchemaField[] {
     if (!okTypes.includes(f.type)) throw new ApiError(422, `bad field type: ${f.type} (${f.key})`);
     if (f.type === 'enum' && (!Array.isArray(f.options) || f.options.length === 0))
       throw new ApiError(422, `enum field ${f.key} needs options[]`);
+    if (f.epg != null && !/^(title|sub-title|description|category|episode|language|icon|credits\.[a-z-]+|custom:[a-zA-Z0-9_-]+)$/.test(String(f.epg)))
+      throw new ApiError(422, `bad epg slot on ${f.key}: ${f.epg}`);
   }
   return fields as SchemaField[];
 }

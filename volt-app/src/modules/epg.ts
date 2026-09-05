@@ -17,6 +17,9 @@ import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
 import { expandRrule, validateRrule } from '../services/epg';
+import { programmeVodStates, convertProgramme } from '../services/epgVod';
+import { programmeFieldsFrom } from '../services/contentTypes';
+import { resolveEffectiveFields } from './metadataSchemas';
 
 export const epgRouter = Router();
 epgRouter.use(requireAuth);
@@ -60,7 +63,19 @@ epgRouter.get(
                 WHERE (n.channel_id = o.id OR n.event_id = o.id) AND n.starts_at > now()
                 ORDER BY n.starts_at LIMIT 1) AS next_at
          FROM (
-           SELECT 'channel'::text AS kind, c.id, c.name, c.status::text FROM channels c
+           -- A RADIO STATION IS ITS OWN KIND, and the column already says which.
+           --
+           -- This was the literal 'channel' for every row, so the EPG page's
+           -- Channels filter swept up every radio station in the account and a
+           -- twenty-one-station list buried the two television channels in it.
+           -- channels.kind has been 'tv' | 'radio' since the first migration;
+           -- the literal was classifying instead of the column.
+           --
+           -- 'radio' is emitted rather than 'tv' because the caller's vocabulary
+           -- is channel / radio / event, and a kind called 'tv' would need
+           -- translating at every consumer.
+           SELECT CASE WHEN c.kind = 'radio' THEN 'radio' ELSE 'channel' END AS kind,
+                  c.id, c.name, c.status::text FROM channels c
              JOIN groups g ON g.id=c.group_id WHERE g.account_id=$1
            UNION ALL
            SELECT 'event', e.id, e.name, e.status::text FROM events e
@@ -94,6 +109,69 @@ epgRouter.get(
   })
 );
 
+/**
+ * THE VOD LIFECYCLE OF A WINDOW'S PROGRAMMES.
+ *
+ * Kept OFF `GET /api/epg` deliberately. That endpoint returns raw programme
+ * rows and is read by things that only want the listing; this one measures the
+ * archive on disk, and making every guide read pay for a filesystem scan to
+ * satisfy one screen would be the wrong trade. The builder asks for both.
+ *
+ * Returned as a keyed map rather than an array so the client joins by id and
+ * cannot silently mis-pair by index when the two responses disagree about how
+ * many programmes are in the window, which they can if one is edited between
+ * the two requests.
+ */
+epgRouter.get(
+  '/vod-status',
+  asyncHandler(async (req, res) => {
+    const owner = ownerOf(req.query);
+    if (!owner) throw badRequest('channelId, eventId, or ownerKind+ownerId required');
+    if (!(await ownOwner(owner.kind, owner.id, accountId(req)))) throw notFound('Owner not found');
+    const from = req.query.from ? new Date(String(req.query.from)) : new Date(Date.now() - 3_600_000);
+    const to = req.query.to ? new Date(String(req.query.to)) : new Date(Date.now() + 24 * 3_600_000);
+    const rows = await programmeVodStates(owner.kind, owner.id, from.toISOString(), to.toISOString());
+    const byId: Record<string, typeof rows[number]> = {};
+    for (const r of rows) byId[r.id] = r;
+    res.json({ programmes: byId });
+  })
+);
+
+/**
+ * CONVERT THIS SLOT NOW.
+ *
+ * The action behind the `convertible` and `failed` states. It runs the SAME
+ * conversion the scheduler runs, from services/epgVod.ts, rather than a second
+ * implementation that agrees with it today.
+ *
+ * A slot that is already converted or mid-conversion answers 409 with what it
+ * is doing instead. That is not pedantry: the failure it prevents is an
+ * operator pressing the button twice on a slow conversion and getting two
+ * assets cut from the same span, which nothing downstream would flag as odd.
+ */
+epgRouter.post(
+  '/:id/convert',
+  asyncHandler(async (req, res) => {
+    const p = await one<any>(`SELECT * FROM programmes WHERE id=$1`, [req.params.id]);
+    if (!p) throw notFound('Programme not found');
+    const kind: OwnerKind = p.channel_id ? 'channel' : 'event';
+    const ownerId = p.channel_id ?? p.event_id;
+    if (!(await ownOwner(kind, ownerId, accountId(req)))) throw notFound('Programme not found');
+    if (new Date(p.actual_end ?? p.ends_at).getTime() > Date.now()) {
+      throw badRequest('This programme has not finished airing yet');
+    }
+    // allowRetry lets a failed slot be tried again; a converted one is still
+    // refused, because the fix for a bad asset is to delete it, not to make a
+    // second one beside it.
+    const out = await convertProgramme(p.id, { allowRetry: true });
+    if ('skipped' in out) {
+      res.status(409).json({ error: out.skipped });
+      return;
+    }
+    res.status(201).json({ assetId: out.assetId });
+  })
+);
+
 /** Now + next for an owner (O(1)-ish hot path). */
 epgRouter.get(
   '/now-next',
@@ -104,7 +182,48 @@ epgRouter.get(
     const col = ownerCol(owner.kind);
     const now = await one(`SELECT * FROM programmes WHERE ${col}=$1 AND span @> now() ORDER BY starts_at LIMIT 1`, [owner.id]);
     const next = await one(`SELECT * FROM programmes WHERE ${col}=$1 AND starts_at > now() ORDER BY starts_at LIMIT 1`, [owner.id]);
-    res.json({ now: now ?? null, next: next ?? null });
+    // THE BASE ENTRY. With no programme on, the owner's own type metadata is
+    // what is on: a station's identity, an event's name and description. It
+    // is returned in the same EPG shape a programme would give, so a guide
+    // client never has an empty "now".
+    const base = await ownerBaseEntry(owner.kind, owner.id, accountId(req));
+    res.json({ now: now ?? null, next: next ?? null, base, nowIsBase: !now && !!base });
+  })
+);
+
+/**
+ * An owner's type metadata rendered through its type's EPG mapping: title,
+ * sub-title, description, categories, credits, icon. The fallback for now/next
+ * and the prefill for a new programme on that owner.
+ */
+export async function ownerBaseEntry(kind: 'channel' | 'event', id: string, account: string) {
+  const table = kind === 'channel' ? 'channels' : 'events';
+  const row = await one<any>(`SELECT name, schema_id, metadata FROM ${table} WHERE id = $1`, [id]);
+  if (!row) return null;
+  const resolved = row.schema_id ? await resolveEffectiveFields(row.schema_id, account) : null;
+  const mapped = resolved ? programmeFieldsFrom(resolved.fields, row.metadata ?? {}) : { categories: [], credits: [], custom: {} };
+  return {
+    title: mapped.title ?? row.name,
+    subTitle: mapped.subTitle ?? null,
+    description: mapped.description ?? null,
+    categories: mapped.categories,
+    episode: mapped.episode ?? null,
+    language: mapped.language ?? null,
+    icon: mapped.icon ?? null,
+    credits: mapped.credits,
+    custom: mapped.custom,
+    schemaId: row.schema_id ?? null,
+  };
+}
+
+/** The prefill for "Add programme" on an owner: its base entry. */
+epgRouter.get(
+  '/owner-defaults',
+  asyncHandler(async (req, res) => {
+    const owner = ownerOf(req.query);
+    if (!owner) throw badRequest('channelId, eventId, or ownerKind+ownerId required');
+    if (!(await ownOwner(owner.kind, owner.id, accountId(req)))) throw notFound('Owner not found');
+    res.json(await ownerBaseEntry(owner.kind, owner.id, accountId(req)));
   })
 );
 

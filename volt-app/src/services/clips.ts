@@ -1,4 +1,5 @@
 import { one } from '../db';
+import { inheritedMetadata } from './contentTypes';
 
 /**
  * Create a VOD asset from a range of a recording. A clip can be delivered as ABR
@@ -52,11 +53,15 @@ export async function createClipVod(opts: {
   const { ownerCol, ownerId, recordingId, title, startMs, endMs, outputKind, masterKeyBase } = opts;
   const base = `${masterKeyBase}/clip-${startMs}-${endMs}`;
   const progressiveKey = outputKind !== 'manifest' ? `${base}/progressive.mp4` : null;
+  // THE CLIP CARRIES ITS OWNER'S TYPE. A cut from a sports match is sports
+  // metadata; a cut from a station carries the station's identity. Copied at
+  // creation so the asset can be edited on its own afterwards.
+  const inh = await inheritedMetadata(ownerCol, ownerId);
   const row = await one(
     `INSERT INTO vod_assets(${ownerCol}, recording_id, kind, title, master_key,
                             start_epoch_ms, end_epoch_ms, duration_ms,
-                            output_kind, formats, progressive_key, thumb_status)
-     VALUES ($1,$2,'clip',$3,$4,$5,$6,$7,$8::clip_output_kind,$9::jsonb,$10,'processing')
+                            output_kind, formats, progressive_key, thumb_status, schema_id, metadata)
+     VALUES ($1,$2,'clip',$3,$4,$5,$6,$7,$8::clip_output_kind,$9::jsonb,$10,'processing',$11,$12::jsonb)
      RETURNING *`,
     [
       ownerId,
@@ -69,6 +74,8 @@ export async function createClipVod(opts: {
       outputKind,
       JSON.stringify(formatsFor(outputKind)),
       progressiveKey,
+      inh.schemaId,
+      JSON.stringify(inh.metadata),
     ]
   );
   // The vod-extractor (services/vod-extractor-job.ts, entrypoint tools/extract-clip.ts)
