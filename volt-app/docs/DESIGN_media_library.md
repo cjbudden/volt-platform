@@ -109,18 +109,48 @@ programme's `metadata` JSONB under the same keys.
 
 ## 4. Publishing rules and availability
 
+### 4.0 Everything here is CLIENT-LEVEL (added 5 Sep, Christian)
+
+In the SaaS release a client sees and controls only its own content, so every
+rule and default in this section belongs to the client account, not to the
+platform. Concretely:
+
+- The PUBLISHING POINTS a client can publish to are the client's own:
+  - its REGISTERED APPS (`apps` + `api_keys`, the API Keys & Apps page). A
+    publication to "the app" means: this asset is available to that app's
+    playback keys through the availability gate. An asset can be published
+    to some apps and not others (the web app but not the TV app);
+  - its SOCIAL ACCOUNTS (`publish_targets`: platform + external account id +
+    credential reference), enabled per client. A platform with no registered
+    account for the client is not offered at all.
+  Both tables already carry `account_id`; the rule is that the publish UI,
+  the default rule and the API only ever list and accept targets from the
+  caller's account, and the platform never shows a global list.
+- The DEFAULT PUBLISHING RULE is a client setting (one per account), set up
+  by the client's admin. Per-asset override stays inside the client.
+- Publishing links to API Keys & Apps: from an asset's "Where it went",
+  each app publication links to the app's registration; from an app, the
+  list of assets published to it. Adding an app to a client makes it a
+  publishable point immediately, disabling the app (or its keys) withdraws
+  every publication to it.
+
 ### 4.1 Default publishing rule (new: `publishing_rules`)
 
-One per account (later: per group / per owner override), with:
+One per client account (later: per group / per owner override), with:
 
-- targets: which publications happen automatically on publish (the platform's
-  own on-demand catalogue, share page, each social adapter) and their settings;
+- targets: which publications happen automatically on publish, chosen ONLY
+  from the client's registered apps and enabled social accounts (see 4.0),
+  plus the client's share page, and their settings;
 - availability window: publish immediately or at a time; expire after N days,
   at a date, or never;
 - access: geo mode (worldwide / allow / block + countries), rights profile,
   paywall (free / entitlement required / price tier);
 - review gate: require approved review and QC pass before auto-publish (the
   existing `publishGate`).
+
+`publications.platform` gains `app` with `target_id` pointing at `apps.id`
+(today `portal` covers the platform catalogue; `app` makes each registered app
+its own publishing point).
 
 `vod_assets` gains `availability` JSONB (`{ rule: 'default' | 'custom', from,
 until, geo_mode, geo_countries, access, paywall }`) plus `availability_state`
@@ -159,6 +189,9 @@ availability.
 5. Upload/encoding profile display in the library.
 
 Open questions for Christian: paywall model (entitlement token vs price tiers,
-and who bills); whether the default rule is per account only or also per group;
-whether "On Demand" should be the viewer-facing catalogue name while operators
-see "Media Library".
+and who bills); whether a client's default rule can also be overridden per
+group inside the client; whether "On Demand" should be the viewer-facing
+catalogue name while operators see "Media Library".
+
+Answered 5 Sep: rules and defaults are client-account level; publishing points
+are the client's registered apps and its configured social accounts only.
