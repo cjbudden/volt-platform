@@ -54,6 +54,15 @@ current version is always the file in this repo.
 - [On-the-fly image service](volt-app/docs/DESIGN_image_service.md)
 - [File manager + watchfolder ingest](volt-app/docs/DESIGN_file_manager_watchfolder.md)
 - [API access map (public vs admin)](volt-app/docs/API_ACCESS_MAP.md)
+- [Pages and embeds](volt-app/docs/DESIGN_pages_and_embeds.md), one Page object with three
+  framings (public, iframe, share token), the module catalogue, composition templates, and
+  the iframe mechanics. The base the portal builder would grow from.
+  Working sketch: `volt-app/docs/pages-and-embeds-mock.html` (open in a browser), template
+  and framing switcher over the module catalogue.
+- [Presentation framework](volt-app/docs/DESIGN_presentation_framework.md), the player, its
+  skins, embed vs SDK, telemetry, advertising seams, share/QC pages and which workflows ship.
+  Working mock: `volt-app/docs/share-page-policy-mock.html` (open in a browser), the share
+  page driven by the real workflow policy module.
 
 ## Workflow docs (`volt-app/docs/`)
 - [Captions + translation](volt-app/docs/WORKFLOW_captions_translation.md)
@@ -61,6 +70,9 @@ current version is always the file in this repo.
 - [Social publishing](volt-app/docs/WORKFLOW_social_publishing.md)
 
 ## API
+- **[Embedding the player](volt-app/docs/EMBEDDING.md)**, customer-facing: the JS embed, the
+  iframe embed, every attribute, the SDK, headless mode, events, postMessage, and the
+  things that go wrong.
 - [API reference](volt-app/docs/API.md) · [API additions](volt-app/docs/API-additions.md)
 - Postman, `volt-app/api/Volt.postman_collection.json` (+ `Volt.postman_environment.json`)
 
@@ -88,6 +100,10 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
 - `orchestrator.check.ts`, provisioning: primary + backup renditions, failover, teardown.
 - `tenancy.check.ts`, multi-tenant hierarchy (parent → children → grandchild) isolation.
 - `epg-pure.check.ts` / `epg.check.sh`, EPG: RRULE materialization, guide window, effective-end.
+- `waveform-holes.check.ts`, waveform: a hole in a run never shifts what follows it.
+- `waveform-cache.check.ts`, waveform: the 100ms envelope cache (a window measured once is
+  served with no decode, legacy caches upgrade, primer progress) and the incremental segment
+  index scan. Needs ffmpeg, no database.
 - `autovod.check.ts`, auto-VOD from a completed event recording.
 - `vod-extractor.check.ts`, VOD extractor pure logic: segment selection/snapping.
 - `retrim.check.sh`, non-destructive clip re-trim (change in/out, original preserved).
@@ -95,6 +111,12 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
 - `captions-orchestration.check.ts`, separate captions task launched, tracked, torn down.
 - `captions-toggle.check.ts`, account captions_provider master toggle (none/whisper/gladia).
 - `metadata-events.check.ts`, metadata-on-events: schema composition + target_kind enforcement.
+- `workflow-policy.check.ts`, the workflow policy chain (defaults → deployment →
+  account → link), the partial-override rule, the env reader, and which actions a
+  share page may offer under each policy. 20 assertions, pure logic.
+- `event-promo.check.ts`, the schema.org projection: template inference from the
+  data's own shape, promo fields from SportsEvent/Person, `eventStatus` to phase,
+  and JSON-LD back out. 17 assertions, pure logic.
 - `access-control.check.sh`, admin routes unreachable without admin auth (the access map).
 - `apps.check.sh`, apps + API keys: publishable key once, /availability gate.
 - `edit-audit.check.sh`, create stamps created_by + audit; partial PATCH + version.

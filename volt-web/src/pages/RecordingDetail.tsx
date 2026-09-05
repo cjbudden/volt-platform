@@ -4,6 +4,7 @@ import AudioVisualizer from '../AudioVisualizer'
 import ClipTimeline from '../ClipTimeline'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import type { Waveform } from '../api'
+import { pressable } from '../a11y'
 
 /* ============================================================================
    Recording detail — the review/trim/clip page, following the same structural
@@ -35,6 +36,49 @@ const KIND_LABEL: Record<string, string> = { event: 'Event', channel_day: 'Chann
 
 type Rec = RecordingRow & { vod_assets?: VodAssetRow[] }
 
+/* ---------------------------------------------------------------------------
+   WHAT IS LOADING, AND WHY.
+
+   This page pulls five separate things, each on its own clock: the recording
+   row, the on-disk coverage (a scan of every segment), the audio envelope for
+   the visible window, the metadata lane for that window, and the transcript
+   languages. On a 24x7 capture the second and third can take seconds, and
+   until now the only sign of that was a lane that stayed empty. Each part now
+   reports what it is doing, so a wait reads as "coverage: scanning 21,600
+   segments" rather than "the page is broken".
+   ------------------------------------------------------------------------ */
+type LoadPart = 'recording' | 'coverage' | 'waveform' | 'metadata' | 'transcript'
+interface LoadInfo { state: 'idle' | 'loading' | 'done' | 'error'; note?: string; ms?: number }
+const PART_LABEL: Record<LoadPart, string> = {
+  recording: 'Recording', coverage: 'Coverage', waveform: 'Audio envelope', metadata: 'Metadata lane', transcript: 'Transcript',
+}
+
+function LoadStatus({ parts }: { parts: Record<LoadPart, LoadInfo> }) {
+  const entries = (Object.keys(parts) as LoadPart[]).map(k => [k, parts[k]] as const)
+  const busy = entries.filter(([, v]) => v.state === 'loading')
+  const failed = entries.filter(([, v]) => v.state === 'error')
+  if (!busy.length && !failed.length) return null
+  const dot = (st: LoadInfo['state']) => st === 'loading' ? '#7dd3fc' : st === 'error' ? '#f87171' : st === 'done' ? '#4ade80' : '#475569'
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', alignItems: 'center', padding: '6px 10px', marginBottom: 8,
+      border: '1px solid var(--border)', borderRadius: 8, background: 'rgba(125,211,252,.05)', fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
+      <span style={{ color: 'var(--muted)', fontWeight: 600 }}>
+        {busy.length ? `Loading ${busy.length} of ${entries.length}` : 'Some parts did not load'}
+      </span>
+      {entries.map(([k, v]) => (
+        <span key={k} title={v.note} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ width: 7, height: 7, borderRadius: 4, background: dot(v.state), flex: 'none',
+            animation: v.state === 'loading' ? 'pulse2 1.2s ease-in-out infinite' : undefined }} />
+          <span style={{ color: v.state === 'error' ? '#f87171' : undefined }}>{PART_LABEL[k]}</span>
+          {v.state === 'loading' && v.note && <span>· {v.note}</span>}
+          {v.state === 'error' && v.note && <span>· {v.note}</span>}
+          {v.state === 'done' && v.ms != null && v.ms > 800 && <span>· {(v.ms / 1000).toFixed(1)}s</span>}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export default function RecordingDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const initialQuery = useMemo(() => new URLSearchParams(window.location.search).get('q') || '', [])
   const [rec, setRec] = useState<Rec | null>(null)
@@ -50,6 +94,10 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   const [view, setView] = useState<{ start: number; end: number } | null>(null)
   const [wave, setWave] = useState<Waveform | null>(null)
   const [waveBusy, setWaveBusy] = useState(false)
+  const [loadParts, setLoadParts] = useState<Record<LoadPart, LoadInfo>>({
+    recording: { state: 'idle' }, coverage: { state: 'idle' }, waveform: { state: 'idle' }, metadata: { state: 'idle' }, transcript: { state: 'idle' },
+  })
+  const part = (k: LoadPart, info: LoadInfo) => setLoadParts(p => ({ ...p, [k]: info }))
   const [playerErr, setPlayerErr] = useState('')
   const videoRef = useRef<HTMLVideoElement | null>(null)
   // transcript side panel: cues for the LOADED range (live-follows the playhead)
@@ -72,15 +120,30 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   const [actErr, setActErr] = useState('')
 
   async function loadRec() {
-    try { setRec(await api.recording(id)) } catch (e: any) { setErr(e.message) }
+    const t0 = Date.now()
+    part('recording', { state: 'loading', note: 'fetching the recording' })
+    try { setRec(await api.recording(id)); part('recording', { state: 'done', ms: Date.now() - t0 }) }
+    catch (e: any) { setErr(e.message); part('recording', { state: 'error', note: e.message }) }
   }
   async function loadTl() {
-    try { setTl(await api.recordingTimeline(id)) } catch (e: any) { setErr(e.message) }
+    const t0 = Date.now()
+    part('coverage', { state: 'loading', note: 'scanning the segments on disk' })
+    try {
+      const t = await api.recordingTimeline(id)
+      setTl(t)
+      const n = t.spans.reduce((a, s) => a + (s.segments ?? 0), 0)
+      part('coverage', { state: 'done', ms: Date.now() - t0, note: n ? `${n.toLocaleString()} segments` : undefined })
+    } catch (e: any) { setErr(e.message); part('coverage', { state: 'error', note: e.message }) }
   }
   useEffect(() => {
     loadRec(); loadTl()
-    api.recordingProgrammes(id).then(r => setProgrammes(r.programmes)).catch(() => setProgrammes([]))
-    api.recordingTranscript(id).then(r => setTsLangs(r.languages)).catch(() => setTsLangs([]))
+    // The metadata lane is fetched for the VISIBLE window only (below). The
+    // unbounded call that used to sit here pulled every entry of the recording,
+    // tens of thousands on a 24x7 radio station, and then threw them away the
+    // moment the zoom window arrived.
+    part('transcript', { state: 'loading', note: 'checking for subtitles' })
+    api.recordingTranscript(id).then(r => { setTsLangs(r.languages); part('transcript', { state: 'done' }) })
+      .catch(() => { setTsLangs([]); part('transcript', { state: 'done' }) })
     /* eslint-disable-next-line */
   }, [id])
 
@@ -130,21 +193,31 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     let cancelled = false
     const t = setTimeout(async () => {
       setWaveBusy(true)
+      const t0 = Date.now()
+      const span = view.end - view.start
+      part('waveform', { state: 'loading', note: span <= 15 * 60_000 ? 'exact: decoding this window (cached after the first look)' : 'sampled: one segment per column' })
       try {
         const buckets = Math.max(120, Math.min(900, Math.round((window.innerWidth - 420) / 2)))
         let w = await api.recordingWaveform(id, view.start, view.end, buckets)
         if (cancelled) return
         setWave(w)
-        // The server measures the whole recording in the background; poll while
-        // it fills so a wide window sharpens up instead of blocking on open.
-        for (let i = 0; i < 8 && !cancelled && (w.pending > 0 || w.priming); i++) {
-          await new Promise(r => setTimeout(r, 1800))
+        // The server measures the whole recording in the background and never
+        // blocks a request past its budget; poll while THIS window still has
+        // unmeasured segments so it fills in, then stop. The background pass
+        // over the rest of the recording is not waited on: it only matters
+        // when the operator zooms somewhere new, and that view polls itself.
+        const pc = (a: number, b: number) => `${Math.round(100 * a / Math.max(1, b))}%`
+        for (let i = 0; i < 40 && !cancelled && w.pending > 0; i++) {
+          part('waveform', { state: 'loading', note: w.coverage ? `${pc(w.coverage.measured, w.coverage.total)} of this window measured` : 'filling in' })
+          await new Promise(r => setTimeout(r, Math.min(4000, 1200 + i * 200)))
           if (cancelled) return
           w = await api.recordingWaveform(id, view.start, view.end, buckets)
           if (cancelled) return
           setWave(w)
         }
-      } catch { if (!cancelled) setWave(null) } finally { if (!cancelled) setWaveBusy(false) }
+        part('waveform', { state: w.pending > 0 ? 'error' : 'done', ms: Date.now() - t0, note: w.pending > 0 ? 'some of this window could not be measured' : undefined })
+      } catch (e: any) { if (!cancelled) { setWave(null); part('waveform', { state: 'error', note: e?.message || 'failed' }) } }
+      finally { if (!cancelled) setWaveBusy(false) }
     }, 260)
     return () => { cancelled = true; clearTimeout(t) }
     /* eslint-disable-next-line */
@@ -157,9 +230,11 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     let cancelled = false
     const t = setTimeout(() => {
       const pad = (view.end - view.start) * 0.1
+      const t0 = Date.now()
+      part('metadata', { state: 'loading', note: 'EPG and now-playing for this window' })
       api.recordingProgrammes(id, { from: view.start - pad, to: view.end + pad })
-        .then(r => { if (!cancelled) setProgrammes(r.programmes) })
-        .catch(() => { /* lane is optional */ })
+        .then(r => { if (!cancelled) { setProgrammes(r.programmes); part('metadata', { state: 'done', ms: Date.now() - t0, note: `${r.programmes.length} items` }) } })
+        .catch((e: any) => { if (!cancelled) part('metadata', { state: 'error', note: e?.message || 'failed' }) })
     }, 260)
     return () => { cancelled = true; clearTimeout(t) }
     /* eslint-disable-next-line */
@@ -339,7 +414,11 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     } catch (e: any) { setActErr(e.message) } finally { setBusy('') }
   }
 
-  if (err) return (<><BackRow onBack={onBack} /><div className="err">{err}</div></>)
+  // Only when there is nothing to show. `err` is also written by the actions
+  // on this page, so an unconditional guard let one rejected action replace
+  // the working page — including the controls needed to retry — with a line
+  // of red text and no way back except navigating away.
+  if (err && !rec) return (<><BackRow onBack={onBack} /><div className="err">{err}</div></>)
   if (!rec || !domain) return (<><BackRow onBack={onBack} /><div className="loading">Loading recording…</div></>)
 
   const vods = rec.vod_assets ?? []
@@ -358,6 +437,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
         <button className="btn ghost" onClick={() => { loadTl(); loadRec() }}>Refresh</button>
       </div>
 
+      <LoadStatus parts={loadParts} />
       {tl && tl.spans.length === 0 ? (
         <div className="empty"><h3>No segments on disk</h3><p>Nothing is recorded for this entry (pruned by retention, or recording was off for the run).</p></div>
       ) : (
@@ -398,7 +478,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
                       {tsQ.trim() ? `No spoken match for "${tsQ.trim()}".` : 'No subtitles in the loaded range.'}
                     </div>
                   ) : cues.map((m, i) => (
-                    <div key={i} data-cue={i} onClick={() => jumpToCue(m)}
+                    <div key={i} data-cue={i} {...pressable((e: any) => { ((() => jumpToCue(m)) as any)(e) })} data-a11y-click=""
                       style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '6px 10px', cursor: 'pointer',
                         borderLeft: i === activeCue ? '3px solid var(--brand)' : '3px solid transparent',
                         background: i === activeCue ? 'rgba(120,140,255,.12)' : 'transparent' }}>
@@ -535,7 +615,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
 function BackRow({ onBack, name }: { onBack: () => void; name?: string }) {
   return (
     <div className="crumb" style={{ marginBottom: 8 }}>
-      <span className="lnk" style={{ cursor: 'pointer', color: 'var(--brand)' }} onClick={onBack}>Recordings</span>
+      <span className="lnk" style={{ cursor: 'pointer', color: 'var(--brand)' }} {...pressable((e: any) => { ((onBack) as any)(e) })} data-a11y-click="">Recordings</span>
       {name && <>&nbsp;/&nbsp; <b style={{ color: 'var(--text)' }}>{name}</b></>}
     </div>
   )

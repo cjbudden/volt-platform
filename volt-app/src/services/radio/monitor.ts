@@ -28,7 +28,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { query } from '../../db';
-import { originBaseFor } from '../liveOrigin';
+import { originBaseFor, currentRunId } from '../liveOrigin';
 import { icyState } from './icyMeta';
 
 export type SignalVerdict = 'audio' | 'quiet' | 'silent' | 'static' | 'unknown';
@@ -62,7 +62,8 @@ export interface QcIssue {
 
 export interface RadioMonitorState {
   channelId: string;
-  runId: string;
+  /** The run being measured. Null until a following monitor sees a run pointer. */
+  runId: string | null;
   levels: LevelSample[];        // rolling window (newest last)
   verdict: SignalVerdict;
   lastSampleAt: number | null;
@@ -187,9 +188,22 @@ class RadioMonitor {
   private stalledRaised = false;
   private busy = false;
 
-  constructor(public channelId: string, public runId: string) {
+  /**
+   * FOLLOW THE RUN, DO NOT BE PINNED TO ONE.
+   *
+   * `runId` is null when the monitor is following whatever run is current,
+   * which is the only thing it CAN do for a containerised station: the
+   * container chooses its own run id and writes current_run.txt, so the
+   * orchestrator that launched it never learns the id. Following also means a
+   * run roll (the daily recording boundary) is picked up rather than leaving
+   * the monitor watching a directory nothing writes to any more.
+   *
+   * The legacy in-process path still passes an explicit id, and gets exactly
+   * the behaviour it had.
+   */
+  constructor(public channelId: string, public runId: string | null) {
     this.state = {
-      channelId, runId, levels: [], verdict: 'unknown', lastSampleAt: null,
+      channelId, runId: runId ?? null, levels: [], verdict: 'unknown', lastSampleAt: null,
       segments: 0, outputFreshMs: null, issues: [], checks: { ok: 0, failed: 0 },
       silenceSinceMs: null, staticSinceMs: null,
     };
@@ -202,7 +216,37 @@ class RadioMonitor {
   }
   stop() { if (this.timer) clearInterval(this.timer); this.timer = null; }
 
-  private audioDir() { return join(originBaseFor(this.channelId), 'runs', this.runId, 'audio'); }
+  /** The run this tick is about: the pinned one, or whatever is current now. */
+  private resolveRun(): string | null {
+    if (this.runId) return this.runId;
+    const cur = currentRunId(this.channelId);
+    if (cur && cur !== this.followed) {
+      // A NEW RUN IS A NEW MEASUREMENT. Carrying the previous run's playlist
+      // sequence and analysis marker across the boundary would report a
+      // discontinuity as a fault, when a fresh run is exactly what a restart
+      // is supposed to produce.
+      this.followed = cur;
+      this.prevPlaylist = null;
+      this.lastAnalysed = '';
+      this.lastPlaylistMtime = 0;
+      this.lastPlaylistChangeAt = Date.now();
+      this.state.runId = cur;
+      this.state.levels = [];
+      this.state.segments = 0;
+    }
+    return cur;
+  }
+  private followed: string | null = null;
+
+  private audioDir() {
+    const run = this.resolveRun();
+    return run
+      ? join(originBaseFor(this.channelId), 'runs', run, 'audio')
+      // No run pointer yet: the container has not written one. Return a path
+      // that cannot exist rather than the channel root, so a tick during the
+      // gap measures nothing instead of measuring the wrong directory.
+      : join(originBaseFor(this.channelId), 'runs', '__no_run__', 'audio');
+  }
 
   private addIssue(code: QcIssue['code'], message: string) {
     const at = Date.now();
@@ -260,9 +304,17 @@ class RadioMonitor {
       const init = join(dir, 'init.mp4');
       let segs: string[] = [];
       try { segs = readdirSync(dir).filter((f) => /^seg_\d+\.m4s$/.test(f)).sort(); } catch { /* not yet */ }
-      // the last file is still being written; analyse the one before it
-      const target = segs.length >= 2 ? segs[segs.length - 2] : null;
-      if (target && target !== this.lastAnalysed && existsSync(init)) {
+      // The last file is still being written; everything before it is complete.
+      // ANALYSE EVERY COMPLETE SEGMENT WE HAVE NOT SEEN, not just the newest.
+      // Segments and this 4s tick are not phase-locked, so two segments
+      // regularly land in one tick; measuring only the newest dropped the
+      // other, and the meter then showed a gap where the feed was in fact
+      // loud. Bounded so a stall cannot turn into a burst of ffmpeg runs.
+      const complete = segs.slice(0, -1);
+      const startAt = this.lastAnalysed ? complete.indexOf(this.lastAnalysed) + 1 : Math.max(0, complete.length - 1);
+      const pending = complete.slice(startAt).slice(-3);
+      for (const target of pending) {
+        if (!existsSync(init)) break;
         this.lastAnalysed = target;
         const s = analyseSegment(init, join(dir, target));
         if (s) {
@@ -333,9 +385,23 @@ class RadioMonitor {
   private staticRaised = false;
 }
 
-export function startRadioMonitor(channelId: string, runId: string): void {
+/**
+ * Start measuring a station's OUTPUT.
+ *
+ * `runId` omitted means "follow whatever run is current", which is what a
+ * containerised station needs: the container picks its own run id, so the
+ * caller launching it has nothing to pass.
+ *
+ * THIS EXISTS ON BOTH PATHS NOW. It used to be called only from the in-process
+ * pipeline, so moving radio into containers silently took the level meter, the
+ * QC verdict and silence detection with it: the console polled for levels and
+ * got an empty array for ever, and the waveform never moved. The measurement
+ * reads the packaged output off disk and does not care which process wrote it,
+ * so there was never a reason for it to live on one path only.
+ */
+export function startRadioMonitor(channelId: string, runId?: string | null): void {
   stopRadioMonitor(channelId);
-  const m = new RadioMonitor(channelId, runId);
+  const m = new RadioMonitor(channelId, runId ?? null);
   monitors.set(channelId, m);
   m.start();
 }

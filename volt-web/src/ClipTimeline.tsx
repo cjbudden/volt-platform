@@ -21,6 +21,7 @@
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RecordingProgramme, Waveform } from './api'
+import { pressable } from './a11y'
 
 export interface Span { runId: string; startMs: number; endMs: number; segments?: number }
 
@@ -45,6 +46,31 @@ export const CLASS_COLOR: Record<string, { bg: string; bd: string; fg: string }>
 }
 const laneStyleFor = (p: RecordingProgramme) => CLASS_COLOR[p.class || 'epg'] ?? CLASS_COLOR.epg
 
+/**
+ * One line that says what the envelope is doing and WHY, so a wait is never a
+ * mystery: whether this window is being decoded for the first time, whether
+ * the background pass over the whole recording is still running and how far
+ * it has got, or whether the picture is a sample (wide window) or exact.
+ */
+export function waveStatus(w: Waveform | null, loading: boolean): string {
+  const pc = (a: number, b: number) => `${Math.round(100 * a / Math.max(1, b))}%`
+  if (!w) return loading ? 'measuring audio… (first look at this window: decoding it now)' : 'audio not measured'
+  const cov = w.coverage
+  if (cov && cov.measured < cov.total) {
+    const why = w.mode === 'exact'
+      ? 'decoding this window for the first time; it is cached afterwards'
+      : w.priming && w.progress
+        ? `background pass measuring the whole recording, ${pc(w.progress.measured, w.progress.total)} done`
+        : 'sampling one segment per column'
+    return `measuring audio… ${pc(cov.measured, cov.total)} of this window (${why})`
+  }
+  if (loading && !w.complete) return 'measuring audio… filling in'
+  if (w.priming && w.progress && w.progress.measured < w.progress.total) {
+    return `${w.mode === 'sampled' ? 'sampled envelope' : 'exact envelope'} · background pass ${pc(w.progress.measured, w.progress.total)} of the recording measured`
+  }
+  return w.mode === 'sampled' ? 'sampled envelope (zoom in under 15m for exact)' : 'exact envelope'
+}
+
 /** Nice tick interval for the current span (ms per tick). */
 function tickStep(spanMs: number, px: number): number {
   const target = Math.max(70, px / 10)             // aim for ~10 labels
@@ -54,6 +80,22 @@ function tickStep(spanMs: number, px: number): number {
     3600e3, 7200e3, 10800e3, 21600e3, 43200e3, 86400e3]
   return steps.find((s) => s >= want) ?? 86400e3
 }
+
+// ---- ZOOM LIMITS -------------------------------------------------------------
+//  The view is never narrower than MIN_SPAN or wider than MAX_SPAN, whatever
+//  the recording holds. Both are performance limits as much as usability ones:
+//
+//    MIN_SPAN  The audio envelope is cached at 100ms per point. Below ~10s a
+//              900-column lane is asking for sub-10ms buckets, which is finer
+//              than the data and finer than a trim needs (the player's frame
+//              step is 40ms). Zooming further only repeats the same points.
+//    MAX_SPAN  One day. A wide window is drawn from one sample per column, so
+//              the cost per request is flat, but the metadata lane and the
+//              coverage scan grow with the span, and past a day the picture is
+//              a smear nobody can trim on. Fit all shows the LAST day; the
+//              overview strip still spans the whole recording for navigation.
+const MIN_SPAN = 10_000
+const MAX_SPAN = 24 * 3600_000
 
 export default function ClipTimeline({
   domain, spans, view, setView, programmes, waveform, waveLoading,
@@ -81,8 +123,15 @@ export default function ClipTimeline({
 
   const VW = Math.max(1000, view.end - view.start)
   const DW = Math.max(1, domain.end - domain.start)
-  const pctOf = (ms: number) => Math.max(-5, Math.min(105, ((ms - view.start) / VW) * 100))
+  // CLAMPED TO THE LANE. This used to allow -5..105%, and an item that began
+  // before the window was drawn starting 5% to the LEFT of the lane, outside
+  // the border, so the metadata lane and the coverage bar looked shifted
+  // against the waveform (whose canvas cannot draw outside itself). Everything
+  // that overlaps the window now starts at its left edge, exactly where the
+  // waveform starts.
+  const pctOf = (ms: number) => Math.max(0, Math.min(100, ((ms - view.start) / VW) * 100))
   const pct = (ms: number) => `${pctOf(ms)}%`
+  const inView = (ms: number) => ms >= view.start && ms <= view.end
   const msAt = (clientX: number) => {
     const el = barRef.current
     if (!el) return view.start
@@ -99,9 +148,9 @@ export default function ClipTimeline({
     return () => ro.disconnect()
   }, [])
 
-  /** Zoom keeping `atMs` under the cursor. */
+  /** Zoom keeping `atMs` under the cursor, inside [MIN_SPAN..MAX_SPAN]. */
   function zoomTo(newSpan: number, atMs?: number) {
-    const span = Math.max(2000, Math.min(DW, newSpan))
+    const span = Math.max(MIN_SPAN, Math.min(MAX_SPAN, DW, newSpan))
     const anchor = atMs ?? (view.start + VW / 2)
     const f = Math.max(0, Math.min(1, (anchor - view.start) / VW))
     let s = anchor - f * span
@@ -286,10 +335,13 @@ export default function ClipTimeline({
             onClick={() => zoomTo(ms)}>{label}</button>
         ))}
         <button className="chip" style={{ padding: '3px 10px', fontSize: 'var(--fs-xs)' }}
-          onClick={() => setView({ start: domain.start, end: domain.end })}>Fit all</button>
+          title={DW > MAX_SPAN ? 'The view is capped at one day: this shows the most recent day' : 'Show the whole recording'}
+          onClick={() => setView({ start: Math.max(domain.start, domain.end - MAX_SPAN), end: domain.end })}>
+          {DW > MAX_SPAN ? 'Last day' : 'Fit all'}
+        </button>
         <div style={{ display: 'flex', gap: 4, marginLeft: 4 }}>
-          <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title="Zoom out" onClick={() => zoomTo(VW * 2)}>−</button>
-          <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title="Zoom in" onClick={() => zoomTo(VW / 2)}>+</button>
+          <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title={VW >= Math.min(MAX_SPAN, DW) ? 'Widest view' : 'Zoom out'} disabled={VW >= Math.min(MAX_SPAN, DW)} onClick={() => zoomTo(VW * 2)}>−</button>
+          <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title={VW <= MIN_SPAN ? 'Closest view (10s)' : 'Zoom in'} disabled={VW <= MIN_SPAN} onClick={() => zoomTo(VW / 2)}>+</button>
           <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title="Pan left" onClick={() => panBy(-VW / 3)}>◀</button>
           <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title="Pan right" onClick={() => panBy(VW / 3)}>▶</button>
         </div>
@@ -302,28 +354,32 @@ export default function ClipTimeline({
         )}
         <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>
           showing {spanLabel(VW)} · {dayOf(view.start)} {clockOf(view.start, VW < 3600_000)} → {clockOf(view.end, VW < 3600_000)}
-          {waveLoading ? ' · measuring audio…' : waveform?.mode === 'sampled' ? ' · sampled envelope' : ''}
+          {' · '}{waveStatus(waveform, waveLoading)}
         </span>
       </div>
 
       {/* ---------- waveform ---------- */}
       <div style={{ position: 'relative', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: '#0b0f16' }}>
         <canvas ref={waveRef} style={{ width: '100%', height: 96, display: 'block' }} />
-        {!waveform && (
+        {(!waveform || (waveform.coverage && waveform.coverage.measured === 0 && waveform.coverage.total > 0)) && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontSize: 'var(--fs-xs)', color: 'var(--faint)', pointerEvents: 'none' }}>
-            {waveLoading ? 'measuring audio…' : 'no audio measured for this window'}
+            {waveLoading ? waveStatus(waveform, true) : 'no audio measured for this window'}
           </div>
+        )}
+        {/* fill bar: how much of this window is measured, while it is filling */}
+        {waveform?.coverage && waveform.coverage.measured < waveform.coverage.total && (
+          <div style={{ position: 'absolute', left: 0, bottom: 0, height: 2, width: `${Math.round(100 * waveform.coverage.measured / Math.max(1, waveform.coverage.total))}%`, background: 'rgba(125,211,252,.7)', transition: 'width .3s' }} />
         )}
       </div>
 
       {/* ---------- metadata lane (EPG + radio now-playing) ---------- */}
-      <div style={{ position: 'relative', height: visibleProgs.length ? 26 : 0, marginTop: visibleProgs.length ? 4 : 0, transition: 'height .15s' }}>
+      <div style={{ position: 'relative', height: visibleProgs.length ? 26 : 0, marginTop: visibleProgs.length ? 4 : 0, transition: 'height .15s', overflow: 'hidden' }}>
         {visibleProgs.map(p => {
           const l = pctOf(p.startMs), r = pctOf(p.endMs)
           if (r <= l) return null
           const c = laneStyleFor(p)
           return (
-            <div key={p.id} onClick={() => onPickProgramme(p)}
+            <div key={p.id} {...pressable((e: any) => { ((() => onPickProgramme(p)) as any)(e) })} data-a11y-click=""
               title={`${p.title}\n${clockOf(p.startMs)} → ${clockOf(p.endMs)}${p.class ? ` · ${p.class}` : ''}${p.asRun ? ' · as run' : ''}\nClick to set the trim to this item`}
               style={{
                 position: 'absolute', top: 2, bottom: 2, left: `${l}%`, width: `${Math.max(r - l, 0.35)}%`,
@@ -349,14 +405,14 @@ export default function ClipTimeline({
         {from != null && to != null && to > from && (
           <>
             <div style={{ position: 'absolute', top: 0, bottom: 0, left: pct(from), width: `calc(${pct(to)} - ${pct(from)})`, background: 'rgba(90,220,150,.18)', border: '1px solid rgba(90,220,150,.7)', borderRadius: 6, pointerEvents: 'none' }} />
-            <div onPointerDown={e => { e.stopPropagation(); down(e, 'from') }} onPointerMove={move} onPointerUp={up}
+            {inView(from) && <div onPointerDown={e => { e.stopPropagation(); down(e, 'from') }} onPointerMove={move} onPointerUp={up}
               style={{ position: 'absolute', top: -2, bottom: -2, left: pct(from), width: 12, marginLeft: -6, cursor: 'ew-resize', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ width: 4, height: '100%', background: 'rgba(90,220,150,.95)', borderRadius: 2 }} />
-            </div>
-            <div onPointerDown={e => { e.stopPropagation(); down(e, 'to') }} onPointerMove={move} onPointerUp={up}
+            </div>}
+            {inView(to) && <div onPointerDown={e => { e.stopPropagation(); down(e, 'to') }} onPointerMove={move} onPointerUp={up}
               style={{ position: 'absolute', top: -2, bottom: -2, left: pct(to), width: 12, marginLeft: -6, cursor: 'ew-resize', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ width: 4, height: '100%', background: 'rgba(90,220,150,.95)', borderRadius: 2 }} />
-            </div>
+            </div>}
           </>
         )}
         {flash && (
@@ -365,7 +421,7 @@ export default function ClipTimeline({
             background: 'rgba(255,200,80,.55)', border: '1px solid rgba(255,210,110,.9)', borderRadius: 4,
             pointerEvents: 'none', animation: 'pulse 1.2s ease-in-out infinite' }} />
         )}
-        {playheadMs != null && (
+        {playheadMs != null && inView(playheadMs) && (
           <div style={{ position: 'absolute', top: -3, bottom: -3, left: pct(playheadMs), width: 2, marginLeft: -1, background: '#fff', boxShadow: '0 0 6px rgba(255,255,255,.6)', pointerEvents: 'none' }} />
         )}
       </div>

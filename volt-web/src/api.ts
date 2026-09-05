@@ -3,6 +3,40 @@ let token = ''
 export function setToken(t: string) { token = t }
 export function getToken() { return token }
 
+/**
+ * An API failure that still knows what KIND of failure it was.
+ *
+ * Every caller used to receive `new Error(String(status))`, so no page could
+ * tell "your session expired" from "you are not allowed to do that" from "the
+ * server broke" — and every page rendered whichever it got as a bare number.
+ * Now the status travels with the message and pages can react to it.
+ */
+export class ApiError extends Error {
+  // Declared and assigned, not written as a constructor parameter property:
+  // the build runs with `erasableSyntaxOnly`, which rejects the shorthand
+  // because it is TypeScript that EMITS code rather than TypeScript that is
+  // merely erased.
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+    this.name = 'ApiError'
+  }
+  /** The session is gone. Nothing the page can do about it. */
+  get unauthorized() { return this.status === 401 }
+  /** Authenticated, but this is not yours to see or do. */
+  get forbidden() { return this.status === 403 }
+}
+
+/**
+ * Called when the API says the session is over. App.tsx registers a handler
+ * that returns the user to the sign-in screen; without one, an expired token
+ * left every page showing the string "401" and the live status stream
+ * reconnecting every three seconds with the same dead credential, forever.
+ */
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(fn: (() => void) | null) { onUnauthorized = fn }
+
 async function req(path: string, opts: RequestInit = {}) {
   const r = await fetch('/api' + path, {
     ...opts,
@@ -14,8 +48,9 @@ async function req(path: string, opts: RequestInit = {}) {
   })
   if (!r.ok) {
     let msg = `${r.status}`
-    try { msg = (await r.json()).error || msg } catch { try { msg = await r.text() } catch {} }
-    throw new Error(msg)
+    try { msg = (await r.json()).error || msg } catch { try { msg = await r.text() } catch { /* no body */ } }
+    if (r.status === 401 && token) { token = ''; onUnauthorized?.() }
+    throw new ApiError(r.status, msg)
   }
   if (r.status === 204) return null
   return r.json()
@@ -61,6 +96,13 @@ export interface Billing {
 
 export interface ChannelDetail extends Channel {
   kind: 'channel'
+  /** Put this channel back on air after a control-plane restart. Default true. */
+  autoConnect?: boolean
+  /** Whether the channel is MEANT to be running. Survives a crash; `status` does not. */
+  desiredState?: 'running' | 'stopped'
+  /** Set only once auto-connect has stopped trying. Carries the reason. */
+  resumeGaveUpAt?: string | null
+  resumeLastError?: string | null
   group: { id: string; name: string } | null
   profile: {
     name: string; workflow_type: 'transcode' | 'package_only'; packaging: string
@@ -133,6 +175,7 @@ export interface TestStreamStatus {
 
 export interface ChannelSettingsPatch {
   name?: string
+  autoConnect?: boolean
   recordingEnabled?: boolean
   recordingRetentionDays?: number | null
   /** Retention in SECONDS, which is what the settings form actually sends: the
@@ -285,6 +328,127 @@ export interface ChannelWaveform {
   buckets: (WaveBucket | null)[]
 }
 
+/* ---- fleet: servers and billable usage ---------------------------------- */
+
+/** A reading that could not be taken is null, NEVER zero. The UI must show
+ *  "no reading" rather than drawing an idle machine that is actually
+ *  unreachable, which is the one wrong answer an operator would act on. */
+export interface HostMetrics {
+  at: string
+  source: 'cloudwatch' | 'onbox' | 'task_stats'
+  cpuPct: number | null
+  memPct: number | null
+  netInBps: number | null
+  netOutBps: number | null
+  tasksAtSample: number | null
+}
+
+export interface HostStream {
+  instanceId: string
+  id: string
+  type: 'channel' | 'radio' | 'event'
+  name: string | null
+  taskKind: string | null
+  role: string
+  launchedAt: string | null
+}
+
+export interface FleetHost {
+  id: string
+  kind: 'ec2' | 'fargate' | 'local'
+  externalId: string
+  instanceType: string | null
+  availabilityZone: string | null
+  region: string | null
+  lifecycle: 'spot' | 'on_demand' | null
+  vcpus: number | null
+  memoryMib: number | null
+  firstSeenAt: string
+  lastSeenAt: string
+  /** The MACHINE's load, which is what capacity questions need. */
+  tasksTotal: number
+  streamsTotal: number
+  /** This tenant's share of it. */
+  tasksYours: number
+  streamsYours: number
+  taskKinds: string[]
+  metrics: HostMetrics | null
+  streams: HostStream[]
+}
+
+export interface UsageBucket {
+  periodStart: string
+  seconds: number
+  serversUsed: number
+  taskRuns: number
+  streams: number
+  byTaskKind: Record<string, number>
+}
+
+export interface StreamUsage {
+  id: string
+  kind: 'channel' | 'event'
+  name: string | null
+  channelKind: string | null
+  allTimeSeconds: number
+  todaySeconds: number
+  monthSeconds: number
+  /** Running but not yet settled by the meter. Shown apart from the rest. */
+  pendingSeconds: number
+  runs: number
+  lastUsedAt: string | null
+}
+
+export interface UsageTotals {
+  todaySeconds: number
+  monthSeconds: number
+  allTimeSeconds: number
+  pendingSeconds: number
+  serversToday: number
+  serversMonth: number
+  streamsToday: number
+}
+
+export interface FleetUsage {
+  period: 'day' | 'week' | 'month' | 'year'
+  generatedAt: string
+  totals: UsageTotals
+  series: UsageBucket[]
+  streams: StreamUsage[]
+  unit: 'seconds'
+}
+
+/* ---- the embeddable player ------------------------------------------------ */
+
+export interface PlayerConfig {
+  id: string | null
+  name: string
+  layout: 'card' | 'bar' | 'hero'
+  primaryColor: string
+  secondaryColor: string
+  options: Record<string, any>
+  fallbackTitle: string | null
+  fallbackText: string | null
+  fallbackArtworkUrl: string | null
+  /** Where this config came from: the station's own, the account default, or built in. */
+  source: 'channel' | 'account' | 'default'
+}
+
+export interface PlayerLayout { id: string; name: string; detail: string }
+
+export interface PlayerConfigResponse {
+  channel: { id: string; name: string }
+  config: PlayerConfig
+  layouts: PlayerLayout[]
+}
+
+export interface PlayerReport {
+  hours: number
+  totals: { event: string; events: number; sessions: number }[]
+  byOrigin: { origin: string; sessions: number; errors: number }[]
+  recentErrors: { at: string; event: string; origin: string | null; detail: any }[]
+}
+
 export const api = {
   login: (email: string, password: string) =>
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
@@ -371,6 +535,14 @@ export const api = {
   epgOwners: (): Promise<EpgOwnerRow[]> => req('/epg/owners'),
   epgProgrammes: (owner: EpgOwner, fromIso: string, toIso: string): Promise<ProgrammeRow[]> =>
     req(`/epg?${owner.kind === 'event' ? 'eventId' : 'channelId'}=${owner.id}&from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`),
+  /** The VoD lifecycle for a window, keyed by programme id. Measured against
+   *  the archive on disk, so it is a separate read from the listing itself. */
+  epgVodStatus: (owner: EpgOwner, fromIso: string, toIso: string): Promise<{ programmes: Record<string, ProgrammeVod> }> =>
+    req(`/epg/vod-status?ownerKind=${owner.kind}&ownerId=${owner.id}&from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`),
+  /** Convert an aired slot to a VOD now. Runs the same conversion the
+   *  scheduler runs; 409 if it is already converted or in flight. */
+  convertProgramme: (id: string): Promise<{ assetId: string }> =>
+    req(`/epg/${encodeURIComponent(id)}/convert`, { method: 'POST' }),
   epgConflicts: (owner: EpgOwner, fromIso: string, toIso: string): Promise<ProgrammeConflict[]> =>
     req(`/epg/conflicts?${owner.kind === 'event' ? 'eventId' : 'channelId'}=${owner.id}&from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`),
   createProgramme: (owner: EpgOwner, b: ProgrammeBody): Promise<ProgrammeRow & { conflicts: { id: string; title: string }[] }> =>
@@ -480,6 +652,15 @@ export const api = {
 
   recordingDownload: (id: string): Promise<{ status: 'exporting' | 'ready'; url?: string; message?: string }> =>
     req(`/recordings/${id}/download`),
+  // ---- VOD library ----
+  vodAssets: (published?: boolean): Promise<VodAssetRow[]> =>
+    req(`/vod${published === undefined ? '' : `?published=${published}`}`),
+  vodAsset: (id: string): Promise<any> => req(`/vod/${id}`),
+  patchVodAsset: (id: string, b: { title?: string; published?: boolean }): Promise<any> =>
+    req(`/vod/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
+  publishToPortal: (id: string): Promise<any> =>
+    req(`/publications/vod/${id}/publish`, { method: 'POST', body: JSON.stringify({ platform: 'portal' }) }),
+
   // ---- loops & fillers ----
   fillerAssets: (kind?: 'slate' | 'loop'): Promise<FillerAsset[]> =>
     req(`/filler-assets${kind ? `?kind=${kind}` : ''}`),
@@ -487,6 +668,42 @@ export const api = {
     req(`/filler-assets/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
   deleteFillerAsset: (id: string): Promise<null> =>
     req(`/filler-assets/${id}`, { method: 'DELETE' }),
+
+  // ---- monitoring ----
+  /** The whole live board in one request: the fan-out lives on the server. */
+  liveBoard: (): Promise<LiveBoard> => req('/monitoring/live'),
+  /** Problems, ranked, across every subsystem that can quietly go wrong. */
+  monitoringOverview: (): Promise<MonitoringOverview> => req('/monitoring/overview'),
+
+  // ---- embeddable player ----
+  /** The effective config for a station's player, plus the layouts on offer. */
+  playerConfig: (channelId: string): Promise<PlayerConfigResponse> =>
+    req(`/player-config/${encodeURIComponent(channelId)}`),
+  savePlayerConfig: (channelId: string, body: Partial<PlayerConfig>): Promise<PlayerConfig> =>
+    req(`/player-config/${encodeURIComponent(channelId)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  /** Player health: did it load, did it error, and on which site. */
+  playerReport: (channelId: string, hours = 24): Promise<PlayerReport> =>
+    req(`/player-config/${encodeURIComponent(channelId)}/report?hours=${Math.round(hours)}`),
+
+  // ---- fleet ----
+  /** Servers carrying this tenant's live work, with their latest readings. */
+  fleetHosts: (): Promise<{ hosts: FleetHost[] }> => req('/fleet/hosts'),
+  /** Billable TIME. Not money: the rate table is indicative and stays server side. */
+  fleetUsage: (period: 'day' | 'week' | 'month' | 'year' = 'day', limit = 30): Promise<FleetUsage> =>
+    req(`/fleet/usage?period=${period}&limit=${Math.round(limit)}`),
+  /** One stream's usage, for the detail pages. */
+  streamUsage: (id: string): Promise<StreamUsage> => req(`/fleet/usage/stream/${encodeURIComponent(id)}`),
+  /** Recent telemetry for one host, oldest first, for a sparkline. */
+  hostSamples: (id: string): Promise<{ samples: Array<HostMetrics & { tasks: number | null }> }> =>
+    req(`/fleet/hosts/${encodeURIComponent(id)}/samples`),
+
+  // ---- analytics ----
+  /** The whole reporting page in one read, from rollups only. */
+  analyticsOverview: (days = 30): Promise<AnalyticsOverview> =>
+    req(`/analytics/overview?days=${Math.round(days)}`),
+  /** Concurrency NOW. Goes stale in seconds, so the page polls it. */
+  analyticsRealtime: (): Promise<{ total_concurrent: number; streams: LiveStreamRow[] }> =>
+    req('/analytics/realtime'),
 
   // ---- analytics retention ----
   analyticsRetention: (): Promise<AnalyticsRetention> => req('/analytics/retention'),
@@ -522,6 +739,15 @@ export const api = {
   radioStation: (id: string): Promise<RadioStationDetail> => req(`/radio/${id}`),
   radioStartStop: (id: string, action: 'start' | 'stop') =>
     req(`/radio/${id}/${action}`, { method: 'POST' }),
+  /** Put down a give-up notice without starting the station. Also stands the
+   *  stream down, because clearing the give-up alone would re-arm auto connect
+   *  against a source that is still broken. */
+  radioClearRecovery: (id: string) =>
+    req(`/radio/${id}/clear-recovery`, { method: 'POST' }),
+  /** Empty this station's event log. The server writes one `log.cleared` entry
+   *  straight afterwards, so a cleared log never reads as a log of nothing. */
+  radioClearLog: (id: string): Promise<{ id: string; removed: number; log: any[] }> =>
+    req(`/radio/${id}/events`, { method: 'DELETE' }),
   // second, explicit step: open/close PUBLIC delivery (same contract as channels)
   radioSetAir: (id: string, on: boolean): Promise<{ id: string; on_air: boolean; publicUrls: RadioOutputs | null }> =>
     req(`/radio/${id}/air`, { method: 'POST', body: JSON.stringify({ on }) }),
@@ -626,7 +852,17 @@ export interface RadioIcyState {
   class: RadioClass | null; since: number | null; changes: number; lastError: string | null
 }
 export type SignalVerdict = 'audio' | 'quiet' | 'silent' | 'static' | 'unknown'
-export interface RadioOutputs { mp3: string | null; hls: string | null; dash: string | null }
+export interface RadioOutputs {
+  mp3: string | null; hls: string | null; dash: string | null
+  /**
+   * Outputs the RUNNING encoder dropped, as {output: reason}. A null URL above
+   * together with an entry here means "asked for, not being produced, and here
+   * is why", which is a different thing from "not configured" and has to read
+   * differently to an operator. Optional because the public-URL response does
+   * not carry it.
+   */
+  degraded?: Record<string, string>
+}
 export interface RadioLevelSample {
   t: number; peakDb: number; rmsDb: number; crestDb: number
   entropy: number; silence: boolean; verdict: SignalVerdict
@@ -767,6 +1003,8 @@ export interface EventCreateBody {
   purchasingMode?: 'on_demand' | 'reserved' | 'spot_fallback'
   recordingEnabled?: boolean; recordingRetentionSec?: number | null
   autoVod?: boolean
+  /** Put this back on air after a control-plane restart. Default true. */
+  autoConnect?: boolean
   sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string }[]
   inputFailoverEnabled?: boolean; autoFailback?: boolean
   inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
@@ -774,9 +1012,22 @@ export interface EventCreateBody {
 }
 export interface EventPatchBody extends Partial<Omit<EventCreateBody, 'groupId'>> { version?: number }
 
-export interface EpgOwner { kind: 'channel' | 'event'; id: string }
+/**
+ * Whose guide this is.
+ *
+ * 'radio' is a third kind at the PRODUCT level and not at the data level: a
+ * station's programmes hang off `channel_id` exactly as a television channel's
+ * do, so every query below folds radio into the channel branch. That is why the
+ * ternaries read `kind === 'event' ? ... : channel` rather than switching on
+ * three values — the split is about which page and which filter, not which
+ * column.
+ */
+export interface EpgOwner { kind: 'channel' | 'radio' | 'event'; id: string }
 export interface EpgOwnerRow {
-  kind: 'channel' | 'event'; id: string; name: string; status: string
+  /** 'radio' is its own kind. The server derives it from channels.kind rather
+   *  than emitting a literal, which is what used to bury every station in the
+   *  Channels filter. */
+  kind: 'channel' | 'radio' | 'event'; id: string; name: string; status: string
   programme_count: number; first_at: string | null; last_at: string | null
   auto_clip_count: number; next_title: string | null; next_at: string | null
 }
@@ -799,6 +1050,39 @@ export interface ProgrammeBody {
 export interface ProgrammeConflict {
   a_id: string; a_title: string; b_id: string; b_title: string
   overlap_start: string; overlap_end: string
+}
+
+/* ---- the VoD lifecycle of a programme ------------------------------------ */
+
+/**
+ * Where a slot is between "will be recorded" and "is a VOD asset".
+ *
+ *   manual       has not aired, and will NOT auto-convert
+ *   scheduled    has not aired, and WILL auto-convert when it ends
+ *   converting   the scheduler has claimed it right now
+ *   converted    there is an asset
+ *   failed       the automatic attempt errored; carries the reason
+ *   convertible  AIRED, media still covers it, no asset. Still convertible,
+ *                and the only state with a deadline attached
+ *   unavailable  aired, and nothing on disk covers it any more
+ */
+export type VodState =
+  | 'manual' | 'scheduled' | 'converting' | 'converted'
+  | 'failed' | 'convertible' | 'unavailable'
+
+export interface ProgrammeVod {
+  id: string
+  state: VodState
+  coveragePct: number
+  coveredMs: number
+  assetId: string | null
+  assetTitle: string | null
+  assetState: string | null
+  error: string | null
+  /** When the material behind a convertible slot is due to be swept. Null
+   *  means the owner keeps recordings indefinitely. */
+  expiresAt: string | null
+  future: boolean
 }
 
 export interface RecordingRow {
@@ -833,6 +1117,10 @@ export interface Waveform {
   mode: 'exact' | 'sampled'
   complete: boolean; pending: number
   priming?: boolean       // a background pass is still measuring the recording
+  /** Whole-recording background measurement: segments measured vs present. */
+  progress?: { measured: number; total: number }
+  /** This window: segments served from the cache vs segments present. */
+  coverage?: { measured: number; total: number }
   buckets: (WaveBucket | null)[]
 }
 
@@ -993,6 +1281,133 @@ export interface AnalyticsRetention {
   note: string
 }
 
+/** One stream on the live board. The gates are the SAME five-gate health the
+ *  detail pages compute, so the board can never disagree with the page. */
+export interface LiveStream {
+  id: string
+  kind: 'tv' | 'radio' | 'event'
+  name: string
+  groupName: string | null
+  status: string
+  onAir: boolean
+  overall: 'idle' | 'starting' | 'ready' | 'onair' | 'degraded' | 'error' | 'stopped'
+  gates: Gate[]
+  primaryError: { gate: string; label: string; message: string } | null
+  /** Null unless the SERVER gate agrees something is up: an instance row
+   *  outlives a crashed encoder, and reporting from it alone lies. */
+  uptimeMs: number | null
+  orphanedInstance: boolean
+  concurrent: number
+  activeSource: string | null
+  fallbackInUse: boolean
+  fillerInUse: boolean
+  reportAgeMs: number | null
+  /** Outputs the RUNNING encoder dropped, as {output: reason}. Empty when the
+   *  stream is delivering everything it was asked for. A station can carry one
+   *  of these with all five gates green: the pipeline is right, the delivery is
+   *  incomplete, and they are different questions. */
+  degradedOutputs: Record<string, string>
+  href: string
+  /** The ORIGIN manifest, not the public URL: multiview monitors what the
+   *  encoder is producing, whether or not the stream has been published. */
+  previewUrl: string
+  audioOnly: boolean
+}
+
+export interface LiveBoard {
+  streams: LiveStream[]
+  counts: Record<string, number>
+  /** Streams with a pipeline actually up. `counts` is keyed by the five-gate
+   *  roll-up, which says what STATE things are in; this says how many encoders
+   *  are running, which is the capacity question and a different one. */
+  running: number
+  onAir: number
+  /** A failed or degraded GATE, or a dropped OUTPUT. Counted on the server so
+   *  the console and the API cannot drift on what the word means. */
+  degraded: number
+  concurrent: number
+}
+
+export type AlertSeverity = 'critical' | 'serious' | 'warning'
+export interface FleetAlert {
+  id: string
+  severity: AlertSeverity
+  source: 'pipeline' | 'jobs' | 'media' | 'qc' | 'publishing' | 'uploads' | 'capacity'
+  title: string
+  detail: string
+  href: string | null
+  at: string | null
+}
+
+export interface FleetEvent {
+  id: string
+  ts: string
+  type: string
+  name: string | null
+  kind: string
+  ownerId: string | null
+  detail: string
+}
+
+/** What needs attention, not what exists. Every entry is a problem. */
+export interface MonitoringOverview {
+  generatedAt: string
+  fleet: {
+    total: number; running: number; onAir: number
+    error: number; degraded: number; concurrent: number
+  }
+  alerts: FleetAlert[]
+  counts: { critical: number; serious: number; warning: number }
+  feed: FleetEvent[]
+}
+
+/** One day of the account-scope rollup. `sealed` says the figures are final:
+ *  an unsealed day is still moving and must not be read as a finished trend. */
+export interface AnalyticsDay {
+  day: string
+  views: number
+  uniques: number
+  peakConcurrent: number
+  watchSeconds: number
+  blocked: number
+  sealed: boolean
+}
+
+/** A stream carrying viewers right now. Live, not rolled up. */
+export interface LiveStreamRow {
+  asset_kind: string
+  asset_id: string
+  concurrent: number
+  updated_at?: string
+}
+
+/** Everything the Analytics page draws, read entirely from rollups so it keeps
+ *  answering after the raw sessions behind it have been pruned. */
+export interface AnalyticsOverview {
+  windowDays: number
+  daily: AnalyticsDay[]
+  totals: {
+    views: number
+    uniques: number
+    watchHours: number
+    blocked: number
+    peakConcurrent: number
+  }
+  liveConcurrent: number
+  liveStreams: LiveStreamRow[]
+  top: Array<{
+    kind: string
+    id: string
+    name: string
+    views: number
+    watchHours: number
+    peakConcurrent: number
+  }>
+  byApp: Record<string, number>
+  byDevice: Record<string, number>
+  byGeo: Record<string, number>
+}
+
 /** A slate (a still) or a loop (a short video): what a channel falls back to
  *  when its input goes away. */
 export interface FillerAsset {
@@ -1024,6 +1439,14 @@ export interface VodAssetRow {
   source_block_count?: number | null; source_run_count?: number | null
   source_container_count?: number | null; source_segment_count?: number | null
   source_coverage_pct?: number | string | null; build_strategy?: string | null
+  /** Set on the list: an asset was re-cut after it was published, so the copy
+   *  out there is older than the one here. */
+  has_stale_publication?: boolean
+  publication_count?: number
+  published?: boolean
+  review_state?: ReviewStateId
+  qc_state?: string | null
+  source_name?: string | null
 }
 
 /** One contiguous stretch of source media inside a finished clip. */

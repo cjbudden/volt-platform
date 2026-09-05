@@ -45,6 +45,10 @@ export interface WaveformResult {
   complete: boolean;
   pending: number;      // buckets still without data (ask again to fill them)
   priming?: boolean;    // a background pass is measuring the rest right now
+  /** How much of the whole recording the background pass has measured so far. */
+  progress?: { measured: number; total: number };
+  /** Segments inside THIS window: measured (served from cache) vs present. */
+  coverage?: { measured: number; total: number };
   buckets: (WaveBucket | null)[];
 }
 
@@ -69,7 +73,38 @@ function dbToUnit(db: number): number {
 }
 
 // ---- per-run peak cache -----------------------------------------------------
-type RunCache = Record<string, [number, number]>;   // seq -> [peakDb, rmsDb]
+//
+//  seq -> [peakDb, rmsDb] or [peakDb, rmsDb, fine]. `fine` is the segment's
+//  envelope at FINE_MS resolution: base64 of an Int8 array of interleaved
+//  (peakDb, rmsDb) pairs, one pair per FINE_MS of media, dB rounded to whole
+//  numbers and clamped to -100..0. Whole-dB precision is far below what a
+//  96px-tall lane can show, and at 100ms a 4s segment costs 80 bytes.
+//
+//  WHY FINE FRAMES EXIST. The old cache held one peak per segment, which is
+//  enough for a wide (sampled) window but nothing for a short one: every
+//  request under 15 minutes decoded its whole window from scratch, so panning
+//  through a programme at clip zoom re-ran ffmpeg on every step. With the fine
+//  envelope cached, a window that has been measured once (by a visit or by the
+//  background primer) is served with NO decoding at any zoom level.
+type CacheVal = [number, number] | [number, number, string];
+type RunCache = Record<string, CacheVal>;
+const FINE_MS = 100;
+const FINE_HZ = 1000 / FINE_MS;
+
+function encodeFine(frames: [number, number][]): string {
+  const b = Buffer.alloc(frames.length * 2);
+  frames.forEach(([p, r], i) => {
+    b.writeInt8(Math.max(-100, Math.min(0, Math.round(p))), i * 2);
+    b.writeInt8(Math.max(-100, Math.min(0, Math.round(r))), i * 2 + 1);
+  });
+  return b.toString('base64');
+}
+function decodeFine(s: string): [number, number][] {
+  const b = Buffer.from(s, 'base64');
+  const out: [number, number][] = [];
+  for (let i = 0; i + 1 < b.length; i += 2) out.push([b.readInt8(i), b.readInt8(i + 1)]);
+  return out;
+}
 const memCache = new Map<string, RunCache>();       // key: streamId/runId
 
 function cachePath(streamId: string, runId: string) {
@@ -150,20 +185,35 @@ function runDirOf(streamId: string, runId: string) {
 }
 
 /** Decode ONE segment and cache its peak/RMS. */
-async function segmentPeak(streamId: string, s: LocalSegment, timeoutMs: number): Promise<[number, number] | null> {
+async function segmentPeak(streamId: string, s: LocalSegment, timeoutMs: number): Promise<CacheVal | null> {
   const cache = loadCache(streamId, s.runId);
   const hit = cache[String(s.seq)];
-  if (hit) return hit;
+  // A pre-fine-envelope entry (two values) is a hit for the sampled path but
+  // not here: this is the function that upgrades it.
+  if (hit && hit.length === 3) return hit;
   const dir = runDirOf(streamId, s.runId);
   const init = join(dir, 'init.mp4');
   const seg = join(dir, s.file);
   if (!existsSync(init) || !existsSync(seg)) return null;
   const pcm = await decodePcm(init, [seg], timeoutMs);
   if (!pcm.length) return null;
-  const { peakDb, rmsDb } = peakRms(pcm, 0, pcm.length);
-  const val: [number, number] = [Math.round(peakDb * 10) / 10, Math.round(rmsDb * 10) / 10];
+  const val = measureSegmentPcm(pcm, 0, s.durMs);
   cache[String(s.seq)] = val;
   return val;
+}
+
+/** Whole-segment peak/RMS plus the fine envelope, from PCM starting at sample
+ *  offset `s0` and running for `durMs` of media. */
+function measureSegmentPcm(pcm: Int16Array, s0: number, durMs: number): [number, number, string] {
+  const s1 = Math.min(pcm.length, s0 + Math.ceil((durMs / 1000) * PCM_RATE));
+  const { peakDb, rmsDb } = peakRms(pcm, s0, s1);
+  const frames: [number, number][] = [];
+  const per = (FINE_MS / 1000) * PCM_RATE;
+  for (let a = s0; a < s1; a += per) {
+    const f = peakRms(pcm, Math.floor(a), Math.min(s1, Math.floor(a + per)));
+    frames.push([f.peakDb, f.rmsDb]);
+  }
+  return [Math.round(peakDb * 10) / 10, Math.round(rmsDb * 10) / 10, encodeFine(frames)];
 }
 
 /** Run `jobs` with at most `limit` in flight. */
@@ -181,6 +231,33 @@ async function pool<T>(jobs: (() => Promise<T>)[], limit: number): Promise<T[]> 
 }
 
 // ---- public API -------------------------------------------------------------
+/**
+ * Split a run's segments into runs of genuinely ADJACENT media.
+ *
+ * A hole ends a block. The tolerance matches the one the clip resolver uses,
+ * because the two must agree about what "contiguous" means or a waveform will
+ * happily draw across a gap the extractor refuses to cut across.
+ */
+const CONTIGUITY_TOLERANCE_MS = 50;
+function contiguousBlocks(list: LocalSegment[]): LocalSegment[][] {
+  const sorted = [...list].sort((a, b) => a.startMs - b.startMs);
+  const blocks: LocalSegment[][] = [];
+  let cur: LocalSegment[] = [];
+  for (const s of sorted) {
+    if (!cur.length) { cur = [s]; continue; }
+    const prev = cur[cur.length - 1];
+    const expected = prev.startMs + prev.durMs;
+    if (Math.abs(s.startMs - expected) > CONTIGUITY_TOLERANCE_MS) {
+      blocks.push(cur);
+      cur = [s];
+    } else {
+      cur.push(s);
+    }
+  }
+  if (cur.length) blocks.push(cur);
+  return blocks;
+}
+
 /** Longest window we will decode in full (EXACT mode). Beyond this we sample. */
 const EXACT_MAX_MS = 15 * 60_000;
 /** Wall-clock budget for one request's decoding work. */
@@ -195,20 +272,33 @@ const MAX_SAMPLES = 220;
 //  operator starts. Cheap per segment (~70ms), and it yields between batches
 //  so it never starves live encoding.
 const priming = new Set<string>();
+const primeProgress = new Map<string, { measured: number; total: number; at: number }>();
+/** A live recording keeps growing: re-run the primer for a stream once its
+ *  last pass is this old, so the newest material is measured before it is
+ *  looked at rather than on first sight. */
+const REPRIME_MS = 60_000;
 
 export function primeWaveformCache(streamId: string, fromMs: number, toMs: number): void {
   if (priming.has(streamId)) return;
+  const last = primeProgress.get(streamId);
+  if (last && Date.now() - last.at < REPRIME_MS && last.measured >= last.total) return;
   priming.add(streamId);
   void (async () => {
     try {
       const segs = audioSegmentsInRange(streamId, fromMs, toMs).reverse();  // newest first
-      const todo = segs.filter((s) => !loadCache(streamId, s.runId)[String(s.seq)]);
+      // Entries from before the fine envelope existed count as unmeasured:
+      // they still serve a wide window, but a clip-zoom window needs frames.
+      const todo = segs.filter((s) => (loadCache(streamId, s.runId)[String(s.seq)]?.length ?? 0) < 3);
+      const prog = { measured: segs.length - todo.length, total: segs.length, at: Date.now() };
+      primeProgress.set(streamId, prog);
       for (let i = 0; i < todo.length; i += 24) {
         const batch = todo.slice(i, i + 24);
         await pool(batch.map((s) => () => segmentPeak(streamId, s, 2500)), 4);
         for (const runId of new Set(batch.map((s) => s.runId))) saveCache(streamId, runId);
+        prog.measured = Math.min(prog.total, prog.measured + batch.length);
         await new Promise((r) => setTimeout(r, 40));   // yield to live work
       }
+      prog.at = Date.now();
     } catch { /* priming is opportunistic */ } finally {
       priming.delete(streamId);
     }
@@ -216,6 +306,10 @@ export function primeWaveformCache(streamId: string, fromMs: number, toMs: numbe
 }
 
 export function isPriming(streamId: string): boolean { return priming.has(streamId); }
+export function primingProgress(streamId: string): { measured: number; total: number } | undefined {
+  const p = primeProgress.get(streamId);
+  return p ? { measured: p.measured, total: p.total } : undefined;
+}
 
 export async function waveform(streamId: string, fromMs: number, toMs: number, buckets: number): Promise<WaveformResult> {
   const from = Math.min(fromMs, toMs);
@@ -229,39 +323,87 @@ export async function waveform(streamId: string, fromMs: number, toMs: number, b
   };
   if (!segs.length) return base;
 
-  // ---- EXACT: decode the whole window, one pass per run ---------------------
+  // ---- EXACT: fine envelope from cache; decode only what is missing ---------
   if (to - from <= EXACT_MAX_MS) {
-    const byRun = new Map<string, LocalSegment[]>();
-    for (const s of segs) {
-      if (!byRun.has(s.runId)) byRun.set(s.runId, []);
-      byRun.get(s.runId)!.push(s);
-    }
-    const started = Date.now();
-    for (const [runId, list] of byRun) {
-      if (Date.now() - started > BUDGET_MS) { base.complete = false; break; }
-      const dir = runDirOf(streamId, runId);
-      const init = join(dir, 'init.mp4');
-      if (!existsSync(init)) continue;
-      const pcm = await decodePcm(init, list.map((s) => join(dir, s.file)),
-        Math.max(1000, BUDGET_MS - (Date.now() - started)));
-      if (!pcm.length) continue;
-      // PCM is contiguous across the run's segments: map sample -> wall clock
-      const runStart = list[0].startMs;
-      for (let i = 0; i < n; i++) {
-        const bStart = from + i * bucketMs;
-        const bEnd = bStart + bucketMs;
-        const s0 = Math.floor(((bStart - runStart) / 1000) * PCM_RATE);
-        const s1 = Math.ceil(((bEnd - runStart) / 1000) * PCM_RATE);
-        if (s1 <= 0 || s0 >= pcm.length) continue;
-        const { peakDb, rmsDb } = peakRms(pcm, Math.max(0, s0), Math.min(pcm.length, s1));
-        if (peakDb <= -100 && out[i]) continue;
-        out[i] = { t: bStart, peak: dbToUnit(peakDb), rms: dbToUnit(rmsDb) };
+    // dB per bucket while accumulating (a fine frame can span several buckets
+    // at a tight zoom, and several frames fall into one bucket at a loose one)
+    const accPeak = new Float64Array(n).fill(-Infinity);
+    const accRms = new Float64Array(n).fill(-Infinity);
+    const paintFrames = (seg: LocalSegment, frames: [number, number][]) => {
+      for (let k = 0; k < frames.length; k++) {
+        const t0 = seg.startMs + k * FINE_MS, t1 = t0 + FINE_MS;
+        const b0 = Math.floor((t0 - from) / bucketMs), b1 = Math.floor((t1 - 1 - from) / bucketMs);
+        if (b1 < 0 || b0 >= n) continue;
+        for (let i = Math.max(0, b0); i <= Math.min(n - 1, b1); i++) {
+          if (frames[k][0] > accPeak[i]) accPeak[i] = frames[k][0];
+          if (frames[k][1] > accRms[i]) accRms[i] = frames[k][1];
+        }
       }
+    };
+
+    let measured = 0;
+    const missing: LocalSegment[] = [];
+    for (const s of segs) {
+      const hit = loadCache(streamId, s.runId)[String(s.seq)];
+      if (hit && hit.length === 3) { paintFrames(s, decodeFine(hit[2])); measured++; }
+      else missing.push(s);
     }
-    // In EXACT mode everything available was decoded: an empty bucket is a real
-    // GAP in the recording, not work still to do. Only a budget cut-off (set
-    // above) leaves the picture incomplete.
-    base.pending = 0;
+
+    // Decode what the cache lacks, one ffmpeg pass per contiguous block, and
+    // cut the fine envelope for every segment in the block from that one
+    // decode, so the next visit to any of them is free.
+    const started = Date.now();
+    const touched = new Set<string>();
+    if (missing.length) {
+      const byRun = new Map<string, LocalSegment[]>();
+      for (const s of missing) {
+        if (!byRun.has(s.runId)) byRun.set(s.runId, []);
+        byRun.get(s.runId)!.push(s);
+      }
+      outer: for (const [runId, list] of byRun) {
+        const dir = runDirOf(streamId, runId);
+        const init = join(dir, 'init.mp4');
+        if (!existsSync(init)) continue;
+        // SPLIT ON HOLES BEFORE DECODING. Concatenated segments give PCM that
+        // is contiguous in SAMPLES whether or not the media is contiguous in
+        // TIME; anchoring across a hole places everything after it early by
+        // the hole's length. resolve.ts refuses to join across a hole for the
+        // same reason, with the same tolerance.
+        for (const block of contiguousBlocks(list)) {
+          if (Date.now() - started > BUDGET_MS) { base.complete = false; break outer; }
+          const pcm = await decodePcm(init, block.map((s) => join(dir, s.file)),
+            Math.max(1000, BUDGET_MS - (Date.now() - started)));
+          if (!pcm.length) continue;
+          const cache = loadCache(streamId, runId);
+          const blockStart = block[0].startMs;
+          for (const s of block) {
+            const s0 = Math.floor(((s.startMs - blockStart) / 1000) * PCM_RATE);
+            if (s0 >= pcm.length) break;
+            const val = measureSegmentPcm(pcm, s0, s.durMs);
+            cache[String(s.seq)] = val;
+            paintFrames(s, decodeFine(val[2]));
+            measured++;
+          }
+          touched.add(runId);
+        }
+      }
+      for (const runId of touched) saveCache(streamId, runId);
+    }
+
+    for (let i = 0; i < n; i++) {
+      if (accPeak[i] === -Infinity) continue;
+      out[i] = { t: from + i * bucketMs, peak: dbToUnit(accPeak[i]), rms: dbToUnit(accRms[i]) };
+    }
+    // An empty bucket where a segment exists but was not measured (budget cut)
+    // is work still to do; an empty bucket with no segment is a real GAP.
+    const unmeasured = segs.length - measured;
+    base.pending = unmeasured > 0
+      ? Math.max(1, Math.round(n * (unmeasured / Math.max(1, segs.length))))
+      : 0;
+    base.complete = unmeasured === 0;
+    base.coverage = { measured, total: segs.length };
+    base.priming = isPriming(streamId);
+    base.progress = primingProgress(streamId);
     return base;
   }
 
@@ -320,5 +462,16 @@ export async function waveform(streamId: string, fromMs: number, toMs: number, b
   base.pending = out.reduce<number>((acc, b, i) => acc + (b === null && segForBucket[i] ? 1 : 0), 0);
   base.complete = base.pending === 0;
   base.priming = isPriming(streamId);
+  base.progress = primingProgress(streamId);
+  const painted = [...paint.values()].filter((e) => out[e.buckets[0]] !== null).length;
+  base.coverage = { measured: painted, total: paint.size };
   return base;
 }
+
+/**
+ * Exposed for tests only. contiguousBlocks decides where a run is genuinely
+ * continuous, which is the difference between a waveform that shows an editor
+ * the right moment and one that shows a plausible wrong one, so it is worth
+ * pinning directly rather than only through a rendered picture.
+ */
+export const __testing = { contiguousBlocks };

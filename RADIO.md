@@ -49,9 +49,52 @@ delivered.
 
 Support: radio sources offer Icecast / HTTP audio (http(s) MP3 or AAC mount,
 with `Icy-MetaData` negotiation), HLS audio pull, and SRT audio. RTMP and the
-video-only options are not offered for radio. The three SomaFM reference
-streams are seeded for testing: Groove Salad, Secret Agent and Drone Zone
-(`https://ice5.somafm.com/<mount>-128-mp3`).
+video-only options are not offered for radio.
+
+**How radio is actually distributed, and why the three are not equivalent.**
+
+*Icecast / SHOUTcast* is what the overwhelming majority of stations publish:
+one endless HTTP response carrying MP3 or AAC, with now-playing text
+interleaved as ICY metadata. It is what every aggregator expects, what car
+receivers and hardware players speak, and it is cheap: one socket per listener,
+no manifest, no segments. If a station has exactly one public URL, this is
+nearly always the one.
+
+*HLS* is second, and growing, but it is mostly the broadcaster's own app rather
+than the station's public URL. Segments and a playlist buy adaptive bitrate,
+CDN caching, DRM, ad insertion and clean iOS support; they cost latency and are
+useless to the long tail of players that only know how to open a stream URL.
+Public broadcasters with apps, such as the ABC, publish both.
+
+*SRT is not a listener protocol at all.* It is contribution: getting audio from
+a studio, an outside broadcast or a remote presenter INTO the platform over the
+public internet, with retransmission and encryption. Nobody distributes to
+listeners over SRT, and there is no public SRT radio source to point at, which
+is why the SRT test station is backed by a local fixture
+(`volt-app/scripts/srt-radio-source.sh`) rather than a URL.
+
+So the honest shape of a station is **SRT (or RTMP) in, Icecast and HLS out.**
+
+**The input flags differ per protocol, and that is not cosmetic.**
+`inputArgs()` in `volt-app/src/services/radio/args.ts`, mirrored in
+`volt-encoder/bin/radio.py` and diffed against it by `radio-args.check.ts`:
+
+| Source | Flags | Why |
+|---|---|---|
+| Icecast / HTTP | `-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5` | One long response body. It drops, and ffmpeg exits unless told to retry. |
+| HLS | the above, plus `-fflags +genpts -live_start_index -1 -http_persistent 0` | ffmpeg's default entry point into a live playlist is three segments back from the end. With a six second source that is **eighteen seconds behind real time for the entire run** — not a startup cost you wait out, a permanent offset, and it never looks like a fault: the station is up and the meters move, it is simply late. `-http_persistent 0` because a CDN serves segments from a different host than the manifest. |
+| SRT | `-fflags +genpts`, and no reconnect flags | Contribution MPEG-TS can arrive with absent or discontinuous timestamps, which is why `encoder.py` does the same. Reconnect flags are HTTP-only; libsrt reconnects itself. |
+
+A `.m3u8` URL is treated as a playlist whatever the row's protocol column says,
+because somebody will paste one into a form that accepts both and the
+alternative is a source that works and is silently late.
+
+**The station is always the CALLER on SRT, never a listener.** A container that
+accepts an inbound connection needs a stable address, a UDP-aware load balancer
+and a security group, and cannot be moved, scaled or reaped with the rest of the
+fleet. Radio was containerised precisely to stop being that exception. The
+studio end is the one with the fixed address, which is also how a real
+contribution link is normally set up.
 
 ### 3. A timed log of received metadata, stored in the EPG tables
 
@@ -224,7 +267,11 @@ the station is receiving audio, regardless of local playback state, and the
 frames are played back at their measured cadence so the motion is honest rather
 than decorative. The verdict badge on the meter states what the signal IS
 (audio present / low level / dead air / static-like) with the dBFS figures
-beside it. When the operator does press Listen, the Web Audio analyser adds a
+beside it. The meter never invents silence: the monitor analyses every
+complete segment (not only the newest one per tick), the page queues every
+sample it has not yet drawn, and a moment the server has not measured is left
+blank rather than drawn as a quiet bar. Bar height is the square root of linear
+peak amplitude, so speech at -13 dBFS reads as speech, not as a soft hum. When the operator does press Listen, the Web Audio analyser adds a
 live spectrum overlay on top: detail, never the proof of signal.
 
 ## Test setup
@@ -238,24 +285,55 @@ testable offline; `volt-app/test/radio.check.sh` runs the e2e and
 `volt-app/scripts/seed-radio.ts` is an OPTIONAL manual step that adds real test
 stations (nothing is seeded automatically):
 
+**Run it from `volt-app/`, not from the repo root.** The path is relative, so
+from `volt/` it fails with a module-not-found stack that says nothing about the
+working directory. The `cd` is part of the command for that reason:
+
 ```
-npx tsx scripts/seed-radio.ts                      # music set (SomaFM)
-npx tsx scripts/seed-radio.ts --all                # + speech/news set
-npx tsx scripts/seed-radio.ts --all --account RTM  # pick the account
+cd volt-app
 npx tsx scripts/seed-radio.ts --list               # show without writing
+npx tsx scripts/seed-radio.ts                      # a mixed demo set: one of everything
+npx tsx scripts/seed-radio.ts --all                # all 19 stations
+npx tsx scripts/seed-radio.ts --music --hls        # pick sets
+npx tsx scripts/seed-radio.ts --all --account RTM  # pick the account
 ```
 
-Two sets, because they exercise different halves of the feature:
+`DATABASE_URL` comes from `volt-app/.env` automatically, which is the other
+reason the working directory matters.
 
-- **Music** (SomaFM Groove Salad / Secret Agent / Drone Zone): dense, well
-  formed `Artist - Title` metadata. Tests the log, classification and metadata
-  driven clipping.
-- **Speech / news**: NPO Radio 1 (sends programme + broadcaster, e.g.
+Every URL was probed with `ffprobe` before being committed, and the codec and
+sample rate in each station's note is what the probe actually returned. Five
+sets, because they exercise different halves of the feature:
+
+- **`--music`** (SomaFM Groove Salad / Secret Agent / Drone Zone / DEF CON,
+  KEXP Seattle): dense, well formed `Artist - Title` metadata. Tests the log,
+  classification and metadata driven clipping.
+- **`--speech`**: NPO Radio 1 (sends programme + broadcaster, e.g.
   `NPO Radio 1 - De Ochtend - KRO-NCRV`, the strongest programme-metadata
-  test), WPLN 90.3 and WPLN International (NPR / BBC talk), KPFA (interviews
-  and public affairs), WFMU Freeform (alternates programme and track
-  metadata), and NA0D Baxter Stream (ham/GMRS/weather: sparse metadata and
-  long silences, which is what exercises the dead-air and static QC checks).
+  test), WPLN 90.3 (NPR talk, and deliberately the lowest-quality source here
+  at mp3 24 kHz / 64k), KPFA (interviews and public affairs), WFMU Freeform
+  (alternates programme and track metadata), and NA0D Baxter Stream (ham/GMRS/
+  weather: mono, narrowband, sparse metadata and long silences, which is what
+  exercises the dead-air and static QC checks).
+- **`--aac`** (SomaFM Groove Salad AAC, Radio Paradise, RP Mellow): Icecast
+  mounts carrying AAC rather than MP3, so `isMp3Copy()` is false and the relay
+  output is **re-encoded** rather than copied. Seed Groove Salad and Groove
+  Salad AAC together and compare: identical programme, one costing a rounding
+  error of CPU and one costing a core.
+- **`--hls`** (ABC Jazz, triple j, Double J, ABC Classic, ABC News Radio):
+  playlist sources, a genuinely different ingest path. ABC Classic is the
+  hardest source here for the dead-air detector, having very wide dynamic range
+  and long quiet passages; ABC News Radio is continuous speech with no music,
+  so it is the best HLS source for transcription work.
+- **`--srt`** (Studio SRT fixture): contribution in. Start
+  `bash scripts/srt-radio-source.sh` first — it listens, and the station calls
+  it. `--relay <url>` makes the fixture carry a real station instead of a tone.
+
+`volt-app/test/radio-ingest-protocols.check.sh` runs the production argv, read
+out of `radio.py` itself, against a local source of each kind and looks for
+audio on disk at the other end. It exists because two implementations agreeing
+on an argv is not the same as that argv having ever been given to ffmpeg, and
+because the HLS entry-point bug does not fail: it works, and is late.
 
 Classifier behaviour was tuned against what these stations actually send, and
 the observed formats are pinned in the classifier test: `Artist - Title`
@@ -269,11 +347,24 @@ stations publish.
 
 ## Production notes / follow-ups
 
-- The dev pipeline runs ffmpeg under the control plane (same pattern as the
-  local test stream). For production scale the same command graph moves into
-  the encoder container; the manifest layout and APIs do not change.
-- MP3 fan-out is in-process; put it behind the edge/CDN for real listener
-  counts (HLS/DASH already are).
+- ~~The dev pipeline runs ffmpeg under the control plane.~~ **Done.** A station
+  is now a container (`Dockerfile.radio`, `bin/radio.py`) launched exactly like
+  a television channel. The in-process path survives only under
+  `RADIO_MODE=inprocess` and mints `radio:` task arns.
+- ~~MP3 fan-out is in-process.~~ **Done.** The station is an Icecast SOURCE and
+  pushes MP3 to a relay tier that owns listener fan-out, so nothing in the
+  control plane sits in the audio path.
+- Two things stayed in the control plane and must not move into the container:
+  the **level monitor** (reads segments off the origin) and **ICY metadata
+  capture** (a second connection to the source, writing titles to the
+  database — the container has no database and must not be given one). Both
+  were dropped when radio was containerised and both were invisible when
+  missing; `test/radio-container-sidecars.check.ts` now asserts they start and
+  stop with the station.
+- Transcription is offered for Icecast sources only (`Radio.tsx`), which is a
+  form gate rather than a pipeline limit: the captions worker reads the origin,
+  and an HLS station writes the same origin. ABC News Radio is seeded partly to
+  make that gap concrete.
 - Classifier is heuristic; a later pass can add audio-based ad detection and
   fingerprint-based song ID without schema changes.
 - Icecast OUTPUT (serving a public icy mount) is out of scope for this round;

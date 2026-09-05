@@ -26,7 +26,7 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import type { RadioLevelSample, SignalVerdict } from './api'
 // ONE definition of waveform height, shared with the video meter and the
 // clipping workbench. See audioLevel.ts for why it is linear peak amplitude.
-import { dbToAmp, dbToUnit, analyserPeak } from './audioLevel'
+import { dbToAmp, dbToUnit, analyserPeak, ampToBar } from './audioLevel'
 
 /** One AudioContext + source node per media element for the page's lifetime —
  *  createMediaElementSource can only ever be called once per element. */
@@ -88,30 +88,44 @@ export default function AudioVisualizer({
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const recRef = useRef<{ ctx: AudioContext; analyser: AnalyserNode } | null>(null)
   const pcmRef = useRef<Uint8Array | null>(null)
-  // rolling ring of recent level values (0..1), fed by the stream frames
-  const ringRef = useRef<number[]>(new Array(120).fill(0))
+  // Rolling ring of recent level values (0..1), newest last. A value of -1
+  // means "not measured": the slot is drawn as nothing rather than as silence.
+  const RING = 120
+  const ringRef = useRef<number[]>(new Array(RING).fill(-1))
   const queueRef = useRef<number[]>([])
   const lastSampleT = useRef<number>(0)
 
-  // Push newly-arrived server frames into a queue that drains at ~100ms, the
-  // rate they were measured at, so the meter moves at the stream's own pace.
+  // SERVER FRAMES DRIVE THE RING; THE RING NEVER INVENTS SILENCE.
+  //
+  // The old version pushed only the NEWEST sample of each poll and, when a
+  // poll brought nothing new, let the last bar decay by 12% a tick. Samples
+  // arrive in 4s segments on a 4s poll, so a late poll or a skipped segment
+  // routinely produced a couple of seconds of decaying bars, and the padding
+  // used to prime the ring was zeros. Both drew "quiet" where the station was
+  // in fact loud. Now every sample newer than the last one seen is queued, in
+  // order, and a slot the server has not measured is left unmeasured.
   useEffect(() => {
     if (!levels || !levels.length) return
-    const newest = levels[levels.length - 1]
-    if (!newest || newest.t === lastSampleT.current) return
+    const fresh = levels.filter(s => s.t > lastSampleT.current)
+    if (!fresh.length) return
     const first = lastSampleT.current === 0
-    lastSampleT.current = newest.t
+    lastSampleT.current = fresh[fresh.length - 1].t
     if (first) {
       // PRIME the history from the samples we already have, so opening the page
       // shows the last ~12s of received signal instead of an empty meter.
-      const hist = levels.flatMap(sampleUnits)
-      ringRef.current = hist.slice(-120)
-      while (ringRef.current.length < 120) ringRef.current.unshift(0)
+      const hist = fresh.flatMap(sampleUnits)
+      ringRef.current = hist.slice(-RING)
+      while (ringRef.current.length < RING) ringRef.current.unshift(-1)
       return
     }
-    queueRef.current.push(...sampleUnits(newest))
-    // never let the queue run away if a poll is late
-    if (queueRef.current.length > 240) queueRef.current = queueRef.current.slice(-240)
+    queueRef.current.push(...fresh.flatMap(sampleUnits))
+    // A poll that brings more than the ring can show is folded straight in
+    // rather than queued: catching up frame by frame would lag the stream.
+    if (queueRef.current.length > RING) {
+      const tail = queueRef.current.slice(-RING)
+      ringRef.current = tail
+      queueRef.current = []
+    }
   }, [levels])
 
   /** PEAK amplitude of the local analyser window, 0..1 — the same quantity and
@@ -129,17 +143,22 @@ export default function AudioVisualizer({
     const id = setInterval(() => {
       const q = queueRef.current
       const ring = ringRef.current
-      // drain a couple of frames per tick when we are behind, else hold the last
-      const take = q.length > 60 ? 2 : 1
-      for (let i = 0; i < take; i++) {
+      if (hasFeed) {
         // WITH a server feed the local analyser is never consulted, so local
-        // playback and mute cannot move these bars.
-        const v = hasFeed
-          ? (q.length ? q.shift()! : (live ? ring[ring.length - 1] * 0.88 : 0))
-          : localLevel()
-        ring.push(v)
-        if (ring.length > 120) ring.shift()
+        // playback and mute cannot move these bars. Drain faster when behind;
+        // when the queue is EMPTY, hold the picture. The next poll fills the
+        // gap with what was actually measured, so nothing is drawn that the
+        // server did not report.
+        if (!q.length) return
+        const take = q.length > 60 ? 3 : q.length > 40 ? 2 : 1
+        for (let i = 0; i < take && q.length; i++) {
+          ring.push(q.shift()!)
+          if (ring.length > RING) ring.shift()
+        }
+        return
       }
+      ring.push(localLevel())
+      if (ring.length > RING) ring.shift()
     }, 100)
     return () => clearInterval(id)
     /* eslint-disable-next-line */
@@ -178,8 +197,9 @@ export default function AudioVisualizer({
       let streamLevel = 0
       for (let i = 0; i < bars; i++) {
         const val = ring[i]
+        if (val < 0) continue                       // not measured: draw nothing
         streamLevel = Math.max(streamLevel, val)
-        const bh = Math.max(1, val * plotH)
+        const bh = Math.max(1, ampToBar(val) * plotH)
         const x = 10 + i * bw
         const alpha = 0.35 + 0.65 * (i / bars)     // older = dimmer
         g.globalAlpha = alpha

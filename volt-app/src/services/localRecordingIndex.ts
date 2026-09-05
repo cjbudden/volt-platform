@@ -84,18 +84,54 @@ export function listRuns(streamId: string): string[] {
   } catch { return []; }
 }
 
+// ---- per-run scan cache -----------------------------------------------------
+//
+//  A segment's tfdt and mtime never change once the file is closed, but the
+//  old scan re-read the head of EVERY segment and stat'ed it on EVERY call. A
+//  24x7 channel holds ~21,600 segments per retained day, and the recording page
+//  calls this several times per load (timeline, waveform, programmes) and then
+//  again on every waveform poll. That was tens of thousands of file opens per
+//  request, and it was the bulk of "the page takes a long time to load".
+//
+//  The cache keeps what was measured per file and only touches files it has not
+//  seen, plus the newest two (the one still being written and the one just
+//  closed, whose mtime can still move). Pruned files drop out because the
+//  directory listing is still read fresh each time. A very short TTL folds the
+//  bursts of calls a single page load makes into one directory read.
+interface ScanEntry { f: string; seq: number; tfdt: bigint | null; mtimeMs: number }
+interface RunScanCache { ts: number; entries: Map<string, ScanEntry>; result: LocalSegment[]; at: number }
+const scanCache = new Map<string, RunScanCache>();
+const SCAN_TTL_MS = 1500;
+/** Files at the tail of the listing that are re-measured on every scan. */
+const SCAN_HOT_TAIL = 2;
+
 /** Scan ONE rendition of ONE run into wall-clock placed segments. */
 export function scanRun(streamId: string, runId: string, rendition: string): LocalSegment[] {
   const dir = join(originBaseFor(streamId), 'runs', runId, rendition);
+  const key = `${streamId}/${runId}/${rendition}`;
+  const now = Date.now();
+  const cached = scanCache.get(key);
+  if (cached && now - cached.at < SCAN_TTL_MS) return cached.result;
   let files: string[];
   try {
     files = readdirSync(dir).filter((f) => /^seg_\d+\.m4s$/.test(f));
-  } catch { return []; }
-  const ts = mdhdTimescale(join(dir, 'init.mp4')) ?? 90000;
-  const entries = files.map((f) => {
-    const seq = parseInt(f.match(/\d+/)![0], 10);
-    return { f, seq, tfdt: tfdtBase(join(dir, f)), mtimeMs: statSync(join(dir, f)).mtimeMs };
-  }).sort((a, b) => a.seq - b.seq);
+  } catch { scanCache.delete(key); return []; }
+  const ts = cached?.ts ?? (mdhdTimescale(join(dir, 'init.mp4')) ?? 90000);
+  const known = cached?.entries ?? new Map<string, ScanEntry>();
+  const sortedFiles = files
+    .map((f) => ({ f, seq: parseInt(f.match(/\d+/)![0], 10) }))
+    .sort((a, b) => a.seq - b.seq);
+  const next = new Map<string, ScanEntry>();
+  const hotFrom = Math.max(0, sortedFiles.length - SCAN_HOT_TAIL);
+  const entries: ScanEntry[] = sortedFiles.map(({ f, seq }, i) => {
+    const hit = i < hotFrom ? known.get(f) : undefined;
+    if (hit) { next.set(f, hit); return hit; }
+    let e: ScanEntry;
+    try { e = { f, seq, tfdt: tfdtBase(join(dir, f)), mtimeMs: statSync(join(dir, f)).mtimeMs }; }
+    catch { e = { f, seq, tfdt: null, mtimeMs: now }; }
+    next.set(f, e);
+    return e;
+  });
   const out: LocalSegment[] = [];
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
@@ -131,7 +167,16 @@ export function scanRun(streamId: string, runId: string, rendition: string): Loc
       uri: `/origin/${streamId}/runs/${runId}/${rendition}/${e.f}`,
     });
   }
+  scanCache.set(key, { ts, entries: next, result: out, at: now });
   return out;
+}
+
+/** Drop a run's scan cache (after a prune or a rewrite). Optional: the cache
+ *  self-heals from the directory listing, this only makes it immediate. */
+export function invalidateRunScan(streamId: string, runId?: string): void {
+  for (const k of scanCache.keys()) {
+    if (k.startsWith(runId ? `${streamId}/${runId}/` : `${streamId}/`)) scanCache.delete(k);
+  }
 }
 
 /** The video rendition to use (highest height dir) and whether audio exists. */

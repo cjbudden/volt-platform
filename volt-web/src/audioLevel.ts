@@ -56,3 +56,19 @@ export function analyserPeak(analyser: AnalyserNode, buf: Uint8Array): number {
   }
   return Math.max(0, Math.min(1, peak))
 }
+
+/**
+ * Linear amplitude (0..1) → bar height (0..1) for DISPLAY.
+ *
+ * The data stays linear peak amplitude (see the rule above); this is only the
+ * drawing curve. Pure linear made speech look faint: football commentary
+ * peaking at -13 dBFS is a bar 22% tall, which reads as "soft" next to music at
+ * -4 dBFS (63%). A square-root curve is what most waveform displays draw:
+ * -13 dBFS → 47%, -4 dBFS → 79%, -30 dBFS → 18%, -50 dBFS → 6%. Dynamics
+ * survive (the spread between -4 and -13 is still a third of the height) and
+ * silence is still silence.
+ */
+export function ampToBar(amp: number): number {
+  if (!(amp > 0)) return 0
+  return Math.min(1, Math.sqrt(amp))
+}
