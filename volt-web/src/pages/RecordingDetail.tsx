@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, recordingRangeUrl, type RecordingRow, type RecordingTimeline, type VodAssetRow, type RecordingProgramme, type TranscriptSearch } from '../api'
 import AudioVisualizer from '../AudioVisualizer'
-import ClipTimeline from '../ClipTimeline'
+import ClipTimeline, { gapsInRange, GAP_REASON } from '../ClipTimeline'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import type { Waveform } from '../api'
 import { pressable } from '../a11y'
@@ -132,7 +132,8 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
       const t = await api.recordingTimeline(id)
       setTl(t)
       const n = t.spans.reduce((a, s) => a + (s.segments ?? 0), 0)
-      part('coverage', { state: 'done', ms: Date.now() - t0, note: n ? `${n.toLocaleString()} segments` : undefined })
+      const gapNote = t.gaps?.length ? ` · ${t.gaps.length} gap${t.gaps.length === 1 ? '' : 's'} (${Math.round((t.missingMs ?? 0) / 1000)}s missing)` : ''
+      part('coverage', { state: 'done', ms: Date.now() - t0, note: n ? `${n.toLocaleString()} segments${gapNote}` : undefined })
     } catch (e: any) { setErr(e.message); part('coverage', { state: 'error', note: e.message }) }
   }
   useEffect(() => {
@@ -380,6 +381,11 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     if (!tl || !selOk) return 0
     return tl.spans.reduce((a, s) => a + Math.max(0, Math.min(s.endMs, selTo!) - Math.max(s.startMs, selFrom!)), 0)
   }, [tl, selFrom, selTo, selOk])
+  /* THE GAPS THE MARKS CROSS, known BEFORE the button is pressed. The clip
+     will skip them; the operator is told so here, next to the marks, and the
+     cut goes through with exactly that much accepted rather than bouncing off
+     a refusal they could have seen coming. */
+  const selGaps = useMemo(() => gapsInRange(tl?.gaps, selOk ? selFrom : null, selOk ? selTo : null), [tl, selFrom, selTo, selOk])
 
   /** Jump: mark a slice AND load it into the player. */
   function jumpTo(fromMs: number, toMs: number) {
@@ -450,6 +456,24 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
             <span style={{ fontSize: 'var(--fs-body)', fontWeight: 400, color: 'var(--faint)' }}>{KIND_LABEL[rec.kind] || rec.kind} · {fmtDate(domain.start)} {fmtClock(domain.start)} → {rec.end_epoch_ms != null ? fmtClock(domain.end) : 'recording…'}</span>
           </h1>
           <p>{rec.title || 'Scrub with the keyboard, mark the range, cut the clip.'}</p>
+          {/* SAID UP FRONT. The holes are drawn on the timeline, but a day-long
+              recording can hide them off screen; the count and total sit here
+              and each chip zooms to its gap. */}
+          {!!tl?.gaps?.length && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 6, fontSize: 'var(--fs-sm)' }}>
+              <span style={{ color: '#fca5a5', fontWeight: 600 }}>
+                {tl.gaps.length} gap{tl.gaps.length === 1 ? '' : 's'} in this recording · {fmtDur(tl.missingMs ?? 0)} missing
+              </span>
+              {tl.gaps.slice(0, 8).map((g, i) => (
+                <button key={i} className="chip" style={{ padding: '2px 8px', fontSize: 'var(--fs-xs)', color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }}
+                  title={`${GAP_REASON[g.reason]}. Click to zoom to it.`}
+                  onClick={() => { const pad = Math.max(30_000, g.ms * 2); setView({ start: Math.max(domain.start, g.fromMs - pad), end: Math.min(domain.end, g.toMs + pad) }) }}>
+                  {fmtClock(g.fromMs)} · {fmtDur(g.ms)}
+                </button>
+              ))}
+              {tl.gaps.length > 8 && <span style={{ color: 'var(--faint)' }}>and {tl.gaps.length - 8} more</span>}
+            </div>
+          )}
         </div>
         <div className="spacer" />
         <button className="btn ghost" onClick={() => { loadTl(); loadRec() }}>Refresh</button>
@@ -533,7 +557,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
               into one bar. The waveform shows where the content actually is, and
               the metadata lane turns "clip that item" into one click. */}
           {tl && view && <ClipTimeline
-            domain={domain} spans={tl.spans} view={view} setView={setView}
+            domain={domain} spans={tl.spans} gaps={tl.gaps ?? []} view={view} setView={setView}
             programmes={programmes} waveform={wave} waveLoading={waveBusy}
             from={selFrom} to={selTo} loaded={loaded} playheadMs={playheadMs} flash={flash}
             onChange={(f, t) => { setSelFrom(f); setSelTo(t) }}
@@ -569,8 +593,21 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
                 <option value="both">Streaming + MP4</option>
               </select>
             </div>
-            <button className="btn primary" disabled={busy === 'clip' || !selOk} onClick={() => createClip()}>{busy === 'clip' ? 'Creating…' : 'Create clip'}</button>
+            <button className="btn primary" disabled={busy === 'clip' || !selOk}
+              onClick={() => createClip(selGaps.ms > 0 ? selGaps.ms + 1000 : undefined)}
+              title={selGaps.ms > 0 ? `The marked range crosses ${selGaps.gaps.length} gap(s); the clip skips ${(selGaps.ms / 1000).toFixed(1)}s of missing media` : undefined}
+              style={selGaps.ms > 0 ? { background: 'var(--warn,#e2b64f)', borderColor: 'var(--warn,#e2b64f)', color: '#1a1408' } : undefined}>
+              {busy === 'clip' ? 'Creating…' : selGaps.ms > 0 ? `Create clip (skips ${(selGaps.ms / 1000).toFixed(1)}s gap)` : 'Create clip'}
+            </button>
           </div>
+          {selGaps.ms > 0 && (
+            <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(248,113,113,.08)', border: '1px solid rgba(248,113,113,.35)', fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
+              <b style={{ color: '#fca5a5' }}>Missing media inside the marks.</b>{' '}
+              {selGaps.gaps.length === 1 ? 'One gap' : `${selGaps.gaps.length} gaps`} totalling {(selGaps.ms / 1000).toFixed(1)}s fall between In and Out
+              {selGaps.gaps.map((g, i) => <span key={i}> · {fmtClock(Math.max(g.fromMs, selFrom!))} → {fmtClock(Math.min(g.toMs, selTo!))} ({GAP_REASON[g.reason]})</span>)}.
+              The clip will be {fmtDur(selTo! - selFrom! - selGaps.ms)} long and the audio jumps at each gap. Move a mark past the red band to avoid it.
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
             <span style={{ flex: 1 }} />
             <button className="btn ghost" disabled={busy === 'publish' || rec.status === 'recording'} onClick={publishFull}

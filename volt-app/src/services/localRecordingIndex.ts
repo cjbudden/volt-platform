@@ -280,3 +280,55 @@ export function rangeMasterPlaylist(streamId: string, hasAudio: boolean,
   lines.push(videoUrl);
   return lines.join('\n') + '\n';
 }
+
+// ---- GAPS: where the recording has nothing ----------------------------------
+//
+//  A span per run hides the holes INSIDE a run (a pruned segment, an encoder
+//  that stalled for a minute and carried on under the same run id), and the
+//  space BETWEEN runs is only visible as an absence. An editor placing marks
+//  needs the holes drawn as holes, before the clip is refused for crossing one.
+//
+//  Walks the representative rendition's segments in time order; anything
+//  wider than a segment's worth of tolerance is a gap. Same contiguity rule
+//  as the clip resolver, so what the timeline shows is what the cut will hit.
+export interface RecordingGap {
+  fromMs: number; toMs: number; ms: number;
+  reason: 'between-runs' | 'missing-media' | 'no-recording';
+}
+const GAP_MIN_MS = 1500;   // under this is segment jitter, not a hole
+
+export function recordingGaps(streamId: string, fromMs: number, toMs: number): RecordingGap[] {
+  const segs: LocalSegment[] = [];
+  for (const runId of listRuns(streamId)) {
+    const pick = pickRenditions(streamId, runId);
+    const rend = pick.video ?? (pick.audio ? 'audio' : null);
+    if (!rend) continue;
+    for (const s of scanRun(streamId, runId, rend)) {
+      if (s.startMs + s.durMs > fromMs && s.startMs < toMs) segs.push(s);
+    }
+  }
+  segs.sort((a, b) => a.startMs - b.startMs);
+  const gaps: RecordingGap[] = [];
+  if (!segs.length) {
+    if (toMs - fromMs > GAP_MIN_MS) gaps.push({ fromMs, toMs, ms: toMs - fromMs, reason: 'no-recording' });
+    return gaps;
+  }
+  if (segs[0].startMs - fromMs > GAP_MIN_MS) {
+    gaps.push({ fromMs, toMs: segs[0].startMs, ms: segs[0].startMs - fromMs, reason: 'no-recording' });
+  }
+  let cursor = segs[0].startMs + segs[0].durMs;
+  let prevRun = segs[0].runId;
+  for (let i = 1; i < segs.length; i++) {
+    const s = segs[i];
+    if (s.startMs - cursor > GAP_MIN_MS) {
+      gaps.push({ fromMs: cursor, toMs: s.startMs, ms: s.startMs - cursor,
+                  reason: s.runId !== prevRun ? 'between-runs' : 'missing-media' });
+    }
+    cursor = Math.max(cursor, s.startMs + s.durMs);
+    prevRun = s.runId;
+  }
+  if (toMs - cursor > GAP_MIN_MS) {
+    gaps.push({ fromMs: cursor, toMs, ms: toMs - cursor, reason: 'no-recording' });
+  }
+  return gaps;
+}

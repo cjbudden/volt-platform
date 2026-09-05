@@ -20,7 +20,7 @@
 //  or zoomed with the wheel / buttons / +- keys.
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { RecordingProgramme, Waveform } from './api'
+import type { RecordingProgramme, Waveform, RecordingGap } from './api'
 import { pressable } from './a11y'
 
 export interface Span { runId: string; startMs: number; endMs: number; segments?: number }
@@ -97,12 +97,28 @@ function tickStep(spanMs: number, px: number): number {
 const MIN_SPAN = 10_000
 const MAX_SPAN = 24 * 3600_000
 
+export const GAP_REASON: Record<RecordingGap['reason'], string> = {
+  'between-runs': 'the stream was stopped and started again',
+  'missing-media': 'segments are missing inside a run (stall, or pruned)',
+  'no-recording': 'nothing was recorded',
+}
+const fmtGap = (ms: number) => ms >= 60_000 ? `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
+
+/** Gaps that overlap [a..b], with the overlapping portion measured. */
+export function gapsInRange(gaps: RecordingGap[] | undefined, a: number | null, b: number | null): { gaps: RecordingGap[]; ms: number } {
+  if (!gaps?.length || a == null || b == null || b <= a) return { gaps: [], ms: 0 }
+  const hit = gaps.filter(g => g.toMs > a && g.fromMs < b)
+  return { gaps: hit, ms: hit.reduce((n, g) => n + (Math.min(g.toMs, b) - Math.max(g.fromMs, a)), 0) }
+}
+
 export default function ClipTimeline({
-  domain, spans, view, setView, programmes, waveform, waveLoading,
+  domain, spans, gaps = [], view, setView, programmes, waveform, waveLoading,
   from, to, loaded, playheadMs, flash, onChange, onSeek, onPickProgramme,
 }: {
   domain: { start: number; end: number }
   spans: Span[]
+  /** Holes in the recording. Drawn on every row so a mark is never placed across one unknowingly. */
+  gaps?: RecordingGap[]
   view: { start: number; end: number }
   setView: (v: { start: number; end: number }) => void
   programmes: RecordingProgramme[]
@@ -204,6 +220,29 @@ export default function ClipTimeline({
     g.strokeStyle = 'rgba(255,255,255,.10)'
     g.beginPath(); g.moveTo(0, mid); g.lineTo(w, mid); g.stroke()
 
+    // THE HOLES, drawn as holes: a red hatched band the full height of the
+    // lane, labelled with its length when there is room. This is the one
+    // thing on the lane that must never be mistaken for quiet audio.
+    for (const gp of gaps) {
+      const x0 = ((gp.fromMs - view.start) / VW) * w
+      const x1 = ((gp.toMs - view.start) / VW) * w
+      if (x1 < 0 || x0 > w) continue
+      const a = Math.max(0, x0), b = Math.min(w, x1), bw = Math.max(2, b - a)
+      g.fillStyle = 'rgba(248,113,113,.16)'
+      g.fillRect(a, 0, bw, h)
+      g.save()
+      g.beginPath(); g.rect(a, 0, bw, h); g.clip()
+      g.strokeStyle = 'rgba(248,113,113,.45)'; g.lineWidth = 1
+      for (let x = a - h; x < b + h; x += 8) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + h, 0); g.stroke() }
+      g.restore()
+      g.strokeStyle = 'rgba(248,113,113,.9)'
+      g.beginPath(); g.moveTo(a, 0); g.lineTo(a, h); g.moveTo(b, 0); g.lineTo(b, h); g.stroke()
+      if (bw > 44) {
+        g.fillStyle = '#fca5a5'; g.font = '600 10px system-ui'; g.textAlign = 'center'
+        g.fillText(`GAP ${fmtGap(gp.ms)}`, a + bw / 2, 12)
+      }
+    }
+
     if (waveform && waveform.buckets.length) {
       const n = waveform.buckets.length
       const bw = w / n
@@ -223,9 +262,10 @@ export default function ClipTimeline({
     if (from != null && to != null && to > from) {
       const x0 = ((from - view.start) / VW) * w
       const x1 = ((to - view.start) / VW) * w
-      g.fillStyle = 'rgba(90,220,150,.13)'
+      const crosses = gapsInRange(gaps, from, to).ms > 0
+      g.fillStyle = crosses ? 'rgba(248,113,113,.10)' : 'rgba(90,220,150,.13)'
       g.fillRect(x0, 0, Math.max(1, x1 - x0), h)
-      g.strokeStyle = 'rgba(90,220,150,.85)'
+      g.strokeStyle = crosses ? 'rgba(248,113,113,.9)' : 'rgba(90,220,150,.85)'
       g.lineWidth = 1
       g.beginPath(); g.moveTo(x0, 0); g.lineTo(x0, h); g.moveTo(x1, 0); g.lineTo(x1, h); g.stroke()
     }
@@ -234,7 +274,7 @@ export default function ClipTimeline({
       g.strokeStyle = '#fff'; g.lineWidth = 1.5
       g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke()
     }
-  }, [waveform, view.start, view.end, VW, spans, from, to, playheadMs, width])
+  }, [waveform, view.start, view.end, VW, spans, gaps, from, to, playheadMs, width])
 
   // ---- drag on the scrub bar ------------------------------------------------
   function down(e: React.PointerEvent, mode: 'new' | 'from' | 'to' | 'pan') {
@@ -311,6 +351,14 @@ export default function ClipTimeline({
               left: `${((s.startMs - domain.start) / DW) * 100}%`,
               width: `${Math.max(0.3, ((s.endMs - s.startMs) / DW) * 100)}%`,
               background: 'rgba(120,150,255,.4)', borderRadius: 3,
+            }} />
+          ))}
+          {gaps.map((gp, i) => (
+            <div key={'g' + i} title={`Gap ${fmtGap(gp.ms)}: ${GAP_REASON[gp.reason]}`} style={{
+              position: 'absolute', top: 1, bottom: 1,
+              left: `${((gp.fromMs - domain.start) / DW) * 100}%`,
+              width: `max(2px, ${(gp.ms / DW) * 100}%)`,
+              background: 'rgba(248,113,113,.55)', borderRadius: 2,
             }} />
           ))}
           <div style={{
@@ -401,6 +449,12 @@ export default function ClipTimeline({
         {spans.map((s, i) => (
           <div key={s.runId + i} title={`${clockOf(s.startMs)} → ${clockOf(s.endMs)}`}
             style={{ position: 'absolute', top: 6, bottom: 6, left: pct(s.startMs), width: `calc(${pct(s.endMs)} - ${pct(s.startMs)})`, background: 'rgba(120,150,255,.35)', borderRadius: 4, minWidth: 2, pointerEvents: 'none' }} />
+        ))}
+        {gaps.filter(gp => gp.toMs > view.start && gp.fromMs < view.end).map((gp, i) => (
+          <div key={'g' + i} title={`Gap ${fmtGap(gp.ms)} · ${clockOf(gp.fromMs)} → ${clockOf(gp.toMs)} · ${GAP_REASON[gp.reason]}`}
+            style={{ position: 'absolute', top: 2, bottom: 2, left: pct(gp.fromMs), width: `max(3px, calc(${pct(gp.toMs)} - ${pct(gp.fromMs)}))`,
+              background: 'repeating-linear-gradient(135deg, rgba(248,113,113,.55) 0 3px, rgba(248,113,113,.15) 3px 7px)',
+              border: '1px solid rgba(248,113,113,.8)', borderRadius: 3, pointerEvents: 'auto', cursor: 'help' }} />
         ))}
         {from != null && to != null && to > from && (
           <>

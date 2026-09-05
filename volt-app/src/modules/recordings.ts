@@ -10,7 +10,7 @@ import { plan, type OutputFormat } from '../services/clips/extract';
 import { clipsFromRecording } from '../services/clips/provenance';
 import { enqueue } from '../services/jobs/queue';
 import { CLIP_EXTRACT } from '../services/jobs/handlers/clipExtract';
-import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions, isAudioOnly } from '../services/localRecordingIndex';
+import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions, isAudioOnly, recordingGaps } from '../services/localRecordingIndex';
 import { transcriptForStream, searchTranscript, transcriptMatches } from '../services/recordingSearch';
 import { waveform, primeWaveformCache } from '../services/waveform';
 
@@ -63,17 +63,27 @@ recordingsRouter.get(
         && (r.end_epoch_ms == null || s.startMs < Number(r.end_epoch_ms)));
     const hasAudio = listRuns(streamId).some((run) => pickRenditions(streamId, run).audio);
     const hasVideo = listRuns(streamId).some((run) => pickRenditions(streamId, run).video);
+    // THE HOLES, named. Drawn on the timeline so an editor sees missing media
+    // before placing marks across it. A live recording's trailing edge is not
+    // a hole (it is simply not written yet), so the window ends at the last
+    // span rather than at now.
+    const winStart = Number(r.start_epoch_ms);
+    const winEnd = r.end_epoch_ms != null ? Number(r.end_epoch_ms)
+      : (spans.length ? spans[spans.length - 1].endMs : winStart);
+    const gaps = recordingGaps(streamId, winStart, winEnd);
     res.json({
       recordingId: r.id,
       streamId,
       kind: r.kind,
       sourceName: r.source_name,
-      startMs: Number(r.start_epoch_ms),
+      startMs: winStart,
       endMs: r.end_epoch_ms != null ? Number(r.end_epoch_ms) : null,
       live: r.status === 'recording',
       hasAudio,
       audioOnly: hasAudio && !hasVideo,   // radio: player shows the visualiser
       spans,
+      gaps,
+      missingMs: gaps.reduce((n, g) => n + g.ms, 0),
     });
   })
 );

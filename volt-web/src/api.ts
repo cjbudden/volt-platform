@@ -1328,6 +1328,13 @@ export interface RecordingTimeline {
   startMs: number; endMs: number | null; live: boolean; hasAudio: boolean
   audioOnly?: boolean   // radio recordings: player shows the audio visualiser
   spans: { runId: string; startMs: number; endMs: number; segments: number }[]
+  /** Where the recording has NO media, so marks can avoid it (or cross it knowingly). */
+  gaps?: RecordingGap[]
+  missingMs?: number
+}
+export interface RecordingGap {
+  fromMs: number; toMs: number; ms: number
+  reason: 'between-runs' | 'missing-media' | 'no-recording'
 }
 
 
