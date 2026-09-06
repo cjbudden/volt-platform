@@ -16,7 +16,7 @@
 import { useEffect, useState } from 'react'
 import { api, type AccessRule, type AccessTerm, type ContentType, type ForScope } from './api'
 
-const SCOPE_LABEL: Record<ForScope, string> = { this: 'This item', live: 'Linked live content', ondemand: 'Linked on-demand content' }
+const SCOPE_LABEL: Record<ForScope, string> = { this: 'This item', live: 'Linked live content (live streams carried by it)', ondemand: 'Linked on-demand content (VOD / AOD made from its recordings)' }
 const newId = () => `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
 const inp = { className: 'inp', style: { fontSize: 'var(--fs-sm)', padding: '4px 7px' } as any }
 
@@ -30,7 +30,7 @@ export function AccessRulesEditor({ value, onChange, scopeKind }: {
   const rules = value ?? []
   const set = (i: number, r: AccessRule) => onChange(rules.map((x, k) => k === i ? r : x))
   const move = (i: number, d: number) => { const j = i + d; if (j < 0 || j >= rules.length) return; const n = [...rules]; [n[i], n[j]] = [n[j], n[i]]; onChange(n) }
-  const thisLabel = scopeKind === 'asset' ? 'This item' : scopeKind === 'owner' ? 'This channel / station / event' : scopeKind === 'schema' ? 'Content of this type' : 'Everything'
+  const thisLabel = scopeKind === 'asset' ? 'This item' : scopeKind === 'owner' ? 'This channel / station / event itself' : 'The channel, event or station itself'
   return (
     <div style={{ display: 'grid', gap: 8 }}>
       {rules.length === 0 && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>No rules: the simple geo / access / paywall fields decide.</div>}

@@ -41,8 +41,9 @@ export async function evaluateAccess(assetId: string, geo?: string, ctx: { appId
   const od = await onDemandAccess(assetId, geo, ctx.appId ?? null, ctx.entitled === true, vctx);
   if (od) return od.allowed ? { allowed: true, rule: od.rule } : { allowed: false, reason: od.reason, replacementAssetId: null, rule: od.rule, products: od.paywall ?? undefined };
 
-  // A LIVE OWNER under the rules engine: the owner's own rung means 'this',
-  // a rule from its type or the account means linked live content.
+  // A LIVE OWNER under the rules engine. Christian: "this" means the current
+  // channel, event or station itself, whichever rung the rule sits on; the
+  // linked items are the VOD / AOD assets made from its recordings.
   if (ctx.accountId) {
     const owner = await one<any>(
       `SELECT c.id, c.schema_id, 'channel' AS kind FROM channels c WHERE c.id = $1
@@ -52,7 +53,7 @@ export async function evaluateAccess(assetId: string, geo?: string, ctx: { appId
       const rules = plan.settings.accessRules ?? [];
       if (rules.length) {
         const outcome = evaluateAccessRules(rules,
-          { relation: plan.sources.accessRules === 'owner' ? 'this' : 'live', schemaId: owner.schema_id, ownerId: owner.id },
+          { relation: 'this', schemaId: owner.schema_id, ownerId: owner.id },
           vctx ?? { country: geo ?? null, viewerId: null, groups: [], entitlements: [] });
         if (!outcome.allowed) return { allowed: false, reason: outcome.message, replacementAssetId: null, rule: outcome, products: outcome.products };
         if (outcome.via !== 'no_rule') return { allowed: true, rule: outcome };

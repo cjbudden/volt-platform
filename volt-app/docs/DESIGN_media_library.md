@@ -45,8 +45,11 @@ premium for user groups under TERMS). A TERM is a purchasable package: a
 period (1 month for 9.99 AUD + 10% tax) or the item's published dates. First
 matching rule decides; governed content with no matching region is a geo
 refusal; no rule at all falls back to the simple geo / access / paywall
-fields. `this` means the owner or asset the rung is attached to; from the
-type or account rung the same content is "linked".
+fields. Christian's definitions (5 Sep): `this` is the current channel,
+event or station itself, on whichever rung the rule sits (on an item's own
+rung, the item); the LINKED items are every VOD or AOD asset made from that
+owner's recordings (`ondemand`); `live` is reserved for live streams linked
+to the owner once that relation exists.
 
 ### 4.4 Payments and entitlements
 

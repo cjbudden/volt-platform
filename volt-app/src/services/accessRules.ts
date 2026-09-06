@@ -6,9 +6,12 @@
 //  list; the first rule whose FOR matches the content and whose IF matches
 //  the viewer decides. Each rule:
 //
-//    FOR   which content it governs: 'this' (the owner or asset the rule is
-//          on), 'live' (live content linked to it), 'ondemand' (on-demand
-//          content linked to it), and/or named content types.
+//    FOR   which content it governs. Christian's definitions: 'this' is the
+//          current channel, event or station itself (on an item's own rung,
+//          the item); 'ondemand' is the linked items, every VOD or AOD asset
+//          made from that owner's recordings; 'live' is reserved for live
+//          streams linked to the owner (an event carried on a channel) once
+//          that link exists. And/or named content types.
 //    IF    where the viewer is: located in these countries, or NOT located in
 //          them. 'WORLD' matches everywhere.
 //    THEN  free | members (the viewer must be signed in to the client's app,
