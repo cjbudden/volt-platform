@@ -140,6 +140,8 @@ deleted while assigned.
 | Sports match | event | SportsEvent | sport, homeTeam, awayTeam (SportsTeam with logo), competition, venue, round |
 | Multi-sport event | event | SportsEvent (superEvent) with subEvents | sports[], sessions[] (each a Sports match), venue(s), days |
 | Clip / highlight | vod | VideoObject / AudioObject | headline, keywords, thumbnail, contentLocation, isPartOf |
+| Song | vod | MusicRecording | title, artist, album, genre, ISRC, label, release date, artwork |
+| Interview | vod | Interview | title, guests, interviewer, topic, description, keywords |
 | Programme (on-demand episode) | vod | Episode / RadioEpisode | series, season, episodeNumber, partOfSeries |
 
 `domain` carries `sports`, `music`, `civic`, `worship`; extends_id lets "Sports
