@@ -9,7 +9,7 @@
 //  Usage: npx tsx test/content-types.check.ts
 // ============================================================================
 import { STANDARD_TYPES, DEFAULT_TYPE_KEY, EPG_SLOT_RX, programmeFieldsFrom } from '../src/services/contentTypes';
-import { validateSchemaFields, mergeFields } from '../src/services/metadataValidator';
+import { validateSchemaFields, mergeFields, validateMetadata } from '../src/services/metadataValidator';
 
 let pass = 0, fail = 0;
 const ok = (m: string) => { console.log('PASS ' + m); pass++; };
@@ -70,6 +70,23 @@ check('station name is the base title', s.title, 'DEF CON Radio');
 check('genres are categories', s.categories.join(','), 'Music,Talk');
 check('logo is the icon', s.icon, 'https://x/logo.png');
 check('language carried', s.language, 'en');
+
+// --- unknown keys: assets reject, owners keep -------------------------------
+// A seeded station carries { seeded: 'scripts/seed-radio.ts' } in its metadata
+// column. Saving Settings must not fail on it, and must not delete it either.
+{
+  const seededMeta = { name: 'ABC Classic', seeded: 'scripts/seed-radio.ts', seed_note: 'x' };
+  let threw = '';
+  try { validateMetadata(station.fields, seededMeta); } catch (e: any) { threw = e.message; }
+  check('asset policy rejects unknown keys', threw, 'unknown metadata field: seeded');
+  const kept = validateMetadata(station.fields, seededMeta, 'keep');
+  check('owner policy keeps provenance keys', kept.seeded, 'scripts/seed-radio.ts');
+  check('owner policy keeps every unknown key', kept.seed_note, 'x');
+  check('owner policy still validates known fields', kept.name, 'ABC Classic');
+  let req = '';
+  try { validateMetadata(station.fields, { seeded: 'y' }, 'keep'); } catch (e: any) { req = e.message; }
+  truthy('owner policy still enforces required fields', /missing required field/.test(req));
+}
 
 console.log(`content-types: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

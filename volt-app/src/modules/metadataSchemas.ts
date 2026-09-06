@@ -47,7 +47,8 @@ export async function validateEntityMetadata(
   if (!resolved) throw notFound('metadata schema not found');
   if (resolved.targetKind !== 'any' && !kinds.includes(resolved.targetKind))
     throw new ApiError(422, `schema targets '${resolved.targetKind}', cannot bind to ${kinds.join('/')}`);
-  return { schemaId, metadata: validateMetadata(resolved.fields, metadata ?? {}) };
+  // Owners keep keys the type does not define (see validateMetadata).
+  return { schemaId, metadata: validateMetadata(resolved.fields, metadata ?? {}, 'keep') };
 }
 
 /** Named, typed metadata field sets (Movie, Episode, Clip, …) per tenant. */

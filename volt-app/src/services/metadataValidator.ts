@@ -112,16 +112,31 @@ function checkOne(field: SchemaField, value: any): any {
   }
 }
 
+export type UnknownKeyPolicy = 'reject' | 'keep';
+
+/**
+ * Validate a metadata object against a type's fields.
+ *
+ * `unknown` decides what happens to keys the type does not define. Assets
+ * (clips, recordings, uploads) reject them, because the metadata form is the
+ * only writer. Owners (channels, events, stations) KEEP them untouched: their
+ * metadata column predates content types and carries provenance written by
+ * other code paths (seed scripts, ICY capture, probes) that the type has no
+ * business deleting. A station seeded with { seeded: 'scripts/seed-radio.ts' }
+ * must still be savable from the Settings drawer.
+ */
 export function validateMetadata(
   fields: SchemaField[],
-  values: Record<string, any>
+  values: Record<string, any>,
+  unknown: UnknownKeyPolicy = 'reject'
 ): Record<string, any> {
   const known = new Map(fields.map((f) => [f.key, f]));
-  // reject unknown keys
-  for (const k of Object.keys(values ?? {})) {
-    if (!known.has(k)) throw new ApiError(422, `unknown metadata field: ${k}`);
-  }
   const clean: Record<string, any> = {};
+  for (const k of Object.keys(values ?? {})) {
+    if (known.has(k)) continue;
+    if (unknown === 'reject') throw new ApiError(422, `unknown metadata field: ${k}`);
+    clean[k] = values[k];
+  }
   for (const field of fields) {
     const present = values && Object.prototype.hasOwnProperty.call(values, field.key);
     if (!present || values[field.key] === null || values[field.key] === '') {
