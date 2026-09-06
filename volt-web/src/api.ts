@@ -618,6 +618,188 @@ export interface PlayerReport {
   recentErrors: { at: string; event: string; origin: string | null; detail: any }[]
 }
 
+
+/* ------------------------------------------------------------- watchfolders */
+
+export interface Watchfolder {
+  id: string
+  name: string
+  kind: 'local' | 's3'
+  config: { path?: string; min_age_ms?: number; library_folder?: string; delete_after_ingest?: boolean;
+            max_ingest_bytes?: number; min_bytes?: number; max_bytes?: number; default_workflow?: string }
+  default_target_kind: string | null
+  quarantine_path: string
+  /** The ladder every video file this folder accepts is encoded to. */
+  ladder_group_id: string | null
+  enabled: boolean
+  last_scan_at: string | null
+  last_scan_error: string | null
+  rule_count?: number
+  /** Items waiting for a person. The number the nav badge and the card show. */
+  review_count?: number
+  version: number
+}
+
+export interface WatchfolderRule {
+  id: string
+  ordinal: number
+  name: string
+  match_type: 'glob' | 'regex' | 'extension' | 'prefix' | 'suffix'
+  pattern: string
+  target_kind: string
+  workflow: string | null
+  action: 'accept' | 'reject'
+  reject_reason: string | null
+  enabled: boolean
+}
+
+/** Every state an object in a watched folder can be in. `seen` means classified
+ *  and waiting for ingest; `failed` is a closed row an operator must look at. */
+export type WatchfolderItemStatus =
+  'seen' | 'ingested' | 'quarantined' | 'failed' | 'reprocessed' | 'removed'
+
+export interface WatchfolderItem {
+  id: string
+  object_key: string
+  checksum: string | null
+  size_bytes: number | null
+  status: WatchfolderItemStatus
+  target_kind: string | null
+  workflow: string | null
+  media_file_id: string | null
+  /** Why, in the words recorded AT THE DECISION. Not recomputed on read. */
+  reason: string | null
+  quarantine_key: string | null
+  rule_name: string | null
+  seen_at: string
+  resolved_at: string | null
+}
+
+export interface WatchfolderDryRun {
+  filename: string
+  decision:
+    | { decision: 'accept'; targetKind: string; workflow: string | null; ruleId: string | null }
+    | { decision: 'quarantine'; reason: string; ruleId: string | null }
+  quarantinePath: string
+  rules: { id: string; ordinal: number; name: string; pattern: string; targetKind: string
+           action: string; enabled: boolean; winner: boolean }[]
+}
+
+export interface WatchfolderScan {
+  scanned: number
+  accepted: { objectKey: string; targetKind?: string | null }[]
+  quarantined: { objectKey: string; reason?: string | null; quarantineKey?: string | null }[]
+  skippedTooNew: string[]
+  skippedKnown: number
+  errors: { objectKey: string; error: string }[]
+  ingest: {
+    ingested: number; deferred: number; failed: number
+    /** Video accepted and handed to an encode job. Counted apart from
+     *  `ingested`, because accepted is not yet playable. */
+    queued?: number
+    skipped?: number
+  } | null
+}
+
+
+/* ---------------------------------------------------- encoding profiles */
+
+/** One rendition: a height and a bitrate with a name on it. The rate control
+ *  (preset, maxrate, bufsize, GOP) is NOT here and deliberately so — it is the
+ *  same for live and for file and lives in the encoder, in one place. */
+export interface EncodeProfile {
+  id: string
+  name: string
+  height: number
+  bitrate_kbps: number
+  fps: number | null
+  notes: string | null
+  used_in?: number
+  version: number
+}
+
+export interface LadderRung { height: number; bitrate_kbps: number; fps?: number | null }
+
+export type LadderOrigin =
+  | { kind: 'tracked'; outputProfileId: string; profileName?: string | null }
+  | { kind: 'members' }
+
+export interface LadderGroup {
+  id: string
+  name: string
+  description: string | null
+  /** Set means this ladder IS a live profile's ladder, read at encode time. */
+  tracks_output_profile_id: string | null
+  tracked_profile_name?: string | null
+  segment_dur: number | string
+  fps: number | string
+  packaging: 'hls' | 'dash' | 'both'
+  codec_backend: 'x264' | 'nvenc'
+  cap_to_source: boolean
+  is_default: boolean
+  member_count?: number
+  version: number
+  /** RESOLVED by the server, so a tracking ladder shows the numbers it will
+   *  actually encode rather than an empty list. */
+  rungs: LadderRung[]
+  segment_seconds: number | null
+  effective_fps: number | null
+  origin: LadderOrigin | null
+  /** Set when the ladder cannot resolve at all, e.g. its live profile was
+   *  deleted. Shown rather than hidden: this is the screen to fix it on. */
+  problem: string | null
+}
+
+export interface LiveOutputProfile {
+  id: string
+  name: string
+  rungs: LadderRung[]
+  segment_dur: number | string
+  workflow_type: string
+  codec_backend: string
+  packaging: string
+}
+
+export interface LadderFit {
+  kept: LadderRung[]
+  dropped: (LadderRung & { why: string; sourceHeight?: number | null })[]
+  fps: number
+  adapted: { from: number; to: number; reason: string } | null
+  /** Distinct from "measured and everything fitted". */
+  sourceUnmeasured: boolean
+  notes: string[]
+}
+
+export interface LadderPreview {
+  ladder: {
+    id: string; name: string; origin: LadderOrigin
+    rungs: LadderRung[]; segmentSeconds: number; fps: number; capToSource: boolean
+  }
+  source: { height: number | null; fps: number | null }
+  fit: LadderFit
+  summary: string
+}
+
+
+/** The encode of a file-sourced asset, joined onto the library row. */
+export interface AssetEncodeState {
+  encode_state?: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | null
+  encode_pct?: number | null
+  encode_note?: string | null
+  encode_error?: string | null
+  source_kind?: 'recording' | 'upload' | 'watchfolder'
+  /** What the encode ACTUALLY produced: rungs kept, rungs dropped and why. */
+  encode_result?: {
+    summary?: string
+    kept?: LadderRung[]
+    dropped?: (LadderRung & { why: string; sourceHeight?: number | null })[]
+    adapted?: { from: number; to: number } | null
+    sourceUnmeasured?: boolean
+    notes?: string[]
+    ladder?: { name?: string; origin?: LadderOrigin }
+  } | null
+}
+
 export const api = {
   login: (email: string, password: string): Promise<{ access: string; refresh?: string; expiresIn?: number }> =>
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
@@ -648,6 +830,73 @@ export const api = {
     metadata?: Record<string, any>
   }): Promise<Channel> => req('/channels', { method: 'POST', body: JSON.stringify(b) }),
   search: (q: string): Promise<{ results: SearchHit[] }> => req('/search?q=' + encodeURIComponent(q)),
+
+  /* ------------------------------------------------------------ watchfolders --
+     Ingest folders, their ordered rules, and the review queue. The DRY RUN is
+     the important one at the desk: it answers "which rule would win for this
+     filename" against the SAME classify() the scanner runs, so an operator finds
+     out that `*.png` outranks `slate_*.png` here rather than in the review
+     folder tomorrow. */
+  /* ------------------------------------------------------- encoding profiles --
+     Renditions, ladders, and the preview that answers "what would a 720p file
+     get" from the SAME fitToSource() the encode runs. */
+  encodeProfiles: (): Promise<EncodeProfile[]> => req('/encode-profiles'),
+  createEncodeProfile: (b: { name: string; height: number; bitrateKbps: number; fps?: number | null; notes?: string | null }): Promise<EncodeProfile> =>
+    req('/encode-profiles', { method: 'POST', body: JSON.stringify(b) }),
+  patchEncodeProfile: (id: string, b: Record<string, any>): Promise<EncodeProfile> =>
+    req(`/encode-profiles/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteEncodeProfile: (id: string) => req(`/encode-profiles/${id}`, { method: 'DELETE' }),
+
+  ladderGroups: (): Promise<LadderGroup[]> => req('/encode-profiles/ladders'),
+  createLadderGroup: (b: Record<string, any>): Promise<LadderGroup> =>
+    req('/encode-profiles/ladders', { method: 'POST', body: JSON.stringify(b) }),
+  patchLadderGroup: (id: string, b: Record<string, any>): Promise<LadderGroup> =>
+    req(`/encode-profiles/ladders/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteLadderGroup: (id: string) => req(`/encode-profiles/ladders/${id}`, { method: 'DELETE' }),
+  setLadderMembers: (id: string, profileIds: string[]): Promise<LadderGroup> =>
+    req(`/encode-profiles/ladders/${id}/members`, { method: 'PUT', body: JSON.stringify({ profileIds }) }),
+  /** Create (or find) the ladder that TRACKS a live output profile. The one
+   *  that cannot drift from the channels it was made from. */
+  mirrorLiveProfile: (outputProfileId: string, name?: string, makeDefault?: boolean): Promise<LadderGroup> =>
+    req('/encode-profiles/ladders/mirror', { method: 'POST', body: JSON.stringify({ outputProfileId, name, makeDefault }) }),
+  liveOutputProfiles: (): Promise<LiveOutputProfile[]> => req('/encode-profiles/live-profiles'),
+  ladderPreview: (id: string, height: number | null, fps?: number | null): Promise<LadderPreview> =>
+    req(`/encode-profiles/ladders/${id}/preview?height=${height ?? ''}&fps=${fps ?? ''}`),
+
+  watchfolders: (): Promise<Watchfolder[]> => req('/watchfolders'),
+  watchfolder: (id: string): Promise<Watchfolder & { rules: WatchfolderRule[] }> =>
+    req(`/watchfolders/${id}`),
+  createWatchfolder: (b: {
+    name: string; kind?: 'local' | 's3'; config?: Record<string, any>
+    defaultTargetKind?: string | null; quarantinePath?: string
+  }): Promise<Watchfolder> => req('/watchfolders', { method: 'POST', body: JSON.stringify(b) }),
+  patchWatchfolder: (id: string, b: Record<string, any>): Promise<Watchfolder> =>
+    req(`/watchfolders/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteWatchfolder: (id: string) => req(`/watchfolders/${id}`, { method: 'DELETE' }),
+
+  watchfolderRules: (id: string): Promise<WatchfolderRule[]> => req(`/watchfolders/${id}/rules`),
+  addWatchfolderRule: (id: string, b: {
+    name: string; matchType?: string; pattern: string; targetKind: string
+    workflow?: string | null; action?: 'accept' | 'reject'; rejectReason?: string | null
+    ordinal?: number; enabled?: boolean
+  }): Promise<WatchfolderRule> =>
+    req(`/watchfolders/${id}/rules`, { method: 'POST', body: JSON.stringify(b) }),
+  patchWatchfolderRule: (id: string, ruleId: string, b: Record<string, any>): Promise<WatchfolderRule> =>
+    req(`/watchfolders/${id}/rules/${ruleId}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteWatchfolderRule: (id: string, ruleId: string) =>
+    req(`/watchfolders/${id}/rules/${ruleId}`, { method: 'DELETE' }),
+
+  /** Ask what WOULD happen, without a file. Shares the scanner's classifier. */
+  watchfolderDryRun: (id: string, filename: string, sizeBytes?: number | null): Promise<WatchfolderDryRun> =>
+    req(`/watchfolders/${id}/dry-run`, { method: 'POST', body: JSON.stringify({ filename, sizeBytes }) }),
+  /** Scan AND ingest. One action at the desk even though it is two in the code. */
+  scanWatchfolder: (id: string): Promise<WatchfolderScan> =>
+    req(`/watchfolders/${id}/scan`, { method: 'POST' }),
+  watchfolderItems: (id: string, status?: string, limit = 200): Promise<{ items: WatchfolderItem[] }> =>
+    req(`/watchfolders/${id}/items?limit=${limit}` + (status ? `&status=${encodeURIComponent(status)}` : '')),
+  resolveWatchfolderItem: (id: string, itemId: string, resolution: 'reprocess' | 'remove', note?: string) =>
+    req(`/watchfolders/${id}/items/${itemId}/resolve`,
+      { method: 'POST', body: JSON.stringify({ resolution, note }) }),
   startStop: (id: string, action: 'start' | 'stop') =>
     req(`/channels/${id}/${action}`, { method: 'POST' }),
   /** Stop (or resume) auto connect by hand. Off halts retries and leaves the
@@ -988,13 +1237,16 @@ export const api = {
   radioEvents: (id: string): Promise<{ stationId: string; entries: { ts: string; level: string; title: string; detail: string }[] }> =>
     req(`/radio/${id}/events`),
   radioNowPlaying: (id: string): Promise<RadioNowPlaying> => req(`/radio/${id}/nowplaying`),
-  radioLog: (id: string, p: { from?: string; to?: string; q?: string; class?: RadioClass; limit?: number } = {}): Promise<RadioLog> => {
+  radioLog: (id: string, p: { from?: string; to?: string; q?: string; class?: RadioClass; limit?: number; offset?: number; minSec?: number; sort?: 'newest' | 'oldest' | 'longest' | 'title' } = {}): Promise<RadioLog> => {
     const qs = new URLSearchParams()
     if (p.from) qs.set('from', p.from)
     if (p.to) qs.set('to', p.to)
     if (p.q) qs.set('q', p.q)
     if (p.class) qs.set('class', p.class)
     if (p.limit) qs.set('limit', String(p.limit))
+    if (p.offset) qs.set('offset', String(p.offset))
+    if (p.minSec) qs.set('minSec', String(p.minSec))
+    if (p.sort) qs.set('sort', p.sort)
     return req(`/radio/${id}/log` + (qs.toString() ? '?' + qs : ''))
   },
 
@@ -1170,6 +1422,7 @@ export interface RadioNowPlaying {
 export interface RadioLog {
   stationId: string; from: string; to: string
   counts: Partial<Record<RadioClass, number>>
+  total?: number; offset?: number; limit?: number
   entries: RadioLogEntry[]
 }
 

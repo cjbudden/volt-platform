@@ -444,6 +444,10 @@ const logQuery = z.object({
   q: z.string().optional(),              // title search
   class: z.enum(['song', 'ad', 'content']).optional(),
   limit: z.coerce.number().int().min(1).max(2000).default(500),
+  offset: z.coerce.number().int().min(0).default(0),
+  /** Only entries at least this long, in seconds: hides idents and jingles. */
+  minSec: z.coerce.number().int().min(0).optional(),
+  sort: z.enum(['newest', 'oldest', 'longest', 'title']).default('newest'),
 });
 radioRouter.get('/:id/log', asyncHandler(async (req, res) => {
   const c = await ownedStation(req);
@@ -451,26 +455,36 @@ radioRouter.get('/:id/log', asyncHandler(async (req, res) => {
   const from = p.from ? new Date(p.from) : new Date(Date.now() - 24 * 3600_000);
   const to = p.to ? new Date(p.to) : new Date(Date.now() + 60_000);
   if (isNaN(from.getTime()) || isNaN(to.getTime())) throw badRequest('bad from/to');
-  const rows = await query<any>(
-    `SELECT id, title, starts_at, ends_at, status,
-            metadata->>'class' AS class, metadata->>'stream_url' AS stream_url
-       FROM programmes
-      WHERE channel_id=$1 AND metadata->>'source'='icy'
+  // PAGED AND FILTERED ON THE SERVER. A 24x7 station logs a title every few
+  // minutes, so a day is hundreds of rows and a month is tens of thousands;
+  // the console asks for a page and the counts, never the lot.
+  const where = `channel_id=$1 AND metadata->>'source'='icy'
         AND ends_at > $2 AND starts_at < $3
         AND ($4::text IS NULL OR title ILIKE '%'||$4||'%')
         AND ($5::text IS NULL OR metadata->>'class' = $5)
-      ORDER BY starts_at DESC LIMIT $6`,
-    [c.id, from.toISOString(), to.toISOString(), p.q?.trim() || null, p.class ?? null, p.limit]
+        AND ($6::int IS NULL OR ends_at - starts_at >= make_interval(secs => $6))`;
+  const args = [c.id, from.toISOString(), to.toISOString(), p.q?.trim() || null, p.class ?? null, p.minSec ?? null];
+  const order = p.sort === 'oldest' ? 'starts_at ASC' : p.sort === 'longest' ? '(ends_at - starts_at) DESC, starts_at DESC' : p.sort === 'title' ? 'title ASC, starts_at DESC' : 'starts_at DESC';
+  const rows = await query<any>(
+    `SELECT id, title, starts_at, ends_at, status,
+            metadata->>'class' AS class, metadata->>'stream_url' AS stream_url
+       FROM programmes WHERE ${where}
+      ORDER BY ${order} LIMIT $7 OFFSET $8`,
+    [...args, p.limit, p.offset]
   );
+  const total = await one<any>(`SELECT count(*)::int AS n FROM programmes WHERE ${where}`, args);
   const counts = await query<any>(
     `SELECT COALESCE(metadata->>'class','content') AS class, count(*)::int AS n
        FROM programmes
       WHERE channel_id=$1 AND metadata->>'source'='icy' AND ends_at > $2 AND starts_at < $3
-      GROUP BY 1`, [c.id, from.toISOString(), to.toISOString()]);
+        AND ($4::text IS NULL OR title ILIKE '%'||$4||'%')
+        AND ($6::int IS NULL OR ends_at - starts_at >= make_interval(secs => $6))
+      GROUP BY 1`, [c.id, from.toISOString(), to.toISOString(), p.q?.trim() || null, null, p.minSec ?? null]);
   res.json({
     stationId: c.id,
     from: from.toISOString(), to: to.toISOString(),
     counts: Object.fromEntries(counts.map((r: any) => [r.class, r.n])),
+    total: total?.n ?? rows.length, offset: p.offset, limit: p.limit,
     entries: rows,
   });
 }));

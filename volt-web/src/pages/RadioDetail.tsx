@@ -25,6 +25,8 @@ const fmtDur = (ms: number) => {
 }
 const isImg = (u?: string | null) => !!u && /\.(png|jpe?g|gif|webp|avif)(\?|$)/i.test(u)
 
+const toDayInput = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
 export default function RadioDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const [st, setSt] = useState<RadioStationDetail | null>(null)
   const [np, setNp] = useState<RadioNowPlaying | null>(null)
@@ -32,6 +34,23 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
   const [log, setLog] = useState<RadioLog | null>(null)
   const [q, setQ] = useState('')
   const [cls, setCls] = useState<RadioClass | 'all'>('all')
+  // LOG WINDOW, SORT, PAGE. Server-side: a station logs a title every few
+  // minutes, so the console only ever asks for one page of one window.
+  const PAGE = 50
+  const [range, setRange] = useState<'24h' | '7d' | '30d' | 'custom'>('24h')
+  const [fromDay, setFromDay] = useState(() => toDayInput(new Date(Date.now() - 6 * 86400_000)))
+  const [toDay, setToDay] = useState(() => toDayInput(new Date()))
+  const [minSec, setMinSec] = useState<0 | 30 | 60 | 120>(0)
+  const [sort, setSort] = useState<'newest' | 'oldest' | 'longest' | 'title'>('newest')
+  const [page, setPage] = useState(0)
+  const logWindow = () => {
+    if (range === 'custom') {
+      const f = new Date(fromDay + 'T00:00:00'); const t = new Date(toDay + 'T23:59:59.999')
+      return { from: f.toISOString(), to: t.toISOString() }
+    }
+    const ms = range === '24h' ? 86400_000 : range === '7d' ? 7 * 86400_000 : 30 * 86400_000
+    return { from: new Date(Date.now() - ms).toISOString(), to: new Date(Date.now() + 60_000).toISOString() }
+  }
   const [groups, setGroups] = useState<Group[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [qcOpen, setQcOpen] = useState(false)
@@ -106,8 +125,10 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
     try { setSt(await api.radioStation(id)) } catch (e: any) { setErr(e.message) }
   }
   async function loadLog() {
-    try { setLog(await api.radioLog(id, { q: q.trim() || undefined, class: cls === 'all' ? undefined : cls })) }
-    catch { /* log is best-effort */ }
+    try {
+      const w = logWindow()
+      setLog(await api.radioLog(id, { ...w, q: q.trim() || undefined, class: cls === 'all' ? undefined : cls, limit: PAGE, offset: page * PAGE, minSec: minSec || undefined, sort }))
+    } catch { /* log is best-effort */ }
   }
   useEffect(() => { load(); api.groups().then(setGroups).catch(() => {}) /* eslint-disable-next-line */ }, [id])
   useEffect(() => {
@@ -136,12 +157,14 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
     const t = setInterval(poll, 4000)
     return () => clearInterval(t)
   }, [id])
+  useEffect(() => { setPage(0) }, [q, cls, range, fromDay, toDay, minSec, sort])
   useEffect(() => {
     loadLog()
-    const t = setInterval(loadLog, 12_000)
-    return () => clearInterval(t)
+    // Only the live window refreshes itself; a fixed date range does not move.
+    const t = range === 'custom' ? null : setInterval(loadLog, 12_000)
+    return () => { if (t) clearInterval(t) }
     /* eslint-disable-next-line */
-  }, [id, q, cls])
+  }, [id, q, cls, range, fromDay, toDay, minSec, sort, page])
 
   const live = st?.status === 'live'
   const onAir = st?.onAir === true || st?.on_air === true
@@ -691,6 +714,29 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
               placeholder="Search titles…" />
           </>}
         </div>
+        {icyCapable && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap', fontSize: 'var(--fs-sm)' }}>
+            <span style={{ color: 'var(--faint)' }}>Period</span>
+            {(['24h', '7d', '30d', 'custom'] as const).map(r => (
+              <button key={r} className={`chip ${range === r ? 'active' : ''}`} style={{ padding: '3px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => setRange(r)}>
+                {r === '24h' ? 'Last 24h' : r === '7d' ? 'Last 7 days' : r === '30d' ? 'Last 30 days' : 'Dates…'}
+              </button>
+            ))}
+            {range === 'custom' && <>
+              <input className="inp" type="date" style={{ width: 150, padding: '3px 8px', fontSize: 'var(--fs-sm)' }} value={fromDay} max={toDay} onChange={e => setFromDay(e.target.value)} />
+              <span style={{ color: 'var(--faint)' }}>→</span>
+              <input className="inp" type="date" style={{ width: 150, padding: '3px 8px', fontSize: 'var(--fs-sm)' }} value={toDay} min={fromDay} onChange={e => setToDay(e.target.value)} />
+            </>}
+            <span style={{ color: 'var(--faint)', marginLeft: 8 }}>Hide shorter than</span>
+            <select className="inp" style={{ width: 110, padding: '3px 8px', fontSize: 'var(--fs-sm)' }} value={minSec} onChange={e => setMinSec(Number(e.target.value) as any)}>
+              <option value={0}>nothing</option><option value={30}>30s</option><option value={60}>1 min</option><option value={120}>2 min</option>
+            </select>
+            <span style={{ color: 'var(--faint)', marginLeft: 8 }}>Sort</span>
+            <select className="inp" style={{ width: 130, padding: '3px 8px', fontSize: 'var(--fs-sm)' }} value={sort} onChange={e => setSort(e.target.value as any)}>
+              <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="longest">Longest first</option><option value="title">Title A to Z</option>
+            </select>
+          </div>
+        )}
         {!log || log.entries.length === 0 ? (
           <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', padding: '14px 4px' }}>
             {q.trim() ? 'No entries match.'
@@ -724,6 +770,18 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
               })}
             </tbody>
           </table>
+        )}
+        {log && (log.total ?? 0) > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
+            <span>
+              {(log.offset ?? 0) + 1}–{Math.min((log.offset ?? 0) + log.entries.length, log.total ?? 0)} of {(log.total ?? 0).toLocaleString()} entr{(log.total ?? 0) === 1 ? 'y' : 'ies'}
+              {' · '}{new Date(log.from).toLocaleDateString()} → {new Date(log.to).toLocaleDateString()}
+            </span>
+            <span style={{ flex: 1 }} />
+            <button className="btn ghost" disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>← Newer</button>
+            <span>page {page + 1} of {Math.max(1, Math.ceil((log.total ?? 0) / PAGE))}</span>
+            <button className="btn ghost" disabled={(page + 1) * PAGE >= (log.total ?? 0)} onClick={() => setPage(p => p + 1)}>Older →</button>
+          </div>
         )}
       </div>
 

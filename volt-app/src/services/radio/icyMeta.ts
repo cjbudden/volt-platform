@@ -22,6 +22,7 @@
 import * as http from 'node:http';
 import * as https from 'node:https';
 import { query, one } from '../../db';
+import { config } from '../../config';
 
 export type IcyClass = 'song' | 'ad' | 'content';
 
@@ -140,13 +141,23 @@ class IcyCapture {
   constructor(private channelId: string, private url: string, private writeLog: boolean) {}
 
   start() {
-    // A control-plane restart can leave the previous run's last entry open
-    // ('live' forever). Close any stale open icy entries before logging anew.
+    // A crash or a control-plane restart can leave the previous run's last
+    // entry open ('live' forever). Close any stale open icy entries before
+    // logging anew, AT THE TIME THE STATION ACTUALLY STOPPED: the first
+    // channel.stop in the log after the entry began. Closing them at "now"
+    // (the restart) logged one eight-hour "song" spanning the whole outage.
     if (this.writeLog) {
       query(
-        `UPDATE programmes SET status='aired',
-                ends_at=GREATEST(starts_at + interval '1 second', now()), actual_end=now()
-          WHERE channel_id=$1 AND metadata->>'source'='icy' AND status='live'`,
+        `UPDATE programmes p SET status='aired',
+                ends_at = GREATEST(p.starts_at + interval '1 second',
+                            COALESCE((SELECT e.ts FROM stream_events e
+                                       WHERE e.channel_id = p.channel_id AND e.type = 'channel.stop' AND e.ts > p.starts_at
+                                       ORDER BY e.ts LIMIT 1), now())),
+                actual_end = GREATEST(p.starts_at + interval '1 second',
+                            COALESCE((SELECT e.ts FROM stream_events e
+                                       WHERE e.channel_id = p.channel_id AND e.type = 'channel.stop' AND e.ts > p.starts_at
+                                       ORDER BY e.ts LIMIT 1), now()))
+          WHERE p.channel_id=$1 AND p.metadata->>'source'='icy' AND p.status='live'`,
         [this.channelId]
       ).catch(() => {});
     }
@@ -233,6 +244,26 @@ class IcyCapture {
     this.state.class = cls;
     this.state.since = now;
     this.state.changes += 1;
+
+    // ENRICH IN THE BACKGROUND, AND ONLY FOR A SONG.
+    //
+    // Deliberately not awaited. The lookup goes through a one-per-second
+    // process-wide queue (MusicBrainz enforces that limit by blocking the IP),
+    // so awaiting it here would stall the metadata reader behind every other
+    // station's lookups — and the metadata reader is what keeps the content
+    // log honest. Nothing about a missing album cover may slow, block or fail
+    // a station that is on air, so this is fire-and-forget with its own catch.
+    //
+    // Gated on `song` because idents, news and ad breaks are not tracks. Asking
+    // MusicBrainz about "NPO Radio 1 - De Ochtend" spends a rate-limit slot on
+    // a lookup that cannot succeed, and would put a wrong cover on screen if it
+    // accidentally did.
+    if (cls === 'song' && config.trackMeta.enabled) {
+      void import('./trackMeta')
+        .then((m) => m.ensureTrackMeta(title))
+        .catch((e) => console.warn('[icy] track metadata lookup failed', String(e)));
+    }
+
     if (!this.writeLog) return;
     try {
       // Open-ended entry: ends_at starts as a short placeholder window and is
