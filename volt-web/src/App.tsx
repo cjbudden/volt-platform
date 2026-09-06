@@ -27,6 +27,7 @@ import Radio from './pages/Radio'
 import RadioDetail from './pages/RadioDetail'
 import ContentTypesPage from './pages/ContentTypes'
 import PublishingPage from './pages/Publishing'
+import PaymentsPage from './pages/Payments'
 import { useRoute, navigate, hrefFor } from './router'
 import { pressable, openable } from './a11y'
 import { resetLiveBackoff } from './liveStatus'
@@ -151,7 +152,7 @@ export default function App() {
   const openChannel = (id: string) => navigate(`/channels/${id}`)
 
   const account = email.split('@')[1]?.split('.')[0]?.toUpperCase() || 'RTM'
-  const EXTRA_LABEL: Record<string, string> = { apikeys: 'API Keys & Apps', users: 'User Management', system: 'System Admin', 'content-types': 'Content Types', publishing: 'Publishing Rules' }
+  const EXTRA_LABEL: Record<string, string> = { apikeys: 'API Keys & Apps', users: 'User Management', system: 'System Admin', 'content-types': 'Content Types', publishing: 'Publishing Rules', payments: 'Payments' }
   const label = NAV.flatMap(g => g.items).find(i => i.key === section)?.label
     || EXTRA_LABEL[section]
     || (section ? section.charAt(0).toUpperCase() + section.slice(1) : 'Channels')
@@ -198,6 +199,7 @@ export default function App() {
     ...(isAdmin ? [{ group: 'Admin', items: [
       { key: 'content-types', label: 'Content Types', icon: I.epg },
       { key: 'publishing', label: 'Publishing Rules', icon: I.vod },
+      { key: 'payments', label: 'Payments', icon: I.fleet },
       { key: 'apikeys', label: 'API Keys & Apps', icon: I.key },
       { key: 'users', label: 'User Management', icon: I.users },
     ] }] : []),
@@ -340,6 +342,8 @@ export default function App() {
             ? <ContentTypesPage />
             : section === 'publishing'
             ? <PublishingPage />
+            : section === 'payments'
+            ? <PaymentsPage />
             : section === 'apikeys'
             ? <ApiKeys />
             : section === 'users'

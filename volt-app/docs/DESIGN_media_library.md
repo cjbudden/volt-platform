@@ -21,11 +21,47 @@ Status: BUILT (5 Sep 2026), first release. What exists:
   type, and an Availability tab per library asset (state, window, publish,
   remove access, per-item overrides, publishing points).
 
-Not yet built: the entitlement service behind access = entitled / paid (the
-gate takes an `entitled` claim from the app as a placeholder); real social
-upload adapters (stubbed); the encoding profile display for uploads (§5);
-XMLTV export of the EPG mapping (the mapping is stored and served; the
-exporter is DESIGN_epg_xmltv.md's).
+- Access rules engine and payments (§4.3, §4.4, 5 Sep): `settings.accessRules`
+  on any rung (FOR / IF / THEN / TERMS, services/accessRules.ts), viewers,
+  products, purchases, entitlements (migration 0028, services/entitlements.ts),
+  provider adapters (services/payments/providers.ts), /api/payments, the play
+  gate answering 402 paywall / 403 sign in / 451 blocked with the products to
+  offer. Console: the rules editor inside every RuleEditor, Admin → Payments.
+
+Not yet built: server-side confirmation with the App Store Server API and the
+Play Developer API (events from those two are recorded pending until wired;
+Stripe is signature-verified); Stripe Checkout session creation from the
+platform (the app creates the session today); real social upload adapters
+(stubbed); the encoding profile display for uploads (§5); XMLTV export of the
+EPG mapping.
+
+### 4.3 Access rules engine (Christian's model, kept)
+
+Any rung's settings may carry `accessRules`, an ordered list. Each rule:
+FOR (this item | linked live content | linked on-demand content, and/or
+content types) · IF (viewer located in / not located in these countries;
+WORLD = everywhere) · THEN (free | members only, optionally for user groups |
+premium for user groups under TERMS). A TERM is a purchasable package: a
+period (1 month for 9.99 AUD + 10% tax) or the item's published dates. First
+matching rule decides; governed content with no matching region is a geo
+refusal; no rule at all falls back to the simple geo / access / paywall
+fields. `this` means the owner or asset the rung is attached to; from the
+type or account rung the same content is "linked".
+
+### 4.4 Payments and entitlements
+
+Providers (App Store, Google Play, Stripe, manual) TAKE the payment. The
+platform decides what it buys and for how long: every premium TERM is a
+`products` row (key = productKey, grants = the rule it came from, provider
+ids set under Admin → Payments); a verified payment is a `purchases` row
+(idempotent on the provider's transaction id) and grants an `entitlements`
+row (the product's grants copied onto the viewer, valid for the term's
+period, extended by renewals, revoked by refund or cancellation). The app
+names the viewer (externalId, groups) on the play gate; the gate evaluates
+the rules with the viewer's live entitlements. Two paths in: provider
+webhooks (raw body, signature-verified where possible) and the app's own
+receipt / token / session via /api/payments/verify. Nothing is granted on an
+unverified event.
 
 ## What Christian asked for (5 Sep)
 

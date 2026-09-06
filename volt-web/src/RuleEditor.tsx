@@ -15,15 +15,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type RuleSettings, type RuleKey, type ResolvedRules, type PublishingPoints, type PublishTarget, type Rung } from './api'
 import { navigate } from './router'
+import { AccessRulesEditor } from './AccessRulesEditor'
 
 const RUNG_LABEL: Record<Rung, string> = {
   baseline: 'platform default', account: 'account default', schema: 'content type rule', owner: 'channel / event / station rule', asset: 'this item',
 }
 const KEY_LABEL: Record<RuleKey, string> = {
   targets: 'Publish to', autoPublish: 'Auto-publish', availableFrom: 'Available from', expire: 'Expires',
-  geo: 'Geo access', access: 'Access', paywall: 'Paywall', gate: 'Publish gate',
+  geo: 'Geo access', access: 'Access', paywall: 'Paywall', gate: 'Publish gate', accessRules: 'Access rules',
 }
-const KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'geo', 'access', 'paywall', 'gate']
+const KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'accessRules', 'geo', 'access', 'paywall', 'gate']
 
 function describe(k: RuleKey, v: any, points: PublishingPoints | null): string {
   if (v === undefined) return '—'
@@ -42,6 +43,7 @@ function describe(k: RuleKey, v: any, points: PublishingPoints | null): string {
     case 'access': return v === 'free' ? 'free' : v === 'entitled' ? 'entitlement required' : 'paid (paywall)'
     case 'paywall': return v ? [v.tier, v.priceCents != null ? `${(v.priceCents / 100).toFixed(2)} ${v.currency ?? ''}` : ''].filter(Boolean).join(' · ') || 'set' : 'none'
     case 'gate': return `${v.requireReview ? 'review required' : 'no review needed'}, ${v.blockOnQcFail ? 'blocked on QC fail' : 'QC advisory'}`
+    case 'accessRules': return !v?.length ? 'none (simple fields decide)' : `${v.length} rule${v.length === 1 ? '' : 's'}: ` + v.map((r: any) => `${r.for.scopes.join('+') || 'types'} ${r.if.geo === 'in' ? 'in' : 'not in'} ${r.if.countries.join(',')} → ${r.then.access}`).join('; ')
   }
 }
 
@@ -126,7 +128,7 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
           const on = overriding(k)
           const inhV = inherited.settings[k], inhSrc = inherited.sources[k]
           return (
-            <div key={k} style={{ display: 'grid', gridTemplateColumns: compact ? '150px 1fr' : '180px 1fr', gap: 10, alignItems: 'start', padding: '8px 10px', borderRadius: 8, background: on ? 'rgba(63,123,255,.06)' : 'transparent', border: `1px solid ${on ? 'rgba(63,123,255,.35)' : 'var(--border)'}` }}>
+            <div key={k} style={{ display: 'grid', gridTemplateColumns: k === 'accessRules' ? '1fr' : compact ? '150px 1fr' : '180px 1fr', gap: 10, alignItems: 'start', padding: '8px 10px', borderRadius: 8, background: on ? 'rgba(63,123,255,.06)' : 'transparent', border: `1px solid ${on ? 'rgba(63,123,255,.35)' : 'var(--border)'}` }}>
               <div>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--fs-sm)', fontWeight: 600, cursor: scopeKind === 'account' ? 'default' : 'pointer' }}>
                   {scopeKind !== 'account' && <input type="checkbox" checked={on} onChange={() => toggle(k)} />}
@@ -140,7 +142,7 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
               </div>
               <div>
                 {(on || scopeKind === 'account') ? (
-                  <FieldControl k={k} value={scopeKind === 'account' ? (own[k] ?? inhV ?? DEFAULTS[k]) : own[k]} points={points}
+                  <FieldControl k={k} value={scopeKind === 'account' ? (own[k] ?? inhV ?? DEFAULTS[k]) : own[k]} points={points} scopeKind={scopeKind}
                     onChange={v => setKey(k, v)} />
                 ) : (
                   <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>{describe(k, inhV, points)}</div>
@@ -168,12 +170,14 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
 
 const DEFAULTS: Record<RuleKey, any> = {
   targets: [{ kind: 'portal' }], autoPublish: false, availableFrom: { mode: 'publish' }, expire: { mode: 'never' },
-  geo: { mode: 'worldwide', countries: [] }, access: 'free', paywall: null, gate: { requireReview: false, blockOnQcFail: false },
+  geo: { mode: 'worldwide', countries: [] }, access: 'free', paywall: null, gate: { requireReview: false, blockOnQcFail: false }, accessRules: [],
 }
 
-function FieldControl({ k, value, points, onChange }: { k: RuleKey; value: any; points: PublishingPoints; onChange: (v: any) => void }) {
+function FieldControl({ k, value, points, onChange, scopeKind }: { k: RuleKey; value: any; points: PublishingPoints; onChange: (v: any) => void; scopeKind: 'account' | 'schema' | 'owner' | 'asset' }) {
   const inp = { className: 'inp', style: { fontSize: 'var(--fs-sm)', padding: '5px 8px' } as any }
   switch (k) {
+    case 'accessRules':
+      return <AccessRulesEditor value={value ?? []} onChange={onChange} scopeKind={scopeKind} />
     case 'targets': {
       const t: PublishTarget[] = value ?? []
       const has = (p: (x: PublishTarget) => boolean) => t.some(p)

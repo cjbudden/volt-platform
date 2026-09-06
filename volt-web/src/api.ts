@@ -861,6 +861,19 @@ export const api = {
     for (const [k, v] of Object.entries(q)) if (v) qs.set(k, v)
     return req('/publishing-rules/resolve?' + qs)
   },
+  // ---- payments ----
+  paymentProviders: (): Promise<{ providers: PaymentProviderRow[]; available: string[]; webhookBase: string }> => req('/payments/providers'),
+  putPaymentProvider: (provider: string, b: { config: Record<string, any>; secretRef?: string | null; enabled: boolean }): Promise<PaymentProviderRow> =>
+    req(`/payments/providers/${provider}`, { method: 'PUT', body: JSON.stringify(b) }),
+  products: (): Promise<ProductRow[]> => req('/payments/products'),
+  patchProduct: (id: string, b: { providerIds?: Record<string, string>; enabled?: boolean; name?: string }): Promise<ProductRow> =>
+    req(`/payments/products/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  viewerAccount: (externalId: string): Promise<{ viewer: any; purchases: any[]; entitlements: any[]; active: any[] }> =>
+    req(`/payments/viewers/${encodeURIComponent(externalId)}`),
+  grantEntitlement: (b: { viewerExternalId: string; productKey: string; validUntil?: string | null }) =>
+    req('/payments/grants', { method: 'POST', body: JSON.stringify(b) }),
+  recordManualPayment: (b: { viewerExternalId: string; productKey: string; reference?: string; amountCents?: number; currency?: string }) =>
+    req('/payments/manual', { method: 'POST', body: JSON.stringify(b) }),
   vodAvailability: (id: string): Promise<AssetAvailability> => req(`/vod/${id}/availability`),
   setVodAvailability: (id: string, override: RuleSettings): Promise<{ override: RuleSettings; reapplied: boolean; state: string }> =>
     req(`/vod/${id}/availability`, { method: 'PATCH', body: JSON.stringify({ override }) }),
@@ -1829,7 +1842,23 @@ export interface RuleSettings {
   access?: 'free' | 'entitled' | 'paid'
   paywall?: { tier?: string; priceCents?: number; currency?: string } | null
   gate?: { requireReview: boolean; blockOnQcFail: boolean }
+  /** FOR / IF / THEN / TERMS: decides access for the content it governs; the simple fields are the fallback. */
+  accessRules?: AccessRule[]
 }
+export type ForScope = 'this' | 'live' | 'ondemand'
+export interface AccessTerm {
+  productKey: string; kind: 'period' | 'published_dates'
+  count?: number; unit?: 'day' | 'week' | 'month' | 'year'
+  priceCents: number; currency: string; taxPct?: number; name?: string
+}
+export interface AccessRule {
+  id: string
+  for: { scopes: ForScope[]; schemaIds?: string[] }
+  if: { geo: 'in' | 'not_in'; countries: string[] }
+  then: { access: 'free' | 'members' | 'premium'; userGroups?: string[]; terms?: AccessTerm[] }
+}
+export interface PaymentProviderRow { id: string; provider: 'stripe' | 'appstore' | 'googleplay' | 'manual'; config: Record<string, any>; enabled: boolean; has_secret: boolean; updated_at?: string }
+export interface ProductRow { id: string; key: string; name: string; term: AccessTerm; grants: any; provider_ids: Record<string, string>; source_rule: string | null; enabled: boolean }
 export type RuleKey = keyof RuleSettings
 export type Rung = 'baseline' | 'account' | 'schema' | 'owner' | 'asset'
 export interface PublishingRule {
