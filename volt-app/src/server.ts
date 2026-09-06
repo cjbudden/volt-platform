@@ -28,6 +28,7 @@ import { uploadsRouter, uploadChunksRouter } from './modules/uploads';
 import { scheduledClipsRouter } from './modules/scheduledClips';
 import { publishTargetsRouter, publicationsRouter } from './modules/publishing';
 import { publishingRulesRouter } from './modules/publishingRules';
+import { paymentsRouter, paymentsAppRouter, paymentsWebhookRouter } from './modules/payments';
 import { epgRouter } from './modules/epg';
 import { appsRouter, availabilityRouter, accessRouter } from './modules/apps';
 import { usersRouter } from './modules/users';
@@ -47,6 +48,7 @@ import { hypermediaNegotiation } from './middleware/hypermedia';
 import { heartbeat } from './services/statusHub';
 import { INGEST_PROTOCOLS } from './services/ingestProtocols';
 import { mediaFilesRouter } from './modules/mediaFiles';
+import { watchfoldersRouter } from './modules/watchfolders';
 import { imageStore } from './services/imageStore';
 import { parseSpec, resizeFromStore } from './services/imageResize';
 import { isBootReconciled } from './services/orchestrator';
@@ -59,6 +61,8 @@ export function createServer() {
   // needs a larger body limit than the 1mb default. This parser runs first for
   // /api/files and consumes the stream, so the global 1mb parser below skips it.
   app.use('/api/files', express.json({ limit: '30mb' }));
+  // Provider webhooks verify a signature over the exact bytes: mounted before the JSON parser.
+  app.use('/api/payments/webhooks', paymentsWebhookRouter);
   app.use(express.json({ limit: '1mb' }));
 
   // ok = the process is up and can answer. reconciled = boot reconciliation has
@@ -230,6 +234,7 @@ export function createServer() {
     ],
   }));
   app.use('/api/files', mediaFilesRouter);   // image library (file manager)
+  app.use('/api/watchfolders', watchfoldersRouter);  // ingest folders, rules, review queue
 
   // Resized preview derivatives (WebP), cached under the store's derived/ prefix.
   //   /img/<WxH>[,fit]/<store-key>   e.g. /img/320x200/library/<acct>/slates/x.png
@@ -328,6 +333,8 @@ export function createServer() {
   app.use('/api/publish-targets', publishTargetsRouter); // social account config
   app.use('/api/publications', publicationsRouter);      // publish + view tracking
   app.use('/api/publishing-rules', publishingRulesRouter); // the ladder + publishing points
+  app.use('/api/payments', paymentsAppRouter);           // the app verifies a receipt (publishable key)
+  app.use('/api/payments', paymentsRouter);              // providers, products, viewers, grants (admin)
   // TODO: /api/groups, /api/accounts, /api/instances
 
   // An unmatched API route answers as an API, in JSON. Express's default 404 is

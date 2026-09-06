@@ -114,6 +114,8 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
   EPG field mapping) (pure).
 - `publishing-rules.check.ts`, the publishing ladder resolves per field (account < type <
   owner < asset), paywall clearing, availability windows (pure).
+- `access-rules.check.ts`, the FOR / IF / THEN / TERMS access rules engine: first match,
+  members, premium + entitlements, geo in / not in, content types, term periods (pure).
 - `autovod.check.ts`, auto-VOD from a completed event recording.
 - `vod-extractor.check.ts`, VOD extractor pure logic: segment selection/snapping.
 - `retrim.check.sh`, non-destructive clip re-trim (change in/out, original preserved).

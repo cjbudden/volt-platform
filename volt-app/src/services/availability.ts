@@ -18,6 +18,8 @@
 import { query, one } from '../db';
 import { publishGate } from './review';
 import { resolveForAsset, windowFor, type Target, type Resolved } from './publishingRules';
+import { evaluateAccessRules, type ViewerCtx, type AccessOutcome } from './accessRules';
+import { upsertViewer, viewerEntitlements } from './entitlements';
 
 export interface PublishOutcome {
   asset: any;
@@ -166,10 +168,20 @@ export async function sweepAvailability(): Promise<{ opened: number; expired: nu
  * Returns null when the id is not an on-demand asset (the caller then falls
  * through to the live rules).
  */
-export async function onDemandAccess(assetId: string, geo?: string, appId?: string | null, entitled = false):
-  Promise<{ allowed: boolean; reason?: string; paywall?: any } | null> {
+export interface ViewerInput { externalId?: string | null; groups?: string[]; email?: string | null }
+
+/** Build the evaluator's view of the viewer: identity, groups, live entitlements. */
+export async function viewerContext(accountId: string, geo: string | undefined, viewer: ViewerInput | undefined): Promise<ViewerCtx> {
+  if (!viewer?.externalId) return { country: geo ?? null, viewerId: null, groups: [], entitlements: [] };
+  const v = await upsertViewer(accountId, viewer.externalId, { email: viewer.email ?? null, groups: viewer.groups });
+  return { country: geo ?? null, viewerId: v.id, groups: v.groups ?? [], entitlements: await viewerEntitlements(v.id) };
+}
+
+export async function onDemandAccess(assetId: string, geo?: string, appId?: string | null, entitled = false, viewer?: ViewerCtx | null):
+  Promise<{ allowed: boolean; reason?: string; paywall?: any; rule?: AccessOutcome } | null> {
   const a = await one<any>(
-    `SELECT availability_state, availability, available_from, available_until, published FROM vod_assets WHERE id = $1`, [assetId]);
+    `SELECT availability_state, availability, availability_sources, available_from, available_until, published, schema_id, channel_id, event_id
+       FROM vod_assets WHERE id = $1`, [assetId]);
   if (!a) return null;
   const st = a.availability_state ?? 'draft';
   if (st === 'withdrawn') return { allowed: false, reason: 'this content is no longer available' };
@@ -187,12 +199,25 @@ export async function onDemandAccess(assetId: string, geo?: string, appId?: stri
   if (appTargets.length && appId && !appTargets.some((t) => t.appId === appId)) {
     return { allowed: false, reason: 'not published to this app' };
   }
+  // THE RULES ENGINE FIRST. FOR / IF / THEN decides for the content it
+  // governs; the simple fields below are the fallback for content no rule
+  // matches (and for assets published before the rules existed).
+  const rules = Array.isArray(s.accessRules) ? s.accessRules : [];
+  if (rules.length) {
+    const fromAsset = a.availability_sources?.accessRules === 'asset';
+    const outcome = evaluateAccessRules(rules,
+      { relation: fromAsset ? 'this' : 'ondemand', schemaId: a.schema_id, assetId, ownerId: a.channel_id ?? a.event_id },
+      viewer ?? { country: geo ?? null, viewerId: null, groups: [], entitlements: [] });
+    if (outcome.allowed) { if (outcome.via !== 'no_rule') return { allowed: true, rule: outcome }; }
+    else return { allowed: false, reason: outcome.message, paywall: outcome.products ?? null, rule: outcome };
+  }
   const g = s.geo ?? { mode: 'worldwide', countries: [] };
   const country = (geo || '').toUpperCase();
   const list: string[] = (g.countries || []).map((c: string) => String(c).toUpperCase());
   if (g.mode === 'block' && country && list.includes(country)) return { allowed: false, reason: `not available in ${country}` };
   if (g.mode === 'allow' && (!country || !list.includes(country))) return { allowed: false, reason: `not available in ${country || 'your region'}` };
-  if ((s.access === 'entitled' || s.access === 'paid') && !entitled) {
+  const hasEntitlement = entitled || !!(viewer?.entitlements?.length);
+  if ((s.access === 'entitled' || s.access === 'paid') && !hasEntitlement) {
     return { allowed: false, reason: s.access === 'paid' ? 'payment required' : 'entitlement required', paywall: s.paywall ?? null };
   }
   return { allowed: true };

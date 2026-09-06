@@ -118,6 +118,9 @@ const availSchema = z.object({
    *  A placeholder for the entitlement service: the paywall model is an
    *  open question in DESIGN_media_library.md. */
   entitled: z.boolean().optional(),
+  /** Who is watching, as the client's app knows them. Anonymous when absent.
+   *  Groups the app asserts (site users, members) feed the members-only rules. */
+  viewer: z.object({ externalId: z.string().min(1), email: z.string().email().optional(), groups: z.array(z.string()).optional() }).optional(),
 });
 
 /**
@@ -181,7 +184,7 @@ availabilityRouter.post(
     const kind = ASSET_UUID_RE.test(b.assetId) ? await assetKindFor(key.account_id, b.assetId) : null;
     if (!kind) throw new ApiError(404, 'unknown asset');
     // geo / rights (blackout → replacement)
-    const rights = await evaluateAccess(b.assetId, b.geo, { appId: key.app_id, entitled: b.entitled === true });
+    const rights = await evaluateAccess(b.assetId, b.geo, { appId: key.app_id, entitled: b.entitled === true, accountId: key.account_id, viewer: b.viewer ?? null });
     if (!rights.allowed) {
       if (rights.replacementAssetId) {
         // The replacement is named by the PROGRAMME, so its kind is looked up
@@ -200,7 +203,12 @@ availabilityRouter.post(
         const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: rights.replacementAssetId, assetKind: rk, geo: b.geo });
         return res.json({ available: true, mode: 'replacement', assetId: rights.replacementAssetId, reason: rights.reason, playbackToken: tok.token, expiresIn: tok.expiresIn });
       }
-      return res.status(451).json({ available: false, mode: 'blocked', reason: rights.reason });
+      const r: any = rights;
+      const paywall = r.rule?.reason === 'payment_required';
+      return res.status(paywall ? 402 : r.rule?.reason === 'members_only' || r.rule?.reason === 'group' ? 403 : 451).json({
+        available: false, mode: paywall ? 'paywall' : r.rule?.reason === 'members_only' ? 'sign_in' : 'blocked',
+        reason: rights.reason, products: r.products ?? undefined, ruleId: r.rule?.ruleId ?? undefined,
+      });
     }
     const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: b.assetId, assetKind: kind, geo: b.geo });
     res.json({ available: true, mode: 'play', assetId: b.assetId, playbackToken: tok.token, expiresIn: tok.expiresIn });
@@ -230,8 +238,11 @@ accessRouter.post(
     if (!ASSET_UUID_RE.test(b.assetId) || !(await assetKindFor(key.account_id, b.assetId))) {
       throw new ApiError(404, 'unknown asset');
     }
-    const rights = await evaluateAccess(b.assetId, b.geo, { appId: key.app_id, entitled: b.entitled === true });
+    const rights = await evaluateAccess(b.assetId, b.geo, { appId: key.app_id, entitled: b.entitled === true, accountId: key.account_id, viewer: b.viewer ?? null });
     const reasons = [reason, rights.allowed ? null : rights.reason].filter(Boolean);
-    res.json({ allowed: !reason && rights.allowed, assetId: b.assetId, reasons, replacementAssetId: rights.replacementAssetId ?? null });
+    const r: any = rights;
+    res.json({ allowed: !reason && rights.allowed, assetId: b.assetId, reasons, replacementAssetId: rights.replacementAssetId ?? null,
+      mode: rights.allowed ? 'play' : r.rule?.reason === 'payment_required' ? 'paywall' : r.rule?.reason === 'members_only' ? 'sign_in' : 'blocked',
+      products: r.products ?? undefined });
   })
 );

@@ -7,7 +7,9 @@
  * allowed until per-asset rights are modelled.
  */
 import { one } from '../db';
-import { onDemandAccess } from './availability';
+import { onDemandAccess, viewerContext, type ViewerInput } from './availability';
+import { resolveForAsset } from './publishingRules';
+import { evaluateAccessRules } from './accessRules';
 
 export interface AccessDecision {
   allowed: boolean;
@@ -24,7 +26,7 @@ export interface AccessDecision {
 /** `programmes.channel_id` is a uuid column. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function evaluateAccess(assetId: string, geo?: string, ctx: { appId?: string | null; entitled?: boolean } = {}): Promise<AccessDecision> {
+export async function evaluateAccess(assetId: string, geo?: string, ctx: { appId?: string | null; entitled?: boolean; accountId?: string | null; viewer?: ViewerInput | null } = {}): Promise<AccessDecision & { rule?: any; products?: any[] }> {
   // The asset id arrives from an UNAUTHENTICATED caller on the public play
   // gate. Handing a non-uuid to a uuid column raised 22P02 and the gate
   // answered 500 — a bad answer, and a free oracle besides: a stranger could
@@ -35,8 +37,28 @@ export async function evaluateAccess(assetId: string, geo?: string, ctx: { appId
   // ON DEMAND FIRST. An asset with an availability record answers from it:
   // state, window, per-app publication, geo, access. Only a live owner falls
   // through to the programme rules below.
-  const od = await onDemandAccess(assetId, geo, ctx.appId ?? null, ctx.entitled === true);
-  if (od) return od.allowed ? { allowed: true } : { allowed: false, reason: od.reason, replacementAssetId: null };
+  const vctx = ctx.accountId ? await viewerContext(ctx.accountId, geo, ctx.viewer ?? undefined) : null;
+  const od = await onDemandAccess(assetId, geo, ctx.appId ?? null, ctx.entitled === true, vctx);
+  if (od) return od.allowed ? { allowed: true, rule: od.rule } : { allowed: false, reason: od.reason, replacementAssetId: null, rule: od.rule, products: od.paywall ?? undefined };
+
+  // A LIVE OWNER under the rules engine: the owner's own rung means 'this',
+  // a rule from its type or the account means linked live content.
+  if (ctx.accountId) {
+    const owner = await one<any>(
+      `SELECT c.id, c.schema_id, 'channel' AS kind FROM channels c WHERE c.id = $1
+       UNION ALL SELECT e.id, e.schema_id, 'event' FROM events e WHERE e.id = $1`, [assetId]);
+    if (owner) {
+      const plan = await resolveForAsset(ctx.accountId, { schema_id: owner.schema_id, channel_id: owner.kind === 'channel' ? owner.id : null, event_id: owner.kind === 'event' ? owner.id : null });
+      const rules = plan.settings.accessRules ?? [];
+      if (rules.length) {
+        const outcome = evaluateAccessRules(rules,
+          { relation: plan.sources.accessRules === 'owner' ? 'this' : 'live', schemaId: owner.schema_id, ownerId: owner.id },
+          vctx ?? { country: geo ?? null, viewerId: null, groups: [], entitlements: [] });
+        if (!outcome.allowed) return { allowed: false, reason: outcome.message, replacementAssetId: null, rule: outcome, products: outcome.products };
+        if (outcome.via !== 'no_rule') return { allowed: true, rule: outcome };
+      }
+    }
+  }
   const prog = await one<any>(
     `SELECT geo_mode, geo_countries, replacement_asset_id
        FROM programmes WHERE channel_id=$1 AND span @> now()

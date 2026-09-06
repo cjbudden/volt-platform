@@ -41,6 +41,25 @@ export const settingsSchema = z.object({
   access: z.enum(['free', 'entitled', 'paid']).optional(),
   paywall: z.object({ tier: z.string().optional(), priceCents: z.number().int().nonnegative().optional(), currency: z.string().length(3).optional() }).nullable().optional(),
   gate: z.object({ requireReview: z.boolean(), blockOnQcFail: z.boolean() }).optional(),
+  accessRules: z.array(z.object({
+    id: z.string().min(1),
+    for: z.object({ scopes: z.array(z.enum(['this', 'live', 'ondemand'])).default([]), schemaIds: z.array(z.string().uuid()).optional() }),
+    if: z.object({ geo: z.enum(['in', 'not_in']), countries: z.array(z.string().min(2).max(5)).default(['WORLD']) }),
+    then: z.object({
+      access: z.enum(['free', 'members', 'premium']),
+      userGroups: z.array(z.string().min(1)).optional(),
+      terms: z.array(z.object({
+        productKey: z.string().min(1),
+        kind: z.enum(['period', 'published_dates']),
+        count: z.number().int().positive().optional(),
+        unit: z.enum(['day', 'week', 'month', 'year']).optional(),
+        priceCents: z.number().int().nonnegative(),
+        currency: z.string().length(3),
+        taxPct: z.number().min(0).max(100).optional(),
+        name: z.string().optional(),
+      })).optional(),
+    }),
+  })).optional(),
 }).strict();
 
 /** Clean a rung: validate targets against the account and drop unknown keys. */
@@ -131,6 +150,9 @@ publishingRulesRouter.put('/:scopeKind/:scopeId?', asyncHandler(async (req, res)
   await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
     action: before ? 'update' : 'create', entityType: 'publishing_rule', entityId: row.id,
     changes: { settings: { from: before?.settings ?? null, to: settings } } }).catch(() => {});
+  // Every premium TERM is a product the providers sell: keep them in step.
+  const { syncProductsFromRules } = await import('../services/entitlements');
+  await syncProductsFromRules(accountId(req), settings.accessRules ?? [], row.id, id).catch((e) => console.warn('[publishing-rules] product sync failed', e));
   res.json(row);
 }));
 

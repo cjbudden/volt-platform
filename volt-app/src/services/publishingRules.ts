@@ -16,6 +16,7 @@
 //  can never name an app or an account the client does not have.
 // ============================================================================
 import { query, one } from '../db';
+import type { AccessRule } from './accessRules';
 
 export type Target =
   | { kind: 'portal' }
@@ -37,9 +38,14 @@ export interface RuleSettings {
   paywall?: { tier?: string; priceCents?: number; currency?: string } | null;
   /** Gate before an automatic or manual publish goes through. */
   gate?: { requireReview: boolean; blockOnQcFail: boolean };
+  /** The FOR / IF / THEN / TERMS rule set (services/accessRules.ts). When
+   *  present and non-empty it decides access for the content it governs, and
+   *  the simple geo / access / paywall fields are the fallback for content no
+   *  rule matches. */
+  accessRules?: AccessRule[];
 }
 export type RuleKey = keyof RuleSettings;
-export const RULE_KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'geo', 'access', 'paywall', 'gate'];
+export const RULE_KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'geo', 'access', 'paywall', 'gate', 'accessRules'];
 
 /** The platform baseline under the account rung: catalogue only, manual, worldwide, free. */
 export const BASELINE: Required<Omit<RuleSettings, 'paywall'>> & { paywall: RuleSettings['paywall'] } = {
@@ -51,6 +57,7 @@ export const BASELINE: Required<Omit<RuleSettings, 'paywall'>> & { paywall: Rule
   access: 'free',
   paywall: null,
   gate: { requireReview: false, blockOnQcFail: false },
+  accessRules: [],
 };
 
 export type Rung = 'baseline' | 'account' | 'schema' | 'owner' | 'asset';

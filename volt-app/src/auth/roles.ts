@@ -27,6 +27,19 @@ import { forbidden } from '../util/http';
 export type Role = 'viewer' | 'operator' | 'admin' | 'owner';
 export const ROLE_RANK: Record<string, number> = { viewer: 1, operator: 2, admin: 3, owner: 4 };
 
+/**
+ * The rank of a role, and ZERO for anything not in the map.
+ *
+ * Reading ROLE_RANK[role] directly is a fail-OPEN comparison: for an unknown
+ * role the lookup is undefined, and `undefined < 3` is false, so the guard
+ * that was meant to refuse the request skipped its throw and let it through.
+ * Every gate now asks for the rank through here so an unrecognised role is
+ * the least privileged thing in the system rather than the most.
+ */
+export function rankOf(role: unknown): number {
+  return ROLE_RANK[String(role)] ?? 0;
+}
+
 export type Level = 'none' | 'view' | 'manage';
 const LEVEL_RANK: Record<Level, number> = { none: 0, view: 1, manage: 2 };
 
@@ -40,8 +53,12 @@ const FEATURE_PREFIXES: Record<Feature, string[]> = {
   events: ['/api/events'],
   epg: ['/api/epg'],
   recordings: ['/api/recordings', '/api/scheduled-clips'],
-  vod: ['/api/vod', '/api/publications'],
-  media: ['/api/files', '/api/filler-assets'],
+  vod: ['/api/vod', '/api/publications', '/api/publishing-rules'],
+  // /api/uploads belongs here: an upload session creates a filler_asset, so
+  // leaving it off the map put it on the unmapped surface, where writes need
+  // only operator and reads are open to any authenticated user — bypassing a
+  // group that sets media to 'none' entirely.
+  media: ['/api/files', '/api/filler-assets', '/api/uploads'],
   sharing: ['/api/share-links'],
   analytics: ['/api/analytics'],
 };
@@ -51,6 +68,8 @@ const ADMIN_PREFIXES = [
   '/api/users', '/api/user-groups', '/api/apps',
   '/api/groups', '/api/output-profiles', '/api/metadata-schemas',
   '/api/notification-templates', '/api/publish-targets',
+  // Money and audience identities: admin only, as the router itself also enforces.
+  '/api/payments',
 ];
 /** Admin surfaces where operators/viewers still need READ (forms use them). */
 const ADMIN_READ_OPEN = ['/api/groups', '/api/output-profiles', '/api/metadata-schemas'];
@@ -64,13 +83,13 @@ export function featureOf(path: string): Feature | null {
 
 /** Role default feature map (used when the user has no group). */
 export function roleDefaultPerms(role: string): Record<Feature, Level> {
-  const lvl: Level = ROLE_RANK[role] >= ROLE_RANK.operator ? 'manage' : 'view';
+  const lvl: Level = rankOf(role) >= ROLE_RANK.operator ? 'manage' : 'view';
   return Object.fromEntries(FEATURES.map((f) => [f, lvl])) as Record<Feature, Level>;
 }
 
 /** Effective per-feature map for a user: admins full; group wins when set. */
 export function effectivePerms(role: string, groupPerms: Record<string, string> | null): Record<Feature, Level> {
-  if (ROLE_RANK[role] >= ROLE_RANK.admin) {
+  if (rankOf(role) >= ROLE_RANK.admin) {
     return Object.fromEntries(FEATURES.map((f) => [f, 'manage'])) as Record<Feature, Level>;
   }
   if (!groupPerms) return roleDefaultPerms(role);
@@ -79,7 +98,7 @@ export function effectivePerms(role: string, groupPerms: Record<string, string> 
     const v = groupPerms[f];
     out[f] = v === 'manage' || v === 'view' ? (v as Level) : 'none';
     // a viewer's group can grant at most view (role rank still caps writes)
-    if (out[f] === 'manage' && ROLE_RANK[role] < ROLE_RANK.operator) out[f] = 'view';
+    if (out[f] === 'manage' && rankOf(role) < ROLE_RANK.operator) out[f] = 'view';
   }
   return out;
 }
@@ -88,12 +107,20 @@ export function effectivePerms(role: string, groupPerms: Record<string, string> 
 const cache = new Map<string, { role: string; perms: Record<Feature, Level>; at: number }>();
 const TTL = 20_000;
 
+/** A token subject is only a user id when it is shaped like one. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function resolveAccess(userId: string, tokenRole: string): Promise<{ role: string; perms: Record<Feature, Level> }> {
   const hit = cache.get(userId);
   if (hit && Date.now() - hit.at < TTL) return hit;
   let role = tokenRole;
   let groupPerms: Record<string, string> | null = null;
-  if (!userId.startsWith('apikey:')) {
+  // `users.id` is a uuid column, so a subject that is not a uuid cannot match
+  // a row — and handing one to Postgres anyway raises 22P02, which surfaces as
+  // a 500 instead of falling through to the token's own role. The old guard
+  // listed the one exception it knew about ('apikey:'), so every OTHER
+  // non-uuid subject took the request down with it. Ask the real question.
+  if (UUID_RE.test(userId)) {
     const row = await one<any>(
       `SELECT u.role, g.permissions FROM users u
          LEFT JOIN user_groups g ON g.id = u.user_group_id
@@ -110,7 +137,15 @@ export function invalidateAccess(userId?: string) {
 
 /** Central gate: throws 403 when the caller's effective access is short. */
 export async function enforceAccess(req: Request): Promise<void> {
-  const path = (req.originalUrl || req.url || '').split('?')[0];
+  // LOWER-CASED, because Express routes case-insensitively by default while
+  // startsWith does not. `/API/apps/secret-keys` reached the apps router but
+  // matched no ADMIN_PREFIX and no FEATURE_PREFIX, so it fell through to the
+  // unmapped branch — writes at operator, reads at any authenticated user.
+  // That let an operator mint a management-scoped account key and become a
+  // tenant admin, and it bypassed every per-feature group restriction the same
+  // way. Matching is on the normalised path; nothing else about the request is
+  // rewritten, so the router still sees exactly what the client sent.
+  const path = (req.originalUrl || req.url || '').split('?')[0].toLowerCase();
   const isWrite = WRITE_METHODS.has(req.method.toUpperCase());
   const { role, perms } = await resolveAccess(String(req.auth!.sub), String(req.auth!.role));
   (req.auth as any).role = role;   // keep downstream checks honest after role changes
@@ -118,7 +153,7 @@ export async function enforceAccess(req: Request): Promise<void> {
   // hard admin lines first
   if (ADMIN_PREFIXES.some((p) => path.startsWith(p))) {
     const readOpen = !isWrite && ADMIN_READ_OPEN.some((p) => path.startsWith(p));
-    if (!readOpen && ROLE_RANK[role] < ROLE_RANK.admin) {
+    if (!readOpen && rankOf(role) < ROLE_RANK.admin) {
       throw forbidden('This area requires the admin role');
     }
     return;
@@ -126,7 +161,7 @@ export async function enforceAccess(req: Request): Promise<void> {
   const feature = featureOf(path);
   if (!feature) {
     // unmapped surfaces: writes need operator+, reads any authenticated user
-    if (isWrite && ROLE_RANK[role] < ROLE_RANK.operator) throw forbidden('This action requires the operator role');
+    if (isWrite && rankOf(role) < ROLE_RANK.operator) throw forbidden('This action requires the operator role');
     return;
   }
   const need: Level = isWrite ? 'manage' : 'view';
@@ -139,7 +174,7 @@ export async function enforceAccess(req: Request): Promise<void> {
 export function requireMinRole(min: Role) {
   return (req: Request, _res: Response, next: NextFunction) => {
     const role = String(req.auth?.role ?? 'viewer');
-    if ((ROLE_RANK[role] ?? 0) < ROLE_RANK[min]) return next(forbidden(`This action requires the ${min} role`));
+    if (rankOf(role) < ROLE_RANK[min]) return next(forbidden(`This action requires the ${min} role`));
     next();
   };
 }
