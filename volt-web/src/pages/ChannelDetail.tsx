@@ -8,7 +8,7 @@ import { useRecordWatch, LiveEditNotice } from '../liveRecord'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
-import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, GATE_COLOR, RecoveryNote, DiagnosisBlock, type RetUnit } from '../scaffold'
+import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, GATE_COLOR, RecoveryNote, DiagnosisBlock, DrawerTabs, TabPane, type DrawerTab, type RetUnit } from '../scaffold'
 // The meter reads the SAME quantity as the radio waveform and the clipping
 // workbench: linear peak amplitude. See audioLevel.ts.
 import { analyserPeak } from '../audioLevel'
@@ -1720,6 +1720,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   const [epgOn, setEpgOn] = useState(d.epgEnabled !== false)
   const [autoConn, setAutoConn] = useState(d.autoConnect !== false)
   // CONTENT TYPE + the base metadata entry (what the guide shows with no programme on).
+  const [tab, setTab] = useState<DrawerTab>('settings')
   const [typeId, setTypeId] = useState<string | null>(d.schemaId ?? null)
   const [meta, setMeta] = useState<Record<string, any>>(d.metadata ?? {})
   // subtitles
@@ -1818,10 +1819,17 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
               else's change into half-typed fields without lying about which
               values are whose. */}
           <LiveEditNotice change={live.change} onReload={() => { onSaved(); onClose() }} onDismiss={live.clear} />
+          <DrawerTabs tab={tab} setTab={setTab} />
+          <TabPane active={tab === 'metadata'}>
+            <TypePicker appliesTo="tv" value={typeId} onChange={(id) => setTypeId(id)}
+              hint="The channel's identity. Its metadata is what the guide and now/next show when no programme is scheduled." />
+            <MetadataForm typeId={typeId} value={meta} onChange={setMeta} />
+          </TabPane>
+          <TabPane active={tab === 'access'}>
+            <RuleEditor scopeKind="owner" scopeId={d.id} compact resolveQuery={{ channelId: d.id, schemaId: typeId }} />
+          </TabPane>
+          <TabPane active={tab === 'settings'}>
           <div className="field"><label>Channel name</label><input className="inp" value={name} onChange={e => setName(e.target.value)} /></div>
-          <TypePicker appliesTo="tv" value={typeId} onChange={(id) => setTypeId(id)}
-            hint="The channel's identity. Its metadata is what the guide and now/next show when no programme is scheduled." />
-          <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact />
 
           <div className="field"><label>Channel brand image <span style={{ color: 'var(--faint)' }}>— shown in place of the initials box</span></label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1962,8 +1970,6 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           {/* Auto-connect stops after five failed attempts and records why. If
               that has happened the operator has to be told, or the channel is
               simply off with no explanation anywhere. Pressing Start clears it. */}
-          <div className="sec-label">Publishing</div>
-          <RuleEditor scopeKind="owner" scopeId={d.id} compact resolveQuery={{ channelId: d.id, schemaId: typeId }} />
           {d.resumeGaveUpAt && (
             <div className="err" style={{ marginTop: 6 }}>
               Auto reconnect gave up on {new Date(d.resumeGaveUpAt).toLocaleString()} after repeated failures
@@ -2041,6 +2047,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             uploadKind="brand" uploadFolder="brands"
             onClose={() => setWmPickerOpen(false)} onPick={(url) => { setWmRef(url); setWmPickerOpen(false) }} />
           </>)}
+          </TabPane>
 
           {err && <div className="err">{err}</div>}
         </div>

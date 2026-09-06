@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type EventRow, type Group } from '../api'
 import { useProtocols, SourceInput, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
-import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, splitDuration, type RetUnit } from '../scaffold'
+import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, splitDuration, DrawerTabs, TabPane, type DrawerTab, type RetUnit } from '../scaffold'
 import { ShareDrawer } from '../ShareDrawer'
 import { pressable } from '../a11y'
 import { TypePicker, MetadataForm } from '../ContentTypeFields'
@@ -165,6 +165,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
   const protocols = useProtocols()
   const [name, setName] = useState(ev?.name ?? '')
   // CONTENT TYPE, required: decides the metadata captured here and on everything derived.
+  const [tab, setTab] = useState<DrawerTab>('settings')
   const [typeId, setTypeId] = useState<string | null>(ev?.schema_id ?? null)
   const [meta, setMeta] = useState<Record<string, any>>(ev?.metadata ?? {})
   // Type presets pick the group by workflow — the SAME control as the channel
@@ -258,14 +259,22 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
       <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">{isEdit ? 'Event settings' : 'New event'}</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
+          <DrawerTabs tab={tab} setTab={setTab} />
+          <TabPane active={tab === 'metadata'}>
+            {/* THE EVENT'S KIND: a town hall, a match, a service. It decides
+                the fields under it and the EPG fields they fill. */}
+            <TypePicker appliesTo="event" value={typeId} onChange={(id) => setTypeId(id)} />
+            <MetadataForm typeId={typeId} value={meta} onChange={setMeta} />
+          </TabPane>
+          <TabPane active={tab === 'access'}>
+            {isEdit
+              ? <RuleEditor scopeKind="owner" scopeId={ev!.id} compact resolveQuery={{ eventId: ev!.id, schemaId: typeId }} />
+              : <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Create the event first; its publishing and access rules are set here afterwards. Until then it inherits its content type's and the account's rules.</div>}
+          </TabPane>
+          <TabPane active={tab === 'settings'}>
           <div className="field"><label>Event name</label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Cup Final 2026" />
           </div>
-
-          {/* THE EVENT'S KIND comes first: a town hall, a match, a service.
-              It decides the fields under it and the EPG fields they fill. */}
-          <TypePicker appliesTo="event" value={typeId} onChange={(id) => setTypeId(id)} />
-          <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact />
 
           {!isEdit && (
             <div className="field"><label>Workflow</label>
@@ -342,14 +351,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
             retNum={retNum} setRetNum={setRetNum} retUnit={retUnit} setRetUnit={setRetUnit}
             autoVod={autoVod} setAutoVod={setAutoVod} />
 
-          {isEdit && (
-            <>
-              <div className="sec-label">Publishing</div>
-              <RuleEditor scopeKind="owner" scopeId={ev!.id} compact
-                resolveQuery={{ eventId: ev!.id, schemaId: typeId }} />
-            </>
-          )}
-
+          </TabPane>
           {err && <div className="err">{err}</div>}
         </div>
         <div className="drawer-f">

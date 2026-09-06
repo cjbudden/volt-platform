@@ -8,6 +8,7 @@ import { navigate } from '../router'
 import { thumbUrl } from '../api'
 import { pressable } from '../a11y'
 import { TypePicker, MetadataForm } from '../ContentTypeFields'
+import { DrawerTabs, TabPane, type DrawerTab } from '../scaffold'
 import { RuleEditor } from '../RuleEditor'
 
 /* ============================================================================
@@ -199,6 +200,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
   const [name, setName] = useState(station?.name ?? '')
   // CONTENT TYPE: a station always has one (Radio station by default); its
   // metadata is the base entry when nothing is scheduled or playing.
+  const [tab, setTab] = useState<DrawerTab>('settings')
   const [typeId, setTypeId] = useState<string | null>(station?.schema_id ?? null)
   const [meta, setMeta] = useState<Record<string, any>>(station?.metadata ?? {})
   // Packaging is the default; transcode exists to change bitrate or format.
@@ -273,12 +275,21 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
       <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">{isEdit ? 'Station settings' : 'New station'}</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
+          <DrawerTabs tab={tab} setTab={setTab} />
+          <TabPane active={tab === 'metadata'}>
+            <TypePicker appliesTo="radio" value={typeId} onChange={(id) => setTypeId(id)}
+              hint="The station's identity (schema.org RadioStation). Its metadata is what the guide and now/next show when nothing is scheduled." />
+            <MetadataForm typeId={typeId} value={meta} onChange={setMeta} />
+          </TabPane>
+          <TabPane active={tab === 'access'}>
+            {isEdit
+              ? <RuleEditor scopeKind="owner" scopeId={station!.id} compact resolveQuery={{ channelId: station!.id, schemaId: typeId }} />
+              : <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Create the station first; its publishing and access rules are set here afterwards. Until then it inherits its content type's and the account's rules.</div>}
+          </TabPane>
+          <TabPane active={tab === 'settings'}>
           <div className="field"><label>Station name</label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Groove Salad" />
           </div>
-          <TypePicker appliesTo="radio" value={typeId} onChange={(id) => setTypeId(id)}
-            hint="The station's identity (schema.org RadioStation). Its metadata is what the guide and now/next show when nothing is scheduled." />
-          <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact />
           <div className="field"><label>Station artwork <span style={{ color: 'var(--faint)' }}>— shown on the detail page and player</span></label>
             <div style={{ display: 'flex', gap: 8 }}>
               <input className="inp" value={artRef} onChange={e => setArtRef(e.target.value)} placeholder="Pick from library or paste a URL" />
@@ -354,12 +365,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
           )}
           {!isIcecast && <div className="hintxt" style={{ marginTop: 10 }}>Transcription is available for Icecast sources only: without now-playing metadata there is no way to tell speech from songs and adverts, and transcripts of music are noise.</div>}
 
-          {isEdit && (
-            <>
-              <div className="sec-label">Publishing</div>
-              <RuleEditor scopeKind="owner" scopeId={station!.id} compact resolveQuery={{ channelId: station!.id, schemaId: typeId }} />
-            </>
-          )}
+          </TabPane>
           {err && <div className="err">{err}</div>}
         </div>
         <div className="drawer-f">
