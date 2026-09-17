@@ -396,7 +396,14 @@ upload_sessions, mounted at `/api/tus` before the JSON parser; completion
 goes through the same `completeLanded()` as the chunk protocol. The console
 keeps the chunk protocol for its own panel (three chunks in flight,
 Background Fetch); `volt-web/src/tusClient.ts` is the small resumable
-client for phones, embeds and reference. Steps 3 to 8 follow.
+client for phones, embeds and reference. Step 3 is built: `services/ingest/s3.ts` (a ten-call S3 interface, the real
+SDK adapter with Transfer Acceleration, and an in-memory bucket for tests),
+`services/ingest/destinations.ts` (local, and S3 multipart with parts in
+flight), the pipeline pushing object and sidecar to the configured
+destination (`INGEST_DESTINATION`, `INGEST_S3_*`), and
+`services/watchfolder/s3walk.ts` mirroring a bucket prefix into local
+staging so the existing scanner and ingest run unchanged, quarantines
+mirrored back to the review prefix. Steps 4 to 8 follow.
 
 ## 6.1 What is missing
 

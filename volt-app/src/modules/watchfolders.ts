@@ -1,0 +1,360 @@
+/**
+ * WATCHFOLDERS — folders, ordered rules, and the review queue.
+ *
+ *   GET    /                      folders for the account
+ *   POST   /                      create a folder
+ *   GET    /:id                   folder + its rules, newest items first
+ *   PATCH  /:id                   edit (versioned + audited, like every record)
+ *   DELETE /:id                   remove the folder and its rules
+ *   GET    /:id/rules             ordered rules
+ *   POST   /:id/rules             add one (appended to the end)
+ *   PATCH  /:id/rules/:ruleId     edit, including its ordinal
+ *   DELETE /:id/rules/:ruleId     remove
+ *   POST   /:id/dry-run           "what would happen to this filename?"
+ *   POST   /:id/scan              scan now
+ *   GET    /:id/items             the log, filterable to the review queue
+ *   POST   /:id/items/:itemId/resolve   reprocess or remove a refused file
+ *
+ * THE DRY RUN IS THE MOST USEFUL ROUTE HERE and is deliberately not an
+ * afterthought. Rule sets are ordered and first-match-wins, so `*.png` sitting
+ * above `slate_*.png` silently swallows every slate, and the only way an
+ * operator finds that out is by watching real files land in the wrong place.
+ * Typing a filename and being told which rule catches it, before anything moves,
+ * turns that from an incident into a question. It shares `classify()` with the
+ * scanner, so it cannot drift from what will actually happen.
+ *
+ * RESOLVING A QUARANTINED ITEM IS TWO REAL ACTIONS, not a status change:
+ *   REPROCESS moves the file back to where it came from and marks the row so the
+ *             next scan considers it again. Used after correcting a rule.
+ *   REMOVE    leaves the file in the review folder and closes the row. The file
+ *             is NOT deleted: this API refuses to destroy media, and an operator
+ *             who wants it gone can empty the review folder themselves.
+ */
+import { Router } from 'express';
+import { z } from 'zod';
+import { rename, mkdir, stat } from 'node:fs/promises';
+import { join, sep } from 'node:path';
+import { query, one } from '../db';
+import { requireAuth, accountId } from '../auth/middleware';
+import { asyncHandler, notFound, badRequest } from '../util/http';
+import { writeAudit, actor, patchEntity } from '../services/audit';
+import { classify, type WatchRule, type FolderPolicy } from '../services/watchfolder/rules';
+import { loadFolder, pgItemStore, ingestFolder, syncS3, mirrorQuarantines } from '../services/watchfolder/store';
+import { scanFolder } from '../services/watchfolder/scanner';
+
+export const watchfoldersRouter = Router();
+watchfoldersRouter.use(requireAuth);
+
+const FOLDER_EDITABLE = ['name', 'kind', 'config', 'default_target_kind', 'quarantine_path',
+  'enabled', 'ladder_group_id'];
+
+/** Account-scoped fetch. Every route goes through this: a folder id is a UUID an
+ *  operator could paste from anywhere, and the tenant boundary is not optional. */
+async function ownedFolder(req: any) {
+  const f = await one<any>(
+    `SELECT * FROM watchfolders WHERE id = $1 AND account_id = $2`,
+    [req.params.id, accountId(req)]
+  );
+  if (!f) throw notFound('watchfolder not found');
+  return f;
+}
+
+const createSchema = z.object({
+  name: z.string().min(1),
+  kind: z.enum(['local', 's3']).default('local'),
+  config: z.record(z.any()).default({}),
+  defaultTargetKind: z.string().nullable().optional(),
+  quarantinePath: z.string().default('_review'),
+  /** The ladder every video file this folder accepts is encoded to. Null falls
+   *  back to the account default at encode time. */
+  ladderGroupId: z.string().uuid().nullable().optional(),
+});
+
+watchfoldersRouter.get('/', asyncHandler(async (req, res) => {
+  const rows = await query<any>(
+    `SELECT w.*,
+            (SELECT count(*) FROM watchfolder_rules r WHERE r.watchfolder_id = w.id)::int AS rule_count,
+            (SELECT count(*) FROM watchfolder_items i
+              WHERE i.watchfolder_id = w.id AND i.status = 'quarantined')::int AS review_count
+       FROM watchfolders w
+      WHERE w.account_id = $1
+      ORDER BY w.created_at DESC`,
+    [accountId(req)]
+  );
+  res.json(rows);
+}));
+
+watchfoldersRouter.post('/', asyncHandler(async (req, res) => {
+  const b = createSchema.parse(req.body);
+  const who = actor(req);
+  const row = await one<any>(
+    `INSERT INTO watchfolders(account_id, name, kind, config, default_target_kind, quarantine_path, created_by, updated_by, ladder_group_id)
+     VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$7,$8) RETURNING *`,
+    [accountId(req), b.name, b.kind, JSON.stringify(b.config), b.defaultTargetKind ?? null,
+     b.quarantinePath, who.userId, b.ladderGroupId ?? null]
+  );
+  await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
+    action: 'create', entityType: 'watchfolder', entityId: row.id, snapshot: { name: b.name, kind: b.kind } });
+  res.status(201).json(row);
+}));
+
+watchfoldersRouter.get('/:id', asyncHandler(async (req, res) => {
+  const f = await ownedFolder(req);
+  const rules = await query<any>(
+    `SELECT * FROM watchfolder_rules WHERE watchfolder_id = $1 ORDER BY ordinal`, [f.id]);
+  const items = await query<any>(
+    `SELECT * FROM watchfolder_items WHERE watchfolder_id = $1 ORDER BY seen_at DESC LIMIT 100`, [f.id]);
+  const counts = await one<any>(
+    `SELECT count(*) FILTER (WHERE status = 'quarantined')::int AS review,
+            count(*) FILTER (WHERE status = 'ingested')::int   AS ingested,
+            count(*) FILTER (WHERE status = 'seen')::int       AS pending,
+            count(*)::int                                       AS total
+       FROM watchfolder_items WHERE watchfolder_id = $1`, [f.id]);
+  res.json({ ...f, rules, items, counts });
+}));
+
+watchfoldersRouter.patch('/:id', asyncHandler(async (req, res) => {
+  const cur = await ownedFolder(req);
+  const b = req.body ?? {};
+  const patch: Record<string, any> = {};
+  if ('name' in b) patch.name = b.name;
+  if ('config' in b) patch.config = b.config;
+  if ('defaultTargetKind' in b) patch.default_target_kind = b.defaultTargetKind;
+  if ('quarantinePath' in b) patch.quarantine_path = b.quarantinePath;
+  if ('enabled' in b) patch.enabled = !!b.enabled;
+  if ('ladderGroupId' in b) patch.ladder_group_id = b.ladderGroupId;
+  const who = actor(req);
+  // patchEntity, not a bare UPDATE: it versions, audits, and publishes the live
+  // `record` frame, so a second admin editing this folder is told.
+  const { row, changed } = await patchEntity({
+    table: 'watchfolders', id: cur.id, accountId: accountId(req),
+    current: cur, patch, allowed: FOLDER_EDITABLE,
+    entityType: 'watchfolder', userId: who.userId, label: who.label,
+    expectedVersion: b.version ?? null,
+  });
+  res.json({ ...row, changed });
+}));
+
+watchfoldersRouter.delete('/:id', asyncHandler(async (req, res) => {
+  const f = await ownedFolder(req);
+  await query(`DELETE FROM watchfolders WHERE id = $1`, [f.id]);
+  const who = actor(req);
+  await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
+    action: 'delete', entityType: 'watchfolder', entityId: f.id, snapshot: { name: f.name } });
+  res.status(204).end();
+}));
+
+/* -------------------------------------------------------------- rules ---- */
+
+const ruleSchema = z.object({
+  name: z.string().min(1),
+  matchType: z.enum(['glob', 'regex', 'extension', 'prefix', 'suffix']).default('glob'),
+  pattern: z.string().min(1),
+  targetKind: z.string().min(1),
+  workflow: z.string().nullable().optional(),
+  action: z.enum(['accept', 'reject']).default('accept'),
+  rejectReason: z.string().nullable().optional(),
+  ordinal: z.number().int().optional(),
+  enabled: z.boolean().default(true),
+});
+
+watchfoldersRouter.get('/:id/rules', asyncHandler(async (req, res) => {
+  const f = await ownedFolder(req);
+  res.json(await query(`SELECT * FROM watchfolder_rules WHERE watchfolder_id=$1 ORDER BY ordinal`, [f.id]));
+}));
+
+watchfoldersRouter.post('/:id/rules', asyncHandler(async (req, res) => {
+  const f = await ownedFolder(req);
+  const b = ruleSchema.parse(req.body);
+  // APPENDED, in tens. A new rule must never silently outrank the existing ones,
+  // and the gaps leave room to insert without renumbering the whole set.
+  const last = await one<any>(
+    `SELECT COALESCE(max(ordinal), 0) AS n FROM watchfolder_rules WHERE watchfolder_id=$1`, [f.id]);
+  const ordinal = b.ordinal ?? (Number(last?.n ?? 0) + 10);
+  const row = await one<any>(
+    `INSERT INTO watchfolder_rules(watchfolder_id, ordinal, name, match_type, pattern,
+                                   target_kind, workflow, action, reject_reason, enabled)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [f.id, ordinal, b.name, b.matchType, b.pattern, b.targetKind, b.workflow ?? null,
+     b.action, b.rejectReason ?? null, b.enabled]
+  );
+  const who = actor(req);
+  await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
+    action: 'create', entityType: 'watchfolder_rule', entityId: row.id,
+    snapshot: { folder: f.id, pattern: b.pattern, targetKind: b.targetKind } });
+  res.status(201).json(row);
+}));
+
+watchfoldersRouter.patch('/:id/rules/:ruleId', asyncHandler(async (req, res) => {
+  const f = await ownedFolder(req);
+  const b = req.body ?? {};
+  const sets: string[] = [];
+  const params: any[] = [];
+  const put = (col: string, v: any) => { params.push(v); sets.push(`${col}=$${params.length}`); };
+  if ('name' in b) put('name', b.name);
+  if ('matchType' in b) put('match_type', b.matchType);
+  if ('pattern' in b) put('pattern', b.pattern);
+  if ('targetKind' in b) put('target_kind', b.targetKind);
+  if ('workflow' in b) put('workflow', b.workflow);
+  if ('action' in b) put('action', b.action);
+  if ('rejectReason' in b) put('reject_reason', b.rejectReason);
+  if ('ordinal' in b) put('ordinal', b.ordinal);
+  if ('enabled' in b) put('enabled', !!b.enabled);
+  if (!sets.length) throw badRequest('nothing to change');
+  params.push(req.params.ruleId, f.id);
+  const row = await one<any>(
+    `UPDATE watchfolder_rules SET ${sets.join(', ')}
+      WHERE id=$${params.length - 1} AND watchfolder_id=$${params.length} RETURNING *`, params);
+  if (!row) throw notFound('rule not found');
+  res.json(row);
+}));
+
+watchfoldersRouter.delete('/:id/rules/:ruleId', asyncHandler(async (req, res) => {
+  const f = await ownedFolder(req);
+  const r = await one<any>(
+    `DELETE FROM watchfolder_rules WHERE id=$1 AND watchfolder_id=$2 RETURNING id`,
+    [req.params.ruleId, f.id]);
+  if (!r) throw notFound('rule not found');
+  res.status(204).end();
+}));
+
+/* ------------------------------------------------------------ dry run ---- */
+
+/**
+ * What WOULD happen to a file with this name.
+ *
+ * Shares `classify()` with the scanner, so the answer cannot drift from the
+ * behaviour. Returns the whole ordered rule list alongside the decision, with
+ * the winner marked, because "slate_open.png becomes a poster" is only half the
+ * answer: the operator needs to see that `*.png` sits above `slate_*.png`.
+ */
+watchfoldersRouter.post('/:id/dry-run', asyncHandler(async (req, res) => {
+  const f = await ownedFolder(req);
+  const name = String(req.body?.filename ?? '').trim();
+  if (!name) throw badRequest('filename is required');
+  const sizeBytes = req.body?.sizeBytes == null ? null : Number(req.body.sizeBytes);
+
+  const rules = await query<any>(
+    `SELECT * FROM watchfolder_rules WHERE watchfolder_id=$1 ORDER BY ordinal`, [f.id]);
+  const mapped: WatchRule[] = rules.map((r) => ({
+    id: r.id, ordinal: r.ordinal, name: r.name, matchType: r.match_type, pattern: r.pattern,
+    targetKind: r.target_kind, workflow: r.workflow, action: r.action,
+    rejectReason: r.reject_reason, enabled: r.enabled,
+  }));
+  const policy: FolderPolicy = {
+    defaultTargetKind: f.default_target_kind ?? null,
+    defaultWorkflow: f.config?.default_workflow ?? null,
+    minBytes: f.config?.min_bytes ?? null,
+    maxBytes: f.config?.max_bytes ?? null,
+  };
+  const decision = classify(name, sizeBytes, mapped, policy);
+  res.json({
+    filename: name,
+    decision,
+    quarantinePath: f.quarantine_path,
+    rules: mapped.map((r) => ({
+      id: r.id, ordinal: r.ordinal, name: r.name, pattern: r.pattern,
+      targetKind: r.targetKind, action: r.action, enabled: r.enabled,
+      winner: 'ruleId' in decision && decision.ruleId === r.id,
+    })),
+  });
+}));
+
+/* --------------------------------------------------------------- scan ---- */
+
+watchfoldersRouter.post('/:id/scan', asyncHandler(async (req, res) => {
+  const f = await ownedFolder(req);
+  const loaded = await loadFolder(f.id);
+  if (!loaded) throw badRequest('this folder is disabled or has no path');
+  try {
+    // An S3 folder is mirrored into staging first; the scan below then sees
+    // it as a local folder and its quarantines are mirrored back.
+    const sync = f.kind === 's3' ? await syncS3(f.id) : null;
+    const result = await scanFolder(loaded, pgItemStore);
+    if (f.kind === 's3') await mirrorQuarantines(f.id, result.quarantined);
+    // AND THEN INGEST, because an operator who presses Scan and sees "3 accepted"
+    // with nothing in the library has been told a fact about an internal state
+    // machine rather than an answer. Accepting and ingesting are two steps in the
+    // code; they are one action at the desk.
+    const ingest = await ingestFolder(f.id);
+    await query(`UPDATE watchfolders SET last_scan_at=now(), last_scan_error=NULL WHERE id=$1`, [f.id]);
+    res.json({ ...result, ingest, ...(sync ? { s3: sync } : {}) });
+  } catch (e: any) {
+    const msg = String(e?.message ?? e).slice(0, 500);
+    await query(`UPDATE watchfolders SET last_scan_at=now(), last_scan_error=$2 WHERE id=$1`, [f.id, msg]);
+    throw badRequest(msg);
+  }
+}));
+
+/* -------------------------------------------------------------- items ---- */
+
+watchfoldersRouter.get('/:id/items', asyncHandler(async (req, res) => {
+  const f = await ownedFolder(req);
+  const status = String(req.query.status ?? '').trim();
+  const params: any[] = [f.id];
+  let where = 'watchfolder_id = $1';
+  if (status) { params.push(status); where += ` AND status = $${params.length}`; }
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit ?? 200)));
+  params.push(limit);
+  const items = await query<any>(
+    `SELECT i.*, r.name AS rule_name
+       FROM watchfolder_items i
+       LEFT JOIN watchfolder_rules r ON r.id = i.matched_rule_id
+      WHERE ${where} ORDER BY i.seen_at DESC LIMIT $${params.length}`, params);
+  res.json({ items });
+}));
+
+const resolveSchema = z.object({
+  resolution: z.enum(['reprocess', 'remove']),
+  note: z.string().max(500).optional(),
+});
+
+watchfoldersRouter.post('/:id/items/:itemId/resolve', asyncHandler(async (req, res) => {
+  const f = await ownedFolder(req);
+  const b = resolveSchema.parse(req.body);
+  const item = await one<any>(
+    `SELECT * FROM watchfolder_items WHERE id=$1 AND watchfolder_id=$2`,
+    [req.params.itemId, f.id]);
+  if (!item) throw notFound('item not found');
+  if (item.status !== 'quarantined') throw badRequest(`this item is ${item.status}, not quarantined`);
+
+  const who = actor(req);
+
+  if (b.resolution === 'reprocess') {
+    // PUT IT BACK WHERE IT CAME FROM, then mark the row. The file has to exist in
+    // the drop folder again before the row says it will be reconsidered, or a
+    // failed move leaves a queue entry claiming a scan will pick up a file that
+    // is not there.
+    const root = String(f.config?.path ?? '');
+    if (!root) throw badRequest('this folder has no path, so nothing can be moved back');
+    const from = join(root, String(item.quarantine_key).split('/').join(sep));
+    const to = join(root, String(item.object_key).split('/').join(sep));
+    try {
+      await stat(from);
+    } catch {
+      throw badRequest('the file is no longer in the review folder; somebody has already moved or deleted it');
+    }
+    await mkdir(join(to, '..'), { recursive: true });
+    await rename(from, to);
+    await query(
+      `UPDATE watchfolder_items
+          SET status='reprocessed', resolved_at=now(), resolved_by=$2, resolution_note=$3
+        WHERE id=$1`, [item.id, who.userId, b.note ?? null]);
+  } else {
+    // REMOVE CLOSES THE ROW AND LEAVES THE FILE. This API does not delete media:
+    // the review folder is a person's to empty, and a queue action that silently
+    // destroys the only copy of something is exactly what quarantine exists to
+    // prevent.
+    await query(
+      `UPDATE watchfolder_items
+          SET status='removed', resolved_at=now(), resolved_by=$2, resolution_note=$3
+        WHERE id=$1`, [item.id, who.userId, b.note ?? null]);
+  }
+
+  await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
+    action: 'update', entityType: 'watchfolder_item', entityId: String(item.id),
+    snapshot: { resolution: b.resolution, objectKey: item.object_key, note: b.note ?? null } });
+
+  const updated = await one<any>(`SELECT * FROM watchfolder_items WHERE id=$1`, [item.id]);
+  res.json(updated);
+}));

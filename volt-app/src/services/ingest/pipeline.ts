@@ -16,6 +16,19 @@ import { applyNaming, type NamingResult } from './naming';
 import { findMatch, decideDuplicate, type Decision } from './duplicates';
 import { extract, candidates, mergeMetadata, missingRequired, type Extracted } from './metadata';
 import { buildPayload, sidecarKey, toXml, signWebhook, type IngestPayload } from './payload';
+import { config } from '../../config';
+import { S3Destination, type Destination } from './destinations';
+import { realS3 } from './s3';
+
+let s3dest: Destination | null = null;
+/** The configured object destination, or null when objects stay local. Injectable for tests. */
+export async function objectDestination(): Promise<Destination | null> {
+  if (config.ingest.destination !== 's3') return null;
+  if (!s3dest) s3dest = new S3Destination(await realS3({ region: config.aws.region, accelerate: config.ingest.s3Accelerate, endpoint: config.ingest.s3Endpoint }),
+                                          { bucket: config.ingest.s3Bucket, prefix: config.ingest.s3Prefix });
+  return s3dest;
+}
+export function setObjectDestination(d: Destination | null) { s3dest = d; }
 
 export async function loadRules(accountId: string): Promise<(IngestRule & { metadataDefaults: Record<string, any> })[]> {
   const rows = await query<any>(
@@ -145,10 +158,20 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
     naming.key = key; naming.filename = key.split('/').pop()!;
   }
 
+  // Object store: the local vod-src copy stays for the encoder; when S3 is
+  // the destination the object and its sidecar go there too and the library
+  // records the S3 uri as the object key.
+  let store = 'local'; let objectUri: string | null = null;
+  const dest = status === 'ingested' || status === 'awaiting_metadata' ? await objectDestination().catch(() => null) : null;
+  if (dest) {
+    try { const put = await dest.put(finalPath, `${f.accountId}/${naming.key}`, extracted.type.mime); objectUri = put.uri; store = dest.store; }
+    catch (e) { console.warn('[ingest] destination put failed, object stays local', e); }
+  }
+
   const payload = buildPayload({
     event: status === 'ingested' ? 'ingested' : status === 'awaiting_metadata' ? 'awaiting_metadata' : status === 'duplicate' ? 'duplicate' : 'quarantined',
     account: f.accountId, assetId: f.assetId, kind: extracted.type.kind, contentTypeId: s.contentTypeId, title: merged.metadata.name ?? merged.metadata.title ?? f.originalName,
-    naming, store: 'local', bytes: f.bytes, sha256: f.sha256, source: f.source, sessionId: f.sessionId ?? null, uploadedBy: f.uploadedBy ?? null,
+    naming, store, bytes: f.bytes, sha256: f.sha256, source: f.source, sessionId: f.sessionId ?? null, uploadedBy: f.uploadedBy ?? null,
     resolved, duplicate, metadata: merged.metadata, metadataSources: merged.sources, extracted, unmapped: merged.unmapped,
   });
 
@@ -159,13 +182,15 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
             source_key = $10, awaiting_metadata = $11, updated_at = now()
       WHERE id = $1`,
     [f.assetId, f.originalName, f.relativePath ?? null, f.sha256, extracted.type.mime,
-     JSON.stringify({ status, rules: payload.rules, naming: payload.naming, duplicate: payload.duplicate, type: extracted.type, probe: extracted.probe, id3: extracted.id3, metadataSources: merged.sources, unmapped: merged.unmapped }),
+     JSON.stringify({ status, rules: payload.rules, naming: payload.naming, duplicate: payload.duplicate, type: extracted.type, probe: extracted.probe, id3: extracted.id3, metadataSources: merged.sources, unmapped: merged.unmapped, objectUri, store }),
      JSON.stringify(merged.metadata), s.contentTypeId, payload.asset.title, finalPath, missing.length ? missing : null]);
 
   if (status !== 'rejected' && duplicate.outcome !== 'skip' && s.sidecar !== 'none') {
+    const text = s.sidecar === 'xml' ? toXml(payload) : JSON.stringify(payload, null, 2);
     try {
       const sc = join(dirname(finalPath), sidecarKey(finalPath.split('/').pop()!, s.sidecar));
-      writeFileSync(sc, s.sidecar === 'xml' ? toXml(payload) : JSON.stringify(payload, null, 2));
+      writeFileSync(sc, text);
+      if (dest && objectUri) await dest.putText(`${f.accountId}/${sidecarKey(naming.key, s.sidecar)}`, text, s.sidecar === 'xml' ? 'application/xml' : 'application/json');
     } catch (e) { console.warn('[ingest] sidecar not written', e); }
   }
   void deliverWebhooks(f.accountId, payload, s.webhooks);
