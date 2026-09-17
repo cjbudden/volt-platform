@@ -58,7 +58,11 @@ export interface UploadItem {
    *  it a cancelled upload kept PUTting chunks at a deleted session until the
    *  whole file had been sent. */
   cancelled?: boolean
+  /** Set by pause(). Workers stop between chunks; resume() re-drives from the server's count. */
+  paused?: boolean
   startedAt: number
+  /** Bytes per second over the last few seconds, for the queue's speed and ETA. */
+  rate?: number
   /** What the ingest rules decided when the bytes landed (vod uploads). */
   ingest?: IngestOutcome | null
 }
@@ -442,7 +446,7 @@ async function drive(item: UploadItem): Promise<void> {
       // Cancellation is checked HERE, between chunks, because a chunk already
       // in flight cannot be recalled and the next one is the earliest thing we
       // control.
-      if (i >= missing.length || failed || item.cancelled) return
+      if (i >= missing.length || failed || item.cancelled || item.paused) return
       const index = missing[i]
       const start = index * item.chunkSize
       const blob = item.file!.slice(start, Math.min(start + item.chunkSize, item.totalBytes))
@@ -463,7 +467,11 @@ async function drive(item: UploadItem): Promise<void> {
         // Progress comes from the SERVER's count, not from what this tab thinks
         // it sent. They differ after a resume, and the server is the one that
         // knows.
+        const now = Date.now(); const prev = (item as any)._r as { t: number; b: number } | undefined
+        if (prev && now - prev.t > 1500) { item.rate = ((out.receivedBytes - prev.b) * 1000) / (now - prev.t); (item as any)._r = { t: now, b: out.receivedBytes } }
+        else if (!prev) (item as any)._r = { t: now, b: out.receivedBytes }
         item.sentBytes = out.receivedBytes
+        if (Array.isArray(out.receivedIndices)) item.received = out.receivedIndices   // so a resume sends only what is missing
         emit()
       } catch (e: any) {
         failed = e.message
@@ -480,6 +488,8 @@ async function drive(item: UploadItem): Promise<void> {
     emit()
     return
   }
+  // Paused or cancelled between chunks: leave the row as it is, nothing to assemble yet.
+  if (item.paused || item.cancelled) return
 
   item.status = 'assembling'
   emit()
@@ -562,6 +572,26 @@ async function startBackgroundFetch(item: UploadItem): Promise<void> {
     if (reg.result === 'failure') { item.status = 'error'; item.error = reg.failureReason || 'failed' }
     emit()
   })
+}
+
+/** Stop between chunks; nothing already sent is lost. */
+export function pause(id: string) {
+  const item = items.get(id)
+  if (!item || item.status !== 'uploading') return
+  item.paused = true
+  item.status = 'paused'
+  item.rate = 0
+  emit()
+}
+
+/** Continue from the server's count of what landed. */
+export function resume(id: string) {
+  const item = items.get(id)
+  if (!item || item.status !== 'paused' || !item.file) return
+  item.paused = false
+  item.status = 'queued'
+  emit()
+  void drive(item)
 }
 
 export function dismiss(id: string) {

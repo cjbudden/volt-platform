@@ -35,6 +35,7 @@ import { useRoute, navigate, hrefFor } from './router'
 import { pressable, openable } from './a11y'
 import { resetLiveBackoff } from './liveStatus'
 import { UploadIndicator } from './uploads'
+import { IngestQueue } from './IngestQueue'
 import { ErrorBoundary } from './ErrorBoundary'
 
 const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z" /></svg>
@@ -277,6 +278,7 @@ export default function App() {
       </aside>
 
       <div className="main">
+        <IngestQueue />
         <div className="topbar">
           <div className="crumb"><b>{label}</b></div>
           <GlobalSearch />

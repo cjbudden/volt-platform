@@ -173,6 +173,10 @@ uploadChunksRouter.put(
       index,
       duplicate: out.duplicate,
       received: out.received.length,
+      // The indices themselves, so a paused client resumes with exactly the
+      // chunks still missing rather than re-sending everything (idempotent,
+      // but a 60 GB file does not want to be idempotent twice).
+      receivedIndices: out.received,
       chunkCount: s.chunk_count,
       receivedBytes: out.receivedBytes,
       complete: out.complete,

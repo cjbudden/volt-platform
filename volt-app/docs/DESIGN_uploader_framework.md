@@ -442,6 +442,22 @@ package compiles with no dependency on Volt; the README is written for a
 developer who is not us. `volt-app/test/ingest.sh` (`npm run test:ingest`)
 runs all eight suites, 203 checks, in one command with no database.
 
+Christian, 17 Sep, on the first panel: "visually not great, needs more
+structure and design; look at Uppy; it must feel simple while offering a
+range of services." The panel was rebuilt as `IngestPanel.tsx` in Uppy's
+shape: a rail of sources (device, folder, link; Dropbox, OneDrive and Google
+Drive through their own pickers; "send with" for each accelerated provider),
+one drop zone, files as cards with thumbnails and a single badge each for
+what the rules decided, type and metadata as a sheet for all files or one,
+one primary button, an Uppy-style status bar. Long-running work moved to
+`IngestQueue.tsx`, a drawer mounted once in App (per-file pause, resume and
+cancel, thumbnails, rate and time left, and the "needs you" items), with a
+floating progress ring when closed. `cloudPickers.ts` loads each vendor's
+picker on demand with `VITE_DROPBOX_APP_KEY`, `VITE_MS_CLIENT_ID`,
+`VITE_GOOGLE_CLIENT_ID` and `VITE_GOOGLE_API_KEY`; Dropbox and OneDrive hand
+back direct links (fetched as URL sources), Google hands back ids plus a
+drive.file token. The upload manager gained pause and resume and a rate.
+
 All eight steps are built. Not yet done, and known: live verification of
 the Aspera, MASV and Signiant request shapes against real accounts; the
 provider OAuth apps (client ids) for Dropbox, OneDrive and Google;
