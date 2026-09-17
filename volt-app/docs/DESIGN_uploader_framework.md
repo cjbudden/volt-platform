@@ -389,7 +389,14 @@ sniff, id3, metadata, payload, events (pure, 97 checks) and pipeline (DB);
 migration 0032 adds `ingest_rules`, `ingest_webhooks`, the asset columns and
 the session inputs; `/api/ingest` serves the rules, preview, sanitise and
 webhooks; the upload finish runs the pipeline and the panel sends folder
-paths and shows the ingest outcome. Steps 2 to 8 remain, listed below.
+paths and shows the ingest outcome. Step 2 is built: `services/ingest/tus.ts` is a tus 1.0.0 router (creation,
+creation-with-upload, expiration, termination, checksum) over a store
+interface with a memory store for tests and `modules/tus.ts` backing it with
+upload_sessions, mounted at `/api/tus` before the JSON parser; completion
+goes through the same `completeLanded()` as the chunk protocol. The console
+keeps the chunk protocol for its own panel (three chunks in flight,
+Background Fetch); `volt-web/src/tusClient.ts` is the small resumable
+client for phones, embeds and reference. Steps 3 to 8 follow.
 
 ## 6.1 What is missing
 

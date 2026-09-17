@@ -65,7 +65,7 @@ export const CHUNK_SIZE = 8 * 1024 * 1024;
 export const MAX_UPLOAD_BYTES = 16 * 1024 * 1024 * 1024;   // 16 GB
 
 /** Where partial chunks live while a session is open. */
-function sessionDir(id: string): string {
+export function sessionDir(id: string): string {
   return join(config.uploads.dir, id);
 }
 function chunkPath(id: string, index: number): string {
@@ -344,15 +344,10 @@ export async function finishSession(session: UploadSession): Promise<FinishResul
   await query(`UPDATE upload_sessions SET state = 'assembling', updated_at = now() WHERE id = $1`,
     [session.id]);
 
-  const ext = safeExt(session.filename);
   // A VOD upload's bytes go where a re-encode will still find them, keyed by the
   // asset — the same place the watchfolder preserves its sources, and NOT the
   // filler directory, whose contents are served publicly at /filler.
-  const dest = session.vod_asset_id
-    ? join(config.clips.dir, 'vod-src', session.vod_asset_id + ext)
-    : session.filler_asset_id
-      ? fillerPath(session.account_id, session.filler_asset_id, session.filename)
-      : join(config.uploads.fillerDir, session.account_id, session.id + ext);
+  const dest = destinationFor(session);
   mkdirSync(join(dest, '..'), { recursive: true });
 
   const hash = createHash('sha256');
@@ -400,6 +395,29 @@ export async function finishSession(session: UploadSession): Promise<FinishResul
   }
 
   const sha = hash.digest('hex');
+  return completeLanded(session, dest, written, sha);
+}
+
+/**
+ * Where a session's finished bytes belong. Shared by the chunk protocol and
+ * the tus endpoint so both land in the same place with the same rules.
+ */
+export function destinationFor(session: UploadSession): string {
+  const ext = safeExt(session.filename);
+  return session.vod_asset_id
+    ? join(config.clips.dir, 'vod-src', session.vod_asset_id + ext)
+    : session.filler_asset_id
+      ? fillerPath(session.account_id, session.filler_asset_id, session.filename)
+      : join(config.uploads.fillerDir, session.account_id, session.id + ext);
+}
+
+/**
+ * The bytes are complete and verified at `dest`: record them, run the ingest
+ * framework, queue the encode, close the session. Called by finishSession
+ * (chunk protocol) and by the tus endpoint when the offset reaches the length.
+ */
+export async function completeLanded(session: UploadSession, dest: string, written: number, sha: string): Promise<FinishResult> {
+  const ext = safeExt(session.filename);
   const sourceKey = session.vod_asset_id
     ? dest
     : session.filler_asset_id

@@ -29,6 +29,7 @@ import { scheduledClipsRouter } from './modules/scheduledClips';
 import { publishTargetsRouter, publicationsRouter } from './modules/publishing';
 import { publishingRulesRouter } from './modules/publishingRules';
 import { ingestRouter as ingestRulesRouter } from './modules/ingestRules';
+import { tusRouter } from './modules/tus';
 import { paymentsRouter, paymentsAppRouter, paymentsWebhookRouter } from './modules/payments';
 import { epgRouter } from './modules/epg';
 import { appsRouter, availabilityRouter, accessRouter } from './modules/apps';
@@ -65,6 +66,9 @@ export function createServer() {
   app.use('/api/files', express.json({ limit: '30mb' }));
   // Provider webhooks verify a signature over the exact bytes: mounted before the JSON parser.
   app.use('/api/payments/webhooks', paymentsWebhookRouter);
+  // tus resumable uploads: PATCH bodies are raw octets, so this too sits before
+  // the JSON parser. Any tus client (iOS, Android, Uppy, tus-py) uploads here.
+  app.use('/api/tus', tusRouter);
   app.use(express.json({ limit: '1mb' }));
 
   // ok = the process is up and can answer. reconciled = boot reconciliation has
