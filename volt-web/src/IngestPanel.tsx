@@ -15,7 +15,7 @@
 //  needs. Both land in the same rules.
 // ============================================================================
 import { useEffect, useRef, useState } from 'react'
-import { api, getToken, type IngestPreviewRow, type IngestHeld } from './api'
+import { api, getToken, type IngestPreviewRow, type IngestHeld, type IngestTransfer } from './api'
 import { startUpload, subscribe, type UploadItem } from './uploadManager'
 import { tusUpload, isCellular } from './tusClient'
 import { TypePicker, MetadataForm } from './ContentTypeFields'
@@ -58,6 +58,8 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
   const [busy, setBusy] = useState(false)
   const [tusProgress, setTusProgress] = useState<Record<string, number>>({})
   const [link, setLink] = useState('')
+  const [providers, setProviders] = useState<{ id: string; provider: string; label: string }[]>([])
+  const [transfers, setTransfers] = useState<IngestTransfer[]>([])
   const [remote, setRemote] = useState<{ name: string; note: string }[]>([])
   const fileRef = useRef<HTMLInputElement | null>(null)
   const folderRef = useRef<HTMLInputElement | null>(null)
@@ -69,6 +71,26 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
   useEffect(() => { loadHeld() }, [])
   useEffect(() => subscribe((all) => { setItems(all); if (all.some(i => i.status === 'done')) { onDone(); loadHeld() } }), [onDone])
   useEffect(() => { api.ingestBaseline().then(b => setAutoUpload(b.baseline.autoUpload)).catch(() => {}) }, [])
+  useEffect(() => { api.ingestProviders().then(p => setProviders(p.linked.filter(l => ['aspera', 'masv', 'signiant'].includes(l.provider)))).catch(() => {}) }, [])
+  useEffect(() => { const t = setInterval(() => api.ingestTransfers().then(ts => setTransfers(ts.filter(x => x.state !== 'landed' || Date.now() - new Date(x.createdAt).getTime() < 10 * 60_000))).catch(() => {}), 15000); api.ingestTransfers().then(setTransfers).catch(() => {}); return () => clearInterval(t) }, [])
+
+  /** Hand the picked files to an accelerated provider instead of uploading them here. */
+  async function sendWith(pa: { id: string; provider: string; label: string }) {
+    const list = picked.filter(p => !p.skip && !p.preview?.reject)
+    if (!list.length) return
+    setErr('')
+    try {
+      const t = await api.createIngestTransfer({ provider: pa.provider as any, files: list.map(p => ({ name: p.file.name, bytes: p.file.size, relativePath: (p.file as any).webkitRelativePath || null })), providerAccountId: pa.id })
+      setTransfers(cur => [t, ...cur])
+      setPicked(cur => cur.filter(p => !list.includes(p)))
+      if (t.launch?.kind === 'portal') window.open(t.launch.url, '_blank')
+      if (t.launch?.kind === 'aspera_spec') {
+        // IBM Aspera browser SDK, when the page has it; otherwise the spec is shown for the desktop client.
+        const sdk = (window as any).AsperaSdk ?? (window as any).asperaWeb
+        if (sdk?.startTransfer) sdk.startTransfer(t.launch.transferSpec, {})
+      }
+    } catch (e: any) { setErr(String(e?.message ?? e)) }
+  }
 
   /** Add files: preview them first so the operator sees renames, duplicates and rejects before starting. */
   async function add(files: File[]) {
@@ -192,11 +214,18 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
               <button type="button" className="btn ghost" style={{ fontSize: 'var(--fs-xs)' }} onClick={() => setPicked(cur => cur.filter((_, j) => j !== i))}>Remove</button>
             </div>
           ))}
-          {!autoUpload && pending.length > 0 && (
-            <button type="button" className="btn primary" style={{ marginTop: 8 }} disabled={busy} onClick={() => start(pending)}>
-              Upload {pending.length} file{pending.length === 1 ? '' : 's'}
-            </button>
-          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            {!autoUpload && pending.length > 0 && (
+              <button type="button" className="btn primary" disabled={busy} onClick={() => start(pending)}>
+                Upload {pending.length} file{pending.length === 1 ? '' : 's'}
+              </button>
+            )}
+            {pending.length > 0 && providers.map(pa => (
+              <button key={pa.id} type="button" className="btn" onClick={() => sendWith(pa)} title="Accelerated transfer: the provider moves the files, Volt ingests them when they land">
+                Send with {pa.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -213,6 +242,21 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
           </div>
         </div>
       ))}
+
+      {transfers.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div className="sec-label">Accelerated transfers</div>
+          {transfers.map(t => (
+            <div key={t.id} style={{ fontSize: 'var(--fs-sm)', padding: '4px 0', borderBottom: '1px solid var(--border,#242a36)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ minWidth: 90 }}><strong>{t.provider}</strong></span>
+              <span style={{ flex: 1, color: 'var(--faint,#8b93a7)' }}>{t.files.length} file{t.files.length === 1 ? '' : 's'} · {t.state}{t.progress?.pct != null ? ` ${t.progress.pct}%` : ''}{t.error ? ` · ${t.error}` : ''}</span>
+              {t.launch?.kind === 'portal' && t.state !== 'landed' && <a className="btn" style={{ fontSize: 'var(--fs-xs)' }} href={t.launch.url} target="_blank" rel="noreferrer">Open portal</a>}
+              {t.launch?.kind === 'aspera_spec' && t.state !== 'landed' && <button type="button" className="btn" style={{ fontSize: 'var(--fs-xs)' }} onClick={() => { navigator.clipboard?.writeText(JSON.stringify((t.launch as any).transferSpec)); }}>Copy transfer spec</button>}
+              {t.launch?.note && <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>{t.launch.note}</span>}
+            </div>
+          ))}
+        </div>
+      )}
 
       {held.length > 0 && <HeldList held={held} onChange={() => { loadHeld(); onDone() }} />}
     </div>

@@ -21,8 +21,17 @@ import { providerAccounts, accessTokenFor, authorizeUrl, linkOAuth, OAUTH, type 
 import { actorId } from '../util/actor';
 import { config } from '../config';
 import { createHmac } from 'node:crypto';
+import { createTransfer, applyTransferEvent, listTransfers } from '../services/ingest/transfers';
 
 export const ingestRouter = Router();
+
+/** Provider callbacks (Aspera hook, MASV / Signiant webhook, an S3 event relay, or a client finish) name the transfer by its id. */
+export const ingestCallbacksRouter = Router();
+ingestCallbacksRouter.post('/transfers/:id/events', asyncHandler(async (req, res) => {
+  const out = await applyTransferEvent(req.params.id, req.body, req.headers as any);
+  res.json(out);
+}));
+
 ingestRouter.use(requireAuth);
 
 const when = z.object({
@@ -322,3 +331,20 @@ ingestRouter.delete('/providers/:id', asyncHandler(async (req, res) => {
   if (!r) throw notFound('provider account not found');
   res.status(204).end();
 }));
+
+// ---------------------------------------------------------------------------
+//  Accelerated transfers: Aspera, MASV, Signiant, S3 acceleration.
+// ---------------------------------------------------------------------------
+ingestRouter.get('/transfers', asyncHandler(async (req, res) => {
+  res.json((await listTransfers(accountId(req))).map(viewTransfer));
+}));
+ingestRouter.post('/transfers', asyncHandler(async (req, res) => {
+  const b = z.object({
+    provider: z.enum(['aspera', 'masv', 'signiant', 's3accel']),
+    files: z.array(z.object({ name: z.string().min(1).max(400), bytes: z.number().nonnegative().nullable().optional(), relativePath: z.string().max(1000).nullable().optional() })).min(1).max(500),
+    providerAccountId: z.string().uuid().nullable().optional(),
+  }).parse(req.body);
+  const t = await createTransfer(accountId(req), actorId(req), b.provider, b.files, b.providerAccountId ?? null);
+  res.status(201).json(viewTransfer(t));
+}));
+function viewTransfer(t: any) { return { id: t.id, provider: t.provider, state: t.state, externalId: t.external_id, files: t.files, destination: t.destination, launch: t.spec?.launch ?? null, progress: t.progress, error: t.error, landedPaths: t.landed_paths, createdAt: t.created_at }; }

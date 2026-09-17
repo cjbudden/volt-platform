@@ -420,7 +420,18 @@ session's destination and calls `completeLanded()`), `/api/ingest/remote`,
 will transfer cloud to cloud" offer with a way to upload locally instead.
 The object is staged on the worker's disk before ingest so extraction can
 run; streaming straight into S3 multipart without the staging copy is a
-later optimisation. Steps 6 to 8 follow.
+later optimisation. Step 6 is built: `services/ingest/providers/` (the `TransferProvider`
+interface; Aspera through the Node API with the transfer spec handed to the
+desktop client and progress by hook or poll; MASV and Signiant as portal
+driven packages with webhooks; S3 Transfer Acceleration as presigned PUT
+URLs signed with SigV4), `services/ingest/transfers.ts` (create, record,
+apply events, and when files land run each through the same
+`completeLanded()` as an upload), `/api/ingest/transfers` and the
+unauthenticated `/api/ingest/transfers/:id/events` callback, a poll on the
+watchfolder tick, and "Send with <provider>" in the panel with the portal
+link or the Aspera spec. Request shapes are pinned by tests against fakes
+and must be verified against a live account before go-live. Steps 7 and 8
+follow.
 
 ## 6.1 What is missing
 

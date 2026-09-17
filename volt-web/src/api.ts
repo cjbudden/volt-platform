@@ -829,6 +829,12 @@ export interface IngestHeld {
   status: 'awaiting_metadata' | 'duplicate' | 'rejected'; awaitingMetadata: string[] | null
   duplicate: { outcome: string; ofAssetId: string | null; strength: string | null } | null; rules: { rung: string; ruleName: string }[]; createdAt: string
 }
+export interface IngestTransfer {
+  id: string; provider: string; state: 'created' | 'running' | 'landed' | 'failed' | 'cancelled'; externalId: string | null
+  files: { name: string; bytes?: number | null; relativePath?: string | null }[]
+  launch: { kind: 'aspera_spec'; transferSpec: Record<string, any>; note: string } | { kind: 'portal'; url: string; note: string } | { kind: 'presigned'; uploads: { name: string; url: string; method: 'PUT' }[]; note: string } | { kind: 'none'; note: string } | null
+  progress: { bytes?: number; pct?: number } | null; error: string | null; landedPaths: Record<string, string> | null; createdAt: string
+}
 export interface IngestWebhook { id: string; name: string; url: string; enabled: boolean; events: string[]; lastStatus: number | null; lastAt: string | null; lastError: string | null; secret?: string }
 
 export const api = {
@@ -1149,6 +1155,9 @@ export const api = {
   ingestProviderAuthorize: (provider: string): Promise<{ url: string }> => req(`/ingest/providers/${provider}/authorize`),
   addIngestProvider: (b: { provider: 'aspera' | 'masv' | 'signiant'; label: string; config: Record<string, any> }): Promise<{ id: string }> => req('/ingest/providers', { method: 'POST', body: JSON.stringify(b) }),
   deleteIngestProvider: (id: string) => req(`/ingest/providers/${id}`, { method: 'DELETE' }),
+  ingestTransfers: (): Promise<IngestTransfer[]> => req('/ingest/transfers'),
+  createIngestTransfer: (b: { provider: 'aspera' | 'masv' | 'signiant' | 's3accel'; files: { name: string; bytes?: number | null; relativePath?: string | null }[]; providerAccountId?: string | null }): Promise<IngestTransfer> =>
+    req('/ingest/transfers', { method: 'POST', body: JSON.stringify(b) }),
   ingestWebhooks: (): Promise<IngestWebhook[]> => req('/ingest/webhooks'),
   createIngestWebhook: (b: { name: string; url: string; events?: string[] }): Promise<IngestWebhook> => req('/ingest/webhooks', { method: 'POST', body: JSON.stringify(b) }),
   updateIngestWebhook: (id: string, b: Partial<IngestWebhook>): Promise<IngestWebhook> => req(`/ingest/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),

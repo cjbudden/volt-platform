@@ -28,7 +28,7 @@ import { uploadsRouter, uploadChunksRouter } from './modules/uploads';
 import { scheduledClipsRouter } from './modules/scheduledClips';
 import { publishTargetsRouter, publicationsRouter } from './modules/publishing';
 import { publishingRulesRouter } from './modules/publishingRules';
-import { ingestRouter as ingestRulesRouter } from './modules/ingestRules';
+import { ingestRouter as ingestRulesRouter, ingestCallbacksRouter } from './modules/ingestRules';
 import { tusRouter } from './modules/tus';
 import { paymentsRouter, paymentsAppRouter, paymentsWebhookRouter } from './modules/payments';
 import { epgRouter } from './modules/epg';
@@ -340,6 +340,7 @@ export function createServer() {
   app.use('/api/publish-targets', publishTargetsRouter); // social account config
   app.use('/api/publications', publicationsRouter);      // publish + view tracking
   app.use('/api/publishing-rules', publishingRulesRouter); // the ladder + publishing points
+  app.use('/api/ingest', ingestCallbacksRouter);             // provider callbacks, no Volt session
   app.use('/api/ingest', ingestRulesRouter);                 // ingest rules ladder, preview, webhooks
   app.use('/api/payments', paymentsAppRouter);           // the app verifies a receipt (publishable key)
   app.use('/api/payments', paymentsRouter);              // providers, products, viewers, grants (admin)

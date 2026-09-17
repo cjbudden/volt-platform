@@ -130,6 +130,10 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
   range fetcher (reassembly, retry of one range, single-stream fallback, short body), and
   the URL, Dropbox, OneDrive and Google Drive adapters (describe, locate by path / name and
   size, unlinked errors, picker token).
+- `ingest-providers.check.ts`, accelerated transfer providers against fake endpoints:
+  Aspera (upload_setup request, transfer spec launch, event parsing, poll), MASV and
+  Signiant (package creation, portal launch, webhook parsing) and S3 Transfer Acceleration
+  presigned PUT URLs with fixed credentials (pure).
 - `ingest-extract.check.ts`, extract() over real files made with ffmpeg (an ID3-tagged
   mp3, a mov, a mov named .mp3). Needs ffmpeg/ffprobe; pass the directory as argv[2].
 - `autovod.check.ts`, auto-VOD from a completed event recording.

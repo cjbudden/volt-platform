@@ -141,6 +141,45 @@ export function startScheduler(): () => void {
     o.resumeRetrySeconds * 1000
   ) : null;
 
+  // WATCHFOLDER SCANS, on their own interval and their own error boundary, for
+  // the same reason the fleet pass is: a watched path that has been unmounted,
+  // or a folder holding ten thousand files, must not be able to delay the pass
+  // that keeps channels on air. It starts nothing and stops nothing.
+  //
+  // Sixty seconds rather than the thirty-second tick because an ingest folder is
+  // not a real-time surface and every pass hashes files it has already seen; the
+  // operator who wants it now has a Scan button.
+  const watch = setInterval(
+    () => import('../watchfolder/store').then(async (m) => {
+      const rs = await m.scanAllFolders();
+      for (const r of rs) {
+        if (r.error) { console.error(`[watchfolder] ${r.folderId} scan failed: ${r.error}`); continue; }
+        const a = r.result?.accepted.length ?? 0;
+        const q = r.result?.quarantined.length ?? 0;
+        if (a || q) console.log(`[watchfolder] ${r.folderId}: ${a} accepted, ${q} sent to review`);
+      }
+      // INGEST RUNS AFTER THE SCAN, IN THE SAME TICK, and deliberately not on its
+      // own interval. Two independent timers over one queue is how a file gets
+      // ingested twice: the status guard in pgIngestStore would catch it, but the
+      // right answer is not to hold the race in the first place. Accepting and
+      // ingesting are one pass; the scan just happens to go first.
+      // Accelerated transfers that report through a poll (Aspera node) ride the
+      // same tick: a transfer is a drop that has not landed yet.
+      await import('../ingest/transfers').then((t) => t.pollTransfers()).catch((e) => console.error('[transfers] poll error', e));
+      const is = await m.ingestAllFolders();
+      for (const r of is) {
+        if (r.error) { console.error(`[watchfolder] ${r.folderId} ingest failed: ${r.error}`); continue; }
+        const s = r.summary;
+        if (s && (s.ingested || s.failed)) {
+          console.log(`[watchfolder] ${r.folderId}: ${s.ingested} ingested, ${s.failed} failed` +
+            (s.deferred ? `, ${s.deferred} left for other workflows` : ''));
+        }
+      }
+    }).catch((e) => console.error('[watchfolder] pass error', e)),
+    60_000
+  );
+  watch.unref?.();
+
   tick.unref?.();
   sweep.unref?.();
   fleet.unref?.();
@@ -152,6 +191,7 @@ export function startScheduler(): () => void {
     clearInterval(sweep); clearInterval(avail);
     clearInterval(fleet);
     clearInterval(prune);
+    clearInterval(watch);
     if (resume) clearInterval(resume);
   };
 }
