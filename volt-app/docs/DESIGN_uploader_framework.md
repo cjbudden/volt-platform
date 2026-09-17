@@ -444,12 +444,21 @@ runs all eight suites, 203 checks, in one command with no database.
 
 Christian, 17 Sep, on the first panel: "visually not great, needs more
 structure and design; look at Uppy; it must feel simple while offering a
-range of services." The panel was rebuilt as `IngestPanel.tsx` in Uppy's
-shape: a rail of sources (device, folder, link; Dropbox, OneDrive and Google
-Drive through their own pickers; "send with" for each accelerated provider),
-one drop zone, files as cards with thumbnails and a single badge each for
-what the rules decided, type and metadata as a sheet for all files or one,
-one primary button, an Uppy-style status bar. Long-running work moved to
+range of services." Then: "don't copy it 100%; our own design
+language, user friendly, simple; highlight colours against the heavy dark,
+subtle borders." The panel (`IngestPanel.tsx`, `ingest.css`) takes Uppy's
+simplicity and not its layout. Volt's shape: one ADD BAND across the top
+(drop anywhere on the panel; pills for this device, folder, link, and
+Dropbox / OneDrive / Drive through their pickers), then a MANIFEST, a row
+per file with its thumbnail, name, what the rules decided, and its ROUTE
+(this device, cloud to cloud, not ingested) with a route swatch, the one
+thing no other uploader can show because no other uploader decides it
+before a byte moves. Route counts sit in the manifest header. Type and
+metadata are a sheet for all files or one row. One primary action,
+"Ingest N files", with "Send with <provider>" beside it. Colour: the panel
+sits a step lighter than the console with visible borders, a gradient
+highlight along its top edge (blue, sky, violet: local, cloud, accelerated),
+and a small palette for routes and decisions. Long-running work moved to
 `IngestQueue.tsx`, a drawer mounted once in App (per-file pause, resume and
 cancel, thumbnails, rate and time left, and the "needs you" items), with a
 floating progress ring when closed. `cloudPickers.ts` loads each vendor's

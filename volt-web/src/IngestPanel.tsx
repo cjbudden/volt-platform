@@ -13,10 +13,10 @@
 //  on desktop; the tus client on phones. Cloud sources and accelerated
 //  providers never move bytes through this device at all.
 // ============================================================================
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, type IngestPreviewRow, type IngestHeld, type IngestTransfer } from './api'
 import { startUpload, subscribe, type UploadItem } from './uploadManager'
-import { tusUpload, isCellular } from './tusClient'
+import { tusUpload } from './tusClient'
 import { TypePicker, MetadataForm } from './ContentTypeFields'
 import { openDropboxChooser, openOneDrivePicker, openGooglePicker, pickerConfigured } from './cloudPickers'
 import './ingest.css'
@@ -43,11 +43,6 @@ interface Picked { id: string; file: File; preview?: IngestPreviewRow; skip?: bo
   cloud?: { provider: string; ref: string; providerAccountId: string; label: string; strength: string } | null; thumb?: string | null }
 
 const I = {
-  device: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 20h8"/></svg>,
-  folder: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>,
-  link: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>,
-  camera: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>,
-  cloud: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M7 18a4 4 0 0 1-.6-7.95A6 6 0 0 1 18 9a4.5 4.5 0 0 1-1 8.9z"/><path d="M12 12v8m-3-3 3 3 3-3"/></svg>,
   up: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 16V5m-5 5 5-5 5 5"/><path d="M4 19h16"/></svg>,
 }
 
@@ -174,130 +169,143 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
   const rate = active.reduce((a, i) => a + (i.rate ?? 0), 0)
   const eta = rate > 0 ? Math.round((tot - sent) / rate) : null
 
-  const railBtn = (k: Source, label: string, icon: ReactNode, onClick: () => void, disabled = false, title = '') => (
-    <button type="button" className={`ig-src${src === k ? ' on' : ''}`} onClick={onClick} disabled={disabled} title={title}>{icon}<span>{label}</span></button>
+  /** Volt's own shape. Not a source rail and a card grid: one band to add
+   *  from anywhere, then a manifest of rows, each carrying its ROUTE (this
+   *  device, cloud to cloud, accelerated) and what the rules decided. The
+   *  route is the thing no other uploader shows, because no other uploader
+   *  decides it before a byte moves. */
+  const srcBtn = (k: Source, text: string, onClick: () => void, disabled = false, title = '') => (
+    <button type="button" className="ig-add" onClick={onClick} disabled={disabled} title={title} data-on={src === k || undefined}>{text}</button>
   )
-  const brandIco = (bg: string, letter: string) => <span className="ig-ico" style={{ background: bg }}>{letter}</span>
+  const routeOf = (p: Picked): { key: 'local' | 'cloud' | 'none'; text: string } =>
+    p.preview?.reject ? { key: 'none', text: 'not ingested' }
+    : p.cloud && p.preview?.settings.transfer !== 'local' ? { key: 'cloud', text: `cloud to cloud from ${p.cloud.label}` }
+    : { key: 'local', text: phone ? 'from this phone, resumable' : 'from this device, resumable' }
+  const routeCounts = { local: pending.filter(p => routeOf(p).key === 'local').length, cloud: pending.filter(p => routeOf(p).key === 'cloud').length, refused: picked.filter(p => p.preview?.reject).length }
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div className="ig">
-        <div className="ig-rail">
-          <div className="ig-t">Add from</div>
-          {railBtn('device', phone ? 'Camera roll' : 'My device', I.device, () => { setSrc('device'); fileRef.current?.click() })}
-          {!phone && railBtn('folder', 'A folder', I.folder, () => { setSrc('folder'); folderRef.current?.click() })}
-          {phone && railBtn('camera', 'Record now', I.camera, () => { setSrc('camera'); camRef.current?.click() })}
-          {railBtn('link', 'Link', I.link, () => setSrc('link'))}
-          <div className="ig-t" style={{ marginTop: 8 }}>Cloud to cloud</div>
-          {railBtn('dropbox', 'Dropbox', brandIco('#0061fe', 'D'), () => { setSrc('dropbox'); fromPicker('dropbox') }, !pickers.dropbox, pickers.dropbox ? 'Pick in Dropbox; Volt fetches it, nothing goes through this device' : 'Set VITE_DROPBOX_APP_KEY to enable the Dropbox chooser')}
-          {railBtn('onedrive', 'OneDrive', brandIco('#0a64c2', 'O'), () => { setSrc('onedrive'); fromPicker('onedrive') }, !pickers.onedrive, pickers.onedrive ? '' : 'Set VITE_MS_CLIENT_ID to enable the OneDrive picker')}
-          {railBtn('gdrive', 'Google Drive', brandIco('#1ea362', 'G'), () => { setSrc('gdrive'); fromPicker('gdrive') }, !pickers.gdrive, pickers.gdrive ? '' : 'Set VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to enable the Drive picker')}
-          {providers.length > 0 && <div className="ig-t" style={{ marginTop: 8 }}>Send with</div>}
-          {providers.map(pa => <button key={pa.id} type="button" className="ig-src" disabled={!pending.length} title={pending.length ? `Accelerated transfer: ${pa.label} moves the files, Volt ingests them when they land` : 'Add files first'} onClick={() => sendWith(pa)}>{I.cloud}<span>{pa.label}</span></button>)}
+      <div className="ig"
+        onDragEnter={e => { e.preventDefault(); depth.current++; setOver(true) }}
+        onDragLeave={e => { e.preventDefault(); if (--depth.current <= 0) setOver(false) }}
+        onDragOver={e => e.preventDefault()}
+        onDrop={async e => { e.preventDefault(); depth.current = 0; setOver(false); add(await filesFromDrop(e.dataTransfer)) }}>
+
+        {/* THE ADD BAND: one strip, every door, always visible. Drop anywhere on the panel. */}
+        <div className={`ig-band${over ? ' over' : ''}`}>
+          <div className="ig-band-l">
+            <span className="ig-band-ico">{I.up}</span>
+            <div>
+              <div className="ig-band-t">{over ? 'Drop to add' : picked.length ? 'Drop more here' : 'Drop files or a folder here'}</div>
+              <div className="ig-band-s">{phone ? 'or add from your camera roll' : 'or add from'}</div>
+            </div>
+          </div>
+          <div className="ig-band-r">
+            {srcBtn('device', phone ? 'Camera roll' : 'This device', () => { setSrc('device'); fileRef.current?.click() })}
+            {!phone && srcBtn('folder', 'Folder', () => { setSrc('folder'); folderRef.current?.click() })}
+            {phone && srcBtn('camera', 'Record now', () => { setSrc('camera'); camRef.current?.click() })}
+            {srcBtn('link', 'Link', () => setSrc(src === 'link' ? 'device' : 'link'))}
+            <span className="ig-sep" title="Files that are already in a cloud drive move provider to Volt and never touch this device" />
+            {srcBtn('dropbox', 'Dropbox', () => { setSrc('dropbox'); fromPicker('dropbox') }, !pickers.dropbox, pickers.dropbox ? 'Pick in Dropbox; Volt fetches it cloud to cloud' : 'Set VITE_DROPBOX_APP_KEY to enable')}
+            {srcBtn('onedrive', 'OneDrive', () => { setSrc('onedrive'); fromPicker('onedrive') }, !pickers.onedrive, pickers.onedrive ? '' : 'Set VITE_MS_CLIENT_ID to enable')}
+            {srcBtn('gdrive', 'Drive', () => { setSrc('gdrive'); fromPicker('gdrive') }, !pickers.gdrive, pickers.gdrive ? '' : 'Set VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to enable')}
+          </div>
           <input ref={fileRef} type="file" accept="video/*,audio/*,image/*" multiple hidden onChange={e => { add([...(e.target.files ?? [])]); e.target.value = '' }} />
           <input ref={folderRef} type="file" multiple hidden {...({ webkitdirectory: '' } as any)} onChange={e => { add([...(e.target.files ?? [])]); e.target.value = '' }} />
           <input ref={camRef} type="file" accept="video/*" capture="environment" hidden onChange={e => { add([...(e.target.files ?? [])]); e.target.value = '' }} />
         </div>
 
-        <div className="ig-main"
-          onDragEnter={e => { e.preventDefault(); depth.current++; setOver(true) }}
-          onDragLeave={e => { e.preventDefault(); if (--depth.current <= 0) setOver(false) }}
-          onDragOver={e => e.preventDefault()}
-          onDrop={async e => { e.preventDefault(); depth.current = 0; setOver(false); add(await filesFromDrop(e.dataTransfer)) }}>
-          <div className="ig-head">
-            {picked.length ? <><b>{picked.length} file{picked.length === 1 ? '' : 's'}</b><span>· {fmtBytes(totalBytes)}</span></> : <span>Add to the library</span>}
-            <span className="sp" />
-            {picked.length > 0 && <button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => fileRef.current?.click()}>Add more</button>}
-            <button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => setSheet(sheet === 'all' ? null : 'all')}>{typeId ? 'Type and metadata' : 'Set type and metadata'}</button>
-          </div>
+        {src === 'link' && (
+          <form className="ig-link" onSubmit={e => { e.preventDefault(); fetchLink() }}>
+            <input className="ig-in" value={link} onChange={e => setLink(e.target.value)} placeholder="https://example.com/master.mxf  (fetched by Volt's servers, nothing goes through this device)" autoFocus />
+            <button type="submit" className="btn primary" disabled={!link.trim()}>Import</button>
+            <button type="button" className="btn ghost" onClick={() => setSrc('device')}>Close</button>
+          </form>
+        )}
 
-          <div className="ig-body">
+        {picked.length > 0 && (
+          <div className="ig-man">
+            <div className="ig-man-h">
+              <span className="n">{picked.length} file{picked.length === 1 ? '' : 's'} <span className="d">· {fmtBytes(totalBytes)}</span></span>
+              <span className="routes">
+                {routeCounts.local > 0 && <span className="rt local">{routeCounts.local} from {phone ? 'this phone' : 'this device'}</span>}
+                {routeCounts.cloud > 0 && <span className="rt cloud">{routeCounts.cloud} cloud to cloud</span>}
+                {routeCounts.refused > 0 && <span className="rt none">{routeCounts.refused} refused</span>}
+              </span>
+              <span className="sp" />
+              <button type="button" className="ig-lnk" onClick={() => setSheet(sheet === 'all' ? null : 'all')}>{typeId ? 'Type and metadata for all' : 'Set type and metadata for all'}</button>
+              <button type="button" className="ig-lnk" onClick={() => setPicked([])}>Clear</button>
+            </div>
+
             {sheet === 'all' && (
               <div className="ig-sheet">
-                <h4>Applies to every file added from now</h4>
-                <p>Leave the type empty and the ingest rules decide it. Required fields can be filled while the upload runs; ingest waits for them, the bytes do not.</p>
+                <div className="ig-sheet-h"><b>Every file added from now</b><span>Leave the type empty and the rules decide it. Required fields can be filled while the upload runs.</span></div>
                 <div style={{ display: 'grid', gridTemplateColumns: phone ? '1fr' : '240px 1fr', gap: 12 }}>
                   <TypePicker appliesTo="vod" value={typeId} onChange={id => { setTypeId(id); setMeta({}) }} />
                   {typeId ? <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact /> : <div />}
                 </div>
-                <div><button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => setSheet(null)}>Done</button></div>
-              </div>
-            )}
-            {sheet && sheet !== 'all' && (() => { const p = picked.find(x => x.id === sheet); if (!p) return null; return (
-              <div className="ig-sheet">
-                <h4>{p.file.name}</h4>
-                <p>Type and metadata for this file only. Anything left empty falls back to the panel's setting, then the rules.</p>
-                <div style={{ display: 'grid', gridTemplateColumns: phone ? '1fr' : '240px 1fr', gap: 12 }}>
-                  <TypePicker appliesTo="vod" value={p.typeId ?? typeId} onChange={id => setPicked(c => c.map(x => x.id === p.id ? { ...x, typeId: id, meta: {} } : x))} />
-                  {(p.typeId ?? typeId) ? <MetadataForm typeId={p.typeId ?? typeId} value={p.meta ?? {}} onChange={v => setPicked(c => c.map(x => x.id === p.id ? { ...x, meta: v } : x))} compact /> : <div />}
-                </div>
-                <div><button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => setSheet(null)}>Done</button></div>
-              </div>) })()}
-            {src === 'link' && (
-              <div className="ig-sheet">
-                <h4>Import from a link</h4>
-                <p>Fetched by Volt's servers as parallel ranges. Nothing goes through this device. Signed URLs work.</p>
-                <form style={{ display: 'flex', gap: 8 }} onSubmit={e => { e.preventDefault(); fetchLink() }}>
-                  <input className="ig-in" value={link} onChange={e => setLink(e.target.value)} placeholder="https://example.com/master.mxf" autoFocus />
-                  <button type="submit" className="btn primary" disabled={!link.trim()}>Import</button>
-                </form>
+                <div><button type="button" className="ig-lnk" onClick={() => setSheet(null)}>Done</button></div>
               </div>
             )}
 
-            {picked.length === 0 && src !== 'link' ? (
-              <div className={`ig-drop${over ? ' over' : ''}`}>
-                <div>
-                  {I.up}
-                  <div className="big">Drop files here or <a onClick={() => fileRef.current?.click()}>browse</a></div>
-                  <div className="sm">{phone ? 'Video, audio and images from your camera roll or Files' : 'Video, audio and images. Drop a whole folder and its structure is kept.'}{phone && isCellular() ? ' · on cellular: smaller chunks, resumes if it drops' : ''}</div>
-                </div>
-              </div>
-            ) : picked.length > 0 && (
-              <div className="ig-grid">
-                {picked.map(p => {
-                  const pv = p.preview
-                  const badge = !pv ? <span className="ig-badge">checking rules</span>
-                    : pv.reject ? <span className="ig-badge bad" title={pv.reject}>refused</span>
-                    : p.cloud && pv.settings.transfer !== 'local' ? <span className="ig-badge cloud" title={`found in ${p.cloud.label} by ${p.cloud.strength.replace('_', ' ')}: transfers cloud to cloud`}>from {p.cloud.label}</span>
-                    : pv.duplicate !== 'proceed' ? <span className="ig-badge warn" title={`looks like a duplicate (${pv.duplicateOf?.strength.replace('_', ' ')}), rule says ${pv.duplicate}`}>duplicate?</span>
-                    : pv.settings.naming === 'honour' && pv.changed ? <span className="ig-badge" title={`will be named ${pv.sanitised}`}>renamed</span>
-                    : <span className="ig-badge ok" title={pv.matched.map(m => m.ruleName).join(' < ')}>ready</span>
-                  const prog = tusProg[p.id]
-                  return (
-                    <div key={p.id} className={`ig-card${p.skip ? ' dim' : ''}`}>
-                      <div className="th">{p.thumb ? (p.file.type.startsWith('image/') ? <img src={p.thumb} alt="" /> : <img src={p.thumb} alt="" />) : (p.file.name.split('.').pop() ?? 'file').slice(0, 4)}</div>
-                      <div className="nm" title={(p.file as any).webkitRelativePath || p.file.name}>{p.file.name}</div>
-                      <div className="mt">{fmtBytes(p.file.size)}{(p.meta && Object.keys(p.meta).length) ? ' · metadata set' : ''}{p.typeId ? ' · own type' : ''}</div>
-                      <div className="bd">{badge}{p.cloud && pv?.settings.transfer !== 'local' && <button type="button" className="ig-badge" style={{ cursor: 'pointer', border: 0 }} onClick={() => setPicked(c => c.map(x => x.id === p.id ? { ...x, cloud: null } : x))}>upload from here</button>}</div>
+            <div className="ig-rows">
+              {picked.map(p => {
+                const pv = p.preview; const r = routeOf(p); const prog = tusProg[p.id]
+                const decision = !pv ? <span className="ig-dec">checking the rules</span>
+                  : pv.reject ? <span className="ig-dec bad">refused: {pv.reject}</span>
+                  : pv.duplicate !== 'proceed' ? <span className="ig-dec warn">looks like a duplicate ({pv.duplicateOf?.strength.replace('_', ' ')}), rule says {pv.duplicate}</span>
+                  : <span className="ig-dec ok" title={pv.matched.map(m => m.ruleName).join(' < ')}>{pv.settings.naming === 'honour' ? (pv.changed ? `named ${pv.sanitised}` : 'name kept') : `filed by ${pv.settings.naming.replace('_', ' ')}`}{pv.deferred ? ' · checked again after upload' : ''}</span>
+                return (
+                  <div key={p.id} className={`ig-row${p.skip ? ' dim' : ''}`}>
+                    <div className="th">{p.thumb ? <img src={p.thumb} alt="" /> : (p.file.name.split('.').pop() ?? 'file').slice(0, 4)}</div>
+                    <div className="body">
+                      <div className="l1"><span className="nm" title={(p.file as any).webkitRelativePath || p.file.name}>{p.file.name}</span><span className="sz">{fmtBytes(p.file.size)}</span>{(p.meta && Object.keys(p.meta).length) ? <span className="tg">metadata set</span> : null}{p.typeId ? <span className="tg">own type</span> : null}</div>
+                      <div className="l2">{decision}</div>
                       {prog != null && <div className="ig-pb"><i style={{ width: `${Math.round(prog * 100)}%` }} /></div>}
-                      <button type="button" className="ed" onClick={() => setSheet(p.id)}>Edit</button>
-                      <button type="button" className="x" aria-label="Remove" onClick={() => setPicked(c => c.filter(x => x.id !== p.id))}>×</button>
                     </div>
-                  )
-                })}
-              </div>
-            )}
-            {err && <div style={{ color: 'var(--down)', fontSize: 'var(--fs-sm)' }}>{err}</div>}
-          </div>
-
-          {(active.length > 0 || recentDone.length > 0) && (
-            <div className={`ig-status${active.length ? '' : ' done'}`}>
-              {active.length ? <>
-                <span>Uploading {active.length} file{active.length === 1 ? '' : 's'}</span>
-                <div className="bar"><i style={{ width: `${tot ? Math.round((sent / tot) * 100) : 0}%` }} /></div>
-                <span style={{ color: 'var(--muted)' }}>{fmtBytes(sent)} of {fmtBytes(tot)}{rate > 0 ? ` · ${fmtBytes(rate)}/s` : ''}{eta != null ? ` · ${eta >= 60 ? Math.round(eta / 60) + 'm' : eta + 's'} left` : ''}</span>
-              </> : <><span style={{ color: 'var(--live)' }}>✓ {recentDone.length} uploaded</span><span style={{ color: 'var(--muted)' }}>{recentDone.map(i => i.ingest?.status === 'awaiting_metadata' ? `${i.name}: waiting for metadata` : i.ingest?.status === 'duplicate' ? `${i.name}: duplicate, decide in the queue` : '').filter(Boolean).join(' · ')}</span></>}
+                    <div className={`route ${r.key}`} title={r.text}><i /><span>{r.key === 'cloud' ? 'cloud to cloud' : r.key === 'local' ? (phone ? 'this phone' : 'this device') : 'not ingested'}</span>
+                      {p.cloud && r.key === 'cloud' && <button type="button" className="ig-lnk" onClick={() => setPicked(c => c.map(x => x.id === p.id ? { ...x, cloud: null } : x))}>use this device</button>}
+                    </div>
+                    <div className="acts">
+                      <button type="button" className="ig-lnk" onClick={() => setSheet(sheet === p.id ? null : p.id)}>{sheet === p.id ? 'Close' : 'Details'}</button>
+                      <button type="button" className="ig-x" aria-label="Remove" onClick={() => setPicked(c => c.filter(x => x.id !== p.id))}>×</button>
+                    </div>
+                    {sheet === p.id && (
+                      <div className="ig-sheet in-row">
+                        <div className="ig-sheet-h"><b>Type and metadata for this file</b><span>Anything left empty falls back to the panel's setting, then the rules.</span></div>
+                        <div style={{ display: 'grid', gridTemplateColumns: phone ? '1fr' : '240px 1fr', gap: 12 }}>
+                          <TypePicker appliesTo="vod" value={p.typeId ?? typeId} onChange={id => setPicked(c => c.map(x => x.id === p.id ? { ...x, typeId: id, meta: {} } : x))} />
+                          {(p.typeId ?? typeId) ? <MetadataForm typeId={p.typeId ?? typeId} value={p.meta ?? {}} onChange={v => setPicked(c => c.map(x => x.id === p.id ? { ...x, meta: v } : x))} compact /> : <div />}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
-          )}
-
-          <div className="ig-foot">
-            <label className={`ig-tog${autoUpload ? ' on' : ''}`} onClick={() => setAutoUpload(v => !v)}><i />Start as soon as added</label>
-            {held.length > 0 && <span className="ig-badge warn" title="Open the Ingest Queue to fill metadata or decide duplicates">{held.length} waiting on you</span>}
-            {transfers.filter(t => t.state !== 'landed').length > 0 && <span className="ig-badge fast">{transfers.filter(t => t.state !== 'landed').length} accelerated transfer{transfers.filter(t => t.state !== 'landed').length === 1 ? '' : 's'} running</span>}
-            <span className="sp" />
-            {pending.length > 0 && !autoUpload && <button type="button" className="btn primary" disabled={busy} onClick={() => start(pending)}>Upload {pending.length} file{pending.length === 1 ? '' : 's'}</button>}
-            {pending.length > 0 && autoUpload && busy && <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)' }}>starting…</span>}
           </div>
+        )}
+
+        {err && <div className="ig-err">{err}</div>}
+
+        {(active.length > 0 || recentDone.length > 0) && (
+          <div className={`ig-status${active.length ? '' : ' done'}`}>
+            {active.length ? <>
+              <span className="ig-ring" style={{ ['--p' as any]: `${tot ? Math.round((sent / tot) * 100) : 0}%` }} />
+              <span><b>Uploading {active.length} file{active.length === 1 ? '' : 's'}</b> · {fmtBytes(sent)} of {fmtBytes(tot)}{rate > 0 ? ` · ${fmtBytes(rate)}/s` : ''}{eta != null ? ` · ${eta >= 60 ? Math.round(eta / 60) + 'm' : eta + 's'} left` : ''}</span>
+              <span className="sp" /><span className="ig-dec">pause and details in the Ingest Queue</span>
+            </> : <><span style={{ color: 'var(--live)' }}>✓ {recentDone.length} uploaded</span><span className="ig-dec">{recentDone.map(i => i.ingest?.status === 'awaiting_metadata' ? `${i.name}: waiting for metadata` : i.ingest?.status === 'duplicate' ? `${i.name}: duplicate, decide in the queue` : '').filter(Boolean).join(' · ')}</span></>}
+          </div>
+        )}
+
+        <div className="ig-foot">
+          <label className={`ig-tog${autoUpload ? ' on' : ''}`} onClick={() => setAutoUpload(v => !v)}><i />Start as soon as added</label>
+          {held.length > 0 && <span className="rt warn">{held.length} waiting on you, in the queue</span>}
+          {transfers.filter(t => t.state !== 'landed').length > 0 && <span className="rt fast">{transfers.filter(t => t.state !== 'landed').length} accelerated transfer{transfers.filter(t => t.state !== 'landed').length === 1 ? '' : 's'} running</span>}
+          <span className="sp" />
+          {providers.map(pa => <button key={pa.id} type="button" className="btn ghost" disabled={!pending.length} title={pending.length ? `${pa.label} moves the files; Volt ingests them when they land` : 'Add files first'} onClick={() => sendWith(pa)}>Send with {pa.label}</button>)}
+          {pending.length > 0 && !autoUpload && <button type="button" className="btn primary" disabled={busy} onClick={() => start(pending)}>Ingest {pending.length} file{pending.length === 1 ? '' : 's'}</button>}
+          {pending.length > 0 && autoUpload && busy && <span className="ig-dec">starting…</span>}
         </div>
       </div>
     </div>
