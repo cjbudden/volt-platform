@@ -27,6 +27,12 @@
 .ig-band-s{font-size:var(--fs-xs);color:var(--faint);margin-top:2px}
 .ig-band-r{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .ig-add{font:inherit;font-size:var(--fs-sm);font-weight:500;color:var(--text);background:var(--ig-surface);border:1px solid var(--ig-line);border-radius:var(--radius-ctl,10px);padding:6px 13px;cursor:pointer}
+.ig-add{display:inline-flex;align-items:center;gap:7px}
+.ig-add>svg{width:15px;height:15px;color:var(--muted);flex:none}
+.ig-add[data-on]>svg{color:var(--brand)}
+.ig-brand{width:16px;height:16px;display:grid;place-items:center;flex:none;position:relative}
+.ig-brand img{width:16px;height:16px;display:block}
+.ig-brand i{width:16px;height:16px;display:grid;place-items:center;font-size:10px;font-weight:700;font-style:normal;color:#fff;background:var(--c);border-radius:4px}
 .ig-add:hover{border-color:var(--ig-line-2);background:var(--ig-surface-2)}
 .ig-add[data-on]{border-color:rgba(63,123,255,.5);background:var(--brand-dim)}
 .ig-add[disabled]{opacity:.4;cursor:not-allowed}

@@ -13,7 +13,7 @@
 //  on desktop; the tus client on phones. Cloud sources and accelerated
 //  providers never move bytes through this device at all.
 // ============================================================================
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, type IngestPreviewRow, type IngestHeld, type IngestTransfer } from './api'
 import { startUpload, subscribe, type UploadItem } from './uploadManager'
 import { tusUpload } from './tusClient'
@@ -42,8 +42,29 @@ type Source = 'device' | 'folder' | 'link' | 'dropbox' | 'onedrive' | 'gdrive' |
 interface Picked { id: string; file: File; preview?: IngestPreviewRow; skip?: boolean; meta?: Record<string, any>; typeId?: string | null
   cloud?: { provider: string; ref: string; providerAccountId: string; label: string; strength: string } | null; thumb?: string | null }
 
+/** Line icons for our own doors; the cloud drives use their brand marks
+ *  (served from Simple Icons, alt text and a letter fallback), because a
+ *  Dropbox or Drive mark says "this is my files there" faster than a word
+ *  can. Shipping note: use each vendor's official brand asset and follow
+ *  their guidelines before this goes to customers. */
 const I = {
   up: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 16V5m-5 5 5-5 5 5"/><path d="M4 19h16"/></svg>,
+  device: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 20h8"/></svg>,
+  phone: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18h2"/></svg>,
+  folder: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>,
+  link: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>,
+  camera: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>,
+  fast: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M13 3 4 14h7l-1 7 9-11h-7z"/></svg>,
+}
+const BRAND: Record<'dropbox' | 'onedrive' | 'gdrive', { src: string; alt: string; letter: string; colour: string }> = {
+  dropbox: { src: 'https://cdn.simpleicons.org/dropbox/0061FE', alt: 'Dropbox', letter: 'D', colour: '#0061fe' },
+  onedrive: { src: 'https://cdn.simpleicons.org/microsoftonedrive/0A64C2', alt: 'OneDrive', letter: 'O', colour: '#0a64c2' },
+  gdrive: { src: 'https://cdn.simpleicons.org/googledrive/1EA362', alt: 'Google Drive', letter: 'G', colour: '#1ea362' },
+}
+function Brand({ k }: { k: keyof typeof BRAND }) {
+  const b = BRAND[k]
+  const [failed, setFailed] = useState(false)
+  return <span className="ig-brand" style={{ ['--c' as any]: b.colour }}>{failed ? <i aria-hidden>{b.letter}</i> : <img src={b.src} alt="" width={16} height={16} onError={() => setFailed(true)} />}</span>
 }
 
 export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; source?: string }) {
@@ -174,8 +195,8 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
    *  device, cloud to cloud, accelerated) and what the rules decided. The
    *  route is the thing no other uploader shows, because no other uploader
    *  decides it before a byte moves. */
-  const srcBtn = (k: Source, text: string, onClick: () => void, disabled = false, title = '') => (
-    <button type="button" className="ig-add" onClick={onClick} disabled={disabled} title={title} data-on={src === k || undefined}>{text}</button>
+  const srcBtn = (k: Source, text: string, icon: React.ReactNode, onClick: () => void, disabled = false, title = '') => (
+    <button type="button" className="ig-add" onClick={onClick} disabled={disabled} title={title} data-on={src === k || undefined}>{icon}<span>{text}</span></button>
   )
   const routeOf = (p: Picked): { key: 'local' | 'cloud' | 'none'; text: string } =>
     p.preview?.reject ? { key: 'none', text: 'not ingested' }
@@ -201,14 +222,14 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
             </div>
           </div>
           <div className="ig-band-r">
-            {srcBtn('device', phone ? 'Camera roll' : 'This device', () => { setSrc('device'); fileRef.current?.click() })}
-            {!phone && srcBtn('folder', 'Folder', () => { setSrc('folder'); folderRef.current?.click() })}
-            {phone && srcBtn('camera', 'Record now', () => { setSrc('camera'); camRef.current?.click() })}
-            {srcBtn('link', 'Link', () => setSrc(src === 'link' ? 'device' : 'link'))}
+            {srcBtn('device', phone ? 'Camera roll' : 'This device', phone ? I.phone : I.device, () => { setSrc('device'); fileRef.current?.click() })}
+            {!phone && srcBtn('folder', 'Folder', I.folder, () => { setSrc('folder'); folderRef.current?.click() })}
+            {phone && srcBtn('camera', 'Record now', I.camera, () => { setSrc('camera'); camRef.current?.click() })}
+            {srcBtn('link', 'Link', I.link, () => setSrc(src === 'link' ? 'device' : 'link'))}
             <span className="ig-sep" title="Files that are already in a cloud drive move provider to Volt and never touch this device" />
-            {srcBtn('dropbox', 'Dropbox', () => { setSrc('dropbox'); fromPicker('dropbox') }, !pickers.dropbox, pickers.dropbox ? 'Pick in Dropbox; Volt fetches it cloud to cloud' : 'Set VITE_DROPBOX_APP_KEY to enable')}
-            {srcBtn('onedrive', 'OneDrive', () => { setSrc('onedrive'); fromPicker('onedrive') }, !pickers.onedrive, pickers.onedrive ? '' : 'Set VITE_MS_CLIENT_ID to enable')}
-            {srcBtn('gdrive', 'Drive', () => { setSrc('gdrive'); fromPicker('gdrive') }, !pickers.gdrive, pickers.gdrive ? '' : 'Set VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to enable')}
+            {srcBtn('dropbox', 'Dropbox', <Brand k="dropbox" />, () => { setSrc('dropbox'); fromPicker('dropbox') }, !pickers.dropbox, pickers.dropbox ? 'Pick in Dropbox; Volt fetches it cloud to cloud' : 'Set VITE_DROPBOX_APP_KEY to enable')}
+            {srcBtn('onedrive', 'OneDrive', <Brand k="onedrive" />, () => { setSrc('onedrive'); fromPicker('onedrive') }, !pickers.onedrive, pickers.onedrive ? '' : 'Set VITE_MS_CLIENT_ID to enable')}
+            {srcBtn('gdrive', 'Google Drive', <Brand k="gdrive" />, () => { setSrc('gdrive'); fromPicker('gdrive') }, !pickers.gdrive, pickers.gdrive ? '' : 'Set VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to enable')}
           </div>
           <input ref={fileRef} type="file" accept="video/*,audio/*,image/*" multiple hidden onChange={e => { add([...(e.target.files ?? [])]); e.target.value = '' }} />
           <input ref={folderRef} type="file" multiple hidden {...({ webkitdirectory: '' } as any)} onChange={e => { add([...(e.target.files ?? [])]); e.target.value = '' }} />
@@ -303,7 +324,7 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
           {held.length > 0 && <span className="rt warn">{held.length} waiting on you, in the queue</span>}
           {transfers.filter(t => t.state !== 'landed').length > 0 && <span className="rt fast">{transfers.filter(t => t.state !== 'landed').length} accelerated transfer{transfers.filter(t => t.state !== 'landed').length === 1 ? '' : 's'} running</span>}
           <span className="sp" />
-          {providers.map(pa => <button key={pa.id} type="button" className="btn ghost" disabled={!pending.length} title={pending.length ? `${pa.label} moves the files; Volt ingests them when they land` : 'Add files first'} onClick={() => sendWith(pa)}>Send with {pa.label}</button>)}
+          {providers.map(pa => <button key={pa.id} type="button" className="btn ghost" disabled={!pending.length} title={pending.length ? `${pa.label} moves the files; Volt ingests them when they land` : 'Add files first'} onClick={() => sendWith(pa)}>{I.fast}Send with {pa.label}</button>)}
           {pending.length > 0 && !autoUpload && <button type="button" className="btn primary" disabled={busy} onClick={() => start(pending)}>Ingest {pending.length} file{pending.length === 1 ? '' : 's'}</button>}
           {pending.length > 0 && autoUpload && busy && <span className="ig-dec">starting…</span>}
         </div>
