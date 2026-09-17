@@ -215,3 +215,93 @@ export async function deliverWebhooks(accountId: string, payload: IngestPayload,
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+//  Later decisions: the metadata gate lifting, and a duplicate being resolved.
+// ---------------------------------------------------------------------------
+
+/** Queue the encode for an asset whose ingest is now complete. Idempotent by dedupe key. */
+export async function queueEncodeFor(assetId: string): Promise<string | null> {
+  const a = await one<any>(`SELECT id, account_id, source_key, ladder_group_id FROM vod_assets WHERE id = $1`, [assetId]);
+  if (!a?.source_key) return null;
+  const { enqueue } = await import('../jobs/queue');
+  const { VOD_ENCODE } = await import('../jobs/handlers/vodEncode');
+  const job = await enqueue({ type: VOD_ENCODE, payload: { vodAssetId: a.id, accountId: a.account_id, sourcePath: a.source_key, ladderGroupId: a.ladder_group_id ?? null }, dedupeKey: `vod.encode:${a.id}`, maxAttempts: 2 });
+  await query(`UPDATE vod_assets SET encode_job_id = $2 WHERE id = $1`, [a.id, job.id]);
+  return job.id;
+}
+
+async function markIngested(assetId: string, extra: Record<string, any> = {}): Promise<void> {
+  await query(`UPDATE vod_assets SET ingest = COALESCE(ingest, '{}'::jsonb) || $2::jsonb, awaiting_metadata = NULL, updated_at = now() WHERE id = $1`,
+    [assetId, JSON.stringify({ status: 'ingested', ...extra })]);
+}
+
+/**
+ * The operator (or an API caller) supplied metadata for an asset the gate is
+ * holding. Validates against the type, and if nothing required is missing
+ * any more, completes the ingest: status, encode, webhooks.
+ */
+export async function completeMetadata(accountId: string, assetId: string, values: Record<string, any>): Promise<{ missing: string[]; ingested: boolean }> {
+  const a = await one<any>(`SELECT * FROM vod_assets WHERE id = $1 AND account_id = $2`, [assetId, accountId]);
+  if (!a) throw Object.assign(new Error('asset not found'), { status: 404 });
+  const { validateMetadata } = await import('../metadataValidator');
+  let fields: any[] = [];
+  if (a.schema_id) { const r = await resolveEffectiveFields(a.schema_id, accountId).catch(() => null); fields = r?.fields ?? []; }
+  const merged = { ...(a.metadata ?? {}), ...values };
+  const clean = validateMetadata(fields, merged, 'keep');
+  const missing = missingRequired(fields, clean);
+  const wasWaiting = a.ingest?.status === 'awaiting_metadata';
+  await query(`UPDATE vod_assets SET metadata = $2, title = COALESCE($3, title), awaiting_metadata = $4, updated_at = now() WHERE id = $1`,
+    [assetId, JSON.stringify(clean), clean.name ?? clean.title ?? null, missing.length ? missing : null]);
+  if (!missing.length && wasWaiting) {
+    await markIngested(assetId, { metadataCompletedAt: new Date().toISOString() });
+    await queueEncodeFor(assetId).catch((e) => console.warn('[ingest] encode not queued', e));
+    void notifyIngested(assetId);
+    return { missing, ingested: true };
+  }
+  return { missing, ingested: false };
+}
+
+/** Resolve a held duplicate. */
+export async function resolveDuplicate(accountId: string, assetId: string, action: 'skip' | 'version' | 'replace'): Promise<{ status: string }> {
+  const a = await one<any>(`SELECT * FROM vod_assets WHERE id = $1 AND account_id = $2`, [assetId, accountId]);
+  if (!a) throw Object.assign(new Error('asset not found'), { status: 404 });
+  if (a.ingest?.status !== 'duplicate') throw Object.assign(new Error('this asset is not a held duplicate'), { status: 409 });
+  if (action === 'skip') {
+    try { if (a.source_key && !String(a.source_key).startsWith('s3://')) require('node:fs').rmSync(a.source_key, { force: true }); } catch { /* */ }
+    await query(`DELETE FROM vod_assets WHERE id = $1`, [assetId]);
+    return { status: 'skipped' };
+  }
+  const ofId = a.ingest?.duplicate?.ofAssetId ?? null;
+  await markIngested(assetId, { duplicate: { ...(a.ingest?.duplicate ?? {}), outcome: action, resolvedAt: new Date().toISOString() } });
+  if (action === 'replace' && ofId) {
+    // The older asset stays for retention to sweep, but points at its successor.
+    await query(`UPDATE vod_assets SET ingest = COALESCE(ingest, '{}'::jsonb) || $2::jsonb, updated_at = now() WHERE id = $1 AND account_id = $3`,
+      [ofId, JSON.stringify({ replacedBy: assetId }), accountId]);
+  }
+  if (a.awaiting_metadata?.length) {
+    await query(`UPDATE vod_assets SET ingest = COALESCE(ingest, '{}'::jsonb) || '{"status":"awaiting_metadata"}'::jsonb WHERE id = $1`, [assetId]);
+    return { status: 'awaiting_metadata' };
+  }
+  await queueEncodeFor(assetId).catch((e) => console.warn('[ingest] encode not queued', e));
+  void notifyIngested(assetId);
+  return { status: 'ingested' };
+}
+
+/** Re-send the ingested payload for an asset from what the row recorded. */
+async function notifyIngested(assetId: string): Promise<void> {
+  const a = await one<any>(`SELECT * FROM vod_assets WHERE id = $1`, [assetId]);
+  if (!a) return;
+  const payload: IngestPayload = {
+    version: 1, event: 'ingested', at: new Date().toISOString(), account: a.account_id,
+    asset: { id: a.id, kind: a.ingest?.type?.kind ?? 'other', contentType: { id: a.schema_id }, title: a.title },
+    object: { key: a.ingest?.objectUri ?? a.source_key, bytes: Number(a.source_bytes ?? 0), sha256: a.sha256, mime: a.mime, container: a.ingest?.type?.container ?? '', store: a.ingest?.store ?? 'local' },
+    origin: { source: 'panel', originalName: a.original_filename ?? a.title, originalPath: a.original_path },
+    naming: a.ingest?.naming ?? { mode: 'guid', structure: 'flat', guid: '', renamed: false },
+    rules: a.ingest?.rules ?? { matched: [], sources: {} as any, deferred: false },
+    duplicate: a.ingest?.duplicate ?? null, metadata: a.metadata ?? {}, metadataSources: a.ingest?.metadataSources ?? {},
+    extracted: { file: { originalName: a.original_filename ?? '', bytes: Number(a.source_bytes ?? 0), sha256: a.sha256 }, type: a.ingest?.type, probe: a.ingest?.probe ?? null, id3: a.ingest?.id3 ?? null, image: null },
+    unmapped: a.ingest?.unmapped ?? {},
+  };
+  await deliverWebhooks(a.account_id, payload);
+}

@@ -10,7 +10,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound } from '../util/http';
 import { actor, writeAudit } from '../services/audit';
 import { BASELINE, INGEST_KEYS } from '../services/ingest/rules';
-import { preview } from '../services/ingest/pipeline';
+import { preview, completeMetadata, resolveDuplicate } from '../services/ingest/pipeline';
 import { sanitise, applyNaming } from '../services/ingest/naming';
 import { INGEST_EVENTS } from '../services/ingest/events';
 
@@ -179,4 +179,26 @@ ingestRouter.delete('/webhooks/:id', asyncHandler(async (req, res) => {
   const r = await one<any>(`DELETE FROM ingest_webhooks WHERE id = $1 AND account_id = $2 RETURNING id`, [req.params.id, accountId(req)]);
   if (!r) throw notFound('webhook not found');
   res.status(204).end();
+}));
+
+// ---------------------------------------------------------------------------
+//  Assets the pipeline is holding: the metadata gate and duplicates.
+// ---------------------------------------------------------------------------
+ingestRouter.get('/held', asyncHandler(async (req, res) => {
+  const rows = await query<any>(
+    `SELECT id, title, original_filename, source_bytes, mime, schema_id, awaiting_metadata, ingest, created_at
+       FROM vod_assets WHERE account_id = $1 AND ingest->>'status' IN ('awaiting_metadata', 'duplicate', 'rejected')
+      ORDER BY created_at DESC LIMIT 200`, [accountId(req)]);
+  res.json(rows.map((r: any) => ({ id: r.id, title: r.title, originalFilename: r.original_filename, bytes: r.source_bytes != null ? Number(r.source_bytes) : null, mime: r.mime,
+    schemaId: r.schema_id, status: r.ingest?.status, awaitingMetadata: r.awaiting_metadata, duplicate: r.ingest?.duplicate ?? null, rules: r.ingest?.rules?.matched ?? [], createdAt: r.created_at })));
+}));
+
+ingestRouter.post('/assets/:id/metadata', asyncHandler(async (req, res) => {
+  const b = z.object({ metadata: z.record(z.any()) }).parse(req.body);
+  res.json(await completeMetadata(accountId(req), req.params.id, b.metadata));
+}));
+
+ingestRouter.post('/assets/:id/duplicate', asyncHandler(async (req, res) => {
+  const b = z.object({ action: z.enum(['skip', 'version', 'replace']) }).parse(req.body);
+  res.json(await resolveDuplicate(accountId(req), req.params.id, b.action));
 }));

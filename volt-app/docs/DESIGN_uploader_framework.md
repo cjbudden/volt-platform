@@ -403,7 +403,15 @@ flight), the pipeline pushing object and sidecar to the configured
 destination (`INGEST_DESTINATION`, `INGEST_S3_*`), and
 `services/watchfolder/s3walk.ts` mirroring a bucket prefix into local
 staging so the existing scanner and ingest run unchanged, quarantines
-mirrored back to the review prefix. Steps 4 to 8 follow.
+mirrored back to the review prefix. Step 4 is built: `volt-web/src/IngestPanel.tsx` replaces the Media Library
+upload panel (files, folders with their tree, drag and drop of folders,
+pick-time preview of rename / duplicate / refuse per file, content type and
+metadata entered while the bytes move, auto upload switch, the held list
+for the metadata gate and duplicate decisions, camera roll and "record now"
+on phones with the tus client), `pages/IngestRules.tsx` edits the ladder
+and the webhooks, and `/api/ingest/held`, `/assets/:id/metadata` and
+`/assets/:id/duplicate` complete an ingest the rules were holding. Steps 5
+to 8 follow.
 
 ## 6.1 What is missing
 

@@ -3,6 +3,8 @@ import { api, setSession, clearSession, noteActivity, setUnauthorizedHandler, ty
 import Channels from './pages/Channels'
 import ChannelDetail from './pages/ChannelDetail'
 import ImageLibrary from './pages/ImageLibrary'
+import Watchfolders from './pages/Watchfolders'
+import EncodingProfiles from './pages/EncodingProfiles'
 import Recordings from './pages/Recordings'
 import RecordingDetail from './pages/RecordingDetail'
 import RecordingSourceView from './pages/RecordingSource'
@@ -27,6 +29,7 @@ import Radio from './pages/Radio'
 import RadioDetail from './pages/RadioDetail'
 import ContentTypesPage from './pages/ContentTypes'
 import PublishingPage from './pages/Publishing'
+import IngestRulesPage from './pages/IngestRules'
 import PaymentsPage from './pages/Payments'
 import { useRoute, navigate, hrefFor } from './router'
 import { pressable, openable } from './a11y'
@@ -64,6 +67,8 @@ const I = {
 const NAV_FEATURE: Record<string, string> = {
   channels: 'channels', radio: 'radio', events: 'events', epg: 'epg', loops: 'media',
   recordings: 'recordings', vod: 'vod', images: 'media', analytics: 'analytics',
+  watchfolders: 'media',
+  encoding: 'media',
 }
 
 interface NavItem { key: string; label: string; icon: ReactElement; badge?: string }
@@ -89,6 +94,8 @@ const NAV: NavGroup[] = [
     { key: 'images', label: 'Image Library', icon: I.images },
     { key: 'multiview', label: 'Multiview', icon: I.multiview },
     { key: 'review', label: 'Review', icon: I.review },
+    { key: 'watchfolders', label: 'Watchfolders', icon: I.storage },
+    { key: 'encoding', label: 'Encoding Profiles', icon: I.fleet },
     { key: 'storage', label: 'Storage', icon: I.storage },
   ] },
   { group: 'Insight', items: [
@@ -152,7 +159,7 @@ export default function App() {
   const openChannel = (id: string) => navigate(`/channels/${id}`)
 
   const account = email.split('@')[1]?.split('.')[0]?.toUpperCase() || 'RTM'
-  const EXTRA_LABEL: Record<string, string> = { apikeys: 'API Keys & Apps', users: 'User Management', system: 'System Admin', 'content-types': 'Content Types', publishing: 'Publishing Rules', payments: 'Payments' }
+  const EXTRA_LABEL: Record<string, string> = { apikeys: 'API Keys & Apps', users: 'User Management', system: 'System Admin', 'content-types': 'Content Types', publishing: 'Publishing Rules', ingest: 'Ingest Rules', payments: 'Payments' }
   const label = NAV.flatMap(g => g.items).find(i => i.key === section)?.label
     || EXTRA_LABEL[section]
     || (section ? section.charAt(0).toUpperCase() + section.slice(1) : 'Channels')
@@ -199,6 +206,7 @@ export default function App() {
     ...(isAdmin ? [{ group: 'Admin', items: [
       { key: 'content-types', label: 'Content Types', icon: I.epg },
       { key: 'publishing', label: 'Publishing Rules', icon: I.vod },
+      { key: 'ingest', label: 'Ingest Rules', icon: I.vod },
       { key: 'payments', label: 'Payments', icon: I.fleet },
       { key: 'apikeys', label: 'API Keys & Apps', icon: I.key },
       { key: 'users', label: 'User Management', icon: I.users },
@@ -299,6 +307,10 @@ export default function App() {
                 : <Channels createOpen={createOpen} setCreateOpen={setCreateOpen} onOpen={openChannel} />)
             : section === 'images'
             ? <ImageLibrary />
+            : section === 'watchfolders'
+            ? <Watchfolders />
+            : section === 'encoding'
+            ? <EncodingProfiles />
             : section === 'recordings'
             ? (route.recordingId
                 ? <RecordingDetail key={route.recordingId} id={route.recordingId} onBack={() => navigate('/recordings')} />
@@ -342,6 +354,8 @@ export default function App() {
             ? <ContentTypesPage />
             : section === 'publishing'
             ? <PublishingPage />
+            : section === 'ingest'
+            ? <IngestRulesPage />
             : section === 'payments'
             ? <PaymentsPage />
             : section === 'apikeys'

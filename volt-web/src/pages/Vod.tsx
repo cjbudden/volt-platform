@@ -1,6 +1,5 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { startUpload, subscribe, type UploadItem } from '../uploadManager'
-import type { LadderGroup } from '../api'
+import { Fragment, useEffect, useMemo, useState } from 'react'
+import { IngestPanel } from '../IngestPanel'
 import { api, type VodAssetRow } from '../api'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import { navigate } from '../router'
@@ -384,142 +383,6 @@ function AvailabilityPanel({ d, onChanged }: { d: any; onChanged: () => void }) 
 
 // ---------------------------------------------------------------------------
 
-/* ---------------------------------------------------------------------------
-   UPLOADING A VIDEO FILE.
-
-   The ladder is chosen HERE and not at encode time, because it is the one
-   decision an operator has an opinion about and the only moment they are
-   holding the file in mind. Leaving it blank is a real choice too — it takes
-   the account default AT ENCODE TIME, so a default changed during a two-hour
-   upload is still the one that applies.
-
-   THE PROGRESS IS ON THE PAGE, not in a modal that vanishes. A programme is not
-   a slate: the interesting states are the ones an hour in, where something goes
-   wrong and the operator needs to still be looking at it.
-   -------------------------------------------------------------------------*/
-/** One line on what the ingest rules decided, worded for the operator. */
-function ingestLabel(g: UploadItem['ingest']): string {
-  if (!g) return 'uploaded, encoding next'
-  switch (g.status) {
-    case 'ingested': return g.naming?.renamed ? 'uploaded and filed, encoding next' : 'uploaded, encoding next'
-    case 'awaiting_metadata': return `uploaded, waiting for ${(g.awaitingMetadata ?? []).join(', ') || 'metadata'}`
-    case 'duplicate': return g.duplicate?.outcome === 'skip' ? 'skipped, already in the library' : 'already in the library, needs a decision'
-    case 'rejected': return 'refused by an ingest rule'
-    default: return 'uploaded'
-  }
-}
-
-function UploadPanel({ onDone }: { onDone: () => void }) {
-  const [ladders, setLadders] = useState<LadderGroup[]>([])
-  const [ladderId, setLadderId] = useState('')
-  const [items, setItems] = useState<UploadItem[]>([])
-  const [over, setOver] = useState(false)
-  const [err, setErr] = useState('')
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const folderRef = useRef<HTMLInputElement | null>(null)
-  const depth = useRef(0)
-
-  useEffect(() => { api.ladderGroups().then(setLadders).catch(() => setLadders([])) }, [])
-  useEffect(() => subscribe((all) => {
-    setItems(all)
-    // Refresh the library as each upload lands, so the new asset appears with
-    // its encode already in flight rather than after a manual refresh.
-    if (all.some(i => i.status === 'done')) onDone()
-  }), [onDone])
-
-  const send = async (files: File[]) => {
-    setErr('')
-    for (const f of files) {
-      try {
-        await startUpload(f, { kind: 'loop', purpose: 'vod', ladderGroupId: ladderId || null })
-      } catch (e: any) { setErr(String(e?.message ?? e)) }
-    }
-  }
-
-  const active = items.filter(i => i.status !== 'done' || Date.now() - i.startedAt < 60_000)
-  const chosen = ladders.find(l => l.id === ladderId)
-
-  return (
-    <div className="card" style={{ padding: 16, marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <strong style={{ fontSize: 'var(--fs-body)' }}>Upload video</strong>
-        <select value={ladderId} onChange={e => setLadderId(e.target.value)}
-          style={{ background: 'var(--panel-2,#151922)', border: '1px solid var(--border,#242a36)',
-                   color: 'var(--text,#e7ebf3)', borderRadius: 8, padding: '6px 9px',
-                   fontFamily: 'inherit', fontSize: 'var(--fs-sm)' }}>
-          <option value="">The account default ladder</option>
-          {ladders.map(l => (
-            <option key={l.id} value={l.id}>
-              {l.name}{l.tracks_output_profile_id ? ' (tracks live)' : ''}
-              {l.rungs.length ? ` — ${l.rungs.map(r => r.height + 'p').join('/')}` : ''}
-            </option>
-          ))}
-        </select>
-        <button type="button" className="btn primary" onClick={() => inputRef.current?.click()}>
-          Choose files
-        </button>
-        <button type="button" className="btn" onClick={() => folderRef.current?.click()}>
-          Choose folder
-        </button>
-        <input ref={inputRef} type="file" accept="video/*,audio/*" multiple hidden
-          onChange={e => { send([...(e.target.files ?? [])]); e.target.value = '' }} />
-        {/* A folder pick keeps each file's path inside the folder
-            (webkitRelativePath), which the ingest rules can honour or flatten. */}
-        <input ref={folderRef} type="file" multiple hidden {...({ webkitdirectory: '' } as any)}
-          onChange={e => { send([...(e.target.files ?? [])]); e.target.value = '' }} />
-      </div>
-
-      <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)', margin: '8px 0 0' }}>
-        {chosen?.tracks_output_profile_id
-          ? <>Encoded to the same ladder as the channels using <strong>{chosen.tracked_profile_name}</strong>, read at encode time so it cannot drift from them.</>
-          : chosen
-            ? <>Encoded to this ladder{chosen.cap_to_source ? ', skipping any rung above the source\u2019s own height' : ', including rungs above the source'}.</>
-            : <>Encoded to whichever ladder is the account default when the encode runs.</>}
-      </p>
-
-      <div
-        onDragEnter={e => { e.preventDefault(); depth.current++; setOver(true) }}
-        onDragLeave={e => { e.preventDefault(); if (--depth.current <= 0) setOver(false) }}
-        onDragOver={e => e.preventDefault()}
-        onDrop={e => {
-          e.preventDefault(); depth.current = 0; setOver(false)
-          send([...(e.dataTransfer?.files ?? [])])
-        }}
-        style={{
-          marginTop: 10, padding: '18px 14px', borderRadius: 10, textAlign: 'center',
-          border: `1px dashed ${over ? 'var(--brand,#3f7bff)' : 'var(--border,#242a36)'}`,
-          background: over ? 'rgba(63,123,255,.08)' : 'transparent',
-          fontSize: 'var(--fs-sm)', color: 'var(--faint,#8b93a7)',
-        }}>
-        Drop video files here
-      </div>
-
-      {err && <p style={{ color: 'var(--danger,#f87171)', fontSize: 'var(--fs-sm)' }}>{err}</p>}
-
-      {active.map(i => (
-        <div key={i.id} style={{ marginTop: 8, fontSize: 'var(--fs-sm)' }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {i.name}
-            </span>
-            <span style={{ color: 'var(--faint,#8b93a7)' }}>
-              {i.status === 'done' ? ingestLabel(i.ingest)
-                : i.status === 'error' ? (i.error ?? 'failed')
-                : `${Math.round((i.sentBytes / Math.max(1, i.totalBytes)) * 100)}%`}
-            </span>
-          </div>
-          <div style={{ height: 4, borderRadius: 2, background: 'var(--panel-2,#151922)', marginTop: 4 }}>
-            <div style={{
-              height: '100%', borderRadius: 2,
-              width: `${Math.round((i.sentBytes / Math.max(1, i.totalBytes)) * 100)}%`,
-              background: i.status === 'error' ? 'var(--danger,#f87171)' : 'var(--brand,#3f7bff)',
-            }} />
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
 
 export default function VodPage() {
   const [rows, setRows] = useState<VodAssetRow[] | null>(null)
@@ -574,7 +437,7 @@ export default function VodPage() {
       </div>
       {err && <div className="err">{err}</div>}
 
-      <UploadPanel onDone={load} />
+      <IngestPanel onDone={load} />
 
       <div className="card">
         <div className="flex flex-wrap items-center gap-2" style={{ padding: '12px 14px 0' }}>

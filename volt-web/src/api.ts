@@ -800,6 +800,37 @@ export interface AssetEncodeState {
   } | null
 }
 
+
+// ---- ingest framework (upload rules ladder, preview, held assets, webhooks) ----
+export interface IngestWhen {
+  extensions?: string[]; kinds?: ('video' | 'audio' | 'image' | 'other')[]; mimePrefixes?: string[]
+  namePattern?: { type: 'glob' | 'regex'; pattern: string }; pathPrefix?: string
+  minBytes?: number; maxBytes?: number; minDurationSec?: number; maxDurationSec?: number; minHeight?: number; hasTags?: boolean
+}
+export interface IngestThen {
+  contentTypeId?: string | null; targetKind?: string | null
+  naming?: 'honour' | 'guid' | 'guid_prefixed' | 'template'; structure?: 'flat' | 'honour' | 'minimal' | 'template'
+  nameTemplate?: string | null; pathTemplate?: string | null; lowercase?: boolean
+  duplicate?: 'skip' | 'replace' | 'version' | 'rename' | 'ask'; nameCheck?: boolean
+  transfer?: 'auto' | 'local' | 'cloud'; metadataRequired?: 'none' | 'before_ingest' | 'before_upload'; autoUpload?: boolean
+  sidecar?: 'none' | 'json' | 'xml'; webhooks?: string[]; ladderGroupId?: string | null; reject?: string | null
+}
+export interface IngestRule {
+  id: string; rung: 'account' | 'type' | 'source'; scopeId: string | null; ordinal: number; name: string; enabled: boolean
+  when: IngestWhen | null; then: IngestThen; metadataDefaults: Record<string, any>; createdAt: string; updatedAt: string
+}
+export interface IngestPreviewRow {
+  name: string; key: string; sanitised: string; changed: boolean; settings: Required<IngestThen>
+  sources: Record<string, string>; matched: { rung: string; ruleId: string; ruleName: string }[]; deferred: boolean
+  duplicate: 'proceed' | 'skip' | 'replace' | 'version' | 'rename' | 'ask'; duplicateOf: { assetId: string; strength: string } | null; reject: string | null
+}
+export interface IngestHeld {
+  id: string; title: string | null; originalFilename: string | null; bytes: number | null; mime: string | null; schemaId: string | null
+  status: 'awaiting_metadata' | 'duplicate' | 'rejected'; awaitingMetadata: string[] | null
+  duplicate: { outcome: string; ofAssetId: string | null; strength: string | null } | null; rules: { rung: string; ruleName: string }[]; createdAt: string
+}
+export interface IngestWebhook { id: string; name: string; url: string; enabled: boolean; events: string[]; lastStatus: number | null; lastAt: string | null; lastError: string | null; secret?: string }
+
 export const api = {
   login: (email: string, password: string): Promise<{ access: string; refresh?: string; expiresIn?: number }> =>
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
@@ -1095,6 +1126,25 @@ export const api = {
   deleteContentType: (id: string) => req(`/metadata-schemas/${id}`, { method: 'DELETE' }),
   ownerDefaults: (owner: { kind: 'channel' | 'event'; id: string }): Promise<OwnerBaseEntry> =>
     req(`/epg/owner-defaults?${owner.kind === 'event' ? 'eventId' : 'channelId'}=${owner.id}`),
+
+
+  // ---- ingest framework ----
+  ingestBaseline: (): Promise<{ baseline: Required<IngestThen>; keys: string[]; events: string[] }> => req('/ingest/baseline'),
+  ingestRules: (): Promise<IngestRule[]> => req('/ingest/rules'),
+  createIngestRule: (b: Partial<IngestRule>): Promise<IngestRule> => req('/ingest/rules', { method: 'POST', body: JSON.stringify(b) }),
+  updateIngestRule: (id: string, b: Partial<IngestRule>): Promise<IngestRule> => req(`/ingest/rules/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteIngestRule: (id: string) => req(`/ingest/rules/${id}`, { method: 'DELETE' }),
+  ingestPreview: (b: { files: { name: string; bytes?: number; relativePath?: string | null; mime?: string | null }[]; source?: string; contentTypeId?: string | null; item?: IngestThen }): Promise<IngestPreviewRow[]> =>
+    req('/ingest/preview', { method: 'POST', body: JSON.stringify(b) }),
+  ingestHeld: (): Promise<IngestHeld[]> => req('/ingest/held'),
+  ingestSetMetadata: (assetId: string, metadata: Record<string, any>): Promise<{ missing: string[]; ingested: boolean }> =>
+    req(`/ingest/assets/${assetId}/metadata`, { method: 'POST', body: JSON.stringify({ metadata }) }),
+  ingestResolveDuplicate: (assetId: string, action: 'skip' | 'version' | 'replace'): Promise<{ status: string }> =>
+    req(`/ingest/assets/${assetId}/duplicate`, { method: 'POST', body: JSON.stringify({ action }) }),
+  ingestWebhooks: (): Promise<IngestWebhook[]> => req('/ingest/webhooks'),
+  createIngestWebhook: (b: { name: string; url: string; events?: string[] }): Promise<IngestWebhook> => req('/ingest/webhooks', { method: 'POST', body: JSON.stringify(b) }),
+  updateIngestWebhook: (id: string, b: Partial<IngestWebhook>): Promise<IngestWebhook> => req(`/ingest/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteIngestWebhook: (id: string) => req(`/ingest/webhooks/${id}`, { method: 'DELETE' }),
 
   // ---- publishing rules (the ladder) + availability ----
   publishingRules: (): Promise<PublishingRule[]> => req('/publishing-rules'),
