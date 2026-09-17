@@ -6,10 +6,13 @@ import { migrate } from './services/migrate';
 import { startWorker } from './services/jobs/worker';
 import { registerClipHandlers } from './services/jobs/handlers/clipExtract';
 import { registerQcHandlers } from './services/jobs/handlers/qcRun';
+import { registerVodEncodeHandlers } from './services/jobs/handlers/vodEncode';
+import { registerRemoteIngestHandlers } from './services/jobs/handlers/remoteIngest';
 import { backfillContainers } from './services/containers';
 import { reconcileAll } from './services/media/reconcile';
 import { reapAllEncoders } from './services/orchestrator/encoderCleanup';
 import { stopAllRadio } from './services/radio/pipeline';
+import { stopAllFeeds } from './services/radio/mp3Gateway';
 
 const app = createServer();
 
@@ -133,6 +136,8 @@ boot().then(() => {
   // claims types it can handle, so an unregistered type would sit queued.
   registerClipHandlers();
   registerQcHandlers();
+  registerVodEncodeHandlers();
+  registerRemoteIngestHandlers();
   worker = startWorker();
 }).catch((e) => {
   console.error('[boot] schema preparation failed — refusing to serve', e);
@@ -144,6 +149,11 @@ async function shutdown(signal: string) {
   stopScheduler();
   if (worker) await worker.stop();   // let in-flight jobs unwind; the reaper covers the rest
   stopAllRadio();   // detached ffmpeg trees would otherwise outlive the control plane
+  // On-demand MP3 transcodes are our children too, and a listener holding an
+  // open socket would keep the server from closing. Ending them lets the
+  // shutdown proceed and records each session with `shutdown` as its reason,
+  // which is honestly different from a listener who chose to leave.
+  stopAllFeeds();
   server.close(async () => {
     await pool.end();
     process.exit(0);

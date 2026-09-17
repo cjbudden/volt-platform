@@ -1141,6 +1141,14 @@ export const api = {
     req(`/ingest/assets/${assetId}/metadata`, { method: 'POST', body: JSON.stringify({ metadata }) }),
   ingestResolveDuplicate: (assetId: string, action: 'skip' | 'version' | 'replace'): Promise<{ status: string }> =>
     req(`/ingest/assets/${assetId}/duplicate`, { method: 'POST', body: JSON.stringify({ action }) }),
+  ingestRemote: (b: { ref: { provider: 'url' | 'dropbox' | 'onedrive' | 'gdrive'; ref: string; token?: string | null; headers?: Record<string, string> }; name?: string; bytes?: number; relativePath?: string | null; schemaId?: string | null; metadata?: Record<string, any>; providerAccountId?: string | null }): Promise<{ sessionId: string; assetId: string | null; jobId: string; name: string; bytes: number | null; ranges: boolean; transfer: 'cloud' }> =>
+    req('/ingest/remote', { method: 'POST', body: JSON.stringify(b) }),
+  ingestLocate: (files: { name: string; bytes?: number; relativePath?: string | null }[]): Promise<{ name: string; hit: { ref: { provider: string; ref: string }; name: string; bytes: number | null; path?: string | null; strength: string; providerAccountId: string; label: string } | null }[]> =>
+    req('/ingest/locate', { method: 'POST', body: JSON.stringify({ files }) }),
+  ingestProviders: (): Promise<{ linked: { id: string; provider: string; label: string; expiresAt: string | null }[]; available: { provider: string; configured: boolean }[] }> => req('/ingest/providers'),
+  ingestProviderAuthorize: (provider: string): Promise<{ url: string }> => req(`/ingest/providers/${provider}/authorize`),
+  addIngestProvider: (b: { provider: 'aspera' | 'masv' | 'signiant'; label: string; config: Record<string, any> }): Promise<{ id: string }> => req('/ingest/providers', { method: 'POST', body: JSON.stringify(b) }),
+  deleteIngestProvider: (id: string) => req(`/ingest/providers/${id}`, { method: 'DELETE' }),
   ingestWebhooks: (): Promise<IngestWebhook[]> => req('/ingest/webhooks'),
   createIngestWebhook: (b: { name: string; url: string; events?: string[] }): Promise<IngestWebhook> => req('/ingest/webhooks', { method: 'POST', body: JSON.stringify(b) }),
   updateIngestWebhook: (id: string, b: Partial<IngestWebhook>): Promise<IngestWebhook> => req(`/ingest/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),

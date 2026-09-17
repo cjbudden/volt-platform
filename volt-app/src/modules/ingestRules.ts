@@ -13,6 +13,14 @@ import { BASELINE, INGEST_KEYS } from '../services/ingest/rules';
 import { preview, completeMetadata, resolveDuplicate } from '../services/ingest/pipeline';
 import { sanitise, applyNaming } from '../services/ingest/naming';
 import { INGEST_EVENTS } from '../services/ingest/events';
+import { openSession } from '../services/uploads';
+import { enqueue } from '../services/jobs/queue';
+import { REMOTE_INGEST } from '../services/jobs/handlers/remoteIngest';
+import { sourcesFor, type RemoteRef, type LocateHit } from '../services/ingest/sources';
+import { providerAccounts, accessTokenFor, authorizeUrl, linkOAuth, OAUTH, type OAuthProvider } from '../services/ingest/providerAccounts';
+import { actorId } from '../util/actor';
+import { config } from '../config';
+import { createHmac } from 'node:crypto';
 
 export const ingestRouter = Router();
 ingestRouter.use(requireAuth);
@@ -201,4 +209,116 @@ ingestRouter.post('/assets/:id/metadata', asyncHandler(async (req, res) => {
 ingestRouter.post('/assets/:id/duplicate', asyncHandler(async (req, res) => {
   const b = z.object({ action: z.enum(['skip', 'version', 'replace']) }).parse(req.body);
   res.json(await resolveDuplicate(accountId(req), req.params.id, b.action));
+}));
+
+// ---------------------------------------------------------------------------
+//  Remote sources: cloud to cloud.
+// ---------------------------------------------------------------------------
+const remoteRef = z.object({
+  provider: z.enum(['url', 'dropbox', 'onedrive', 'gdrive']), ref: z.string().min(1).max(4000),
+  token: z.string().max(4000).nullable().optional(), headers: z.record(z.string()).optional(),
+});
+
+/** Start a cloud to cloud ingest. Answers at once with the session; the worker does the moving. */
+ingestRouter.post('/remote', asyncHandler(async (req, res) => {
+  const b = z.object({
+    ref: remoteRef, name: z.string().max(400).optional(), bytes: z.number().nonnegative().optional(),
+    relativePath: z.string().max(1000).nullable().optional(), schemaId: z.string().uuid().nullable().optional(),
+    metadata: z.record(z.any()).optional(), ladderGroupId: z.string().uuid().nullable().optional(), providerAccountId: z.string().uuid().nullable().optional(),
+  }).parse(req.body);
+  // Describe first so the session has a real name and size, and so a bad link fails here, not in a job.
+  const src = sourcesFor()[b.ref.provider];
+  let auth = null as { accessToken: string } | null;
+  if (b.ref.provider !== 'url' && !b.ref.token) {
+    const accts = await providerAccounts(accountId(req), b.ref.provider);
+    const pa = b.providerAccountId ? accts.find((a) => a.id === b.providerAccountId) : accts[0];
+    if (!pa) return res.status(409).json({ error: `${b.ref.provider} is not linked to this account. Link it under Ingest Rules, or use the picker.` });
+    auth = { accessToken: await accessTokenFor(pa) };
+  }
+  let d;
+  try { d = await src.describe(b.ref, auth); } catch (e: any) { return res.status(e?.status && e.status < 500 ? e.status : 502).json({ error: e?.message ?? 'could not read the source' }); }
+  const name = b.name || d.name;
+  const { session, assetId } = await openSession({
+    accountId: accountId(req), openedBy: actorId(req), purpose: 'vod', name: name.replace(/\.[^.]+$/, '').slice(0, 200), filename: name,
+    contentType: d.mime ?? 'application/octet-stream', totalBytes: Math.max(1, d.bytes ?? b.bytes ?? 1),
+    ladderGroupId: b.ladderGroupId ?? null, relativePath: b.relativePath ?? null, schemaId: b.schemaId ?? null, metadata: b.metadata ?? null, source: b.ref.provider,
+  });
+  await query(`UPDATE upload_sessions SET chunk_count = 0 WHERE id = $1`, [session.id]);
+  const job = await enqueue({ type: REMOTE_INGEST, payload: { sessionId: session.id, ref: b.ref, providerAccountId: b.providerAccountId ?? null }, dedupeKey: `ingest.remote:${session.id}`, maxAttempts: 3 });
+  res.status(202).json({ sessionId: session.id, assetId, jobId: job.id, name, bytes: d.bytes, ranges: d.ranges, transfer: 'cloud' });
+}));
+
+/** Is this file already in a linked cloud account? For transfer = auto before a byte moves. */
+ingestRouter.post('/locate', asyncHandler(async (req, res) => {
+  const b = z.object({ files: z.array(z.object({ name: z.string().min(1).max(400), bytes: z.number().nonnegative().optional(), relativePath: z.string().max(1000).nullable().optional() })).min(1).max(200) }).parse(req.body);
+  const accts = await providerAccounts(accountId(req));
+  const srcs = sourcesFor();
+  const out: { name: string; hit: (LocateHit & { providerAccountId: string; label: string }) | null }[] = [];
+  for (const f of b.files) {
+    let hit: (LocateHit & { providerAccountId: string; label: string }) | null = null;
+    for (const pa of accts) {
+      const src = (srcs as any)[pa.provider];
+      if (!src?.locate) continue;
+      try {
+        const h = await src.locate({ name: f.name, bytes: f.bytes ?? null, relativePath: f.relativePath ?? null }, { accessToken: await accessTokenFor(pa) });
+        if (h && (!hit || h.strength === 'path' || (h.strength === 'name_and_size' && hit.strength === 'name'))) hit = { ...h, providerAccountId: pa.id, label: pa.label };
+      } catch (e) { /* one provider down is not a reason to stop looking */ }
+    }
+    out.push({ name: f.name, hit });
+  }
+  res.json(out);
+}));
+
+// ---------------------------------------------------------------------------
+//  Linked provider accounts.
+// ---------------------------------------------------------------------------
+ingestRouter.get('/providers', asyncHandler(async (req, res) => {
+  const rows = await providerAccounts(accountId(req));
+  res.json({
+    linked: rows.map((r) => ({ id: r.id, provider: r.provider, label: r.label, expiresAt: r.expires_at, config: { ...r.config, apiKey: undefined, password: undefined } })),
+    available: (Object.keys(OAUTH) as OAuthProvider[]).map((p) => ({ provider: p, configured: !!OAUTH[p].clientId() })),
+  });
+}));
+
+function oauthState(accountId: string, provider: string, userId: string | null): string {
+  const payload = Buffer.from(JSON.stringify({ a: accountId, p: provider, u: userId, t: Date.now() })).toString('base64url');
+  return payload + '.' + createHmac('sha256', config.jwt.accessSecret).update(payload).digest('base64url');
+}
+function readState(state: string): { a: string; p: string; u: string | null; t: number } {
+  const [payload, sig] = state.split('.');
+  if (createHmac('sha256', config.jwt.accessSecret).update(payload ?? '').digest('base64url') !== sig) throw Object.assign(new Error('bad state'), { status: 400 });
+  const j = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  if (Date.now() - j.t > 15 * 60 * 1000) throw Object.assign(new Error('the link request expired, start again'), { status: 400 });
+  return j;
+}
+function redirectUri(req: any, provider: string): string {
+  return `${config.publicBaseUrl}/api/ingest/providers/${provider}/callback`;
+}
+
+/** Where to send the browser to link a provider. */
+ingestRouter.get('/providers/:provider/authorize', asyncHandler(async (req, res) => {
+  const provider = req.params.provider as OAuthProvider;
+  if (!(provider in OAUTH)) throw notFound('unknown provider');
+  res.json({ url: authorizeUrl(provider, redirectUri(req, provider), oauthState(accountId(req), provider, actorId(req))) });
+}));
+
+/** The provider sends the browser back here. No session cookie is needed: the signed state names the account. */
+ingestRouter.get('/providers/:provider/callback', asyncHandler(async (req, res) => {
+  const provider = req.params.provider as OAuthProvider;
+  const code = String(req.query.code ?? ''); const st = readState(String(req.query.state ?? ''));
+  if (st.p !== provider || !code) throw Object.assign(new Error('bad callback'), { status: 400 });
+  await linkOAuth(st.a, provider, code, redirectUri(req, provider), `${provider} (linked ${new Date().toISOString().slice(0, 10)})`, st.u);
+  res.type('html').send(`<!doctype html><title>Linked</title><p style="font-family:system-ui">${provider} is linked to Volt. You can close this window.</p><script>try{window.opener&&window.opener.postMessage({voltProviderLinked:'${provider}'},'*')}catch(e){}</script>`);
+}));
+
+/** Non-OAuth providers (Aspera node, MASV key, Signiant) are entered directly. */
+ingestRouter.post('/providers', asyncHandler(async (req, res) => {
+  const b = z.object({ provider: z.enum(['aspera', 'masv', 'signiant']), label: z.string().min(1).max(120), config: z.record(z.any()) }).parse(req.body);
+  const r = await one<any>(`INSERT INTO ingest_provider_accounts (account_id, provider, label, config, linked_by) VALUES ($1,$2,$3,$4,$5) RETURNING id, provider, label`, [accountId(req), b.provider, b.label, JSON.stringify(b.config), actorId(req)]);
+  res.status(201).json(r);
+}));
+ingestRouter.delete('/providers/:id', asyncHandler(async (req, res) => {
+  const r = await one<any>(`DELETE FROM ingest_provider_accounts WHERE id = $1 AND account_id = $2 RETURNING id`, [req.params.id, accountId(req)]);
+  if (!r) throw notFound('provider account not found');
+  res.status(204).end();
 }));

@@ -113,15 +113,23 @@ export default function IngestRulesPage() {
   const [editing, setEditing] = useState<Partial<IngestRule> | null>(null)
   const [newHook, setNewHook] = useState({ name: '', url: '' })
   const [shownSecret, setShownSecret] = useState<string | null>(null)
+  const [providers, setProviders] = useState<{ linked: { id: string; provider: string; label: string }[]; available: { provider: string; configured: boolean }[] } | null>(null)
+  const [accel, setAccel] = useState<{ provider: 'aspera' | 'masv' | 'signiant'; label: string; config: string }>({ provider: 'aspera', label: '', config: '{"nodeUrl":"https://node.example.com:9092","user":"","password":"","destinationRoot":"/volt/inbox"}' })
   const [err, setErr] = useState('')
 
   async function load() {
     try {
       const [r, t, f, h, b] = await Promise.all([api.ingestRules(), api.contentTypes('vod'), api.watchfolders().catch(() => [] as Watchfolder[]), api.ingestWebhooks(), api.ingestBaseline()])
       setRules(r); setTypes(t); setFolders(f); setHooks(h); setBaseline(b.baseline)
+      api.ingestProviders().then(setProviders).catch(() => {})
     } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() }, [])
+  useEffect(() => { const h = (e: MessageEvent) => { if (e.data?.voltProviderLinked) load() }; window.addEventListener('message', h); return () => window.removeEventListener('message', h) }, [])
+
+  async function linkProvider(provider: string) {
+    try { const { url } = await api.ingestProviderAuthorize(provider); window.open(url, 'volt-link', 'width=560,height=720') } catch (e: any) { setErr(e.message) }
+  }
 
   const scopeName = (r: IngestRule) => r.rung === 'account' ? '' : r.rung === 'type' ? (types.find(t => t.id === r.scopeId)?.name ?? (r.scopeId ? r.scopeId : 'any type')) : (folders.find(f => f.id === r.scopeId)?.name ?? (r.scopeId ?? 'any source'))
   const thenSummary = (t: IngestThen) => Object.entries(t).filter(([, v]) => v !== undefined && v !== null && !(Array.isArray(v) && !v.length)).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.length : String(v)}`).join(' · ') || 'inherits everything'
@@ -153,6 +161,33 @@ export default function IngestRulesPage() {
           ))}
         </div>
       ))}
+
+      <div className="card" style={{ padding: 14, marginBottom: 14 }}>
+        <div className="sec-label">Linked cloud accounts (cloud to cloud transfer, and "this file is already in Dropbox")</div>
+        {providers?.linked.map(l => (
+          <div key={l.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', borderTop: '1px solid var(--border)', fontSize: 'var(--fs-sm)' }}>
+            <span style={{ minWidth: 100 }}><strong>{l.provider}</strong></span><span style={{ flex: 1, color: 'var(--muted)' }}>{l.label}</span>
+            <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)' }} onClick={() => api.deleteIngestProvider(l.id).then(() => api.ingestProviders().then(setProviders))}>Unlink</button>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {providers?.available.map(a => (
+            <button key={a.provider} className="btn" disabled={!a.configured} title={a.configured ? '' : 'Set the client id and secret for this provider on the server first'} onClick={() => linkProvider(a.provider)}>Link {a.provider === 'gdrive' ? 'Google Drive' : a.provider === 'onedrive' ? 'OneDrive' : 'Dropbox'}</button>
+          ))}
+          <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)' }}>Google Drive links with the picker scope only: files you pick, never a search of your Drive.</span>
+        </div>
+        <div className="sec-label" style={{ marginTop: 12 }}>Accelerated transfer providers</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 8, alignItems: 'start' }}>
+          <select value={accel.provider} onChange={e => setAccel({ ...accel, provider: e.target.value as any, config: e.target.value === 'aspera' ? '{"nodeUrl":"https://node.example.com:9092","user":"","password":"","destinationRoot":"/volt/inbox"}' : e.target.value === 'masv' ? '{"apiKey":"","teamId":"","portalSubdomain":""}' : '{"clientId":"","clientSecret":"","portalUrl":""}' })}>
+            <option value="aspera">IBM Aspera</option><option value="masv">MASV</option><option value="signiant">Signiant</option>
+          </select>
+          <div style={{ display: 'grid', gap: 6 }}>
+            <input placeholder="Label (e.g. Sydney Aspera node)" value={accel.label} onChange={e => setAccel({ ...accel, label: e.target.value })} />
+            <textarea rows={3} value={accel.config} onChange={e => setAccel({ ...accel, config: e.target.value })} style={{ fontFamily: 'var(--mono, monospace)', fontSize: 'var(--fs-xs)' }} />
+            <button className="btn" style={{ justifySelf: 'start' }} disabled={!accel.label} onClick={async () => { try { await api.addIngestProvider({ provider: accel.provider, label: accel.label, config: JSON.parse(accel.config) }); setAccel({ ...accel, label: '' }); api.ingestProviders().then(setProviders) } catch (e: any) { setErr(e.message) } }}>Add provider</button>
+          </div>
+        </div>
+      </div>
 
       <div className="card" style={{ padding: 14 }}>
         <div className="sec-label">Webhooks (signed POST of the ingest payload)</div>

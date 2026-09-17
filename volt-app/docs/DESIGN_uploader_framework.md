@@ -410,8 +410,17 @@ metadata entered while the bytes move, auto upload switch, the held list
 for the metadata gate and duplicate decisions, camera roll and "record now"
 on phones with the tus client), `pages/IngestRules.tsx` edits the ladder
 and the webhooks, and `/api/ingest/held`, `/assets/:id/metadata` and
-`/assets/:id/duplicate` complete an ingest the rules were holding. Steps 5
-to 8 follow.
+`/assets/:id/duplicate` complete an ingest the rules were holding. Step 5 is built: `services/ingest/sources/` (URL, Dropbox, OneDrive,
+Google Drive adapters behind one interface with injected fetch, and the
+parallel range fetcher), `providerAccounts.ts` (OAuth link and refresh for
+Dropbox, OneDrive and Drive with drive.file only; credentials for Aspera,
+MASV, Signiant), the `ingest.remote` job (the worker fetches into the
+session's destination and calls `completeLanded()`), `/api/ingest/remote`,
+`/locate` and `/providers/*`, and the panel's link box and "in Dropbox:
+will transfer cloud to cloud" offer with a way to upload locally instead.
+The object is staged on the worker's disk before ingest so extraction can
+run; streaming straight into S3 multipart without the staging copy is a
+later optimisation. Steps 6 to 8 follow.
 
 ## 6.1 What is missing
 

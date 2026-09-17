@@ -126,6 +126,10 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
 - `ingest-s3.check.ts`, the S3 destination (single put, multipart in parallel, abort on a
   failed part, sidecar beside the object) and the S3 watchfolder mirror (quiet time, junk,
   known objects, review prefix) against an in-memory bucket (pure).
+- `ingest-sources.check.ts`, remote sources over a fake provider on localhost: the parallel
+  range fetcher (reassembly, retry of one range, single-stream fallback, short body), and
+  the URL, Dropbox, OneDrive and Google Drive adapters (describe, locate by path / name and
+  size, unlinked errors, picker token).
 - `ingest-extract.check.ts`, extract() over real files made with ffmpeg (an ID3-tagged
   mp3, a mov, a mov named .mp3). Needs ffmpeg/ffprobe; pass the directory as argv[2].
 - `autovod.check.ts`, auto-VOD from a completed event recording.

@@ -44,7 +44,7 @@ export async function filesFromDrop(dt: DataTransfer): Promise<File[]> {
   return out
 }
 
-interface Picked { file: File; preview?: IngestPreviewRow; skip?: boolean }
+interface Picked { file: File; preview?: IngestPreviewRow; skip?: boolean; cloud?: { provider: string; ref: string; providerAccountId: string; label: string; strength: string } | null }
 
 export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; source?: string }) {
   const [picked, setPicked] = useState<Picked[]>([])
@@ -57,6 +57,8 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [tusProgress, setTusProgress] = useState<Record<string, number>>({})
+  const [link, setLink] = useState('')
+  const [remote, setRemote] = useState<{ name: string; note: string }[]>([])
   const fileRef = useRef<HTMLInputElement | null>(null)
   const folderRef = useRef<HTMLInputElement | null>(null)
   const camRef = useRef<HTMLInputElement | null>(null)
@@ -79,7 +81,15 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
         files: files.map(f => ({ name: f.name, bytes: f.size, relativePath: (f as any).webkitRelativePath || null, mime: f.type || null })),
         source, contentTypeId: typeId,
       })
-      const withPreview = files.map((f, i) => ({ file: f, preview: rows[i], skip: rows[i]?.reject != null || rows[i]?.duplicate === 'skip' }))
+      const withPreview: Picked[] = files.map((f, i) => ({ file: f, preview: rows[i], skip: rows[i]?.reject != null || rows[i]?.duplicate === 'skip' }))
+      // transfer = auto: before a byte moves, ask whether a linked cloud account already has the file.
+      const wantCloud = withPreview.filter(w => w.preview && w.preview.settings.transfer !== 'local' && !w.skip)
+      if (wantCloud.length) {
+        try {
+          const hits = await api.ingestLocate(wantCloud.map(w => ({ name: w.file.name, bytes: w.file.size, relativePath: (w.file as any).webkitRelativePath || null })))
+          for (const w of wantCloud) { const h = hits.find(x => x.name === w.file.name)?.hit; if (h) w.cloud = { provider: h.ref.provider, ref: h.ref.ref, providerAccountId: h.providerAccountId, label: h.label, strength: h.strength } }
+        } catch { /* no linked accounts, or a provider is down: the local route still works */ }
+      }
       setPicked(p => p.map(x => withPreview.find(w => w.file === x.file) ?? x))
       if (autoUpload) void start(withPreview)
     } catch (e: any) { setErr(String(e?.message ?? e)) }
@@ -90,6 +100,13 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
     for (const p of list) {
       if (p.skip || p.preview?.reject) continue
       try {
+        if (p.cloud && p.preview?.settings.transfer !== 'local') {
+          // Cloud to cloud: the worker fetches it from the linked account; the laptop moves nothing.
+          const r = await api.ingestRemote({ ref: { provider: p.cloud.provider as any, ref: p.cloud.ref }, name: p.file.name, bytes: p.file.size, relativePath: (p.file as any).webkitRelativePath || null, schemaId: typeId, metadata: Object.keys(meta).length ? meta : undefined, providerAccountId: p.cloud.providerAccountId })
+          setRemote(cur => [...cur, { name: r.name, note: `transferring from ${p.cloud!.label} in the cloud${r.ranges ? ' (parallel ranges)' : ''}` }])
+          onDone()
+          continue
+        }
         if (phone) {
           const key = p.file.name + p.file.size
           await tusUpload(p.file, {
@@ -138,6 +155,12 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
         {phone && isCellular() && <div style={{ fontSize: 'var(--fs-xs)', marginTop: 4 }}>On cellular: smaller chunks, resumes if the connection drops.</div>}
       </div>
 
+      <form style={{ display: 'flex', gap: 8, marginTop: 8 }} onSubmit={async e => { e.preventDefault(); if (!link.trim()) return; setErr(''); try { const r = await api.ingestRemote({ ref: { provider: 'url', ref: link.trim() }, schemaId: typeId, metadata: Object.keys(meta).length ? meta : undefined }); setRemote(cur => [...cur, { name: r.name, note: `fetching from the link in the cloud${r.ranges ? ' (parallel ranges)' : ''}` }]); setLink(''); onDone() } catch (e: any) { setErr(String(e?.message ?? e)) } }}>
+        <input value={link} onChange={e => setLink(e.target.value)} placeholder="Or paste a link (https://...): fetched server side, never through this device" style={{ flex: 1 }} />
+        <button type="submit" className="btn" disabled={!link.trim()}>Fetch</button>
+      </form>
+      {remote.map((r, i) => <div key={i} style={{ fontSize: 'var(--fs-sm)', marginTop: 6, color: 'var(--faint,#8b93a7)' }}>{r.name}: {r.note}. Progress shows in the library row.</div>)}
+
       <div style={{ display: 'grid', gridTemplateColumns: phone ? '1fr' : '260px 1fr', gap: 12, marginTop: 12 }}>
         <div>
           <div className="sec-label">Content type</div>
@@ -163,6 +186,8 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
                 : p.preview.duplicate !== 'proceed' ? <span style={{ color: 'var(--warn,#f5a524)' }}>looks like a duplicate ({p.preview.duplicateOf?.strength.replace('_', ' ')}), rule says {p.preview.duplicate}</span>
                 : <span style={{ color: 'var(--faint,#8b93a7)' }} title={p.preview.matched.map(m => m.ruleName).join(' < ')}>{p.preview.settings.naming === 'honour' ? (p.preview.changed ? `renamed ${p.preview.sanitised}` : 'name kept') : `filed as ${p.preview.settings.naming.replace('_', ' ')}`}{p.preview.deferred ? ', checked again after upload' : ''}</span>
               ) : <span style={{ color: 'var(--faint,#8b93a7)' }}>checking rules</span>}
+              {p.cloud && p.preview?.settings.transfer !== 'local' && <span style={{ color: 'var(--ok,#4cc27a)' }} title={`matched by ${p.cloud.strength.replace('_', ' ')}`}>in {p.cloud.label}: will transfer cloud to cloud</span>}
+              {p.cloud && <button type="button" className="btn ghost" style={{ fontSize: 'var(--fs-xs)' }} onClick={() => setPicked(cur => cur.map(x => x === p ? { ...x, cloud: null } : x))}>Upload from here instead</button>}
               {tusProgress[p.file.name + p.file.size] != null && <span>{Math.round(tusProgress[p.file.name + p.file.size] * 100)}%</span>}
               <button type="button" className="btn ghost" style={{ fontSize: 'var(--fs-xs)' }} onClick={() => setPicked(cur => cur.filter((_, j) => j !== i))}>Remove</button>
             </div>
