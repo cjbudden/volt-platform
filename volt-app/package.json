@@ -9,9 +9,12 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "migrate": "node scripts/migrate.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "node scripts/check.js",
+    "test:ingest": "bash test/ingest.sh"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudwatch": "^3.1118.0",
     "@aws-sdk/client-ecs": "^3.1098.0",
     "@aws-sdk/client-s3": "^3.600.0",
     "argon2": "^0.40.3",

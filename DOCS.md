@@ -116,6 +116,10 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
   owner < asset), paywall clearing, availability windows (pure).
 - `access-rules.check.ts`, the FOR / IF / THEN / TERMS access rules engine: first match,
   members, premium + entitlements, geo in / not in, content types, term periods (pure).
+- `ingest.sh` (or `npm run test:ingest`), the whole ingest framework in one command: compiles
+  every ingest check into a scratch directory, makes the ffmpeg fixtures, runs the eight
+  suites below (core, tus, s3, sources, providers, agent, extract, package) and prints one
+  line each plus a total. Takes suite names as arguments to run a subset. No database.
 - `ingest-core.check.ts`, the upload and ingest framework core: name sanitising and
   naming/structure modes, the ingest rules ladder (account < type < source < item, first
   match by ordinal, deferred facts), duplicate matching and actions, real type from magic

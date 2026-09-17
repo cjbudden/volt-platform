@@ -435,7 +435,19 @@ recognises Google Drive, OneDrive and Dropbox sync roots on macOS and
 Windows, never reads a cloud-only placeholder from disk, asks Volt to
 locate and fetch such files cloud to cloud, and uploads everything else
 with tus carrying the relative path and provenance. State survives a
-restart. Step 8 follows.
+restart. Step 8 is built: `packages/ingest-core` is the distributable package. Its
+`scripts/sync.js` copies the pure modules from volt-app (the source of
+truth) and patches the two imports that reach outside the core, so the
+package compiles with no dependency on Volt; the README is written for a
+developer who is not us. `volt-app/test/ingest.sh` (`npm run test:ingest`)
+runs all eight suites, 203 checks, in one command with no database.
+
+All eight steps are built. Not yet done, and known: live verification of
+the Aspera, MASV and Signiant request shapes against real accounts; the
+provider OAuth apps (client ids) for Dropbox, OneDrive and Google;
+streaming a remote fetch straight into S3 multipart without the staging
+copy; Background Fetch for tus (not possible by design, the chunk protocol
+covers it); the Aspera browser SDK on the console page.
 
 ## 6.1 What is missing
 
