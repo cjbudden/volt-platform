@@ -430,8 +430,12 @@ apply events, and when files land run each through the same
 unauthenticated `/api/ingest/transfers/:id/events` callback, a poll on the
 watchfolder tick, and "Send with <provider>" in the panel with the portal
 link or the Aspera spec. Request shapes are pinned by tests against fakes
-and must be verified against a live account before go-live. Steps 7 and 8
-follow.
+and must be verified against a live account before go-live. Step 7 is built: `volt-agent/` (no runtime dependencies) watches folders,
+recognises Google Drive, OneDrive and Dropbox sync roots on macOS and
+Windows, never reads a cloud-only placeholder from disk, asks Volt to
+locate and fetch such files cloud to cloud, and uploads everything else
+with tus carrying the relative path and provenance. State survives a
+restart. Step 8 follows.
 
 ## 6.1 What is missing
 

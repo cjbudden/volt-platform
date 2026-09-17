@@ -134,6 +134,10 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
   Aspera (upload_setup request, transfer spec launch, event parsing, poll), MASV and
   Signiant (package creation, portal launch, webhook parsing) and S3 Transfer Acceleration
   presigned PUT URLs with fixed credentials (pure).
+- `agent.check.ts`, the desktop agent (`volt-agent/`): sync root detection for macOS and
+  Windows Drive / OneDrive / Dropbox paths, cloud-only heuristic, and one pass against a
+  fake Volt on localhost (locate then cloud to cloud, tus upload with provenance, quiet
+  time, junk, idempotent state). Compile with `--rootDir ..` since it imports volt-agent.
 - `ingest-extract.check.ts`, extract() over real files made with ffmpeg (an ID3-tagged
   mp3, a mov, a mov named .mp3). Needs ffmpeg/ffprobe; pass the directory as argv[2].
 - `autovod.check.ts`, auto-VOD from a completed event recording.

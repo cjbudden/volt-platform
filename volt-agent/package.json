@@ -1,0 +1,11 @@
+{
+  "name": "@volt/agent",
+  "version": "0.1.0",
+  "description": "Volt desktop agent: watches folders, recognises cloud drive sync roots, uploads with tus or asks Volt to fetch cloud to cloud.",
+  "license": "MIT",
+  "bin": { "volt-agent": "dist/cli.js" },
+  "main": "dist/index.js",
+  "scripts": { "build": "tsc -p tsconfig.json", "start": "node dist/cli.js" },
+  "engines": { "node": ">=20" },
+  "devDependencies": { "typescript": "^5.4.0", "@types/node": "^20.11.0" }
+}
