@@ -455,10 +455,14 @@ per file with its thumbnail, name, what the rules decided, and its ROUTE
 thing no other uploader can show because no other uploader decides it
 before a byte moves. Route counts sit in the manifest header. Type and
 metadata are a sheet for all files or one row. One primary action,
-"Ingest N files", with "Send with <provider>" beside it. Colour: the panel
-sits a step lighter than the console with visible borders, a gradient
-highlight along its top edge (blue, sky, violet: local, cloud, accelerated),
-and a small palette for routes and decisions. Long-running work moved to
+"Ingest N files", with "Send with <provider>" beside it. Christian, on style: "you have a recognisable style; broaden it, decide
+from the product's direction, and I dislike the thick accent bar on one
+edge." So the panel takes every visual answer from the console's own
+tokens in `index.css` (16px cards, 10px controls, hairline borders, one
+blue accent) and nothing decorative: no gradient hairline, no glow tile,
+no pill buttons, no accent bar down a side. Colour is spent only where it
+carries meaning: sky for cloud to cloud, violet for accelerated, green
+done, amber decision, red refusal. Long-running work moved to
 `IngestQueue.tsx`, a drawer mounted once in App (per-file pause, resume and
 cancel, thumbnails, rate and time left, and the "needs you" items), with a
 floating progress ring when closed. `cloudPickers.ts` loads each vendor's

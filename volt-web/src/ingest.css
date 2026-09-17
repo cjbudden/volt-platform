@@ -6,27 +6,27 @@
    (this device, cloud to cloud, accelerated) and what the rules decided,
    before a byte moves. One primary action. The heavy lifting shows in the
    Ingest Queue drawer, which follows the operator around the console.
-   Colour: the console is dark; this panel sits a step lighter with borders
-   that can be seen, a highlight along its top edge, and a small palette of
-   its own for routes: blue for the primary action, sky for cloud to cloud,
-   violet for accelerated, green for done, amber for a decision, red for a
-   refusal. Enough to read at a glance, never a carnival.
+   Style comes from the console's own tokens (index.css): 16px card radius,
+   10px controls, hairline borders, one blue accent. No decorative gradient
+   edges, no glow tiles, no accent bar down one side: colour is spent only
+   where it carries meaning (sky for cloud to cloud, violet for accelerated,
+   green done, amber decision, red refusal).
    ========================================================================== */
 .ig{--ig-line:rgba(255,255,255,.13);--ig-line-2:rgba(255,255,255,.2);--ig-surface:#1a1f2b;--ig-surface-2:#202636;--ig-cloud:#38bdf8;--ig-fast:#a78bfa;--ig-ok:#4ade80;--ig-warn:#fbbf24;--ig-bad:#f87171;
-  border:1px solid var(--ig-line);border-radius:var(--radius);background:linear-gradient(180deg,#1c2230 0%,#171c27 100%);box-shadow:var(--shadow),inset 0 1px 0 rgba(255,255,255,.06);overflow:hidden;position:relative}
-.ig::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg,var(--brand),var(--ig-cloud) 55%,var(--ig-fast));opacity:.9}
+  border:1px solid var(--ig-line);border-radius:var(--radius);background:#1a1f2b;box-shadow:var(--shadow);overflow:hidden;position:relative}
 .ig .sp{flex:1}
 
 /* the add band */
-.ig-band{display:flex;align-items:center;gap:18px;padding:18px 20px;border-bottom:1px solid var(--ig-line);flex-wrap:wrap;transition:background .15s;background:radial-gradient(600px 120px at 0% 0%,rgba(63,123,255,.12),transparent 70%)}
+.ig-band{display:flex;align-items:center;gap:18px;padding:18px 20px;border-bottom:1px solid var(--ig-line);flex-wrap:wrap;transition:background .15s}
 .ig-band.over{background:var(--brand-dim);box-shadow:inset 0 0 0 2px var(--brand)}
 .ig-band-l{display:flex;align-items:center;gap:14px;min-width:240px}
-.ig-band-ico{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,var(--brand),var(--brand-2));box-shadow:0 8px 20px -8px rgba(63,123,255,.8);flex:none}
-.ig-band-ico svg{width:24px;height:24px;color:#fff}
+.ig-band-ico{width:40px;height:40px;border-radius:var(--radius-ctl,10px);display:grid;place-items:center;border:1px dashed var(--ig-line-2);color:var(--brand);flex:none}
+.ig-band-ico svg{width:22px;height:22px}
+.ig-band.over .ig-band-ico{border-style:solid;border-color:var(--brand)}
 .ig-band-t{font-size:15px;font-weight:600;color:var(--text)}
 .ig-band-s{font-size:var(--fs-xs);color:var(--faint);margin-top:2px}
 .ig-band-r{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.ig-add{font:inherit;font-size:var(--fs-sm);font-weight:500;color:var(--text);background:var(--ig-surface);border:1px solid var(--ig-line);border-radius:999px;padding:6px 13px;cursor:pointer}
+.ig-add{font:inherit;font-size:var(--fs-sm);font-weight:500;color:var(--text);background:var(--ig-surface);border:1px solid var(--ig-line);border-radius:var(--radius-ctl,10px);padding:6px 13px;cursor:pointer}
 .ig-add:hover{border-color:var(--ig-line-2);background:var(--ig-surface-2)}
 .ig-add[data-on]{border-color:rgba(63,123,255,.5);background:var(--brand-dim)}
 .ig-add[disabled]{opacity:.4;cursor:not-allowed}
@@ -40,7 +40,7 @@
 .ig-man-h{display:flex;align-items:center;gap:12px;padding:10px 20px;font-size:var(--fs-sm);color:var(--muted);border-bottom:1px solid var(--ig-line);flex-wrap:wrap;background:rgba(0,0,0,.14)}
 .ig-man-h .n{color:var(--text);font-weight:600}.ig-man-h .d{color:var(--faint);font-weight:400}
 .ig-man-h .routes{display:flex;gap:6px;flex-wrap:wrap}
-.rt{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-xs);font-weight:600;padding:2px 9px;border-radius:999px;background:var(--ig-surface-2);border:1px solid var(--ig-line);color:var(--muted)}
+.rt{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-xs);font-weight:600;padding:2px 9px;border-radius:6px;background:var(--ig-surface-2);border:1px solid var(--ig-line);color:var(--muted)}
 .rt::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
 .rt.local{color:var(--text)}.rt.cloud{color:var(--ig-cloud);border-color:rgba(56,189,248,.35)}.rt.none{color:var(--ig-bad);border-color:rgba(248,113,113,.35)}.rt.warn{color:var(--ig-warn);border-color:rgba(251,191,36,.35)}.rt.fast{color:var(--ig-fast);border-color:rgba(167,139,250,.35)}
 .ig-lnk{font:inherit;font-size:var(--fs-xs);color:var(--brand);background:none;border:0;padding:0;cursor:pointer}
@@ -56,12 +56,12 @@
 .ig-row .l1{display:flex;align-items:baseline;gap:8px;min-width:0}
 .ig-row .nm{font-size:var(--fs-body);color:var(--text);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ig-row .sz{font-size:var(--fs-xs);color:var(--faint);flex:none}
-.ig-row .tg{font-size:10.5px;color:var(--muted);background:var(--ig-surface-2);border:1px solid var(--ig-line);border-radius:999px;padding:1px 7px;flex:none}
+.ig-row .tg{font-size:10.5px;color:var(--muted);background:var(--ig-surface-2);border:1px solid var(--ig-line);border-radius:5px;padding:1px 7px;flex:none}
 .ig-dec{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .ig-dec.ok{color:var(--muted)}.ig-dec.warn{color:var(--ig-warn)}.ig-dec.bad{color:var(--ig-bad)}
 .ig-row .route{display:flex;align-items:center;gap:8px;font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;flex-wrap:wrap;row-gap:2px}
-.ig-row .route i{width:26px;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--brand),rgba(63,123,255,.25));flex:none}
-.ig-row .route.cloud i{background:linear-gradient(90deg,var(--ig-cloud),rgba(56,189,248,.25))}
+.ig-row .route i{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.ig-row .route.cloud i{background:var(--ig-cloud)}
 .ig-row .route.cloud{color:var(--ig-cloud)}
 .ig-row .route.none i{background:var(--ig-surface-2)}.ig-row .route.none{color:var(--faint)}
 .ig-row .route .ig-lnk{margin-left:2px}
@@ -88,7 +88,7 @@
 .ig-tog.on i{background:var(--brand)}.ig-tog.on i::after{left:16px}
 
 /* queue drawer (the Glue pattern, ours) */
-.iq-fab{position:fixed;right:18px;bottom:18px;z-index:70;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:14px;border:1px solid var(--border-2);background:var(--panel);color:var(--text);box-shadow:0 12px 34px -12px rgba(0,0,0,.8);cursor:pointer;font:inherit;font-size:var(--fs-sm)}
+.iq-fab{position:fixed;right:18px;bottom:18px;z-index:70;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--radius-ctl,10px);border:1px solid var(--border-2);background:var(--panel);color:var(--text);box-shadow:0 12px 34px -12px rgba(0,0,0,.8);cursor:pointer;font:inherit;font-size:var(--fs-sm)}
 .iq-fab .ring{width:22px;height:22px;border-radius:50%;background:conic-gradient(var(--brand) var(--p,0%),var(--panel-3) 0);display:grid;place-items:center}
 .iq-fab .ring::after{content:"";width:14px;height:14px;border-radius:50%;background:var(--panel)}
 .iq{position:fixed;top:0;right:0;bottom:0;width:min(420px,100vw);z-index:80;background:#161b26;border-left:1px solid rgba(255,255,255,.14);box-shadow:-20px 0 60px -20px rgba(0,0,0,.8);display:flex;flex-direction:column}
