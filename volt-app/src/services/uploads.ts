@@ -33,6 +33,8 @@ export interface UploadSession {
   purpose: string;
   filler_kind: 'slate' | 'loop' | null;
   filler_asset_id: string | null;
+  vod_asset_id: string | null;
+  ladder_group_id: string | null;
   filename: string;
   content_type: string;
   total_bytes: string | number;
@@ -43,6 +45,10 @@ export interface UploadSession {
   state: UploadState;
   error: string | null;
   expires_at: string;
+  relative_path?: string | null;
+  schema_id?: string | null;
+  metadata?: Record<string, any> | null;
+  source?: string | null;
 }
 
 /**
@@ -115,6 +121,17 @@ export interface OpenRequest {
   filename: string;
   contentType?: string;
   totalBytes: number;
+  /** 'vod' only: the ladder the finished file is encoded to. Null takes the
+   *  account default at encode time rather than here, so a default changed
+   *  during a long upload is still the one that applies. */
+  ladderGroupId?: string | null;
+  /** Ingest framework inputs ('vod' only): where the file came from within the
+   *  drop, the content type chosen up front, metadata typed before upload, and
+   *  which source rung applies ('panel', 'api', a watchfolder id, a provider). */
+  relativePath?: string | null;
+  schemaId?: string | null;
+  metadata?: Record<string, any> | null;
+  source?: string;
 }
 
 export async function openSession(req: OpenRequest): Promise<{ session: UploadSession; assetId: string | null }> {
@@ -134,8 +151,10 @@ export async function openSession(req: OpenRequest): Promise<{ session: UploadSe
   // The asset row exists from the START of the upload, in 'uploading'. It is
   // what the list shows while bytes are in flight: an upload that is only
   // visible once it finishes is an upload nobody can see fail.
+  const purpose = req.purpose ?? 'filler';
   let assetId: string | null = null;
-  if ((req.purpose ?? 'filler') === 'filler') {
+  let vodAssetId: string | null = null;
+  if (purpose === 'filler') {
     const asset = await one<{ id: string }>(
       `INSERT INTO filler_assets (account_id, kind, name, status, bytes, content_type, filename)
        VALUES ($1, $2::filler_kind, $3, 'uploading', $4, $5, $6)
@@ -144,23 +163,40 @@ export async function openSession(req: OpenRequest): Promise<{ session: UploadSe
        req.totalBytes, req.contentType ?? 'application/octet-stream', req.filename]
     );
     assetId = asset?.id ?? null;
+  } else if (purpose === 'vod') {
+    // SAME REASONING AS THE FILLER ROW ABOVE, and it matters more here: a filler
+    // loop is seconds and a programme is an hour, so an asset that only appears
+    // when the upload finishes is one the operator cannot watch fail for the
+    // whole afternoon. thumb_status 'processing' is what makes it read as not
+    // yet playable rather than as broken.
+    const asset = await one<{ id: string }>(
+      `INSERT INTO vod_assets
+         (account_id, source_kind, kind, title, source_bytes, ladder_group_id,
+          start_epoch_ms, end_epoch_ms, duration_ms, thumb_status)
+       VALUES ($1,'upload','clip',$2,$3,$4,0,0,0,'processing')
+       RETURNING id`,
+      [req.accountId, req.name, req.totalBytes, req.ladderGroupId ?? null]
+    );
+    vodAssetId = asset?.id ?? null;
   }
 
   const session = await one<UploadSession>(
     `INSERT INTO upload_sessions
-       (account_id, opened_by, token, purpose, filler_kind, filler_asset_id,
-        filename, content_type, total_bytes, chunk_size, chunk_count)
-     VALUES ($1,$2,$3,$4,$5::filler_kind,$6,$7,$8,$9,$10,$11)
+       (account_id, opened_by, token, purpose, filler_kind, filler_asset_id, vod_asset_id,
+        ladder_group_id, filename, content_type, total_bytes, chunk_size, chunk_count,
+        relative_path, schema_id, metadata, source)
+     VALUES ($1,$2,$3,$4,$5::filler_kind,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      RETURNING *`,
     [req.accountId, req.openedBy ?? null, openSessionToken(),
-     req.purpose ?? 'filler', req.fillerKind ?? null, assetId,
+     purpose, req.fillerKind ?? null, assetId, vodAssetId, req.ladderGroupId ?? null,
      req.filename, req.contentType ?? 'application/octet-stream',
-     req.totalBytes, CHUNK_SIZE, chunkCount]
+     req.totalBytes, CHUNK_SIZE, chunkCount,
+     req.relativePath ?? null, req.schemaId ?? null, JSON.stringify(req.metadata ?? {}), req.source ?? 'panel']
   );
   if (!session) throw new Error('failed to open an upload session');
 
   mkdirSync(sessionDir(session.id), { recursive: true });
-  return { session, assetId };
+  return { session, assetId: assetId ?? vodAssetId };
 }
 
 /** A session by its capability token. The only way a chunk request authenticates. */
@@ -169,9 +205,17 @@ export async function sessionByToken(token: string): Promise<UploadSession | nul
   return one<UploadSession>(`SELECT * FROM upload_sessions WHERE token = $1`, [token]);
 }
 
-export async function sessionById(id: string, accountId: string): Promise<UploadSession | null> {
+export async function sessionById(
+  id: string, accountId: string, openedBy?: string | null
+): Promise<UploadSession | null> {
+  // `openedBy` narrows to the session's owner. Callers that RETURN the
+  // capability token pass it; callers that only act on the session (abort)
+  // may leave it out, since an operator clearing a colleague's stuck upload
+  // is a reasonable thing to do and does not hand over a credential.
   return one<UploadSession>(
-    `SELECT * FROM upload_sessions WHERE id = $1 AND account_id = $2`, [id, accountId]
+    `SELECT * FROM upload_sessions
+      WHERE id = $1 AND account_id = $2 AND ($3::uuid IS NULL OR opened_by = $3)`,
+    [id, accountId, openedBy ?? null]
   );
 }
 
@@ -301,9 +345,14 @@ export async function finishSession(session: UploadSession): Promise<FinishResul
     [session.id]);
 
   const ext = safeExt(session.filename);
-  const dest = session.filler_asset_id
-    ? fillerPath(session.account_id, session.filler_asset_id, session.filename)
-    : join(config.uploads.fillerDir, session.account_id, session.id + ext);
+  // A VOD upload's bytes go where a re-encode will still find them, keyed by the
+  // asset — the same place the watchfolder preserves its sources, and NOT the
+  // filler directory, whose contents are served publicly at /filler.
+  const dest = session.vod_asset_id
+    ? join(config.clips.dir, 'vod-src', session.vod_asset_id + ext)
+    : session.filler_asset_id
+      ? fillerPath(session.account_id, session.filler_asset_id, session.filename)
+      : join(config.uploads.fillerDir, session.account_id, session.id + ext);
   mkdirSync(join(dest, '..'), { recursive: true });
 
   const hash = createHash('sha256');
@@ -351,9 +400,11 @@ export async function finishSession(session: UploadSession): Promise<FinishResul
   }
 
   const sha = hash.digest('hex');
-  const sourceKey = session.filler_asset_id
-    ? `filler/${session.account_id}/${session.filler_asset_id}${ext}`
-    : `uploads/${session.account_id}/${session.id}${ext}`;
+  const sourceKey = session.vod_asset_id
+    ? dest
+    : session.filler_asset_id
+      ? `filler/${session.account_id}/${session.filler_asset_id}${ext}`
+      : `uploads/${session.account_id}/${session.id}${ext}`;
 
   if (session.filler_asset_id) {
     await query(
@@ -364,6 +415,65 @@ export async function finishSession(session: UploadSession): Promise<FinishResul
       [session.filler_asset_id, sourceKey, written]
     );
   }
+  let ingestStatus: string = 'ingested';
+  let encodeSource = dest;
+  if (session.vod_asset_id) {
+    await query(
+      `UPDATE vod_assets SET source_key = $2, source_bytes = $3, updated_at = now()
+        WHERE id = $1`,
+      [session.vod_asset_id, dest, written]
+    );
+    // THE INGEST FRAMEWORK RUNS HERE: rules ladder, naming, real type, checksum
+    // duplicate check, metadata extraction and merge, sidecar, webhooks. It
+    // never throws for a rule outcome; a duplicate or a metadata gate is a
+    // status the asset carries, and the encode below only runs for 'ingested'.
+    try {
+      const { ingestLanded } = await import('./ingest/pipeline');
+      const out = await ingestLanded({
+        accountId: session.account_id, assetId: session.vod_asset_id, path: dest,
+        originalName: session.filename, relativePath: session.relative_path ?? null,
+        bytes: written, sha256: sha, declaredMime: session.content_type,
+        source: session.source ?? 'panel', sessionId: session.id, uploadedBy: session.opened_by,
+        contentTypeId: session.schema_id ?? null, operatorMetadata: session.metadata ?? null,
+      });
+      ingestStatus = out.status; encodeSource = out.path;
+    } catch (e: any) {
+      // A probe that cannot read the file is worth recording, not worth losing
+      // the bytes over. The asset keeps its original name and encodes as before.
+      await query(`UPDATE upload_sessions SET error = $2 WHERE id = $1`,
+        [session.id, `ingest rules could not run: ${String(e?.message ?? e)}`.slice(0, 500)]);
+    }
+  }
+  if (session.vod_asset_id && ingestStatus === 'ingested') {
+    // THE ENCODE IS QUEUED HERE, not by the route, because finishing is
+    // idempotent by design (a service worker's backgroundfetchsuccess can fire
+    // more than once) and the dedupe key makes a second call join the job in
+    // flight rather than start a second encode into the same directory.
+    try {
+      const { enqueue } = await import('./jobs/queue');
+      const { VOD_ENCODE } = await import('./jobs/handlers/vodEncode');
+      const job = await enqueue({
+        type: VOD_ENCODE,
+        payload: {
+          vodAssetId: session.vod_asset_id, accountId: session.account_id,
+          sourcePath: encodeSource, ladderGroupId: session.ladder_group_id ?? null,
+        },
+        dedupeKey: `vod.encode:${session.vod_asset_id}`,
+        maxAttempts: 2,
+      });
+      await query(`UPDATE vod_assets SET encode_job_id = $2 WHERE id = $1`,
+        [session.vod_asset_id, job.id]);
+    } catch (e: any) {
+      // THE BYTES ARE SAFE EITHER WAY. A queue that is briefly unavailable must
+      // not lose an hour-long upload, so the failure is recorded on the session
+      // and the operator can retry the encode from the asset.
+      await query(
+        `UPDATE upload_sessions SET error = $2 WHERE id = $1`,
+        [session.id, `uploaded, but the encode could not be queued: ${String(e?.message ?? e)}`.slice(0, 500)]
+      );
+    }
+  }
+
   const done = await one<UploadSession>(
     `UPDATE upload_sessions SET state = 'complete', error = NULL, updated_at = now()
       WHERE id = $1 RETURNING *`,
@@ -374,7 +484,8 @@ export async function finishSession(session: UploadSession): Promise<FinishResul
   // every upload.
   try { rmSync(sessionDir(session.id), { recursive: true, force: true }); } catch { /* */ }
 
-  return { session: done ?? session, assetId: session.filler_asset_id, bytes: written, sha256: sha, path: sourceKey };
+  return { session: done ?? session, assetId: session.filler_asset_id ?? session.vod_asset_id,
+           bytes: written, sha256: sha, path: sourceKey };
 }
 
 export async function abortSession(session: UploadSession, reason = 'abandoned by the client'): Promise<void> {
@@ -389,6 +500,17 @@ export async function abortSession(session: UploadSession, reason = 'abandoned b
     await query(
       `DELETE FROM filler_assets WHERE id = $1 AND status = 'uploading'`,
       [session.filler_asset_id]
+    );
+  }
+  // THE SAME FOR A VIDEO UPLOAD, with one condition that matters: only when the
+  // bytes never landed. `source_key` set means the file assembled and an encode
+  // may already be running, and deleting THAT row would destroy a real asset
+  // mid-encode. An abandoned upload has no source_key at all.
+  if (session.vod_asset_id) {
+    await query(
+      `DELETE FROM vod_assets
+        WHERE id = $1 AND source_kind = 'upload' AND source_key IS NULL AND master_key IS NULL`,
+      [session.vod_asset_id]
     );
   }
 }
@@ -424,6 +546,13 @@ export async function sweepUploads(): Promise<SweepResult> {
     if (s.filler_asset_id) {
       await query(`DELETE FROM filler_assets WHERE id = $1 AND status = 'uploading'`,
         [s.filler_asset_id]);
+    }
+    // Same condition as abortSession: only a row whose bytes never landed.
+    if (s.vod_asset_id) {
+      await query(
+        `DELETE FROM vod_assets
+          WHERE id = $1 AND source_kind = 'upload' AND source_key IS NULL AND master_key IS NULL`,
+        [s.vod_asset_id]);
     }
     res.expired++;
   }
@@ -466,11 +595,17 @@ function dirBytes(dir: string): number {
 }
 
 /** Sessions an account could still resume, newest first. */
-export async function resumableSessions(accountId: string): Promise<UploadSession[]> {
+export async function resumableSessions(accountId: string, openedBy?: string | null): Promise<UploadSession[]> {
+  // Scoped to the USER when one is given, not just the account. Each session
+  // carries its own capability token — the credential the chunk endpoint
+  // accepts INSTEAD of a login — and the listing returns it. Account scope
+  // alone meant any colleague could read a stranger's upload token and then
+  // overwrite their chunks, finish their upload, or abort it.
   return query<UploadSession>(
     `SELECT * FROM upload_sessions
       WHERE account_id = $1 AND state = 'open' AND expires_at > now()
+        AND ($2::uuid IS NULL OR opened_by = $2)
       ORDER BY created_at DESC LIMIT 50`,
-    [accountId]
+    [accountId, openedBy ?? null]
   );
 }

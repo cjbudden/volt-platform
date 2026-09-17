@@ -54,7 +54,22 @@ export interface UploadItem {
   error: string | null
   /** True when the browser, not this page, is carrying the transfer. */
   background: boolean
+  /** Set by cancel(). In-page workers check it between chunks and stop; without
+   *  it a cancelled upload kept PUTting chunks at a deleted session until the
+   *  whole file had been sent. */
+  cancelled?: boolean
   startedAt: number
+  /** What the ingest rules decided when the bytes landed (vod uploads). */
+  ingest?: IngestOutcome | null
+}
+
+export interface IngestOutcome {
+  status: 'ingested' | 'awaiting_metadata' | 'duplicate' | 'rejected'
+  naming?: { mode: string; structure: string; guid: string; renamed: boolean }
+  duplicate?: { outcome: string; ofAssetId: string | null; strength: string | null } | null
+  rules?: { rung: string; ruleId: string; ruleName: string }[]
+  awaitingMetadata?: string[] | null
+  title?: string | null
 }
 
 type Listener = (items: UploadItem[]) => void
@@ -191,7 +206,25 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return r.status === 204 ? (null as T) : r.json()
 }
 
-export interface StartOptions { kind: 'slate' | 'loop'; name?: string }
+export interface StartOptions {
+  kind: 'slate' | 'loop'
+  name?: string
+  /**
+   * 'vod' uploads a programme rather than a filler asset: it creates a VOD
+   * asset and, when the bytes land, an encode job on the chosen ladder. The
+   * `kind` above is ignored for these — a VOD is not a slate or a loop.
+   */
+  purpose?: 'filler' | 'vod'
+  /** 'vod' only. Omitted takes the account default AT ENCODE TIME, so a default
+   *  changed during a long upload is still the one that applies. */
+  ladderGroupId?: string | null
+  /** Ingest framework: the path inside a dropped or picked folder, the content
+   *  type chosen up front, metadata typed before upload, the source rung. */
+  relativePath?: string | null
+  schemaId?: string | null
+  metadata?: Record<string, any> | null
+  source?: string
+}
 
 export async function startUpload(file: File, opts: StartOptions): Promise<UploadItem> {
   const item: UploadItem = {
@@ -209,7 +242,14 @@ export async function startUpload(file: File, opts: StartOptions): Promise<Uploa
     const s = await api<any>('/uploads', {
       method: 'POST',
       body: JSON.stringify({
-        purpose: 'filler', fillerKind: opts.kind, name: item.name,
+        purpose: opts.purpose ?? 'filler',
+        ...(opts.purpose === 'vod'
+          ? { ladderGroupId: opts.ladderGroupId ?? null,
+              relativePath: opts.relativePath ?? ((file as any).webkitRelativePath || null),
+              schemaId: opts.schemaId ?? null, metadata: opts.metadata ?? undefined,
+              source: opts.source ?? 'panel' }
+          : { fillerKind: opts.kind }),
+        name: item.name,
         filename: file.name, contentType: file.type || 'application/octet-stream',
         totalBytes: file.size,
       }),
@@ -288,6 +328,73 @@ export async function listResumable(): Promise<Array<RememberedSession & {
   return out
 }
 
+/**
+ * Did the browser actually START carrying it?
+ *
+ * Asks the SERVER, not the registration: the server is the only party that
+ * knows what arrived, and after a resume it is the only one that is right.
+ * A background fetch that has moved nothing after the grace window is treated
+ * as not working, and the page takes the transfer back.
+ *
+ * Kept short deliberately. The cost of being wrong in one direction is a few
+ * chunks uploaded twice, which is free because chunks are idempotent; the cost
+ * in the other direction is an upload that never finishes and never says so.
+ */
+const BG_GRACE_MS = 15_000
+const BG_POLL_MS = 2_500
+
+async function backgroundIsMoving(item: UploadItem): Promise<boolean> {
+  const started = Date.now()
+  const before = item.received.length
+  while (Date.now() - started < BG_GRACE_MS) {
+    await new Promise((r) => setTimeout(r, BG_POLL_MS))
+    // The tab may have been closed and reopened; if the item is gone, the
+    // supervision goes with it and the browser is on its own, as intended.
+    if (!items.has(item.id)) return true
+    const state = await serverState(item)
+    if (!state) continue
+    item.received = state.received
+    item.sentBytes = state.receivedBytes
+    emit()
+    if (state.state === 'complete') {
+      item.status = 'done'
+      if (item.sessionId) forget(item.sessionId)
+      emit(); return true
+    }
+    if (state.received.length > before) return true    // it is moving; leave it alone
+  }
+  console.warn('[upload] background fetch registered but moved nothing in',
+    BG_GRACE_MS, 'ms — uploading in the page instead')
+  return false
+}
+
+/** What the server has actually received for this session. */
+async function serverState(item: UploadItem): Promise<
+  { received: number[]; receivedBytes: number; state: string } | null
+> {
+  if (!item.sessionId || !item.token) return null
+  try {
+    const r = await fetch(`/api/uploads/${item.sessionId}/state`, {
+      headers: { authorization: `Bearer ${item.token}` },
+    })
+    if (!r.ok) return null
+    const j = await r.json()
+    return { received: j.received ?? [], receivedBytes: j.receivedBytes ?? 0, state: j.state }
+  } catch { return null }
+}
+
+/** Stop a background fetch we have decided is not working, so it cannot later
+ *  wake up and race the in-page upload. Best effort: an abort that fails is
+ *  harmless, because every chunk write is idempotent. */
+async function abandonBackgroundFetch(item: UploadItem): Promise<void> {
+  try {
+    const bg = (swReg as any)?.backgroundFetch
+    const reg = await bg?.get?.(`volt-upload-${item.sessionId}`)
+    await reg?.abort?.()
+  } catch { /* nothing to abort */ }
+  item.background = false
+}
+
 // ---------------------------------------------------------------------------
 //  Driving one upload
 // ---------------------------------------------------------------------------
@@ -302,14 +409,24 @@ async function drive(item: UploadItem): Promise<void> {
   if (backgroundSupported()) {
     try {
       await startBackgroundFetch(item)
-      return
+      // REGISTERING IS NOT UPLOADING. bg.fetch() resolves as soon as the
+      // browser accepts the registration, which tells us nothing about whether
+      // it will ever run the requests — and several environments accept one
+      // and then do nothing at all. Nothing downstream checked, so the item sat
+      // at "background" with zero bytes sent, no error, and no timeout, for as
+      // long as the tab stayed open. Watch it; if it has not moved, take the
+      // transfer back.
+      if (await backgroundIsMoving(item)) return
+      await abandonBackgroundFetch(item)
+      // fall through and upload in the page instead
     } catch {
-      // Fall through to the in-page path. A browser that advertises Background
-      // Fetch and then refuses is not worth arguing with.
+      // A browser that advertises Background Fetch and then refuses is not
+      // worth arguing with.
     }
   }
 
   item.status = 'uploading'
+  item.background = false
   emit()
 
   const missing: number[] = []
@@ -322,7 +439,10 @@ async function drive(item: UploadItem): Promise<void> {
   async function worker() {
     for (;;) {
       const i = next++
-      if (i >= missing.length || failed) return
+      // Cancellation is checked HERE, between chunks, because a chunk already
+      // in flight cannot be recalled and the next one is the earliest thing we
+      // control.
+      if (i >= missing.length || failed || item.cancelled) return
       const index = missing[i]
       const start = index * item.chunkSize
       const blob = item.file!.slice(start, Math.min(start + item.chunkSize, item.totalBytes))
@@ -374,6 +494,7 @@ async function drive(item: UploadItem): Promise<void> {
     }
     const out = await done.json()
     item.assetId = out.assetId ?? item.assetId
+    item.ingest = out.ingest ?? null
     item.sentBytes = item.totalBytes
     item.status = 'done'
     forget(item.sessionId)
@@ -451,6 +572,19 @@ export function dismiss(id: string) {
 export async function cancel(id: string) {
   const item = items.get(id)
   if (!item) return
+  // ABORT THE BROWSER'S TRANSFER FIRST.
+  //
+  // Cancel used to delete the server session and drop the row, and stop there.
+  // A Background Fetch belongs to the BROWSER, not to this page: the row
+  // vanished from the app while the browser carried on uploading, at full
+  // speed, to a session that no longer existed — every chunk 404ing, on the
+  // user's bandwidth, with no handle left anywhere to stop it. On a phone that
+  // is somebody's data allowance.
+  //
+  // Aborting before deleting the session also gets the order right: kill the
+  // producer, then remove what it was writing to.
+  if (item.background) await abandonBackgroundFetch(item)
+  item.cancelled = true          // in-page drivers check this between chunks
   if (item.sessionId) {
     try {
       await api(`/uploads/${item.sessionId}`, { method: 'DELETE' })
@@ -458,6 +592,37 @@ export async function cancel(id: string) {
     forget(item.sessionId)
   }
   items.delete(id)
+  emit()
+}
+
+/**
+ * Drop finished and failed rows. The shared indicator counts BOTH upload
+ * stores but Clear only ever emptied the image one, so a completed loop or a
+ * failed chunked upload stayed in the count for the rest of the session and no
+ * button in the interface could remove it.
+ */
+export function clearFinished(): void {
+  for (const [id, it] of items) {
+    if (it.status === 'done' || it.status === 'error') items.delete(id)
+  }
+  emit()
+}
+
+/** Re-drive whatever failed. The counterpart of Retry for the other store. */
+export function retryFailed(): void {
+  for (const it of items.values()) {
+    if (it.status !== 'error') continue
+    if (!it.file) {
+      // Resumable sessions survive a reload but the FILE does not: the browser
+      // will not hand it back without the user choosing it again. Say so rather
+      // than silently doing nothing when the button is pressed.
+      it.error = 'Choose the file again to resume this upload'
+      continue
+    }
+    it.status = 'queued'
+    it.error = null
+    void drive(it)
+  }
   emit()
 }
 

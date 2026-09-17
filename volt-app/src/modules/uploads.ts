@@ -18,6 +18,7 @@
 // ============================================================================
 import { Router, raw } from 'express';
 import { z } from 'zod';
+import { one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest, ApiError } from '../util/http';
 import { actorId } from '../util/actor';
@@ -35,7 +36,9 @@ function view(s: UploadSession, withToken: boolean) {
     state: s.state,
     purpose: s.purpose,
     fillerKind: s.filler_kind,
-    assetId: s.filler_asset_id,
+    assetId: s.filler_asset_id ?? s.vod_asset_id,
+    vodAssetId: s.vod_asset_id,
+    ladderGroupId: s.ladder_group_id,
     filename: s.filename,
     contentType: s.content_type,
     totalBytes: Number(s.total_bytes),
@@ -57,12 +60,22 @@ export const uploadsRouter = Router();
 uploadsRouter.use(requireAuth);
 
 const openBody = z.object({
-  purpose: z.enum(['filler']).default('filler'),
+  purpose: z.enum(['filler', 'vod']).default('filler'),
   fillerKind: z.enum(['slate', 'loop']).optional(),
   name: z.string().min(1).max(200),
   filename: z.string().min(1).max(400),
   contentType: z.string().max(200).optional(),
   totalBytes: z.number().int().positive(),
+  /** 'vod' only. Omitted takes the account's default ladder AT ENCODE TIME,
+   *  which is deliberate: a long upload should not pin a default that was
+   *  changed while its bytes were in flight. */
+  ladderGroupId: z.string().uuid().nullable().optional(),
+  /** Ingest framework: path within the drop (folder picks), the content type
+   *  chosen up front, metadata typed before upload, and the source rung. */
+  relativePath: z.string().max(1000).nullable().optional(),
+  schemaId: z.string().uuid().nullable().optional(),
+  metadata: z.record(z.any()).optional(),
+  source: z.string().max(80).optional(),
 });
 
 uploadsRouter.post('/', asyncHandler(async (req, res) => {
@@ -71,18 +84,26 @@ uploadsRouter.post('/', asyncHandler(async (req, res) => {
     accountId: accountId(req),
     openedBy: actorId(req),
     purpose: b.purpose,
-    fillerKind: b.fillerKind ?? 'loop',
+    fillerKind: b.purpose === 'vod' ? undefined : (b.fillerKind ?? 'loop'),
+    ladderGroupId: b.purpose === 'vod' ? (b.ladderGroupId ?? null) : null,
     name: b.name,
     filename: b.filename,
     contentType: b.contentType,
     totalBytes: b.totalBytes,
+    relativePath: b.relativePath ?? null,
+    schemaId: b.schemaId ?? null,
+    metadata: b.metadata ?? null,
+    source: b.source ?? 'panel',
   });
   res.status(201).json(view(session, true));
 }));
 
 /** Sessions this account could still resume. What a returning tab asks for. */
 uploadsRouter.get('/', asyncHandler(async (req, res) => {
-  const rows = await resumableSessions(accountId(req));
+  // The caller's OWN sessions. The response carries each session's capability
+  // token, so listing the whole tenant's handed every user the credentials to
+  // take over everyone else's in-flight uploads.
+  const rows = await resumableSessions(accountId(req), actorId(req));
   res.json({
     sessions: rows.map((s) => view(s, true)),
     chunkSize: CHUNK_SIZE,
@@ -91,7 +112,8 @@ uploadsRouter.get('/', asyncHandler(async (req, res) => {
 }));
 
 uploadsRouter.get('/:id', asyncHandler(async (req, res) => {
-  const s = await sessionById(req.params.id, accountId(req));
+  // Owner-scoped: this response carries the session's capability token.
+  const s = await sessionById(req.params.id, accountId(req), actorId(req));
   if (!s) throw notFound('Upload session not found');
   res.json(view(s, true));
 }));
@@ -169,9 +191,15 @@ uploadChunksRouter.post('/:id/finish', asyncHandler(async (req, res) => {
   const s = await authorisedSession(req);
   try {
     const out = await finishSession(s);
+    const asset = out.assetId && s.vod_asset_id
+      ? await one<any>(`SELECT ingest, awaiting_metadata, source_key, title FROM vod_assets WHERE id = $1`, [s.vod_asset_id]) : null;
     res.json({
       id: s.id, assetId: out.assetId, bytes: out.bytes,
       sha256: out.sha256, state: 'complete',
+      // What the ingest rules decided, so the panel can say "duplicate of X,
+      // waiting for you" or "awaiting competition and teams" without a refetch.
+      ingest: asset?.ingest ? { status: asset.ingest.status, naming: asset.ingest.naming, duplicate: asset.ingest.duplicate, rules: asset.ingest.rules?.matched,
+                                awaitingMetadata: asset.awaiting_metadata, title: asset.title } : null,
     });
   } catch (e: any) {
     if (e?.status === 409 && Array.isArray(e.missing)) {

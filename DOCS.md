@@ -116,6 +116,12 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
   owner < asset), paywall clearing, availability windows (pure).
 - `access-rules.check.ts`, the FOR / IF / THEN / TERMS access rules engine: first match,
   members, premium + entitlements, geo in / not in, content types, term periods (pure).
+- `ingest-core.check.ts`, the upload and ingest framework core: name sanitising and
+  naming/structure modes, the ingest rules ladder (account < type < source < item, first
+  match by ordinal, deferred facts), duplicate matching and actions, real type from magic
+  bytes, ID3v2 reading, metadata merge into a content type, sidecar/webhook payload (pure).
+- `ingest-extract.check.ts`, extract() over real files made with ffmpeg (an ID3-tagged
+  mp3, a mov, a mov named .mp3). Needs ffmpeg/ffprobe; pass the directory as argv[2].
 - `autovod.check.ts`, auto-VOD from a completed event recording.
 - `vod-extractor.check.ts`, VOD extractor pure logic: segment selection/snapping.
 - `retrim.check.sh`, non-destructive clip re-trim (change in/out, original preserved).

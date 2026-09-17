@@ -28,6 +28,7 @@ import { uploadsRouter, uploadChunksRouter } from './modules/uploads';
 import { scheduledClipsRouter } from './modules/scheduledClips';
 import { publishTargetsRouter, publicationsRouter } from './modules/publishing';
 import { publishingRulesRouter } from './modules/publishingRules';
+import { ingestRouter as ingestRulesRouter } from './modules/ingestRules';
 import { paymentsRouter, paymentsAppRouter, paymentsWebhookRouter } from './modules/payments';
 import { epgRouter } from './modules/epg';
 import { appsRouter, availabilityRouter, accessRouter } from './modules/apps';
@@ -49,6 +50,7 @@ import { heartbeat } from './services/statusHub';
 import { INGEST_PROTOCOLS } from './services/ingestProtocols';
 import { mediaFilesRouter } from './modules/mediaFiles';
 import { watchfoldersRouter } from './modules/watchfolders';
+import { encodeProfilesRouter } from './modules/encodeProfiles';
 import { imageStore } from './services/imageStore';
 import { parseSpec, resizeFromStore } from './services/imageResize';
 import { isBootReconciled } from './services/orchestrator';
@@ -235,6 +237,7 @@ export function createServer() {
   }));
   app.use('/api/files', mediaFilesRouter);   // image library (file manager)
   app.use('/api/watchfolders', watchfoldersRouter);  // ingest folders, rules, review queue
+  app.use('/api/encode-profiles', encodeProfilesRouter);  // renditions + ladder groups
 
   // Resized preview derivatives (WebP), cached under the store's derived/ prefix.
   //   /img/<WxH>[,fit]/<store-key>   e.g. /img/320x200/library/<acct>/slates/x.png
@@ -333,6 +336,7 @@ export function createServer() {
   app.use('/api/publish-targets', publishTargetsRouter); // social account config
   app.use('/api/publications', publicationsRouter);      // publish + view tracking
   app.use('/api/publishing-rules', publishingRulesRouter); // the ladder + publishing points
+  app.use('/api/ingest', ingestRulesRouter);                 // ingest rules ladder, preview, webhooks
   app.use('/api/payments', paymentsAppRouter);           // the app verifies a receipt (publishable key)
   app.use('/api/payments', paymentsRouter);              // providers, products, viewers, grants (admin)
   // TODO: /api/groups, /api/accounts, /api/instances

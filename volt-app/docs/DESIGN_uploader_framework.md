@@ -194,6 +194,32 @@ a 60 GB file is seconds. Google Cloud Storage and Azure Blob as sources go
 through AWS DataSync, which supports both as locations, for accounts that
 keep a library there.
 
+### 4.3 Mobile
+
+Christian, 17 Sep: uploads from phones and tablets must work. Two routes,
+both already implied by the decisions above, and one set of specifics that
+the panel has to get right:
+
+- PHONE BROWSER. The same panel, and the file input opens the camera roll
+  and the Files app on iOS and Android. `accept="video/*,audio/*"` plus a
+  second control with `capture="environment"` for "record now and upload".
+  Safari suspends a background tab within seconds and has no Background
+  Fetch, so the client must treat "resume from the last verified chunk" as
+  the normal path on mobile, not the fallback: the session id and token are
+  remembered, and reopening the page offers "continue" with the file
+  re-picked (the browser will not keep a File handle across a reload).
+  Chunk size drops to 4 MB on a cellular connection, and the panel pauses
+  automatically on cellular when the account setting says wifi only.
+- NATIVE APP. The Volt mobile app (DESIGN_mobile_app_and_ticketed_events)
+  uses the official tus clients (TUSKit on iOS, tus-android-client) against
+  the same endpoint, with background transfer through the OS (NSURLSession
+  background sessions, WorkManager). That is the whole reason tus won the
+  protocol decision: the phone SDKs exist and are maintained by someone
+  else.
+- Metadata on a phone is the gate at its most useful: the operator picks
+  the content type and fills the required fields while the upload runs, on
+  the same screen, and the gate holds ingest until they are in.
+
 ### 4.2 Accelerated and secure transfer: Aspera and friends
 
 For anything the web cannot do well (multi hundred gigabyte deliveries,
@@ -356,7 +382,16 @@ Config, not code: `metadata.required = none | before_ingest | before_upload`.
 panel and watchfolders: on, anything added starts (subject to the gate);
 off, added items queue until Start.
 
-## 6. What is missing, honestly
+## 6. Build status
+
+Step 1 is built (17 Sep): `services/ingest/` holds naming, rules, duplicates,
+sniff, id3, metadata, payload, events (pure, 97 checks) and pipeline (DB);
+migration 0032 adds `ingest_rules`, `ingest_webhooks`, the asset columns and
+the session inputs; `/api/ingest` serves the rules, preview, sanitise and
+webhooks; the upload finish runs the pipeline and the panel sends folder
+paths and shows the ingest outcome. Steps 2 to 8 remain, listed below.
+
+## 6.1 What is missing
 
 | Gap | Size |
 | --- | --- |
