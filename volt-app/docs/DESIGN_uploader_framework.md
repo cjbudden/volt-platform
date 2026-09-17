@@ -112,6 +112,8 @@ upload session row, so progress is a query rather than a memory.
 | Google Drive, Dropbox, OneDrive | Each vendor's own PICKER (Google Picker, Dropbox Chooser, OneDrive File Picker). The user picks in the vendor UI, we receive a file id or a temporary direct link, the server fetches it. | medium |
 | Watchfolders: local, network share, S3 prefix | The existing scanner. Add S3 listing as a second walker and SMB/NFS as "local" mounts. Event driven S3 (ObjectCreated to SQS) later, scan is the backstop. | medium |
 | Any tus client | Point it at the endpoint. | none |
+| Accelerated transfer (Aspera, Signiant, MASV, S3 Transfer Acceleration) | Provider plugin replaces the transfer stage, section 4.2. | medium per provider |
+| Customer S3 bucket, GCS, Azure Blob | S3 server side copy, or AWS DataSync for GCS and Azure. | small to medium |
 
 The picker route is the deliberate alternative to Companion's full OAuth
 model. Companion asks for broad "read your whole Drive" scopes, which for
@@ -123,6 +125,121 @@ links with no server side token at all. We get the three sources you named
 for a fraction of the maintenance, and the framework's source adapter
 interface leaves the door open to full OAuth adapters later for anyone who
 needs "sync this folder".
+
+
+### 4.1 Cloud to cloud: never route a cloud file through the home connection
+
+Christian, 17 Sep: a file that lives in Google Drive, Dropbox or OneDrive and
+is dragged in from the mounted folder on a laptop goes cloud, to laptop, to
+cloud, at the speed of a home ISP. Video files are large. If we can tell the
+file is already in a cloud store, the transfer should go provider to AWS and
+never touch the laptop.
+
+WHY IT IS WORSE THAN IT LOOKS. Google Drive for desktop, OneDrive Files On
+Demand and Dropbox smart sync all show files that are not on the disk at all.
+Dragging one into a browser makes the sync client download it first, then
+the browser uploads it: the file crosses the home connection twice, and the
+laptop needs the disk space in between. A 60 GB camera card from a shoot is
+an afternoon.
+
+WHAT THE BROWSER CAN AND CANNOT KNOW. A dropped file arrives with a name, a
+size, a modified time and a relative path within the drop. The absolute path
+is deliberately hidden by every browser, so the page alone cannot see that a
+file came from `~/Library/CloudStorage/GoogleDrive-...`. Detection therefore
+has three routes, from cheapest to most complete:
+
+1. THE PICKER. If the file is chosen in the vendor's picker (section 4) it is
+   already cloud to cloud: the server fetches it, the laptop moves nothing.
+   The panel should offer the pickers prominently, with the words "faster for
+   files already in Drive, Dropbox or OneDrive", because the biggest win is
+   the operator choosing the right door.
+2. CONNECTED ACCOUNT LOOKUP. With a Dropbox or OneDrive account linked to the
+   Volt user, a dropped file's name, size and modified time are sent to the
+   server before any byte moves, and the server searches the account. Both
+   APIs support search by name and, given the drop's relative path, a get
+   by path. A match on name and exact size is offered as "This file is in
+   your Dropbox. Transfer from there instead?" (or done silently when the
+   rule says so). Google Drive is the exception: every scope that allows
+   search is a restricted scope with Google's verification and annual
+   assessment, so for Google this route is only for accounts that have gone
+   through that, and the picker is the default.
+3. DESKTOP AGENT. A small Volt desktop agent (the same component the local
+   watchfolder design already needs for on prem drop folders) sees the real
+   path, recognises the sync roots (`GoogleDrive-*`, `OneDrive-*`,
+   `Dropbox-*` under `~/Library/CloudStorage` on macOS, the drive letter or
+   `%USERPROFILE%` folders on Windows), knows whether the file is cloud only
+   or hydrated, and hands the server a provider plus path. For Dropbox and
+   OneDrive that path resolves directly. For Google the agent walks the
+   folder names in the account. This is the route that makes plain drag and
+   drop do the right thing without the operator thinking about it.
+
+Recommendation: 1 now, 2 with the cloud sources phase, 3 when the desktop
+agent is built for watchfolders anyway. The rule set gets one more THEN
+field, `transfer = auto | local | cloud`, with `auto` meaning "cloud if we
+can find it, local otherwise".
+
+HOW FAST "CLOUD TO CLOUD" ACTUALLY IS, so nobody oversells it. None of the
+three providers can push a file into S3 themselves, so the bytes go through
+a Volt transfer worker running in AWS: provider to worker to S3, streaming,
+nothing written to disk. That worker sits on datacentre bandwidth, so the
+practical ceiling is the provider's per-connection rate, and all three
+support HTTP Range requests, so the worker fetches a large file as parallel
+ranges (eight to sixteen in flight) straight into an S3 multipart upload. In
+practice that is hundreds of megabits to a few gigabits per file, against
+the tens of megabits of a home upload, and the laptop can be closed the
+moment the transfer is queued. When the source is ALREADY on S3 (a
+customer's own bucket, a bring your own bucket account) the worker does not
+move bytes at all: S3 multipart copy, server side, and a same region copy of
+a 60 GB file is seconds. Google Cloud Storage and Azure Blob as sources go
+through AWS DataSync, which supports both as locations, for accounts that
+keep a library there.
+
+### 4.2 Accelerated and secure transfer: Aspera and friends
+
+For anything the web cannot do well (multi hundred gigabyte deliveries,
+lossy long haul links, broadcasters who already own the licences) the
+framework should have a first class hook for accelerated transfer tools
+rather than pretend the browser is enough. The interface is one
+`TransferProvider` per tool:
+
+```
+createTransfer(files, destination, rule) -> { spec, launch }
+    spec:   what the tool needs to run the job (Aspera transfer_spec,
+            a Signiant Jet job, a MASV package request, a presigned
+            S3 accelerated URL)
+    launch: how the operator's side starts it (browser handoff to the
+            desktop client, deep link, portal URL, or nothing)
+onEvent(payload) -> progress | complete | failed   (webhook or poll)
+```
+
+The upload session is the same row, the same events and the same ingest
+pipeline afterwards. The tool replaces the transfer stage only; rules,
+naming, dedupe, metadata and sidecars run unchanged when the bytes land.
+
+Prebuilt providers, in the order they matter to the customers we sell to:
+
+- IBM Aspera. The Volt server acts as an Aspera Node API client: it asks the
+  customer's Aspera node (or Aspera on Cloud) for a transfer spec with a
+  one time token for the destination, hands it to the operator's IBM Aspera
+  desktop client through the browser SDK handoff, and follows the transfer
+  through the Node API events. FASP does the moving. Also usable server side
+  with `ascp` for cloud to cloud and watchfolder pulls from a customer's
+  Aspera Shares.
+- Signiant Media Shuttle and Jet: the Media Shuttle API for portal driven
+  submits with a webhook on completion, Jet for scheduled automated
+  transfers between Signiant endpoints.
+- MASV: API driven packages and portals, webhook on delivery, straight to
+  S3. The pragmatic choice for a customer who has no Aspera licence.
+- AWS S3 Transfer Acceleration: not a tool, a different S3 endpoint that
+  routes uploads through the nearest CloudFront edge. Costs nothing to
+  support in the S3 driver (one flag), no client software, and it is the
+  single biggest improvement available to a home upload without leaving the
+  browser. Should be on by default for browser uploads to S3.
+- FileCatalyst, Resilio and SFTP as later adapters behind the same
+  interface, SFTP being the "secure, slow, everyone has it" floor.
+
+Every provider is a plugin package (`ingest-provider-aspera`, and so on) so
+the core never depends on a vendor SDK.
 
 ## 5. The rules engine
 
@@ -291,8 +408,12 @@ decision or veto it.
 3. S3 driver and S3 watchfolder walker.
 4. Upload panel v2: one action, folder picks, bulk, metadata gate, duplicate
    prompts, progress that survives navigation. Replaces the Vod page panel.
-5. URL, Drive, Dropbox, OneDrive sources.
-6. Package split and a README aimed at a developer who is not us.
+5. URL, Drive, Dropbox, OneDrive sources, with the cloud to cloud transfer
+   worker (parallel ranges into S3 multipart) and connected account lookup.
+   S3 Transfer Acceleration flag in the S3 driver comes with step 3.
+6. Accelerated transfer providers: Aspera first, then MASV and Signiant.
+7. Desktop agent for local watchfolders and sync root detection.
+8. Package split and a README aimed at a developer who is not us.
 
 ## 9. Decisions to confirm
 
@@ -302,3 +423,6 @@ decision or veto it.
 - Default naming for Volt: `guid` with the original name kept in metadata.
 - Default duplicate action: `ask` in the panel, `skip` in watchfolders.
 - Default gate: `before_ingest` when the content type has required fields.
+- Default transfer: `auto` (cloud to cloud whenever the file can be found in
+  a connected account, local otherwise) and S3 Transfer Acceleration on.
+- Aspera as the first accelerated provider, MASV as the no licence fallback.
