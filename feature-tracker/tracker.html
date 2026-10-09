@@ -27,38 +27,12 @@
 </style></head><body>
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
- <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-10T05:30:00Z.</div>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-10T08:15:00Z.</div>
  <div class=sub>Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code: statuses and app surfacing brought up to date, and 16 cards added (14 built features the list was missing, plus Notifications and XMLTV import, which are still being built). Nothing has been approved yet, and nothing was removed.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>42</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>5</b> 🔨 Building</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>40</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>2</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>5</b> 🔨 Building</span></div>
  <div class=chips style="margin-bottom:12px"><span class=chip><b>32</b> 📱 In app</span><span class=chip><b>14</b> 📱 Partial</span><span class=chip><b>1</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span><span class=chip><b>2</b> ⏳ Not built</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
- <div class=card data-status="ready_to_test" data-app="full">
-    <div class=top><div class=name>Live stream end to end (create → transcode → play)</div>
-      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
-      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
-    <div class=summary>Create a Transcode channel with an HLS/RTMP/SRT pull source, Send source, and the real encoder ingests + builds the ABR ladder (x264) + packages CMAF (HLS+DASH) to the origin, played back in the app with real status + event log. Verified in a full local stack against the JR HLS source: 1080/720/480 ABR served + playable.</div>
-    <div class=meta>Verified end-to-end in a local stack (postgres+control plane+encoder); origin serves a 3-rendition master; tsc + vite build clean.</div>
-    <div class=how><b>How to test:</b> run-on-mac.sh → Channels → New channel (Transcode, HLS source) → open channel → Send source → watch Source/Output play.</div>
-    
-    <div class=actions>
-         <button class="btn ok" data-approve="Live stream end to end (create → transcode → play)">✓ Approve as working</button>
-         <button class="btn warn" data-changes="Live stream end to end (create → transcode → play)">Request changes</button>
-       </div>
-    
-  </div><div class=card data-status="ready_to_test" data-app="full">
-    <div class=top><div class=name>Image resize service</div>
-      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
-      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
-    <div class=summary>On-the-fly resize, crop and filter by URL, cached: fit (cover, inside, contain, fill), focus point, grayscale, blur, saturation, quality and format (WebP, JPEG, PNG). Every thumbnail and artwork in the app is served through it.</div>
-    <div class=meta>Productionised 5 Sep: services/imageResize.ts serves GET /img/&lt;WxH&gt;,&lt;fit&gt;/&lt;key&gt; and every thumbnail and artwork in the console goes through it. Open gap: signed (HMAC) URLs are not enforced yet, so sign before it faces the internet. AVIF and smart focus from the prototype did not carry over.</div>
-    <div class=how><b>How to test:</b> Image Library or any channel or station artwork: thumbnails render through /img/... . To try sizes and fits by hand, open /img/320x180,cover/&lt;library key&gt; and change the size and fit in the URL.</div>
-    
-    <div class=actions>
-         <button class="btn ok" data-approve="Image resize service">✓ Approve as working</button>
-         <button class="btn warn" data-changes="Image resize service">Request changes</button>
-       </div>
-    
-  </div><div class=card data-status="ready_to_test" data-app="partial">
+ <div class=card data-status="ready_to_test" data-app="partial">
     <div class=top><div class=name>Frame-accurate scrub &amp; clip</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
@@ -617,6 +591,26 @@
          <button class="btn warn" data-changes="Live output trust (live-edge ingest + live-lock)">Request changes</button>
        </div>
     
+  </div><div class=card data-status="approved" data-app="full">
+    <div class=top><div class=name>Live stream end to end (create → transcode → play)</div>
+      <span class=pill style="background:#16a34a">✅ Approved</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Create a Transcode channel with an HLS/RTMP/SRT pull source, Send source, and the real encoder ingests + builds the ABR ladder (x264) + packages CMAF (HLS+DASH) to the origin, played back in the app with real status + event log. Verified in a full local stack against the JR HLS source: 1080/720/480 ABR served + playable.</div>
+    <div class=meta>Verified end-to-end in a local stack (postgres+control plane+encoder); origin serves a 3-rendition master; tsc + vite build clean.</div>
+    <div class=how><b>How to test:</b> run-on-mac.sh → Channels → New channel (Transcode, HLS source) → open channel → Send source → watch Source/Output play.</div>
+    
+    <div class=approved-line>✅ Approved by you</div>
+    <div class=fblog><div class=fb>• 2026-10-10: Approved by Christian as working.</div></div>
+  </div><div class=card data-status="approved" data-app="full">
+    <div class=top><div class=name>Image resize service</div>
+      <span class=pill style="background:#16a34a">✅ Approved</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>On-the-fly resize, crop and filter by URL, cached: fit (cover, inside, contain, fill), focus point, grayscale, blur, saturation, quality and format (WebP, JPEG, PNG). Every thumbnail and artwork in the app is served through it.</div>
+    <div class=meta>Productionised 5 Sep: services/imageResize.ts serves GET /img/&lt;WxH&gt;,&lt;fit&gt;/&lt;key&gt; and every thumbnail and artwork in the console goes through it. Open gap: signed (HMAC) URLs are not enforced yet, so sign before it faces the internet. AVIF and smart focus from the prototype did not carry over.</div>
+    <div class=how><b>How to test:</b> Image Library or any channel or station artwork: thumbnails render through /img/... . To try sizes and fits by hand, open /img/320x180,cover/&lt;library key&gt; and change the size and fit in the URL.</div>
+    
+    <div class=approved-line>✅ Approved by you</div>
+    <div class=fblog><div class=fb>• 2026-10-10: Approved by Christian as working.</div></div>
   </div><div class=card data-status="building" data-app="partial">
     <div class=top><div class=name>Publish a clip to social media</div>
       <span class=pill style="background:#64748b">🔨 Building</span>

@@ -1,30 +1,40 @@
 {
-  "updated": "2026-10-10T05:30:00Z",
+  "updated": "2026-10-10T08:15:00Z",
   "features": [
     {
       "id": "live-stream-e2e",
       "name": "Live stream end to end (create → transcode → play)",
       "summary": "Create a Transcode channel with an HLS/RTMP/SRT pull source, Send source, and the real encoder ingests + builds the ABR ladder (x264) + packages CMAF (HLS+DASH) to the origin, played back in the app with real status + event log. Verified in a full local stack against the JR HLS source: 1080/720/480 ABR served + playable.",
-      "status": "ready_to_test",
+      "status": "approved",
       "test": {
         "how": "run-on-mac.sh → Channels → New channel (Transcode, HLS source) → open channel → Send source → watch Source/Output play.",
         "artifact": ""
       },
       "checks": "Verified end-to-end in a local stack (postgres+control plane+encoder); origin serves a 3-rendition master; tsc + vite build clean.",
-      "feedback": [],
+      "feedback": [
+        {
+          "date": "2026-10-10",
+          "note": "Approved by Christian as working."
+        }
+      ],
       "app_surface": "full"
     },
     {
       "id": "image-resize",
       "name": "Image resize service",
       "summary": "On-the-fly resize, crop and filter by URL, cached: fit (cover, inside, contain, fill), focus point, grayscale, blur, saturation, quality and format (WebP, JPEG, PNG). Every thumbnail and artwork in the app is served through it.",
-      "status": "ready_to_test",
+      "status": "approved",
       "test": {
         "how": "Image Library or any channel or station artwork: thumbnails render through /img/... . To try sizes and fits by hand, open /img/320x180,cover/<library key> and change the size and fit in the URL.",
         "artifact": ""
       },
       "checks": "Productionised 5 Sep: services/imageResize.ts serves GET /img/<WxH>,<fit>/<key> and every thumbnail and artwork in the console goes through it. Open gap: signed (HMAC) URLs are not enforced yet, so sign before it faces the internet. AVIF and smart focus from the prototype did not carry over.",
-      "feedback": [],
+      "feedback": [
+        {
+          "date": "2026-10-10",
+          "note": "Approved by Christian as working."
+        }
+      ],
       "app_surface": "full"
     },
     {
