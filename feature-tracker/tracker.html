@@ -27,9 +27,10 @@
 </style></head><body>
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
- <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-10T04:30:00Z.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>25</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>17</b> 📱 In app</span><span class=chip><b>6</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-10T05:30:00Z.</div>
+ <div class=sub>Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code: statuses and app surfacing brought up to date, and 16 cards added (14 built features the list was missing, plus Notifications and XMLTV import, which are still being built). Nothing has been approved yet, and nothing was removed.</div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>42</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>5</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>32</b> 📱 In app</span><span class=chip><b>14</b> 📱 Partial</span><span class=chip><b>1</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span><span class=chip><b>2</b> ⏳ Not built</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>Live stream end to end (create → transcode → play)</div>
@@ -44,39 +45,39 @@
          <button class="btn warn" data-changes="Live stream end to end (create → transcode → play)">Request changes</button>
        </div>
     
-  </div><div class=card data-status="ready_to_test" data-app="partial">
+  </div><div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>Image resize service</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
-      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
-    <div class=summary>On-the-fly resize / crop / filter by URL, cached. fit-in / fill / stretch, focus incl. smart, sharpen / blur / grayscale / webp / avif, signed URLs. Now wired to the Image Library: grid/picker/preview thumbnails render via /img/&lt;WxH&gt;/library/... (WebP, cached under derived/thumbs/).</div>
-    <div class=meta>14/14 automated contract checks pass</div>
-    <div class=how><b>How to test:</b> Open the test view, drop in your own logo/image and try fit / size / focus / filters, or attach an image in chat for true sharp-service renders.</div>
-    <div class=note>Test tool: open <b>“volt-image-api-validator”</b> in your artifacts gallery.</div>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>On-the-fly resize, crop and filter by URL, cached: fit (cover, inside, contain, fill), focus point, grayscale, blur, saturation, quality and format (WebP, JPEG, PNG). Every thumbnail and artwork in the app is served through it.</div>
+    <div class=meta>Productionised 5 Sep: services/imageResize.ts serves GET /img/&lt;WxH&gt;,&lt;fit&gt;/&lt;key&gt; and every thumbnail and artwork in the console goes through it. Open gap: signed (HMAC) URLs are not enforced yet, so sign before it faces the internet. AVIF and smart focus from the prototype did not carry over.</div>
+    <div class=how><b>How to test:</b> Image Library or any channel or station artwork: thumbnails render through /img/... . To try sizes and fits by hand, open /img/320x180,cover/&lt;library key&gt; and change the size and fit in the URL.</div>
+    
     <div class=actions>
          <button class="btn ok" data-approve="Image resize service">✓ Approve as working</button>
          <button class="btn warn" data-changes="Image resize service">Request changes</button>
        </div>
     
-  </div><div class=card data-status="ready_to_test" data-app="none">
+  </div><div class=card data-status="ready_to_test" data-app="partial">
     <div class=top><div class=name>Frame-accurate scrub &amp; clip</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
-    <div class=summary>Pull any frame on demand from the chunked origin, scrub via sprite + I-frame trick-play, cut a frame-accurate clip. No proxies.</div>
-    <div class=meta>15/15 assertions (frame-accuracy MAD 0.02, exact clip, sprite, trick-play)</div>
-    <div class=how><b>How to test:</b> Run the prototype (volt-frame-proto.zip): npm install → node test.mjs → node server.mjs → open /scrub. 15/15 assertions.</div>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Frame-exact cutting is in the Recordings workbench: step one frame at a time with , and . then set in/out and the clip is rendered frame-accurate (decode-and-discard seek, no proxies). The prototype's just-in-time single-frame pull and I-frame trick-play were not carried into the product: the workbench filmstrip and frame-accurate render replaced them.</div>
+    <div class=meta>clip-extract, clip-provenance, clip-smart-render and retrim suites. Prototype (15/15, volt-frame-proto) kept for reference only.</div>
+    <div class=how><b>How to test:</b> Recordings &gt; open a recording &gt; step with , and . to a frame &gt; set in (i) and out (o) &gt; Create clip &gt; check the clip starts and ends on those frames.</div>
     
     <div class=actions>
          <button class="btn ok" data-approve="Frame-accurate scrub &amp; clip">✓ Approve as working</button>
          <button class="btn warn" data-changes="Frame-accurate scrub &amp; clip">Request changes</button>
        </div>
     
-  </div><div class=card data-status="ready_to_test" data-app="none">
+  </div><div class=card data-status="ready_to_test" data-app="partial">
     <div class=top><div class=name>Secure share page</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
-    <div class=summary>Time-boxed standalone preview link for one asset. Revoke, expiry, max-views, optional PIN, watermarked preview, allow-download, notify-on-open.</div>
-    <div class=meta>20/20 e2e (isolation, PIN, revoke→410, expiry→410, download gating)</div>
-    <div class=how><b>How to test:</b> Say the word and I'll spin up a live sample share link + page from the local console so you can click expiry / PIN / revoke. Backend is 20/20 e2e.</div>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Time-boxed standalone preview link for one asset: revoke, expiry, max views, optional PIN or emailed PIN, watermarked preview, allow download, notify on open. In the app from the Share drawer on a channel, a radio station and an event. Not yet on Media Library assets: the drawer supports them but the VOD page has no Share button.</div>
+    <div class=meta>share-links.check.sh (create, resolve, PIN, revoke, expiry, rotate, cross-tenant).</div>
+    <div class=how><b>How to test:</b> Channel detail (or a station or an event) &gt; Share &gt; set an expiry and a PIN &gt; Create &gt; open the link in a private window. Then revoke it and reload: the page should say it has gone.</div>
     
     <div class=actions>
          <button class="btn ok" data-approve="Secure share page">✓ Approve as working</button>
@@ -88,7 +89,7 @@
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
     <div class=summary>Whisper transcribe + NLLB translate + segmented WebVTT renditions, with the SYNC problem solved at the root. Caption audio is now the DELIVERED audio (the packager's own CMAF audio segments), so a cue is pinned to the exact media PTS its words sit at rather than reconciled from wall clock. Video PDT, subtitle PDT and the WebVTT timestamp map all derive from ONE epoch plus each segment's own tfdt, so they agree by construction. Word-level cue timing, VAD gating and hallucination thresholds; a base.en default in place of tiny. Measured on the unified-streaming 1080p source over 10 and 31 minute runs: median sync error went from -15.7s to +0.01s, 96% of cues within 1 second, PDT step error 8.777s to 0.000s, and 9.5% of the delivered audio that was silently missing is now 0%.</div>
-    <div class=meta>Unit: test_captions.py 58, test_companion_pdt.py 38, test_player_alignment.py 7 (cues that state their own media time, checked in a real browser). Live: 31 minute soak, 474 cues, 0 unplaceable, 0 ingest errors, 0% missing audio, median sync error +0.002s. Full write-up in CAPTIONS.md. OPEN: DASH text alignment still needs a check against a real DASH player, and playercheck.py against H.264 output needs a machine with real Google Chrome (headless Chromium has no H.264/AAC decoder).</div>
+    <div class=meta>9 Oct test and review: the 19 Aug sync fix had been overwritten by two later commits and was restored (median sync error 0.02 s, 94 to 100% of cues within 1 to 2 s). The encoder now runs with the project .venv so faster-whisper is found. Unit: test_captions.py, test_companion_pdt.py, test_player_alignment.py. Still missing: the captions settings screen (account provider toggle, per-profile languages), so it stays partial in the app.</div>
     <div class=how><b>How to test:</b> Two ways. (1) One command, no app: cd volt-encoder &amp;&amp; ./synctest.sh mytest 300 prints start-up, ingest health, clean stop, the sync error in seconds, caption coverage and word error rate, then what a real player shows. (2) In the app: enable captions on the account+profile (set caption_source_lang to 'en' for an English channel so it uses the better English-only model), run a channel, toggle CC on the output, scrub back through the DVR window and return to live. Subtitles should sit on the words at any point in the window, not just at the live edge.</div>
     
     <div class=actions>
@@ -101,8 +102,8 @@
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#3f4656;color:#3f4656">— no UI needed</span></div>
     <div class=summary>Browser console over the live API: overview, channels (start/stop), events, EPG, VOD, analytics, tickets, notifications + SaaS admin tab.</div>
-    <div class=meta>verified end-to-end in browser</div>
-    <div class=how><b>How to test:</b> In volt-app: ./run-local.sh, open /console, sign in (admin@rtm.example / saas@volt.example, pw volt1234). Flip between logins to see tenant isolation.</div>
+    <div class=meta>The single-file console is retired: /console now redirects to the React app, and the old file is kept in volt-app/dev/ but not served. This card is a candidate for removal and needs your confirmation.</div>
+    <div class=how><b>How to test:</b> Browse to /console: it should land on the app's sign-in.</div>
     
     <div class=actions>
          <button class="btn ok" data-approve="Local test console (login + all tabs)">✓ Approve as working</button>
@@ -114,7 +115,7 @@
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
     <div class=summary>Edit channels/events/schemas with PATCH (send only changed fields; null clears), optimistic concurrency (If-Match/version, 409 on stale write), and a full audit trail: who created/changed each record, field-level diffs, and per-record history.</div>
-    <div class=meta>23 e2e (partial patch, version bump, 409 conflict, null-clear, create/update/delete audit, history) + verify.sh 38/38</div>
+    <div class=meta>edit-audit.check.sh + activity-log.check.ts. Editing is in the app (channel settings, events, content types). The per-record history (GET /:id/history) has no screen yet, so it stays partial.</div>
     <div class=how><b>How to test:</b> PATCH /api/channels/:id (or events / metadata-schemas), then GET /api/channels/:id/history. Try a stale If-Match to see the 409. Postman collection covers it; or attach me a scenario and I'll run it.</div>
     
     <div class=actions>
@@ -122,12 +123,25 @@
          <button class="btn warn" data-changes="Record edit API + audit trail">Request changes</button>
        </div>
     
-  </div><div class=card data-status="ready_to_test" data-app="none">
+  </div><div class=card data-status="ready_to_test" data-app="partial">
+    <div class=top><div class=name>Live updates (admin)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>When one admin saves a record, anyone else with the same record open is told it changed (only which fields changed and who, never the values) and can reload, over the existing SSE hub. Own saves are not flagged. Wired into the channel Settings drawer only so far; events, radio, Media Library and content types are a one-line addition each.</div>
+    <div class=meta>Built 5 Sep: patchEntity publishes the change, liveRecord.tsx shows the notice. live-record.check.ts 24/24 including a check that values never reach the frame.</div>
+    <div class=how><b>How to test:</b> Open the same channel's Settings in two browsers (or two users). Save a change in one: the other shows a notice that the record changed, naming the fields, with a reload option.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Live updates (admin)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Live updates (admin)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>EPG: guides, day builder, slot control &amp; post-airing automation</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
     <div class=summary>WHY: the guide is both the viewer-facing schedule and the automation spine: what aired drives clip creation and naming. WHAT: EPG section (owners roll-up), per-channel/per-event day builder (add/remove, copy days, clear day, conflicts), per-slot geo access and slot replacement (slate/loop/vod for the period), and post-airing auto clip/VOD generation that harvests the programme metadata for the asset name and fields. Event EPGs double as the day schedule. Radio (in build) reuses these same tables/APIs for the Icecast now-playing log.</div>
-    <div class=meta>18/18 epg-extended e2e + original 13; auto-clip firing verified.</div>
+    <div class=meta>18/18 epg-extended e2e + epg.check.sh + epg-pure + epg-vod (VOD lifecycle per slot, convert now). In the app: EPG list and the per-owner day builder (EpgDetail).</div>
     <div class=how><b>How to test:</b> EPG &gt; pick a channel &gt; build a day, copy it forward, set a slot geo rule and a replacement, let a programme end and watch the auto-clip appear in VOD with the EPG metadata.</div>
     
     <div class=actions>
@@ -148,12 +162,25 @@
          <button class="btn warn" data-changes="Image Library (file manager)">Request changes</button>
        </div>
     
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Watchfolder ingest</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Assign a local folder as an automatic ingest source. Ordered rules decide what each file becomes, a dry run shows what a filename would match, and a review queue holds anything a rule did not place, with Reprocess and Remove. Video files are encoded on the live ladder. S3 bucket sources and the VOD/loop targets are still queued.</div>
+    <div class=meta>watchfolder-api, watchfolder-scan, watchfolder-rules, watchfolder-ingest, watchfolder-video suites.</div>
+    <div class=how><b>How to test:</b> Watchfolders &gt; add a folder and a rule &gt; type a filename into the dry run to see what it matches &gt; drop a file into the folder &gt; it lands in the Media Library, or in the review queue if no rule matched.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Watchfolder ingest">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Watchfolder ingest">Request changes</button>
+       </div>
+    
   </div><div class=card data-status="ready_to_test" data-app="partial">
     <div class=top><div class=name>Test stream, playback &amp; live subtitles</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
     <div class=summary>Synthetic test-card generator (test-stream.sh) for a quick demo without a real feed. Secondary/demo path only; the primary flow now uses the real encoder. Note: relies on ffmpeg drawtext which can fail on macOS Homebrew ffmpeg.</div>
-    <div class=meta>generator + captions + /origin serving + start/stop API validated; player is hls.js (H.264 plays in Chrome/Safari on Mac)</div>
+    <div class=meta>generator + captions + /origin serving + start/stop API validated; player is hls.js (H.264 plays in Chrome/Safari on Mac) Mostly superseded by the real local encoder; kept as the no-source demo path.</div>
     <div class=how><b>How to test:</b> Run the app on your Mac (bash run-on-mac.sh, needs ffmpeg), open a channel, click 'Start test stream'. The output player plays the live HLS; toggle CC and switch languages; drag the DVR bar back and hit Go live.</div>
     
     <div class=actions>
@@ -211,6 +238,19 @@
     <div class=actions>
          <button class="btn ok" data-approve="Deep-linking &amp; routing (hashless)">✓ Approve as working</button>
          <button class="btn warn" data-changes="Deep-linking &amp; routing (hashless)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="partial">
+    <div class=top><div class=name>Bitrate ladder profiles (library + CRUD)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Two places: a channel's live output ladder (its ABR rungs) is edited in the channel Settings drawer, and Encoding Profiles holds the renditions and ladders used for file-based encodes, either tracking a live output profile or their own. The standalone output-profile library (list, copy, rename, delete with in-use guard) exists in the API without a screen, and has no edit.</div>
+    <div class=meta>encode-ladder.check.ts, encode-store.check.ts.</div>
+    <div class=how><b>How to test:</b> Encoding Profiles &gt; create a rendition, then a ladder (tracking a live profile, or its own) &gt; Preview. For a live channel: Channel &gt; Settings &gt; Output ladder &gt; change a rung &gt; restart and check the player's rung list.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Bitrate ladder profiles (library + CRUD)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Bitrate ladder profiles (library + CRUD)">Request changes</button>
        </div>
     
   </div><div class=card data-status="ready_to_test" data-app="partial">
@@ -282,9 +322,9 @@
     <div class=top><div class=name>Channel brand image (info + guide)</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
-    <div class=summary>A logo/artwork image and a description on the channel — its identity, kept separate from the burned-in watermark. Set on the CREATE form and in settings (browse the Image Library or upload). Shown as the list thumbnail and in the detail header, and served to guide clients via GET /api/epg/channels (id, name, icon, colour, description, medium) — the same thing XMLTV carries as &lt;channel&gt;&lt;icon src/&gt;&lt;/channel&gt;. For a radio station it is the artwork a player shows.</div>
-    <div class=meta>Built 16 Aug. Brand is never passed to the encoder (asserted in radio-brand.check.ts).</div>
-    <div class=how><b>How to test:</b> Channels → New channel → Brand: pick or upload a logo, add a description, create. The list thumbnail and the detail header should show it. Change it later in Settings → Brand. Check GET /api/epg/channels returns it as icon.</div>
+    <div class=summary>A logo or artwork image on the channel: its identity, kept separate from the burned-in watermark. Set on the create form and in Settings from the Image Library. Shown as the list thumbnail and in the detail header, and served to guide clients via GET /api/epg/channels and as the XMLTV &lt;channel&gt;&lt;icon&gt;. The description comes from the channel's content type (the separate description column described on 16 Aug is not in the schema).</div>
+    <div class=meta>Built 16 Aug, endpoint added 10 Oct. Brand is never passed to the encoder (radio-brand.check.ts).</div>
+    <div class=how><b>How to test:</b> Channels &gt; New channel &gt; Brand: pick a logo, create. The list thumbnail and detail header show it. Then EPG &gt; XMLTV export &gt; Download and check the channel has an &lt;icon&gt;.</div>
     
     <div class=actions>
          <button class="btn ok" data-approve="Channel brand image (info + guide)">✓ Approve as working</button>
@@ -356,26 +396,208 @@
          <button class="btn warn" data-changes="XMLTV export: download, partner feeds, channel IDs">Request changes</button>
        </div>
     
-  </div><div class=card data-status="in_review" data-app="none">
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Events: scheduled live events</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>WHY: a one-off broadcast (a match, a service, a town hall) needs to start, go public and end on time without an operator. WHAT: create an event with a window, sources and a slate; it provisions itself before the start, goes public, ends, records, and can turn into a VOD automatically with the event's metadata. Has its own schedule (EPG) and Share.</div>
+    <div class=meta>events.check.sh, autovod.check.ts, event-delivery.check.ts, scheduled-clips.check.ts, epg-vod.check.ts.</div>
+    <div class=how><b>How to test:</b> Events &gt; New &gt; set a start a few minutes ahead, a source and Auto-VOD &gt; wait: it starts on its own, then after the end a VOD appears in the Media Library carrying the event's metadata.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Events: scheduled live events">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Events: scheduled live events">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Source loss: failover, loop/slate playout and the recording marker</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>WHY: viewers must never see a dead player. WHAT: when a source drops, the channel cuts to its backup source with no gap, or to a fallback loop or slate that was pre-built to match the source's own video and audio, spliced straight into the delivered HLS and DASH (no packager restart). Works for transcode and packaging channels. The recording marks where the loop was on air with an amber strip, since the loop itself is not recorded.</div>
+    <div class=meta>Built 9 Oct: zero player stalls in browser failover runs with the real hls.js and dash.js (browsercheck.mjs), DASH period boundaries handled per track. orchestrator.check.ts, recordings.check.sh, filler-prep.check.ts, encoder dev/wftest.sh. See FAILOVER.md and PLAYOUT.md.</div>
+    <div class=how><b>How to test:</b> Start a channel with a backup source and a fallback loop &gt; use Force backup / Force loop on the channel page, or stop the primary source &gt; the output keeps playing with no freeze &gt; restore the source &gt; open the recording: an amber strip shows where the loop was on air.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Source loss: failover, loop/slate playout and the recording marker">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Source loss: failover, loop/slate playout and the recording marker">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="partial">
+    <div class=top><div class=name>Loops &amp; Fillers library</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Upload slates and loops (drag and drop, resumable chunked upload) and assign them to channels as the filler on source loss. A loop is pre-rendered to match each channel's sources when they are added. The status of that pre-build is not shown in the app yet.</div>
+    <div class=meta>uploads.check.ts, tus.check.ts, filler-prep.check.ts.</div>
+    <div class=how><b>How to test:</b> Loops &amp; Fillers &gt; upload a short video loop &gt; Channel &gt; Settings &gt; filler on total loss = that loop &gt; start the channel and force the loop.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Loops &amp; Fillers library">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Loops &amp; Fillers library">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Ingest: upload panel, cloud drives, accelerated transfer, desktop agent</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>WHY: getting media in is the first thing every customer does. WHAT: an ingest panel in the Media Library with source buttons (local files, Dropbox, OneDrive, Google Drive, accelerated transfer via Aspera, MASV, Signiant or S3), per-file rule badges showing where each file will land, and an Ingest Queue drawer that follows every transfer. A desktop agent handles large local transfers. Ingest Rules (Admin) set naming, structure, duplicates and webhooks.</div>
+    <div class=meta>Built 17 Sep (ingest steps 1 to 8). ingest-core, ingest-extract, ingest-providers, ingest-s3, ingest-sources, tus, uploads, agent suites. Cloud drive buttons only show when their app keys are configured.</div>
+    <div class=how><b>How to test:</b> Media Library &gt; drop a few files into the ingest panel &gt; check each file's rule badge &gt; Upload &gt; open the Ingest Queue drawer and watch them complete. Admin &gt; Ingest Rules to change naming or duplicate handling, then upload again.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Ingest: upload panel, cloud drives, accelerated transfer, desktop agent">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Ingest: upload panel, cloud drives, accelerated transfer, desktop agent">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>File-based encoding on the live ladder</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>An uploaded or watchfolder video is encoded into the same renditions and ladder as live, so VOD and live play the same way. Encoding Profiles defines the renditions and ladders. Progress shows on the Media Library row.</div>
+    <div class=meta>encode-ladder.check.ts, encode-store.check.ts, watchfolder-video.check.ts, jobs.check.ts.</div>
+    <div class=how><b>How to test:</b> Media Library &gt; upload a video &gt; the row goes Queued to encode &gt; Encoding n% &gt; ready &gt; play it and step through the rungs.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="File-based encoding on the live ladder">✓ Approve as working</button>
+         <button class="btn warn" data-changes="File-based encoding on the live ladder">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Media Library, availability and publishing rules</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>WHY: an asset is only useful once the right audience can reach it, on the right app, for the right price. WHAT: Media Library with content types, availability windows and a publishing rules ladder (account default, then type, then owner, then asset); apps registered under API Keys are publishing points; access rules (FOR / IF / THEN / TERMS) cover members-only, geo and paid access; web payments are configured under Admin &gt; Payments.</div>
+    <div class=meta>Built 5 Sep. access-rules.check.ts, publishing-rules.check.ts, apps.check.sh. Not yet: App Store / Play receipt confirmation, platform-created Stripe Checkout, social adapters.</div>
+    <div class=how><b>How to test:</b> Register an app &gt; Admin &gt; Publishing Rules &gt; target that app &gt; Media Library &gt; open an asset &gt; Availability &gt; Publish &gt; request it through the app key and confirm it is allowed. Add an access rule that blocks a country and request it with that country.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Media Library, availability and publishing rules">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Media Library, availability and publishing rules">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Content types (standard schema.org types)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Every account gets standard types (radio station, TV channel, broadcast event and its family, clip, episode), each editable and cloneable. A channel, station or event always has a type; its fields feed the guide (EPG slots), schema.org output and anything derived from it, which inherits the type and a copy of its metadata.</div>
+    <div class=meta>content-types.check.ts 121/121.</div>
+    <div class=how><b>How to test:</b> Admin &gt; Content Types &gt; add a field to TV channel and map it to an EPG slot &gt; open a channel &gt; Metadata tab: the field is there &gt; add a programme on that channel: it is prefilled.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Content types (standard schema.org types)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Content types (standard schema.org types)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Review and QC</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Automated QC (five checks in one ffmpeg pass) on clips and VOD, a review state machine with notes and an audit trail, and a soft publish gate. A re-trimmed clip loses its approval and QC verdict.</div>
+    <div class=meta>review-qc.check.ts.</div>
+    <div class=how><b>How to test:</b> Create a clip &gt; Review &gt; run QC &gt; read the findings &gt; approve with a note &gt; re-trim the clip and confirm it drops back to unreviewed.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Review and QC">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Review and QC">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Storage, media lifecycle and retention</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Every file is a tracked media object with a lifecycle (nine states) separate from where it physically sits. A retention ladder moves or deletes media oldest first, with a dry run. Cold and archive tiers only apply on S3 with archiving switched on.</div>
+    <div class=meta>media-lifecycle.check.ts. Still not built: deleting the S3 objects themselves on expiry (the database row goes, the sweep is a TODO). Archive and restore are unit tested against a fake driver only.</div>
+    <div class=how><b>How to test:</b> Storage &gt; add a retention rung (for example delete clips older than N days) &gt; Dry run and read what it would touch &gt; open an object's history.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Storage, media lifecycle and retention">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Storage, media lifecycle and retention">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Operations: Dashboard, Live Streams, Monitoring, Multiview, Fleet &amp; Usage</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>The operator's view of everything running: dashboard summary, the live board, alerts across seven subsystems with fleet activity as events, a multiview that watches the origin so you can see a channel before it goes on air, and fleet and usage (instances, relays, hours run).</div>
+    <div class=meta>monitoring.check.ts, fleet-api.check.sh, relay-fleet.check.ts, activity-log.check.ts, live-degraded.check.ts, air-sessions.check.ts.</div>
+    <div class=how><b>How to test:</b> Start two channels &gt; Live Streams and Multiview show both &gt; stop one channel's source &gt; Monitoring raises it and the dashboard reflects it &gt; Fleet &amp; Usage shows the running instances.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Operations: Dashboard, Live Streams, Monitoring, Multiview, Fleet &amp; Usage">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Operations: Dashboard, Live Streams, Monitoring, Multiview, Fleet &amp; Usage">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Auto connect and recovery</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>A channel set to auto connect is relaunched after a crash, but only once it has had a healthy run (pressing Start is not enough to arm it), and a channel stopped by hand stays stopped. After repeated failures it gives up and says why, and the operator can clear the notice.</div>
+    <div class=meta>auto-connect.check.ts, recovery-note.check.ts, crash-loop.check.ts, startup-settling.check.ts.</div>
+    <div class=how><b>How to test:</b> Channel &gt; Settings &gt; Auto connect on &gt; start it and let it run healthy &gt; kill the encoder process &gt; it relaunches by itself &gt; stop it by hand and confirm it stays stopped.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Auto connect and recovery">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Auto connect and recovery">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Multi-language audio tracks</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Each audio track in the source becomes its own AAC rendition with its language and name, the first is the default, and the player has a track picker with a level meter, volume and mute.</div>
+    <div class=meta>Built 16 Aug. No dedicated suite (covered inside the encoder tests).</div>
+    <div class=how><b>How to test:</b> Use a source with two audio languages &gt; start the channel &gt; in the output player open the audio track picker and switch languages.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Multi-language audio tracks">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Multi-language audio tracks">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="partial">
+    <div class=top><div class=name>Timed in-stream metadata (EXT-X-DATERANGE / ID3)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Programme and event markers carried inside the stream as EXT-X-DATERANGE (and ID3 for audio) so players can react to what is on. SCTE-35 ad markers and DASH emsg are not built. The only screen is the radio timed-metadata log.</div>
+    <div class=meta>Built 5 Sep. timed-metadata.check.ts.</div>
+    <div class=how><b>How to test:</b> Start a channel with an EPG programme &gt; fetch the media playlist and look for #EXT-X-DATERANGE at the programme boundary. Radio: station page &gt; timed metadata log.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Timed in-stream metadata (EXT-X-DATERANGE / ID3)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Timed in-stream metadata (EXT-X-DATERANGE / ID3)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="partial">
+    <div class=top><div class=name>Embeddable player setup (radio)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Per-station embeddable player: colours and layout with a live preview, the embed snippet and allowed origins. Radio stations only so far; TV channels and events have no player setup yet.</div>
+    <div class=meta>player-api.check.sh, player-layouts.check.ts.</div>
+    <div class=how><b>How to test:</b> Radio &gt; a station &gt; Player setup &gt; change colours and layout &gt; copy the snippet into a test page on an allowed origin and play.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Embeddable player setup (radio)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Embeddable player setup (radio)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="in_review" data-app="full">
     <div class=top><div class=name>Analytics &amp; reporting</div>
       <span class=pill style="background:#6366f1">👀 In review</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
     <div class=summary>Server-side audience / QoS / realtime from CDN logs; by-app + device; realtime concurrency.</div>
-    <div class=meta>6 tests pass</div>
-    <div class=how><b>How to test:</b> View in the console Analytics tab (seeded data) or hit /api/analytics/*.</div>
+    <div class=meta>Insight &gt; Analytics in the app, reading rollups so it survives raw-event pruning; unsealed days drawn as unfinished. analytics-retention.check.ts plus the air ledger and listener session suites.</div>
+    <div class=how><b>How to test:</b> Analytics &gt; change the date range and the channel filter; compare a channel you ran today with the live viewer count on its detail page.</div>
     
     <div class=actions>
          <button class="btn ok" data-approve="Analytics &amp; reporting">✓ Approve as working</button>
          <button class="btn warn" data-changes="Analytics &amp; reporting">Request changes</button>
        </div>
     
-  </div><div class=card data-status="in_review" data-app="none">
+  </div><div class=card data-status="in_review" data-app="partial">
     <div class=top><div class=name>SaaS admin dashboard</div>
       <span class=pill style="background:#6366f1">👀 In review</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
-    <div class=summary>Cross-tenant overview: active servers, projected instances, channels, viewers, tickets; MFA 2-step login; impersonation (deferred).</div>
-    <div class=meta>auth + dashboard tests pass</div>
-    <div class=how><b>How to test:</b> Sign in to the console as saas@volt.example to see the SaaS Admin tab across tenants.</div>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Platform staff manage client accounts: create, set plan, suspend (a suspended account's keys and feeds stop at once). MFA 2-step sign-in for platform staff. In the app as System &gt; System Admin for accounts. The cross-tenant overview (servers, projected instances, viewers), support tickets and impersonation exist in the API only.</div>
+    <div class=meta>saas.check.sh, admin.check.sh, mfa-login.check.sh, tenancy.check.ts.</div>
+    <div class=how><b>How to test:</b> Sign in as a platform user &gt; System Admin &gt; create an account, change its plan, suspend it and confirm its users can no longer sign in.</div>
     
     <div class=actions>
          <button class="btn ok" data-approve="SaaS admin dashboard">✓ Approve as working</button>
@@ -387,7 +609,7 @@
       <span class=pill style="background:#6366f1">👀 In review</span>
       <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
     <div class=summary>HLS ingest starts at the live edge (-live_start_index -1) so the packaged output tracks the true source and restarts re-acquire live instead of replaying old content. The output player holds the live edge and self-heals after stalls (snaps back when it drifts &gt;12s) so it stays honestly live; DVR only when the operator scrubs. KNOWN OPEN ITEM: the Wowza test source has irregular segment durations + non-monotonic audio DTS (Shaka logs overlapping-segment warnings) which can cause brief hiccups; needs a soak test to confirm content is consistently at the true live point.</div>
-    <div class=meta>encoder.log confirms live_start_index applied + real-time segment writes; player live-lock added. Content-age soak test still needed.</div>
+    <div class=meta>9 Oct: the console player sat only 0.5 s behind the live edge, which caused 6 s freezes during a splice. Now holds 12 s back, like hls.js and dash.js defaults. Content-age soak test still to run.</div>
     <div class=how><b>How to test:</b> Run a channel for 20+ min; compare the SOURCE pane (true source) to the OUTPUT pane; confirm OUTPUT stays at live edge and content matches within normal latency.</div>
     
     <div class=actions>
@@ -395,63 +617,53 @@
          <button class="btn warn" data-changes="Live output trust (live-edge ingest + live-lock)">Request changes</button>
        </div>
     
-  </div><div class=card data-status="building" data-app="none">
-    <div class=top><div class=name>Live updates (admin)</div>
-      <span class=pill style="background:#64748b">🔨 Building</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
-    <div class=summary>When one admin changes a field, others viewing the same record see it update live, over the existing SSE hub. Public front-end live kept minimal (EPG served from CDN + client boundary advance) so 500k viewers add no per-viewer load.</div>
-    <div class=meta>design agreed; admin SSE + Postgres NOTIFY</div>
-    <div class=how><b>How to test:</b> Designed, builds on the edit+audit foundation just shipped. Not testable yet.</div>
-    
-    
-    
-  </div><div class=card data-status="building" data-app="none">
+  </div><div class=card data-status="building" data-app="partial">
     <div class=top><div class=name>Publish a clip to social media</div>
       <span class=pill style="background:#64748b">🔨 Building</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
     <div class=summary>Push a clip to YouTube / Facebook / X / TikTok / Dailymotion. Data model + APIs exist; real upload adapters pending.</div>
-    <div class=meta>foundation built; adapters stubbed</div>
+    <div class=meta>Publish targets and publication records are built, and the Publishing Rules editor can name a social account as a target. Not built: linking accounts (OAuth), the Publish to action on a clip, the caption editor and the real upload adapters (stubs). Needs each platform's app credentials.</div>
     <div class=how><b>How to test:</b> Not testable yet — needs each platform's OAuth app credentials from you before the upload adapters go live.</div>
     
     
     
-  </div><div class=card data-status="building" data-app="none">
-    <div class=top><div class=name>Watchfolder ingest</div>
-      <span class=pill style="background:#64748b">🔨 Building</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
-    <div class=summary>Assign a folder or S3 bucket/prefix as an auto ingest source; new files become assets / VOD / slates / playlist items.</div>
-    <div class=meta>design complete</div>
-    <div class=how><b>How to test:</b> Designed only — see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.</div>
-    
-    
-    
   </div><div class=card data-status="building" data-app="partial">
-    <div class=top><div class=name>Bitrate ladder profiles (library + CRUD)</div>
-      <span class=pill style="background:#64748b">🔨 Building</span>
-      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
-    <div class=summary>Managed library of output ladder profiles (reuses output_profiles): list, create from scratch or copy an existing profile, rename, edit; delete with an API-level confirmation workflow + in-use guard + audit log. Assign a profile to a transcode channel's output.</div>
-    <div class=meta>in progress — schema + seed + CRUD + UI + assign</div>
-    <div class=how><b>How to test:</b> Profiles → New (or copy an existing) → edit rungs → save. Assign it when creating a transcode channel. Try deleting one in use (blocked) and an unused one (confirm required).</div>
-    
-    
-    
-  </div><div class=card data-status="building" data-app="none">
     <div class=top><div class=name>Source validate + info (probe)</div>
       <span class=pill style="background:#64748b">🔨 Building</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
-    <div class=summary>Validate button in the create form + detail that ffprobes the source and shows video/audio codec, resolution, fps, bitrate, metadata (timed-ID3) and subtitle tracks; used to cap output rungs to the source. DESIGNED/next (ffprobe proven; UI + endpoint pending).</div>
-    <div class=meta></div>
-    <div class=how><b>How to test:</b> </div>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>Probe a source with ffprobe: codecs, resolution, frame rate, bitrate, audio tracks, timed metadata and subtitles. Since 9 Oct every source is probed automatically when added and the result is stored, which is what builds the matching fallback loop. Radio has a probe in its source panel. Still to build: the Validate button and result panel on the channel and event forms (the endpoint POST /api/sources/probe exists).</div>
+    <div class=meta>Probe runs on add and is stored on stream_inputs.probe (9 Oct). filler-prep.check.ts, source-required.check.ts.</div>
+    <div class=how><b>How to test:</b> Not testable for video in the app yet. Radio: open a station &gt; source panel &gt; probe. API: POST /api/sources/probe with {&quot;url&quot;: ...}.</div>
+    
+    
+    
+  </div><div class=card data-status="building" data-app="pending">
+    <div class=top><div class=name>Settings lock while running</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⏳ Not built yet</span></div>
+    <div class=summary>Channel settings fields read-only (still copyable) while the transcoder is running; editable only when stopped. Next.</div>
+    <div class=meta>Not built: the channel Settings drawer has no running check yet.</div>
+    <div class=how><b>How to test:</b> Not testable yet. When built: start a channel, open Settings, the fields are read-only but copyable until you stop it.</div>
     
     
     
   </div><div class=card data-status="building" data-app="none">
-    <div class=top><div class=name>Settings lock while running</div>
+    <div class=top><div class=name>Notifications</div>
       <span class=pill style="background:#64748b">🔨 Building</span>
       <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
-    <div class=summary>Channel settings fields read-only (still copyable) while the transcoder is running; editable only when stopped. Next.</div>
-    <div class=meta></div>
-    <div class=how><b>How to test:</b> </div>
+    <div class=summary>One API to send an event to recipients over channels (email, in-app, device push), templated, with a delivery log and retries. Email and push adapters are stubs and there is no screen; retries have no cap yet.</div>
+    <div class=meta>notifications.check.sh.</div>
+    <div class=how><b>How to test:</b> Not testable in the app. API: POST /api/notifications then GET the inbox.</div>
+    
+    
+    
+  </div><div class=card data-status="building" data-app="pending">
+    <div class=top><div class=name>XMLTV import (bring in a customer's guide)</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⏳ Not built yet</span></div>
+    <div class=summary>WHY: onboarding a broadcaster means taking the guide they already have. WHAT: import an XMLTV file or URL into programmes: map their channel ids to ours (kept across re-imports), resolve times with no offset against the channel time zone, end = next start where stop is missing, idempotent nightly refresh, overlaps flagged rather than rejected.</div>
+    <div class=meta>Designed (docs/DESIGN_epg_xmltv.md), not built. The programme store already has the idempotent import key and overlap index it needs.</div>
+    <div class=how><b>How to test:</b> Not testable yet.</div>
     
     
     
