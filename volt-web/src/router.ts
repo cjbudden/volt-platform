@@ -17,7 +17,13 @@ export interface Route {
    *  one source's continuous timeline, /recordings/:id is a single capture. */
   recordingSource: { id: string } | null
   radioId: string | null
-  epgOwner: { kind: 'channel' | 'event'; id: string } | null
+  /** /radio/:id/player — the embed setup page for one station. */
+  radioPlayerId: string | null
+  /** A guide's owner. 'radio' is a THIRD kind, not a flavour of channel: a
+   *  station and a television channel are different products with different
+   *  control pages, and the EPG list is filtered by exactly this. Programmes
+   *  still hang off channel_id for both — see epgProgrammes(). */
+  epgOwner: { kind: 'channel' | 'radio' | 'event'; id: string } | null
   create: boolean
   path: string
 }
@@ -41,6 +47,7 @@ export function parseRoute(pathname: string, search = ''): Route {
   const base = { channelId: null as string | null, recordingId: null as string | null,
     recordingSource: null as Route['recordingSource'],
     radioId: null as string | null,
+    radioPlayerId: null as string | null,
     epgOwner: null as Route['epgOwner'], create, path: pathname }
   if (parts.length === 0) return { ...base, section: 'channels' }
   if (parts[0] === 'channels') {
@@ -56,9 +63,14 @@ export function parseRoute(pathname: string, search = ''): Route {
   }
   if (parts[0] === 'radio' && parts[1]) {
     if (parts[1] === 'new') return { ...base, section: 'radio', create: true }
+    // A SUB-ROUTE, not a section of its own: the player setup belongs to one
+    // station and is reached from it, so its URL says so and Back is obvious.
+    if (parts[2] === 'player') {
+      return { ...base, section: 'radio', radioPlayerId: decodeURIComponent(parts[1]) }
+    }
     return { ...base, section: 'radio', radioId: decodeURIComponent(parts[1]) }
   }
-  if (parts[0] === 'epg' && (parts[1] === 'channel' || parts[1] === 'event') && parts[2]) {
+  if (parts[0] === 'epg' && (parts[1] === 'channel' || parts[1] === 'radio' || parts[1] === 'event') && parts[2]) {
     return { ...base, section: 'epg', epgOwner: { kind: parts[1], id: decodeURIComponent(parts[2]) } }
   }
   return { ...base, section: parts[0] }

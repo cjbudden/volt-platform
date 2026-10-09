@@ -88,7 +88,16 @@ export function startScheduler(): () => void {
     // rows out from under you", and that is true either way.
     .finally(() => { bootReconcileDone = true; });
   const tick = setInterval(
-    () => orchestrator.tick().catch((e) => console.error('[orchestrator] tick error', e)),
+    () => orchestrator.tick().catch((e) => console.error('[orchestrator] tick error', e))
+      // AN ENCODER THAT DIES WITHOUT SAYING SO. A crash, an OOM kill or a SIGKILL
+      // sends no channel.stop, and reconcileStreamStatus only ran at boot, so the
+      // channel stayed 'live' with nothing behind it (measured: still 'live' 80s
+      // after the encoder was killed, auto connect never fired, the origin kept
+      // serving the last manifest). Reconciling on the tick marks it ended within
+      // one tick, and the resume pass then brings an armed stream straight back.
+      .then(() => orchestrator.reconcileStreamStatus())
+      .then((n) => { if (n) console.log(`[orchestrator] tick reconcile: ${n} stream(s) had no running task`); })
+      .catch((e) => console.error('[orchestrator] tick reconcile error', e)),
     o.tickSeconds * 1000
   );
   const sweep = setInterval(

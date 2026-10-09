@@ -18,11 +18,31 @@ searchRouter.get('/', asyncHandler(async (req, res) => {
   const like = `%${q}%`;
   const results: Array<{ kind: string; id: string; name: string; href: string; sub?: string }> = [];
 
+  // A RADIO STATION IS NOT A TV CHANNEL, AND THE ROW ALREADY SAYS SO.
+  //
+  // `kind: 'channel'` used to be a hardcoded literal here, so every station in
+  // the account came back labelled CHANNEL and linked to /channels/<id>. The
+  // label was wrong and the link was worse: it opened the television control
+  // page for a station, which has a 16:9 video surface, no audio visualiser, no
+  // now-playing metadata and no station settings.
+  //
+  // Nothing was wrong with the data. `channels.kind` has been 'tv' | 'radio'
+  // since the first migration, and this query simply did not select it. The
+  // literal was doing the classifying instead of the column.
   try {
     const chs = await query<any>(
-      `SELECT c.id, c.name, c.status FROM channels c JOIN groups g ON g.id = c.group_id
+      `SELECT c.id, c.name, c.status, c.kind FROM channels c JOIN groups g ON g.id = c.group_id
         WHERE g.account_id = $1 AND c.name ILIKE $2 ORDER BY c.name LIMIT 8`, [acc, like]);
-    for (const c of chs) results.push({ kind: 'channel', id: c.id, name: c.name, href: `/channels/${c.id}`, sub: c.status });
+    for (const c of chs) {
+      const radio = c.kind === 'radio';
+      results.push({
+        kind: radio ? 'radio' : 'channel',
+        id: c.id,
+        name: c.name,
+        href: radio ? `/radio/${c.id}` : `/channels/${c.id}`,
+        sub: c.status,
+      });
+    }
   } catch { /* table shape may differ */ }
 
   try {

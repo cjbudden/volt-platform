@@ -14,7 +14,7 @@
 //
 //  Run: DATABASE_URL=... ORIGIN_DIR=... npx tsx test/clip-extract.check.ts
 // ============================================================================
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,23 +42,46 @@ function probeMs(path: string): number {
   return Math.round(parseFloat(out) * 1000);
 }
 
-/** A stream in the origin dir that has at least one run with segments. */
-function findStreamWithMedia(): { streamId: string; spans: ReturnType<typeof recordingSpans> } | null {
+/**
+ * THIS SUITE MAKES ITS OWN MEDIA.
+ *
+ * It used to take whichever stream in the origin directory happened to have
+ * segments, which made two different things vary run to run: whether it ran at
+ * all, and HOW MANY assertions it ran, because several of them only fire when
+ * the borrowed stream happens to have more than one run. A suite whose
+ * assertion count depends on what somebody else left on disk is not measuring
+ * the code.
+ *
+ * Two runs, generated fresh, so the multi-run and gap assertions always fire.
+ */
+const OWN_STREAM = '0000000f-0000-0000-0000-0000000000ce';
+
+function ensureOwnMedia(): { streamId: string; spans: ReturnType<typeof recordingSpans> } | null {
   const base = config.testStream.originDir;
-  if (!existsSync(base)) return null;
-  for (const streamId of readdirSync(base)) {
-    if (!existsSync(join(base, streamId, 'runs'))) continue;
-    const spans = recordingSpans(streamId);
-    const usable = spans.filter((s) => s.segments >= 6);
-    if (usable.length) return { streamId, spans: usable };
+  const dir = join(base, OWN_STREAM);
+  const usableNow = () => recordingSpans(OWN_STREAM).filter((s) => s.segments >= 6);
+  if (existsSync(join(dir, 'runs')) && usableNow().length >= 2) {
+    return { streamId: OWN_STREAM, spans: usableNow() };
   }
-  return null;
+  rmSync(dir, { recursive: true, force: true });
+  const gen = join(__dirname, 'lib', 'make-fixture-runs.sh');
+  // 36s runs, not 28: the wider-range assertion below only fires when a second
+  // request can be at least 5s longer than the first, and a 28s run cannot
+  // offer that once the off-grid margins are taken off both ends. 36 is also a
+  // whole number of 4s segments, so there is no short trailing segment.
+  const r = spawnSync('bash', [gen, dir, '2', '36'], { encoding: 'utf8' });
+  if (r.status !== 0) {
+    console.error(r.stderr || r.stdout);
+    return null;
+  }
+  const spans = usableNow();
+  return spans.length ? { streamId: OWN_STREAM, spans } : null;
 }
 
 async function main() {
-  const found = findStreamWithMedia();
+  const found = ensureOwnMedia();
   if (!found) {
-    console.log('SKIP no recorded runs on this box — start a channel or station and re-run.');
+    console.log('SKIP could not generate fixture media (needs ffmpeg).');
     console.log('\nclip-extract: 0 passed, 0 failed (skipped)');
     return;
   }

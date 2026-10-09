@@ -11,7 +11,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
-import { requireMinRole, ROLE_RANK, invalidateAccess } from '../auth/roles';
+import { requireMinRole, rankOf, invalidateAccess } from '../auth/roles';
 import { hashPassword } from '../auth/password';
 import { asyncHandler, notFound, badRequest, forbidden } from '../util/http';
 
@@ -83,7 +83,7 @@ usersRouter.patch(
       throw forbidden('Only an owner can change owner roles');
     }
     // an admin cannot raise anyone above their own rank
-    if (b.role && ROLE_RANK[b.role] > ROLE_RANK[meRole]) {
+    if (b.role && rankOf(b.role) > rankOf(meRole)) {
       throw forbidden('You cannot grant a role above your own');
     }
     // the last active owner is untouchable

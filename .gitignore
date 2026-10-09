@@ -57,3 +57,15 @@ volt-app/origin/_control-plane.log
 # ---- caption sync test harness (fetched / generated, not source) ----
 volt-encoder/bin/hls.min.js
 volt-encoder/_synctest/
+volt-encoder/dev/_wftest/
+
+# ---- runtime data written by a running stack or session (not source) ----
+volt-app/clips/
+volt-app/filler/
+volt-app/image-store/derived/
+volt-app/image-store/library/
+volt-app/.env.bak.*
+*.timestamp-*.mjs
+/outputs
+/_*.tgz
+/_to_delete/

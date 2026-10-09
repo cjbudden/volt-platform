@@ -6,9 +6,15 @@ let pass = 0, fail = 0;
 const ok = (c: boolean, m: string) => (c ? (pass++, console.log('PASS ' + m)) : (fail++, console.log('FAIL ' + m)));
 
 (async () => {
-  const A = '00000000-0000-0000-0000-0000000000a1', G = '00000000-0000-0000-0000-0000000000b1';
-  const D = '00000000-0000-0000-0000-0000000000d1', E = '00000000-0000-0000-0000-0000000000e1';
-  const S = '00000000-0000-0000-0000-0000000000c5', R = '00000000-0000-0000-0000-0000000000a9';
+  // Ids namespaced to THIS suite (…a07d…). They used to start at 0000…00a1,
+  // which the orchestrator check also claims as its account: whichever ran
+  // second died on a primary-key collision that read like a product fault and
+  // was only ever a fixture clash. Every suite owns its own range now, and
+  // clears it first so a second run against the same database works.
+  const A = '00000000-0000-0000-0000-0000a07d00a1', G = '00000000-0000-0000-0000-0000a07d00b1';
+  const D = '00000000-0000-0000-0000-0000a07d00d1', E = '00000000-0000-0000-0000-0000a07d00e1';
+  const S = '00000000-0000-0000-0000-0000a07d00c5', R = '00000000-0000-0000-0000-0000a07d00a9';
+  await query(`DELETE FROM accounts WHERE id = $1`, [A]);
   await query(`INSERT INTO accounts(id,name) VALUES ($1,'RTM')`, [A]);
   await query(`INSERT INTO output_profiles(id,account_id,name,rungs,workflow_type) VALUES ($1,$2,'p','[]','package_only')`, [D, A]);
   await query(`INSERT INTO groups(id,account_id,name,output_profile_id) VALUES ($1,$2,'g',$3)`, [G, A, D]);

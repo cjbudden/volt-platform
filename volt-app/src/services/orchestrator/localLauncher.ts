@@ -18,14 +18,16 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync, openSync } from 'nod
 import { liveDirFor } from '../liveOrigin';
 import { join, resolve } from 'node:path';
 import { config } from '../../config';
-import type { TaskLauncher, LaunchResult } from './launcher';
+import type { TaskLauncher, LaunchResult, Liveness } from './launcher';
+import type { Placement } from '../fleet/placement';
+import { onboxPlacement } from '../fleet/onbox';
 import { reserveUdpBase, releaseUdpBase } from './encoderPorts';
 import { reapStreamEncoder } from './encoderCleanup';
 
 interface Proc {
   taskArn: string;
   child: ChildProcess;
-  kind: 'encoder' | 'thumbnailer' | 'captions';
+  kind: 'encoder' | 'thumbnailer' | 'captions' | 'radio';
   streamId?: string;
   udpBase?: number;   // reserved bus-port block, released on stop
 }
@@ -198,6 +200,43 @@ export class LocalTaskLauncher implements TaskLauncher {
     return path;
   }
 
+  // ---- radio ---------------------------------------------------------------
+  /**
+   * Run volt-radio's own entrypoint as an on-box child, the same way this
+   * launcher runs encoder.py. This is what makes the development path and the
+   * container path the SAME pipeline rather than two that happen to look alike:
+   * radio.py is the file the image runs, so a developer exercises the shipped
+   * code, and `local` stops being a special case that only exists here.
+   */
+  async launchRadio(streamId: string, job: Record<string, any>): Promise<LaunchResult> {
+    const out = join(config.testStream.originDir, streamId);
+    mkdirSync(out, { recursive: true });
+    // Local-storage mode: write straight into the origin dir the control plane
+    // serves, and skip the S3 mirror. Identical to what launchEncoder injects.
+    const localJob = { ...job, output: { mode: 'local', dir: out } };
+    const taskArn = `local:radio:${streamId}:${++this.n}`;
+
+    const script = join(this.encoderBin(), 'radio.py');
+    if (!existsSync(script)) {
+      throw new Error(`local launcher cannot start radio: ${script} not found`);
+    }
+    const logFd = openSync(join(out, 'radio-task.log'), 'a');
+    const child = spawn(this.python(), [script], {
+      cwd: this.encoderBin(),
+      env: { ...process.env, JOB_CONFIG_JSON: JSON.stringify(localJob), WORK_DIR: out },
+      stdio: ['ignore', logFd, logFd],
+      detached: true,   // own group, so ffmpeg goes down with the station
+    });
+    this.procs.set(taskArn, { taskArn, child, kind: 'radio', streamId });
+    child.on('exit', () => {
+      this.procs.delete(taskArn);
+      // A station holds its source connection open; sweep anything lingering.
+      reapStreamEncoder(config.testStream.originDir, streamId);
+    });
+    console.log(`[local-launcher] radio ${streamId} -> ${taskArn} (pid ${child.pid})`);
+    return { taskArn, lifecycle: 'on_demand' };
+  }
+
   // ---- captions ------------------------------------------------------------
   async launchCaptions(streamId: string, _job: Record<string, any>): Promise<LaunchResult> {
     // The GPU whisper/NLLB add-on isn't run on-box in local mode (needs model
@@ -221,6 +260,43 @@ export class LocalTaskLauncher implements TaskLauncher {
     setTimeout(() => { if (child.exitCode === null) killTree(child, 'SIGKILL'); }, 8000).unref?.();
     if (p.udpBase != null) releaseUdpBase(p.udpBase);
     this.procs.delete(taskArn);
+  }
+
+  /**
+   * Is the child still there?
+   *
+   * Two things have to be true: we still track the arn, and the process has
+   * not exited. `exitCode === null && signalCode === null` is Node's way of
+   * saying the child is still running; either being set means it is over,
+   * however it ended — a crash, an OOM kill, a SIGSEGV. That is precisely the
+   * case that used to leave a channel `live` forever, because nothing except
+   * an explicit stopTask ever wrote terminated_at.
+   *
+   * An arn we do not track is `dead` rather than `unknown` ONLY because this
+   * launcher's process table is the whole truth on this box: if the control
+   * plane restarted, its children died with it.
+   */
+  async isRunning(taskArn: string): Promise<Liveness> {
+    const p = this.procs.get(taskArn);
+    if (!p) return 'dead';
+    const c = p.child;
+    if (c.exitCode !== null || c.signalCode !== null) return 'dead';
+    // The handle can outlive the process if the child was reaped elsewhere;
+    // signal 0 asks the kernel without sending anything.
+    if (c.pid != null) {
+      try { process.kill(c.pid, 0); } catch { return 'dead'; }
+    }
+    return 'alive';
+  }
+
+  /**
+   * Every local task shares one host: this box. Reported for a task we are
+   * actually tracking and null otherwise, so an arn from a previous run of the
+   * control plane does not silently re-attach itself to a host it no longer
+   * has a process on.
+   */
+  async describePlacement(taskArn: string): Promise<Placement | null> {
+    return this.procs.has(taskArn) ? onboxPlacement() : null;
   }
 
   /** Force-kill every tracked process TREE (used on control-plane shutdown). */

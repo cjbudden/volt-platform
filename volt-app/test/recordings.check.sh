@@ -27,6 +27,31 @@ REC=00000010-0000-0000-0000-0000000000aa
 # channel's UUID (that's the streamId the index scans)
 [ -e "$REC_ORIGIN/$CH" ] || ln -s "$REC_ORIGIN/origin" "$REC_ORIGIN/$CH"
 
+# THIS SUITE DEPENDS ON REAL MEDIA THAT THE SYSTEM UNDER TEST MAY DELETE.
+#
+# The fixture is genuine Shaka-packaged segments generated once and left on
+# disk. That makes the suite honest, and it also makes it a time bomb: the
+# control plane this suite starts runs the orchestrator against the same
+# ORIGIN_DIR, and a recording that ages past its retention is swept exactly as
+# designed. The manifests survive, the rendition directories do not, and every
+# assertion downstream then fails for a reason that has nothing to do with the
+# code under test.
+#
+# So check for the segments FIRST and skip loudly rather than emitting a wall
+# of failures that reads like a product fault. The real fix is for this suite
+# to generate its own fixture on each run instead of inheriting one.
+SEGN=$(find "$REC_ORIGIN/origin/runs" -name 'seg_*.m4s' 2>/dev/null | head -4 | wc -l)
+if [ "$SEGN" -lt 1 ]; then
+  echo "fixture media missing -- generating it"
+  rm -rf "$REC_ORIGIN/origin"
+  if ! bash "$(dirname "$0")/lib/make-fixture-runs.sh" "$REC_ORIGIN/origin" 2 20; then
+    echo "SKIP could not generate fixture media (needs ffmpeg)"
+    echo ""
+    echo "== RESULT: 0 passed, 0 failed =="
+    exit 0
+  fi
+fi
+
 # window bounds derived from the actual runs on disk
 read -r WSTART WEND <<EOF
 $(python3 - "$REC_ORIGIN/origin/runs" <<'PY'
@@ -117,9 +142,17 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT/api/record
 ok "other tenant cannot see the recording ($CODE)" '[ "$CODE" = "404" ]'
 
 # ---- clip + publish
-CLIP=$(curl -s -X POST "http://localhost:$PORT/api/recordings/$REC/clip" -H "$A" -H 'content-type:application/json' \
+# This range SPANS TWO RUNS on purpose — that is what makes it a boundary clip
+# — so by construction there is a hole in it where the encoder restarted. Clip
+# creation refuses a gappy range by default, correctly, and this assertion
+# predates that refusal. Assert BOTH halves of the contract now: the refusal is
+# real, and the escape hatch the refusal recommends actually works.
+STRICT=$(curl -s -X POST "http://localhost:$PORT/api/recordings/$REC/clip" -H "$A" -H 'content-type:application/json' \
   -d "{\"title\":\"Boundary clip\",\"startMs\":$FROM,\"endMs\":$TO,\"outputKind\":\"both\"}")
-ok "clip created as vod asset" 'echo "$CLIP" | grep -q "\"kind\":\"clip\"" && echo "$CLIP" | grep -q "Boundary clip"'
+ok "a range with a hole in it is refused by default" 'echo "$STRICT" | grep -q "gap"'
+CLIP=$(curl -s -X POST "http://localhost:$PORT/api/recordings/$REC/clip" -H "$A" -H 'content-type:application/json' \
+  -d "{\"title\":\"Boundary clip\",\"startMs\":$FROM,\"endMs\":$TO,\"outputKind\":\"both\",\"acceptGapsMs\":60000}")
+ok "clip created as vod asset once the gaps are accepted" 'echo "$CLIP" | grep -q "\"kind\":\"clip\"" && echo "$CLIP" | grep -q "Boundary clip"'
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://localhost:$PORT/api/recordings/$REC/clip" -H "$A" -H 'content-type:application/json' \
   -d "{\"title\":\"bad\",\"startMs\":$TO,\"endMs\":$FROM}")
 ok "reversed clip range rejected ($CODE)" '[ "$CODE" = "400" ]'

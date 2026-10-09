@@ -325,7 +325,13 @@ export async function openShare(raw: string, opts: { pin?: string; email?: strin
     } catch { /* notify is best-effort */ }
   }
 
-  const tok = mintPlaybackToken({ accountId: row.account_id, appId: null, assetId: playAssetId, geo: opts.geo, ttlSec: 300 });
+  // The share link already records what it points at, so the kind is known
+  // rather than guessed. A blackout replacement swaps the id but stays within
+  // the same kind, since only a VOD share evaluates one.
+  const tok = mintPlaybackToken({
+    accountId: row.account_id, appId: null, assetId: playAssetId,
+    assetKind: row.resource_kind, geo: opts.geo, ttlSec: 300,
+  });
   const download = row.access_type === 'allow_download';
   return {
     ok: true,

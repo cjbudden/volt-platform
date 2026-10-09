@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type PlatformAccountRow } from '../api'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
+import { pressable } from '../a11y'
 
 /* ============================================================================
    System Admin — SaaS-provider controls, visible ONLY to platform staff
@@ -110,8 +111,8 @@ function CredsOnceModal({ creds, onClose }: { creds: { account: string; email: s
   const [copied, setCopied] = useState(false)
   const text = `VOLT Stream account: ${creds.account}\nSign-in email: ${creds.email}\nTemporary password: ${creds.password}`
   return (
-    <div className="drawer-scrim" onClick={onClose} style={{ display: 'grid', placeItems: 'center' }}>
-      <div className="card" onClick={e => e.stopPropagation()} style={{ width: 520, padding: 22 }}>
+    <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="" style={{ display: 'grid', placeItems: 'center' }}>
+      <div className="card" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 520, padding: 22 }}>
         <div style={{ fontWeight: 700, fontSize: 'var(--fs-h2)' }}>Client account created</div>
         <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--warn,#fbbf24)', margin: '8px 0 12px' }}>
           Share these sign-in details with the client now. The password is not retrievable later.
@@ -184,8 +185,8 @@ function AccountDrawer({ account, onClose, onDone }: {
   }
 
   return (
-    <div className="drawer-scrim" onClick={onClose}>
-      <div className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="">
+      <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">{isEdit ? 'Client account' : 'New client account'}</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
           <div className="field"><label>Account name</label>
@@ -237,7 +238,7 @@ function AccountDrawer({ account, onClose, onDone }: {
                     ? 'Sign-in is blocked and API keys are rejected. Reactivate to restore access.'
                     : 'Suspending blocks sign-in, revokes sessions, and rejects all of the account\'s API keys.'}</div>
                 </div>
-                <div className={`sw ${suspended ? 'off' : ''}`} onClick={() => setSuspended(!suspended)}><i /></div>
+                <div className={`sw ${suspended ? 'off' : ''}`} {...pressable((e: any) => { ((() => setSuspended(!suspended)) as any)(e) })} data-a11y-click=""><i /></div>
               </div>
             </>
           )}

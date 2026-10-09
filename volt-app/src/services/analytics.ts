@@ -56,7 +56,13 @@ export interface Ctx {
 export async function ingest(sessionKey: string, event: string, ctx: Ctx, extra: { seconds?: number; bitrateKbps?: number; ttffMs?: number; rebufferMs?: number; bytes?: number; blocked?: boolean } = {}) {
   const dev = parseDevice(ctx.ua);
   const rclass = classifyReferrer(ctx.referer, ctx.ua);
-  const existing = await one<any>(`SELECT id, seconds_watched FROM play_sessions WHERE account_id=$1 AND session_key=$2`, [ctx.accountId, sessionKey]);
+  const existing = await one<any>(
+    `SELECT id, seconds_watched, ended_at FROM play_sessions WHERE account_id=$1 AND session_key=$2`,
+    [ctx.accountId, sessionKey]
+  );
+  // Whether THIS call is the one that closed the session. Only that call may
+  // fold it into the rollup.
+  let endedNow = false;
   if (!existing) {
     await query(
       `INSERT INTO play_sessions(account_id, session_key, app_id, asset_kind, asset_id, device_type, client_app, referrer_class, geo_country, ip_hash, max_bitrate_kbps, ttff_ms, blocked)
@@ -65,15 +71,32 @@ export async function ingest(sessionKey: string, event: string, ctx: Ctx, extra:
       [ctx.accountId, sessionKey, ctx.appId, ctx.assetKind, ctx.assetId, dev.device_type, dev.client_app, rclass, ctx.geo ?? null, ipHash(ctx.ip), extra.bitrateKbps ?? null, extra.ttffMs ?? null, extra.blocked ?? false]
     );
   } else {
-    await query(
+    // ENDING IS A ONE-WAY TRANSITION, AND THE ROW IS THE RECORD OF IT.
+    //
+    // This beacon is PUBLIC — a playback token is by definition in the hands
+    // of every viewer. `ended_at = CASE WHEN $7 THEN now()` re-stamped an
+    // already-ended session on every replay and the caller rolled it up again:
+    // another view, another unique viewer, another helping of watch seconds,
+    // as many times as the request was resent. A player that fires `end` on
+    // both pause and beforeunload did the same thing by accident. These are
+    // the numbers /analytics/usage bills from.
+    //
+    // Close only a session that is still open, and count only the call that
+    // did the closing. A replay now updates nothing that matters and folds
+    // nothing: the UPDATE's own predicate is what makes it single-shot, so two
+    // simultaneous `end` calls cannot both win it.
+    const closed = await one<any>(
       `UPDATE play_sessions SET last_seen_at=now(),
-         seconds_watched = seconds_watched + $3,
+         seconds_watched = CASE WHEN ended_at IS NULL THEN seconds_watched + $3 ELSE seconds_watched END,
          max_bitrate_kbps = GREATEST(COALESCE(max_bitrate_kbps,0), COALESCE($4,0)),
-         rebuffer_ms = rebuffer_ms + $5, bytes = bytes + $6,
-         ended_at = CASE WHEN $7 THEN now() ELSE ended_at END
-       WHERE id=$1 AND account_id=$2`,
+         rebuffer_ms = CASE WHEN ended_at IS NULL THEN rebuffer_ms + $5 ELSE rebuffer_ms END,
+         bytes = CASE WHEN ended_at IS NULL THEN bytes + $6 ELSE bytes END,
+         ended_at = CASE WHEN $7 AND ended_at IS NULL THEN now() ELSE ended_at END
+       WHERE id=$1 AND account_id=$2 AND ($7 = false OR ended_at IS NULL)
+       RETURNING id`,
       [existing.id, ctx.accountId, extra.seconds ?? 0, extra.bitrateKbps ?? null, extra.rebufferMs ?? 0, extra.bytes ?? 0, event === 'end']
     );
+    endedNow = event === 'end' && !!closed;
   }
   // refresh the realtime concurrency snapshot for this stream
   const c = await liveConcurrency(ctx.assetKind, ctx.assetId);
@@ -83,7 +106,7 @@ export async function ingest(sessionKey: string, event: string, ctx: Ctx, extra:
      ON CONFLICT (asset_kind, asset_id) DO UPDATE SET concurrent=EXCLUDED.concurrent, updated_at=now()`,
     [ctx.accountId, ctx.assetKind, ctx.assetId, c]
   );
-  if (event === 'end') await rollupSession(ctx, sessionKey);
+  if (endedNow) await rollupSession(ctx, sessionKey);
   return { concurrent: c };
 }
 

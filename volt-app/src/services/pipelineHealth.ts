@@ -171,7 +171,12 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   const sstates: Record<string, any> = (st && st.sources && typeof st.sources === 'object') ? st.sources : {};
   const primary = sstates['primary'] || null;
   const primaryUp = primary?.state === 'up';
-  const firstErrLine = logTailErrors[0];
+  // A source problem is described from the SOURCE side. The log tail also carries
+  // the packager's own glog warnings ("W1009 12:00:00 ... representation.cc:429] Found
+  // a gap ..."), which are not about the input and mean nothing to an operator; one of
+  // them was shown as the Input gate's error during a failover (9 Oct).
+  const isPackagerLine = (l: string) => /^[WEIF]\d{4} \d|\.cc:\d+\]|kRoundingErrorGrace|shaka|packager/i.test(l);
+  const firstErrLine = logTailErrors.find((l) => !isPackagerLine(l));
   // encoder is genuinely running only if live AND it hasn't crashed this run
   const effLive = live && !crashed;
 
@@ -205,7 +210,24 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   if (crashIsInput) { inputStatus = 'failed'; inputDetail = inputErrMsg || firstErrLine || stopReason; }
   else if (!live && !crashed) { inputStatus = ended ? 'stopped' : 'idle'; inputDetail = inp.hasPrimarySource ? 'source configured · idle' : 'no source configured'; }
   else if (inputErr) { inputStatus = 'failed'; inputDetail = inputErrMsg || firstErrLine || 'input error'; }
-  else if (srcDown) { inputStatus = 'failed'; inputDetail = firstErrLine || 'source down — no signal'; }
+  else if (srcDown) {
+    // With failover, losing ONE source is not a failed input: the selector is already
+    // on the next one. Say which source went and what is on air instead.
+    const groups = Object.entries(sstates).filter(([k]) => k !== 'filler');
+    const down = groups.filter(([, v]: any) => v?.state === 'down').map(([k]) => k);
+    const upNow = groups.filter(([, v]: any) => v?.state === 'up').map(([k]) => k);
+    const active = String(st?.active_source || '');
+    if (active && active !== 'filler' && upNow.includes(active)) {
+      inputStatus = 'degraded';
+      inputDetail = `${down.length ? down.join(' and ') : 'a source'} lost · ${active} on air`;
+    } else if (active === 'filler') {
+      inputStatus = 'failed';
+      inputDetail = 'all sources lost · the channel slate or loop is on air';
+    } else {
+      inputStatus = 'failed';
+      inputDetail = firstErrLine || 'source down — no signal';
+    }
+  }
   else if (primaryUp && outStalled) { inputStatus = 'degraded'; inputDetail = firstErrLine || `source may have dropped — output stalled ${stalledFor}`; }
   else if (primaryUp) { inputStatus = 'healthy'; inputDetail = crashIsEncoder ? 'receiving — but the encoder failed' : String(primary?.detail || 'receiving'); }
   else if (reporting) { inputStatus = 'starting'; inputDetail = 'waiting for the source to arrive'; }

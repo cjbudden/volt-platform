@@ -223,7 +223,11 @@ function ObjectDetail({ id, caps, onChanged }: { id: string; caps: StorageCapabi
   }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [id])
 
-  if (err) return <div className="err">{err}</div>
+  // Only when there is nothing to show. `err` is also written by the actions
+  // on this page, so an unconditional guard let one rejected action replace
+  // the working page — including the controls needed to retry — with a line
+  // of red text and no way back except navigating away.
+  if (err && !d) return <div className="err">{err}</div>
   if (!d) return <div className="loading">Loading…</div>
 
   const r = d.readability

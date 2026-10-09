@@ -1707,10 +1707,23 @@ export interface RecordingTimeline {
   /** Where the recording has NO media, so marks can avoid it (or cross it knowingly). */
   gaps?: RecordingGap[]
   missingMs?: number
+  /** Where viewers were shown the channel's loop/slate instead of the source. The loop is
+   *  never in the recording, so these sit over holes: what was on air in the hole. */
+  fallbacks?: RecordingFallback[]
+  fallbackMs?: number
 }
 export interface RecordingGap {
   fromMs: number; toMs: number; ms: number
   reason: 'between-runs' | 'missing-media' | 'no-recording'
+  /** set when the hole was covered on air by the channel's loop or slate */
+  onAir?: 'loop' | 'slate'
+  onAirReason?: 'source-lost' | 'forced'
+}
+export interface RecordingFallback {
+  fromMs: number; toMs: number; ms: number
+  filler: 'loop' | 'slate'
+  reason: 'source-lost' | 'forced'
+  open: boolean
 }
 
 

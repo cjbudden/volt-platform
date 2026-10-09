@@ -17,6 +17,13 @@ INSERT INTO users(id,account_id,email,password_hash,role,status) VALUES ('$U','$
 INSERT INTO output_profiles(id,account_id,name,rungs,workflow_type) VALUES ('$D','$A','p','[]','package_only');
 INSERT INTO groups(id,account_id,name,output_profile_id) VALUES ('$G','$A','g','$D');
 INSERT INTO channels(id,group_id,name,status) VALUES ('$C','$G','n','live');
+-- The replacement must be a REAL asset in this account. It used to be a bare
+-- uuid with no row behind it, which passed only because the availability gate
+-- never checked that the asset it was about to mint a token for existed or
+-- belonged to the caller. It does now, so a dangling replacement is treated as
+-- no replacement -- correctly, and this fixture has to mean what it says.
+INSERT INTO vod_assets(id,channel_id,kind,title,master_key,start_epoch_ms,end_epoch_ms,duration_ms)
+ VALUES ('$REPL','$C','clip','Blackout slate','vod/$REPL/master.m3u8',0,60000,60000);
 -- a currently-airing programme with a US blackout + replacement
 INSERT INTO programmes(channel_id,title,starts_at,ends_at,geo_mode,geo_countries,replacement_asset_id)
  VALUES ('$C','Blackout Match', now()-interval '1 hour', now()+interval '1 hour', 'block', '{US}', '$REPL');"

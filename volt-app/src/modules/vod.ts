@@ -30,12 +30,30 @@ import { cleanSettings } from './publishingRules';
 export const vodRouter = Router();
 vodRouter.use(requireAuth);
 
+/**
+ * The tenant boundary for an asset.
+ *
+ * IT USED TO BE AN INNER JOIN THROUGH THE CHANNEL OR EVENT, which was right
+ * while every asset was derived from a recording and therefore had one. An
+ * uploaded or watched-folder asset has neither: it belongs to the account
+ * directly. Under the inner join those rows simply did not exist — every list,
+ * every fetch, every permission check silently returned nothing, and a file
+ * somebody uploaded would encode successfully and then never appear.
+ *
+ * So the join is LEFT and ownership is `COALESCE(g.account_id, v.account_id)`.
+ * The COALESCE order matters: a recording-derived asset's account is still the
+ * one that owns its channel, which is the existing behaviour unchanged, and
+ * v.account_id only answers for rows that have no channel at all.
+ */
 const OWNED = `
   FROM vod_assets v
   LEFT JOIN channels c ON c.id = v.channel_id
   LEFT JOIN events   e ON e.id = v.event_id
-  JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
+  LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
 `;
+
+/** The account that owns the asset, whichever way it got here. */
+const OWNER_ACCOUNT = `COALESCE(g.account_id, v.account_id)`;
 
 vodRouter.get(
   '/',
@@ -50,10 +68,16 @@ vodRouter.get(
               -- changed" is a library you have to check by hand.
               EXISTS (SELECT 1 FROM publications p
                        WHERE p.vod_asset_id = v.id AND p.stale) AS has_stale_publication,
-              (SELECT count(*) FROM publications p WHERE p.vod_asset_id = v.id)::int AS publication_count
+              (SELECT count(*) FROM publications p WHERE p.vod_asset_id = v.id)::int AS publication_count,
+              -- THE ENCODE, for a file-sourced asset. An asset with no master
+              -- yet is not broken, it is still being made, and the list has to
+              -- be able to say which.
+              j.state AS encode_state, j.progress_pct AS encode_pct,
+              j.progress_note AS encode_note, j.last_error AS encode_error
        ${OWNED}
        LEFT JOIN metadata_schemas ms ON ms.id = v.schema_id
-       WHERE g.account_id = $1 AND ($2::boolean IS NULL OR v.published = $2)
+       LEFT JOIN jobs j ON j.id = v.encode_job_id
+       WHERE COALESCE(g.account_id, v.account_id) = $1 AND ($2::boolean IS NULL OR v.published = $2)
        ORDER BY v.created_at DESC`,
       [accountId(req), published]
     );
@@ -62,7 +86,8 @@ vodRouter.get(
 );
 
 async function fetchOwned(id: string, acct: string) {
-  return one<any>(`SELECT v.* ${OWNED} WHERE v.id = $1 AND g.account_id = $2`, [id, acct]);
+  return one<any>(
+    `SELECT v.* ${OWNED} WHERE v.id = $1 AND ${OWNER_ACCOUNT} = $2`, [id, acct]);
 }
 
 vodRouter.get(
@@ -287,7 +312,7 @@ vodRouter.put(
          metadata = COALESCE($6::jsonb, metadata),
          updated_at = now()
        WHERE id = $1
-         AND EXISTS (SELECT 1 ${OWNED} WHERE v.id = $1 AND g.account_id = $2)
+         AND EXISTS (SELECT 1 ${OWNED} WHERE v.id = $1 AND ${OWNER_ACCOUNT} = $2)
        RETURNING *`,
       [
         req.params.id,
@@ -367,7 +392,7 @@ vodRouter.patch(
          qc_state = NULL, qc_at = NULL,
          built_at = NULL,
          updated_at = now()
-       WHERE id=$1 AND EXISTS (SELECT 1 ${OWNED} WHERE v.id=$1 AND g.account_id=$2)
+       WHERE id=$1 AND EXISTS (SELECT 1 ${OWNED} WHERE v.id=$1 AND ${OWNER_ACCOUNT}=$2)
        RETURNING *`,
       [req.params.id, accountId(req), b.startMs, b.endMs, stem]
     );
@@ -486,7 +511,7 @@ vodRouter.delete(
       `DELETE FROM vod_assets v USING groups g
         WHERE (v.channel_id IN (SELECT id FROM channels WHERE group_id = g.id)
             OR v.event_id   IN (SELECT id FROM events   WHERE group_id = g.id))
-          AND v.id = $1 AND g.account_id = $2
+          AND v.id = $1 AND ${OWNER_ACCOUNT} = $2
         RETURNING v.id`,
       [req.params.id, accountId(req)]
     );

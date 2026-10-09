@@ -258,6 +258,10 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
 .tag.type{background:var(--panel-3);color:#c7cee0}
 .tag.type.chan{color:#7dd3fc}
 .tag.type.event{color:#fca5a5}
+/* A radio station is its own kind, so it gets its own colour: green, matching
+   the Radio section's identity, and clearly not the channel blue it used to
+   borrow when every station was labelled CHANNEL. */
+.tag.type.radio{color:#6ee7b7}
 .tag.type.loop{color:#c4b5fd}
 .tag.proto{background:rgba(255,255,255,.05);color:var(--muted);font-weight:600;font-size:var(--fs-label)}
 .tag.hls{color:#fdba74;background:rgba(253,186,116,.12)}

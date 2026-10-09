@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type EpgOwnerRow } from '../api'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 import { navigate } from '../router'
+import { pressable } from '../a11y'
 
 /* ============================================================================
    EPG section — one guide per channel (the traditional programme guide) and
@@ -11,6 +12,14 @@ import { navigate } from '../router'
    access, slot replacement, and post-airing clip automation.
    ========================================================================== */
 
+/** One place that knows what each kind is called, so the table, the picker and
+ *  the empty state cannot drift into three different vocabularies. */
+const LABEL: Record<string, string> = { channel: 'Channel', radio: 'Radio', event: 'Event' }
+const SUB: Record<string, string> = {
+  channel: 'Channel guide', radio: 'Station guide', event: 'Event schedule',
+}
+const TAG_CLASS: Record<string, string> = { channel: 'chan', radio: 'radio', event: 'event' }
+
 const fmtDT = (iso: string) => {
   const d = new Date(iso)
   return d.toLocaleDateString([], { day: '2-digit', month: 'short' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -19,7 +28,11 @@ const fmtDT = (iso: string) => {
 export default function Epg() {
   const [rows, setRows] = useState<EpgOwnerRow[] | null>(null)
   const [err, setErr] = useState('')
-  const [filter, setFilter] = useState<'all' | 'channel' | 'event'>('all')
+  // THREE KINDS, NOT TWO. A radio station is not a television channel: it has a
+  // different control page, a different source form and a different idea of what
+  // a programme is. Folding it into "Channels" put twenty-one stations in a
+  // filter alongside two channels and made the filter useless for either.
+  const [filter, setFilter] = useState<'all' | 'channel' | 'radio' | 'event'>('all')
   const [pickerOpen, setPickerOpen] = useState(false)
 
   useEffect(() => {
@@ -28,7 +41,12 @@ export default function Epg() {
 
   const counts = useMemo(() => {
     const c = rows || []
-    return { all: c.length, channel: c.filter(r => r.kind === 'channel').length, event: c.filter(r => r.kind === 'event').length }
+    return {
+      all: c.length,
+      channel: c.filter(r => r.kind === 'channel').length,
+      radio: c.filter(r => r.kind === 'radio').length,
+      event: c.filter(r => r.kind === 'event').length,
+    }
   }, [rows])
   const shown = useMemo(() => {
     if (!rows) return []
@@ -41,7 +59,7 @@ export default function Epg() {
 
   return (
     <>
-      <PageHead title="EPG" sub="Programme guides. Channels carry a traditional guide; events carry the day's schedule. Each slot can control geo access, trigger a slate/loop/VOD replacement, and cut a clip automatically after airing."
+      <PageHead title="EPG" sub="Programme guides. Channels and radio stations carry a traditional guide; events carry the day's schedule. Each slot can control geo access, trigger a slate/loop/VOD replacement, and cut a clip automatically after airing."
         action={<NewButton label="New EPG" onClick={() => setPickerOpen(true)} />} />
       {err && <div className="err">{err}</div>}
       {rows === null ? (
@@ -51,6 +69,7 @@ export default function Epg() {
           <div className="filters">
             <FChip label="All" n={counts.all} on={filter === 'all'} onClick={() => setFilter('all')} />
             <FChip label="Channels" n={counts.channel} on={filter === 'channel'} onClick={() => setFilter('channel')} />
+            <FChip label="Radio stations" n={counts.radio} on={filter === 'radio'} onClick={() => setFilter('radio')} />
             <FChip label="Events" n={counts.event} on={filter === 'event'} onClick={() => setFilter('event')} />
           </div>
           <div className="card">
@@ -59,8 +78,8 @@ export default function Epg() {
               <tbody>
                 {shown.map((r, i) => (
                   <tr key={r.kind + r.id} onClick={() => open(r)} style={{ cursor: 'pointer' }}>
-                    <td><EntityCell name={r.name} sub={r.kind === 'channel' ? 'Channel guide' : 'Event schedule'} index={i} /></td>
-                    <td><span className={`tag type ${r.kind === 'event' ? 'event' : 'chan'}`}>{r.kind === 'channel' ? 'Channel' : 'Event'}</span></td>
+                    <td><EntityCell name={r.name} sub={SUB[r.kind]} index={i} /></td>
+                    <td><span className={`tag type ${TAG_CLASS[r.kind]}`}>{LABEL[r.kind]}</span></td>
                     <td style={{ color: 'var(--muted)' }}>{r.programme_count || '—'}</td>
                     <td style={{ color: 'var(--muted)' }}>
                       {r.first_at && r.last_at ? `${fmtDT(r.first_at)} → ${fmtDT(r.last_at)}` : 'no programmes yet'}
@@ -84,18 +103,18 @@ export default function Epg() {
 
       {/* New EPG: pick the channel/event the guide belongs to */}
       {pickerOpen && (
-        <div className="drawer-scrim" onClick={() => setPickerOpen(false)} style={{ alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" onClick={e => e.stopPropagation()} style={{ width: 480, maxWidth: '95vw', padding: 20 }}>
+        <div className="drawer-scrim" {...pressable((e: any) => { ((() => setPickerOpen(false)) as any)(e) })} data-a11y-click="" style={{ alignItems: 'center', justifyContent: 'center' }}>
+          <div className="card" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 480, maxWidth: '95vw', padding: 20 }}>
             <h3 style={{ margin: '0 0 4px' }}>New EPG</h3>
             <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', margin: '0 0 12px' }}>A guide belongs to a channel or an event. Pick one without programmes yet; guides that already exist open from the list.</p>
             {empty.length === 0 ? (
-              <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-body)' }}>Every channel and event already has a guide started. Open one from the list.</div>
+              <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-body)' }}>Every channel, station and event already has a guide started. Open one from the list.</div>
             ) : (
               <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
                 {empty.map(r => (
-                  <div key={r.kind + r.id} onClick={() => open(r)}
+                  <div key={r.kind + r.id} {...pressable((e: any) => { ((() => open(r)) as any)(e) })} data-a11y-click=""
                     style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '9px 12px', cursor: 'pointer', borderTop: '1px solid var(--border)' }}>
-                    <span style={{ fontSize: 'var(--fs-micro)', fontWeight: 700, color: 'var(--brand)', width: 60, textTransform: 'uppercase' }}>{r.kind}</span>
+                    <span style={{ fontSize: 'var(--fs-micro)', fontWeight: 700, color: 'var(--brand)', width: 60, textTransform: 'uppercase' }}>{LABEL[r.kind] ?? r.kind}</span>
                     <span style={{ flex: 1 }}>{r.name}</span>
                   </div>
                 ))}

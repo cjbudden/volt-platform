@@ -43,20 +43,20 @@ export function LangPicker({ value, onChange, options }: {
           {labelOf(code)}
           <button aria-label={`Remove ${labelOf(code)}`} title="Remove"
             onClick={() => onChange(value.filter(c => c !== code))}
-            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: 13 }}>
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: 'var(--fs-body)' }}>
             ×
           </button>
         </span>
       ))}
       {remaining.length > 0 && (
-        <select className="inp" value="" style={{ width: 'auto', padding: '4px 8px', fontSize: 12 }}
+        <select className="inp" value="" style={{ width: 'auto', padding: '4px 8px', fontSize: 'var(--fs-sm)' }}
           aria-label="Add caption language"
           onChange={e => { if (e.target.value) onChange([...value, e.target.value]) }}>
           <option value="">+ Add language…</option>
           {remaining.map(o => <option key={o.code} value={o.code}>{o.label}</option>)}
         </select>
       )}
-      {value.length === 0 && <span style={{ fontSize: 12, color: 'var(--faint)' }}>No languages selected: captions will not be published.</span>}
+      {value.length === 0 && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>No languages selected: captions will not be published.</span>}
     </div>
   )
 }

@@ -12,7 +12,12 @@
 // has stopped.
 import { useSyncExternalStore, useEffect, useState } from 'react'
 import { api } from './api'
-import { subscribe as subscribeChunked, type UploadItem } from './uploadManager'
+import {
+  subscribe as subscribeChunked,
+  clearFinished as clearChunked,
+  retryFailed as retryChunked,
+  type UploadItem,
+} from './uploadManager'
 
 export type UpStatus = 'queued' | 'uploading' | 'done' | 'error'
 export interface UploadJob { id: string; name: string; folder: string; kind: string; size: number; status: UpStatus; error?: string }
@@ -93,6 +98,14 @@ export function UploadIndicator() {
   const cDone = chunked.filter(c => c.status === 'done').length
   const cFailed = chunked.filter(c => c.status === 'error').length
 
+  // BOTH STORES, because the counts above already add both. Clear and Retry
+  // used to touch only the image store, so a finished loop or a failed chunked
+  // upload stayed in the number for the rest of the session with no way to
+  // remove it: the button was there, it just did not apply to the thing the
+  // user was looking at.
+  const clearBoth = () => { clearFinished(); clearChunked() }
+  const retryBoth = () => { retryFailed(); retryChunked() }
+
   const active = u.active + cActive
   const done = u.done + cDone
   const failed = u.failed + cFailed
@@ -119,8 +132,10 @@ export function UploadIndicator() {
         <div className="card" style={{ position: 'absolute', right: 0, top: 42, width: 300, zIndex: 60, padding: 10, maxHeight: 340, overflow: 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
             <b style={{ fontSize: 'var(--fs-body)' }}>Uploads</b><span style={{ flex: 1 }} />
-            {u.failed > 0 && <button className="chip" onClick={retryFailed} style={{ padding: '3px 9px', marginRight: 6 }}>Retry failed</button>}
-            <button className="chip" onClick={clearFinished} style={{ padding: '3px 9px' }}>Clear</button>
+            {failed > 0 && (
+              <button className="chip" onClick={retryBoth} style={{ padding: '3px 9px', marginRight: 6 }}>Retry failed</button>
+            )}
+            <button className="chip" onClick={clearBoth} style={{ padding: '3px 9px' }}>Clear</button>
           </div>
           {chunked.slice().reverse().map(c => {
             const pct = c.totalBytes ? Math.round((c.sentBytes / c.totalBytes) * 100) : 0

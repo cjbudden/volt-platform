@@ -4,6 +4,7 @@ import { Orchestrator } from '../src/services/orchestrator/service';
 import { MockTaskLauncher, EcsTaskLauncher } from '../src/services/orchestrator/launcher';
 import { buildEncoderJobConfig } from '../src/services/jobConfig';
 import { query, one, pool } from '../src/db';
+import { config } from '../src/config';
 
 let fails = 0;
 const ok = (n: string, c: boolean) => { console.log((c ? 'PASS ' : 'FAIL ') + n); if (!c) fails++; };
@@ -14,7 +15,12 @@ const P = '00000000-0000-0000-0000-0000000000d1';
 const CH = '00000000-0000-0000-0000-0000000000c1';
 
 async function seed() {
-  await query(`DELETE FROM accounts WHERE id=$1`, [A]).catch(() => {});
+  // NOT swallowed. This delete used to be wrapped in .catch(() => {}), so when
+  // another suite left a child account pointing at A the foreign key blocked
+  // the cleanup, the failure vanished, and the very next line died on a
+  // primary-key collision that looked like a product bug. A cleanup that can
+  // silently not clean is worse than no cleanup.
+  await query(`DELETE FROM accounts WHERE id=$1`, [A]);
   await query(`INSERT INTO accounts(id,name) VALUES ($1,'Orch')`, [A]);
   await query(`INSERT INTO output_profiles(id,account_id,name,rungs,workflow_type,packaging,segment_dur,dvr_window_sec,captions_enabled,caption_targets)
     VALUES ($1,$2,'pkg','[{"height":1080,"bitrate_kbps":5000},{"height":720,"bitrate_kbps":2800}]','package_only','both',2,60,true,'["en","zh"]')`, [P, A]);
@@ -104,13 +110,188 @@ async function lifecycleTests() {
   ok('stop: task stopped via launcher', mock.stopped.includes(inst.task_arn));
   ok('stop: thumbnailer launched for recording', mock.launched.some((l) => l.kind === 'thumbnailer' && l.job.id === rec.id));
 
-  // retention sweep removes an already-expired recording
+  // ---- THE ENCODER LIFECYCLE, when nothing goes to plan --------------------
+  //
+  // Five of these used to be one bug wearing different hats: the `instances`
+  // row was the only record of a running encoder, and only stopStream ever
+  // cleared it. So the row was a CLAIM that something was started, and every
+  // question about whether it was still running asked the claim to answer for
+  // itself. The launcher knows; these check that it is the one being asked.
+
+  // A CRASH. Not a stop: nothing called stopStream, the task simply is not
+  // there any more. Before, the channel stayed `live` and billing forever.
+  await orch.startStream('channel', CH);
+  const crashed = await one<any>(
+    `SELECT * FROM instances WHERE channel_id=$1 AND terminated_at IS NULL`, [CH]);
+  ok('crash: a fresh start is running', !!crashed);
+  mock.deadArns.add(crashed.task_arn);          // the task died on its own
+  const reconciled = await orch.reconcileStreamStatus();
+  ok('crash: the reconciler notices', reconciled >= 1);
+  const afterCrash = await one<any>(`SELECT status FROM channels WHERE id=$1`, [CH]);
+  ok('crash: the channel stops being live', afterCrash.status !== 'live');
+  const reaped = await one<any>(`SELECT * FROM instances WHERE id=$1`, [crashed.id]);
+  ok('crash: and the instance row is closed, so billing stops',
+    reaped.terminated_at !== null && reaped.state === 'terminated');
+  mock.deadArns.clear();
+
+  // AN UNREACHABLE LAUNCHER IS NOT A CRASH. `unknown` must never tear down a
+  // healthy channel: a throttled API or a restarted control plane would
+  // otherwise take the whole fleet off air.
+  await orch.startStream('channel', CH);
+  const live2 = await one<any>(
+    `SELECT * FROM instances WHERE channel_id=$1 AND terminated_at IS NULL`, [CH]);
+  mock.unknownArns.add(live2.task_arn);
+  await orch.reconcileStreamStatus();
+  const stillLive = await one<any>(`SELECT status FROM channels WHERE id=$1`, [CH]);
+  ok('unknown liveness leaves the channel alone', stillLive.status === 'live');
+  const stillOpen = await one<any>(`SELECT * FROM instances WHERE id=$1`, [live2.id]);
+  ok('and does not close its instance row', stillOpen.terminated_at === null);
+  mock.unknownArns.clear();
+
+  // IDEMPOTENT START. A double-clicked Start, or two overlapping ticks, used to
+  // launch a SECOND encoder into the same output namespace: two processes
+  // writing the same manifests, which corrupts the live edge rather than merely
+  // wasting money.
+  const launchesBefore = mock.launched.filter((l) => l.kind === 'encoder').length;
+  const again = await orch.startStream('channel', CH);
+  ok('start on a running stream returns the SAME task', again.taskArn === live2.task_arn);
+  const launchesAfter = mock.launched.filter((l) => l.kind === 'encoder').length;
+  ok('and launches nothing new', launchesAfter === launchesBefore);
+  const openCount = await one<any>(
+    `SELECT count(*)::int n FROM instances WHERE channel_id=$1 AND terminated_at IS NULL AND role='primary'`, [CH]);
+  ok('so there is still exactly one primary instance', openCount.n === 1);
+
+  // CONCURRENT STARTS. The advisory lock is what makes the check above hold
+  // under a race rather than only in sequence.
+  await orch.stopStream('channel', CH);
+  const results = await Promise.allSettled([
+    orch.startStream('channel', CH),
+    orch.startStream('channel', CH),
+  ]);
+  const won = results.filter((r) => r.status === 'fulfilled').length;
+  ok('two simultaneous starts do not both launch', won >= 1);
+  const raced = await one<any>(
+    `SELECT count(*)::int n FROM instances WHERE channel_id=$1 AND terminated_at IS NULL AND role='primary'`, [CH]);
+  ok('a race still leaves exactly one primary instance', raced.n === 1);
+  await orch.stopStream('channel', CH);
+
+  // Retention sweep expires an already-expired recording. Since the media
+  // lifecycle landed this MARKS rather than deletes: the bytes go, the row
+  // stays, so the library still knows the recording existed and a clip's
+  // provenance chain still reaches back to it. A sweep that dropped the row
+  // would silently break every chain that referenced it.
   await query(`INSERT INTO recordings(kind,channel_id,day_utc,status,start_epoch_ms,retention_days,expires_at)
     VALUES ('channel_day',$1,'2020-01-01','complete',1,1, now() - interval '1 day')`, [CH]);
   const swept = await orch.sweepRetention();
-  ok('retention sweep removes expired', swept >= 1);
-  const gone = await one<any>(`SELECT count(*)::int n FROM recordings WHERE channel_id=$1 AND day_utc='2020-01-01'`, [CH]);
-  ok('swept recording is gone', gone.n === 0);
+  ok('retention sweep expires an expired recording', swept >= 1);
+  const legacy = await one<any>(
+    `SELECT count(*)::int n, count(*) FILTER (WHERE storage_state = 'deleted')::int marked
+       FROM recordings WHERE channel_id=$1 AND day_utc='2020-01-01'`, [CH]);
+  ok('swept recording survives as a record', legacy.n === 1);
+  ok('swept recording is marked deleted, not dropped', legacy.marked === 1);
+}
+
+/**
+ * RADIO AS A LAUNCHED TASK.
+ *
+ * The container path is behind config.orchestrator.radioMode, and a flag that
+ * defaults off is exactly where untested code hides. So this exercises the
+ * path that flag selects: a station must launch through the LAUNCHER, be
+ * recorded like any other task, be idempotent, and be reapable by asking the
+ * launcher rather than an in-memory table.
+ */
+async function radioContainerTests() {
+  const RA = '00000000-0000-0000-0000-0000000000a7';
+  const RG = '00000000-0000-0000-0000-0000000000b7';
+  const RP = '00000000-0000-0000-0000-0000000000d7';
+  const RCH = '00000000-0000-0000-0000-0000000000c7';
+  await query(`DELETE FROM accounts WHERE id=$1`, [RA]);
+  await query(`INSERT INTO accounts(id,name) VALUES ($1,'RadioOrch')`, [RA]);
+  await query(`INSERT INTO output_profiles(id,account_id,name,rungs,workflow_type)
+    VALUES ($1,$2,'p','[]','package_only')`, [RP, RA]);
+  await query(`INSERT INTO groups(id,account_id,name,output_profile_id,max_channels)
+    VALUES ($1,$2,'g',$3,10)`, [RG, RA, RP]);
+  await query(`INSERT INTO channels(id,group_id,name,status,kind,radio_config)
+    VALUES ($1,$2,'Container FM','scheduled','radio','{"bitrateKbps":192,"outputs":{"mp3":true}}'::jsonb)`, [RCH, RG]);
+  await query(`INSERT INTO stream_inputs(channel_id,role,protocol,ingest_url)
+    VALUES ($1,'primary','icecast','http://up.example/stream')`, [RCH]);
+
+  const prev = config.orchestrator.radioMode;
+  (config.orchestrator as any).radioMode = 'container';
+  try {
+    const mock = new MockTaskLauncher();
+    const orch = new Orchestrator(mock);
+
+    const started = await orch.startStream('channel', RCH);
+    const radioLaunches = mock.launched.filter((l) => l.kind === 'radio');
+    ok('a station launches through the launcher', radioLaunches.length === 1);
+    ok('and NOT as an encoder', mock.launched.every((l) => l.kind !== 'encoder'));
+    ok('the arn is a real task arn, not a radio: pid', started.taskArn.startsWith('mock:radio:'));
+
+    // The job config is the entire contract with the container.
+    const job = radioLaunches[0].job as any;
+    ok('the job names the channel', job.channel_id === RCH);
+    ok('the job carries the source url', job.url === 'http://up.example/stream');
+    ok('the configured bitrate survives into the job', job.bitrate_kbps === 192);
+    // MP3 IS OPT-IN, so the fixture asks for it. It used to be defaulted on,
+    // which meant this assertion passed without anyone having decided anything.
+    ok('mp3, WHEN ASKED FOR, is pushed to a relay mount derived from the id',
+      job.icecast?.mount === `${RCH}.mp3`);
+    ok('the container is told where to report status',
+      typeof job.status_report?.url === 'string' && job.status_report.url.includes(RCH));
+    ok('the source codec is NOT pre-decided; the container probes it',
+      !('source_codec' in job));
+
+    // A STATION THAT DID NOT ASK FOR MP3 GETS NO RELAY AT ALL.
+    //
+    // Not merely "the output is off": no icecast block in the job config, so the
+    // container never probes a relay, never occupies a mount, and cannot be
+    // degraded by a relay it was never going to use. MP3 is the only output
+    // whose bill is egress, so one nobody asked for must not reserve fan-out
+    // capacity on the assumption that somebody might.
+    //
+    // Asserted on the BUILDER rather than by restarting the station, because the
+    // running station is the subject of the assertions below and stopping it
+    // here to make a point about config would break them.
+    const { buildRadioJobConfig } = await import('../src/services/radio/jobConfig');
+    const quiet = await buildRadioJobConfig({
+      channelId: RCH, channelName: 'Container FM',
+      protocol: 'icecast', url: 'http://up.example/stream',
+      radioConfig: { bitrateKbps: 192 },
+    });
+    ok('a station that did not ask for MP3 is given no relay at all',
+      quiet.icecast === null);
+    ok('and still gets the outputs that are files rather than fan-out',
+      quiet.outputs?.hls === true && quiet.outputs?.dash === true);
+
+    const inst = await one<any>(
+      `SELECT task_arn, state, terminated_at FROM instances WHERE channel_id=$1`, [RCH]);
+    ok('an instance row records the task', inst?.task_arn === started.taskArn);
+    ok('and it is open', inst?.terminated_at === null);
+    const chRow = await one<any>(`SELECT status FROM channels WHERE id=$1`, [RCH]);
+    ok('the channel goes live', chRow?.status === 'live');
+
+    // Idempotency: the same rule television gets. Two stations pushing to one
+    // relay mount would leave listeners on whichever source Icecast accepted.
+    const again = await orch.startStream('channel', RCH);
+    ok('starting again returns the SAME task', again.taskArn === started.taskArn);
+    ok('and launches nothing new',
+      mock.launched.filter((l) => l.kind === 'radio').length === 1);
+
+    // Liveness comes from the launcher now, so a crashed station is reapable
+    // exactly like a crashed encoder.
+    mock.deadArns.add(started.taskArn);
+    await orch.reconcileStreamStatus();
+    const after = await one<any>(
+      `SELECT state, terminated_at FROM instances WHERE channel_id=$1`, [RCH]);
+    ok('a dead station is reaped by asking the launcher', after?.terminated_at !== null);
+    ok('and the row is closed the way a clean stop closes it', after?.state === 'terminated');
+    const chAfter = await one<any>(`SELECT status FROM channels WHERE id=$1`, [RCH]);
+    ok('so the channel stops being live', chAfter?.status !== 'live');
+  } finally {
+    (config.orchestrator as any).radioMode = prev;
+    await query(`DELETE FROM accounts WHERE id=$1`, [RA]).catch(() => {});
+  }
 }
 
 (async () => {
@@ -118,6 +299,7 @@ async function lifecycleTests() {
   ecsParamTests();
   await seed();
   await lifecycleTests();
+  await radioContainerTests();
   console.log('\n' + (fails ? `${fails} FAILED` : 'ALL PASSED'));
   await pool.end();
   process.exit(fails ? 1 : 0);

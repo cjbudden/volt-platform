@@ -20,7 +20,7 @@
 //  or zoomed with the wheel / buttons / +- keys.
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { RecordingProgramme, Waveform, RecordingGap } from './api'
+import type { RecordingProgramme, Waveform, RecordingGap, RecordingFallback } from './api'
 import { pressable } from './a11y'
 
 export interface Span { runId: string; startMs: number; endMs: number; segments?: number }
@@ -111,14 +111,20 @@ export function gapsInRange(gaps: RecordingGap[] | undefined, a: number | null, 
   return { gaps: hit, ms: hit.reduce((n, g) => n + (Math.min(g.toMs, b) - Math.max(g.fromMs, a)), 0) }
 }
 
+const onAirNote = (gp: RecordingGap) => gp.onAir
+  ? ` · on air: viewers saw the channel ${gp.onAir}${gp.onAirReason === 'forced' ? ' (forced from the failover panel)' : ' (source lost)'}`
+  : ''
+
 export default function ClipTimeline({
-  domain, spans, gaps = [], view, setView, programmes, waveform, waveLoading,
+  domain, spans, gaps = [], fallbacks = [], view, setView, programmes, waveform, waveLoading,
   from, to, loaded, playheadMs, flash, onChange, onSeek, onPickProgramme,
 }: {
   domain: { start: number; end: number }
   spans: Span[]
   /** Holes in the recording. Drawn on every row so a mark is never placed across one unknowingly. */
   gaps?: RecordingGap[]
+  /** Where the channel's loop/slate was on air instead of the source (not in the recording). */
+  fallbacks?: RecordingFallback[]
   view: { start: number; end: number }
   setView: (v: { start: number; end: number }) => void
   programmes: RecordingProgramme[]
@@ -354,7 +360,7 @@ export default function ClipTimeline({
             }} />
           ))}
           {gaps.map((gp, i) => (
-            <div key={'g' + i} title={`Gap ${fmtGap(gp.ms)}: ${GAP_REASON[gp.reason]}`} style={{
+            <div key={'g' + i} title={`Gap ${fmtGap(gp.ms)}: ${GAP_REASON[gp.reason]}${onAirNote(gp)}`} style={{
               position: 'absolute', top: 1, bottom: 1,
               left: `${((gp.fromMs - domain.start) / DW) * 100}%`,
               width: `max(2px, ${(gp.ms / DW) * 100}%)`,
@@ -451,10 +457,19 @@ export default function ClipTimeline({
             style={{ position: 'absolute', top: 6, bottom: 6, left: pct(s.startMs), width: `calc(${pct(s.endMs)} - ${pct(s.startMs)})`, background: 'rgba(120,150,255,.35)', borderRadius: 4, minWidth: 2, pointerEvents: 'none' }} />
         ))}
         {gaps.filter(gp => gp.toMs > view.start && gp.fromMs < view.end).map((gp, i) => (
-          <div key={'g' + i} title={`Gap ${fmtGap(gp.ms)} · ${clockOf(gp.fromMs)} → ${clockOf(gp.toMs)} · ${GAP_REASON[gp.reason]}`}
+          <div key={'g' + i} title={`Gap ${fmtGap(gp.ms)} · ${clockOf(gp.fromMs)} → ${clockOf(gp.toMs)} · ${GAP_REASON[gp.reason]}${onAirNote(gp)}`}
             style={{ position: 'absolute', top: 2, bottom: 2, left: pct(gp.fromMs), width: `max(3px, calc(${pct(gp.toMs)} - ${pct(gp.fromMs)}))`,
               background: 'repeating-linear-gradient(135deg, rgba(248,113,113,.55) 0 3px, rgba(248,113,113,.15) 3px 7px)',
               border: '1px solid rgba(248,113,113,.8)', borderRadius: 3, pointerEvents: 'auto', cursor: 'help' }} />
+        ))}
+        {/* ON AIR INSTEAD: a strip along the top of the lane where the channel's loop or
+            slate was delivered to viewers. It sits over the hole it covered; the loop
+            itself is not recorded, so there is nothing here to clip. */}
+        {fallbacks.filter(f => f.toMs > view.start && f.fromMs < view.end).map((f, i) => (
+          <div key={'fb' + i}
+            title={`${f.filler === 'loop' ? 'Loop' : 'Slate'} on air ${fmtGap(f.ms)} · ${clockOf(f.fromMs)} → ${clockOf(f.toMs)} · ${f.reason === 'forced' ? 'forced from the failover panel' : 'the source was lost'}. Viewers saw the channel ${f.filler}; it is not in the recording.`}
+            style={{ position: 'absolute', top: 0, height: 5, left: pct(f.fromMs), width: `max(3px, calc(${pct(f.toMs)} - ${pct(f.fromMs)}))`,
+              background: 'rgba(251,191,36,.85)', borderRadius: 2, cursor: 'help', zIndex: 2 }} />
         ))}
         {from != null && to != null && to > from && (
           <>

@@ -1,0 +1,245 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Volt pages: templates, modules, framings</title>
+<!--
+  ONE PAGE OBJECT, THREE FRAMINGS.
+
+  A working sketch of DESIGN_pages_and_embeds.md. Pick a template on the left to
+  see which modules it composes, and a framing to see what changes: the public
+  page gets site chrome, the iframe drops it and negotiates height, the share
+  framing adds the token bar and the review rail.
+
+  The point of the sketch is that only the module LIST changes between them.
+-->
+<style>
+  :root{ --bg:#0e1116; --panel:#151a22; --line:#242c38; --ink:#e8ecf4; --dim:#98a3b6;
+         --brand:#3f7bff; --ok:#34d399; --warn:#fbbf24; --card:#171d26; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  #app{display:grid;grid-template-columns:300px 1fr;min-height:100vh}
+  .side{background:var(--panel);border-right:1px solid var(--line);padding:20px 18px}
+  h2{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin:0 0 8px}
+  h2.sep{margin-top:24px}
+  .hint{color:var(--dim);font-size:12.5px;margin:0 0 12px}
+  .opt{display:block;width:100%;text-align:left;background:#0c0f14;color:var(--ink);
+    border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-bottom:6px;
+    font:inherit;cursor:pointer}
+  .opt.on{border-color:var(--brand);background:rgba(63,123,255,.14)}
+  .opt small{display:block;color:var(--dim);font-size:11.5px;margin-top:2px}
+  .mods{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+  .mod{font:11px ui-monospace,Menlo,monospace;background:rgba(255,255,255,.07);
+    border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:var(--dim)}
+  .mod.on{background:rgba(63,123,255,.16);border-color:rgba(63,123,255,.45);color:#9dbcff}
+
+  .stagewrap{padding:24px 28px 60px;overflow:auto}
+  .framebar{display:flex;align-items:center;gap:10px;margin-bottom:14px;color:var(--dim);font-size:12.5px}
+  .framebar code{font:11.5px ui-monospace,Menlo,monospace;background:rgba(255,255,255,.07);
+    padding:2px 6px;border-radius:4px;color:var(--ink)}
+  .frame{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#0b0e13;
+    max-width:940px;margin:0 auto}
+  .frame.embed{border-style:dashed;border-color:rgba(63,123,255,.5)}
+  .sitechrome{display:flex;align-items:center;gap:14px;padding:12px 18px;
+    border-bottom:1px solid var(--line);background:#10141b}
+  .sitechrome nav{display:flex;gap:14px;margin-left:auto;color:var(--dim);font-size:13px}
+  .mark{font-weight:800}.mark span{font-weight:400;opacity:.7}
+  .tokenbar{display:flex;align-items:center;gap:10px;padding:9px 18px;font-size:12.5px;
+    background:rgba(251,191,36,.12);border-bottom:1px solid rgba(251,191,36,.3);color:#ffd475}
+  .body{padding:18px}
+  .player{position:relative;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:#000}
+  .player img{width:100%;height:100%;object-fit:cover;display:block}
+  .pill{position:absolute;top:11px;left:11px;font-size:10px;font-weight:700;letter-spacing:.08em;
+    background:var(--brand);padding:4px 8px;border-radius:4px}
+  h1{font-size:20px;margin:16px 0 2px;letter-spacing:-.01em}
+  .sub{color:var(--dim);margin:0 0 4px;font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:13px 15px;margin-top:12px}
+  .card h3{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);
+    margin:0 0 9px;display:flex;justify-content:space-between}
+  .card h3 em{font-style:normal;font:10px ui-monospace,Menlo,monospace;opacity:.7}
+  .rowi{display:flex;gap:12px;align-items:baseline;padding:6px 0;border-top:1px solid var(--line)}
+  .rowi:first-of-type{border-top:0}
+  .rowi .t{font:12px ui-monospace,Menlo,monospace;color:var(--dim);min-width:64px}
+  .rowi .n{flex:1;min-width:0}
+  .rowi .n b{font-weight:620}
+  .rowi .n small{display:block;color:var(--dim)}
+  .live{font-size:9px;font-weight:700;letter-spacing:.07em;background:var(--brand);
+    padding:2px 6px;border-radius:3px}
+  .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .thumb{border-radius:8px;overflow:hidden;background:#0c1017;border:1px solid var(--line)}
+  .thumb .im{aspect-ratio:16/9;background:linear-gradient(135deg,#1f4d33,#0a2415)}
+  .thumb p{margin:0;padding:7px 9px;font-size:12.5px}
+  .thumb p small{display:block;color:var(--dim);font-size:11px}
+  .people{display:flex;flex-wrap:wrap;gap:14px}
+  .person{display:flex;align-items:center;gap:9px}
+  .av{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#3f6d8f,#5b3f8f)}
+  .person b{display:block;font-weight:620;font-size:13.5px}
+  .person small{color:var(--dim);font-size:12px}
+  .field{display:block;margin-bottom:9px}
+  .field span{display:block;font-size:12px;color:var(--dim);margin-bottom:4px}
+  .field i{display:block;height:34px;border:1px solid var(--line);border-radius:7px;background:#0c0f14}
+  .btn{background:var(--brand);border:0;color:#fff;border-radius:8px;padding:9px 15px;
+    font:600 13px inherit;cursor:pointer}
+  .btn.ghost{background:rgba(255,255,255,.07);color:var(--ink);border:1px solid var(--line)}
+  .sponsor{border:1px dashed var(--line);border-radius:10px;padding:20px;text-align:center;
+    color:var(--dim);font-size:12.5px;margin-top:12px}
+  .qcnote{display:flex;gap:9px;align-items:baseline;padding:6px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+  .lab{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+    padding:2px 7px;border-radius:4px;background:rgba(63,123,255,.2);color:#9dbcff}
+  .lab.a{background:rgba(251,191,36,.16);color:#ffd475}
+  .acts{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .note{color:var(--dim);font-size:12.5px;margin-top:14px;border-left:2px solid var(--line);padding-left:11px}
+  @media (max-width:900px){ #app{grid-template-columns:1fr} .side{border-right:0;border-bottom:1px solid var(--line)} }
+</style>
+<div id="app">
+  <aside class="side">
+    <h2>Template</h2>
+    <p class="hint">A preset arrangement of modules. Not a codebase each.</p>
+    <div id="templates"></div>
+    <h2 class="sep">Framing</h2>
+    <p class="hint">Same page, same modules. Chrome and access differ.</p>
+    <div id="framings"></div>
+    <h2 class="sep">Modules in this page</h2>
+    <div class="mods" id="modlist"></div>
+  </aside>
+  <main class="stagewrap">
+    <div class="framebar" id="framebar"></div>
+    <div id="out"></div>
+  </main>
+</div>
+<script>
+const FRAME_IMG = "data:image/svg+xml;utf8," + encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540">
+     <defs><radialGradient id="p" cx="50%" cy="38%" r="72%">
+       <stop offset="0" stop-color="#2f7d43"/><stop offset="1" stop-color="#0a2415"/></radialGradient></defs>
+     <rect width="960" height="540" fill="url(#p)"/>
+     <ellipse cx="480" cy="300" rx="300" ry="120" fill="none" stroke="rgba(255,255,255,.26)" stroke-width="4"/>
+     <circle cx="480" cy="300" r="52" fill="none" stroke="rgba(255,255,255,.26)" stroke-width="4"/>
+   </svg>`);
+
+const TEMPLATES = {
+  solo:    { title: 'Player only', desc: 'an iframe that wants nothing else', mods: ['player'] },
+  channel: { title: 'Channel', desc: 'a 24x7 channel', mods: ['player','nowNext','schedule','playlist'] },
+  station: { title: 'Station', desc: 'radio, audio only', mods: ['player','trackHistory','schedule','richText'] },
+  event:   { title: 'Event', desc: 'one live event', mods: ['player','richText','form','sponsor'] },
+  session: { title: 'Session', desc: 'a conference day', mods: ['player','sessions','lineup','form'] },
+  fixture: { title: 'Fixture', desc: 'sport', mods: ['player','fixtures','richText','sponsor'] },
+  review:  { title: 'Review', desc: 'approval before air', mods: ['player','reviewRail','downloads'] },
+};
+const ALL_MODS = ['player','nowNext','schedule','playlist','trackHistory','sessions','lineup','fixtures','form','richText','sponsor','downloads','reviewRail','shareRow'];
+const FRAMINGS = {
+  public: { label: 'Public page', url: '/p/coastal-cup-final', desc: 'indexable, JSON-LD, site chrome' },
+  embed:  { label: 'iframe embed', url: '/embed/PAGE_ID', desc: 'no chrome, height posted to the parent' },
+  share:  { label: 'Share token', url: '/share/shr_7f2a…', desc: 'expiry, PIN, watermark, policy actions' },
+};
+
+let template = 'channel', framing = 'public';
+
+const M = {
+  player: () => `<div class="player"><img src="${FRAME_IMG}" alt=""><span class="pill">LIVE</span></div>
+    <h1>Coastal Cup Final: Harbour vs Northbank</h1>
+    <p class="sub">Harbour Sport · Harbour Stadium</p>`,
+  nowNext: () => card('Now and next', 'nowNext', `
+    ${row('19:00', 'Coastal Cup Final', 'Live from Harbour Stadium', true)}
+    ${row('21:00', 'Post-match analysis', 'With Amara Boyd and Tom Reilly')}`),
+  schedule: () => card('Today', 'schedule', `
+    ${row('16:00', 'Harbour Weekly', 'Magazine show')}
+    ${row('18:30', 'Build up', 'Team news and the walk out')}
+    ${row('19:00', 'Coastal Cup Final', 'Live', true)}
+    ${row('21:00', 'Post-match analysis', '')}`),
+  playlist: () => card('Watch again', 'playlist', `<div class="thumbs">
+    ${thumb('Semi-final: Harbour vs Eastport', '24 Aug · 1h 52m')}
+    ${thumb('Quarter-final highlights', '17 Aug · 12m')}
+    ${thumb('Manager press conference', '28 Aug · 24m')}</div>`),
+  trackHistory: () => card('Recently played', 'trackHistory', `
+    ${row('19:42', 'Midnight Drive', 'The Nocturnes')}
+    ${row('19:38', 'Harbour Lights', 'Ruby Vale')}
+    ${row('19:34', 'Slow Tide', 'Kit Farrow')}`),
+  sessions: () => card('Programme', 'sessions', `
+    ${row('09:30', 'Opening keynote', 'Dr Amara Boyd', true)}
+    ${row('10:45', 'The state of coastal fisheries', 'Panel, 45 minutes with questions')}
+    ${row('13:00', 'Workshop: tagging at sea', 'Tom Reilly')}`),
+  lineup: () => card('Speaking today', 'lineup', `<div class="people">
+    ${person('Dr Amara Boyd', 'Marine Institute')}
+    ${person('Tom Reilly', "Fishermen's Association")}
+    ${person('Priya Raman', 'Chair')}</div>`),
+  fixtures: () => card('Also this weekend', 'fixtures', `
+    ${row('Sat 15:00', 'Eastport vs Kelby', 'Coastal Cup, third place')}
+    ${row('Sun 14:00', 'Harbour II vs Northbank II', 'Reserve league')}`),
+  form: () => card('Ask a question', 'form', `
+    <label class="field"><span>Your name</span><i></i></label>
+    <label class="field"><span>Question for the panel</span><i style="height:60px"></i></label>
+    <button class="btn">Submit</button>`),
+  richText: () => card('About', 'richText', `<p style="margin:0;color:var(--dim)">
+    Full commentary from the harbour side, with the pre-match build up from 18:30.
+    Coverage continues through the presentation.</p>`),
+  sponsor: () => `<div class="sponsor">companion slot · <code>slots.leaderboard</code><br>empty until an ad system fills it</div>`,
+  downloads: () => card('Files', 'downloads', `<div class="acts">
+    <button class="btn ghost">Download hi-res</button>
+    <button class="btn ghost">Download metadata</button></div>`),
+  reviewRail: () => card('Review', 'reviewRail', `
+    <div class="qcnote"><span class="lab">automated QC</span><span style="color:var(--dim)">2 findings: 41s silence at 00:58:12, black frames at 01:12:04</span></div>
+    <div class="qcnote"><span class="t" style="font:12px ui-monospace;color:var(--dim)">00:12:03-06</span><span class="lab">language</span><span class="lab a">beep</span><span style="color:var(--dim)">Swear word from the touchline mic.</span></div>
+    <div class="acts"><button class="btn">Approve</button><button class="btn ghost">Request changes</button></div>`),
+  shareRow: () => `<div class="acts"><button class="btn ghost">Copy link</button><button class="btn ghost">Share</button></div>`,
+};
+
+function card(title, mod, inner) {
+  return `<div class="card"><h3>${title}<em>${mod}</em></h3>${inner}</div>`;
+}
+function row(t, name, sub, live) {
+  return `<div class="rowi"><span class="t">${t}</span><span class="n"><b>${name}</b>${sub ? `<small>${sub}</small>` : ''}</span>${live ? '<span class="live">LIVE</span>' : ''}</div>`;
+}
+function thumb(name, sub) {
+  return `<div class="thumb"><div class="im"></div><p>${name}<small>${sub}</small></p></div>`;
+}
+function person(name, role) {
+  return `<div class="person"><div class="av"></div><div><b>${name}</b><small>${role}</small></div></div>`;
+}
+
+function render() {
+  const tpl = TEMPLATES[template];
+  let mods = tpl.mods.slice();
+  // Framing does not change the template's modules, it adds the ones the
+  // framing itself owns.
+  if (framing === 'public' && !mods.includes('shareRow')) mods = mods.concat('shareRow');
+  if (framing === 'share' && !mods.includes('downloads')) mods = mods.concat('downloads');
+
+  document.getElementById('templates').innerHTML = Object.entries(TEMPLATES).map(([k, v]) =>
+    `<button class="opt ${k === template ? 'on' : ''}" data-t="${k}">${v.title}<small>${v.desc}</small></button>`).join('');
+  document.getElementById('framings').innerHTML = Object.entries(FRAMINGS).map(([k, v]) =>
+    `<button class="opt ${k === framing ? 'on' : ''}" data-f="${k}">${v.label}<small>${v.desc}</small></button>`).join('');
+  document.getElementById('modlist').innerHTML = ALL_MODS.map((m) =>
+    `<span class="mod ${mods.includes(m) ? 'on' : ''}">${m}</span>`).join('');
+
+  document.getElementById('framebar').innerHTML =
+    `<code>${FRAMINGS[framing].url}</code> · ${FRAMINGS[framing].desc}`;
+
+  const chrome = framing === 'public'
+    ? `<div class="sitechrome"><span class="mark">HARBOUR<span>SPORT</span></span>
+        <nav><span>Live</span><span>Schedule</span><span>Teams</span><span>Watch again</span></nav></div>`
+    : framing === 'share'
+      ? `<div class="tokenbar">Shared for review by Christian Budden · expires in 7 days · PIN protected</div>`
+      : '';
+
+  document.getElementById('out').innerHTML =
+    `<div class="frame ${framing === 'embed' ? 'embed' : ''}">${chrome}
+      <div class="body">${mods.map((m) => M[m] ? M[m]() : '').join('')}</div>
+    </div>
+    <p class="note">${
+      framing === 'embed'
+        ? 'Dashed border is the iframe boundary. Height is posted to the parent on every content change, because an iframe cannot size itself once there is a schedule under the player.'
+        : framing === 'share'
+          ? 'The token bar and the review actions come from the policy, not from the template. Same modules underneath.'
+          : 'Site chrome is the framing, not the page. The same modules serve all three.'
+    }</p>`;
+}
+
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-t]'); const f = e.target.closest('[data-f]');
+  if (t) { template = t.dataset.t; render(); }
+  if (f) { framing = f.dataset.f; render(); }
+});
+render();
+window.__ready = true;
+</script>

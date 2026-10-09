@@ -107,7 +107,9 @@ export const config = {
   // shared secret the encoder uses to POST status/events to /api/streams/:id/report
   ingestToken: req('INGEST_TOKEN', 'dev-ingest-token'),
   // where encoder/thumbnailer tasks reach the control plane (status + media reports)
-  internalApiBaseUrl: process.env.INTERNAL_API_BASE_URL ?? 'http://localhost:8080',
+  // default follows PORT: a control plane on any port other than 8080 used to send its
+  // encoders' status reports to a port nobody was listening on (gates stuck at starting)
+  internalApiBaseUrl: process.env.INTERNAL_API_BASE_URL ?? `http://localhost:${process.env.PORT ?? 8080}`,
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://localhost:8080',   // origin used in share links
   // orchestrator: how channel/event start launches encoder tasks
   orchestrator: {

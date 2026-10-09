@@ -10,7 +10,7 @@ import { plan, type OutputFormat } from '../services/clips/extract';
 import { clipsFromRecording } from '../services/clips/provenance';
 import { enqueue } from '../services/jobs/queue';
 import { CLIP_EXTRACT } from '../services/jobs/handlers/clipExtract';
-import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions, isAudioOnly, recordingGaps } from '../services/localRecordingIndex';
+import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions, isAudioOnly, recordingGaps, recordingFallbacks } from '../services/localRecordingIndex';
 import { transcriptForStream, searchTranscript, transcriptMatches } from '../services/recordingSearch';
 import { waveform, primeWaveformCache } from '../services/waveform';
 
@@ -70,7 +70,14 @@ recordingsRouter.get(
     const winStart = Number(r.start_epoch_ms);
     const winEnd = r.end_epoch_ms != null ? Number(r.end_epoch_ms)
       : (spans.length ? spans[spans.length - 1].endMs : winStart);
-    const gaps = recordingGaps(streamId, winStart, winEnd);
+    // Where viewers were shown the channel's loop instead of the source. Not media in
+    // the recording (the loop is never packaged): a marker over the hole, so an editor
+    // knows the outage was covered on air, and by what.
+    const fallbacks = recordingFallbacks(streamId, winStart, winEnd);
+    const gaps = recordingGaps(streamId, winStart, winEnd).map((g) => {
+      const f = fallbacks.find((x) => x.toMs > g.fromMs && x.fromMs < g.toMs);
+      return f ? { ...g, onAir: f.filler, onAirReason: f.reason } : g;
+    });
     res.json({
       recordingId: r.id,
       streamId,
@@ -84,6 +91,8 @@ recordingsRouter.get(
       spans,
       gaps,
       missingMs: gaps.reduce((n, g) => n + g.ms, 0),
+      fallbacks,
+      fallbackMs: fallbacks.reduce((n, f) => n + f.ms, 0),
     });
   })
 );

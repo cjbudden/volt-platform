@@ -212,13 +212,24 @@ export async function registerObject(opts: {
     );
   } else if (opts.bytes != null || opts.segmentCount != null) {
     // A live run grows. Keep the measurements current without a transition.
+    //
+    // `updated_at` moves only when a measurement ACTUALLY changes. Reconcile
+    // re-registers every run on disk on every tick and passes the same numbers
+    // back, so an unconditional bump rewrote the timestamp perpetually for
+    // media that had not changed in months. Retention reads this column when
+    // it has nothing better (see closedAtMsOf), and a timestamp that is always
+    // `now` is a clock that never ticks. The WHERE clause makes the write a
+    // no-op when there is nothing new to say.
     await query(
       `UPDATE media_objects
           SET bytes = COALESCE($2, bytes),
               duration_ms = COALESCE($3, duration_ms),
               segment_count = COALESCE($4, segment_count),
               updated_at = now()
-        WHERE id = $1`,
+        WHERE id = $1
+          AND (bytes IS DISTINCT FROM COALESCE($2, bytes)
+            OR duration_ms IS DISTINCT FROM COALESCE($3, duration_ms)
+            OR segment_count IS DISTINCT FROM COALESCE($4, segment_count))`,
       [obj.id, opts.bytes ?? null, opts.durationMs ?? null, opts.segmentCount ?? null]
     );
   }

@@ -332,3 +332,53 @@ export function recordingGaps(streamId: string, fromMs: number, toMs: number): R
   }
   return gaps;
 }
+
+// ---- ON AIR INSTEAD: where viewers saw the channel's loop ----------------------
+//
+// The playout splice (volt-encoder/bin/playout.py) covers a lost source by putting the
+// channel's pre-built loop or slate into the DELIVERED playlists. The loop never goes
+// through the packager, so it is never in the recording: the recording keeps only
+// real source media and the outage is a hole in it. What the hole does not say is
+// that the audience was not looking at a dead player, they were watching the loop.
+// The encoder writes every splice to playout.jsonl in its run directory; this turns
+// those into intervals the timeline draws and gap reasons can name.
+export interface FallbackSpan {
+  fromMs: number; toMs: number; ms: number;
+  filler: 'loop' | 'slate';
+  reason: 'source-lost' | 'forced';
+  open: boolean;            // still on the loop (live run, or the run ended on it)
+}
+
+export function recordingFallbacks(streamId: string, fromMs: number, toMs: number): FallbackSpan[] {
+  const out: FallbackSpan[] = [];
+  for (const runId of listRuns(streamId)) {
+    let txt: string;
+    try { txt = readFileSync(join(originBaseFor(streamId), 'runs', runId, 'playout.jsonl'), 'utf8'); }
+    catch { continue; }
+    let cur: FallbackSpan | null = null;
+    for (const line of txt.split('\n')) {
+      let e: any;
+      try { e = JSON.parse(line); } catch { continue; }
+      if (e?.type !== 'splice' || !Number.isFinite(Number(e.at_ms))) continue;
+      const at = Number(e.at_ms);
+      if (e.to === 'loop' && !cur) {
+        cur = { fromMs: at, toMs: at, ms: 0, filler: e.filler === 'loop' ? 'loop' : 'slate',
+                reason: e.reason === 'forced' ? 'forced' : 'source-lost', open: true };
+      } else if (e.to === 'live' && cur) {
+        cur.toMs = at; cur.open = false; out.push(cur); cur = null;
+      }
+    }
+    if (cur) {
+      // the run ended (or is still) on the loop: it lasts to the run's last segment
+      const spans = recordingSpans(streamId).filter((s) => s.runId === runId);
+      cur.toMs = Math.max(cur.fromMs, spans.length ? spans[spans.length - 1].endMs : Date.now());
+      out.push(cur);
+    }
+  }
+  return out
+    .filter((f) => f.toMs > fromMs && f.fromMs < toMs)
+    .map((f) => {
+      const a = Math.max(f.fromMs, fromMs), b = Math.min(f.toMs, toMs);
+      return { ...f, fromMs: a, toMs: b, ms: b - a };
+    });
+}

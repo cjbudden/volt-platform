@@ -118,7 +118,12 @@ resource "aws_cloudfront_distribution" "cdn" {
   }
 
   restrictions {
-    geo_restriction { restriction_type = "none" }
+    # See variables.tf: this is the blunt, whole-distribution edge stop. The
+    # per-programme blackout lives in the play gate, not here.
+    geo_restriction {
+      restriction_type = var.cdn_geo_restriction_type
+      locations        = var.cdn_geo_restriction_type == "none" ? [] : var.cdn_geo_countries
+    }
   }
 
   viewer_certificate {

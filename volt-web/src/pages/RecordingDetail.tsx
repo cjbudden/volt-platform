@@ -474,6 +474,23 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
               {tl.gaps.length > 8 && <span style={{ color: 'var(--faint)' }}>and {tl.gaps.length - 8} more</span>}
             </div>
           )}
+          {/* What viewers saw in those holes: the channel's loop or slate, spliced into the
+              delivered stream. Said separately because it is not media in the recording. */}
+          {!!tl?.fallbacks?.length && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 6, fontSize: 'var(--fs-sm)' }}>
+              <span style={{ color: '#fbbf24', fontWeight: 600 }}
+                title="The source was lost (or the loop was forced from the failover panel) and viewers were shown the channel's loop or slate. The loop is not recorded: the recording has a hole there.">
+                {tl.fallbacks[0].filler === 'loop' ? 'Loop' : 'Slate'} on air {tl.fallbacks.length} time{tl.fallbacks.length === 1 ? '' : 's'} · {fmtDur(tl.fallbackMs ?? 0)} not from the source
+              </span>
+              {tl.fallbacks.slice(0, 8).map((f, i) => (
+                <button key={i} className="chip" style={{ padding: '2px 8px', fontSize: 'var(--fs-xs)', color: '#fbbf24', borderColor: 'rgba(251,191,36,.5)' }}
+                  title={`${f.reason === 'forced' ? 'Forced from the failover panel' : 'Source lost'}. Click to zoom to it.`}
+                  onClick={() => { const pad = Math.max(30_000, f.ms * 2); setView({ start: Math.max(domain.start, f.fromMs - pad), end: Math.min(domain.end, f.toMs + pad) }) }}>
+                  {fmtClock(f.fromMs)} · {fmtDur(f.ms)}{f.open ? ' (still on)' : ''}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="spacer" />
         <button className="btn ghost" onClick={() => { loadTl(); loadRec() }}>Refresh</button>
@@ -557,7 +574,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
               into one bar. The waveform shows where the content actually is, and
               the metadata lane turns "clip that item" into one click. */}
           {tl && view && <ClipTimeline
-            domain={domain} spans={tl.spans} gaps={tl.gaps ?? []} view={view} setView={setView}
+            domain={domain} spans={tl.spans} gaps={tl.gaps ?? []} fallbacks={tl.fallbacks ?? []} view={view} setView={setView}
             programmes={programmes} waveform={wave} waveLoading={waveBusy}
             from={selFrom} to={selTo} loaded={loaded} playheadMs={playheadMs} flash={flash}
             onChange={(f, t) => { setSelFrom(f); setSelTo(t) }}

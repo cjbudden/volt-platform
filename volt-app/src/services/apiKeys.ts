@@ -103,10 +103,23 @@ function matchHost(pattern: string, host: string): boolean {
 }
 
 /** Mint a short-lived playback token bound to account/asset/session. */
-export function mintPlaybackToken(opts: { accountId: string; appId: string | null; assetId: string; geo?: string; ttlSec?: number }): { token: string; expiresIn: number } {
+export function mintPlaybackToken(opts: {
+  accountId: string; appId: string | null; assetId: string;
+  /**
+   * WHAT the asset is. The beacon needs it to file the session under the right
+   * scope, and it was never in the token: the consumer guessed with
+   * `/^(chan|00000000)/.test(assetId)`, which no real channel uuid matches, so
+   * every channel play session was recorded as `asset_kind='vod'`. Live
+   * concurrency for a channel was therefore zero on every screen that asked
+   * for it, and per-channel rollups landed under the wrong scope entirely.
+   */
+  assetKind: 'channel' | 'event' | 'vod';
+  geo?: string; ttlSec?: number;
+}): { token: string; expiresIn: number } {
   const ttl = opts.ttlSec ?? 120;
   const token = jwt.sign(
-    { typ: 'playback', aid: opts.accountId, app: opts.appId, asset: opts.assetId, geo: opts.geo ?? null },
+    { typ: 'playback', aid: opts.accountId, app: opts.appId,
+      asset: opts.assetId, kind: opts.assetKind, geo: opts.geo ?? null },
     config.jwt.accessSecret,
     { expiresIn: ttl }
   );

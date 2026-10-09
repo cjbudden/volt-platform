@@ -188,14 +188,14 @@ Three levels, all runnable, none of them trusting the encoder's own account of i
 defaults, translation routing) and `test_companion_pdt.py` (37 assertions: box parsing,
 PDT from the media timeline, one shared epoch, playlist shape, variant resolution).
 
-**Against the delivered stream** — `bin/syncheck.py` decodes the audio a run actually
+**Against the delivered stream** — `dev/syncheck.py` decodes the audio a run actually
 delivered, transcribes it offline at high quality with word timestamps, and reports how far
 every published cue is from the words it belongs to. Because a delivered segment does not
 always contain as much audio as its timeline claims, the wav position is mapped back
 through the real per-segment breakpoints rather than assumed continuous; a checker without
 that reports a growing error that is entirely its own invention.
 
-**Against a real player** — `bin/test_player_alignment.py` packages a short asset, writes
+**Against a real player** — `dev/test_player_alignment.py` packages a short asset, writes
 its subtitle track with the encoder's own functions, gives every cue a text that states the
 media time it claims to be at, then plays it in headless Chromium with hls.js and checks
 each cue appeared when the playhead really was there. This is the part that catches a
@@ -220,3 +220,39 @@ subtly misinterpreted `X-TIMESTAMP-MAP`, which looks perfect on disk.
 | player-level cue placement error | — | **+0.171s** |
 
 Positive sync error means the cue is late.
+
+---
+
+## Regression and restore (8 Oct 2026)
+
+This fix was lost twice after it landed, and the product ran without it from
+19 Aug to 8 Oct:
+
+* `2f29a5d` (Recording content search, 19 Aug 22:53) was written from a copy of
+  `encoder.py` that predated `7d5114f` and replaced the whole file, putting the
+  second source pull, mtime PDT and master-playlist ingest back.
+* `0f1a6cd` (stutter fix, 21 Aug) was then built on that reverted file. Its two
+  real fixes (atomic playlist writes, skip a truncated source playlist) were kept;
+  its mtime "jitter guard" is not needed once PDT comes from `tfdt`, so it is gone.
+* On 30 Aug a sync restored the working copy of `captions.py` and this document to
+  their 18 Aug versions.
+
+Restored on 8 Oct by a three-way merge (base `51ef572`, ours `7d5114f`, theirs the
+working copy) so everything built since is kept: `ladder_args.py`, the atomic writes,
+and the searchable `transcript.jsonl`, which now uses the same media epoch as the PDTs.
+
+Measured before and after on the same source and box (5 minute runs, 2 vCPU):
+
+| | working copy before restore | restored |
+|---|---|---|
+| median sync error | -19.8s | **+0.02s** |
+| cues within 1s / 2s | 0% / 0% | **94% / 100%** |
+| PDT step error (mean) | 8.1s | **0.000s** |
+| word error rate vs delivered audio | 1.47 | **0.14** |
+| manifest audio tracks | 6 (duplicates) | **1** |
+| ingested rung | lowest variant, upscaled | **1080p** |
+| first manifest | 23s | **9s** |
+
+If you change anything in the caption or PDT path, run `./synctest.sh` before and
+after. A suite that only checks decisions (captions-plan, captions-toggle) passes with
+this whole path broken.

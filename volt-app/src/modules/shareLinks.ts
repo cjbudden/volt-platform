@@ -104,9 +104,25 @@ shareLinksRouter.post('/:id/revoke', asyncHandler(async (req, res) => {
 // ---------- public standalone page + resolve (NO admin auth) ----------------
 export const publicShareRouter = Router();
 
-// The page itself. Serves HTML only; all data comes from the resolve call so the
-// token is never embedded in server-rendered content and a PIN can be prompted.
+/** The shape createShareLink mints: `shr_` + base64url. Nothing else is a token. */
+const SHARE_TOKEN_RE = /^shr_[A-Za-z0-9_-]{8,128}$/;
+
+// The page itself. Serves HTML only; all data comes from the resolve call, so
+// no asset detail is server-rendered and a PIN can be prompted for.
 publicShareRouter.get('/share/:token', asyncHandler(async (req, res) => {
+  // REFUSE ANYTHING THAT IS NOT TOKEN-SHAPED. The token IS server-rendered —
+  // into the page's inline script — and Express percent-decodes a path
+  // segment, so `%3C%2Fscript%3E…` arrived here as a literal `</script>`.
+  // JSON.stringify escapes quotes but not a closing script tag, so the block
+  // terminated early and the rest of the "token" ran as script on this origin,
+  // from a URL that looks like an ordinary share link and needs no auth.
+  // Checking the shape costs nothing and no real token can fail it;
+  // sharePageHtml now escapes as well, so neither half is load-bearing alone.
+  if (!SHARE_TOKEN_RE.test(req.params.token)) {
+    // The same page an unknown token gets: existence is not disclosed here.
+    res.status(404).type('html').send(sharePageHtml('invalid'));
+    return;
+  }
   // don't even reveal existence here — the page fetches /resolve and renders state
   res.type('html').send(sharePageHtml(req.params.token));
 }));

@@ -100,13 +100,46 @@ ingestRouter.post(
       // run the real teardown so status stops lying (instances terminated, channel
       // ended, recordings closed). Guarded on status='live' so a normal operator
       // stop (which already set 'ended') is not double-processed.
+      // ----------------------------------------------------------------------
+      //  WHAT THE ENCODER ACTUALLY PRODUCED. Until this existed the event was
+      //  emitted and nobody listened, so the API kept advertising an MP3 URL
+      //  for an output the running station had dropped. Pressing Listen then
+      //  attached to a URL with no audio behind it and said nothing.
+      //
+      //  channel.start CLEARS the map. A run decides its own outputs at launch
+      //  (the relay probe runs per start), so inheriting the previous run's
+      //  verdict would hide an MP3 output that came back when Icecast did.
+      // ----------------------------------------------------------------------
+      if (e.type === 'channel.start') {
+        await query(
+          `UPDATE stream_status SET degraded_outputs = '{}'::jsonb WHERE ${col} = $1`,
+          [body.id]
+        ).catch((err) => console.error('[ingest] could not clear degraded outputs', body.id, err));
+      } else if (e.type === 'output.degraded') {
+        const d = (e.detail ?? {}) as any;
+        const output = String(d.output ?? '').trim();
+        if (output) {
+          await query(
+            `INSERT INTO stream_status(${col}, degraded_outputs)
+             VALUES ($1, jsonb_build_object($2::text, $3::text))
+             ON CONFLICT (${col}) DO UPDATE
+               SET degraded_outputs = stream_status.degraded_outputs
+                                    || jsonb_build_object($2::text, $3::text)`,
+            [body.id, output, String(d.reason ?? 'unavailable')]
+          ).catch((err) => console.error('[ingest] could not record a degraded output', body.id, err));
+        }
+      }
+
       if (e.type === 'channel.stop') {
         const tbl = body.kind === 'channel' ? 'channels' : 'events';
         const owner = await one<{ status: string }>(`SELECT status FROM ${tbl} WHERE id = $1`, [body.id]);
         if (owner?.status === 'live') {
           const reason = String((e.detail as any)?.reason ?? 'stop');
           try {
-            await orchestrator.stopStream(body.kind, body.id, `encoder-reported: ${reason}`);
+            // A FAULT, NOT A STOP. The encoder died; nobody decided this stream should
+            // be off. Marking it stopped here would switch auto-connect off for the
+            // exact case it exists to handle.
+            await orchestrator.stopStream(body.kind, body.id, `encoder-reported: ${reason}`, 'fault');
           } catch (err) {
             console.error('[ingest] encoder-reported stop teardown failed', body.id, err);
           }

@@ -14,7 +14,14 @@ jf(){ node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{conso
 # password hash for 'secret123' (argon2id) via the app's own lib
 PW=$(node -e "require('argon2').hash('secret123',{type:require('argon2').argon2id}).then(h=>process.stdout.write(h))")
 psql "$DATABASE_URL" -q -f migrations/0001_init.sql
+# Clear this suite's own rows first. Email is unique, so on any database that
+# already had a saas@volt.example — a seeded one, or a second run of this file
+# — the whole fixture INSERT aborted as one statement and every assertion after
+# it failed on a user that was never created. A fixture that only works against
+# an empty database is not a fixture.
 psql "$DATABASE_URL" -q -c "
+DELETE FROM users WHERE email IN ('saas@volt.example','client@volt.example');
+DELETE FROM accounts WHERE id = '$A';
 INSERT INTO accounts(id,name) VALUES ('$A','RTM');
 INSERT INTO users(id,account_id,email,password_hash,role,status,platform_role) VALUES
  ('$SA','$A','saas@volt.example','$PW','owner','active','saas_admin'),

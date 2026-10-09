@@ -60,6 +60,8 @@ export interface OwnerRow {
   watermark_offset_y?: number;
   watermark_opacity?: number;
   watermark_scale?: number;
+  /** pre-built, ladder-matched fallback loop (services/fillerPrep.ts) */
+  filler_build?: { status?: string; dir?: string; hash?: string } | null;
 }
 
 export interface AccountRow {
@@ -77,9 +79,30 @@ export interface JobConfigCtx {
 }
 
 function inputUrl(i: StreamInputRow): string {
-  // prefer an explicit ingest_url; otherwise it's an endpoint we issue and the
+  // Prefer an explicit ingest_url; otherwise it is an endpoint we issue and the
   // stream key selects the stream (the encoder listens / connects per protocol).
-  return i.ingest_url ?? `srt://0.0.0.0:9000?streamid=${i.stream_key ?? ''}`;
+  if (i.ingest_url) return i.ingest_url;
+
+  // THE BACKSTOP FOR THE BUG THIS DEFAULT CAUSED.
+  //
+  // With no stream key either, the old expression produced
+  // `srt://0.0.0.0:9000?streamid=` — a listener on every interface with an
+  // EMPTY streamid. Syntactically fine, semantically meaningless: nothing can
+  // ever match it, so the encoder binds and waits forever while the channel
+  // shows STARTING, opens a recording and runs the billable clock. A channel
+  // with no source at all reached that state and was indistinguishable from a
+  // healthy push channel in the seconds before its encoder dials in.
+  //
+  // services/sourceReadiness.ts refuses this at the start path, which is where
+  // an operator gets a message they can act on. This is the second line: a
+  // config builder must not be able to invent an address for a source that has
+  // none, whatever call site appears later.
+  if (!i.stream_key) {
+    throw new Error(
+      `a ${i.role} stream input has neither an ingest URL nor a stream key; ` +
+      'there is nothing to identify the incoming feed');
+  }
+  return `srt://0.0.0.0:9000?streamid=${i.stream_key}`;
 }
 
 export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
@@ -178,9 +201,14 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
     // same way the watermark ref is resolved: the encoder then downloads them locally. Without
     // this the filler ffmpeg dies with "No such file or directory" and failover has nothing to
     // fall back TO, so a lost primary takes the whole output down.
+    // Any ref that already names a SCHEME is addressable and passes through
+    // untouched. Matching only http(s) was wrong: an s3:// or file:// ref came
+    // back as 'http://host/s3://bucket/slate.png', which resolves to nothing,
+    // so failover fell back to a filler that could never be opened. Only a
+    // bare path (a library ref) needs a host bolted on.
     const absRef = (ref: string | null | undefined): string | null => {
       if (!ref) return null;
-      if (/^https?:\/\//i.test(ref)) return ref;
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(ref)) return ref;
       const base = config.internalApiBaseUrl.replace(/\/$/, '');
       return `${base}${ref.startsWith('/') ? '' : '/'}${ref}`;
     };
@@ -191,6 +219,10 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
       filler: {
         slate_ref: absRef(owner.filler_ref),
         vod_loop_url: absRef(owner.filler_vod_url),
+        // the loop already rendered to this channel's ladder and packaged; the
+        // encoder checks it against its live output and uses it when it matches
+        ...(owner.filler_build?.status === 'ready' && owner.filler_build.dir
+          ? { prebuilt: { dir: owner.filler_build.dir, hash: owner.filler_build.hash ?? null } } : {}),
       },
     };
   }

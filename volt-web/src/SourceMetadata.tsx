@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type IcyProbe } from './api'
+import { pressable } from './a11y'
 
 /* ============================================================================
    SOURCE METADATA — what the stream says about itself, before you save it.
@@ -68,8 +69,8 @@ function SourceMetadataPanel({ url, targets, onClose }: {
   const art = probe?.artworkUrl ?? (probe?.streamUrl && IMG.test(probe.streamUrl) ? probe.streamUrl : null)
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 70, display: 'grid', placeItems: 'center', padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 'min(620px,96vw)', maxHeight: '92vh', overflow: 'auto', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
+    <div {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="" style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 70, display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 'min(620px,96vw)', maxHeight: '92vh', overflow: 'auto', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
         <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
           <h2 style={{ margin: 0, fontSize: 'var(--fs-h1)', letterSpacing: 'var(--ls-title)' }}>Source metadata</h2>
           <div className="flex-1" />

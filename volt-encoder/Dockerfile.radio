@@ -1,0 +1,43 @@
+# Volt Radio — one container per station, audio only.
+# ============================================================================
+# A SEPARATE image from the base encoder, and deliberately much smaller: a
+# station needs ffmpeg and nothing else. There is no Shaka Packager here
+# because there is no video to package into CMAF video renditions, and no SPEKE
+# client because audio radio is not DRM'd. Carrying the encoder image for a
+# station would mean paying for a packager and a DRM stack per 24/7 stream.
+#
+# The station is an Icecast SOURCE. It pushes MP3 to the relay tier, and writes
+# HLS/DASH into the standard per-run origin layout that every television run
+# uses, so recordings, range playback and clipping need no radio special case.
+# Like the encoder, it accepts NO inbound connections: that property is what
+# makes it deployable, restartable and reapable the same way as everything else.
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    JOB_CONFIG=/job/config.json \
+    WORK_DIR=/work
+
+# ffmpeg carries the icecast output protocol and libmp3lame; awscli is the S3
+# mirror sidecar; tini reaps the ffmpeg child on stop so a terminated task does
+# not leave a process behind holding the source connection.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        python3 \
+        awscli \
+        ca-certificates tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Fail the BUILD, not a 3am station start, if this ffmpeg cannot speak icecast.
+RUN ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx icecast \
+    && ffmpeg -hide_banner -encoders | grep -q libmp3lame \
+    && echo "ffmpeg: icecast + libmp3lame present"
+
+WORKDIR /app
+COPY bin/radio.py /app/bin/radio.py
+COPY bin/events.py /app/bin/events.py
+COPY bin/s3-uploader.sh /app/bin/s3-uploader.sh
+RUN chmod +x /app/bin/s3-uploader.sh
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python3", "/app/bin/radio.py"]

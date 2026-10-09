@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, thumbUrl, type MediaFile } from '../api'
 import { enqueueUploads, useUploads } from '../uploads'
+import { pressable } from '../a11y'
 
 const KINDS = ['all', 'slate', 'watermark', 'poster', 'brand', 'other'] as const
 const ASSIGNABLE = ['slate', 'watermark', 'poster', 'brand', 'other'] // user-assignable usage types
@@ -127,7 +128,7 @@ export default function ImageLibrary() {
             <div style={{ padding: '10px 8px', fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
               No folders yet. Quick-create:
               <div className="chipset" style={{ marginTop: 8 }}>
-                {STD_FOLDERS.map(name => <div key={name} className="selchip" onClick={async () => { await api.createFolder(name); await loadFolders(); setFolder(name) }}>{name}</div>)}
+                {STD_FOLDERS.map(name => <div key={name} className="selchip" {...pressable((e: any) => { ((async () => { await api.createFolder(name); await loadFolders(); setFolder(name) }) as any)(e) })} data-a11y-click="">{name}</div>)}
               </div>
             </div>
           )}
@@ -140,14 +141,14 @@ export default function ImageLibrary() {
               <input className="inp" style={{ width: '100%', paddingLeft: 34 }} placeholder="Search images by name, path or tag…" value={q} onChange={e => setQ(e.target.value)} aria-label="Search images" />
               {q && <button className="xbtn" onClick={() => setQ('')} title="Clear" style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)' }}>✕</button>}
             </div>
-            {KINDS.map(k => <div key={k} className={`chip ${kind === k ? 'active' : ''}`} onClick={() => setKind(k)}>{k}</div>)}
+            {KINDS.map(k => <div key={k} className={`chip ${kind === k ? 'active' : ''}`} {...pressable((e: any) => { ((() => setKind(k)) as any)(e) })} data-a11y-click="">{k}</div>)}
           </div>
 
           {err && <div className="err" style={{ marginBottom: 10 }}>{err}</div>}
 
           {files === null ? <div className="loading">Loading…</div>
             : shown.length === 0 ? (
-              <div className="empty" onClick={() => fileInput.current?.click()} style={{ cursor: 'pointer' }}>
+              <div className="empty" {...pressable((e: any) => { ((() => fileInput.current?.click()) as any)(e) })} data-a11y-click="" style={{ cursor: 'pointer' }}>
                 <div className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></svg></div>
                 <h3>No images here</h3>
                 <p>{folder ? `The “${folder}” folder is empty.` : 'Your library is empty.'} Drag images in, or click to upload.</p>
@@ -155,7 +156,7 @@ export default function ImageLibrary() {
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 14 }}>
                 {shown.map(f => (
-                  <div key={f.id} className="card" style={{ overflow: 'hidden', cursor: 'pointer' }} onClick={() => setPreview(f)}>
+                  <div key={f.id} className="card" style={{ overflow: 'hidden', cursor: 'pointer' }} {...pressable((e: any) => { ((() => setPreview(f)) as any)(e) })} data-a11y-click="">
                     <div style={{ aspectRatio: '16/10', background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 16px 16px', display: 'grid', placeItems: 'center' }}>
                       <img src={thumbUrl(f.url, 300, 190)} alt={f.name} loading="lazy" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
                     </div>
@@ -187,8 +188,8 @@ export default function ImageLibrary() {
 
       {/* staging / review before commit */}
       {staged && (
-        <div className="drawer-scrim" onClick={() => { staged.items.forEach(it => URL.revokeObjectURL(it.preview)); setStaged(null) }}>
-          <div className="drawer" onClick={e => e.stopPropagation()} style={{ width: 560, maxWidth: '96vw' }}>
+        <div className="drawer-scrim" {...pressable((e: any) => { ((() => { staged.items.forEach(it => URL.revokeObjectURL(it.preview)); setStaged(null) }) as any)(e) })} data-a11y-click="">
+          <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 560, maxWidth: '96vw' }}>
             <div className="drawer-h"><div className="t">Add {staged.items.length} image{staged.items.length > 1 ? 's' : ''}</div>
               <button className="xbtn" onClick={() => { staged.items.forEach(it => URL.revokeObjectURL(it.preview)); setStaged(null) }}>✕</button></div>
             <div className="drawer-b">
@@ -224,8 +225,8 @@ export default function ImageLibrary() {
 
       {/* preview / detail with editable type */}
       {preview && (
-        <div className="drawer-scrim" onClick={() => setPreview(null)} style={{ alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" onClick={e => e.stopPropagation()} style={{ width: 560, maxWidth: '95vw', padding: 0, overflow: 'hidden' }}>
+        <div className="drawer-scrim" {...pressable((e: any) => { ((() => setPreview(null)) as any)(e) })} data-a11y-click="" style={{ alignItems: 'center', justifyContent: 'center' }}>
+          <div className="card" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 560, maxWidth: '95vw', padding: 0, overflow: 'hidden' }}>
             <div style={{ background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 18px 18px', display: 'grid', placeItems: 'center', maxHeight: 360 }}>
               <img src={thumbUrl(preview.url, 1000, 720, 'inside')} alt={preview.name} style={{ maxWidth: '100%', maxHeight: 360, objectFit: 'contain' }} />
             </div>
@@ -258,7 +259,7 @@ export default function ImageLibrary() {
       )}
 
       {folderModal !== null && (
-        <div className="drawer-scrim" onClick={() => setFolderModal(null)} style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <div className="drawer-scrim" {...pressable((e: any) => { ((() => setFolderModal(null)) as any)(e) })} data-a11y-click="" style={{ alignItems: 'center', justifyContent: 'center' }}>
           <form className="card" onClick={e => e.stopPropagation()} style={{ width: 420, padding: 20 }}
             onSubmit={e => { e.preventDefault(); createFolder(folderModal) }}>
             <h3 style={{ margin: '0 0 4px' }}>New folder</h3>
@@ -273,8 +274,8 @@ export default function ImageLibrary() {
       )}
 
       {confirm && (
-        <div className="drawer-scrim" onClick={() => setConfirm(null)} style={{ alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" onClick={e => e.stopPropagation()} style={{ width: 420, padding: 20 }}>
+        <div className="drawer-scrim" {...pressable((e: any) => { ((() => setConfirm(null)) as any)(e) })} data-a11y-click="" style={{ alignItems: 'center', justifyContent: 'center' }}>
+          <div className="card" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 420, padding: 20 }}>
             <h3 style={{ margin: '0 0 8px' }}>Delete image?</h3>
             <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-body)' }}><b>{confirm.file.path}</b> — this can’t be undone.</p>
             {confirm.inUse && confirm.inUse.length > 0 && (
@@ -295,7 +296,7 @@ export default function ImageLibrary() {
 
 function FolderRow({ label, active, onClick, count, depth }: { label: string; active: boolean; onClick: () => void; count: number; depth: number }) {
   return (
-    <div onClick={onClick} className={`nav-item ${active ? 'active' : ''}`}
+    <div {...pressable((e: any) => { ((onClick) as any)(e) })} data-a11y-click="" className={`nav-item ${active ? 'active' : ''}`}
       style={{ paddingLeft: 8 + depth * 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, borderRadius: 8 }}>
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
       <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
@@ -431,8 +432,8 @@ function UrlBuilder({ file, onClose, notify }: { file: MediaFile; onClose: () =>
   )
 
   return (
-    <div className="drawer-scrim" onClick={onClose} style={{ alignItems: 'center', justifyContent: 'center' }}>
-      <div className="card" onClick={e => e.stopPropagation()} style={{ width: 1040, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto', padding: 0 }}>
+    <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="" style={{ alignItems: 'center', justifyContent: 'center' }}>
+      <div className="card" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 1040, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto', padding: 0 }}>
         <div className="drawer-h"><div className="t">Image URL builder — {file.name}</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 18, padding: 18 }}>
           <div>

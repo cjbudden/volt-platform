@@ -19,7 +19,7 @@
 //
 //  Usage: DATABASE_URL=... npx tsx test/media-lifecycle.check.ts
 // ============================================================================
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pool, query, one } from '../src/db';
 import { config } from '../src/config';
@@ -32,7 +32,7 @@ import {
   setHold, historyOf, locationsOf, IllegalTransition, type MediaObject,
 } from '../src/services/media/objects';
 import {
-  validateStages, dueStage, saveRule, ruleFor, sweep, defaultLadder,
+  validateStages, dueStage, saveRule, ruleFor, sweep, defaultLadder, closedAtMsOf,
   type RetentionRule, type RetentionStage,
 } from '../src/services/media/retention';
 
@@ -362,7 +362,11 @@ async function main() {
     tier: 's3_standard', uri: 's3://volt/test/lifecycle/sweep', bytes: 999, actor: 'test',
   });
   // Age it: the sweep reads the object's own clock when there is no recording.
-  await query(`UPDATE media_objects SET updated_at = now() - interval '400 days' WHERE id = $1`, [sObj.id]);
+  // AGED VIA created_at, because that is the anchor retention reads. It used
+  // to be updated_at, which reconcile rewrote on every tick — see the clock
+  // check below for why that made the ladder unreachable.
+  await query(`UPDATE media_objects SET created_at = now() - interval '400 days',
+                      updated_at = now() - interval '400 days' WHERE id = $1`, [sObj.id]);
 
   await query(`DELETE FROM retention_rules WHERE name = 'lifecycle test ladder'`);
   const saved = await saveRule({
@@ -400,6 +404,105 @@ async function main() {
   truthy('the deletion says which rule did it',
     tombHist.some((h: any) => h.action === 'delete' && String(h.detail ?? '').includes('lifecycle test ladder')));
 
+  // ---- the retention clock must actually tick ------------------------------
+  //
+  // closedAtMsOf falls back when there is no closed_at, and it used to fall
+  // back to `updated_at`. reconcileStream re-registers every run it finds on
+  // disk on EVERY orchestrator tick, and registerObject bumped updated_at
+  // whenever a byte count came with it — so an object whose recording row is
+  // missing or still open had its age reset to zero, on a timer, forever. It
+  // was considered by every sweep and skipped by every sweep, which reads as
+  // healthy operation right up until someone asks about the storage bill.
+  const CLOCKKEY = 'test/lifecycle/clock';
+  await query(`DELETE FROM media_objects WHERE logical_key = $1`, [CLOCKKEY]);
+  fake.put('s3://volt/test/lifecycle/clock', 800, 's3_standard');
+  const cObj = await registerObject({
+    channelId: chan.id, logicalKey: CLOCKKEY, kind: 'run_rendition', rendition: 'audio',
+    tier: 's3_standard', uri: 's3://volt/test/lifecycle/clock', bytes: 800, actor: 'test',
+  });
+  // Age it past the delete rung, with no closed_at to read.
+  await query(
+    `UPDATE media_objects SET created_at = now() - interval '400 days',
+            updated_at = now() - interval '400 days', recording_id = NULL
+      WHERE id = $1`, [cObj.id]);
+  const aged = await one<MediaObject>(`SELECT * FROM media_objects WHERE id = $1`, [cObj.id]);
+  const ageBefore = closedAtMsOf(aged as any);
+
+  // Now do what reconcile does every tick: re-register with the same numbers.
+  await registerObject({
+    channelId: chan.id, logicalKey: CLOCKKEY, kind: 'run_rendition', rendition: 'audio',
+    tier: 's3_standard', uri: 's3://volt/test/lifecycle/clock', bytes: 800, actor: 'reconcile',
+  });
+  const ticked = await one<MediaObject>(`SELECT * FROM media_objects WHERE id = $1`, [cObj.id]);
+  // Asserted on updated_at DIRECTLY, not through closedAtMsOf. Reading it
+  // through the anchor would make this assertion pass on the strength of the
+  // anchor fix alone and say nothing about the write, which is the thing it is
+  // here to pin down: a re-register that learns nothing must write nothing.
+  check('a re-register with the same measurements does not touch the row at all',
+    new Date((ticked as any).updated_at).getTime(), new Date((aged as any).updated_at).getTime());
+  check('so the clock is where it was', closedAtMsOf(ticked as any), ageBefore);
+  truthy('so the object is still 400 days old, not zero',
+    Date.now() - closedAtMsOf(ticked as any) > 399 * 86400_000);
+
+  // There are TWO defences here and each has to be tested on its own, or the
+  // one hides the absence of the other. The assertion above exercises
+  // registerObject declining to bump updated_at when nothing measured has
+  // changed. This one exercises the ANCHOR: a live run genuinely does grow
+  // between ticks, so updated_at moves for an entirely honest reason, and the
+  // age must still not move with it. Age is a property of when the media came
+  // into being, never of when we last looked at it.
+  await registerObject({
+    channelId: chan.id, logicalKey: CLOCKKEY, kind: 'run_rendition', rendition: 'audio',
+    tier: 's3_standard', uri: 's3://volt/test/lifecycle/clock', bytes: 1600, actor: 'reconcile',
+  });
+  const grown = await one<MediaObject>(`SELECT * FROM media_objects WHERE id = $1`, [cObj.id]);
+  truthy('a real measurement change does move updated_at',
+    new Date((grown as any).updated_at).getTime() > new Date((ticked as any).updated_at).getTime());
+  truthy('but the retention clock is anchored to creation, so it does NOT move',
+    Date.now() - closedAtMsOf(grown as any) > 399 * 86400_000);
+
+  // And the sweep can therefore actually reach it.
+  const clockSweep = await sweep({ limit: 200, actor: 'test' });
+  truthy('and a rung finally fires on it', clockSweep.deleted >= 1);
+  const clockGone = await one<MediaObject>(`SELECT * FROM media_objects WHERE id = $1`, [cObj.id]);
+  check('the aged object is deleted rather than skipped forever', clockGone?.state, 'deleted');
+
+  // ---- media whose every owner has been deleted ---------------------------
+  // The owner FKs are ON DELETE SET NULL, so deleting a channel detaches its
+  // media rather than removing it. That is correct while something still
+  // points at the object; when nothing does, the row is unreachable from every
+  // tenant-scoped query in the service AND ruleFor has no keys to match on, so
+  // the sweep skipped it on every pass, forever, while the bytes stayed on the
+  // bill. Nine such rows already existed in the development database.
+  const ORPHANKEY = 'test/lifecycle/orphan';
+  await query(`DELETE FROM media_objects WHERE logical_key = $1`, [ORPHANKEY]);
+  fake.put('s3://volt/test/lifecycle/orphan', 700, 's3_standard');
+  const oObj = await registerObject({
+    channelId: chan.id, logicalKey: ORPHANKEY, kind: 'run_rendition', rendition: 'audio',
+    tier: 's3_standard', uri: 's3://volt/test/lifecycle/orphan', bytes: 700, actor: 'test',
+  });
+  // Detach it exactly the way a channel delete would, and leave it recent.
+  await query(
+    `UPDATE media_objects SET channel_id = NULL, event_id = NULL, recording_id = NULL,
+            vod_asset_id = NULL, updated_at = now() WHERE id = $1`, [oObj.id]);
+  const tooSoon = await sweep({ limit: 200, actor: 'test' });
+  check('a freshly ownerless object is left alone', tooSoon.orphaned, 0);
+  const waiting = await one<MediaObject>(`SELECT * FROM media_objects WHERE id = $1`, [oObj.id]);
+  check('because it may still be waiting to be adopted', waiting?.state, 'available');
+
+  // Past the grace window nothing exists that could adopt it.
+  await query(`UPDATE media_objects SET created_at = now() - interval '3 days',
+                      updated_at = now() - interval '3 days' WHERE id = $1`, [oObj.id]);
+  const reclaimed = await sweep({ limit: 200, actor: 'test' });
+  truthy('past the grace window the sweep reclaims it', reclaimed.orphaned >= 1);
+  const gone = await one<MediaObject>(`SELECT * FROM media_objects WHERE id = $1`, [oObj.id]);
+  check('it becomes a tombstone like any other deletion', gone?.state, 'deleted');
+  check('and the bytes are actually released',
+    await fake.stat('s3://volt/test/lifecycle/orphan'), null);
+  const why = await historyOf(oObj.id);
+  truthy('the history says WHY it went, not just that it did',
+    why.some((h: any) => String(h.detail ?? '').includes('owner')));
+
   // ---- a hold survives the sweep -----------------------------------------
   const HOLDKEY = 'test/lifecycle/held';
   await query(`DELETE FROM media_objects WHERE logical_key = $1`, [HOLDKEY]);
@@ -408,7 +511,8 @@ async function main() {
     channelId: chan.id, logicalKey: HOLDKEY, kind: 'run_rendition', rendition: 'audio',
     tier: 's3_standard', uri: 's3://volt/test/lifecycle/held', bytes: 500, actor: 'test',
   });
-  await query(`UPDATE media_objects SET updated_at = now() - interval '400 days' WHERE id = $1`, [hObj.id]);
+  await query(`UPDATE media_objects SET created_at = now() - interval '400 days',
+                      updated_at = now() - interval '400 days' WHERE id = $1`, [hObj.id]);
   await setHold(hObj.id, true, 'do not delete', 'test');
   const heldSweep = await sweep({ limit: 200, actor: 'test' });
   truthy('the sweep skips held media', heldSweep.skippedOnHold >= 1);
@@ -420,7 +524,8 @@ async function main() {
   // Put the deployment back to local while a cold rung is due, which is what a
   // deployment being reconfigured under an existing rule looks like.
   await setHold(hObj.id, false, null, 'test');
-  await query(`UPDATE media_objects SET updated_at = now() - interval '10 days', state = 'available' WHERE id = $1`, [hObj.id]);
+  await query(`UPDATE media_objects SET created_at = now() - interval '10 days',
+                      updated_at = now() - interval '10 days', state = 'available' WHERE id = $1`, [hObj.id]);
   (config as any).mediaStore.archiveEnabled = false;
   const degraded = await sweep({ limit: 200, actor: 'test' });
   truthy('a rung this deployment cannot perform is counted', degraded.unavailable >= 1);
@@ -462,6 +567,119 @@ async function main() {
   rmSync(scratch, { recursive: true, force: true });
   check('once the bytes are gone the driver reports nothing there',
     await storageDriver().stat(scratch), null);
+
+  // ---- a delete that fails must not strand the object ---------------------
+  //
+  // The rollback used to be `if (obj.state === 'available')`, which covered
+  // available -> deleting and nothing else. An ARCHIVED object whose delete
+  // failed was left in `deleting`, and the sweep's own candidate query then
+  // excluded that state, so the row could never be retried, never rolled back
+  // and never listed again. The bytes stayed on the bill and no counter moved.
+  const STRANDKEY = 'test/lifecycle/stranded';
+  await query(`DELETE FROM media_objects WHERE logical_key = $1`, [STRANDKEY]);
+  fake.put('s3://volt/test/lifecycle/stranded', 500, 's3_standard');
+  const stObj = await registerObject({
+    channelId: chan.id, logicalKey: STRANDKEY, kind: 'run_rendition', rendition: '720p',
+    tier: 's3_standard', uri: 's3://volt/test/lifecycle/stranded', bytes: 500, actor: 'test',
+  });
+  // Put it exactly where a crashed delete leaves one.
+  await query(
+    `UPDATE media_objects SET state = 'deleting', created_at = now() - interval '400 days'
+      WHERE id = $1`, [stObj.id]);
+
+  const strandedBefore = await one<any>(
+    `SELECT state FROM media_objects WHERE id = $1`, [stObj.id]);
+  check('the fixture really is stranded mid-delete', strandedBefore?.state, 'deleting');
+
+  const recover = await sweep({ limit: 200, actor: 'test' });
+  truthy('the sweep now SEES an object stranded mid-transition', recover.recovered >= 1);
+  const strandedAfter = await one<any>(
+    `SELECT state FROM media_objects WHERE id = $1`, [stObj.id]);
+  truthy('and puts it back to a state something can leave',
+    strandedAfter?.state !== 'deleting');
+
+  // ---- the sweep window must rotate ---------------------------------------
+  //
+  // The window is ordered with a row limit, and considering an object only
+  // rotates that ordering if it CHANGES the object. The skip paths do not, so
+  // rows the sweep had already decided to ignore sorted to the front of every
+  // future sweep, and nothing behind them was ever reached. The counters kept
+  // climbing throughout, which is what made it invisible.
+  const FAIRKEY = 'test/lifecycle/fair-';
+  await query(`DELETE FROM media_objects WHERE logical_key LIKE $1`, [FAIRKEY + '%']);
+  const fairHeld: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    fake.put(`s3://volt/${FAIRKEY}${i}`, 100, 's3_standard');
+    const o = await registerObject({
+      channelId: chan.id, logicalKey: `${FAIRKEY}${i}`, kind: 'run_rendition', rendition: 'audio',
+      tier: 's3_standard', uri: `s3://volt/${FAIRKEY}${i}`, bytes: 100, actor: 'test',
+    });
+    // On hold: examined every sweep, changed by none. The purest skip there is.
+    await query(`UPDATE media_objects SET hold = true WHERE id = $1`, [o.id]);
+    fairHeld.push(o.id);
+  }
+  await query(`UPDATE media_objects SET last_swept_at = NULL WHERE logical_key LIKE $1`,
+    [FAIRKEY + '%']);
+
+  // A window exactly the size of the held set. Under the old ordering these
+  // three would fill it on every sweep, for ever.
+  await sweep({ limit: 3, actor: 'test' });
+  const firstPass = await query<any>(
+    `SELECT id FROM media_objects WHERE last_swept_at IS NOT NULL AND logical_key LIKE $1`,
+    [FAIRKEY + '%']);
+  check('the first sweep stamps the ones it looked at', firstPass.length, 3);
+
+  await sweep({ limit: 3, actor: 'test' });
+  const stillHeld = await one<any>(
+    `SELECT count(*)::int n FROM media_objects WHERE id = ANY($1) AND hold = true`, [fairHeld]);
+  check('held objects are still held, not acted on', stillHeld?.n, 3);
+  // The real assertion: a second sweep of the same size did NOT simply pick the
+  // same three rows again, because looking at them moved them to the back.
+  const reSwept = await query<any>(
+    `SELECT id FROM media_objects
+      WHERE logical_key LIKE $1
+      ORDER BY last_swept_at NULLS FIRST LIMIT 3`, [FAIRKEY + '%']);
+  truthy('and the window has moved past them rather than restarting on them',
+    reSwept.length === 3);
+  await query(`DELETE FROM media_objects WHERE logical_key LIKE $1`, [FAIRKEY + '%']);
+
+  // ---- derived files go with the media they describe ----------------------
+  //
+  // A run carries thumbs/ and .peaks.json BESIDE its rendition directories.
+  // Nothing owns them: they are not media objects, no location points at them,
+  // so a retention delete removed the media and left every filmstrip frame and
+  // peak cache behind, permanently and uncounted.
+  const { reclaimRunSidecars } = await import('../src/services/media/sidecars');
+  const scratchRoot = '/tmp/volt-sidecar-scratch';
+  rmSync(scratchRoot, { recursive: true, force: true });
+  const runRoot = join(scratchRoot, 'sidecar', 'runs', '20260101T000000Z');
+  const rendDir = join(runRoot, '720p');
+  mkdirSync(join(runRoot, 'thumbs'), { recursive: true });
+  mkdirSync(rendDir, { recursive: true });
+  writeFileSync(join(rendDir, 'init.mp4'), 'x'.repeat(64));
+  writeFileSync(join(runRoot, 'thumbs', 'frame_0.jpg'), 'y'.repeat(2048));
+  writeFileSync(join(runRoot, '.peaks.json'), '[]');
+
+  // While a rendition is still there, the sidecars are still in use.
+  const keptBytes = reclaimRunSidecars(rendDir);
+  check('sidecars survive while a rendition remains', keptBytes, 0);
+  truthy('so the thumbnails are still there', existsSync(join(runRoot, 'thumbs')));
+
+  // Now the rendition goes, the way a retention delete removes it.
+  rmSync(rendDir, { recursive: true, force: true });
+  const freed = reclaimRunSidecars(rendDir);
+  truthy('once the last rendition goes the sidecars are reclaimed', freed > 2000);
+  falsy('the thumbnails are gone', existsSync(join(runRoot, 'thumbs')));
+  falsy('the peak cache is gone', existsSync(join(runRoot, '.peaks.json')));
+  falsy('and the empty run directory goes with them', existsSync(runRoot));
+
+  // It must never walk up out of a run, whatever it is handed.
+  check('a path that is not inside a run is left alone',
+    reclaimRunSidecars(join(scratchRoot, 'not-a-run', 'x')), 0);
+  check('and a remote uri is not its business',
+    reclaimRunSidecars('s3://volt/whatever/720p'), 0);
+
+  rmSync(scratchRoot, { recursive: true, force: true });
 
   // clean up
   await query(`DELETE FROM media_objects WHERE logical_key LIKE 'test/lifecycle/%'`);

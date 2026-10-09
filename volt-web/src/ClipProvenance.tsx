@@ -106,7 +106,11 @@ export function ClipProvenancePanel({ assetId }: { assetId: string }) {
     return () => { dead = true }
   }, [assetId])
 
-  if (err) return <div className="err">{err}</div>
+  // Only when there is nothing to show. `err` is also written by the actions
+  // on this page, so an unconditional guard let one rejected action replace
+  // the working page — including the controls needed to retry — with a line
+  // of red text and no way back except navigating away.
+  if (err && !p) return <div className="err">{err}</div>
   if (!p) return <div className="loading">Reading the chain…</div>
 
   if (!p.recorded) {

@@ -1,0 +1,652 @@
+<title>VOLT Graphics Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+:root{
+  --bg:#0f1218; --panel:#171b24; --panel-2:#1c2130; --panel-3:#212736;
+  --border:rgba(255,255,255,.07); --border-2:rgba(255,255,255,.12);
+  --text:#e9ecf4; --muted:#98a1b6; --faint:#6a7387;
+  --brand:#3f7bff; --brand-dim:rgba(63,123,255,.16); --brand-2:#2f5fe6;
+  --live:#4ade80; --sched:#38bdf8; --warn:#fbbf24; --down:#f87171; --idle:#66708a;
+  --radius:16px; --radius-sm:11px; --radius-ctl:10px;
+  --shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 8px 30px -12px rgba(0,0,0,.6);
+  --display:'Archivo',system-ui,sans-serif;
+  --body:'Inter',system-ui,-apple-system,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:13px;
+  line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:34px 22px 90px;display:flex;flex-direction:column;gap:34px}
+
+/* ---------- masthead ---------- */
+.mast{display:flex;flex-direction:column;gap:14px}
+.eyebrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tag{font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;padding:4px 9px;border-radius:6px}
+.tag-proto{color:#ffd9a1;background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.3)}
+.tag-scope{color:var(--muted);background:var(--panel-2);border:1px solid var(--border)}
+h1{font-family:var(--display);font-size:34px;font-weight:700;letter-spacing:-.6px;
+  margin:0;line-height:1.12;text-wrap:balance}
+.lede{color:var(--muted);font-size:15px;max-width:62ch;margin:0}
+.lede strong{color:var(--text);font-weight:600}
+
+/* ---------- section furniture ---------- */
+section{display:flex;flex-direction:column;gap:14px}
+.shead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+  border-bottom:1px solid var(--border);padding-bottom:9px}
+h2{font-family:var(--display);font-size:19px;font-weight:600;letter-spacing:-.25px;margin:0}
+.snote{color:var(--faint);font-size:12.5px;margin:0}
+.label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+
+/* ---------- the bench ---------- */
+.bench{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(280px,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.bench{grid-template-columns:1fr}}
+
+.monitor{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:12px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:10px}
+.mtop{display:flex;align-items:center;gap:9px;padding:0 2px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;
+  font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+  background:var(--panel-2);border:1px solid var(--border);border-radius:6px;padding:3px 8px}
+.chip.on{color:#0c1220;background:var(--live);border-color:transparent}
+.chip.off{color:var(--faint)}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block}
+.tc{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--faint);
+  font-variant-numeric:tabular-nums}
+
+.screen{position:relative;aspect-ratio:16/9;border-radius:10px;overflow:hidden;
+  background:#0a0d12;border:1px solid var(--border-2)}
+#pitch{position:absolute;inset:0;width:100%;height:100%;display:block}
+.safe{position:absolute;inset:0;pointer-events:none;z-index:2;opacity:0;transition:opacity .2s}
+.safe.show{opacity:1}
+.safe i{position:absolute;border:1px dashed rgba(255,255,255,.34);border-radius:2px;display:block}
+.safe .action{inset:3.5%}
+.safe .title{inset:5%;border-color:rgba(255,214,102,.4)}
+.safe span{position:absolute;left:5.4%;top:5.6%;font-family:var(--mono);font-size:9px;
+  letter-spacing:.08em;color:rgba(255,214,102,.75);text-transform:uppercase}
+
+/* the overlay canvas is a real fixed 1920x1080 stage, scaled down. */
+.stage{position:absolute;top:0;left:0;width:1920px;height:1080px;transform-origin:top left;z-index:3;
+  pointer-events:none}
+.stage.hidden{display:none}
+
+.mfoot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 2px}
+.statebox{display:flex;flex-direction:column;gap:7px;border-top:1px solid var(--border);padding-top:11px}
+.statehead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:0 2px}
+.mono-lab{font-family:var(--mono);letter-spacing:.02em;text-transform:none;margin-left:auto}
+.rung{font-family:var(--mono);font-size:10px;color:var(--faint);background:var(--panel-2);
+  border:1px solid var(--border);border-radius:5px;padding:2px 7px}
+
+/* ---------- operator rail ---------- */
+.rail{display:flex;flex-direction:column;gap:12px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:14px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:11px}
+.card h3{font-family:var(--display);font-size:13.5px;font-weight:600;margin:0;
+  display:flex;align-items:center;gap:8px}
+.card h3 .label{margin-left:auto}
+
+.tsel{display:flex;flex-direction:column;gap:5px}
+.tsel button{display:flex;align-items:center;gap:9px;text-align:left;width:100%;
+  background:var(--panel-2);border:1px solid var(--border);color:var(--muted);
+  border-radius:var(--radius-ctl);padding:8px 10px;font-family:var(--body);font-size:12.5px;
+  font-weight:500;cursor:pointer;transition:.14s}
+.tsel button:hover{border-color:var(--border-2);color:var(--text)}
+.tsel button[aria-pressed="true"]{background:var(--brand-dim);border-color:rgba(63,123,255,.5);color:var(--text)}
+.tsel .k{font-family:var(--mono);font-size:9.5px;color:var(--faint);margin-left:auto}
+.tsel button[aria-pressed="true"] .k{color:#9dbcff}
+
+.fields{display:flex;flex-direction:column;gap:9px}
+.frow{display:grid;grid-template-columns:78px minmax(0,1fr);align-items:center;gap:10px}
+.frow label{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+.inp{width:100%;background:var(--panel-2);border:1px solid var(--border);border-radius:9px;
+  padding:7px 10px;color:var(--text);font-family:var(--body);font-size:12.5px;outline:none;transition:.15s}
+.inp:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-dim)}
+.stepper{display:flex;align-items:center;gap:6px}
+.stepper .val{font-family:var(--mono);font-size:15px;font-weight:600;min-width:22px;text-align:center;
+  font-variant-numeric:tabular-nums}
+.mini{background:var(--panel-3);border:1px solid var(--border);color:var(--text);
+  width:26px;height:26px;border-radius:7px;font-family:var(--body);font-size:14px;font-weight:600;
+  cursor:pointer;line-height:1;transition:.14s}
+.mini:hover{background:var(--brand);border-color:var(--brand);color:#fff}
+
+.btnrow{display:flex;gap:7px;flex-wrap:wrap}
+.btn{background:var(--panel-2);border:1px solid var(--border);color:var(--text);
+  border-radius:var(--radius-ctl);padding:8px 12px;font-family:var(--body);font-size:12.5px;
+  font-weight:600;cursor:pointer;transition:.14s}
+.btn:hover{border-color:var(--border-2)}
+.btn-air{background:var(--live);border-color:transparent;color:#0c1220}
+.btn-air:hover{filter:brightness(1.08)}
+.btn-off{background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.34);color:#ffb4b4}
+.btn:focus-visible,.mini:focus-visible,.tsel button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+
+pre.state{font-family:var(--mono);font-size:11px;line-height:1.6;margin:0;color:#c8d3ea;
+  background:#10141c;border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:11px 12px;overflow-x:auto;white-space:pre}
+pre.state .k{color:#7fa8ff}
+pre.state .s{color:#8fe3b0}
+pre.state .n{color:#ffcf7a}
+pre.state .b{color:#f0a0c0}
+.flash{animation:flash .5s ease-out}
+@keyframes flash{from{background:rgba(63,123,255,.28)}to{background:transparent}}
+@media (prefers-reduced-motion:reduce){.flash{animation:none}}
+
+/* ---------- template gallery ---------- */
+.gal{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:12px}
+.gcard{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  overflow:hidden;display:flex;flex-direction:column}
+.gprev{position:relative;aspect-ratio:16/9;overflow:hidden;border-bottom:1px solid var(--border);
+  background-color:#0d1117;
+  background-image:linear-gradient(45deg,#151a24 25%,transparent 25%,transparent 75%,#151a24 75%),
+                   linear-gradient(45deg,#151a24 25%,transparent 25%,transparent 75%,#151a24 75%);
+  background-size:16px 16px;background-position:0 0,8px 8px}
+.gprev .stage{z-index:1}
+.gbody{padding:11px 13px 13px;display:flex;flex-direction:column;gap:5px}
+.gbody b{font-family:var(--display);font-size:13px;font-weight:600}
+.gbody p{margin:0;color:var(--muted);font-size:12px}
+.gbody code{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+
+/* ---------- targets ---------- */
+.targets{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+.tcard{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:15px;display:flex;flex-direction:column;gap:8px}
+.tcard.burn{border-color:rgba(251,191,36,.28)}
+.tcard h4{font-family:var(--display);font-size:13.5px;font-weight:600;margin:0;
+  display:flex;align-items:center;gap:8px}
+.tcard p{margin:0;color:var(--muted);font-size:12.5px}
+.tcard .cost{font-family:var(--mono);font-size:11px;padding-top:6px;margin-top:2px;
+  border-top:1px solid var(--border);color:var(--faint)}
+.tcard .cost b{color:var(--text);font-weight:600}
+.pill{display:inline-flex;align-items:center;font-family:var(--mono);font-size:9.5px;font-weight:600;
+  letter-spacing:.07em;text-transform:uppercase;padding:2px 7px;border-radius:5px}
+.p-free{color:#a7f3c8;background:rgba(74,222,128,.14)}
+.p-paid{color:#ffd9a1;background:rgba(251,191,36,.14)}
+
+/* ---------- vod strip ---------- */
+.vod{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px;display:flex;flex-direction:column;gap:13px}
+.timeline{display:grid;grid-template-columns:74px 1fr 74px;gap:5px;align-items:stretch;height:62px}
+.seg{border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2px;font-family:var(--mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase}
+.seg b{font-family:var(--body);font-size:11.5px;font-weight:600;letter-spacing:0;text-transform:none}
+.seg-card{background:var(--brand-dim);border:1px solid rgba(63,123,255,.42);color:#9dbcff}
+.seg-body{background:var(--panel-2);border:1px solid var(--border);color:var(--muted)}
+.vodfoot{display:flex;gap:22px;flex-wrap:wrap}
+.stat{display:flex;flex-direction:column;gap:1px}
+.stat b{font-family:var(--mono);font-size:17px;font-weight:600;color:var(--text);
+  font-variant-numeric:tabular-nums}
+.stat span{font-size:11px;color:var(--faint);letter-spacing:.04em}
+
+/* ---------- questions ---------- */
+.qs{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:12px}
+.q{background:var(--panel);border:1px solid var(--border);border-left:2px solid var(--brand);
+  border-radius:var(--radius-sm);padding:13px 15px;display:flex;flex-direction:column;gap:5px}
+.q b{font-size:12.5px;font-weight:600}
+.q p{margin:0;color:var(--muted);font-size:12.5px}
+
+footer{color:var(--faint);font-size:12px;border-top:1px solid var(--border);padding-top:16px}
+footer code{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="eyebrow">
+    <span class="tag tag-proto">Prototype, not built</span>
+    <span class="tag tag-scope">Live video workflows only</span>
+    <span class="tag tag-scope">Radio unaffected</span>
+  </div>
+  <h1>Graphics that are web pages, driven live</h1>
+  <p class="lede">Every graphic below is an HTML template on a fixed 1920&times;1080 stage, bound
+  to a small live state document. Change the state and the graphic changes, in the player, in the
+  operator preview and in the burned output at once. <strong>Drive it with the controls and watch
+  the state document underneath change with it.</strong></p>
+</header>
+
+<section>
+  <div class="shead">
+    <h2>The bench</h2>
+    <p class="snote">Channel: Harbourside Sport 1. Fixture: Northbridge v Ferry Road, second half.</p>
+  </div>
+
+  <div class="bench">
+    <div class="monitor">
+      <div class="mtop">
+        <span class="chip on" id="airchip"><span class="dot"></span>On air</span>
+        <span class="chip" id="tplchip">Scorebug / v3</span>
+        <span class="tc" id="tcode">10:41:02:14</span>
+      </div>
+      <div class="screen" id="screen">
+        <canvas id="pitch"></canvas>
+        <div class="safe" id="safe">
+          <i class="action"></i><i class="title"></i><span>Title safe</span>
+        </div>
+        <div class="stage" id="stage"></div>
+      </div>
+      <div class="mfoot">
+        <span class="label">Composited once, before the ladder splits</span>
+        <span class="rung">1080p50</span><span class="rung">720p50</span><span class="rung">540p</span>
+      </div>
+      <div class="statebox">
+        <div class="statehead"><span class="label">State document</span>
+          <span class="label mono-lab">PATCH /api/overlay/bindings/:id/state</span></div>
+        <pre class="state" id="statejson"></pre>
+      </div>
+    </div>
+
+    <div class="rail">
+      <div class="card">
+        <h3>Template <span class="label">bound to channel</span></h3>
+        <div class="tsel" id="tsel"></div>
+      </div>
+
+      <div class="card">
+        <h3>Live fields <span class="label">operator</span></h3>
+        <div class="fields" id="fields"></div>
+        <div class="btnrow">
+          <button class="btn btn-air" id="airbtn">Take off air</button>
+          <button class="btn" id="safebtn" aria-pressed="false">Safe areas</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>The shipped library</h2>
+    <p class="snote">Each preview is the same template code, scaled from the same 1920&times;1080 stage.</p>
+  </div>
+  <div class="gal" id="gal"></div>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>Where a graphic renders</h2>
+    <p class="snote">One template, three renderers. A binding picks any combination.</p>
+  </div>
+  <div class="targets">
+    <div class="tcard">
+      <h4><span class="pill p-free">Free</span> In the player</h4>
+      <p>Drawn over the video in the browser, so it can differ by viewer: a sponsor in one
+      territory, another elsewhere. Reports its own impressions.</p>
+      <p class="cost">Cost <b>nothing</b>. Does not survive download or redistribution, and an
+      ad blocker can hide it.</p>
+    </div>
+    <div class="tcard">
+      <h4><span class="pill p-free">Free</span> In the operator preview</h4>
+      <p>The same code path as the player, so what the operator approves is what the viewer gets.
+      Never a separate implementation.</p>
+      <p class="cost">Cost <b>nothing</b>. This is the reason the template language is constrained.</p>
+    </div>
+    <div class="tcard burn">
+      <h4><span class="pill p-paid">Metered</span> Burned into the picture</h4>
+      <p>Composited into the encode, so it survives the recording, the clip, the download and any
+      redistribution. The right answer for a contracted sponsor mark.</p>
+      <p class="cost">Cost <b>one blend per frame</b>, because it happens once before the ladder
+      splits. Identical for every viewer, so never use it for targeted inventory.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>Intros and outros on published assets</h2>
+    <p class="snote">Rendered to match the target exactly, then joined without re-encoding.</p>
+  </div>
+  <div class="vod">
+    <div class="timeline">
+      <div class="seg seg-card"><b>Intro card</b>3s</div>
+      <div class="seg seg-body"><b>Northbridge v Ferry Road, full match</b>1h 52m, untouched</div>
+      <div class="seg seg-card"><b>Outro</b>5s</div>
+    </div>
+    <div class="vodfoot">
+      <div class="stat"><b>0.109s</b><span>measured join, stream copy</span></div>
+      <div class="stat"><b>0</b><span>frames re-encoded in the body</span></div>
+      <div class="stat"><b>325</b><span>packets out, from 75 + 250 in</span></div>
+      <div class="stat"><b>1</b><span>check that must never be skipped</span></div>
+    </div>
+    <p class="snote">That last one matters. Render a card whose parameters do not match the asset
+    and ffmpeg joins it anyway, exits cleanly, and produces a file that reports the wrong duration
+    and the wrong resolution. The publish step verifies the packet count against the sum of the
+    parts before anything reaches a viewer.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>What we want your view on</h2>
+    <p class="snote">These four answers change what gets built, and in what order.</p>
+  </div>
+  <div class="qs">
+    <div class="q"><b>Who drives the graphic on the day?</b>
+      <p>A person in the gallery with this panel open, or a data feed from the scoring system with
+      nobody watching it? Both are supported. The first one shapes the console.</p></div>
+    <div class="q"><b>Who makes the templates?</b>
+      <p>A set we design and you restyle, or your own designers uploading their own HTML? This is
+      the single biggest difference in scope.</p></div>
+    <div class="q"><b>Must sponsor graphics appear in clips and downloads?</b>
+      <p>If yes, they have to be burned in live rather than added at publish time, which brings the
+      metered path forward.</p></div>
+    <div class="q"><b>Is a banner here advertising, or branding?</b>
+      <p>Branding should be burned in. Advertising should not, because a burned banner is identical
+      for all ten thousand viewers and sells for a fraction of a targeted one.</p></div>
+  </div>
+</section>
+
+<footer>
+  Specified in <code>REQ_graphics_overlays.md</code>, costed and measured in
+  <code>DESIGN_html_graphics_overlays.md</code>. Figures on this page are measured, not estimated.
+  Nothing on this page is in the product yet.
+</footer>
+
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ---------- the pitch behind the graphics ---------- */
+  const cv = document.getElementById('pitch');
+  function drawPitch(){
+    const r = cv.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
+    cv.width = w * dpr; cv.height = h * dpr;
+    const g = cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+    g.clearRect(0,0,w,h);
+    // crowd band
+    const crowd = g.createLinearGradient(0,0,0,h*0.30);
+    crowd.addColorStop(0,'#1b2130'); crowd.addColorStop(1,'#2a3446');
+    g.fillStyle = crowd; g.fillRect(0,0,w,h*0.30);
+    for (let i=0;i<420;i++){
+      const x = Math.random()*w, y = Math.random()*h*0.28;
+      g.fillStyle = ['#3c4a63','#455573','#39435c','#515f7d'][i%4];
+      g.globalAlpha = 0.5 + Math.random()*0.4;
+      g.fillRect(x,y,2.1,2.1);
+    }
+    g.globalAlpha = 1;
+    // turf
+    const turf = g.createLinearGradient(0,h*0.28,0,h);
+    turf.addColorStop(0,'#1f5133'); turf.addColorStop(1,'#2f7a49');
+    g.fillStyle = turf; g.fillRect(0,h*0.28,w,h*0.72);
+    // mown stripes, narrowing with distance
+    g.save(); g.beginPath(); g.rect(0,h*0.28,w,h*0.72); g.clip();
+    for (let i=0;i<14;i++){
+      const t0 = i/14, t1 = (i+0.5)/14;
+      const yTop = h*0.28 + Math.pow(t0,1.7)*h*0.72;
+      const yBot = h*0.28 + Math.pow(t1,1.7)*h*0.72;
+      g.fillStyle = 'rgba(255,255,255,0.030)';
+      g.fillRect(0,yTop,w,Math.max(1,yBot-yTop));
+    }
+    // perspective touchlines and halfway
+    g.strokeStyle = 'rgba(255,255,255,0.34)'; g.lineWidth = 1.6;
+    g.beginPath(); g.moveTo(w*0.10,h); g.lineTo(w*0.335,h*0.315); g.stroke();
+    g.beginPath(); g.moveTo(w*0.95,h); g.lineTo(w*0.70,h*0.315); g.stroke();
+    g.beginPath(); g.moveTo(w*0.335,h*0.315); g.lineTo(w*0.70,h*0.315); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.22)';
+    g.beginPath(); g.moveTo(w*0.40,h); g.lineTo(w*0.475,h*0.315); g.stroke();
+    g.restore();
+    // vignette
+    const vg = g.createRadialGradient(w/2,h*0.55,h*0.20,w/2,h*0.55,h*0.95);
+    vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.42)');
+    g.fillStyle = vg; g.fillRect(0,0,w,h);
+  }
+
+  /* ---------- templates: fixed 1920x1080 stage, one render() each ---------- */
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const clock = (secs) => String(Math.floor(secs/60)).padStart(2,'0')+':'+String(Math.floor(secs%60)).padStart(2,'0');
+
+  const S = {
+    font: "font-family:'Archivo',system-ui,sans-serif",
+    mono: "font-variant-numeric:tabular-nums;font-family:'JetBrains Mono',ui-monospace,monospace"
+  };
+
+  const TEMPLATES = {
+    scorebug: {
+      name: 'Scorebug', kind: 'sport', version: 'v3',
+      blurb: 'Two teams, a running clock and a period. The field an operator touches most.',
+      fields: [
+        {k:'home', t:'text', label:'Home'}, {k:'homeScore', t:'step', label:'Score'},
+        {k:'away', t:'text', label:'Away'}, {k:'awayScore', t:'step', label:'Score'},
+        {k:'clock', t:'clock', label:'Clock'}
+      ],
+      render: (s) => `
+      <div style="position:absolute;left:96px;bottom:104px;display:flex;align-items:stretch;
+        border-radius:10px;overflow:hidden;box-shadow:0 14px 40px rgba(0,0,0,.5);${S.font}">
+        <div style="background:#0f2044;color:#fff;padding:22px 40px;font-size:52px;font-weight:700;
+          letter-spacing:.02em">${esc(s.home)}</div>
+        <div style="background:#eef1f7;color:#0f2044;padding:22px 34px;font-size:52px;font-weight:700;${S.mono}">${s.homeScore}</div>
+        <div style="background:#c8102e;color:#fff;padding:22px 30px;font-size:52px;font-weight:700;${S.mono}">${clock(s.clock)}</div>
+        <div style="background:#eef1f7;color:#0f2044;padding:22px 34px;font-size:52px;font-weight:700;${S.mono}">${s.awayScore}</div>
+        <div style="background:#0f2044;color:#fff;padding:22px 40px;font-size:52px;font-weight:700;
+          letter-spacing:.02em">${esc(s.away)}</div>
+      </div>
+      <div style="position:absolute;left:96px;bottom:60px;background:rgba(15,32,68,.9);color:#9db4e0;
+        padding:8px 20px;border-radius:6px;font-size:26px;font-weight:600;letter-spacing:.14em;
+        text-transform:uppercase;${S.font}">${esc(s.period)}</div>`
+    },
+    lower3: {
+      name: 'Lower third', kind: 'talent', version: 'v2',
+      blurb: 'A name and a role, wiping on from the left. Used across news, corporate and sport.',
+      fields: [{k:'name', t:'text', label:'Name'}, {k:'role', t:'text', label:'Role'}],
+      render: (s) => `
+      <div style="position:absolute;left:120px;bottom:150px;${S.font}">
+        <div style="display:inline-block;background:linear-gradient(90deg,#0f2044,#1b3a72);
+          color:#fff;padding:20px 46px 20px 34px;border-left:8px solid #3f7bff;
+          font-size:60px;font-weight:700;letter-spacing:-.5px;
+          box-shadow:0 14px 40px rgba(0,0,0,.5)">${esc(s.name)}</div>
+        <div style="display:block;margin-top:6px;">
+          <span style="display:inline-block;background:rgba(10,16,30,.92);color:#9db4e0;
+          padding:12px 34px;font-size:30px;font-weight:600;letter-spacing:.06em;
+          text-transform:uppercase">${esc(s.role)}</span></div>
+      </div>`
+    },
+    sponsor: {
+      name: 'Sponsor bug', kind: 'commercial', version: 'v1',
+      blurb: 'A contracted mark in the corner. The one graphic that should be burned in.',
+      fields: [{k:'sponsor', t:'text', label:'Brand'}, {k:'strap', t:'text', label:'Strap'}],
+      render: (s) => `
+      <div style="position:absolute;right:96px;top:80px;background:rgba(255,255,255,.94);
+        color:#0f2044;border-radius:10px;padding:18px 26px;text-align:right;
+        box-shadow:0 14px 40px rgba(0,0,0,.45);${S.font}">
+        <div style="font-size:19px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;
+          color:#5b6b8c">${esc(s.strap)}</div>
+        <div style="font-size:44px;font-weight:700;letter-spacing:-.5px;margin-top:2px">${esc(s.sponsor)}</div>
+      </div>`
+    },
+    ticker: {
+      name: 'Results ticker', kind: 'sport', version: 'v1',
+      blurb: 'A strip across the foot of frame. Driven by the same feed as the scorebug.',
+      fields: [{k:'tickerLabel', t:'text', label:'Label'}, {k:'ticker', t:'text', label:'Copy'}],
+      render: (s) => `
+      <div style="position:absolute;left:0;right:0;bottom:56px;display:flex;align-items:stretch;
+        box-shadow:0 -8px 30px rgba(0,0,0,.4);${S.font}">
+        <div style="background:#c8102e;color:#fff;padding:20px 34px;font-size:32px;font-weight:700;
+          letter-spacing:.14em;text-transform:uppercase;white-space:nowrap">${esc(s.tickerLabel)}</div>
+        <div style="flex:1;background:rgba(10,16,30,.93);color:#e9ecf4;padding:20px 34px;
+          font-size:32px;font-weight:500;white-space:nowrap;overflow:hidden">${esc(s.ticker)}</div>
+      </div>`
+    },
+    intro: {
+      name: 'Intro card', kind: 'vod', version: 'v2',
+      blurb: 'Full frame. Rendered to match the asset exactly, then joined by stream copy.',
+      fields: [{k:'title', t:'text', label:'Title'}, {k:'sub', t:'text', label:'Subtitle'}],
+      render: (s) => `
+      <div style="position:absolute;inset:0;background:linear-gradient(140deg,#0b1730,#16305e 62%,#1d4a86);
+        display:flex;flex-direction:column;justify-content:center;padding:0 150px;${S.font}">
+        <div style="width:104px;height:6px;background:#3f7bff;margin-bottom:44px"></div>
+        <div style="color:#fff;font-size:96px;font-weight:700;letter-spacing:-2px;line-height:1.04;
+          max-width:1300px">${esc(s.title)}</div>
+        <div style="color:#9db4e0;font-size:38px;font-weight:500;margin-top:26px;
+          letter-spacing:.04em">${esc(s.sub)}</div>
+      </div>`
+    }
+  };
+
+  /* ---------- live state ---------- */
+  const state = {
+    home:'NBR', away:'FRD', homeScore:2, awayScore:1, clock:4034, period:'Second half',
+    name:'Priya Raman', role:'Touchline reporter',
+    sponsor:'Harbour Mutual', strap:'Match coverage brought to you by',
+    tickerLabel:'Half-time', ticker:'Eastvale 1 - 1 Kingsmead   •   Ferry Road lead the table on goal difference',
+    title:'Northbridge v Ferry Road', sub:'Coastal League  •  Saturday 12 September',
+    onAir:true, running:true
+  };
+  let current = 'scorebug';
+
+  const stageEl = document.getElementById('stage');
+  const screenEl = document.getElementById('screen');
+
+  function fitStage(el, host){
+    const r = host.getBoundingClientRect();
+    el.style.transform = 'scale(' + (r.width / 1920) + ')';
+  }
+
+  function renderStage(){
+    stageEl.innerHTML = TEMPLATES[current].render(state);
+    stageEl.classList.toggle('hidden', !state.onAir);
+    document.getElementById('tplchip').textContent =
+      TEMPLATES[current].name + ' / ' + TEMPLATES[current].version;
+    const air = document.getElementById('airchip');
+    air.className = 'chip ' + (state.onAir ? 'on' : 'off');
+    air.innerHTML = '<span class="dot"></span>' + (state.onAir ? 'On air' : 'Off air');
+    document.getElementById('airbtn').textContent = state.onAir ? 'Take off air' : 'Put on air';
+    document.getElementById('airbtn').className = 'btn ' + (state.onAir ? 'btn-off' : 'btn-air');
+  }
+
+  /* ---------- state document pane ---------- */
+  function renderJson(){
+    const t = TEMPLATES[current];
+    const keys = t.fields.map(f => f.k);
+    const shown = { binding: 'bnd_' + current + '_hs1', on_air: state.onAir };
+    keys.forEach(k => { shown[k] = k === 'clock' ? clock(state.clock) : state[k]; });
+    if (current === 'scorebug') shown.period = state.period;
+    const lines = Object.entries(shown).map(([k,v]) => {
+      let val;
+      if (typeof v === 'boolean') val = '<span class="b">' + v + '</span>';
+      else if (typeof v === 'number') val = '<span class="n">' + v + '</span>';
+      else val = '<span class="s">"' + esc(v) + '"</span>';
+      return '  <span class="k">"' + k + '"</span>: ' + val;
+    });
+    document.getElementById('statejson').innerHTML = '{\n' + lines.join(',\n') + '\n}';
+  }
+
+  function pulse(){
+    const p = document.getElementById('statejson');
+    p.classList.remove('flash'); void p.offsetWidth; p.classList.add('flash');
+  }
+
+  /* ---------- operator controls ---------- */
+  function renderFields(){
+    const box = document.getElementById('fields');
+    box.innerHTML = '';
+    TEMPLATES[current].fields.forEach(f => {
+      const row = document.createElement('div');
+      row.className = 'frow';
+      const lab = document.createElement('label');
+      lab.textContent = f.label; lab.setAttribute('for', 'f_' + f.k);
+      row.appendChild(lab);
+      if (f.t === 'step'){
+        const wrap = document.createElement('div'); wrap.className = 'stepper';
+        const minus = document.createElement('button');
+        minus.className = 'mini'; minus.textContent = '−';
+        minus.setAttribute('aria-label', 'Decrease ' + f.label);
+        const val = document.createElement('span'); val.className = 'val'; val.id = 'f_' + f.k;
+        val.textContent = state[f.k];
+        const plus = document.createElement('button');
+        plus.className = 'mini'; plus.textContent = '+';
+        plus.setAttribute('aria-label', 'Increase ' + f.label);
+        minus.onclick = () => { state[f.k] = Math.max(0, state[f.k]-1); val.textContent = state[f.k]; renderStage(); renderJson(); pulse(); };
+        plus.onclick  = () => { state[f.k] = state[f.k]+1; val.textContent = state[f.k]; renderStage(); renderJson(); pulse(); };
+        wrap.append(minus, val, plus); row.appendChild(wrap);
+      } else if (f.t === 'clock'){
+        const wrap = document.createElement('div'); wrap.className = 'stepper';
+        const val = document.createElement('span'); val.className = 'val'; val.id = 'f_' + f.k;
+        val.style.minWidth = '58px'; val.textContent = clock(state.clock);
+        const tog = document.createElement('button');
+        tog.className = 'btn'; tog.style.padding = '5px 11px';
+        tog.textContent = state.running ? 'Stop' : 'Start';
+        tog.onclick = () => { state.running = !state.running; tog.textContent = state.running ? 'Stop' : 'Start'; };
+        wrap.append(val, tog); row.appendChild(wrap);
+      } else {
+        const inp = document.createElement('input');
+        inp.className = 'inp'; inp.id = 'f_' + f.k; inp.value = state[f.k]; inp.type = 'text';
+        inp.oninput = () => { state[f.k] = inp.value; renderStage(); renderJson(); };
+        row.appendChild(inp);
+      }
+      box.appendChild(row);
+    });
+  }
+
+  function renderSelector(){
+    const box = document.getElementById('tsel');
+    box.innerHTML = '';
+    Object.entries(TEMPLATES).forEach(([id, t]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(id === current));
+      b.innerHTML = '<span>' + t.name + '</span><span class="k">' + t.kind + '</span>';
+      b.onclick = () => {
+        current = id;
+        renderSelector(); renderFields(); renderStage(); renderJson(); pulse();
+      };
+      box.appendChild(b);
+    });
+  }
+
+  document.getElementById('airbtn').onclick = () => {
+    state.onAir = !state.onAir; renderStage(); renderJson(); pulse();
+  };
+  const safeBtn = document.getElementById('safebtn');
+  safeBtn.onclick = () => {
+    const on = document.getElementById('safe').classList.toggle('show');
+    safeBtn.setAttribute('aria-pressed', String(on));
+  };
+
+  /* ---------- the gallery: same code, scaled previews ---------- */
+  const gal = document.getElementById('gal');
+  const galStages = [];
+  Object.entries(TEMPLATES).forEach(([id, t]) => {
+    const card = document.createElement('div'); card.className = 'gcard';
+    const prev = document.createElement('div'); prev.className = 'gprev';
+    const st = document.createElement('div'); st.className = 'stage';
+    st.innerHTML = t.render(state);
+    prev.appendChild(st); card.appendChild(prev);
+    const body = document.createElement('div'); body.className = 'gbody';
+    body.innerHTML = '<b>' + t.name + '</b><p>' + t.blurb + '</p><code>' +
+      t.fields.map(f => f.k).join('  ') + '</code>';
+    card.appendChild(body); gal.appendChild(card);
+    galStages.push([st, prev, id]);
+  });
+
+  function fitAll(){
+    fitStage(stageEl, screenEl);
+    galStages.forEach(([st, host]) => fitStage(st, host));
+    drawPitch();
+  }
+
+  /* ---------- clock and timecode ---------- */
+  let frames = 14;
+  setInterval(() => {
+    frames += 25;
+    const tc = document.getElementById('tcode');
+    const total = 38462 + Math.floor(frames/25);
+    tc.textContent = [Math.floor(total/3600), Math.floor(total/60)%60, total%60]
+      .map(n => String(n).padStart(2,'0')).join(':') + ':' + String(frames%25).padStart(2,'0');
+    if (state.running){
+      state.clock += 1;
+      const v = document.getElementById('f_clock');
+      if (v) v.textContent = clock(state.clock);
+      if (current === 'scorebug'){ renderStage(); renderJson(); }
+    }
+  }, 1000);
+
+  window.addEventListener('resize', fitAll);
+  renderSelector(); renderFields(); renderStage(); renderJson(); fitAll();
+  document.fonts && document.fonts.ready.then(fitAll);
+})();
+</script>

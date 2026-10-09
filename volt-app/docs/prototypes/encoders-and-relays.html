@@ -1,0 +1,454 @@
+<title>Encoders and Relays</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+:root{
+  --bg:#0f1218; --panel:#171b24; --panel-2:#1c2130; --panel-3:#212736;
+  --border:rgba(255,255,255,.07); --border-2:rgba(255,255,255,.13);
+  --text:#e9ecf4; --muted:#98a1b6; --faint:#6a7387;
+  --brand:#3f7bff; --brand-dim:rgba(63,123,255,.14);
+  --live:#4ade80; --warn:#fbbf24; --down:#f87171;
+  --radius:16px; --radius-sm:11px;
+  --shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 8px 30px -12px rgba(0,0,0,.6);
+  --display:'Archivo',system-ui,sans-serif;
+  --body:'Inter',system-ui,-apple-system,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:13.5px;
+  line-height:1.62;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto;padding:34px 22px 90px;display:flex;flex-direction:column;gap:36px}
+p{margin:0}
+
+h1{font-family:var(--display);font-size:32px;font-weight:700;letter-spacing:-.6px;margin:0;
+  line-height:1.13;text-wrap:balance}
+.mast{display:flex;flex-direction:column;gap:12px}
+.lede{color:var(--muted);font-size:15px;max-width:66ch}
+.lede strong{color:var(--text);font-weight:600}
+.tag{display:inline-flex;font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;padding:4px 9px;border-radius:6px;color:var(--muted);
+  background:var(--panel-2);border:1px solid var(--border);width:max-content}
+
+section{display:flex;flex-direction:column;gap:15px}
+.shead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+  border-bottom:1px solid var(--border);padding-bottom:9px}
+h2{font-family:var(--display);font-size:20px;font-weight:600;letter-spacing:-.3px;margin:0}
+h3{font-family:var(--display);font-size:14.5px;font-weight:600;margin:0}
+.snote{color:var(--faint);font-size:12.5px}
+
+figure{margin:0;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:18px 18px 14px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px}
+figure svg{width:100%;height:auto;display:block;color:var(--text);overflow:visible}
+figcaption{color:var(--muted);font-size:12.5px;border-top:1px solid var(--border);padding-top:11px}
+figcaption b{color:var(--text);font-weight:600}
+
+.tw{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:12.5px;min-width:640px}
+th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+  font-weight:600;padding:10px 13px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:10px 13px;border-bottom:1px solid var(--border);color:var(--muted);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td b{color:var(--text);font-weight:600}
+td:first-child{color:var(--text);font-weight:500;white-space:nowrap}
+code{font-family:var(--mono);font-size:11.5px;color:var(--text);background:var(--panel-3);
+  padding:1px 5px;border-radius:4px}
+td code,li code{background:var(--panel-3)}
+
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:14px 16px;display:flex;flex-direction:column;gap:7px}
+.card p{color:var(--muted);font-size:12.5px}
+.card.built{border-left:2px solid var(--live)}
+.card.api{border-left:2px solid var(--warn)}
+.card.none{border-left:2px solid var(--down)}
+
+.pill{display:inline-flex;align-items:center;font-family:var(--mono);font-size:9.5px;font-weight:600;
+  letter-spacing:.07em;text-transform:uppercase;padding:2px 7px;border-radius:5px;width:max-content}
+.p-yes{color:#a7f3c8;background:rgba(74,222,128,.14)}
+.p-api{color:#ffd9a1;background:rgba(251,191,36,.14)}
+.p-no{color:#ffb4b4;background:rgba(248,113,113,.14)}
+
+.say{background:var(--panel);border:1px solid var(--border);border-left:2px solid var(--brand);
+  border-radius:var(--radius-sm);padding:14px 17px;display:flex;flex-direction:column;gap:5px}
+.say .lab{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--brand)}
+.say p{font-size:14.5px;color:var(--text)}
+
+ul{margin:0;padding-left:20px;color:var(--muted);display:flex;flex-direction:column;gap:6px}
+li b{color:var(--text);font-weight:600}
+
+footer{color:var(--faint);font-size:12px;border-top:1px solid var(--border);padding-top:16px}
+footer code{background:none;color:var(--muted)}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <span class="tag">Fleet · how it is actually wired</span>
+  <h1>One encoder per stream, one relay for the whole audience</h1>
+  <p class="lede">The two tiers scale on different things, which is the reason they are managed
+  differently. <strong>An encoder is per stream: ten stations means ten tasks.</strong>
+  <strong>A relay is per audience: ten stations is ten connections into it, and the load is the
+  listeners on the other side.</strong> Everything below follows from that, including the honest
+  answer to whether relays autoscale, which is no.</p>
+</header>
+
+<section>
+  <div class="shead">
+    <h2>Where the load comes from</h2>
+    <p class="snote">The picture the cost model turns on.</p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 940 412" role="img"
+         aria-label="Three stations each run one encoder task on a shared host; every encoder writes HLS and DASH segments to the origin and opens exactly one source connection to the relay, and the relay alone fans out to every MP3 listener.">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+                orient="auto-start-reverse">
+          <path d="M0,1 L9,5 L0,9 z" fill="currentColor"/>
+        </marker>
+        <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+                orient="auto-start-reverse">
+          <path d="M0,1 L9,5 L0,9 z" fill="#fbbf24"/>
+        </marker>
+      </defs>
+
+      <!-- hosts -->
+      <rect x="158" y="52" width="168" height="160" rx="10" fill="none"
+            stroke="currentColor" stroke-opacity=".26" stroke-dasharray="5 4"/>
+      <text x="242" y="44" text-anchor="middle" font-size="11" fill="currentColor"
+            fill-opacity=".55" font-family="monospace">compute host A</text>
+      <rect x="158" y="248" width="168" height="84" rx="10" fill="none"
+            stroke="currentColor" stroke-opacity=".26" stroke-dasharray="5 4"/>
+      <text x="242" y="348" text-anchor="middle" font-size="11" fill="currentColor"
+            fill-opacity=".55" font-family="monospace">compute host B</text>
+
+      <!-- sources -->
+      <g font-size="12" fill="currentColor">
+        <rect x="12" y="76" width="104" height="36" rx="8" fill="none" stroke="currentColor" stroke-opacity=".4"/>
+        <text x="64" y="99" text-anchor="middle">station 1</text>
+        <rect x="12" y="152" width="104" height="36" rx="8" fill="none" stroke="currentColor" stroke-opacity=".4"/>
+        <text x="64" y="175" text-anchor="middle">station 2</text>
+        <rect x="12" y="266" width="104" height="36" rx="8" fill="none" stroke="currentColor" stroke-opacity=".4"/>
+        <text x="64" y="289" text-anchor="middle">station 3</text>
+      </g>
+
+      <!-- encoders -->
+      <g font-size="12" fill="currentColor">
+        <rect x="176" y="72" width="132" height="44" rx="8" fill="#1c2130" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="242" y="93" text-anchor="middle">encoder task</text>
+        <text x="242" y="108" text-anchor="middle" font-size="10.5" fill-opacity=".6" font-family="monospace">instances row</text>
+        <rect x="176" y="148" width="132" height="44" rx="8" fill="#1c2130" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="242" y="169" text-anchor="middle">encoder task</text>
+        <text x="242" y="184" text-anchor="middle" font-size="10.5" fill-opacity=".6" font-family="monospace">instances row</text>
+        <rect x="176" y="262" width="132" height="44" rx="8" fill="#1c2130" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="242" y="283" text-anchor="middle">encoder task</text>
+        <text x="242" y="298" text-anchor="middle" font-size="10.5" fill-opacity=".6" font-family="monospace">instances row</text>
+      </g>
+
+      <!-- source -> encoder -->
+      <g stroke="currentColor" stroke-opacity=".55" stroke-width="1.4" marker-end="url(#ar)" fill="none">
+        <line x1="118" y1="94" x2="172" y2="94"/>
+        <line x1="118" y1="170" x2="172" y2="170"/>
+        <line x1="118" y1="284" x2="172" y2="284"/>
+      </g>
+
+      <!-- encoder -> origin -->
+      <g stroke="currentColor" stroke-opacity=".5" stroke-width="1.4" marker-end="url(#ar)" fill="none">
+        <path d="M310 84 C 360 84, 370 74, 424 74"/>
+        <path d="M310 158 C 370 158, 380 82, 424 80"/>
+        <path d="M310 272 C 380 272, 390 88, 424 86"/>
+      </g>
+      <rect x="428" y="52" width="150" height="56" rx="9" fill="#1c2130" stroke="currentColor" stroke-opacity=".45"/>
+      <text x="503" y="76" text-anchor="middle" font-size="12" fill="currentColor">origin</text>
+      <text x="503" y="93" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity=".6"
+            font-family="monospace">HLS + DASH segments</text>
+      <text x="368" y="48" text-anchor="middle" font-size="11" fill="currentColor" fill-opacity=".6">writes files</text>
+
+      <!-- encoder -> relay : the ONE connection each -->
+      <g stroke="#fbbf24" stroke-opacity=".9" stroke-width="1.6" marker-end="url(#arb)" fill="none">
+        <path d="M310 104 C 370 104, 380 210, 424 226"/>
+        <path d="M310 180 C 370 180, 380 218, 424 232"/>
+        <path d="M310 292 C 370 292, 380 252, 424 244"/>
+      </g>
+      <text x="452" y="356" text-anchor="middle" font-size="11" fill="#fbbf24">
+        one source connection per station
+      </text>
+
+      <!-- relay -->
+      <rect x="428" y="200" width="150" height="72" rx="9" fill="rgba(251,191,36,.08)" stroke="#fbbf24" stroke-opacity=".55"/>
+      <text x="503" y="228" text-anchor="middle" font-size="12.5" fill="currentColor">Icecast relay</text>
+      <text x="503" y="246" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity=".62"
+            font-family="monospace">relays row · one box</text>
+      <text x="503" y="262" text-anchor="middle" font-size="10.5" fill="#fbbf24" font-family="monospace">fan-out lives here</text>
+
+      <!-- origin -> players -->
+      <line x1="582" y1="80" x2="678" y2="80" stroke="currentColor" stroke-opacity=".5"
+            stroke-width="1.4" marker-end="url(#ar)"/>
+      <text x="630" y="70" text-anchor="middle" font-size="11" fill="currentColor" fill-opacity=".6">over HTTP</text>
+      <g font-size="12" fill="currentColor">
+        <rect x="682" y="58" width="150" height="44" rx="8" fill="none" stroke="currentColor" stroke-opacity=".4"/>
+        <text x="757" y="80" text-anchor="middle">HLS / DASH players</text>
+        <text x="757" y="95" text-anchor="middle" font-size="10.5" fill-opacity=".6" font-family="monospace">scaled by the origin</text>
+      </g>
+
+      <!-- relay -> listeners -->
+      <g stroke="#fbbf24" stroke-opacity=".85" stroke-width="1.5" marker-end="url(#arb)" fill="none">
+        <path d="M582 214 C 630 214, 640 176, 678 172"/>
+        <path d="M582 236 C 630 236, 640 236, 678 236"/>
+        <path d="M582 258 C 630 258, 640 296, 678 300"/>
+      </g>
+      <g fill="currentColor" font-size="12">
+        <rect x="682" y="152" width="150" height="40" rx="8" fill="none" stroke="#fbbf24" stroke-opacity=".4"/>
+        <text x="757" y="177" text-anchor="middle">MP3 listener</text>
+        <rect x="682" y="216" width="150" height="40" rx="8" fill="none" stroke="#fbbf24" stroke-opacity=".4"/>
+        <text x="757" y="241" text-anchor="middle">MP3 listener</text>
+        <rect x="682" y="280" width="150" height="40" rx="8" fill="none" stroke="#fbbf24" stroke-opacity=".4"/>
+        <text x="757" y="305" text-anchor="middle">…× the whole audience</text>
+      </g>
+      <text x="757" y="344" text-anchor="middle" font-size="11" fill="#fbbf24">
+        one connection per listener
+      </text>
+    </svg>
+    <figcaption><b>Adding listeners adds nothing to the encoder tier and everything to the relay
+    tier.</b> A station opens exactly one connection to its relay however many people are listening,
+    which is why encoder capacity is counted in tasks and relay capacity is counted in listeners and
+    egress. It is also why MP3 is the only output that can be missing while the pipeline is perfect:
+    HLS and DASH are files the encoder writes itself, and the relay is a second machine.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>How a station gets a relay</h2>
+    <p class="snote"><code>services/fleet/relays.ts</code>, called from <code>buildRadioJobConfig</code> at start.</p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 900 300" role="img"
+         aria-label="At start the control plane checks whether the station already has a relay assigned; if it does and that relay is not offline it is reused, otherwise the least loaded active relay is picked and stored on the channel, and if no relays are registered at all the environment's Icecast host is used.">
+      <defs>
+        <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+                orient="auto-start-reverse">
+          <path d="M0,1 L9,5 L0,9 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-size="12" fill="currentColor">
+        <rect x="8" y="112" width="132" height="48" rx="9" fill="#1c2130" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="74" y="132" text-anchor="middle">station starts</text>
+        <text x="74" y="148" text-anchor="middle" font-size="10.5" fill-opacity=".6" font-family="monospace">mp3 output on</text>
+
+        <rect x="180" y="106" width="150" height="60" rx="9" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="255" y="130" text-anchor="middle" font-size="11.5">relay_id already</text>
+        <text x="255" y="146" text-anchor="middle" font-size="11.5">set on the channel?</text>
+
+        <rect x="378" y="24" width="160" height="56" rx="9" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="458" y="46" text-anchor="middle" font-size="11.5">is that relay</text>
+        <text x="458" y="62" text-anchor="middle" font-size="11.5">offline?</text>
+
+        <rect x="378" y="196" width="160" height="60" rx="9" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="458" y="219" text-anchor="middle" font-size="11.5">any relay rows</text>
+        <text x="458" y="235" text-anchor="middle" font-size="11.5">at all?</text>
+
+        <rect x="602" y="16" width="196" height="56" rx="9" fill="rgba(74,222,128,.10)" stroke="#4ade80" stroke-opacity=".5"/>
+        <text x="700" y="38" text-anchor="middle" font-size="11.5">keep it. sticky.</text>
+        <text x="700" y="55" text-anchor="middle" font-size="10.5" fill-opacity=".65" font-family="monospace">the URL never moves</text>
+
+        <rect x="602" y="106" width="196" height="66" rx="9" fill="#1c2130" stroke="currentColor" stroke-opacity=".5"/>
+        <text x="700" y="128" text-anchor="middle" font-size="11.5">fewest assigned stations</text>
+        <text x="700" y="144" text-anchor="middle" font-size="11.5">among active, ties by name</text>
+        <text x="700" y="161" text-anchor="middle" font-size="10.5" fill-opacity=".65" font-family="monospace">then store relay_id</text>
+
+        <rect x="602" y="212" width="196" height="56" rx="9" fill="rgba(251,191,36,.09)" stroke="#fbbf24" stroke-opacity=".5"/>
+        <text x="700" y="234" text-anchor="middle" font-size="11.5">use ICECAST_HOST</text>
+        <text x="700" y="251" text-anchor="middle" font-size="10.5" fill-opacity=".65" font-family="monospace">the single-relay fallback</text>
+      </g>
+
+      <g stroke="currentColor" stroke-opacity=".5" stroke-width="1.4" fill="none" marker-end="url(#ar2)">
+        <line x1="142" y1="136" x2="176" y2="136"/>
+        <path d="M330 124 C 352 124, 356 56, 374 52"/>
+        <path d="M330 150 C 352 150, 356 222, 374 226"/>
+        <path d="M540 44 L 598 44"/>
+        <path d="M458 80 C 458 96, 540 100, 598 130"/>
+        <path d="M538 216 C 560 210, 574 150, 598 140"/>
+        <path d="M540 240 L 598 240"/>
+      </g>
+      <g font-size="10.5" fill="currentColor" fill-opacity=".62" font-family="monospace">
+        <text x="352" y="86" text-anchor="middle">yes</text>
+        <text x="352" y="192" text-anchor="middle">no</text>
+        <text x="566" y="38">no</text>
+        <text x="474" y="106">yes</text>
+        <text x="566" y="152">yes</text>
+        <text x="566" y="234">none</text>
+      </g>
+    </svg>
+    <figcaption>Assignment is <b>sticky and stored on the channel</b>, because the mount is derived
+    from the channel id specifically so a renamed station keeps its listener URL; re-picking a relay
+    on every start would move the host in that URL instead and undo it. Car head units and hardware
+    receivers are configured once. Balancing is by <b>assigned station count, not listeners</b>:
+    listener counts move by the minute and would make assignment flap as an audience shifts.
+    <b>An empty <code>relays</code> table is not a misconfiguration</b> — it means a development
+    machine or a one-Icecast install, and the environment describes it completely. That is the path
+    your Mac is on right now.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>Does it manage relays the way it manages encoders?</h2>
+    <p class="snote">Short answer: it balances across them, it does not create them. Neither tier autoscales.</p>
+  </div>
+  <div class="tw">
+    <table>
+      <thead><tr><th>&nbsp;</th><th>Encoder tier</th><th>Relay tier</th></tr></thead>
+      <tbody>
+        <tr><td>Unit</td>
+          <td>one task per running stream</td>
+          <td>one long-lived box carrying many stations</td></tr>
+        <tr><td>Created by</td>
+          <td>the orchestrator, automatically, on every start</td>
+          <td><b>a person</b>, via <code>POST /api/platform/relays</code></td></tr>
+        <tr><td>Destroyed by</td>
+          <td>the orchestrator on stop, plus the reaper for dead ones</td>
+          <td><b>nobody.</b> A relay is retired by moving it to <code>draining</code>, then <code>offline</code>, by hand</td></tr>
+        <tr><td>Placement</td>
+          <td>ECS capacity providers, spot weighted 4 to on-demand 1 with a base of 1</td>
+          <td>n/a — the relay is the machine</td></tr>
+        <tr><td>Assignment</td>
+          <td>per run, ephemeral, no affinity</td>
+          <td><b>sticky</b>, stored on <code>channels.relay_id</code>, survives restarts</td></tr>
+        <tr><td>Balanced on</td>
+          <td>left to ECS placement</td>
+          <td>fewest assigned stations, ties broken on name so two control-plane replicas choose alike</td></tr>
+        <tr><td>Capacity limit</td>
+          <td>none enforced by VOLT</td>
+          <td><code>max_listeners</code> is stored and editable and <b>nothing reads it</b> — <code>pickRelay</code> ignores it</td></tr>
+        <tr><td>Autoscaling</td>
+          <td><b>no.</b> ECS places tasks on capacity that already exists; VOLT never decides to add a machine</td>
+          <td><b>no.</b> Adding a relay is a deliberate act</td></tr>
+        <tr><td>Cost driver</td>
+          <td>task-seconds → <code>usage_accruals</code></td>
+          <td>egress → <code>relay_accruals</code>, compared against <code>cost_actuals</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="say">
+    <span class="lab">So, to your question</span>
+    <p>Yes to multiple relays, and it spreads stations across them automatically and stickily. No to
+    creating them: a relay exists because somebody registered one. That is a defensible place to
+    stop, because a relay is a long-lived box with a DNS name that listeners are pointed at, and
+    conjuring one mid-broadcast is not the same kind of act as starting an encoder task that nobody
+    outside the platform can see.</p>
+  </div>
+
+  <div class="card" style="border-left:2px solid var(--warn)">
+    <h3>The one loose thread</h3>
+    <p><code>max_listeners</code> exists on the table, is settable through the admin API, and is
+    read by nothing. A capacity number that is recorded and never enforced will eventually be
+    believed by somebody. Either <code>pickRelay</code> should skip a relay that is at its limit, or
+    the column should go.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>What you can see today</h2>
+    <p class="snote">Three states: built and rendered, API only, or absent.</p>
+  </div>
+
+  <div class="grid2">
+    <div class="card built">
+      <span class="pill p-yes">Built</span>
+      <h3>Which streams are on a host</h3>
+      <p><b>Fleet &amp; Usage</b> answers this properly. Per host: instance type, availability zone,
+      region, spot or on-demand, vCPUs and memory, the newest CPU / memory / network reading, your
+      task count against the total on the machine so a shared box is visible, and <b>a list of the
+      streams with each one's task kind</b>.</p>
+      <p>Absent readings render as unknown rather than zero, because a host drawn at 0% CPU when
+      nothing has reported for an hour invites a conclusion.</p>
+    </div>
+
+    <div class="card none">
+      <span class="pill p-no">Missing</span>
+      <h3>Which host a stream is on</h3>
+      <p>The reverse lookup. <b>Live Streams shows no host at all</b> — you get the five gates,
+      uptime, viewers and group, and to find the machine you have to go to Fleet &amp; Usage and
+      scan. The data is one join away: <code>instances.host_id</code> already points at
+      <code>compute_hosts</code>.</p>
+    </div>
+
+    <div class="card api">
+      <span class="pill p-api">API only</span>
+      <h3>Relay health</h3>
+      <p><code>GET /api/platform/relays</code> returns, per relay: stations assigned, how many of
+      those are live, uptime, and the newest CPU / memory / network sample, plus a <code>stale</code>
+      flag for a relay we can see but cannot currently measure.</p>
+      <p><b>Nothing renders it.</b> System Admin has no relay panel.</p>
+    </div>
+
+    <div class="card api">
+      <span class="pill p-api">API only</span>
+      <h3>What is on a relay</h3>
+      <p><code>GET /api/platform/relays/:id/stations</code> lists every station pointed at a relay
+      with its status and the account it belongs to. This is the direct answer to "what is on this
+      box". <b>Also unrendered.</b></p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Why the relay views are platform-only, deliberately</h3>
+    <p>They sit behind <code>requirePlatform</code> and have no route on the tenant API at all,
+    rather than a tenant route that checks a role. Two reasons, both commercial. Relay topology is
+    shared infrastructure, so one tenant learning which relay carries their stations learns which
+    relay carries everyone else's. And <code>relay_accruals</code> against <code>cost_actuals</code>
+    is the platform's own cost basis: showing a customer what their traffic costs us to serve tells
+    them our margin, and they will ask for it back. An account admin still gets everything about
+    their own account, because <code>usage_accruals</code> is account-scoped and stays where it is.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>On your Mac, right now</h2>
+  </div>
+  <div class="card">
+    <p><code>run-on-mac.sh</code> starts <b>one</b> container called <code>volt-icecast</code> on
+    :8000, and your database has no <code>relays</code> rows. So you are on the environment fallback
+    path in the second diagram: every station points at <code>localhost:8000</code>, nothing is
+    assigned, and none of the fleet logic runs. That is the intended behaviour for a development
+    machine, and it is worth knowing that <b>what you are testing is the single-relay mode</b>, not
+    the tier.</p>
+    <p>To exercise the real path locally you would register a relay row through the admin API
+    pointing at that same container, at which point <code>relay_id</code> starts being written and
+    the health endpoint has something to report.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>What I would add, smallest first</h2>
+  </div>
+  <ul>
+    <li><b>The host on the Live Streams card.</b> One join and one chip, and it closes the reverse
+    lookup that is missing today. It is the thing you actually asked for.</li>
+    <li><b>A Relays panel in System Admin.</b> The API is already there and already returns the
+    right shape, including the stale flag. This is rendering, not plumbing.</li>
+    <li><b>Enforce <code>max_listeners</code> in <code>pickRelay</code>, or drop the column.</b>
+    Recorded and unenforced is the worst of the three options.</li>
+    <li><b>Relay assignment on the station page.</b> A station's detail page never says which relay
+    it is pushing to, which is the same reverse-lookup gap one tier down.</li>
+  </ul>
+</section>
+
+<footer>
+  Drawn from <code>volt-app/src/services/fleet/relays.ts</code>,
+  <code>services/fleet/hosts.ts</code>, <code>src/modules/platform.ts</code>,
+  <code>src/modules/fleet.ts</code>, <code>src/modules/monitoring.ts</code>,
+  <code>services/radio/jobConfig.ts</code>, migration <code>0021_relay_fleet.sql</code> and
+  <code>volt-web/src/pages/Fleet.tsx</code>. Behaviour described is what the code does today, not
+  what is planned.
+</footer>
+
+</div>

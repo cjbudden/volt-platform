@@ -5,7 +5,19 @@
  * "no longer available" states from that one call. hls.js plays the preview.
  */
 export function sharePageHtml(token: string): string {
-  const t = JSON.stringify(token);
+  // JSON.stringify escapes quotes and backslashes. It does NOT escape `<`, so
+  // a value containing `</script>` closes the block it is embedded in and
+  // everything after it becomes markup on this origin. Escaping the three
+  // characters that can start a tag or a comment (and U+2028/9, which are raw
+  // line terminators in a script but not in JSON) makes the embedded literal
+  // safe for HTML context whatever the caller passes. The route also refuses
+  // non-token-shaped input; this is the half that cannot be forgotten.
+  const t = JSON.stringify(token)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"/>

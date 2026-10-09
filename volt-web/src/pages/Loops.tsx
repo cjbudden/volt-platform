@@ -4,6 +4,7 @@ import {
   cancel, dismiss, initBackground, listResumable,
   resumeWithFile, startUpload, subscribe, type UploadItem,
 } from '../uploadManager'
+import { pressable } from '../a11y'
 
 /* ============================================================================
    LOOPS & FILLERS
@@ -112,7 +113,7 @@ function DropZone({ onFiles, kind, setKind, background }: {
         can be resumed.
       </div>
 
-      <div className="flex items-center justify-center gap-2" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center justify-center gap-2" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Upload as</span>
         <select value={kind} onChange={e => setKind(e.target.value as any)} style={{ width: 200 }}>
           <option value="auto">whatever the file is</option>

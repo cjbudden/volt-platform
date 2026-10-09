@@ -1,5 +1,12 @@
 # VOLT Failover and Failback
 
+> **Update 9 Oct 2026.** The filler is no longer encoded by the selector and pushed
+> through the packager. It is pre-built to the channel's ladder when sources are added,
+> and spliced into the delivered HLS playlists on a loss. That fixes package_only (the
+> packager used to stop on the filler's codec change) and removes the stall during
+> detection. The sections below on the filler process and "where failover is wired"
+> describe the old path. See `PLAYOUT.md` → *Status* and `TESTING_WORKFLOWS.md` §4.
+
 This document confirms how source failover works in VOLT today, what the construct
 we built earlier actually does, where it is wired, and what is not yet built. It is
 written to match how you described the feature so we agree on the workflow.

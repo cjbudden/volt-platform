@@ -242,7 +242,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         }}>
           <span style={{ fontSize: 'var(--fs-h2)' }}>⚠</span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, color: '#fca5a5' }}>{perr.label} {perr.gate === 'output' && outGate?.status === 'degraded' ? 'degraded' : 'failed'}</div>
+            <div style={{ fontWeight: 700, color: '#fca5a5' }}>{perr.label} {health?.gates.find(g => g.gate === perr.gate)?.status === 'degraded' ? 'degraded' : 'failed'}</div>
             <div style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)', wordBreak: 'break-word' }}>{perr.message}</div>
           </div>
           <button className="btn ghost" onClick={() => setQcOpen(true)} style={{ color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }}>Diagnose →</button>
@@ -1000,6 +1000,12 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   // are on we hold the play point back by this much. "Live" then means the point where
   // the subtitles already exist and align, not the bleeding edge.
   const capHold = d.captions?.enabled ? 14 : 0
+  // LIVE PLAY POINT with captions off. It used to be 0.5s behind the newest data, so the
+  // player ran dry whenever a segment was a little late (every source hiccup, and every
+  // splice to or from the loop): measured in a real Chrome, 5s frozen at the first splice
+  // where hls.js' own start (3 segments back) played straight through. 12s is three 4s
+  // segments, the same margin the libraries use.
+  const liveHold = capHold || 12
   const langOpts = useCaptionLanguages()   // labels for the CC language selector
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const videoBoxRef = useRef<HTMLDivElement | null>(null)
@@ -1046,7 +1052,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           if (fmt === 'hls' && hlsRef.current) {
             if (s.tries === 1) hlsRef.current.startLoad()
             else if (s.tries === 2) hlsRef.current.recoverMediaError()
-            else { const sk = v.seekable; if (sk.length) { v.currentTime = Math.max(sk.start(0), sk.end(sk.length - 1) - Math.max(2, capHold)) ; v.play().catch(() => {}) } }
+            else { const sk = v.seekable; if (sk.length) { v.currentTime = Math.max(sk.start(0), sk.end(sk.length - 1) - liveHold) ; v.play().catch(() => {}) } }
           } else if (dashRef.current) {
             dashRef.current.seekToOriginalLive?.()
           }
@@ -1100,13 +1106,16 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
     // LIVE IS THE DEFAULT: jump to the play point shortly after load (once). With captions
     // on, the play point is held back by capHold so the subtitles already exist there.
     const snapSoon = () => {
-      const snap = () => { try { const sk = video.seekable; if (sk.length && !didSnapRef.current) { const end = sk.end(sk.length - 1), start = sk.start(0); const hold = Math.min(capHold || 0.5, Math.max(0.5, (end - start) - 3)); video.currentTime = end - hold; didSnapRef.current = true } } catch {} }
+      const snap = () => { try { const sk = video.seekable; if (sk.length && !didSnapRef.current) { const end = sk.end(sk.length - 1), start = sk.start(0); const hold = Math.min(liveHold, Math.max(0.5, (end - start) - 3)); video.currentTime = end - hold; didSnapRef.current = true } } catch {} }
       setTimeout(snap, 300); setTimeout(snap, 1200)
     }
     // Captions on: load the captions-aware companion manifest (subtitles + PDT in the
     // manifest). It appears a few seconds after start, so retry it rather than dropping
     // to the plain master permanently; only fall back after several misses.
-    const cc = !!d.captions?.enabled
+    // the DELIVERED master (master_cc) carries subtitles AND the playout splice that
+    // covers a lost source with the channel's loop, so a channel with either plays it
+    const spliced = !!d.input_failover_enabled && ['slate', 'vod_loop'].includes(String(d.input_loss_behavior ?? ''))
+    const cc = !!d.captions?.enabled || spliced
     async function attachHls() {
       const Hls = (await import('hls.js')).default
       if (cancelled) return
@@ -1262,7 +1271,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           // before the buffer start and the player would jerk/shiver. Never target
           // past the start; grow toward capHold as the window fills.
           const depth = end - start
-          const target = Math.min(capHold || 0.5, Math.max(0.5, depth - 3))
+          const target = Math.min(liveHold, Math.max(0.5, depth - 3))
           const behindNow = end - v.currentTime
           // DON'T fight hls.js's own live sync (that caused the start jitter). Only step
           // in on a real problem: a big stall that left us far behind, or running up to
@@ -1306,7 +1315,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
     const end = v.seekable.end(v.seekable.length - 1)
     v.currentTime = Math.max(v.seekable.start(0), end - Math.max(0, sec))
   }
-  function goLive() { const v = videoRef.current; scrubbedRef.current = false; setScrubbed(false); if (!v || !v.seekable.length) return; const sk = v.seekable, end = sk.end(sk.length - 1), start = sk.start(0); const hold = Math.min(capHold || 0.5, Math.max(0.5, (end - start) - 3)); v.currentTime = end - hold }
+  function goLive() { const v = videoRef.current; scrubbedRef.current = false; setScrubbed(false); if (!v || !v.seekable.length) return; const sk = v.seekable, end = sk.end(sk.length - 1), start = sk.start(0); const hold = Math.min(liveHold, Math.max(0.5, (end - start) - 3)); v.currentTime = end - hold }
 
   // Captions status from the latest caption.* telemetry so the operator can see the
   // estimated live offset AND why captions failed (not a roadblock, but worth knowing).

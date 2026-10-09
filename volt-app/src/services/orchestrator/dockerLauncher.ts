@@ -17,7 +17,9 @@ import { spawn, spawnSync, ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, openSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { config } from '../../config';
-import type { TaskLauncher, LaunchResult } from './launcher';
+import type { TaskLauncher, LaunchResult, Liveness } from './launcher';
+import type { Placement } from '../fleet/placement';
+import { onboxPlacement } from '../fleet/onbox';
 
 interface Proc { taskArn: string; child: ChildProcess; name: string; kind: string; streamId?: string; }
 
@@ -25,6 +27,7 @@ export class DockerTaskLauncher implements TaskLauncher {
   private procs = new Map<string, Proc>();
   private n = 0;
   private image() { return config.orchestrator.encoderImage; }
+  private radioImage() { return config.orchestrator.radioImage; }
   private originDir() { return resolve(config.testStream.originDir); }
   private originFor(streamId: string) { return resolve(this.originDir(), streamId); }
   private encoderBin() { return resolve(config.testStream.encoderBin); }
@@ -87,6 +90,50 @@ export class DockerTaskLauncher implements TaskLauncher {
     return { taskArn, lifecycle: 'on_demand' };
   }
 
+  /**
+   * A station in its own container, from the volt-radio image.
+   *
+   * Note what is NOT rewritten here that is rewritten for the encoder: the
+   * icecast host. The status-report callback points at the host control plane
+   * and so needs host.docker.internal, but the relay is a peer container that
+   * the station reaches by its compose service name. Rewriting it would send
+   * the station's audio to the developer's laptop instead of to Icecast.
+   */
+  async launchRadio(streamId: string, job: Record<string, any>): Promise<LaunchResult> {
+    const out = this.originFor(streamId);
+    mkdirSync(out, { recursive: true });
+    const localJob: Record<string, any> = { ...job, output: { mode: 'local', dir: out } };
+    const rep = localJob.status_report;
+    if (rep && typeof rep.url === 'string') {
+      localJob.status_report = {
+        ...rep,
+        url: rep.url.replace(/\/\/(localhost|127\.0\.0\.1)(:|\/|$)/, '//host.docker.internal$2'),
+      };
+    }
+    const name = `volt-radio-${streamId}`;
+    const taskArn = `docker:radio:${name}:${++this.n}`;
+    spawnSync('docker', ['rm', '-f', name], { stdio: 'ignore' });
+
+    const logFd = openSync(`${out}/radio-task.log`, 'a');
+    const args = [
+      'run', '--rm', '--name', name,
+      '--add-host', 'host.docker.internal:host-gateway',
+      '-v', `${this.originDir()}:${this.originDir()}`,
+      '-v', `${this.encoderBin()}:/app/bin:ro`,   // live code, no rebuild for edits
+      '-e', `JOB_CONFIG_JSON=${JSON.stringify(localJob)}`,
+      '-e', `WORK_DIR=${out}`,
+      this.radioImage(),
+    ];
+    const child = spawn('docker', args, { stdio: ['ignore', logFd, logFd] });
+    this.procs.set(taskArn, { taskArn, child, name, kind: 'radio', streamId });
+    child.on('exit', (code) => {
+      this.procs.delete(taskArn);
+      console.log(`[docker-launcher] radio ${streamId} (container ${name}) exited rc=${code}`);
+    });
+    console.log(`[docker-launcher] radio ${streamId} -> container ${name} (image ${this.radioImage()}) out=${out}`);
+    return { taskArn, lifecycle: 'on_demand' };
+  }
+
   async launchCaptions(streamId: string, _job: Record<string, any>): Promise<LaunchResult> {
     const taskArn = `docker:captions:${streamId}:${++this.n}`;
     console.log(`[docker-launcher] captions requested for ${streamId}; not run in docker dev mode`);
@@ -101,6 +148,42 @@ export class DockerTaskLauncher implements TaskLauncher {
     spawnSync('docker', ['stop', '-t', '8', p.name], { stdio: 'ignore', timeout: 15000 });
     try { p.child.kill('SIGTERM'); } catch { /* ignore */ }
     this.procs.delete(taskArn);
+  }
+
+  /**
+   * Ask docker, not our own bookkeeping. `docker inspect -f {{.State.Running}}`
+   * answers for a container that outlived this process and for one that died
+   * without us noticing; a non-zero exit means no such container, which is the
+   * same answer as stopped. A docker daemon we cannot reach is `unknown`, so a
+   * daemon restart never reads as "every channel crashed".
+   */
+  async isRunning(taskArn: string): Promise<Liveness> {
+    const p = this.procs.get(taskArn);
+    if (!p) return 'dead';
+    try {
+      const r = spawnSync('docker', ['inspect', '-f', '{{.State.Running}}', p.name],
+        { encoding: 'utf8', timeout: 5000 });
+      if (r.error) return 'unknown';
+      const out = String(r.stdout ?? '').trim();
+      if (r.status !== 0) {
+        // "No such object" is a definite dead; anything else is not ours to read.
+        return /no such object/i.test(String(r.stderr ?? '')) ? 'dead' : 'unknown';
+      }
+      return out === 'true' ? 'alive' : 'dead';
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  /**
+   * Containers here share the docker host, which is this box. Reported as a
+   * `local` host rather than a fourth kind: from the fleet view's point of
+   * view a docker daemon on the control-plane machine and a bare process on
+   * the control-plane machine are the same shared, measurable server, and
+   * splitting them would report one physical box as two.
+   */
+  async describePlacement(taskArn: string): Promise<Placement | null> {
+    return this.procs.has(taskArn) ? onboxPlacement() : null;
   }
 
   killAll(): void {

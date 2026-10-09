@@ -174,8 +174,26 @@ storageRouter.put('/retention', asyncHandler(async (req, res) => {
   const v = validateStages(stages);
   if (!v.ok) throw badRequest(v.message);
 
+  // A rule scoped to a channel or event carries account_id NULL and reaches
+  // its account through that owner, so an unchecked owner id plants a rule
+  // inside somebody else's scope and the sweep then honours it against their
+  // media. Confirm the owner belongs to the caller before saving anything.
+  if (body.channelId) {
+    const owned = await one<any>(
+      `SELECT 1 FROM channels c JOIN groups g ON g.id = c.group_id
+        WHERE c.id = $1 AND g.account_id = $2`, [body.channelId, accountId(req)]);
+    if (!owned) throw notFound('Channel not found');
+  }
+  if (body.eventId) {
+    const owned = await one<any>(
+      `SELECT 1 FROM events e JOIN groups g ON g.id = e.group_id
+        WHERE e.id = $1 AND g.account_id = $2`, [body.eventId, accountId(req)]);
+    if (!owned) throw notFound('Event not found');
+  }
+
   const rule = await saveRule({
     ruleId: body.ruleId,
+    actingAccountId: accountId(req),
     accountId: body.accountScope || (!body.channelId && !body.eventId) ? accountId(req) : null,
     channelId: body.channelId ?? null,
     eventId: body.eventId ?? null,
@@ -194,8 +212,10 @@ storageRouter.put('/retention', asyncHandler(async (req, res) => {
  * happens is not a convenience, it is the difference between a policy someone
  * is willing to switch on and one that sits disabled forever.
  */
-storageRouter.post('/retention/preview', asyncHandler(async (_req, res) => {
-  res.json({ dryRun: true, ...(await sweep({ dryRun: true, limit: 1000 })) });
+storageRouter.post('/retention/preview', asyncHandler(async (req, res) => {
+  // Scoped to the caller. Unscoped, this reported how much media every OTHER
+  // customer on the platform was about to lose.
+  res.json({ dryRun: true, ...(await sweep({ dryRun: true, limit: 1000, accountId: accountId(req) })) });
 }));
 
 /** Re-read what is on disk for a stream and bring the lifecycle rows in line. */

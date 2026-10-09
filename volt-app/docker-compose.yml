@@ -16,17 +16,60 @@ services:
       timeout: 3s
       retries: 10
 
+  # The MP3 relay. Stations are SOURCE clients that push to it; listeners pull
+  # from it. Nothing of ours is in the audio path, which is what lets the API be
+  # restarted or replicated without taking stations off air.
+  #
+  # The on-air gate lives in icecast.xml as URL listener authentication pointing
+  # back at the API, because Icecast has no idea what `on_air` means. See
+  # src/modules/icecastAuth.ts.
+  icecast:
+    image: libretime/icecast:2.4.4
+    environment:
+      ICECAST_SOURCE_PASSWORD: hackme
+      ICECAST_ADMIN_PASSWORD: hackme
+      ICECAST_RELAY_PASSWORD: hackme
+      ICECAST_PASSWORD: hackme
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8000/status-json.xsl >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
-    build: .
+    # The context is the REPOSITORY ROOT because the image builds the console
+    # too and volt-web is a sibling of volt-app. Run compose from volt-app as
+    # before; the ".." is what lets one image serve both.
+    build:
+      context: ..
+      dockerfile: volt-app/Dockerfile
     depends_on:
       db:
+        condition: service_healthy
+      icecast:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://volt:volt@db:5432/volt
       JWT_ACCESS_SECRET: dev-access
       JWT_REFRESH_SECRET: dev-refresh
       PORT: "8080"
+      # The console is served by this container on the same origin, so CORS is
+      # not in play for it. Kept permissive only for the Vite dev server, which
+      # a developer may still point at this API.
       CORS_ORIGIN: http://localhost:5173
+      # Radio as a launched container pushing MP3 to the relay above. `host` and
+      # `port` are how a STATION reaches Icecast from inside the compose network;
+      # ICECAST_PUBLIC_BASE is what a LISTENER is handed and would be the CDN or
+      # load balancer in production. They are deliberately separate.
+      RADIO_MODE: container
+      ICECAST_HOST: icecast
+      ICECAST_PORT: "8000"
+      ICECAST_SOURCE_USER: source
+      ICECAST_SOURCE_PASSWORD: hackme
+      ICECAST_PUBLIC_BASE: http://localhost:8000
+      ICECAST_AUTH_SECRET: dev-relay-secret
     ports:
       - "8080:8080"
 

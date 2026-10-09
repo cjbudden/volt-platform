@@ -177,15 +177,52 @@ def relay_cmd(inp, group, idx, progress_url):
     return cmd
 
 
-def filler_slate_cmd(slate_ref, ladder, seg, fps, progress_url):
+# ---------------------------------------------------------------------------
+# Filler AUDIO must match the source's audio exactly on a package_only channel.
+# There the filler's AAC goes straight into Shaka with no transcode between, and
+# Shaka cannot change audio configuration mid-stream: a mono or 44.1kHz source
+# followed by a stereo 48kHz filler stopped the packager with "Varying audio
+# configurations are not supported", which tore the whole channel down at the
+# exact moment the filler was meant to save it. The encoder probes the primary
+# and passes {sample_rate, channels}; without that we keep the old 48kHz stereo.
+# ---------------------------------------------------------------------------
+def _audio_shape(audio):
+    a = audio or {}
+    try:
+        sr = int(a.get("sample_rate") or 48000)
+    except (TypeError, ValueError):
+        sr = 48000
+    try:
+        ch = int(a.get("channels") or 2)
+    except (TypeError, ValueError):
+        ch = 2
+    return sr, (1 if ch == 1 else 2)
+
+
+def _anullsrc(audio):
+    sr, ch = _audio_shape(audio)
+    return f"anullsrc=channel_layout={'mono' if ch == 1 else 'stereo'}:sample_rate={sr}"
+
+
+def _filler_audio_args(audio):
+    sr, ch = _audio_shape(audio)
+    return ["-c:a", "aac", "-b:a", "128k", "-ac", str(ch), "-ar", str(sr)]
+
+
+def filler_slate_cmd(slate_ref, ladder, seg, fps, progress_url, audio=None):
     """Loop a static slate image into a ladder-matched TS per rendition, GOP
     aligned so Shaka can segment filler like any live source. One ffmpeg,
     multiple outputs (one per rendition)."""
     gop = int(seg * fps)
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
            "-progress", progress_url,
-           "-loop", "1", "-i", slate_ref,
-           "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+           # -re on BOTH inputs: an image loop and anullsrc are infinite and free to
+           # read, so unpaced this filler encoded as fast as the CPU allowed for the
+           # whole life of the channel (measured: 80 slate segments, 320s of media, in
+           # ~50s on air), burning a core next to the live transcode and, once
+           # forwarded, pushing the output timeline minutes ahead of the clock.
+           "-re", "-framerate", str(fps), "-loop", "1", "-i", slate_ref,
+           "-re", "-f", "lavfi", "-i", _anullsrc(audio)]
     for i, r in enumerate(ladder):
         cmd += ["-map", "0:v:0", "-map", "1:a:0",
                 "-vf", f"scale=-2:{r['height']},fps={fps}",
@@ -193,12 +230,12 @@ def filler_slate_cmd(slate_ref, ladder, seg, fps, progress_url):
                 "-b:v", f"{r['bitrate_kbps']}k",
                 "-g", str(gop), "-keyint_min", str(gop), "-sc_threshold", "0",
                 "-force_key_frames", f"expr:gte(t,n_forced*{seg})",
-                "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-shortest_buf_duration", "0",
+                *_filler_audio_args(audio), "-shortest_buf_duration", "0",
                 "-f", "mpegts", _priv_url("filler", i)]
     return cmd
 
 
-def filler_vod_cmd(vod_url, ladder, seg, fps, progress_url):
+def filler_vod_cmd(vod_url, ladder, seg, fps, progress_url, audio=None):
     """Loop a VOD asset into a ladder-matched TS per rendition (same alignment
     as the slate path). `-stream_loop -1` loops forever; `-re` paces to realtime."""
     gop = int(seg * fps)
@@ -212,12 +249,12 @@ def filler_vod_cmd(vod_url, ladder, seg, fps, progress_url):
                 "-b:v", f"{r['bitrate_kbps']}k",
                 "-g", str(gop), "-keyint_min", str(gop), "-sc_threshold", "0",
                 "-force_key_frames", f"expr:gte(t,n_forced*{seg})",
-                "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+                *_filler_audio_args(audio),
                 "-f", "mpegts", _priv_url("filler", i)]
     return cmd
 
 
-def filler_motion_slate_cmd(slate_ref, ladder, seg, fps, progress_url):
+def filler_motion_slate_cmd(slate_ref, ladder, seg, fps, progress_url, audio=None):
     """Loop a slate image but give it a slow BREATHING ZOOM (a gentle scale in and out)
     so the loop is not a dead-static frame. This is the 'loop made from a slate image'
     option: same ladder-matched, GOP-aligned output as the static slate, plus a subtle
@@ -226,8 +263,13 @@ def filler_motion_slate_cmd(slate_ref, ladder, seg, fps, progress_url):
     gop = int(seg * fps)
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
            "-progress", progress_url,
-           "-loop", "1", "-i", slate_ref,
-           "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+           # -re on BOTH inputs: an image loop and anullsrc are infinite and free to
+           # read, so unpaced this filler encoded as fast as the CPU allowed for the
+           # whole life of the channel (measured: 80 slate segments, 320s of media, in
+           # ~50s on air), burning a core next to the live transcode and, once
+           # forwarded, pushing the output timeline minutes ahead of the clock.
+           "-re", "-framerate", str(fps), "-loop", "1", "-i", slate_ref,
+           "-re", "-f", "lavfi", "-i", _anullsrc(audio)]
     for i, r in enumerate(ladder):
         h = int(r["height"]); w = (int(round(h * 16 / 9)) // 2) * 2
         period = max(1, int(fps * 4))   # ~25s breath at typical fps
@@ -240,7 +282,7 @@ def filler_motion_slate_cmd(slate_ref, ladder, seg, fps, progress_url):
                 "-b:v", f"{r['bitrate_kbps']}k",
                 "-g", str(gop), "-keyint_min", str(gop), "-sc_threshold", "0",
                 "-force_key_frames", f"expr:gte(t,n_forced*{seg})",
-                "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+                *_filler_audio_args(audio),
                 "-f", "mpegts", _priv_url("filler", i)]
     return cmd
 
@@ -251,6 +293,12 @@ def forwarder_cmd(group, idx, bus_base=BUS_BASE):
     timeline monotonic across a restart."""
     return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
             "-fflags", "+genpts+nobuffer", "-flags", "low_delay",
+            # SHORT PROBE: a forwarder is spawned fresh on every switch, and with
+            # ffmpeg's default 5s analyse window that is 5s of nothing on the bus
+            # after the decision was already made. The private port is our own
+            # relay/filler output (one H.264 + one AAC, PAT/PMT every packet burst),
+            # so 1s is ample to see both streams.
+            "-analyzeduration", "1000000", "-probesize", "1000000",
             "-i", _priv_url(group, idx),
             "-c", "copy", "-muxdelay", "0", "-muxpreload", "0",
             "-f", "mpegts", _bus_url(idx, bus_base)]
@@ -355,6 +403,13 @@ class SourceSelector:
         red = cfg.get("redundancy", {})
         self.auto_failback = red.get("auto_failback", True)
         self.loss_behavior = red.get("input_loss_behavior", "slate")
+        # MANIFEST FILLER: the loop is spliced into the delivered playlists (playout.py)
+        # from a pre-built, ladder-matched package, so the selector runs NO filler
+        # encoder and forwards nothing on total loss. That removes a full extra encode
+        # that ran for the whole life of every failover channel, and on package_only it
+        # is the only filler the packager survives (it cannot take a stream whose codec
+        # configuration differs from the source's).
+        self.manifest_filler = bool(red.get("filler_via_manifest"))
         self.filler = red.get("filler", {}) or {}
         # STARTUP GRACE: at channel start every source is 'down' simply because the relays
         # have not connected yet. Failing over to filler (and reporting source.down) in that
@@ -363,6 +418,14 @@ class SourceSelector:
         # source has been up ONCE, or the grace expires, we hold on the primary quietly.
         # A real dead source still engages the filler once the grace runs out.
         self.start_grace = float(red.get("start_grace_sec", 20.0))
+        # LOSS DETECTION TIME is the biggest part of what a viewer sees on a failover.
+        # Measured on a transcode channel with HLS sources: 5.0s here made a total of
+        # ~9s from the source dying to the switch (the relay plays out what it already
+        # buffered first), and 16s without new segments at the output, longer than a
+        # player's live buffer, so viewers stalled. 3.0s still rides over the pacing
+        # jitter the 5.0 was protecting against (-progress reports every 0.5s and the
+        # relays are -re paced), and is configurable per channel.
+        self.down_hold = float(red.get("loss_detect_sec", 3.0))
         self._started = None            # set in start()
         self._ever_up = {"primary": False, "backup": False}
 
@@ -374,8 +437,8 @@ class SourceSelector:
         # that as a loss and flap to filler. A genuine total loss still trips within ~5s and
         # the player/DVR buffer covers the gap.
         self.health = {
-            "primary": Health(up_hold=3.0, down_hold=5.0, start_up=False),
-            "backup": Health(up_hold=3.0, down_hold=5.0, start_up=False),
+            "primary": Health(up_hold=3.0, down_hold=self.down_hold, start_up=False),
+            "backup": Health(up_hold=3.0, down_hold=self.down_hold, start_up=False),
         }
         self.policy = SelectorPolicy(
             has_backup=bool(backup), auto_failback=self.auto_failback, start="primary")
@@ -410,7 +473,11 @@ class SourceSelector:
 
         # filler (one ffmpeg, all renditions) — slate (static) or loop. The loop is
         # either an uploaded video, or the slate image with a gentle breathing zoom.
-        if self.loss_behavior in ("slate", "vod_loop"):
+        if self.loss_behavior in ("slate", "vod_loop") and self.manifest_filler:
+            self._filler_proc = None
+            if self.events:
+                self.events.filler_ready(True)
+        elif self.loss_behavior in ("slate", "vod_loop"):
             self._filler_proc = self.spawn("filler", self._filler_cmd(
                 "loop" if self.loss_behavior == "vod_loop" else "slate"))
             if self.events:
@@ -431,6 +498,9 @@ class SourceSelector:
                 and not any(self._ever_up.values()))
 
     def _start_forwarder(self, idx, group):
+        if group == "filler" and self.manifest_filler:
+            self._forwarders[idx] = None    # nothing to forward: the playlists carry the loop
+            return
         self._forwarders[idx] = self.spawn(
             f"fwd:{idx}<-{group}", forwarder_cmd(group, idx, self.bus_base))
 
@@ -488,11 +558,11 @@ class SourceSelector:
             url = self.filler.get("vod_loop_url")
             if url:
                 self._filler_kind = "loop"
-                return filler_vod_cmd(url, self.ladder, seg, fps, pp)
+                return filler_vod_cmd(url, self.ladder, seg, fps, pp, audio=self.filler.get("audio"))
             self._filler_kind = "motion_slate"
-            return filler_motion_slate_cmd(self._slate_ref(), self.ladder, seg, fps, pp)
+            return filler_motion_slate_cmd(self._slate_ref(), self.ladder, seg, fps, pp, audio=self.filler.get("audio"))
         self._filler_kind = "slate"
-        return filler_slate_cmd(self._slate_ref(), self.ladder, seg, fps, pp)
+        return filler_slate_cmd(self._slate_ref(), self.ladder, seg, fps, pp, audio=self.filler.get("audio"))
 
     def _ensure_filler(self, kind):
         """Make the requested filler kind (slate|loop) the running filler, respawning only
@@ -536,6 +606,8 @@ class SourceSelector:
         for idx, fwd in list(self._forwarders.items()):
             if fwd is not None and fwd.poll() is None:
                 continue
+            if fwd is None and self.active == "filler" and self.manifest_filler:
+                continue
             if now - getattr(self, "_fwd_retry", {}).get(idx, 0) < 5.0:
                 continue
             self._fwd_retry = getattr(self, "_fwd_retry", {})
@@ -575,6 +647,10 @@ class SourceSelector:
             # the health-driven policy so an operator can force each failover path and watch
             # the real output switch, then clear it to resume normal behaviour.
             override = self._read_override()
+            if self.manifest_filler and override in ("slate", "loop"):
+                # a forced slate/loop is a PLAYOUT action now (the encoder splices the
+                # loop into the playlists); the inputs keep flowing so the return is instant
+                override = "auto"
             if override != self._override:
                 self.log(f"source-selector: failover-test override -> {override}")
                 if self.events:

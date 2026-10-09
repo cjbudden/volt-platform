@@ -8,10 +8,21 @@ cd "$(dirname "$0")/.."
 export JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:-devsecret} JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-devrefresh} INGEST_TOKEN=${INGEST_TOKEN:-dev-ingest}
 export PORT=${PORT:-8093} ORCH_LAUNCHER=mock
 A=00000000-0000-0000-0000-0000000000a1
+G=00000000-0000-0000-0000-0000000000b1; D=00000000-0000-0000-0000-0000000000d1
+C=00000000-0000-0000-0000-0000000000c1
 pass=0; fail=0; ok(){ echo "  ✓ $1"; pass=$((pass+1)); }; no(){ echo "  ✗ $1"; fail=$((fail+1)); }
 
 psql "$DATABASE_URL" -q -f migrations/0001_init.sql
-psql "$DATABASE_URL" -q -c "INSERT INTO accounts(id,name) VALUES ('$A','RTM') ON CONFLICT DO NOTHING;"
+# A REAL asset to ask about. This used to pass the literal string "vod-123",
+# which worked only because the availability gate never checked that the asset
+# existed or belonged to the key's account -- so a publishable key could mint a
+# playback token for anything, including another tenant's channel.
+psql "$DATABASE_URL" -q -c "
+DELETE FROM accounts WHERE id = '$A';
+INSERT INTO accounts(id,name) VALUES ('$A','RTM');
+INSERT INTO output_profiles(id,account_id,name,rungs,workflow_type) VALUES ('$D','$A','p','[]','package_only');
+INSERT INTO groups(id,account_id,name,output_profile_id) VALUES ('$G','$A','g','$D');
+INSERT INTO channels(id,group_id,name,status) VALUES ('$C','$G','app-news','live');"
 
 fuser -k "$PORT"/tcp 2>/dev/null || true; sleep 1
 npx tsx src/index.ts >/tmp/volt-apps.log 2>&1 & SRV=$!
@@ -29,15 +40,18 @@ APPID=$(echo "$APP" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end
 
 echo "== /availability gate =="
 # valid key + matching Origin → token
-AV=$(curl -fsS -X POST -H "$JS" -H "Origin: https://watch.rtm.example" "$BASE/api/availability" -d "{\"appKey\":\"$PK\",\"assetId\":\"vod-123\"}")
+AV=$(curl -fsS -X POST -H "$JS" -H "Origin: https://watch.rtm.example" "$BASE/api/availability" -d "{\"appKey\":\"$PK\",\"assetId\":\"$C\"}")
 echo "$AV" | grep -q '"available":true' && ok "availability granted for allowed origin" || no "availability denied: $AV"
 PBT=$(echo "$AV" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).playbackToken)}catch(e){console.log('')}})")
 [ -n "$PBT" ] && ok "playback token minted" || no "no playback token"
 # token is a playback-typed JWT
-node -e "const j=require('jsonwebtoken');const d=j.verify('$PBT',process.env.JWT_ACCESS_SECRET);process.exit(d.typ==='playback'&&d.asset==='vod-123'?0:1)" && ok "playback token is typ=playback bound to asset" || no "playback token invalid"
+# The token names WHAT the asset is as well as which one. Without `kind` the
+# beacon guessed from the id's first characters, which no real uuid matches, so
+# every channel session was filed as VOD and channel concurrency read zero.
+node -e "const j=require('jsonwebtoken');const d=j.verify('$PBT',process.env.JWT_ACCESS_SECRET);process.exit(d.typ==='playback'&&d.asset==='$C'&&d.kind==='channel'?0:1)" && ok "playback token is typ=playback bound to the asset and its kind" || no "playback token invalid"
 
 # wrong origin → 403
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$JS" -H "Origin: https://evil.example" "$BASE/api/availability" -d "{\"appKey\":\"$PK\",\"assetId\":\"vod-123\"}")
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$JS" -H "Origin: https://evil.example" "$BASE/api/availability" -d "{\"appKey\":\"$PK\",\"assetId\":\"$C\"}")
 [ "$code" = "403" ] && ok "disallowed origin blocked (403)" || no "wrong origin not blocked (got $code)"
 
 # bad key → 401

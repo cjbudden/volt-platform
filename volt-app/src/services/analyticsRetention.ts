@@ -148,10 +148,18 @@ export async function recomputeDay(accountId: string, day: string): Promise<numb
  * partial number; sealing one still inside the window is harmless but pointless,
  * because it can still be recomputed.
  */
-export async function sealDueDays(opts: { limit?: number } = {}): Promise<SealResult> {
+export async function sealDueDays(opts: { limit?: number; accountId?: string } = {}): Promise<SealResult> {
   const res: SealResult = { recomputed: 0, sealed: 0, skipped: [] };
+  // Confined to ONE account when asked. The scheduler leaves it unset and
+  // walks the platform, which is right for a background job and wrong for the
+  // tenant-facing endpoint that used to call it: any operator with analytics
+  // access could trigger an irreversible prune of every OTHER customer's raw
+  // sessions, from a route whose own doc says it exists to show the caller
+  // the effect of the caller's retention change.
   const accounts = await query<{ id: string; d: number | null }>(
-    `SELECT id, analytics_raw_retention_days AS d FROM accounts`
+    `SELECT id, analytics_raw_retention_days AS d FROM accounts
+      WHERE ($1::uuid IS NULL OR id = $1)`,
+    [opts.accountId ?? null]
   );
 
   for (const acct of accounts) {
@@ -194,10 +202,13 @@ export async function sealDueDays(opts: { limit?: number } = {}): Promise<SealRe
  * cannot be recovered. A day with no rollup at all is treated as unsealed and
  * held: raw data whose summary was never computed is not stale, it is unread.
  */
-export async function pruneRawSessions(opts: { limit?: number } = {}): Promise<PruneResult> {
+export async function pruneRawSessions(opts: { limit?: number; accountId?: string } = {}): Promise<PruneResult> {
   const res: PruneResult = { sessionsDeleted: 0, accountsConsidered: 0, heldForUnsealed: 0 };
   const accounts = await query<{ id: string; d: number | null }>(
-    `SELECT id, analytics_raw_retention_days AS d FROM accounts WHERE analytics_raw_retention_days IS NOT NULL`
+    `SELECT id, analytics_raw_retention_days AS d FROM accounts
+      WHERE analytics_raw_retention_days IS NOT NULL
+        AND ($1::uuid IS NULL OR id = $1)`,
+    [opts.accountId ?? null]
   );
 
   for (const acct of accounts) {
@@ -226,10 +237,21 @@ export async function pruneRawSessions(opts: { limit?: number } = {}): Promise<P
              WHERE r.account_id = s.account_id AND r.scope = 'account'
                AND r.scope_id IS NULL AND r.bucket_date = s.started_at::date
                AND r.sealed)
+          -- THE SLICE MUST CARRY THE SAME SEALED TEST as the outer predicate.
+          -- Without it the LIMIT could be filled entirely with rows from
+          -- unsealed days, the outer EXISTS then rejected all of them, and the
+          -- prune deleted nothing on every run while the sealed backlog aged
+          -- forever. The counters read sessionsDeleted: 0 and looked idle.
           AND s.id IN (
-            SELECT id FROM play_sessions
-             WHERE account_id = $1
-               AND started_at < current_date - ($2 || ' days')::interval
+            SELECT p.id FROM play_sessions p
+             WHERE p.account_id = $1
+               AND p.started_at < current_date - ($2 || ' days')::interval
+               AND EXISTS (
+                 SELECT 1 FROM analytics_rollups r2
+                  WHERE r2.account_id = p.account_id AND r2.scope = 'account'
+                    AND r2.scope_id IS NULL AND r2.bucket_date = p.started_at::date
+                    AND r2.sealed)
+             ORDER BY p.started_at
              LIMIT $3)
         RETURNING s.id`,
       [acct.id, acct.d, opts.limit ?? 20000]
@@ -240,9 +262,9 @@ export async function pruneRawSessions(opts: { limit?: number } = {}): Promise<P
 }
 
 /** Seal what is due, then prune what is safe. The order is the point. */
-export async function sweepAnalytics(): Promise<{ seal: SealResult; prune: PruneResult }> {
-  const seal = await sealDueDays();
-  const prune = await pruneRawSessions();
+export async function sweepAnalytics(opts: { accountId?: string } = {}): Promise<{ seal: SealResult; prune: PruneResult }> {
+  const seal = await sealDueDays({ accountId: opts.accountId });
+  const prune = await pruneRawSessions({ accountId: opts.accountId });
   if (seal.sealed || prune.sessionsDeleted || prune.heldForUnsealed) {
     console.log(
       `[analytics] sealed ${seal.sealed} rollup(s), pruned ${prune.sessionsDeleted} raw session(s)` +

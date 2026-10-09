@@ -20,6 +20,7 @@
 // ============================================================================
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, type ShareLinkRow } from './api'
+import { pressable } from './a11y'
 
 /** What is being shared. `kind` maps onto the API's resource kinds; radio
  *  stations ARE channels, so they share as a channel with radio wording. */
@@ -63,7 +64,7 @@ function Choice({ on, onPick, title, desc, children }:
 
 /** Stop clicks inside a nested control from re-triggering the row's onPick. */
 function Nested({ children }: { children: ReactNode }) {
-  return <div onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>{children}</div>
+  return <div {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" onKeyDown={e => e.stopPropagation()}>{children}</div>
 }
 
 export function ShareDrawer({ target, onClose }: { target: ShareTarget; onClose: () => void }) {
@@ -124,8 +125,8 @@ export function ShareDrawer({ target, onClose }: { target: ShareTarget; onClose:
   async function revoke(id: string) { try { await api.revokeShareLink(id); await loadLinks() } catch (e: any) { setErr(e.message) } }
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 60, display: 'grid', placeItems: 'center', padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 'min(560px,96vw)', maxHeight: '92vh', overflow: 'auto', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
+    <div {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="" style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 60, display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 'min(560px,96vw)', maxHeight: '92vh', overflow: 'auto', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
         <div className="flex items-center" style={{ marginBottom: 4 }}>
           <h2 style={{ margin: 0, fontSize: 'var(--fs-h1)', letterSpacing: 'var(--ls-title)' }}>Share</h2>
           <div className="flex-1" />

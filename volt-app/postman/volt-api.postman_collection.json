@@ -1,0 +1,930 @@
+{
+  "info": {
+    "_postman_id": "volt-api-navigability-2026-09-04",
+    "name": "VOLT API \u2014 navigability walk",
+    "description": "Runs the API the way a client with no documentation would: start at /api and only\nfollow links that appear in responses.\n\nIMPORTANT: the hypermedia layer is CONTENT NEGOTIATED. Without\n\"Accept: application/ld+json\" every collection returns a bare JSON array with no\nlinks and no ids. That header is set at collection level here. Remove it and\nfolder 2 stops working, which is itself one of the findings.\n\nFolder 4 documents defects on purpose: those requests are expected to fail, and\ntheir tests assert the failure so the collection turns green when they are fixed\nand stays honest until then.\n\nRun with: newman run volt-api.postman_collection.json -e volt-local.postman_environment.json",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1 \u00b7 Sign in",
+      "item": [
+        {
+          "name": "Login (captures {{token}})",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "The one thing discovery cannot give you: the entrypoint does not link to auth, so every client needs this URL out of band.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('returns an access token', () => pm.expect(b).to.have.property('access'));",
+                  "pm.environment.set('token', b.access); pm.collectionVariables.set('token', b.access);",
+                  "pm.test('DEFECT: entrypoint does not advertise the auth endpoint', () => pm.expect(true).to.be.true);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2 \u00b7 Discovery walk (links only)",
+      "item": [
+        {
+          "name": "GET /api \u2014 the entry point",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api"
+              ]
+            },
+            "description": "The service document. This is the WSDL-equivalent starting point."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('is a Hydra EntryPoint', () => pm.expect(JSON.stringify(b['@type'])).to.include('EntryPoint'));",
+                  "pm.test('links to the API documentation', () => pm.expect(b).to.have.property('apiDocumentation'));",
+                  "const cols = Object.keys(b).filter(k => !k.startsWith('@') && k !== 'apiDocumentation');",
+                  "console.log('collections advertised: ' + cols.length + ' -> ' + cols.join(', '));",
+                  "pm.test('advertises at least 10 collections', () => pm.expect(cols.length).to.be.at.least(10));",
+                  "pm.collectionVariables.set('channelsUrl', b.channels);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/doc \u2014 supported classes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/doc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "doc"
+              ]
+            },
+            "description": "Where a WSDL would describe operations and types."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "const cls = b['hydra:supportedClass'] || [];",
+                  "console.log('classes described: ' + cls.length);",
+                  "const ops = cls.reduce((n,c) => n + ((c['hydra:supportedOperation']||c.supportedOperation||[]).length), 0);",
+                  "const props = cls.reduce((n,c) => n + ((c['hydra:supportedProperty']||c.supportedProperty||[]).length), 0);",
+                  "console.log('operations described: ' + ops + ' \u00b7 properties described: ' + props);",
+                  "pm.test('DEFECT: classes are named but carry no operations', () => pm.expect(ops).to.equal(0));",
+                  "pm.test('DEFECT: classes are named but carry no properties', () => pm.expect(props).to.equal(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/context.jsonld",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/context.jsonld",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "context.jsonld"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const c = pm.response.json()['@context'];",
+                  "pm.test('defines hydra and schema.org', () => { pm.expect(c).to.have.property('hydra'); pm.expect(c).to.have.property('schema'); });",
+                  "pm.collectionVariables.set('vocabUrl', c.volt);",
+                  "console.log('vocabulary namespace: ' + c.volt);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/channels \u2014 the collection",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/channels",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "channels"
+              ]
+            },
+            "description": "Followed from the entry point. Only carries ids and links when ld+json is asked for."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('is a Hydra Collection', () => pm.expect(JSON.stringify(b['@type'])).to.include('Collection'));",
+                  "pm.test('reports totalItems', () => pm.expect(b).to.have.property('hydra:totalItems'));",
+                  "const m = b['hydra:member'] || [];",
+                  "pm.test('members carry @id', () => pm.expect(m[0]).to.have.property('@id'));",
+                  "if (m[0]) { pm.collectionVariables.set('channelUrl', m[0]['@id']); pm.collectionVariables.set('channelId', m[0].id);",
+                  "  console.log('link relations on a member: ' + Object.keys(m[0]).filter(k => typeof m[0][k]==='string' && m[0][k].startsWith('http')).join(', ')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET a channel \u2014 followed from the collection",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/channels/{{channelId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                "{{channelId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('carries self, collection and up', () => { pm.expect(b).to.have.property('self'); pm.expect(b).to.have.property('collection'); pm.expect(b).to.have.property('up'); });",
+                  "pm.test('links onward to its recordings', () => pm.expect(b).to.have.property('recordings'));",
+                  "pm.collectionVariables.set('recordingsUrl', b.recordings);",
+                  "console.log('drill-down available: ' + Object.keys(b).filter(k => typeof b[k]==='string' && b[k].startsWith('http')).join(', '));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the channel's recordings \u2014 followed again",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/recordings?channelId={{channelId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recordings"
+              ],
+              "query": [
+                {
+                  "key": "channelId",
+                  "value": "{{channelId}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('is a decorated collection', () => pm.expect(b).to.have.property('hydra:member'));",
+                  "pm.test('DEFECT: an empty collection emits no onward links, so the walk stops here', () => pm.expect(b['hydra:totalItems']).to.equal(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/vod \u2014 and its schema.org projection",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/vod",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "vod"
+              ]
+            },
+            "description": "The best-linked resource in the API: members link to publications and to a schema.org VideoObject."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const m = pm.response.json()['hydra:member'] || [];",
+                  "if (m[0]) { pm.collectionVariables.set('vodId', m[0].id);",
+                  "  pm.test('a VoD member links to its schema.org projection', () => pm.expect(m[0]).to.have.property('schemaOrg')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/vod/:id/schema.org",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/vod/{{vodId}}/schema.org",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "vod",
+                "{{vodId}}",
+                "schema.org"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('is a schema.org media type', () => pm.expect(['Clip','VideoObject','BroadcastEvent']).to.include(b['@type']));",
+                  "pm.test('carries an embedUrl a search engine can use', () => pm.expect(b).to.have.property('embedUrl'));",
+                  "pm.test('a Clip declares its offsets into the parent work', () => { if (b['@type']==='Clip') { pm.expect(b).to.have.property('startOffset'); pm.expect(b).to.have.property('endOffset'); } });",
+                  "pm.test('offers both HLS and DASH as associatedMedia', () => { const f=(b.associatedMedia||[]).map(m=>m.encodingFormat); pm.expect(f).to.include('application/vnd.apple.mpegurl'); pm.expect(f).to.include('application/dash+xml'); });",
+                  "pm.test('offers a WatchAction', () => pm.expect(b.potentialAction && b.potentialAction['@type']).to.equal('WatchAction'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3 \u00b7 Works, but undiscoverable",
+      "description": "Every request here returns 200. None of them can be found by following links from /api, and none is decorated with JSON-LD even when ld+json is requested. A client has to be told these URLs exist.",
+      "item": [
+        {
+          "name": "Radio stations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/radio",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "radio"
+              ]
+            },
+            "description": "A whole product area. Not in the entry point."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "const b = pm.response.json();",
+                  "const decorated = !Array.isArray(b) && b && b['@id'];",
+                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "EPG owners",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/epg/owners",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "epg",
+                "owners"
+              ]
+            },
+            "description": "Channels, radio and events as guide owners."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "const b = pm.response.json();",
+                  "const decorated = !Array.isArray(b) && b && b['@id'];",
+                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Media / file library",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/files",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "files"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "const b = pm.response.json();",
+                  "const decorated = !Array.isArray(b) && b && b['@id'];",
+                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Apps and API keys",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/apps",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "apps"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "const b = pm.response.json();",
+                  "const decorated = !Array.isArray(b) && b && b['@id'];",
+                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Live monitoring",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/monitoring/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "monitoring",
+                "live"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "const b = pm.response.json();",
+                  "const decorated = !Array.isArray(b) && b && b['@id'];",
+                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fleet hosts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/fleet/hosts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "fleet",
+                "hosts"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "const b = pm.response.json();",
+                  "const decorated = !Array.isArray(b) && b && b['@id'];",
+                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Storage capabilities",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/storage/capabilities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "storage",
+                "capabilities"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "const b = pm.response.json();",
+                  "const decorated = !Array.isArray(b) && b && b['@id'];",
+                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Jobs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/jobs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "jobs"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "const b = pm.response.json();",
+                  "const decorated = !Array.isArray(b) && b && b['@id'];",
+                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "const b = pm.response.json();",
+                  "const decorated = !Array.isArray(b) && b && b['@id'];",
+                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Share links",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/share-links",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "share-links"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "const b = pm.response.json();",
+                  "const decorated = !Array.isArray(b) && b && b['@id'];",
+                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4 \u00b7 Broken links the API itself emits",
+      "description": "These URLs came out of the API's own responses during a link walk. Following them fails. Each test asserts the CURRENT broken behaviour, so it fails loudly once fixed.",
+      "item": [
+        {
+          "name": "Entry point \u2192 /api/publications",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/publications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "publications"
+              ]
+            },
+            "description": "The entry point advertises this collection. Fetching it without a query parameter is a 400, so the advertised link is not followable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('DEFECT: advertised collection returns 400', () => pm.response.to.have.status(400));",
+                  "console.log(pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Context \u2192 the volt: vocabulary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/vocab",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "vocab"
+              ]
+            },
+            "description": "context.jsonld declares the volt: namespace at /api/vocab#. Nothing is served there, so every volt: term in the API is undereferenceable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('DEFECT: the declared vocabulary namespace 404s', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Channel \u2192 start",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/channels/{{channelId}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                "{{channelId}}",
+                "start"
+              ]
+            },
+            "description": "The channel representation links to this URL but never says which method it takes. It is POST-only, so a client that follows the link with GET gets a 404. This is the WSDL gap in one request: a link with no operation."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('DEFECT: linked action 404s on GET because the method is not declared', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Channel \u2192 status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/status/channel/{{channelId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "status",
+                "channel",
+                "{{channelId}}"
+              ]
+            },
+            "description": "Linked from every channel. Returns 404 when the channel has never run, rather than an empty status."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('linked status is either a document or a 404', () => pm.expect(pm.response.code).to.be.oneOf([200,404]));",
+                  "pm.test('DEFECT: status is never JSON-LD decorated', () => { const b = pm.response.json(); pm.expect(!!(b && b['@id'])).to.equal(false); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8080"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  }
+}

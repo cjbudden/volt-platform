@@ -8,6 +8,74 @@ the first use of it. The same engine then does deliberate manual switching, then
 rule driven replacement by geo and access, and ultimately whole channels built from
 VOD playlists with an automatic EPG, delivered as live.
 
+## Status: Phase 1 built for HLS and DASH (9 Oct 2026)
+
+**What happens when a source is added.** The control plane probes each source
+(`bin/source_probe.py`: codec, H.264 profile and level, width, height, fps, bitrate,
+audio sample rate, channels and bitrate). It stores the result on
+`stream_inputs.probe` and queues a `filler.build` job (`services/fillerPrep.ts`).
+The job renders the channel's loop video or slate to the exact ladder
+(`bin/filler_build.py`): the source's renditions on a package channel, the transcode
+ladder at the source's aspect on a transcode channel. The channel's watermark is
+burned in, there is one closed GOP per segment, and the result is packaged once to
+CMAF. Its state is on `channels.filler_build`, readable at `GET /api/channels/:id/filler`.
+
+**What happens on a loss.** `bin/playout.py` writes the playlists the player reads
+(`master_cc.m3u8` → `stream_N_cc.m3u8`, video and audio) from the packager's own
+playlists. When the live edge is more than three quarters of a segment late, the next slot is filled
+from the loop on every rendition at once:
+
+```
+... live 41, live 42,
+#EXT-X-DISCONTINUITY  #EXT-X-MAP loop init   loop 1, loop 2, loop 1, ...
+#EXT-X-DISCONTINUITY  #EXT-X-MAP live init   live 57, live 58 ...
+```
+
+PDT stays continuous across both splices: live is re-anchored to the end of the loop,
+and the subtitles take the same shift. The packager never sees the loop, nothing is
+encoded at failover time, and the source selector no longer runs a filler encoder at
+all (on a transcode channel that was a full extra ladder encode running all the time).
+
+**Measured** with `dev/wftest.sh`: a 3-segment-behind player replayed against when
+each segment was listed (`dev/playersim.py`), and Chrome playing it with the console's
+own hls.js and dash.js (`dev/browsercheck.mjs`), seconds frozen over 205s:
+
+| Channel, primary/backup/loop/primary | HLS (hls.js) | DASH (dash.js) | Without the splice |
+|---|---|---|---|
+| transcode | **0** | **0** | 51 to 54s stalled |
+| package_only | **0** | **0** | the packager stopped and the channel went down |
+| transcode via the API, forced slate from the pre-flight panel | **0** (simulated) | not run | not measured |
+
+**DASH** (`manifest_cc.mpd`) is spliced from the same decision, as a multi-Period
+dynamic MPD: one Period per run of live or loop. Three things had to be right for a
+real player, all found by playing it in Chrome with the console's own dash.js:
+
+- **Audio and video segments do not end together.** The packager cuts audio on a fixed
+  grid and video at keyframes, 1 to 3 seconds apart, and on a package channel the
+  source decides. HLS does not care (each playlist has its own clock). A DASH Period is
+  one window for every track, so a track that ends early leaves a hole the player
+  waits on, and one that runs on past the Period end is appended whole by the browser
+  (dash.js does not cut it) and then playback stops. So each boundary is placed where
+  the first track runs out of live (to the loop) or the last one has live again (back
+  from it); the one segment that crosses a boundary is served cut to it, from a
+  per-Period folder of hard links (`<rendition>/d<period>/`); the loop is laid out per
+  track from the boundary (`filler/<rendition>/p<period>_N.m4s`, rebased copies) and
+  its last slot is cut the same way. While a Period is still open nothing is listed
+  past where the shortest track ends.
+- **A track whose media clock jumps** (a package channel's source switch, which the
+  packager declares per playlist, not always at the same segment) gets a Period
+  boundary of its own there.
+- **Availability.** `availabilityStartTime` is published a segment plus the hold plus
+  2s late, so a player that works from the clock never asks for a segment before it
+  is listed.
+
+**The decisions taken** on the open questions below:
+
+- HLS first, then DASH (both done 9 Oct).
+- The filler is whatever the channel has: an uploaded loop, or the slate image.
+- The splice is done in the companion writer the encoder already had, as recommended.
+  A forced slate or loop from the pre-flight panel is the same splice.
+
 ## The goal in your words
 
 Keep the stream from faltering from the viewer's point of view. Fall back and fill a

@@ -5,6 +5,7 @@ import { hashPassword, verifyPassword } from './password';
 import { signAccess, newRefreshToken, hashRefresh } from './jwt';
 import { asyncHandler, badRequest, unauthorized } from '../util/http';
 import { requireAuth } from './middleware';
+import { config } from '../config';
 
 export const authRouter = Router();
 
@@ -60,25 +61,74 @@ authRouter.post(
        VALUES ($1,$2, now() + interval '14 days')`,
       [user.id, hash]
     );
-    res.json({ access, refresh, expiresIn: 900 });
+    // expiresIn is the CONFIGURED ttl, not a repeated literal. It was 900 in
+    // two places while ACCESS_TTL sat in config; raising the env var moved the
+    // real expiry and left the console refreshing on the old schedule.
+    res.json({ access, refresh, expiresIn: config.jwt.accessTtl });
   })
 );
 
 const refreshSchema = z.object({ refresh: z.string() });
 
+/* ============================================================================
+ *  REFRESH — the endpoint that existed, worked, and was never called.
+ *
+ *  The console threw `r.refresh` away at the login screen and signed the
+ *  operator out on the first 401, so every session was capped at ACCESS_TTL of
+ *  wall clock however hard somebody was working. That is fixed in api.ts. Two
+ *  things here had to be true first.
+ *
+ *  1. A DISABLED USER MUST ACTUALLY BE SIGNED OUT. The old query joined `users`
+ *     and read `account_id` and `role` off it without ever looking at
+ *     `u.status`, so a disabled account kept minting fresh access tokens for
+ *     the full fourteen days of its refresh token. The console's own Users page
+ *     says "Disabling signs the user out (at the next token refresh)", which
+ *     made this the more dangerous kind of bug: a claim in the interface that
+ *     the code did not implement. Now the claim is true, and it is true HERE
+ *     rather than at each call site, because refresh is the one choke point
+ *     every long session goes through.
+ *
+ *  2. ROTATION MUST NOT EXTEND THE SESSION. Rotating the refresh token on use
+ *     is what makes a stolen one short-lived, but the replacement inherits the
+ *     ORIGINAL row's expires_at rather than getting a fresh fourteen days.
+ *     Reissuing the window on every rotation would turn an absolute cap into a
+ *     sliding one that never expires, which is the opposite of a cap. So an
+ *     operator working continuously is signed out fourteen days after they
+ *     logged in, exactly as before, and is never signed out mid-shift.
+ * ========================================================================= */
 authRouter.post(
   '/refresh',
   asyncHandler(async (req, res) => {
     const { refresh } = refreshSchema.parse(req.body);
     const row = await one<any>(
-      `SELECT rt.id, rt.user_id, u.account_id, u.role
-         FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id
+      `SELECT rt.id, rt.user_id, rt.expires_at, u.account_id, u.role,
+              u.status AS user_status, a.status AS account_status
+         FROM refresh_tokens rt
+         JOIN users u ON u.id = rt.user_id
+         JOIN accounts a ON a.id = u.account_id
         WHERE rt.token_hash = $1 AND rt.revoked_at IS NULL AND rt.expires_at > now()`,
       [hashRefresh(refresh)]
     );
     if (!row) throw unauthorized('Invalid refresh token');
+    // The same two gates login applies. A session may not outlive the standing
+    // of the user holding it.
+    if (row.user_status === 'disabled') throw unauthorized('This account has been disabled');
+    if (row.account_status === 'suspended') throw unauthorized('This account is suspended, contact support');
+
     const access = signAccess({ sub: row.user_id, account_id: row.account_id, role: row.role });
-    res.json({ access, expiresIn: 900 });
+
+    // Rotate inside one transaction: a crash between the revoke and the insert
+    // would otherwise leave the operator holding a token that no longer exists.
+    const { token: next, hash } = newRefreshToken();
+    await tx(async (c) => {
+      await c.query(`UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1`, [row.id]);
+      await c.query(
+        `INSERT INTO refresh_tokens(user_id, token_hash, expires_at) VALUES ($1,$2,$3)`,
+        [row.user_id, hash, row.expires_at]   // INHERITED, never reissued
+      );
+    });
+
+    res.json({ access, refresh: next, expiresIn: config.jwt.accessTtl });
   })
 );
 

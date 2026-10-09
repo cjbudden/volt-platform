@@ -59,8 +59,16 @@ export async function writeAudit(c: PoolClient | null, o: {
   const detail: any = { actor: o.label };
   if (o.changes && Object.keys(o.changes).length) detail.changes = o.changes;
   if (o.snapshot) detail.snapshot = o.snapshot;
+  // user_id is resolved through a lookup rather than inserted straight, because
+  // audit_log.user_id is a FK to users.id and the acting subject is not always a
+  // user row: a service token, a platform token, or a user deleted mid-request
+  // all produce a well-formed UUID that has no user behind it. Inserting it
+  // directly raised 23503 AFTER the work had already committed, so the caller
+  // saw a 500 for a delete that had in fact succeeded, which is the worst of
+  // both answers. The subquery yields NULL in that case and the row still
+  // records who acted, in detail.actor.
   const sql = `INSERT INTO audit_log(account_id, user_id, action, entity_type, entity_id, detail)
-               VALUES ($1,$2,$3,$4,$5,$6::jsonb)`;
+               VALUES ($1, (SELECT id FROM users WHERE id = $2), $3,$4,$5,$6::jsonb)`;
   const params = [o.accountId, o.userId, o.action, o.entityType, o.entityId, JSON.stringify(detail)];
   if (c) await c.query(sql, params); else await query(sql, params);
 }
@@ -105,6 +113,40 @@ export async function patchEntity(o: {
     if (!row) throw new VersionConflict(Number(o.current.version)); // lost a concurrent race
     await writeAudit(client, { accountId: o.accountId, userId: o.userId, label: o.label,
       action: 'update', entityType: o.entityType, entityId: o.id, changes });
+
+    /* ------------------------------------------------------------------
+     *  TELL THE OTHER ADMINS. This is the whole of "live updates" on the
+     *  server side, and it belongs HERE rather than at each call site for
+     *  the same reason the audit write does: there is exactly one function
+     *  that changes a record, so there is exactly one place that can be
+     *  certain a change happened and what changed.
+     *
+     *  A caller that had to remember to publish would forget, the way four
+     *  call sites forgot to record `on_air` before airSessions.ts took the
+     *  column away from them.
+     *
+     *  ONLY THE SHAPE OF THE CHANGE TRAVELS, never the values. A second
+     *  admin is told that `name` and `dvr_sec` moved, by whom, and what the
+     *  version is now; they re-read through their own credential to see the
+     *  content. So the SSE frame cannot leak a field the recipient is not
+     *  allowed to read, and the fan-out stays small enough to be free.
+     *
+     *  Fire-and-forget on purpose: the hub is in-process and best-effort,
+     *  and a notification failure must never roll back a committed edit.
+     * ---------------------------------------------------------------- */
+    if (o.accountId) {
+      try {
+        const { publish } = await import('./statusHub');
+        publish(o.accountId, 'record', {
+          kind: o.entityType,
+          id: o.id,
+          changed: cols,
+          version: Number(row.version),
+          by: o.userId ?? null,
+          label: o.label ?? null,
+        });
+      } catch { /* telemetry must never break a write */ }
+    }
     return { row, changed: cols };
   });
 }

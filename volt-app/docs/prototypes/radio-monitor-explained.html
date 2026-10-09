@@ -1,0 +1,543 @@
+<title>Reading the Radio Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+:root{
+  --bg:#0f1218; --panel:#171b24; --panel-2:#1c2130; --panel-3:#212736;
+  --border:rgba(255,255,255,.07); --border-2:rgba(255,255,255,.12);
+  --text:#e9ecf4; --muted:#98a1b6; --faint:#6a7387;
+  --brand:#3f7bff; --brand-dim:rgba(63,123,255,.16);
+  --audio:#4ade80; --quiet:#fbbf24; --silent:#f87171; --static:#fb923c; --unknown:#64748b;
+  --radius:16px; --radius-sm:11px;
+  --shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 8px 30px -12px rgba(0,0,0,.6);
+  --display:'Archivo',system-ui,sans-serif;
+  --body:'Inter',system-ui,-apple-system,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:13.5px;
+  line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding:34px 22px 90px;display:flex;flex-direction:column;gap:36px}
+p{margin:0}
+
+.mast{display:flex;flex-direction:column;gap:13px}
+h1{font-family:var(--display);font-size:33px;font-weight:700;letter-spacing:-.6px;margin:0;
+  line-height:1.12;text-wrap:balance}
+.lede{color:var(--muted);font-size:15px;max-width:64ch}
+.lede strong{color:var(--text);font-weight:600}
+.tag{display:inline-flex;font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;padding:4px 9px;border-radius:6px;color:var(--muted);
+  background:var(--panel-2);border:1px solid var(--border);width:max-content}
+
+section{display:flex;flex-direction:column;gap:16px}
+.shead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+  border-bottom:1px solid var(--border);padding-bottom:9px}
+h2{font-family:var(--display);font-size:20px;font-weight:600;letter-spacing:-.3px;margin:0}
+h3{font-family:var(--display);font-size:14.5px;font-weight:600;margin:0}
+.snote{color:var(--faint);font-size:12.5px}
+.label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+
+/* ---- the annotated meter ---- */
+.meterwrap{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:14px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px}
+.metercv{position:relative}
+#meter{width:100%;height:250px;display:block;border-radius:10px;
+  background:linear-gradient(180deg,rgba(13,19,31,.9),rgba(9,13,22,.95))}
+.ctl{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.ctl button{background:var(--panel-2);border:1px solid var(--border);color:var(--muted);
+  border-radius:9px;padding:7px 12px;font-family:var(--body);font-size:12.5px;font-weight:600;
+  cursor:pointer;transition:.14s}
+.ctl button:hover{border-color:var(--border-2);color:var(--text)}
+.ctl button[aria-pressed="true"]{color:var(--text);background:var(--brand-dim);border-color:rgba(63,123,255,.5)}
+.ctl button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.ctl .spacer{flex:1}
+.readout{font-family:var(--mono);font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+
+/* ---- callouts ---- */
+.calls{display:grid;grid-template-columns:repeat(auto-fit,minmax(258px,1fr));gap:12px}
+.call{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:13px 15px;display:flex;flex-direction:column;gap:6px}
+.call .n{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--brand)}
+.call b{font-size:13px;font-weight:600}
+.call p{color:var(--muted);font-size:12.5px}
+.call code{font-family:var(--mono);font-size:11.5px;color:var(--text);background:var(--panel-3);
+  padding:1px 5px;border-radius:4px}
+
+/* ---- tables ---- */
+.tw{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:12.5px;min-width:520px}
+th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+  font-weight:600;padding:10px 13px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:10px 13px;border-bottom:1px solid var(--border);color:var(--muted);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td b{color:var(--text);font-weight:600}
+td.mono,th.mono{font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:7px;vertical-align:baseline}
+
+/* ---- the not-this box ---- */
+.notthis{background:rgba(248,113,113,.06);border:1px solid rgba(248,113,113,.24);
+  border-radius:var(--radius-sm);padding:15px 17px;display:flex;flex-direction:column;gap:8px}
+.notthis h3{color:#fca5a5}
+.notthis ul{margin:0;padding-left:19px;color:var(--muted);display:flex;flex-direction:column;gap:5px}
+.notthis li b{color:var(--text);font-weight:600}
+
+/* ---- the chain ---- */
+.chain{display:flex;flex-direction:column;gap:0}
+.step{display:grid;grid-template-columns:30px minmax(0,1fr);gap:14px;align-items:start}
+.rail{display:flex;flex-direction:column;align-items:center;gap:4px;height:100%}
+.bead{width:26px;height:26px;border-radius:8px;background:var(--panel-2);border:1px solid var(--border-2);
+  display:grid;place-items:center;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--muted);
+  flex:none}
+.step:last-child .line{display:none}
+.line{width:1px;flex:1;background:var(--border-2);min-height:16px}
+.stepbody{padding-bottom:16px;display:flex;flex-direction:column;gap:5px}
+.stepbody b{font-size:13.5px;font-weight:600}
+.stepbody p{color:var(--muted);font-size:12.5px}
+.stepbody code{font-family:var(--mono);font-size:11.5px;color:#c8d3ea;background:var(--panel-3);
+  padding:1px 6px;border-radius:4px}
+.step.emph .bead{background:rgba(251,191,36,.16);border-color:rgba(251,191,36,.45);color:#ffd9a1}
+
+/* ---- key sentence ---- */
+.say{background:var(--panel);border:1px solid var(--border);border-left:2px solid var(--brand);
+  border-radius:var(--radius-sm);padding:14px 17px;display:flex;flex-direction:column;gap:5px}
+.say .label{color:var(--brand)}
+.say p{font-size:14.5px;color:var(--text)}
+
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:14px 16px;display:flex;flex-direction:column;gap:7px}
+.card p{color:var(--muted);font-size:12.5px}
+.card code{font-family:var(--mono);font-size:11.5px;color:var(--text)}
+
+footer{color:var(--faint);font-size:12px;border-top:1px solid var(--border);padding-top:16px}
+footer code{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <span class="tag">Radio · operator reference</span>
+  <h1>What the meter is telling you, and when MP3 goes missing</h1>
+  <p class="lede">Two things on the station page get asked about, and both have precise answers.
+  <strong>The waveform is the audio we are broadcasting, measured on the server</strong>, not the
+  audio your laptop is playing. <strong>The bar under it is a peak hold over the visible window</strong>,
+  not the level right now. And a degraded MP3 output means one specific thing, which is exactly what
+  DEF CON Radio is reporting: the station asked for an MP3 output, the relay it was told to push to
+  is not running, and it went on air over HLS and DASH without it.</p>
+</header>
+
+<section>
+  <div class="shead">
+    <h2>The waveform</h2>
+    <p class="snote">Switch the signal below to see each state the station can report.</p>
+  </div>
+
+  <div class="meterwrap">
+    <div class="metercv"><canvas id="meter"></canvas></div>
+    <div class="ctl" id="ctl">
+      <span class="label" style="margin-right:4px">Signal</span>
+      <span class="spacer"></span>
+      <span class="readout" id="readout"></span>
+    </div>
+  </div>
+
+  <div class="calls">
+    <div class="call"><span class="n">The bars</span><b>Server-measured true peak</b>
+      <p>Each bar is one <b>~100 ms frame</b> of true peak level, measured by ffmpeg
+      <code>ebur128=peak=true</code> on the newest complete segment the packager wrote. 120 bars are
+      kept, drained at their real cadence, so the visible window is <b>about 12 seconds</b> and the
+      motion is the stream's own, not an animation.</p></div>
+    <div class="call"><span class="n">The fade</span><b>Left is older</b>
+      <p>Opacity ramps from 0.35 on the left to full on the right, so the newest audio is the
+      brightest. Bars scroll leftwards and fall off. A flat grey row means measured silence rather
+      than no measurement.</p></div>
+    <div class="call"><span class="n">The height</span><b>Linear amplitude, floored at -60 dBFS</b>
+      <p>Not loudness and not dB mapped linearly. Broadcast audio is loudness-normalised, so a
+      loudness scale renders every bar near the top and shows no dynamics at all. Peak amplitude is
+      what a waveform view actually draws.</p></div>
+    <div class="call"><span class="n">The colour</span><b>The verdict, not the level</b>
+      <p>Every bar takes the colour of the current verdict, so the whole waveform turns amber the
+      moment the station is classified as low, and red on dead air. The height still says how loud;
+      the colour says what kind of signal it is.</p></div>
+    <div class="call"><span class="n">The bar underneath</span><b>Peak hold over the window</b>
+      <p><b>This is the one people read wrong.</b> Its width is the <b>tallest bar currently on
+      screen</b>, not the level at this instant. It only falls when the loudest moment of the last
+      12 seconds scrolls off the left, so it lags on purpose and answers "has this station peaked
+      recently", not "how loud is it right now".</p></div>
+    <div class="call"><span class="n">The badge</span><b>What kind of signal it is</b>
+      <p>Top left, and it is a classification rather than a measurement: programme audio, low, dead
+      air, or noise-like. It appears only for a live station, because a finished recording has no
+      server feed to classify.</p></div>
+    <div class="call"><span class="n">The line below</span><b>The newest segment's numbers</b>
+      <p><code>peak</code> is the loudest sample in it, <code>rms</code> the average energy, and
+      <code>crest</code> is the gap between them. <code>updated Ns ago</code> is the age of that
+      measurement, so a number that climbs past about ten seconds means the monitor has stopped
+      getting segments, which is a fault the waveform itself will not show yet.</p></div>
+  </div>
+
+  <div class="card">
+    <h3>Crest factor is the one worth knowing</h3>
+    <p>Peak minus RMS. Speech and music are peaky, so they run wide: <b>your DEF CON Radio station
+    measured 15.1 dB and 12.3 dB in the two screenshots, which is healthy programme audio.</b> Noise
+    is flat, so hiss, a stuck tone or a dead carrier collapses toward a few dB. That is why the
+    static test is crest under 8 dB together with high spectral entropy, and it is the check that
+    catches a station that is technically receiving something but is not receiving the show.</p>
+  </div>
+
+  <div class="say">
+    <span class="label">One sentence for a client</span>
+    <p>"That is the audio coming out of the platform, measured on our servers every tenth of a
+    second, over the last twelve seconds. The bar underneath is the loudest point in that window."</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>The four verdicts</h2>
+    <p class="snote">Classified from peak, RMS, crest factor and spectral entropy on each segment.</p>
+  </div>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Badge</th><th>Means</th><th class="mono">Test</th><th>Raises an event after</th></tr></thead>
+      <tbody>
+        <tr><td><b><span class="sw" style="background:#4ade80"></span>Audio present</b></td>
+            <td>Normal programme audio.</td><td class="mono">above -45 dBFS RMS</td><td>-</td></tr>
+        <tr><td><b><span class="sw" style="background:#fbbf24"></span>Low level</b></td>
+            <td>Audio is there but quiet. Often a source gain problem rather than a fault.</td>
+            <td class="mono">-60 to -45 dBFS</td><td>-</td></tr>
+        <tr><td><b><span class="sw" style="background:#f87171"></span>Dead air</b></td>
+            <td>No signal in the output. The station may still be perfectly healthy in every other
+            respect, which is exactly why this is measured.</td>
+            <td class="mono">RMS ≤ -60 dBFS, or silencedetect fired</td>
+            <td class="mono">12 s sustained</td></tr>
+        <tr><td><b><span class="sw" style="background:#fb923c"></span>Static-like</b></td>
+            <td>Something is coming through, but it is noise rather than programme. This is the
+            check that separates "receiving audio" from "receiving the right audio".</td>
+            <td class="mono">entropy ≥ 0.88 and crest &lt; 8 dB</td>
+            <td class="mono">30 s sustained</td></tr>
+        <tr><td><b><span class="sw" style="background:#64748b"></span>No measurement</b></td>
+            <td>Waiting for the first complete segment. Not an error.</td><td class="mono">-</td><td>-</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>Why a loud station is not a full-height waveform</h2>
+    <p class="snote">The height scale, in numbers, because this one surprises people.</p>
+  </div>
+  <div class="grid2">
+    <div class="tw">
+      <table>
+        <thead><tr><th class="mono">True peak</th><th class="mono">Bar height</th><th>Reads as</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">-1 dBFS</td><td class="mono">89%</td><td>a transient, near clipping</td></tr>
+          <tr><td class="mono">-4 dBFS</td><td class="mono">63%</td><td>loud music peak</td></tr>
+          <tr><td class="mono">-13 dBFS</td><td class="mono">22%</td><td>normal programme</td></tr>
+          <tr><td class="mono">-20 dBFS</td><td class="mono">10%</td><td>quiet passage, speech tail</td></tr>
+          <tr><td class="mono">-40 dBFS</td><td class="mono">1%</td><td>room tone</td></tr>
+          <tr><td class="mono">-60 dBFS</td><td class="mono">0%</td><td>floored to silence</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>So the waveform looks "low" and that is correct</h3>
+      <p>A properly mastered station sitting around -13 dBFS peak draws bars about a fifth of the
+      height, with transients spiking well above. That is a healthy picture, not a quiet one.</p>
+      <p>The alternative was tried and discarded. EBU R128 momentary loudness moved under 4 LU
+      across a real music segment, and a 60 dB linear window put -4 dBFS at 0.93 and -13 dBFS at
+      0.78. Both produce a solid block pinned near the top with no dynamics visible at all.</p>
+      <p>Loudness is still measured and kept, it is simply not what draws the picture.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><h2>What the waveform is not</h2></div>
+  <div class="notthis">
+    <h3>Four things it deliberately does not tell you</h3>
+    <ul>
+      <li><b>It is not your playback.</b> Pressing Listen, muting, or stopping changes nothing on
+      screen except the mute icon. There used to be a second blue overlay fed from the browser, and
+      it was removed because two waveforms in one box invite the reading "the picture changes when I
+      press play".</li>
+      <li><b>It is not the source.</b> It is measured on what the packager wrote, which is what
+      listeners receive. A healthy source and a broken output look different here, on purpose.</li>
+      <li><b>It is not loudness.</b> Height is peak amplitude. Do not read a compliance number off it.</li>
+      <li><b>It is not live to the millisecond.</b> It measures the newest complete segment, so it
+      trails the live edge by roughly one segment.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>The one exception</h3>
+    <p>On the recording workbench there is no server feed, because the thing being visualised is a
+    finished file. There the same waveform is fed from the browser's own audio analyser, using peak
+    amplitude on the same scale so it draws the same picture. That is the only place local playback
+    moves the bars, and the verdict badge is hidden there rather than reporting "no measurement"
+    about a completed capture.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>Degraded MP3</h2>
+    <p class="snote">One specific failure, with one specific cause.</p>
+  </div>
+
+  <div class="say">
+    <span class="label">The short version</span>
+    <p>"Degraded" means the running encoder <strong>refused part of what it was asked to
+    produce and went on air with the rest.</strong> Only MP3 can do this, and only in the topology
+    where the station pushes MP3 to an Icecast relay, because MP3 is the only output that needs a
+    second piece of infrastructure to exist.</p>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>Why only MP3</h3>
+      <p>HLS and DASH are <b>files this process writes to the origin</b>. If the process is running,
+      they exist. MP3 in relay mode is a <b>live push to another server</b>, so it can be missing
+      while the station is otherwise perfectly healthy, for a reason that has nothing to do with the
+      source.</p>
+    </div>
+    <div class="card">
+      <h3>Why it is not just an error</h3>
+      <p>One ffmpeg carries every output, and ffmpeg <b>opens all of its outputs before it encodes
+      anything</b>. A refused <code>icecast://</code> connection does not cost you the MP3, it kills
+      the process. The station then produces nothing at all, exits about a second after starting,
+      and auto-connect restarts it twenty seconds later, forever. That is not hypothetical: it filled
+      a demo machine with ninety run directories.</p>
+    </div>
+  </div>
+
+  <h3 style="margin-top:6px">What actually happens, end to end</h3>
+  <div class="chain">
+    <div class="step"><div class="rail"><div class="bead">1</div><div class="line"></div></div>
+      <div class="stepbody"><b>Preflight, before ffmpeg is built</b>
+      <p>The station opens a plain TCP connection to the relay's host and port, three second timeout.
+      Deliberately shallow: it does not authenticate and does not check the mount, because the only
+      question is whether it is worth including this output at all. A relay that accepts and then
+      rejects credentials is a real error and should still fail loudly.</p></div></div>
+
+    <div class="step emph"><div class="rail"><div class="bead">2</div><div class="line"></div></div>
+      <div class="stepbody"><b>If nothing is listening, MP3 is dropped from this run</b>
+      <p>Removed from the config before the argument builder ever sees it, so the builder stays a
+      pure function and keeps parity with its TypeScript twin. The station then goes on air over HLS
+      and DASH. <b>If MP3 was the only output configured it does not degrade, it dies</b>, because a
+      station with nothing to deliver must not claim to be on air.</p></div></div>
+
+    <div class="step"><div class="rail"><div class="bead">3</div><div class="line"></div></div>
+      <div class="stepbody"><b>It says so, with the address</b>
+      <p>An <code>output.degraded</code> event carrying <code>no Icecast relay listening at
+      host:port</code>. The address is the whole diagnosis, and by the time anyone reads the event
+      the container is usually gone.</p></div></div>
+
+    <div class="step"><div class="rail"><div class="bead">4</div><div class="line"></div></div>
+      <div class="stepbody"><b>The control plane records it against the run</b>
+      <p>Stored on <code>stream_status.degraded_outputs</code> as <code>{output: reason}</code>, and
+      <b>cleared on the next start</b>, because a new run makes its own decisions and must not
+      inherit the last one's.</p></div></div>
+
+    <div class="step"><div class="rail"><div class="bead">5</div><div class="line"></div></div>
+      <div class="stepbody"><b>The API stops advertising the URL</b>
+      <p>A degraded output returns <code>null</code> instead of a URL, plus the reason. A URL offered
+      by this API is a promise that there is audio behind it.</p></div></div>
+
+    <div class="step"><div class="rail"><div class="bead">6</div></div>
+      <div class="stepbody"><b>The console says which and why</b>
+      <p>The output row shows the reason inline, and if you press Listen with nothing left to attach
+      to, the banner reads <b>"No output this player can use"</b> followed by the reason.</p></div></div>
+  </div>
+
+  <div class="notthis" style="background:rgba(251,191,36,.06);border-color:rgba(251,191,36,.26)">
+    <h3 style="color:#ffd9a1">The bug this was built to kill</h3>
+    <p style="color:var(--muted);font-size:12.5px">Before any of the above existed, the encoder
+    already dropped MP3 and reported it, and <b>nothing consumed the event</b>. So the API went on
+    advertising an MP3 URL for an output that did not exist, the console tried MP3 first, and the
+    failed play was swallowed. On a machine with no Icecast the result was a station visibly on air,
+    producing perfectly good HLS, playing nothing when you pressed Listen, and reporting no error
+    anywhere. It was a reporting bug, not an audio one.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <h2>Which is exactly what DEF CON Radio is showing you</h2>
+    <p class="snote">Three topologies, and MP3 means something different in each.</p>
+  </div>
+
+  <div class="card" style="border-left:2px solid #fbbf24">
+    <h3>Your station, read back</h3>
+    <p>The header says <code>ICECAST in &middot; 128k out</code> and the MP3 row says
+    <code>unavailable &mdash; no Icecast relay listening at localhost:8000</code>. So this station has
+    its MP3 output <b>explicitly on with a relay configured at localhost:8000</b>, and nothing is
+    running there. The preflight found that before ffmpeg started, dropped MP3 from the run, and put
+    the station on air over HLS and DASH, which are both serving.</p>
+    <p><b>Everything else on that page is correct and healthy.</b> Server, input and encoder are all
+    green, the signal is programme audio at -3.3 dBFS peak with 12.3 dB of crest, and it is
+    recording. One output of three is missing, for a reason that has nothing to do with the audio.</p>
+    <p><b>Start Icecast on port 8000 and restart the station and the MP3 row fills in</b>, because the
+    degraded record is cleared on start and the next run runs its own preflight. Or turn the station's
+    MP3 output off and let the on-demand gateway derive MP3 from the HLS instead, which is the default
+    for new stations and needs no relay at all.</p>
+  </div>
+
+  <div class="card">
+    <h3>And it explains the zero beside it</h3>
+    <p>The now-playing line reads <b>0 MP3 listeners</b>. With MP3 degraded that number can only ever
+    be zero, because there is no MP3 output for anyone to be listening to. Read on its own it looks
+    like an audience problem. It is the same fault, counted from the other end.</p>
+  </div>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Topology</th><th>What MP3 means</th><th>Can it degrade?</th></tr></thead>
+      <tbody>
+        <tr><td><b>Container, no relay</b><br><span class="snote">today's default</span></td>
+            <td>The station writes HLS and knows nothing about MP3. A listener's request starts one
+            ffmpeg that reads the origin and transcodes, stopping shortly after the last listener
+            leaves.</td>
+            <td><b>No.</b> There is no relay to probe, so the preflight never runs.</td></tr>
+        <tr><td><b>Container plus relay</b></td>
+            <td>The station pushes MP3 to Icecast. The public URL points at the relay and the
+            control plane redirects to it.</td>
+            <td><b>Yes.</b> This is the only case that produces a degraded MP3.</td></tr>
+        <tr><td><b>Legacy in-process</b></td>
+            <td>The control plane spawns the station's ffmpeg and reads MP3 off its output, so the
+            control plane holds the bytes and serves them itself.</td>
+            <td><b>No relay involved</b>, so no preflight.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Which is why a newer station will never show this</h3>
+    <p>Stations now default to <code>mp3: false</code> with HLS and DASH on, and MP3 derived on
+    demand. <b>A degraded MP3 requires the output explicitly on, pointed at a relay, with that relay
+    not running</b>, which is the older shape your DEF CON Radio station is still configured in. So
+    two stations side by side can behave differently for a reason that is in their config rather than
+    in the platform, and this is the row that tells them apart.</p>
+    <p>The reason the flag alone is not the discriminator: <code>outputs.mp3</code> means three
+    different things across those rows, and keying on it alone once read the legacy case as the
+    relay case and sent listeners to a mount nothing was pushing to.</p>
+  </div>
+</section>
+
+<footer>
+  Behaviour described here is in <code>volt-encoder/bin/radio.py</code> (preflight and the degraded
+  event), <code>volt-app/src/modules/status.ts</code> (recording it),
+  <code>volt-app/src/modules/radio.ts</code> (withholding the URL),
+  <code>volt-app/src/services/radio/monitor.ts</code> (the measurement) and
+  <code>volt-web/src/AudioVisualizer.tsx</code> with <code>volt-web/src/audioLevel.ts</code>
+  (the drawing and the scale). The meter above is a faithful replica of that drawing code, running
+  on synthetic audio.
+</footer>
+
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const VERDICTS = {
+    audio:   { label:'Audio present', color:'#4ade80', note:'programme audio received' },
+    quiet:   { label:'Low level',     color:'#fbbf24', note:'audio present but quiet' },
+    silent:  { label:'Dead air',      color:'#f87171', note:'no audio in the output' },
+    static:  { label:'Static-like',   color:'#fb923c', note:'noise-like, not programme audio' },
+    unknown: { label:'No measurement',color:'#64748b', note:'waiting for the first segment' },
+  };
+  let verdict = 'audio';
+
+  // --- synthetic true-peak frames, shaped like the real thing ---------------
+  // Programme audio: a slow musical envelope with transients on top, sitting
+  // around -13 dBFS peak and spiking to about -4. Values are dBFS; the meter
+  // converts exactly as audioLevel.ts does.
+  const dbToAmp = (db) => (!isFinite(db) || db <= -60) ? 0
+    : Math.max(0, Math.min(1, Math.pow(10, db / 20)));
+
+  let phase = 0;
+  function nextDb(){
+    phase += 0.13;
+    switch (verdict){
+      case 'silent': return -100;
+      case 'quiet':  return -52 + Math.sin(phase * 1.7) * 3 + Math.random() * 2;
+      case 'static': return -18 + Math.random() * 1.6;              // flat, no crest
+      case 'unknown':return -100;
+      default: {
+        const env = -16 + Math.sin(phase * 0.29) * 4 + Math.sin(phase * 0.07) * 2.5;
+        const hit = Math.random() < 0.14 ? Math.random() * 9 : 0;    // transients
+        return Math.min(-1.5, env + hit - Math.random() * 3);
+      }
+    }
+  }
+
+  const RING = 120;
+  const ring = new Array(RING).fill(0);
+  // Prime with history so the page is never a blank meter at rest.
+  for (let i = 0; i < RING; i++) ring[i] = dbToAmp(nextDb());
+
+  const cv = document.getElementById('meter');
+  const g = cv.getContext('2d');
+  const readout = document.getElementById('readout');
+
+  setInterval(() => { ring.push(dbToAmp(nextDb())); if (ring.length > RING) ring.shift(); }, 100);
+
+  function draw(){
+    requestAnimationFrame(draw);
+    const w = cv.clientWidth, h = cv.clientHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (cv.width !== w * dpr || cv.height !== h * dpr){ cv.width = w * dpr; cv.height = h * dpr; }
+    g.setTransform(dpr,0,0,dpr,0,0);
+    g.clearRect(0,0,w,h);
+
+    g.fillStyle = 'rgba(255,255,255,.035)';
+    for (let y = h - 26; y > 8; y -= 22) g.fillRect(10, y, w - 20, 1);
+
+    const v = VERDICTS[verdict];
+    const plotH = h - 44;
+    const bars = ring.length, bw = (w - 20) / bars;
+    let streamLevel = 0;
+    for (let i = 0; i < bars; i++){
+      const val = ring[i];
+      streamLevel = Math.max(streamLevel, val);
+      const bh = Math.max(1, val * plotH);
+      g.globalAlpha = 0.35 + 0.65 * (i / bars);
+      g.fillStyle = val <= 0.001 ? 'rgba(148,163,184,.35)' : v.color;
+      g.fillRect(10 + i * bw, h - 26 - bh, Math.max(1, bw - 1), bh);
+    }
+    g.globalAlpha = 1;
+
+    // the signal bar: peak hold across the visible window
+    g.fillStyle = 'rgba(255,255,255,.08)';
+    g.fillRect(10, h - 16, w - 20, 7);
+    g.fillStyle = streamLevel > 0.02 ? v.color : '#475569';
+    g.fillRect(10, h - 16, (w - 20) * Math.min(1, streamLevel * 1.1), 7);
+
+    g.font = '600 11px system-ui'; g.textAlign = 'left'; g.fillStyle = v.color;
+    const up = v.label.toUpperCase();
+    g.fillText(up, 12, 18);
+    g.fillStyle = 'rgba(255,255,255,.45)'; g.font = '11px system-ui';
+    g.fillText(v.note, 12 + g.measureText(up).width + 12, 18);
+
+    const db = ring[ring.length-1] > 0 ? (20 * Math.log10(ring[ring.length-1])).toFixed(1) : '-inf';
+    readout.textContent = `newest ${String(db).padStart(6)} dBFS · window peak ${(streamLevel*100).toFixed(0)}% · 120 frames ≈ 12 s`;
+  }
+
+  const ctl = document.getElementById('ctl');
+  const spacer = ctl.querySelector('.spacer');
+  Object.entries(VERDICTS).forEach(([k, v]) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = v.label;
+    b.setAttribute('aria-pressed', String(k === verdict));
+    b.onclick = () => {
+      verdict = k;
+      [...ctl.querySelectorAll('button')].forEach(x =>
+        x.setAttribute('aria-pressed', String(x.textContent === v.label)));
+    };
+    ctl.insertBefore(b, spacer);
+  });
+
+  draw();
+})();
+</script>

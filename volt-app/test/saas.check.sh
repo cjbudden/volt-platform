@@ -13,6 +13,12 @@ A2=00000000-0000-0000-0000-0000000000a2; U2=00000000-0000-0000-0000-0000000000f2
 
 psql "$DATABASE_URL" -q -f migrations/0001_init.sql
 psql "$DATABASE_URL" -q <<SQL
+-- Clear this suite's rows first. Email is unique, so on a database that
+-- already had saas@volt.example the whole INSERT aborted as one statement, the
+-- users were never created, and every assertion after it failed on a missing
+-- fixture rather than on the behaviour under test.
+DELETE FROM users WHERE email IN ('saas@volt.example','client@other.example');
+DELETE FROM accounts WHERE id IN ('$A1','$A2');
 INSERT INTO accounts(id,name) VALUES ('$A1','RTM'),('$A2','OtherCo');
 INSERT INTO users(id,account_id,email,password_hash,role,status,platform_role) VALUES
  ('$U1','$A1','saas@volt.example','x','owner','active','saas_admin'),
@@ -47,8 +53,15 @@ OV=$(curl -fsS -H "Authorization: Bearer $T1" "$BASE/api/platform/overview")
 echo "$OV" | grep -q '"active":2' && ok "overview: 2 active channels across tenants" || no "overview channels: $(echo "$OV"|head -c160)"
 [ "$(echo "$OV" | jf '.admins.active')" -ge 1 ] && ok "overview: active admins counted" || no "active admins not counted"
 echo "$OV" | grep -q '"database":"ok"' && ok "overview: API/system status reported" || no "no api status"
-ACc=$(curl -fsS -H "Authorization: Bearer $T1" "$BASE/api/platform/accounts" | jf '.length')
-[ "$ACc" = "2" ] && ok "platform account list shows both tenants" || no "account list count=$ACc"
+# Assert CONTAINMENT, not a global total. The claim worth making is that the
+# platform list crosses the tenant boundary and shows both of this suite's
+# accounts; "the database contains exactly two accounts" is a different claim,
+# it was never the point, and it made the check fail on any database that had
+# anything else in it.
+ACL=$(curl -fsS -H "Authorization: Bearer $T1" "$BASE/api/platform/accounts")
+echo "$ACL" | grep -q "$A1" && echo "$ACL" | grep -q "$A2" \
+  && ok "platform account list crosses the tenant boundary (both tenants present)" \
+  || no "account list missing a tenant: $(echo "$ACL" | head -c 160)"
 
 echo "== analytics ingest + reports =="
 APP=$(curl -s -X POST -H "Authorization: Bearer $T1" -H "$JS" "$BASE/api/apps" -d '{"name":"RTM Web","type":"web","restrictions":{}}')

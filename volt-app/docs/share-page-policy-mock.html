@@ -1,0 +1,473 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Share page, driven by workflow policy</title>
+<style>
+  :root{ --bg:#0e1116; --panel:#151a22; --line:#242c38; --ink:#e8ecf4; --dim:#98a3b6;
+         --brand:#3f7bff; --ok:#34d399; --warn:#fbbf24; --bad:#f87171; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  #app{display:grid;grid-template-columns:330px 1fr;gap:0;min-height:100vh}
+  .panel{background:var(--panel);border-right:1px solid var(--line);padding:22px 20px}
+  .panel h2{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);margin:0 0 6px}
+  .panel h2.sep{margin-top:26px}
+  .hint{color:var(--dim);font-size:12.5px;margin:0 0 14px}
+  code{font:12px ui-monospace,Menlo,monospace;background:rgba(255,255,255,.07);padding:1px 4px;border-radius:4px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0}
+  .name{font:12px ui-monospace,Menlo,monospace;color:var(--dim)}
+  select,input[type=number]{background:#0c0f14;color:var(--ink);border:1px solid var(--line);
+    border-radius:6px;padding:4px 6px;font:12px inherit;min-width:110px}
+  input[type=number]{width:64px;min-width:0}
+  .toggle{background:#0c0f14;color:var(--dim);border:1px solid var(--line);border-radius:6px;
+    padding:4px 12px;font:12px inherit;cursor:pointer;min-width:52px}
+  .toggle.on{background:rgba(63,123,255,.18);color:#9dbcff;border-color:rgba(63,123,255,.5)}
+
+  .page{padding:26px 30px 60px;max-width:820px}
+  .brand{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+  .mark{font-weight:800;letter-spacing:.02em}
+  .mark span{font-weight:400;opacity:.75}
+  .chips{display:flex;gap:7px;flex-wrap:wrap;margin-left:auto}
+  .chip{font-size:10px;font-weight:700;letter-spacing:.08em;padding:4px 8px;border-radius:5px;
+    background:var(--brand);color:#fff}
+  .chip.review{background:var(--warn);color:#221a00}
+  .chip.quiet{background:rgba(255,255,255,.08);color:var(--dim);font-weight:600}
+  .stage{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000}
+  .stage img{width:100%;height:100%;object-fit:cover;display:block}
+  .badge{position:absolute;top:12px;left:12px;font-size:10px;font-weight:700;letter-spacing:.08em;
+    background:rgba(0,0,0,.6);padding:5px 9px;border-radius:5px}
+  .wm{position:absolute;inset:0;display:grid;place-items:center;color:rgba(255,255,255,.22);
+    font-size:22px;font-weight:700;letter-spacing:.04em;pointer-events:none}
+  h1{font-size:20px;margin:18px 0 4px;letter-spacing:-.01em}
+  .meta{color:var(--dim);margin:0 0 18px;font-size:13px}
+
+  .qc{border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;
+    border:1px solid var(--line);background:rgba(255,255,255,.03)}
+  .qc b{margin-right:8px}
+  .qc span{display:block;color:var(--dim);margin-top:5px;font-size:12.5px}
+  .qc.ok{border-color:rgba(52,211,153,.35)} .qc.ok b{color:var(--ok)}
+  .qc.warn{border-color:rgba(251,191,36,.35)} .qc.warn b{color:var(--warn)}
+  .qc.bad{border-color:rgba(248,113,113,.4)} .qc.bad b{color:var(--bad)}
+
+  .notes{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px}
+  .notes-head{display:flex;justify-content:space-between;margin-bottom:8px}
+  .notes-head span{color:var(--dim);font-size:12px}
+  .note{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+  .note .t{font:12px ui-monospace,Menlo,monospace;color:var(--dim);min-width:150px}
+  .lab{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    padding:3px 7px;border-radius:4px;background:rgba(63,123,255,.2);color:#9dbcff}
+  .lab.act{background:rgba(251,191,36,.18);color:#ffd475}
+  .note .txt{color:var(--dim);flex:1;min-width:180px}
+  .quick{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;
+    border-top:1px solid var(--line);padding-top:10px}
+  .qh{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.07em;margin-right:4px}
+  .arrow{font-size:11px;color:var(--dim);margin:0 2px}
+  .pill{background:rgba(63,123,255,.14);color:#9dbcff;border:1px solid rgba(63,123,255,.3);
+    border-radius:999px;padding:3px 10px;font:12px inherit;cursor:pointer}
+  .pill.act{background:rgba(251,191,36,.12);color:#ffd475;border-color:rgba(251,191,36,.3)}
+
+  .ident{border:1px dashed var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px}
+  .ident span{display:block;color:var(--dim);font-size:12.5px;margin-top:4px}
+
+  .actions{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-top:6px}
+  .act-wrap{display:flex;flex-direction:column;gap:5px;max-width:280px}
+  .act{background:rgba(255,255,255,.07);color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:9px 15px;font:600 13px inherit;cursor:pointer}
+  .act.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  .act.warn{background:var(--warn);border-color:var(--warn);color:#221a00}
+  .act.off{opacity:.42;cursor:not-allowed}
+  .why{font-size:11.5px;color:var(--dim);line-height:1.35}
+  .why.warn{color:var(--warn)}
+
+  .record{margin-top:16px;border-left:2px solid var(--ok);padding-left:12px;color:var(--dim);font-size:13px}
+  .record b{color:var(--warn)}
+  .debug{margin-top:24px;color:var(--dim)}
+  .debug summary{cursor:pointer;font-size:12.5px}
+  .debug pre{font:11.5px ui-monospace,Menlo,monospace;background:#0c0f14;border:1px solid var(--line);
+    border-radius:8px;padding:12px;overflow:auto;max-height:280px}
+  @media (max-width:900px){ #app{grid-template-columns:1fr} .panel{border-right:0;border-bottom:1px solid var(--line)} }
+</style>
+<!--
+  SHARE PAGE, DRIVEN BY WORKFLOW POLICY.
+
+  A working mock, not a screenshot. The action logic in this page is the REAL
+  `shareActions()` from volt-app/src/services/workflowPolicy.ts, bundled in, so
+  what you see here is what the server will decide. Change a setting on the left
+  and watch the page's actions change.
+
+  Regenerate:  npx esbuild mock/share.ts --bundle --format=iife
+  Source:      volt-app/src/services/workflowPolicy.ts
+-->
+<div id="app"></div>
+<script>
+(() => {
+  // src/services/workflowPolicy.ts
+  var DEFAULT_POLICY = {
+    share: {
+      defaultExpiryDays: 7,
+      maxExpiryDays: 30,
+      pin: "optional",
+      watermark: "optional",
+      download: "optional",
+      notifyOnFirstOpen: true
+    },
+    review: {
+      identify: "typed-name",
+      approvalsRequired: 1,
+      requireNoteOnChanges: true,
+      qcGate: "soft",
+      labels: {
+        category: ["language", "audio", "video", "legal", "branding", "caption", "edit", "other"],
+        action: ["cut", "beep", "blur", "replace", "recut", "none"]
+      },
+      notifyOnDecision: true
+    }
+  };
+  function resolvePolicy(rungs = {}) {
+    return [rungs.deployment, rungs.account, rungs.link].filter(Boolean).reduce((acc, patch) => merge(acc, patch), clone(DEFAULT_POLICY));
+  }
+  function merge(base, patch) {
+    const out = clone(base);
+    for (const group of Object.keys(patch)) {
+      const g = patch[group];
+      if (!g || typeof g !== "object") continue;
+      for (const key of Object.keys(g)) {
+        if (g[key] !== void 0) out[group][key] = g[key];
+      }
+    }
+    return out;
+  }
+  function clone(v) {
+    return JSON.parse(JSON.stringify(v));
+  }
+  function shareActions(ctx) {
+    const { policy: p, purpose } = ctx;
+    const out = [
+      { id: "watch", label: "Watch", enabled: true }
+    ];
+    const dl = p.share.download;
+    if (dl !== "never") {
+      if (ctx.link.allowHiRes || dl === "always") {
+        out.push({ id: "download_hires", label: "Download hi-res", enabled: true });
+      }
+      if (ctx.link.allowMetadata || dl === "always") {
+        out.push({ id: "download_metadata", label: "Download metadata", enabled: true });
+      }
+    }
+    if (purpose !== "review") return out;
+    const decided = ctx.reviewState === "approved" || ctx.reviewState === "rejected";
+    const needsId = !ctx.identified;
+    const idReason = p.review.identify === "verified-email" ? "Verify your email on this link first" : "Add your name first";
+    out.push({
+      id: "comment",
+      label: "Add a note",
+      enabled: !needsId,
+      reason: needsId ? idReason : void 0
+    });
+    const noteMissing = p.review.requireNoteOnChanges && ctx.pendingNotes === 0;
+    out.push({
+      id: "request_changes",
+      label: "Request changes",
+      enabled: !needsId && !noteMissing && !decided,
+      reason: needsId ? idReason : noteMissing ? "Add at least one note saying what needs to change" : decided ? "This review is already closed" : void 0
+    });
+    const qcBlocked = p.review.qcGate === "hard" && (ctx.qcState === "failed" || ctx.qcState === "warnings");
+    const qcOverride = p.review.qcGate === "soft" && (ctx.qcState === "failed" || ctx.qcState === "warnings");
+    const remaining = Math.max(0, p.review.approvalsRequired - ctx.approvals);
+    out.push({
+      id: "approve",
+      label: remaining > 1 ? `Approve (${remaining} approvals needed)` : "Approve",
+      enabled: !needsId && !qcBlocked && !decided,
+      // Only flag an override on an action somebody can actually take. A closed
+      // review carrying an "approving anyway will be recorded" warning is a
+      // warning about something that is not going to happen.
+      override: qcOverride && !decided && !needsId && !qcBlocked || void 0,
+      reason: needsId ? idReason : qcBlocked ? `QC ${ctx.qcState === "failed" ? "failed" : "raised warnings"} and this account requires QC to pass before approval` : decided ? "This review is already closed" : qcOverride ? "QC findings are outstanding. Approving anyway is allowed here, and will be recorded against your name." : void 0
+    });
+    return out;
+  }
+
+  // mock/share.ts
+  var svg = (s) => "data:image/svg+xml;utf8," + encodeURIComponent(s);
+  var FRAME = svg(`<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540">
+  <defs><radialGradient id="p" cx="50%" cy="38%" r="72%">
+    <stop offset="0" stop-color="#2f7d43"/><stop offset="1" stop-color="#0a2415"/></radialGradient></defs>
+  <rect width="960" height="540" fill="url(#p)"/>
+  <ellipse cx="480" cy="300" rx="300" ry="120" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="4"/>
+  <circle cx="480" cy="300" r="52" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="4"/>
+</svg>`);
+  var deployment = {
+    share: { download: "optional", pin: "optional", watermark: "optional" },
+    review: { identify: "typed-name", approvalsRequired: 1, requireNoteOnChanges: true, qcGate: "soft" }
+  };
+  var scenario = {
+    purpose: "review",
+    qcState: "warnings",
+    reviewState: "in_review",
+    identified: false,
+    pendingNotes: 0,
+    approvals: 0,
+    allowHiRes: true,
+    allowMetadata: true
+  };
+  var NOTES = [
+    { t: "00:12:03 - 00:12:06", category: "language", action: "beep", text: "Swear word from the touchline mic." },
+    { t: "00:31:40", category: "branding", action: "replace", text: "Old sponsor bug in the corner." }
+  ];
+  var app = document.getElementById("app");
+  app.innerHTML = `
+  <aside class="panel">
+    <h2>Deployment workflow config</h2>
+    <p class="hint">Account-level settings, supplied by the deployment until account
+    management exists. Read through <code>resolvePolicy()</code>, never directly.</p>
+    <div id="policy"></div>
+    <h2 class="sep">This viewer, this link</h2>
+    <p class="hint">Not policy. The state the page happens to be in.</p>
+    <div id="scenario"></div>
+  </aside>
+  <main class="page" id="page"></main>
+`;
+  var policyControls = [
+    {
+      kind: "select",
+      label: "share.download",
+      options: ["never", "optional", "always"],
+      get: () => deployment.share.download,
+      set: (v) => deployment.share.download = v
+    },
+    {
+      kind: "select",
+      label: "share.pin",
+      options: ["never", "optional", "required"],
+      get: () => deployment.share.pin,
+      set: (v) => deployment.share.pin = v
+    },
+    {
+      kind: "select",
+      label: "share.watermark",
+      options: ["off", "optional", "forced"],
+      get: () => deployment.share.watermark,
+      set: (v) => deployment.share.watermark = v
+    },
+    {
+      kind: "select",
+      label: "review.identify",
+      options: ["typed-name", "verified-email"],
+      get: () => deployment.review.identify,
+      set: (v) => deployment.review.identify = v
+    },
+    {
+      kind: "select",
+      label: "review.qcGate",
+      options: ["soft", "hard"],
+      get: () => deployment.review.qcGate,
+      set: (v) => deployment.review.qcGate = v
+    },
+    {
+      kind: "number",
+      label: "review.approvalsRequired",
+      min: 1,
+      max: 3,
+      get: () => deployment.review.approvalsRequired,
+      set: (v) => deployment.review.approvalsRequired = v
+    },
+    {
+      kind: "toggle",
+      label: "review.requireNoteOnChanges",
+      get: () => deployment.review.requireNoteOnChanges,
+      set: (v) => deployment.review.requireNoteOnChanges = v
+    }
+  ];
+  var scenarioControls = [
+    {
+      kind: "select",
+      label: "link purpose",
+      options: ["preview", "review"],
+      get: () => scenario.purpose,
+      set: (v) => scenario.purpose = v
+    },
+    {
+      kind: "select",
+      label: "QC result",
+      options: ["pass", "warnings", "failed"],
+      get: () => String(scenario.qcState),
+      set: (v) => scenario.qcState = v
+    },
+    {
+      kind: "select",
+      label: "review state",
+      options: ["in_review", "changes_requested", "approved"],
+      get: () => scenario.reviewState,
+      set: (v) => scenario.reviewState = v
+    },
+    { kind: "toggle", label: "viewer identified", get: () => scenario.identified, set: (v) => scenario.identified = v },
+    { kind: "number", label: "notes written", min: 0, max: 3, get: () => scenario.pendingNotes, set: (v) => scenario.pendingNotes = v },
+    { kind: "number", label: "approvals already in", min: 0, max: 3, get: () => scenario.approvals, set: (v) => scenario.approvals = v },
+    { kind: "toggle", label: "link grants hi-res", get: () => scenario.allowHiRes, set: (v) => scenario.allowHiRes = v }
+  ];
+  function renderControls(host, ctls) {
+    host.innerHTML = "";
+    for (const c of ctls) {
+      const row = document.createElement("label");
+      row.className = "row";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = c.label;
+      row.appendChild(name);
+      if (c.kind === "select") {
+        const sel = document.createElement("select");
+        for (const o of c.options) {
+          const opt = document.createElement("option");
+          opt.value = o;
+          opt.textContent = o;
+          opt.selected = o === c.get();
+          sel.appendChild(opt);
+        }
+        sel.onchange = () => {
+          c.set(sel.value);
+          render();
+        };
+        row.appendChild(sel);
+      } else if (c.kind === "toggle") {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "toggle" + (c.get() ? " on" : "");
+        b.textContent = c.get() ? "on" : "off";
+        b.onclick = () => {
+          c.set(!c.get());
+          render();
+        };
+        row.appendChild(b);
+      } else {
+        const n = document.createElement("input");
+        n.type = "number";
+        n.min = String(c.min);
+        n.max = String(c.max);
+        n.value = String(c.get());
+        n.onchange = () => {
+          c.set(Math.max(c.min, Math.min(c.max, Number(n.value))));
+          render();
+        };
+        row.appendChild(n);
+      }
+      host.appendChild(row);
+    }
+  }
+  function render() {
+    renderControls(document.getElementById("policy"), policyControls);
+    renderControls(document.getElementById("scenario"), scenarioControls);
+    const policy = resolvePolicy({ deployment });
+    const ctx = {
+      purpose: scenario.purpose,
+      policy,
+      link: { allowHiRes: scenario.allowHiRes, allowMetadata: scenario.allowMetadata },
+      qcState: scenario.qcState,
+      reviewState: scenario.reviewState,
+      identified: scenario.identified,
+      pendingNotes: scenario.pendingNotes,
+      approvals: scenario.approvals
+    };
+    const actions = shareActions(ctx);
+    const isReview = scenario.purpose === "review";
+    const decided = scenario.reviewState === "approved";
+    const page = document.getElementById("page");
+    page.innerHTML = `
+    <header class="brand">
+      <div class="mark">HARBOUR<span>SPORT</span></div>
+      <div class="chips">
+        <span class="chip ${isReview ? "review" : ""}">${isReview ? "FOR REVIEW" : "PREVIEW"}</span>
+        ${policy.share.pin !== "never" ? `<span class="chip quiet">PIN ${policy.share.pin === "required" ? "required" : "optional"}</span>` : ""}
+        ${policy.share.watermark !== "off" ? `<span class="chip quiet">watermark ${policy.share.watermark}</span>` : ""}
+        <span class="chip quiet">expires in ${policy.share.defaultExpiryDays} days</span>
+      </div>
+    </header>
+
+    <div class="stage">
+      <img src="${FRAME}" alt="">
+      ${policy.share.watermark !== "off" ? '<div class="wm">Harbour Sport \xB7 do not distribute</div>' : ""}
+      <div class="badge">${isReview ? "REVIEW COPY" : "PREVIEW"}</div>
+    </div>
+
+    <h1>Coastal Cup Final: Harbour vs Northbank</h1>
+    <p class="meta">Shared by Christian Budden \xB7 recorded 29 Aug \xB7 1h 54m</p>
+
+    ${isReview ? qcStrip(ctx) : ""}
+    ${isReview ? noteRail(policy) : ""}
+    ${isReview && !scenario.identified ? identityBox(policy) : ""}
+
+    <div class="actions">
+      ${actions.map(actionHtml).join("")}
+    </div>
+
+    ${decided ? `<div class="record">Approved by Priya Raman, 30 Aug 09:12.
+      ${scenario.qcState !== "pass" ? "<b>Recorded as approved over outstanding QC findings.</b>" : ""}</div>` : ""}
+
+    <details class="debug">
+      <summary>What the page was told it may do</summary>
+      <pre>${escape(JSON.stringify(actions, null, 1))}</pre>
+    </details>
+  `;
+  }
+  function actionHtml(a) {
+    const cls = ["act", a.enabled ? "" : "off", a.override ? "warn" : "", primary(a.id) ? "primary" : ""].join(" ");
+    return `<div class="act-wrap">
+    <button class="${cls}" ${a.enabled ? "" : "disabled"}>${escape(a.label)}</button>
+    ${a.reason ? `<span class="why ${a.override ? "warn" : ""}">${escape(a.reason)}</span>` : ""}
+  </div>`;
+  }
+  function primary(id) {
+    return id === "approve" || id === "watch";
+  }
+  function qcStrip(ctx) {
+    const s = ctx.qcState;
+    const tone = s === "pass" ? "ok" : s === "warnings" ? "warn" : "bad";
+    const text = s === "pass" ? "QC passed. No findings." : s === "warnings" ? "QC raised 2 findings: 41s of silence at 00:58:12, black frames at 01:12:04." : "QC failed: audio missing from 01:31:00 to the end.";
+    const gate = ctx.policy.review.qcGate === "hard" ? "This account requires QC to pass before approval." : "Approving over findings is allowed here, and is recorded.";
+    return `<div class="qc ${tone}"><b>Automated QC</b> ${escape(text)}<span>${escape(gate)}</span></div>`;
+  }
+  function noteRail(policy) {
+    const cats = policy.review.labels.category.slice(0, 5);
+    const acts = policy.review.labels.action.slice(0, 4);
+    return `<section class="notes">
+    <div class="notes-head"><b>Notes</b><span>timecodes are content time</span></div>
+    ${NOTES.map((n) => `<div class="note">
+      <span class="t">${n.t}</span>
+      <span class="lab cat">${n.category}</span><span class="lab act">${n.action}</span>
+      <span class="txt">${escape(n.text)}</span>
+    </div>`).join("")}
+    <div class="quick">
+      <span class="qh">Quick label</span>
+      ${cats.map((c) => `<button class="pill">${c}</button>`).join("")}
+      <span class="arrow">then</span>
+      ${acts.map((a) => `<button class="pill act">${a}</button>`).join("")}
+    </div>
+  </section>`;
+  }
+  function identityBox(policy) {
+    return policy.review.identify === "verified-email" ? `<div class="ident">This account requires a <b>verified email</b> before a note or a decision is recorded.
+        <span>An approval is only worth the attribution behind it.</span></div>` : `<div class="ident">Add your <b>name</b> so your notes and decision carry attribution.
+        <span>Stored against the link that granted access.</span></div>`;
+  }
+  function escape(s) {
+    return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  }
+  render();
+  window.__ready = true;
+  window.__probe = (over, pol = {}) => {
+    Object.assign(scenario, over);
+    if (pol.share) Object.assign(deployment.share, pol.share);
+    if (pol.review) Object.assign(deployment.review, pol.review);
+    render();
+    return shareActions({
+      purpose: scenario.purpose,
+      policy: resolvePolicy({ deployment }),
+      link: { allowHiRes: scenario.allowHiRes, allowMetadata: scenario.allowMetadata },
+      qcState: scenario.qcState,
+      reviewState: scenario.reviewState,
+      identified: scenario.identified,
+      pendingNotes: scenario.pendingNotes,
+      approvals: scenario.approvals
+    });
+  };
+})();
+
+</script>

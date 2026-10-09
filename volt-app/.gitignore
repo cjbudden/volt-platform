@@ -4,3 +4,10 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# The built console. In a SOURCE checkout the control plane serves
+# ../volt-web/dist directly (see resolveWebDist in src/config.ts); this path
+# only exists inside the Docker image, where the Dockerfile copies it in.
+# A checked-in or hand-copied copy here goes stale silently and serves an old
+# version of the app with no error anywhere.
+/web/

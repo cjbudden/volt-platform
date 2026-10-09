@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>VOLT player — embed demo</title>
+<!--
+  THE EMBED, EXACTLY AS A CUSTOMER PASTES IT.
+
+  One script tag and one div. No build step, no module loader, no second
+  request for a player library, and no JavaScript for the embedder to write.
+  The data- attributes are the whole API for the common case; anything more is
+  window.VoltPlayer.create({...}).
+
+  data-api-base is present here only because this file is opened from disk
+  during development. A real embed omits it: the bundle takes the origin it was
+  served from, which is the control plane.
+-->
+<body style="font:15px system-ui;background:#0f1218;color:#e9ecf4;padding:40px">
+  <h1 style="font-size:18px">Embedded player</h1>
+
+  <div data-volt-player
+       data-app-key="pk_live_REPLACE_ME"
+       data-channel-id="00000000-0000-0000-0000-000000000000"
+       data-api-base="http://localhost:8080"></div>
+
+  <h2 style="font-size:15px;margin-top:34px">The same station, restyled</h2>
+  <div data-volt-player
+       data-app-key="pk_live_REPLACE_ME"
+       data-channel-id="00000000-0000-0000-0000-000000000000"
+       data-api-base="http://localhost:8080"
+       data-primary-color="#ff8800"
+       data-secondary-color="#f6f3ee"></div>
+
+  <script src="./dist/volt-player.js"></script>
+</body>

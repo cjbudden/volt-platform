@@ -438,15 +438,21 @@ const ARMING_GATES = ['server', 'input', 'encoder', 'output'] as const;
 export interface ArmOutcome { kind: OwnerKind; id: string; name: string }
 
 export async function armProvenStreams(): Promise<ArmOutcome[]> {
-  const rows = await query<any>(
-    `SELECT 'channel'::text AS kind, c.* FROM channels c
+  // Two queries, not one UNION: `c.* UNION ALL e.*` only works while channels and
+  // events happen to have the same column list, and they do not. Postgres refused
+  // it on every pass ("each UNION query must have the same number of columns"), so
+  // nothing was ever armed and auto connect never brought a stream back.
+  const chRows = await query<any>(
+    `SELECT c.*, 'channel'::text AS owner_kind FROM channels c
       WHERE c.desired_state = 'running' AND c.auto_connect
         AND c.resume_armed_at IS NULL AND c.status = 'live'
-     UNION ALL
-     SELECT 'event'::text AS kind, e.* FROM events e
+      LIMIT 200`);
+  const evRows = await query<any>(
+    `SELECT e.*, 'event'::text AS owner_kind FROM events e
       WHERE e.desired_state = 'running' AND e.auto_connect
         AND e.resume_armed_at IS NULL AND e.status = 'live'
       LIMIT 200`);
+  const rows = [...chRows, ...evRows].slice(0, 200);
   const armed: ArmOutcome[] = [];
   if (!rows.length) return armed;
   const { loadChannelHealthLite } = await import('../channelDetail');
@@ -454,7 +460,11 @@ export async function armProvenStreams(): Promise<ArmOutcome[]> {
   const now = Date.now();
   for (const o of rows) {
     try {
-      const kind = o.kind as OwnerKind;
+      // owner_kind, not kind: channels have their OWN `kind` column ('tv' | 'radio'),
+      // and with `c.*` beside a literal `AS kind` the row came back with kind='tv'.
+      // Every channel then took the events branch below, updated no row and was
+      // never armed, so auto connect could not bring any channel back.
+      const kind = o.owner_kind as OwnerKind;
       const health = (kind === 'channel' && o.radio_config)
         ? await loadRadioHealth(o, now)
         : await loadChannelHealthLite(o, now, kind);
@@ -474,7 +484,7 @@ export async function armProvenStreams(): Promise<ArmOutcome[]> {
       armed.push({ kind, id: o.id, name: o.name });
       console.log(`[resume] armed auto connect for ${kind} ${o.name} (${o.id}): all four gates healthy`);
     } catch (e) {
-      console.warn('[resume] could not evaluate arming for', o.kind, o.id, e);
+      console.warn('[resume] could not evaluate arming for', o.owner_kind, o.id, e);
     }
   }
   return armed;

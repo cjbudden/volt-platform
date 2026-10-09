@@ -25,18 +25,32 @@ const plain = (s) => String(s ?? '')
   .replace(/`([^`]*)`/g, '$1')
   .replace(/\*\*([^*]*)\*\*/g, '$1')
   .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+  // Strikethrough. A superseded row is deliberately struck in the markdown, and
+  // without this the tildes render literally as `~~Admin prototype~~`, which
+  // reads as a typo on the page rather than as "this was replaced".
+  .replace(/~~([^~]*)~~/g, '$1')
+  // Single-asterisk emphasis, after the double-asterisk pass above so bold is
+  // not left with one orphan asterisk each side.
+  .replace(/(^|[^*])\*([^*]+)\*/g, '$1$2')
   .trim();
 
 const sections = [];
 let current = null;
 for (const line of md.split(/\r?\n/)) {
   const h = line.match(/^##\s+(?:\d+\.\s*)?(.+?)\s*$/);
-  if (h) { current = { title: plain(h[1]), rows: [] }; sections.push(current); continue; }
+  if (h) { current = { title: plain(h[1]), rows: [], isCapTable: false }; sections.push(current); continue; }
   if (!current || !line.startsWith('|')) continue;
   const cells = line.split('|').slice(1, -1).map((c) => c.trim());
   if (cells.length < 3) continue;
   if (/^-+:?$/.test(cells[0].replace(/[\s:]/g, '-'))) continue;   // separator row
-  if (/^capability$/i.test(cells[0])) continue;                    // header row
+  // A CAPABILITY TABLE IS ONE THAT SAYS SO. Any pipe table under any heading
+  // used to be counted, so a narrative table that happens to mention a status
+  // emoji in its second column was silently folded into the totals -- which is
+  // how the 5 Sep prototype sweep, a table ABOUT the statuses, added six
+  // phantom capabilities and pushed Prototype from 1 back up to 7. The header
+  // row now arms the parser and anything before it is prose.
+  if (/^capability$/i.test(cells[0])) { current.isCapTable = true; continue; }
+  if (!current.isCapTable) continue;
   const st = STATUS.find((s) => cells[1].includes(s.emoji));
   if (!st) continue;
   current.rows.push({ cap: plain(cells[0]), notes: plain(cells.slice(2).join(' | ')), st });

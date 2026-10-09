@@ -10,9 +10,16 @@
 # Run from volt-app/ with DATABASE_URL set. Needs ffmpeg + node.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+. "$(dirname "$0")/lib/portable.sh"   # setsid/timeout/stat differ on macOS; see that file
 PORT="${PORT:-8490}"
 SIMPORT="${SIMPORT:-9156}"
-export PORT JWT_ACCESS_SECRET=x JWT_REFRESH_SECRET=y INGEST_TOKEN=z ORCH_LAUNCHER=mock CORS_ORIGIN='*'
+# PINNED TO THE LEGACY PATH ON PURPOSE. RADIO_MODE now defaults to 'container',
+# and this suite covers the in-process pipeline that is being retired: the MP3
+# fan-out with per-listener ICY injection, and the on-air gate enforced by the
+# control plane holding the socket. The container path has its own end-to-end
+# suite against a real relay (radio-container.check.sh). When the in-process
+# path is deleted, this pin and the assertions that depend on it go with it.
+export PORT JWT_ACCESS_SECRET=x JWT_REFRESH_SECRET=y INGEST_TOKEN=z ORCH_LAUNCHER=mock CORS_ORIGIN='*' RADIO_MODE=inprocess
 fuser -k "$PORT"/tcp 2>/dev/null; fuser -k "$SIMPORT"/tcp 2>/dev/null; sleep 0.4
 
 pass=0; fail=0
@@ -86,7 +93,7 @@ PL=$(curl -s "http://localhost:$PORT/origin/$CID/live/audio/index.m3u8")
 ok "audio playlist has fMP4 segments + PDT" 'echo "$PL" | grep -q "seg_00000.m4s" && echo "$PL" | grep -q PROGRAM-DATE-TIME && echo "$PL" | grep -q "init.mp4"'
 ok "DASH manifest serves" '[ "$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/origin/$CID/live/dash/manifest.mpd")" = 200 ]'
 curl -s -H 'Icy-MetaData: 1' -D /tmp/rc_mp3h.txt -o /tmp/rc_mp3b.bin --max-time 4 "http://localhost:$PORT/radio/$CID/stream.mp3" || true
-ok "MP3 fan-out: ICY headers + audio bytes" 'grep -qi "icy-metaint" /tmp/rc_mp3h.txt && [ "$(stat -c %s /tmp/rc_mp3b.bin)" -gt 20000 ]'
+ok "MP3 fan-out: ICY headers + audio bytes" 'grep -qi "icy-metaint" /tmp/rc_mp3h.txt && [ "$(vsize /tmp/rc_mp3b.bin)" -gt 20000 ]'
 ok "MP3 fan-out: StreamTitle injected" 'grep -aq "StreamTitle=" /tmp/rc_mp3b.bin'
 
 # ---- metadata log ---------------------------------------------------------------

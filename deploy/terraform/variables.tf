@@ -126,3 +126,30 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+# CDN-LEVEL GEO RESTRICTION.
+#
+# Deliberately COARSE and deliberately secondary. CloudFront can only apply one
+# country list to the whole distribution, so it cannot express "this programme
+# is blacked out in these markets" -- that is what the play gate already does
+# per-programme in `rights.ts`, with a replacement asset for a blocked viewer.
+# What this buys is a hard edge stop for a country we must not serve AT ALL
+# (a sanctions list, a licence we do not hold anywhere): enforced before a
+# request reaches the origin, and not dependent on our token logic being right.
+#
+# Left as "none" by default so behaviour is unchanged until somebody sets it.
+variable "cdn_geo_restriction_type" {
+  type        = string
+  default     = "none"
+  description = "CloudFront geo restriction: none | whitelist | blacklist"
+  validation {
+    condition     = contains(["none", "whitelist", "blacklist"], var.cdn_geo_restriction_type)
+    error_message = "cdn_geo_restriction_type must be none, whitelist or blacklist."
+  }
+}
+
+variable "cdn_geo_countries" {
+  type        = list(string)
+  default     = []
+  description = "ISO 3166-1 alpha-2 codes for the whitelist/blacklist. Ignored when the type is none."
+}

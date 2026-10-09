@@ -7,6 +7,7 @@ import { startWorker } from './services/jobs/worker';
 import { registerClipHandlers } from './services/jobs/handlers/clipExtract';
 import { registerQcHandlers } from './services/jobs/handlers/qcRun';
 import { registerVodEncodeHandlers } from './services/jobs/handlers/vodEncode';
+import { registerFillerHandlers } from './services/fillerPrep';
 import { registerRemoteIngestHandlers } from './services/jobs/handlers/remoteIngest';
 import { backfillContainers } from './services/containers';
 import { reconcileAll } from './services/media/reconcile';
@@ -130,7 +131,7 @@ const server = app.listen(config.port, () => {
 // sweep) and the job worker, both started only once the schema is in place.
 let stopScheduler: () => void = () => {};
 let worker: { stop: () => Promise<void> } | null = null;
-boot().then(() => {
+boot().then(async () => {
   stopScheduler = startScheduler();
   // Handlers are registered BEFORE the worker starts polling: the worker only
   // claims types it can handle, so an unregistered type would sit queued.
@@ -138,6 +139,7 @@ boot().then(() => {
   registerQcHandlers();
   registerVodEncodeHandlers();
   registerRemoteIngestHandlers();
+  await registerFillerHandlers();
   worker = startWorker();
 }).catch((e) => {
   console.error('[boot] schema preparation failed — refusing to serve', e);

@@ -23,6 +23,8 @@
 #   SKIP_PLAYER=1  skip the browser stage (needs playwright + chromium)
 set -uo pipefail
 ENC="$(cd "$(dirname "$0")" && pwd)"
+# the encoder needs the Python that has faster-whisper: the repo venv when present
+[ -z "${PYTHON_BIN:-}" ] && [ -x "$ENC/.venv/bin/python3" ] && PYTHON_BIN="$ENC/.venv/bin/python3"
 NAME="${1:?usage: synctest.sh <name> <seconds> [job.json]}"
 SECS="${2:?usage: synctest.sh <name> <seconds> [job.json]}"
 JOB="${3:-$ENC/job.synctest.json}"
@@ -42,7 +44,7 @@ export PYTHONPATH="$ENC/bin"
 mkdir -p "$WORK_DIR"
 
 T0=$(date +%s.%N)
-python3 "$ENC/bin/encoder.py" > "$ROOT/encoder.log" 2>&1 &
+"${PYTHON_BIN:-python3}" "$ENC/bin/encoder.py" > "$ROOT/encoder.log" 2>&1 &
 ENCP=$!
 cleanup() { kill -INT "$ENCP" 2>/dev/null; sleep 3; kill -9 "$ENCP" 2>/dev/null; }
 trap cleanup INT TERM
@@ -60,6 +62,13 @@ trap cleanup INT TERM
   done ) &
 WATCH=$!
 
+# PLAYBACK STABILITY, measured while the channel runs: what a player polling the
+# live manifests would trip over (truncated reads, rewinds, PDT tears, stalls).
+( for i in $(seq 1 120); do ls "$ROOT"/origin/runs/*/master.m3u8 >/dev/null 2>&1 && break; sleep 0.5; done
+  RUN=$(ls -d "$ROOT"/origin/runs/* 2>/dev/null | head -1)
+  [ -n "$RUN" ] && python3 "$ENC/dev/playcheck.py" --dir "$RUN" --seconds $(( SECS > 40 ? SECS - 30 : 10 )) --json > "$ROOT/playcheck.txt" 2>&1 ) &
+PCHK=$!
+
 echo "   running..."
 sleep "$SECS"
 cleanup
@@ -69,6 +78,11 @@ sleep 2
 echo
 echo "-- start-up ------------------------------------------------------------"
 cat "$ROOT/startup.txt" 2>/dev/null || echo "   (not captured)"
+
+wait "$PCHK" 2>/dev/null
+echo
+echo "-- playback stability (playcheck, live manifests) -------------------------"
+tail -3 "$ROOT/playcheck.txt" 2>/dev/null || echo "   (not captured)"
 
 echo
 echo "-- ingest health -------------------------------------------------------"
@@ -84,14 +98,14 @@ grep -o '"type":"channel.stop".*' "$ROOT/encoder.log" | tail -1
 
 echo
 echo "-- measured against the delivered audio ---------------------------------"
-python3 "$ENC/bin/syncheck.py" "$ROOT" --model "$REF_MODEL" | tee "$ROOT/syncheck.json"
+"${PYTHON_BIN:-python3}" "$ENC/dev/syncheck.py" "$ROOT" --model "$REF_MODEL" | tee "$ROOT/syncheck.json"
 
 if [ "${SKIP_PLAYER:-0}" != "1" ]; then
   echo
   echo "-- what a real player shows ---------------------------------------------"
   # --vod closes the DVR window so the browser can play the WHOLE of it; a live
   # playlist would leave a stopped channel with only a few seconds before the edge
-  python3 "$ENC/bin/playercheck.py" "$ROOT" --vod --seconds 90 | tee "$ROOT/playercheck.json"
+  python3 "$ENC/dev/playercheck.py" "$ROOT" --vod --seconds 90 | tee "$ROOT/playercheck.json"
 fi
 
 echo

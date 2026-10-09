@@ -187,10 +187,22 @@ import sys,json;d=json.load(sys.stdin);print("yes" if d["coveragePct"]<100 else 
 if [ "$HASGAPS" = "yes" ]; then
   REASON=$(echo "$COV" | python3 -c '
 import sys,json;d=json.load(sys.stdin);print((d.get("reason") or {}).get("code","none"))')
-  check "an incomplete range is refused with a reason" "$REASON" "coverage_gap"
-  GAPS=$(echo "$COV" | python3 -c '
+  PCT=$(echo "$COV" | python3 -c '
+import sys,json;print(json.load(sys.stdin)["coveragePct"])')
+  # ZERO COVERAGE AND PARTIAL COVERAGE ARE DIFFERENT REFUSALS, and the resolver
+  # is right to name them differently: nothing recorded at all is `no_media`,
+  # while something recorded with holes in it is `coverage_gap`. This asserted
+  # `coverage_gap` unconditionally, so it failed against a channel that simply
+  # had no segments — a fixture difference reported as a product fault. Assert
+  # the reason that matches the coverage actually measured.
+  if [ "$PCT" = "0" ] || [ "$PCT" = "0.0" ]; then
+    check "an empty range is refused as no_media" "$REASON" "no_media"
+  else
+    check "an incomplete range is refused as coverage_gap" "$REASON" "coverage_gap"
+    GAPS=$(echo "$COV" | python3 -c '
 import sys,json;print("yes" if json.load(sys.stdin)["gaps"] else "no")')
-  check "and the gaps are named" "$GAPS" "yes"
+    check "and the gaps are named" "$GAPS" "yes"
+  fi
 else
   CLIP=$(echo "$COV" | python3 -c 'import sys,json;print(json.load(sys.stdin)["clippable"])')
   check "a fully covered range is clippable" "$CLIP" "True"

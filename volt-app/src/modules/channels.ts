@@ -13,6 +13,7 @@ import { outputHasValidContent } from './publicLive';
 import { config } from '../config';
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { scheduleFillerPrep, FILLER_FIELDS, runFillerPrep, fillerStatus } from '../services/fillerPrep';
 
 export const channelsRouter = Router();
 channelsRouter.use(requireAuth);
@@ -170,7 +171,10 @@ channelsRouter.post(
       ? JSON.stringify(body.outputLadder.map((r) => ({ height: r.height, bitrate_kbps: r.bitrateKbps })))
       : null;
     const typeId = body.schemaId ?? await defaultTypeId(accountId(req), body.kind === 'radio' ? 'radio' : 'tv');
-    const md = await validateEntityMetadata(accountId(req), typeId, body.metadata, ['channel']);
+    const md = await validateEntityMetadata(accountId(req), typeId,
+      // The type's required `name` IS the channel's own name: an API client that
+      // sends a name but no metadata was refused with "missing required field: name".
+      { name: body.name, ...(body.metadata ?? {}) }, ['channel']);
 
     // retention: seconds is the source of truth; derive the coarse day field in sync
     const retSec = body.recordingRetentionSec ?? (body.recordingRetentionDays != null ? body.recordingRetentionDays * 86400 : null);
@@ -221,6 +225,8 @@ channelsRouter.post(
     await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
       action: 'create', entityType: 'channel', entityId: row.id,
       snapshot: { name: row.name, group_id: row.group_id, sources: (body.sources ?? []).length, ladder: body.outputLadder?.length ?? 0 } });
+    // what the sources are, and the fallback loop built to match them (async: a job)
+    void scheduleFillerPrep('channel', row.id, 'created');
     res.status(201).json(row);
   })
 );
@@ -394,6 +400,7 @@ const editChannel = asyncHandler(async (req, res) => {
       }
     }
 
+    if (FILLER_FIELDS.some((k) => has(k))) void scheduleFillerPrep('channel', req.params.id, 'settings changed');
     res.set('ETag', String(row.version));
     res.json({ ...row, _changed: changed });
   } catch (e) {
@@ -660,5 +667,33 @@ channelsRouter.post(
     }).catch(() => {});
     const row = await one('SELECT * FROM channels WHERE id = $1', [req.params.id]);
     res.json(row);
+  })
+);
+
+
+/** What each source is (its stored probe) and the state of the pre-built fallback loop. */
+channelsRouter.get(
+  '/:id/filler',
+  asyncHandler(async (req, res) => {
+    const own = await one<any>(
+      `SELECT o.id FROM channels o JOIN groups g ON g.id = o.group_id WHERE o.id = $1 AND g.account_id = $2`,
+      [req.params.id, accountId(req)]);
+    if (!own) throw notFound('Not found');
+    const inputs = await query<any>(
+      `SELECT id, role, protocol, rendition_label, ingest_url, probe, probed_at FROM stream_inputs WHERE channel_id = $1 ORDER BY role`,
+      [req.params.id]);
+    res.json({ build: await fillerStatus('channel', req.params.id), inputs });
+  })
+);
+
+/** Probe the sources and (re)build the loop NOW, waiting for the result. */
+channelsRouter.post(
+  '/:id/filler',
+  asyncHandler(async (req, res) => {
+    const own = await one<any>(
+      `SELECT o.id FROM channels o JOIN groups g ON g.id = o.group_id WHERE o.id = $1 AND g.account_id = $2`,
+      [req.params.id, accountId(req)]);
+    if (!own) throw notFound('Not found');
+    res.json({ build: await runFillerPrep('channel', req.params.id) });
   })
 );

@@ -32,6 +32,7 @@ import { one, query } from '../../db';
 import { config } from '../../config';
 import { capabilities, isImmediate, storageDriver, type StorageTier } from './storage';
 import { locationsOf, transition, type MediaObject } from './objects';
+import { reclaimRunSidecars } from './sidecars';
 
 export type RetentionAction = 'keep' | 'to_cold' | 'to_archive' | 'delete';
 
@@ -174,6 +175,16 @@ export async function ruleFor(
 
 export async function saveRule(opts: {
   ruleId?: string;
+  /**
+   * The account making the change. REQUIRED, and separate from `accountId`,
+   * which says what the rule is scoped TO (null for a channel- or event-scoped
+   * rule). The update used to be `WHERE id = $1` with nothing else: any
+   * authenticated user who learned a rule id could rewrite another tenant's
+   * ladder to "delete at 0 days" and the next sweep would destroy that
+   * tenant's media, attributed to `retention:sweep`. A retention rule is the
+   * most destructive object in the system and it was the least protected.
+   */
+  actingAccountId: string;
   accountId?: string | null;
   channelId?: string | null;
   eventId?: string | null;
@@ -187,9 +198,19 @@ export async function saveRule(opts: {
 
   const rule = opts.ruleId
     ? await one<any>(
-        `UPDATE retention_rules SET name = $2, applies_to = $3, enabled = $4, updated_at = now()
-          WHERE id = $1 RETURNING *`,
-        [opts.ruleId, opts.name, opts.appliesTo ?? 'recording', opts.enabled ?? true]
+        // Reachable two ways, matching listRules: the rule is account-scoped
+        // to the caller, or it hangs off a channel/event the caller owns.
+        `UPDATE retention_rules r
+            SET name = $3, applies_to = $4, enabled = $5, updated_at = now()
+           FROM (SELECT r2.id FROM retention_rules r2
+                   LEFT JOIN channels c ON c.id = r2.channel_id
+                   LEFT JOIN events   e ON e.id = r2.event_id
+                   LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
+                  WHERE r2.id = $1 AND (r2.account_id = $2 OR g.account_id = $2)) owned
+          WHERE r.id = owned.id
+        RETURNING r.*`,
+        [opts.ruleId, opts.actingAccountId, opts.name,
+         opts.appliesTo ?? 'recording', opts.enabled ?? true]
       )
     : await one<any>(
         `INSERT INTO retention_rules (account_id, channel_id, event_id, name, applies_to, enabled)
@@ -197,6 +218,11 @@ export async function saveRule(opts: {
         [opts.accountId ?? null, opts.channelId ?? null, opts.eventId ?? null,
          opts.name, opts.appliesTo ?? 'recording', opts.enabled ?? true]
       );
+  // An update that matched nothing means the rule is not the caller's. Same
+  // answer as a rule that does not exist: ownership is not disclosed.
+  if (!rule && opts.ruleId) {
+    throw Object.assign(new Error('Retention rule not found'), { status: 404 });
+  }
   if (!rule) throw new Error('failed to save retention rule');
 
   await query(`DELETE FROM retention_stages WHERE rule_id = $1`, [rule.id]);
@@ -295,8 +321,20 @@ export function dueStage(
 export function closedAtMsOf(row: { closed_at?: string | null; updated_at?: string | null; created_at?: string | null }): number {
   const t = row.closed_at ? new Date(row.closed_at).getTime() : 0;
   if (t > 0) return t;
-  const u = row.updated_at ? new Date(row.updated_at).getTime() : 0;
-  if (u > 0) return u;
+  // FALL BACK TO created_at, NOT updated_at.
+  //
+  // The age of media is about WHEN IT STOPPED BEING WRITTEN, and updated_at is
+  // not that: reconcileStream re-registers every run it finds on disk on every
+  // orchestrator tick, and registerObject touched updated_at whenever a byte
+  // count came with it. So any object without a usable closed_at — one whose
+  // recording row is missing, or is still open — had its retention clock reset
+  // to `now` every tick. It aged at zero. No rung ever fired, no cool, no
+  // archive, no delete, and the counters showed it being considered on every
+  // pass and skipped every time, which looks exactly like healthy operation.
+  //
+  // created_at never moves, so the clock actually runs. Objects that ARE still
+  // being written are excluded from the sweep by state (`writing`, `pending`),
+  // so anchoring on creation cannot age out a live run.
   return row.created_at ? new Date(row.created_at).getTime() : 0;
 }
 
@@ -313,7 +351,28 @@ export interface SweepResult {
   /** Actions a rule asked for that this deployment cannot perform. Reported
    *  rather than swallowed, because silence here reads as "nothing was due". */
   unavailable: number;
+  /** Objects reclaimed because every owner they had has been deleted. */
+  orphaned: number;
+  /** Bytes reclaimed from per-run derived files (thumbnails, peak caches) that
+   *  no media object owns and nothing else would ever remove. */
+  sidecarBytes: number;
+  /** Objects found stranded mid-transition by an earlier failed sweep and put
+   *  back to a state something knows how to leave. Reported because a number
+   *  that is persistently non-zero means storage is failing, not that recovery
+   *  is working. */
+  recovered: number;
 }
+
+/**
+ * How long an object may sit with no owner before the sweep reclaims it.
+ *
+ * Not zero, because there is a legitimate window where an object has no owner
+ * yet: the encoder registers media for a run before the recording row exists,
+ * and adoption attaches it afterwards (migration 0008). Reclaiming instantly
+ * would delete media that was about to be adopted. A day is far longer than
+ * that window and far shorter than "forever".
+ */
+const ORPHAN_GRACE_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Walk the ladder for every object with a rule.
@@ -321,13 +380,21 @@ export interface SweepResult {
  * Bounded per pass on purpose: a first sweep over a long-neglected archive could
  * otherwise queue tens of thousands of storage operations in one tick.
  */
-export async function sweep(opts: { limit?: number; actor?: string; dryRun?: boolean } = {}): Promise<SweepResult> {
+export async function sweep(opts: {
+  limit?: number; actor?: string; dryRun?: boolean;
+  /**
+   * Confine the pass to ONE account. The background sweep leaves this unset
+   * and walks the platform, which is right for a scheduler. It is not right
+   * for the tenant-facing preview endpoint, which was reporting counts drawn
+   * from every other customer's media.
+   */
+  accountId?: string;
+} = {}): Promise<SweepResult> {
   const limit = opts.limit ?? 500;
   const actor = opts.actor ?? 'retention';
   const res: SweepResult = {
     considered: 0, cooled: 0, archived: 0, deleted: 0,
-    skippedOnHold: 0, failed: 0, unavailable: 0,
-  };
+    skippedOnHold: 0, failed: 0, unavailable: 0, orphaned: 0, recovered: 0, sidecarBytes: 0 };
   const caps = capabilities();
   const driver = storageDriver();
 
@@ -343,15 +410,95 @@ export async function sweep(opts: { limit?: number; actor?: string; dryRun?: boo
        LEFT JOIN events   e ON e.id = COALESCE(o.event_id, r.event_id, v.event_id)
        LEFT JOIN groups  gc ON gc.id = c.group_id
        LEFT JOIN groups  ge ON ge.id = e.group_id
-      WHERE o.state NOT IN ('deleted', 'deleting', 'pending', 'writing')
-      ORDER BY o.updated_at
+      -- 'deleting' is BACK IN. It used to be excluded, which meant an object
+      -- whose delete failed halfway sat in 'deleting' where this query could
+      -- never see it again: it could not be retried, could not be rolled back,
+      -- and reconcile ignores it too. A transitional state is exactly what a
+      -- sweep should pick up, because it means a previous sweep did not finish.
+      WHERE o.state NOT IN ('deleted', 'pending', 'writing')
+        AND ($2::uuid IS NULL
+             OR gc.account_id = $2 OR ge.account_id = $2
+             -- An ownerless object belongs to nobody, so a tenant-scoped pass
+             -- must not see it. The platform-wide pass still reclaims it.
+            )
+      -- FAIRNESS. Ordering by updated_at only rotates the window if looking at
+      -- an object changes it, and the skip paths do not touch it, so skipped
+      -- rows sorted to the front of every future sweep and nothing behind them
+      -- was ever reached. last_swept_at records that we LOOKED; never swept
+      -- sorts first because it is the most overdue thing there is.
+      ORDER BY o.last_swept_at NULLS FIRST, o.updated_at
       LIMIT $1`,
-    [limit]
+    [limit, opts.accountId ?? null]
   );
+
+  // STAMPED UP FRONT, for every candidate, whatever happens to it next. Doing
+  // it per-outcome would mean every `continue` in this loop is a chance to
+  // forget one, and forgetting one puts that object back at the head of the
+  // next window permanently. Deliberately not touching updated_at: that is the
+  // object's own modification time and the retention clock's fallback anchor.
+  if (!opts.dryRun && objects.length) {
+    await query(
+      `UPDATE media_objects SET last_swept_at = now() WHERE id = ANY($1)`,
+      [objects.map((o: any) => o.id)]
+    );
+  }
 
   for (const obj of objects) {
     res.considered++;
     if (obj.hold) { res.skippedOnHold++; continue; }
+
+    // ---- an object a previous sweep left mid-transition --------------------
+    // `deleting` or `archiving` means something crashed or errored between the
+    // state change and the storage call. Put it back to a state that can be
+    // left, so the next sweep can try the rung again from a clean footing.
+    if (obj.state === 'deleting' || obj.state === 'archiving') {
+      if (opts.dryRun) { res.considered--; continue; }
+      const locs = await locationsOf(obj.id);
+      const back = locs.some((l) => l.present && l.tier !== 'local') && obj.state === 'archiving'
+        ? 'archived' : (locs.some((l) => l.present) ? 'available' : 'deleted');
+      await transition(obj.id, back as any, {
+        action: 'rollback', actor,
+        detail: `recovered from a stranded ${obj.state}`,
+      }).catch((e) => console.error(`[retention] could not recover ${obj.id} from ${obj.state}`, e));
+      res.recovered++;
+      continue;
+    }
+
+    // ---- media whose every owner has been deleted --------------------------
+    // The owner FKs are ON DELETE SET NULL so media outlives its recording,
+    // which is right while SOMETHING still points at it. When nothing does,
+    // the object becomes unreachable: every read path in the service scopes
+    // media through a channel or an event to a group to an account, so a row
+    // with all four owner columns null cannot be listed, cannot be restored,
+    // and — because ruleFor has no keys to match on — was skipped by this
+    // sweep forever. The bytes stayed on disk, and in the bill, permanently.
+    //
+    // Nothing references it, so nothing can want it. Reclaim it.
+    const ownerless = !obj.channel_id && !obj.event_id && !obj.recording_id && !obj.vod_asset_id;
+    if (ownerless) {
+      const idleMs = Date.now() - new Date(obj.updated_at).getTime();
+      if (idleMs < ORPHAN_GRACE_MS) continue;   // may still be adopted
+      if (opts.dryRun) { res.orphaned++; continue; }
+      try {
+        await transition(obj.id, 'deleting', { action: 'delete', actor, detail: 'no owner' });
+        for (const l of await locationsOf(obj.id)) {
+          await driver.remove(l.uri);
+          // The run's derived files are nobody's media object, so nothing else
+          // would ever remove them. See services/media/sidecars.ts.
+          res.sidecarBytes += reclaimRunSidecars(l.uri);
+          await query(`UPDATE media_locations SET present = false, removed_at = now() WHERE id = $1`, [l.id]);
+        }
+        await transition(obj.id, 'deleted', {
+          action: 'delete', actor,
+          detail: 'every owner was deleted; the object was unreachable from any account',
+        });
+        res.orphaned++;
+      } catch (e) {
+        res.failed++;
+        console.error('[retention] orphan reclaim failed for', obj.id, e);
+      }
+      continue;
+    }
 
     const rule = await ruleFor({
       channelId: obj.channel_id ?? obj.rec_channel ?? obj.asset_channel,
@@ -393,6 +540,9 @@ export async function sweep(opts: { limit?: number; actor?: string; dryRun?: boo
         await transition(obj.id, 'deleting', { action: 'delete', actor, detail: `rule "${rule.name}"` });
         for (const l of locs) {
           await driver.remove(l.uri);
+          // The run's derived files are nobody's media object, so nothing else
+          // would ever remove them. See services/media/sidecars.ts.
+          res.sidecarBytes += reclaimRunSidecars(l.uri);
           await query(
             `UPDATE media_locations SET present = false, removed_at = now() WHERE id = $1`, [l.id]
           );
@@ -449,9 +599,26 @@ export async function sweep(opts: { limit?: number; actor?: string; dryRun?: boo
       res.failed++;
       const msg = String(e?.message ?? e).slice(0, 500);
       await query(`UPDATE media_objects SET last_error = $2, updated_at = now() WHERE id = $1`, [obj.id, msg]);
-      // Roll a half-done transition back to a state something knows how to leave.
-      if (obj.state === 'available') {
-        await transition(obj.id, 'available', { action: 'rollback', actor, error: msg }).catch(() => { /* */ });
+      // ROLL BACK TO WHATEVER IT WAS, not just to `available`.
+      //
+      // This used to be `if (obj.state === 'available')`, which covered
+      // available -> archiving and available -> deleting and nothing else. An
+      // ARCHIVED object whose delete failed was left sitting in `deleting`,
+      // a state the candidate query then excluded, so it could never be
+      // retried and never be seen: the bytes stayed, the row was unreachable,
+      // and no counter moved. Rolling back to the state we found it in is
+      // correct for every rung, and the transition table already refuses an
+      // illegal one, so a genuinely impossible rollback is loud rather than
+      // silent.
+      const nowState = await one<any>(`SELECT state FROM media_objects WHERE id = $1`, [obj.id]);
+      if (nowState && nowState.state !== obj.state) {
+        await transition(obj.id, obj.state, { action: 'rollback', actor, error: msg })
+          .catch((rollbackErr) => {
+            console.error(
+              `[retention] ${obj.id} FAILED AND COULD NOT ROLL BACK from ${nowState.state} to ${obj.state}`,
+              rollbackErr
+            );
+          });
       }
       console.error(`[retention] ${obj.id} (${obj.logical_key}) failed:`, msg);
     }

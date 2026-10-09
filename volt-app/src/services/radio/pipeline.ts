@@ -31,6 +31,10 @@ import { startIcyCapture, stopIcyCapture, icyState } from './icyMeta';
 import { startRadioMonitor, stopRadioMonitor } from './monitor';
 import { query } from '../../db';
 import type { Response } from 'express';
+import {
+  buildRadioArgs, resolveOutputs, isMp3Copy, masterPlaylist,
+  DEFAULT_BITRATE_KBPS, type RadioJobConfig, type IcecastTarget,
+} from './args';
 
 /** Lifecycle/error telemetry — the same stream_events table channels use, so the
  *  radio detail page's event log and the five-gate health read one source. */
@@ -73,18 +77,13 @@ function probeAudioCodec(url: string): string | null {
   } catch { return null; }
 }
 
-function inputArgs(protocol: string, url: string): string[] {
-  if (protocol === 'icecast' || /^https?:/.test(url)) {
-    return ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', '-i', url];
-  }
-  return ['-i', url]; // srt://, etc. — ffmpeg handles natively
-}
-
 export interface StartRadioOpts {
   channelId: string;
   protocol: string;
   url: string;
   cfg: RadioConfig;
+  /** Push MP3 to a relay instead of piping it to us. Null keeps the dev pipe. */
+  icecast?: IcecastTarget | null;
 }
 
 /** Start the station's pipeline. Returns the run id (also the recording run). */
@@ -98,46 +97,40 @@ export function startRadio(opts: StartRadioOpts): { runId: string; pid: number }
   const dashDir = join(runDir, 'dash');
   mkdirSync(audioDir, { recursive: true });
 
-  const cfg = { bitrateKbps: 128, ...opts.cfg };
-  const outs = { mp3: true, hls: true, dash: true, ...(opts.cfg.outputs || {}) };
-  const br = `${Math.min(320, Math.max(32, cfg.bitrateKbps))}k`;
+  const cfg = { bitrateKbps: DEFAULT_BITRATE_KBPS, ...opts.cfg };
+  const outs = resolveOutputs(opts.cfg.outputs);
   const sourceCodec = probeAudioCodec(opts.url);
-  const mp3Copy = !cfg.transcode && sourceCodec === 'mp3';
 
-  const args: string[] = ['-hide_banner', '-loglevel', 'warning', '-nostdin',
-    ...inputArgs(opts.protocol, opts.url)];
+  // ONE description of the pipeline, shared with the container. Everything that
+  // decides what ffmpeg does now lives in args.ts, so the in-process path here
+  // and volt-radio's entrypoint cannot drift into two different stations.
+  //
+  // `icecast: opts.icecast ?? null` is what selects the topology. Null keeps
+  // MP3 on `pipe:1` for the in-process preview, which is the old behaviour and
+  // the reason this path still exists at all.
+  const jobConfig: RadioJobConfig = {
+    channelId: opts.channelId,
+    protocol: opts.protocol,
+    url: opts.url,
+    outputs: outs,
+    bitrateKbps: cfg.bitrateKbps ?? DEFAULT_BITRATE_KBPS,
+    transcode: cfg.transcode,
+    sourceCodec,
+    icecast: opts.icecast ?? null,
+  };
+  const mp3Copy = isMp3Copy(jobConfig);
+  const wantsPipe = outs.mp3 && !jobConfig.icecast;
 
+  if (outs.dash) mkdirSync(dashDir, { recursive: true });
+  const args = buildRadioArgs(jobConfig, { runDir, audioDir, dashDir });
+  // The audio-only master at the run root: written by us rather than ffmpeg,
+  // because the /live rewrite serves this exact path.
   if (outs.hls) {
-    args.push(
-      '-map', '0:a:0', '-c:a', 'aac', '-b:a', br, '-ac', '2',
-      '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0',
-      '-hls_flags', 'program_date_time+independent_segments',
-      '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4',
-      '-hls_segment_filename', join(audioDir, 'seg_%05d.m4s'),
-      join(audioDir, 'index.m3u8'),
-    );
-    // audio-only master at the run root (the /live rewrite serves this path)
-    const bw = (cfg.bitrateKbps + 8) * 1000;
-    writeFileSync(join(runDir, 'master.m3u8'),
-      `#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n` +
-      `#EXT-X-STREAM-INF:BANDWIDTH=${bw},CODECS="mp4a.40.2"\naudio/index.m3u8\n`);
-  }
-  if (outs.dash) {
-    mkdirSync(dashDir, { recursive: true });
-    args.push(
-      '-map', '0:a:0', '-c:a', 'aac', '-b:a', br, '-ac', '2',
-      '-f', 'dash', '-seg_duration', '4', '-streaming', '1',
-      '-window_size', '20', '-extra_window_size', '10', '-remove_at_exit', '0',
-      join(dashDir, 'manifest.mpd'),
-    );
-  }
-  if (outs.mp3) {
-    if (mp3Copy) args.push('-map', '0:a:0', '-c:a', 'copy', '-f', 'mp3', 'pipe:1');
-    else args.push('-map', '0:a:0', '-c:a', 'libmp3lame', '-b:a', br, '-ac', '2', '-f', 'mp3', 'pipe:1');
+    writeFileSync(join(runDir, 'master.m3u8'), masterPlaylist(jobConfig.bitrateKbps));
   }
 
   const logFd = openSync(join(runDir, 'radio.log'), 'a');
-  const child = spawn('ffmpeg', args, { stdio: ['ignore', outs.mp3 ? 'pipe' : 'ignore', logFd], detached: true });
+  const child = spawn('ffmpeg', args, { stdio: ['ignore', wantsPipe ? 'pipe' : 'ignore', logFd], detached: true });
   child.unref();
 
   const proc: RadioProc = {
@@ -151,25 +144,49 @@ export function startRadio(opts: StartRadioOpts): { runId: string; pid: number }
 
   // MP3 fan-out: broadcast every stdout chunk to connected listeners, injecting
   // ICY metadata every ICY_METAINT bytes for clients that asked for it.
-  if (outs.mp3 && child.stdout) {
+  if (wantsPipe && child.stdout) {
     child.stdout.on('data', (chunk: Buffer) => broadcastMp3(proc, chunk));
     child.stdout.on('error', () => { /* listeners handle their own teardown */ });
   }
   child.on('exit', (code, signal) => {
+    // `ours` means this pipeline is STILL REGISTERED as the channel's, which
+    // can only be true for an exit nobody asked for: stopRadio() removes the
+    // registration before it signals. Reaching here with `ours` set is always
+    // a surprise, whatever the exit code turns out to say.
     const ours = running.get(opts.channelId)?.child === child;
-    if (ours) {
-      for (const res of proc.mp3Clients) { try { res.end(); } catch { /* */ } }
-      proc.mp3Clients.clear();
+    if (!ours) return;
+
+    for (const res of proc.mp3Clients) { try { res.end(); } catch { /* */ } }
+    proc.mp3Clients.clear();
+
+    // TEARDOWN IS UNCONDITIONAL NOW. All of this used to be gated on
+    // `code && code !== 0`, which skipped the two most common ways a process
+    // actually ends: a clean rc=0 (the source closed, the stream finished) and
+    // a signal kill, where `code` is null and `signal` carries the truth. In
+    // both cases the station stayed in the `running` map for the life of the
+    // process — isRadioRunning() kept answering true, the boot reconciler
+    // believed it, the monitor kept polling a pipeline that was gone, and
+    // pressing Start was refused as "already running" with no way to clear it
+    // short of restarting the control plane.
+    running.delete(opts.channelId);
+    stopRadioMonitor(opts.channelId);
+
+    if (code === 0) {
+      // A clean end is not a fault. The source went away or the stream simply
+      // finished; say that plainly rather than dressing it up as an error.
+      console.log(`[radio] ffmpeg finished cleanly for ${opts.channelId}`);
+      radioEvent(opts.channelId, 'channel.stop', { reason: 'source ended (rc=0)' });
+      return;
     }
-    // A non-zero exit we did NOT ask for is a real failure: log the reason from
-    // the run's ffmpeg log so the event feed says WHY, exactly like channels.
-    if (ours && code && code !== 0) {
-      console.error(`[radio] ffmpeg exited ${code} for ${opts.channelId}`);
-      radioEvent(opts.channelId, 'input.error', { message: `${errorTail(runDir) || `encoder exited rc=${code}`}`, rc: code, signal });
-      radioEvent(opts.channelId, 'channel.stop', { reason: `exited rc=${code}` });
-      running.delete(opts.channelId);
-      stopRadioMonitor(opts.channelId);
-    }
+    // A non-zero exit, or a signal we did not send, is a real failure: pull the
+    // reason out of this run's ffmpeg log so the event feed says WHY, exactly
+    // the way channels do.
+    const how = code != null ? `rc=${code}` : `signal ${signal}`;
+    console.error(`[radio] ffmpeg exited unexpectedly (${how}) for ${opts.channelId}`);
+    radioEvent(opts.channelId, 'input.error', {
+      message: `${errorTail(runDir) || `encoder exited ${how}`}`, rc: code, signal,
+    });
+    radioEvent(opts.channelId, 'channel.stop', { reason: `exited ${how}` });
   });
 
   // ICY now-playing capture (icecast/http sources only)

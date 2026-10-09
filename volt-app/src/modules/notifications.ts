@@ -7,7 +7,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
-import { asyncHandler, notFound, conflict } from '../util/http';
+import { asyncHandler, notFound, conflict, forbidden } from '../util/http';
+import { ROLE_RANK, rankOf } from '../auth/roles';
 import { sendNotification, retryFailed } from '../services/notifications';
 
 export const notificationsRouter = Router();
@@ -36,11 +37,17 @@ notificationsRouter.get('/', asyncHandler(async (req, res) => {
 
 /** In-app inbox for a recipient (defaults to the current user's email). */
 notificationsRouter.get('/inbox', asyncHandler(async (req, res) => {
-  let recipient = typeof req.query.recipient === 'string' ? req.query.recipient : '';
-  if (!recipient) {
-    const u = await one<any>(`SELECT email FROM users WHERE id=$1`, [req.auth!.sub]);
-    recipient = u?.email ?? '';
+  // YOUR inbox. `?recipient=` used to be honoured for anybody, scoped only by
+  // account, so any member of a tenant could read a colleague's notification
+  // subjects and bodies just by typing their address into the query string.
+  // An admin may still read another user's inbox; nobody else may.
+  const me = await one<any>(`SELECT email FROM users WHERE id=$1`, [req.auth!.sub]);
+  const asked = typeof req.query.recipient === 'string' ? req.query.recipient : '';
+  const mine = String(me?.email ?? '');
+  if (asked && asked.toLowerCase() !== mine.toLowerCase() && rankOf(req.auth?.role) < ROLE_RANK.admin) {
+    throw forbidden('You can only read your own inbox');
   }
+  const recipient = asked || mine;
   const rows = await query(
     `SELECT d.id, d.status, d.read_at, d.created_at, n.topic, n.subject, n.body
        FROM notification_deliveries d JOIN notifications n ON n.id=d.notification_id
@@ -52,7 +59,16 @@ notificationsRouter.get('/inbox', asyncHandler(async (req, res) => {
 }));
 
 notificationsRouter.post('/inbox/:id/read', asyncHandler(async (req, res) => {
-  const row = await one(`UPDATE notification_deliveries SET read_at=now() WHERE id=$1 AND account_id=$2 AND channel='in_app' RETURNING id`, [req.params.id, accountId(req)]);
+  // Scoped to the caller's own delivery for the same reason as the read above:
+  // account scope alone let one user mark another user's items read.
+  const me = await one<any>(`SELECT email FROM users WHERE id=$1`, [req.auth!.sub]);
+  const isAdmin = rankOf(req.auth?.role) >= ROLE_RANK.admin;
+  const row = await one(
+    `UPDATE notification_deliveries SET read_at=now()
+      WHERE id=$1 AND account_id=$2 AND channel='in_app'
+        AND ($3::boolean OR lower(recipient) = lower($4))
+    RETURNING id`,
+    [req.params.id, accountId(req), isAdmin, String(me?.email ?? '')]);
   if (!row) throw notFound('Inbox item not found');
   res.json({ ok: true });
 }));

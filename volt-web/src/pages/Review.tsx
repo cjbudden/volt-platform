@@ -102,7 +102,11 @@ function ReviewPanel({ assetId, onDecided }: { assetId: string; onDecided: () =>
   }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [assetId])
 
-  if (err) return <div className="err">{err}</div>
+  // Only when there is nothing to show. `err` is also written by the actions
+  // on this page, so an unconditional guard let one rejected action replace
+  // the working page — including the controls needed to retry — with a line
+  // of red text and no way back except navigating away.
+  if (err && !r) return <div className="err">{err}</div>
   if (!r) return <div className="loading">Loading…</div>
 
   async function move(to: AssetReview['state']) {

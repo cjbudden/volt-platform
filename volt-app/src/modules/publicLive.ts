@@ -61,14 +61,69 @@ publicLiveRouter.get(
     const { id } = req.params;
     const ch = await one<any>(`SELECT id, name, status, on_air, kind FROM channels WHERE id=$1 AND kind='radio'`, [id]);
     if (!ch || !ch.on_air) { res.status(404).json({ available: false, reason: 'not_on_air' }); return; }
-    const { attachMp3Listener } = await import('../services/radio/pipeline');
     const { radioHasValidContent } = await import('../services/radio/detail');
     if (ch.status !== 'live' || !radioHasValidContent(id)) {
       res.status(503).json({ available: false, reason: 'no_valid_content' });
       return;
     }
-    if (!attachMp3Listener(id, req as any, res as any, ch.name)) {
-      res.status(503).json({ available: false, reason: 'no_valid_content' });
+    // MP3 IS DERIVED ON DEMAND FROM THE HLS THIS STATION IS ALREADY WRITING.
+    //
+    // Not pushed by the station to a relay, and not redirected to one. The
+    // station writes HLS and DASH and knows nothing about MP3 at all; the first
+    // listener here starts one ffmpeg that reads the origin and transcodes, and
+    // it stops shortly after the last listener leaves. See
+    // services/radio/mp3Gateway.ts for why that inversion fixes three separate
+    // problems at once.
+    //
+    // TERMINATING THE CONNECTION IS THE POINT, not an accident. It is what
+    // keeps the on-air gate, the rights check, the listener count and the byte
+    // measurement per-listener — every one of which a relay or a CDN in front of
+    // one would have collapsed into a single anonymous connection.
+    //
+    // A station that pushes to a relay is still supported (radio_config
+    // outputs.mp3), and where one is configured its public URL still points at
+    // the relay. This route is the on-demand path.
+    // THREE TOPOLOGIES, and the discriminator is not "is mp3 enabled".
+    //
+    // `outputs.mp3` means different things in different modes, which is exactly
+    // the confusion to avoid here:
+    //
+    //   legacy in-process   the control plane spawns the station's ffmpeg and
+    //                       reads MP3 off its stdout. mp3 enabled means WE have
+    //                       the bytes; serve them from the pipeline.
+    //   container + relay   the station PUSHES to a relay. mp3 enabled means the
+    //                       audio is somewhere else, so redirect: proxying would
+    //                       put the control plane back in the audio path, which
+    //                       is the thing containerising radio removed.
+    //   container, no relay the station writes HLS and knows nothing of MP3.
+    //                       Derive it on demand.
+    //
+    // Keying on `outputs.mp3` alone read the legacy case as the relay case and
+    // sent a 302 to a mount nothing was pushing to.
+    const rc = (await one<any>(`SELECT radio_config FROM channels WHERE id=$1`, [id]))?.radio_config ?? {};
+    const { radioIsContainerised } = await import('../services/radio/state');
+    if (!radioIsContainerised()) {
+      const { attachMp3Listener } = await import('../services/radio/pipeline');
+      if (!attachMp3Listener(id, req as any, res as any, ch.name)) {
+        res.status(503).json({ available: false, reason: 'no_valid_content' });
+      }
+      return;
+    }
+    if (rc?.outputs?.mp3 === true) {
+      const { publicMp3Url } = await import('../services/radio/jobConfig');
+      res.redirect(302, publicMp3Url(id));
+      return;
+    }
+    const acct = await one<any>(
+      `SELECT g.account_id FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1`, [id]);
+    const { attachListener } = await import('../services/radio/mp3Gateway');
+    const r = await attachListener(id, req as any, res as any, {
+      bitrateKbps: rc?.bitrateKbps ?? 128,
+      stationName: ch.name,
+      accountId: acct?.account_id ?? null,
+    });
+    if (!r.ok) {
+      res.status(503).json({ available: false, reason: r.reason ?? 'no_valid_content' });
     }
   })
 );
@@ -99,11 +154,29 @@ publicLiveRouter.get(
     // this control plane already serves at /origin.
     const cdn = config.aws?.cdnBaseUrl;
     if (cdn && config.env === 'production' && !/example\.com/.test(cdn)) {
-      res.redirect(302, `${cdn.replace(/\/$/, '')}/channel/${id}/${file}`);
+      // the CDN path cannot be stat'ed from here, so decide from the channel: the
+      // encoder writes master_cc whenever it splices (failover with a slate/loop) or
+      // carries subtitles
+      const d = await one<any>(
+        `SELECT c.input_failover_enabled, c.input_loss_behavior, p.captions_enabled
+           FROM channels c JOIN groups g ON g.id = c.group_id
+           LEFT JOIN output_profiles p ON p.id = g.output_profile_id WHERE c.id = $1`, [id]);
+      const spliced = !!d && d.input_failover_enabled && ['slate', 'vod_loop'].includes(d.input_loss_behavior);
+      const useCc = ch.kind !== 'radio' && !!d && (file === 'master.m3u8' ? (d.captions_enabled || spliced) : spliced);
+      const out = useCc ? (file === 'master.m3u8' ? 'master_cc.m3u8' : 'manifest_cc.mpd') : file;
+      res.redirect(302, `${cdn.replace(/\/$/, '')}/channel/${id}/${out}`);
       return;
     }
     // Radio packages DASH under the run's dash/ dir; HLS master sits at the run root.
-    const path = ch.kind === 'radio' && file === 'manifest.mpd' ? 'dash/manifest.mpd' : file;
+    let path = ch.kind === 'radio' && file === 'manifest.mpd' ? 'dash/manifest.mpd' : file;
+    // THE DELIVERED MASTER. When the encoder writes master_cc.m3u8 (subtitles, and/or
+    // the playout splice that covers a lost source with the channel's loop), that is
+    // what a viewer must get: the packager's own master has neither, and a viewer
+    // given it stalls when the source drops.
+    if (ch.kind !== 'radio') {
+      const delivered = file === 'master.m3u8' ? 'master_cc.m3u8' : 'manifest_cc.mpd';
+      if (existsSync(join(liveDirFor(id), delivered))) path = delivered;
+    }
     res.redirect(302, `${liveUrlBase(id)}/${path}`);
   })
 );

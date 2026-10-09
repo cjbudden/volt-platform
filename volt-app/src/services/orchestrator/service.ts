@@ -81,7 +81,7 @@ export class Orchestrator {
   launcherForFleet(): TaskLauncher { return this.launcher; }
 
   // ---- context loading -----------------------------------------------------
-  private async loadContext(kind: 'channel' | 'event', id: string): Promise<JobConfigCtx | null> {
+  async loadContext(kind: 'channel' | 'event', id: string): Promise<JobConfigCtx | null> {
     const ownerSql =
       kind === 'channel'
         ? `SELECT c.*, g.output_profile_id, g.account_id FROM channels c JOIN groups g ON g.id=c.group_id WHERE c.id=$1`
@@ -123,6 +123,7 @@ export class Orchestrator {
         filler_ref,
         filler_vod_url,
         output_ladder: owner.output_ladder,   // per-channel ladder override -> encoder
+        filler_build: owner.filler_build ?? null,
         watermark_enabled: owner.watermark_enabled,
         watermark_ref: owner.watermark_ref,
         watermark_position: owner.watermark_position,

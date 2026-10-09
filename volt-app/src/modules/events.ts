@@ -7,6 +7,7 @@ import { orchestrator } from '../services/orchestrator';
 import { validateEntityMetadata } from './metadataSchemas';
 import { defaultTypeId } from '../services/contentTypes';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
+import { scheduleFillerPrep, FILLER_FIELDS, runFillerPrep, fillerStatus } from '../services/fillerPrep';
 
 export const eventsRouter = Router();
 eventsRouter.use(requireAuth);
@@ -122,7 +123,10 @@ eventsRouter.post(
     // against it and against everything derived from it. None chosen = the
     // generic Broadcast event.
     const typeId = b.schemaId ?? await defaultTypeId(accountId(req), 'event');
-    const md = await validateEntityMetadata(accountId(req), typeId, b.metadata, ['event']);
+    const md = await validateEntityMetadata(accountId(req), typeId,
+      // The type's required `name` IS the event's own name: an API client that
+      // sends a name but no metadata was refused with "missing required field: name".
+      { name: b.name, ...(b.metadata ?? {}) }, ['event']);
     const who = actor(req);
     const row = await one<any>(
       `INSERT INTO events(group_id, name, scheduled_start, scheduled_end,
@@ -147,6 +151,7 @@ eventsRouter.post(
     if (b.sources?.length) await replaceEventInputs(row.id, b.sources);
     await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
       action: 'create', entityType: 'event', entityId: row.id, snapshot: { name: row.name } });
+    void scheduleFillerPrep('event', row.id, 'created');
     res.status(201).json(row);
   })
 );
@@ -219,6 +224,7 @@ const editEvent = asyncHandler(async (req, res) => {
       userId: who.userId, label: who.label, expectedVersion,
     });
     if (has('sources') && b.sources) await replaceEventInputs(req.params.id, b.sources);
+    if (FILLER_FIELDS.some((k) => has(k))) void scheduleFillerPrep('event', req.params.id, 'settings changed');
     res.set('ETag', String(row.version));
     res.json({ ...row, _changed: changed });
   } catch (e) {
@@ -310,5 +316,33 @@ eventsRouter.post(
     }).catch(() => {});
     const row = await one('SELECT * FROM events WHERE id = $1', [req.params.id]);
     res.json(row);
+  })
+);
+
+
+/** What each source is (its stored probe) and the state of the pre-built fallback loop. */
+eventsRouter.get(
+  '/:id/filler',
+  asyncHandler(async (req, res) => {
+    const own = await one<any>(
+      `SELECT o.id FROM events o JOIN groups g ON g.id = o.group_id WHERE o.id = $1 AND g.account_id = $2`,
+      [req.params.id, accountId(req)]);
+    if (!own) throw notFound('Not found');
+    const inputs = await query<any>(
+      `SELECT id, role, protocol, rendition_label, ingest_url, probe, probed_at FROM stream_inputs WHERE event_id = $1 ORDER BY role`,
+      [req.params.id]);
+    res.json({ build: await fillerStatus('event', req.params.id), inputs });
+  })
+);
+
+/** Probe the sources and (re)build the loop NOW, waiting for the result. */
+eventsRouter.post(
+  '/:id/filler',
+  asyncHandler(async (req, res) => {
+    const own = await one<any>(
+      `SELECT o.id FROM events o JOIN groups g ON g.id = o.group_id WHERE o.id = $1 AND g.account_id = $2`,
+      [req.params.id, accountId(req)]);
+    if (!own) throw notFound('Not found');
+    res.json({ build: await runFillerPrep('event', req.params.id) });
   })
 );
