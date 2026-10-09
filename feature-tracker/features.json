@@ -1,13 +1,13 @@
 {
-  "updated": "2026-08-23T02:52:42Z",
+  "updated": "2026-10-10T04:30:00Z",
   "features": [
     {
       "id": "live-stream-e2e",
-      "name": "Live stream end to end (create \u2192 transcode \u2192 play)",
+      "name": "Live stream end to end (create → transcode → play)",
       "summary": "Create a Transcode channel with an HLS/RTMP/SRT pull source, Send source, and the real encoder ingests + builds the ABR ladder (x264) + packages CMAF (HLS+DASH) to the origin, played back in the app with real status + event log. Verified in a full local stack against the JR HLS source: 1080/720/480 ABR served + playable.",
       "status": "ready_to_test",
       "test": {
-        "how": "run-on-mac.sh \u2192 Channels \u2192 New channel (Transcode, HLS source) \u2192 open channel \u2192 Send source \u2192 watch Source/Output play.",
+        "how": "run-on-mac.sh → Channels → New channel (Transcode, HLS source) → open channel → Send source → watch Source/Output play.",
         "artifact": ""
       },
       "checks": "Verified end-to-end in a local stack (postgres+control plane+encoder); origin serves a 3-rendition master; tsc + vite build clean.",
@@ -33,7 +33,7 @@
       "summary": "Pull any frame on demand from the chunked origin, scrub via sprite + I-frame trick-play, cut a frame-accurate clip. No proxies.",
       "status": "ready_to_test",
       "test": {
-        "how": "Run the prototype (volt-frame-proto.zip): npm install \u2192 node test.mjs \u2192 node server.mjs \u2192 open /scrub. 15/15 assertions.",
+        "how": "Run the prototype (volt-frame-proto.zip): npm install → node test.mjs → node server.mjs → open /scrub. 15/15 assertions.",
         "artifact": null
       },
       "checks": "15/15 assertions (frame-accuracy MAD 0.02, exact clip, sprite, trick-play)",
@@ -49,7 +49,7 @@
         "how": "Say the word and I'll spin up a live sample share link + page from the local console so you can click expiry / PIN / revoke. Backend is 20/20 e2e.",
         "artifact": null
       },
-      "checks": "20/20 e2e (isolation, PIN, revoke\u2192410, expiry\u2192410, download gating)",
+      "checks": "20/20 e2e (isolation, PIN, revoke→410, expiry→410, download gating)",
       "feedback": [],
       "app_surface": "none"
     },
@@ -150,7 +150,7 @@
       "summary": "Push a clip to YouTube / Facebook / X / TikTok / Dailymotion. Data model + APIs exist; real upload adapters pending.",
       "status": "building",
       "test": {
-        "how": "Not testable yet \u2014 needs each platform's OAuth app credentials from you before the upload adapters go live.",
+        "how": "Not testable yet — needs each platform's OAuth app credentials from you before the upload adapters go live.",
         "artifact": null
       },
       "checks": "foundation built; adapters stubbed",
@@ -163,7 +163,7 @@
       "summary": "Hierarchical, searchable image store for watermarks, slates, posters and channel brands. Storage-driver abstraction: local base dir for local runs, S3 bucket+prefix in cloud. Upload + folder tree + search + kind filter + move/rename + guarded, audit-logged delete (confirm + in-use guard). Generated keyframes/storyboards live under a separate derived/ prefix. Serves /library/* as the image-resize origin.",
       "status": "ready_to_test",
       "test": {
-        "how": "Media \u2192 Image Library. Create a folder (slates/watermarks/brands/posters), upload images, search/filter, delete (asks to confirm; blocks if a channel uses it as a slate).",
+        "how": "Media → Image Library. Create a folder (slates/watermarks/brands/posters), upload images, search/filter, delete (asks to confirm; blocks if a channel uses it as a slate).",
         "artifact": null
       },
       "checks": "backend verified end-to-end (upload/probe/list/search/folders/move/serve/guarded-delete); browser UI type-checked",
@@ -176,7 +176,7 @@
       "summary": "Assign a folder or S3 bucket/prefix as an auto ingest source; new files become assets / VOD / slates / playlist items.",
       "status": "building",
       "test": {
-        "how": "Designed only \u2014 see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.",
+        "how": "Designed only — see DESIGN_file_manager_watchfolder.md. Build starts on your go-ahead.",
         "artifact": null
       },
       "checks": "design complete",
@@ -202,22 +202,22 @@
       "summary": "Runs the REAL encode/package/DVR/record/thumbnail pipeline on-box (no AWS), ORCH_LAUNCHER=local. Now WIRED to the channel UI: Send source starts the real encoder against the channel's configured source and the page plays the real output.",
       "status": "ready_to_test",
       "test": {
-        "how": "On the Mac (with ffmpeg+python3+Shaka packager installed) run run-on-mac.sh \u2014 it prints 'real local encoder: ENABLED'. Open a channel with an HLS pull source, click Start; the output player shows the REAL ENCODER \u00b7 x264 \u2192 CMAF badge and plays the live CMAF with DVR scrub. Stop the channel to generate the poster/storyboard/VTT.",
+        "how": "On the Mac (with ffmpeg+python3+Shaka packager installed) run run-on-mac.sh — it prints 'real local encoder: ENABLED'. Open a channel with an HLS pull source, click Start; the output player shows the REAL ENCODER · x264 → CMAF badge and plays the live CMAF with DVR scrub. Stop the channel to generate the poster/storyboard/VTT.",
         "artifact": null
       },
-      "checks": "12/12 TS integration test drives the real encoder end-to-end (ingest\u2192720/480/360 ladder\u2192CMAF HLS+DASH, decodable; clean stop; poster+5x5 sheet+VTT). Encoder+thumbnailer unit tests pass; real local e2e verified.",
+      "checks": "12/12 TS integration test drives the real encoder end-to-end (ingest→720/480/360 ladder→CMAF HLS+DASH, decodable; clean stop; poster+5x5 sheet+VTT). Encoder+thumbnailer unit tests pass; real local e2e verified.",
       "feedback": [],
       "app_surface": "full"
     },
     {
       "id": "channels-ui",
-      "name": "Channels \u2014 list & create (transcode/package)",
+      "name": "Channels — list & create (transcode/package)",
       "app_surface": "full",
       "status": "ready_to_test",
       "summary": "Channels list (empty state, filter chips, start/stop) + a create drawer that branches by type: transcode = one source + optional backup + selectable output ladder + filler-on-loss; package = per-rendition input rows + fallback (matching URLs or a single source transcoded to all bitrates).",
       "checks": "create inserts channel + stream_inputs + ladder + filler (both flows) verified via API",
       "test": {
-        "how": "Channels \u2192 New channel. Pick Transcode or Packaging; fill the type-specific fields; Create. It appears in the list.",
+        "how": "Channels → New channel. Pick Transcode or Packaging; fill the type-specific fields; Create. It appears in the list.",
         "artifact": null
       },
       "feedback": []
@@ -230,7 +230,7 @@
       "summary": "Channel control page. Now shows REAL data only: source + output players play the live encoder output (/origin/<id>/master.m3u8), status board + event log come from the real encoder report (stream_status/stream_events) incl. the actual encoder/ffmpeg error lines so you can see WHY a source/output failed. EPG shows the real programmes table (empty state when none); viewers empty until real analytics. No fabricated telemetry.",
       "checks": "detail endpoint + optimistic-concurrency PATCH + audit diff verified",
       "test": {
-        "how": "Click a channel in the list. Send source \u2192 Go live; toggle CC; drag the DVR bar; open Settings and save a change.",
+        "how": "Click a channel in the list. Send source → Go live; toggle CC; drag the DVR bar; open Settings and save a change.",
         "artifact": null
       },
       "feedback": []
@@ -254,9 +254,9 @@
       "app_surface": "partial",
       "status": "building",
       "summary": "Managed library of output ladder profiles (reuses output_profiles): list, create from scratch or copy an existing profile, rename, edit; delete with an API-level confirmation workflow + in-use guard + audit log. Assign a profile to a transcode channel's output.",
-      "checks": "in progress \u2014 schema + seed + CRUD + UI + assign",
+      "checks": "in progress — schema + seed + CRUD + UI + assign",
       "test": {
-        "how": "Profiles \u2192 New (or copy an existing) \u2192 edit rungs \u2192 save. Assign it when creating a transcode channel. Try deleting one in use (blocked) and an unused one (confirm required).",
+        "how": "Profiles → New (or copy an existing) → edit rungs → save. Assign it when creating a transcode channel. Try deleting one in use (blocked) and an unused one (confirm required).",
         "artifact": null
       },
       "feedback": []
@@ -266,10 +266,10 @@
       "name": "Form & field management (protocol-aware sources)",
       "app_surface": "partial",
       "status": "ready_to_test",
-      "summary": "Hybrid plan (no general form builder): source fields change to suit the selected protocol via a typed descriptor registry served at GET /api/ingest-protocols (srt/rtmp/rtmps/hls/dash/ndi/st2110 \u2014 label, placeholder, example, hint, stream-key field, push|pull). Wired into the create form and settings drawer. i18n label catalogs + a metadata_schemas custom-field renderer are the next phases.",
+      "summary": "Hybrid plan (no general form builder): source fields change to suit the selected protocol via a typed descriptor registry served at GET /api/ingest-protocols (srt/rtmp/rtmps/hls/dash/ndi/st2110 — label, placeholder, example, hint, stream-key field, push|pull). Wired into the create form and settings drawer. i18n label catalogs + a metadata_schemas custom-field renderer are the next phases.",
       "checks": "registry + endpoint verified; forms + settings type-checked and wired; enum aligned to DB",
       "test": {
-        "how": "New channel \u2192 change the source protocol; the URL example/placeholder + hint change, and RTMP/RTMPS show a Stream key field. Same in a channel's Settings drawer.",
+        "how": "New channel → change the source protocol; the URL example/placeholder + hint change, and RTMP/RTMPS show a Stream key field. Same in a channel's Settings drawer.",
         "artifact": null
       },
       "feedback": []
@@ -316,10 +316,10 @@
     {
       "id": "share-preview-live",
       "name": "Share preview link (live channel)",
-      "summary": "A private, expiring link to preview a channel's output before go-live \u2014 separate from going on air, and it ignores geo/access rules. Set it up in one panel: label, recipient emails (optionally mailed the link), an expiry preset or an exact date/time, an optional PIN (generate one), a view cap, watermark and notify-on-open. The created link is shown once with a copy button and a QR to scan it onto a phone. Existing links for the channel are listed with view stats, last opened, who it went to, and actions to extend by 7 days, issue a new URL (killing the old one) or revoke.",
+      "summary": "A private, expiring link to preview a channel's output before go-live — separate from going on air, and it ignores geo/access rules. Set it up in one panel: label, recipient emails (optionally mailed the link), an expiry preset or an exact date/time, an optional PIN (generate one), a view cap, watermark and notify-on-open. The created link is shown once with a copy button and a QR to scan it onto a phone. Existing links for the channel are listed with view stats, last opened, who it went to, and actions to extend by 7 days, issue a new URL (killing the old one) or revoke.",
       "status": "ready_to_test",
       "test": {
-        "how": "Channel detail \u2192 Share preview. Create a link with a PIN and a recipient; copy it or scan the QR and open it in a private window. Then try: extend 7 days, New URL (the first URL should stop working), revoke. The email is recorded as a notification delivery (adapters are stubs until SES is wired).",
+        "how": "Channel detail → Share preview. Create a link with a PIN and a recipient; copy it or scan the QR and open it in a private window. Then try: extend 7 days, New URL (the first URL should stop working), revoke. The email is recorded as a notification delivery (adapters are stubs until SES is wired).",
         "artifact": ""
       },
       "checks": "Backend 42 assertions in share-links.check.sh (create/resolve/PIN/revoke/expiry + custom expiry, PATCH, rotate, scoped list, cross-tenant). QR verified against a real QR reader across v1-10, ECC L and M.",
@@ -359,7 +359,7 @@
       "status": "ready_to_test",
       "app_surface": "full",
       "test": {
-        "how": "Channels \u2192 New channel \u2192 Watermark (transcode only): pick a logo, position, size, opacity, margin, create. Or Channel detail \u2192 Settings \u2192 Watermark on an existing channel; the player preview shows the placement before burn-in.",
+        "how": "Channels → New channel → Watermark (transcode only): pick a logo, position, size, opacity, margin, create. Or Channel detail → Settings → Watermark on an existing channel; the player preview shows the placement before burn-in.",
         "artifact": ""
       },
       "checks": "tsc + encoder syntax clean. NEEDS a transcode-channel run to confirm the burned-in overlay renders correctly (position/size/opacity).",
@@ -368,11 +368,11 @@
     {
       "id": "channel-brand-image",
       "name": "Channel brand image (info + guide)",
-      "summary": "A logo/artwork image and a description on the channel \u2014 its identity, kept separate from the burned-in watermark. Set on the CREATE form and in settings (browse the Image Library or upload). Shown as the list thumbnail and in the detail header, and served to guide clients via GET /api/epg/channels (id, name, icon, colour, description, medium) \u2014 the same thing XMLTV carries as <channel><icon src/></channel>. For a radio station it is the artwork a player shows.",
+      "summary": "A logo/artwork image and a description on the channel — its identity, kept separate from the burned-in watermark. Set on the CREATE form and in settings (browse the Image Library or upload). Shown as the list thumbnail and in the detail header, and served to guide clients via GET /api/epg/channels (id, name, icon, colour, description, medium) — the same thing XMLTV carries as <channel><icon src/></channel>. For a radio station it is the artwork a player shows.",
       "status": "ready_to_test",
       "app_surface": "full",
       "test": {
-        "how": "Channels \u2192 New channel \u2192 Brand: pick or upload a logo, add a description, create. The list thumbnail and the detail header should show it. Change it later in Settings \u2192 Brand. Check GET /api/epg/channels returns it as icon.",
+        "how": "Channels → New channel → Brand: pick or upload a logo, add a description, create. The list thumbnail and the detail header should show it. Change it later in Settings → Brand. Check GET /api/epg/channels returns it as icon.",
         "artifact": ""
       },
       "checks": "Built 16 Aug. Brand is never passed to the encoder (asserted in radio-brand.check.ts).",
@@ -428,6 +428,19 @@
         "artifact": ""
       },
       "checks": "34/34 recordings e2e; transcript+EPG search verified in-browser.",
+      "feedback": []
+    },
+    {
+      "id": "xmltv-export",
+      "name": "XMLTV export: download, partner feeds, channel IDs",
+      "summary": "WHY: XMLTV is what every PVR, IPTV middleware and guide aggregator reads; without it the guide cannot be plugged into anything a customer already runs. WHAT: download the whole guide as XMLTV (scheduled or as-run, channel-local or UTC), give each partner a revocable feed URL they poll (with .xml.gz), and set the channel ID partners see. JSON channel list at GET /api/epg/channels.",
+      "status": "ready_to_test",
+      "app_surface": "full",
+      "test": {
+        "how": "EPG > XMLTV export. 1) Download .xml and open it (or run it through xmllint --valid with xmltv.dtd). 2) New feed, copy the URL, open it in a browser or point Jellyfin/TVHeadend/Kodi IPTV Simple at it. 3) Set a Channel ID such as news.yourbrand.com, download again and check <channel id> and programme channel= use it. 4) Disable / New URL / Revoke and confirm the old URL 404s.",
+        "artifact": "volt-app/docs/DESIGN_epg_xmltv.md"
+      },
+      "checks": "Built 10 Oct. xmltv-pure 49/49 + xmltv e2e 49/49, every document DTD-validated; 6,722 programmes / 20 channels in ~0.3 s. XMLTV IMPORT is not built.",
       "feedback": []
     }
   ]

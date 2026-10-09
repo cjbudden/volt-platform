@@ -998,6 +998,42 @@ export const api = {
 
   // EPG — programme guides for channels and event-day schedules
   epgOwners: (): Promise<EpgOwnerRow[]> => req('/epg/owners'),
+  // ---- XMLTV export (modules/xmltv.ts) ----
+  guideChannels: (): Promise<GuideChannel[]> => req('/epg/channels'),
+  setXmltvId: (channelId: string, xmltvId: string | null): Promise<{ id: string; xmltvId: string; xmltvIdSet: boolean }> =>
+    req(`/epg/channels/${channelId}/xmltv-id`, { method: 'PUT', body: JSON.stringify({ xmltvId }) }),
+  xmltvFeeds: (): Promise<XmltvFeed[]> => req('/epg/xmltv/feeds'),
+  createXmltvFeed: (b: Partial<XmltvFeedBody> & { name: string }): Promise<XmltvFeed & { url: string; gzipUrl: string }> =>
+    req('/epg/xmltv/feeds', { method: 'POST', body: JSON.stringify(b) }),
+  patchXmltvFeed: (id: string, b: Partial<XmltvFeedBody>): Promise<XmltvFeed> =>
+    req(`/epg/xmltv/feeds/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  rotateXmltvFeed: (id: string): Promise<XmltvFeed & { url: string; gzipUrl: string }> =>
+    req(`/epg/xmltv/feeds/${id}/rotate`, { method: 'POST' }),
+  deleteXmltvFeed: async (id: string): Promise<void> => {
+    const r = await fetch('/api/epg/xmltv/feeds/' + id, { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
+    if (!r.ok && r.status !== 204) throw new ApiError(r.status, `${r.status}`, null)
+  },
+  /** The XMLTV document as a file the browser saves. Goes through fetch, not a
+   *  link, because the export needs the session's bearer token. */
+  downloadXmltv: async (q: { pastDays: number; futureDays: number; times: 'scheduled' | 'asrun'; tz: 'local' | 'utc'; includeEvents?: boolean; channelIds?: string[] }): Promise<{ bytes: number; programmes: string | null }> => {
+    await refreshIfDueSoon()
+    const qs = new URLSearchParams({ pastDays: String(q.pastDays), futureDays: String(q.futureDays), times: q.times, tz: q.tz })
+    if (q.includeEvents) qs.set('includeEvents', 'true')
+    if (q.channelIds?.length) qs.set('channelId', q.channelIds.join(','))
+    const r = await fetch('/api/epg/xmltv?' + qs.toString(), { headers: { authorization: `Bearer ${getToken()}` } })
+    if (!r.ok) {
+      let msg = `${r.status}`
+      try { const b = await r.json(); msg = b.error || msg } catch { /* not json */ }
+      throw new ApiError(r.status, msg, null)
+    }
+    const blob = await r.blob()
+    const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || 'volt-guide.xml'
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = name
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+    return { bytes: blob.size, programmes: r.headers.get('x-volt-guide-counts') }
+  },
   epgProgrammes: (owner: EpgOwner, fromIso: string, toIso: string): Promise<ProgrammeRow[]> =>
     req(`/epg?${owner.kind === 'event' ? 'eventId' : 'channelId'}=${owner.id}&from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`),
   /** The VoD lifecycle for a window, keyed by programme id. Measured against
@@ -1606,6 +1642,22 @@ export interface EpgOwnerRow {
   programme_count: number; first_at: string | null; last_at: string | null
   auto_clip_count: number; next_title: string | null; next_at: string | null
 }
+/* ---- XMLTV export ---------------------------------------------------------- */
+export interface GuideChannel {
+  id: string; xmltvId: string; xmltvIdSet: boolean; name: string; medium: 'tv' | 'radio'
+  icon: string | null; brandRef: string | null; description: string | null; language: string | null
+  tz: string; epgEnabled: boolean
+}
+export interface XmltvFeedBody {
+  name: string; channelIds: string[] | null; includeEvents: boolean
+  pastDays: number; futureDays: number; timeBasis: 'scheduled' | 'asrun'; tzMode: 'local' | 'utc'
+  lang: string | null; enabled: boolean
+}
+export interface XmltvFeed extends XmltvFeedBody {
+  id: string; tokenPrefix: string; lastPolledAt: string | null; pollCount: number
+  createdAt: string; updatedAt: string
+}
+
 export interface ProgrammeRow {
   id: string; channel_id: string | null; event_id: string | null
   title: string; starts_at: string; ends_at: string; status: string

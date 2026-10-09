@@ -27,9 +27,9 @@
 </style></head><body>
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
- <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-08-23T02:52:42Z.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>24</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>16</b> 📱 In app</span><span class=chip><b>6</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-10T04:30:00Z.</div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>25</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#64748b"><b>6</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>17</b> 📱 In app</span><span class=chip><b>6</b> 📱 Partial</span><span class=chip><b>10</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>Live stream end to end (create → transcode → play)</div>
@@ -341,6 +341,19 @@
     <div class=actions>
          <button class="btn ok" data-approve="Recordings: searchable library + NLE clipping workbench">✓ Approve as working</button>
          <button class="btn warn" data-changes="Recordings: searchable library + NLE clipping workbench">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>XMLTV export: download, partner feeds, channel IDs</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>WHY: XMLTV is what every PVR, IPTV middleware and guide aggregator reads; without it the guide cannot be plugged into anything a customer already runs. WHAT: download the whole guide as XMLTV (scheduled or as-run, channel-local or UTC), give each partner a revocable feed URL they poll (with .xml.gz), and set the channel ID partners see. JSON channel list at GET /api/epg/channels.</div>
+    <div class=meta>Built 10 Oct. xmltv-pure 49/49 + xmltv e2e 49/49, every document DTD-validated; 6,722 programmes / 20 channels in ~0.3 s. XMLTV IMPORT is not built.</div>
+    <div class=how><b>How to test:</b> EPG &gt; XMLTV export. 1) Download .xml and open it (or run it through xmllint --valid with xmltv.dtd). 2) New feed, copy the URL, open it in a browser or point Jellyfin/TVHeadend/Kodi IPTV Simple at it. 3) Set a Channel ID such as news.yourbrand.com, download again and check &lt;channel id&gt; and programme channel= use it. 4) Disable / New URL / Revoke and confirm the old URL 404s.</div>
+    <div class=note>Test tool: open <b>“volt-app/docs/DESIGN_epg_xmltv.md”</b> in your artifacts gallery.</div>
+    <div class=actions>
+         <button class="btn ok" data-approve="XMLTV export: download, partner feeds, channel IDs">✓ Approve as working</button>
+         <button class="btn warn" data-changes="XMLTV export: download, partner feeds, channel IDs">Request changes</button>
        </div>
     
   </div><div class=card data-status="in_review" data-app="none">

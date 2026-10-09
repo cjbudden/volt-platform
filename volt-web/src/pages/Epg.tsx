@@ -3,6 +3,7 @@ import { api, type EpgOwnerRow } from '../api'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 import { navigate } from '../router'
 import { pressable } from '../a11y'
+import XmltvDrawer from './EpgXmltv'
 
 /* ============================================================================
    EPG section — one guide per channel (the traditional programme guide) and
@@ -34,6 +35,7 @@ export default function Epg() {
   // filter alongside two channels and made the filter useless for either.
   const [filter, setFilter] = useState<'all' | 'channel' | 'radio' | 'event'>('all')
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [xmltvOpen, setXmltvOpen] = useState(false)
 
   useEffect(() => {
     api.epgOwners().then(setRows).catch((e: any) => setErr(e.message))
@@ -60,7 +62,14 @@ export default function Epg() {
   return (
     <>
       <PageHead title="EPG" sub="Programme guides. Channels and radio stations carry a traditional guide; events carry the day's schedule. Each slot can control geo access, trigger a slate/loop/VOD replacement, and cut a clip automatically after airing."
-        action={<NewButton label="New EPG" onClick={() => setPickerOpen(true)} />} />
+        action={<div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn" onClick={() => setXmltvOpen(true)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" width="14" height="14" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+            XMLTV export
+          </button>
+          <NewButton label="New EPG" onClick={() => setPickerOpen(true)} />
+        </div>} />
+      {xmltvOpen && <XmltvDrawer onClose={() => setXmltvOpen(false)} />}
       {err && <div className="err">{err}</div>}
       {rows === null ? (
         <div className="loading">Loading guides…</div>

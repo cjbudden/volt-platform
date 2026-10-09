@@ -32,6 +32,7 @@ import { ingestRouter as ingestRulesRouter, ingestCallbacksRouter } from './modu
 import { tusRouter } from './modules/tus';
 import { paymentsRouter, paymentsAppRouter, paymentsWebhookRouter } from './modules/payments';
 import { epgRouter } from './modules/epg';
+import { xmltvAdminRouter, xmltvPublicRouter } from './modules/xmltv';
 import { appsRouter, availabilityRouter, accessRouter } from './modules/apps';
 import { usersRouter } from './modules/users';
 import { userGroupsRouter } from './modules/userGroups';
@@ -203,6 +204,10 @@ export function createServer() {
   // exposes the single shared resource.
   app.use(publicShareRouter);
 
+  // Public XMLTV partner feeds (NO admin auth): /xmltv/<token>.xml[.gz]. The
+  // token is the credential and carries the scope; see modules/xmltv.ts.
+  app.use(xmltvPublicRouter);
+
   // Public live delivery (NO admin auth): /live/:id/master.m3u8|manifest.mpd. Only
   // serves when the channel is on air with valid content; off air returns 404.
   app.use(publicLiveRouter);
@@ -312,6 +317,7 @@ export function createServer() {
   app.use('/api/uploads', uploadChunksRouter);
   app.use('/api/uploads', uploadsRouter);
   app.use('/api/scheduled-clips', scheduledClipsRouter); // timeline clip scheduling
+  app.use('/api/epg', xmltvAdminRouter);                  // XMLTV export, guide channels, partner feeds (per-route auth)
   app.use('/api/epg', epgRouter);                        // EPG / programme scheduling
   // Icecast asks this before admitting a listener; it is the on-air gate now
   // that the control plane is not the one holding the socket. Mounted BEFORE

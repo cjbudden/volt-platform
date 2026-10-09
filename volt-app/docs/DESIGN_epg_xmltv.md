@@ -1,8 +1,13 @@
 # EPG: XMLTV in and XMLTV out
 
-**Status: REQUIRED, NOT BUILT.** Recorded here so it does not live only in a
-conversation. There is currently no XMLTV support anywhere in the codebase —
-`grep -ri xmltv` across `src/` and `docs/` returns nothing.
+**Status (10 Oct 2026): OUTPUT BUILT, INPUT NOT BUILT.**
+
+Output shipped as `services/xmltv.ts` + `modules/xmltv.ts`, migration
+`0035_xmltv_export.sql`, console drawer **EPG → XMLTV export**, checks
+`test/xmltv-pure.check.ts` and `test/xmltv.check.sh` (every document validated
+against the XMLTV project's DTD in `test/fixtures/xmltv.dtd`). See *Output, as
+built* at the end. The ordering note below still stands: input is the next
+piece, and it is the one that unblocks onboarding a customer's existing guide.
 
 ## The requirement
 
@@ -76,4 +81,54 @@ So the work is mapping and transport, not a new data model.
 Input before output. Ingesting a customer's existing guide is what unblocks an
 onboarding; emitting ours matters once there is something worth emitting.
 
-Neither is started. This file is the note.
+Output is built (below). Input is not started.
+
+## Output, as built (10 Oct 2026)
+
+**Endpoints**
+
+| Route | Auth | Use |
+|---|---|---|
+| `GET /api/epg/xmltv` | session JWT or secret account key | console download, server-to-server pull |
+| `GET /xmltv/<token>.xml` / `.xml.gz` | the token (public) | partner feed a PVR / middleware / aggregator polls |
+| `GET /api/epg/channels` | session or key | channel list as JSON (id, xmltvId, name, icon, description, language, medium, tz) |
+| `PUT /api/epg/channels/:id/xmltv-id` | session or key | set or clear a channel's XMLTV id |
+| `GET/POST /api/epg/xmltv/feeds`, `PATCH/DELETE /api/epg/xmltv/feeds/:id`, `POST …/:id/rotate` | session or key | partner feed management |
+
+Query on `/api/epg/xmltv`: `channelId` (comma list), `pastDays`/`futureDays` or
+`from`/`to` (max 93 days), `times=scheduled|asrun`, `tz=local|utc`,
+`includeEvents=true`, `lang`, `download=0` to serve inline.
+
+**Decisions taken on the open questions above**
+
+- *Scheduled or as-run:* both, explicit. `times` is a parameter (feed setting),
+  echoed in an `X-Volt-Time-Basis` header and a comment at the top of the
+  document. An unknown value is a 400, never a silent default.
+- *Channel ids:* `channels.xmltv_id`, optional, unique per account, defaults to
+  the UUID. Programmes reference the same id.
+- *Polling:* partner feeds are their own credential (sha256 stored, shown once),
+  scoped per partner, revocable and rotatable without touching other partners.
+  `Cache-Control: private, max-age=300`, ETag + Last-Modified, 304 when nothing
+  in the window changed; the feed window snaps to the hour so polls inside the
+  same hour share an ETag.
+- *Times:* channel-local offset by default (`tz` column), computed per instant,
+  so a programme either side of a DST change carries the right offset. `tz=utc`
+  for consumers that prefer it.
+- *Scope:* cancelled programmes and channels with the guide switched off
+  (`epg_enabled = false`) are left out. Overlaps are emitted as stored (the
+  conflict view is where they are fixed, not the export).
+
+**Metadata mapping** (programme `metadata` → XMLTV element): `subTitle` →
+`sub-title`, `description` → `desc`, `credits` / `credits.<role>` →
+`credits` (unknown roles as `guest`), `date`/`productionYear` → `date`,
+`genre`/`category`/`categories` → `category`, `tags` → `keyword`, `language`,
+`icon`/`image` (store keys resolved through the image service) → `icon`,
+`url`, `country`, `season`+`episodeNumber` → `episode-num` (`xmltv_ns`, zero
+based, plus `onscreen`), `repeat`/`previouslyShown`, `premiere`, `lastChance`,
+`isNew`, `subtitles`, `rating`+`ratingSystem`, `starRating` ("4/5"). Radio
+programmes carry `<video><present>no</present></video>`.
+
+**Not in this release:** `PUBLIC_BASE_URL` must be set to the public host for
+feed and icon URLs to be right outside a dev box; feeds do not yet emit
+per-programme geo/blackout information (XMLTV has no element for it); the
+Postman collection and API docs page do not list these routes yet.
