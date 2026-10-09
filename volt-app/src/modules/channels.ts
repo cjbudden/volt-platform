@@ -1,3 +1,4 @@
+import { encoderRunning, lockedChanges } from '../services/settingsLock';
 import { Router } from 'express';
 import { z } from 'zod';
 import { query, one, tx } from '../db';
@@ -345,6 +346,18 @@ const editChannel = asyncHandler(async (req, res) => {
       has('metadata') ? body.metadata : current.metadata, ['channel']);
     patch.schema_id = md.schemaId;
     patch.metadata = md.metadata;
+  }
+
+  // SETTINGS LOCK: what the encoder reads at start cannot change under it.
+  // See services/settingsLock.ts. Re-sending the stored value is not a change.
+  if (await encoderRunning(req.params.id)) {
+    const locked = await lockedChanges(req.params.id, current, patch, body as any, has);
+    if (locked.length) {
+      return res.status(409).json({
+        error: `Stop the channel to change ${locked.join(', ')}. These are read by the encoder when it starts.`,
+        code: 'locked_while_running', fields: locked,
+      });
+    }
   }
 
   const im = req.get('If-Match');

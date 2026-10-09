@@ -1,13 +1,14 @@
 # EPG: XMLTV in and XMLTV out
 
-**Status (10 Oct 2026): OUTPUT BUILT, INPUT NOT BUILT.**
+**Status (10 Oct 2026): BUILT, both directions.**
 
-Output shipped as `services/xmltv.ts` + `modules/xmltv.ts`, migration
-`0035_xmltv_export.sql`, console drawer **EPG → XMLTV export**, checks
-`test/xmltv-pure.check.ts` and `test/xmltv.check.sh` (every document validated
-against the XMLTV project's DTD in `test/fixtures/xmltv.dtd`). See *Output, as
-built* at the end. The ordering note below still stands: input is the next
-piece, and it is the one that unblocks onboarding a customer's existing guide.
+Output: `services/xmltv.ts` + `modules/xmltv.ts`, migration `0035_xmltv_export.sql`,
+console **EPG → XMLTV export**, see *Output, as built*. Input:
+`services/xmltvParse.ts` + `services/xmltvImport.ts` + `modules/xmltvImport.ts`,
+migration `0037_xmltv_import.sql`, console **EPG → XMLTV import**, see *Input,
+as built*. Checks: `xmltv-pure`, `xmltv`, `xmltv-import-pure`, `xmltv-import`
+(every exported document validated against the XMLTV project's DTD, and an
+export imported back into a second account).
 
 ## The requirement
 
@@ -81,7 +82,7 @@ So the work is mapping and transport, not a new data model.
 Input before output. Ingesting a customer's existing guide is what unblocks an
 onboarding; emitting ours matters once there is something worth emitting.
 
-Output is built (below). Input is not started.
+Both are built (below).
 
 ## Output, as built (10 Oct 2026)
 
@@ -132,3 +133,31 @@ programmes carry `<video><present>no</present></video>`.
 feed and icon URLs to be right outside a dev box; feeds do not yet emit
 per-programme geo/blackout information (XMLTV has no element for it); the
 Postman collection and API docs page do not list these routes yet.
+
+## Input, as built (10 Oct 2026)
+
+**Sources.** One per guide taken in: a URL fetched on a schedule (1 hour to a
+week) or files uploaded by hand. Each carries the zone for times with no offset
+(default: each channel's own `tz`), how many days of history to keep, an
+optional preferred language for multi-language titles, and whether to map
+channels automatically.
+
+**Channel aliases** (`epg_channel_aliases`). Every channel id a file names is
+recorded per source, with its display name and icon. Auto-mapping takes only an
+unambiguous match: a Volt channel whose `xmltv_id` equals theirs, else exactly
+one channel with the same name. Everything else waits, unmapped, its programmes
+counted and skipped, until somebody picks a channel in the console. Re-pointing
+a mapping takes that source's not-yet-aired programmes off the old channel.
+
+**A run.** Gzip and Latin-1 are detected and read; the file streams through the
+reader; times are resolved per channel in its zone; a missing stop is the next
+start, else `<length>`, else the programme is reported and skipped; writes are
+an upsert on `source_ref = xmltv:<source>:<their channel>:<start>`, so the same
+file twice changes nothing; inside the span the file covers for a channel,
+programmes the file no longer lists are removed, except any with a clip cut
+from it. Overlaps are counted and kept. A failed run changes nothing and tells
+the account's admins.
+
+**API** (`/api/epg/import`): `GET/POST /sources`, `PATCH/DELETE /sources/:id`,
+`POST /sources/:id/run`, `POST /sources/:id/upload` (the file as the body),
+`GET /sources/:id/channels`, `PUT /aliases/:id`, `GET /sources/:id/runs`.

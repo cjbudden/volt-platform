@@ -123,3 +123,23 @@ scripts/migrate.js            forward-only migration runner (for RDS)
 ## Deploy
 
 Container image builds via the multi-stage `Dockerfile`. Target **ECS Fargate** for the control plane (small, always-on) with **RDS PostgreSQL**. Run `npm run migrate` against RDS on deploy. Secrets (DB creds, JWT secrets, Axinom management key) via AWS Secrets Manager — never in the image.
+
+## Configuration for notifications, social publishing and guide import
+
+All optional: without them each feature says what is missing in the console,
+and the rest of the platform is unaffected.
+
+| Setting | For |
+|---|---|
+| `PUBLIC_BASE_URL` | The public host. XMLTV feed URLs, icons, and the OAuth callback (`<host>/api/social/callback/<platform>`) are built from it. |
+| `SMTP_URL`, `NOTIFY_FROM` | Notification email, e.g. `smtps://user:pass@email-smtp.ap-southeast-2.amazonaws.com:465` and `Volt <alerts@example.com>`. |
+| `FCM_SERVICE_ACCOUNT` | Device push: the Firebase service account JSON, or a path to it. |
+| `SOCIAL_TOKEN_KEY` | 32 bytes (hex or base64) that encrypt linked social accounts' tokens. Set it before linking real accounts. |
+| `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET` | YouTube publishing (Google Cloud OAuth client, YouTube Data API v3 enabled). |
+| `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET` | Facebook Page publishing (Meta app with Pages and video permissions). |
+| `X_CLIENT_ID`, `X_CLIENT_SECRET` | X posting (OAuth 2.0 app with media.write). |
+| `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | TikTok Content Posting API. Posts are private until TikTok audits the app. |
+| `DAILYMOTION_API_KEY`, `DAILYMOTION_API_SECRET` | Dailymotion publishing. |
+
+Register `<PUBLIC_BASE_URL>/api/social/callback/<platform>` as the redirect URL
+with each platform. Admin > Social accounts shows the exact values.

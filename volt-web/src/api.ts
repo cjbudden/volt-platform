@@ -247,6 +247,10 @@ export interface ChannelDetail extends Channel {
   autoConnect?: boolean
   /** Whether the channel is MEANT to be running. Survives a crash; `status` does not. */
   desiredState?: 'running' | 'stopped'
+  /** An encoder instance is up, so the settings it reads at start are locked. */
+  encoderRunning?: boolean
+  /** Settings-patch keys locked while it runs. */
+  lockedWhileRunning?: string[]
   /** Set only once auto-connect has stopped trying. Carries the reason. */
   resumeGaveUpAt?: string | null
   resumeLastError?: string | null
@@ -1064,6 +1068,77 @@ export const api = {
    *  recordings. Sorting and filtering are server-side because the counts and
    *  the available range are computed in SQL. */
   /** Ask a source URL what it is, before saving it. Nothing is written. */
+  /** ffprobe a channel or event source from the control plane (services/sourceProbe.ts). */
+  // ---- XMLTV import (modules/xmltvImport.ts) ----
+  importSources: (): Promise<ImportSource[]> => req('/epg/import/sources'),
+  createImportSource: (b: Partial<ImportSourceBody> & { name: string; kind: 'url' | 'upload' }): Promise<ImportSource> =>
+    req('/epg/import/sources', { method: 'POST', body: JSON.stringify(b) }),
+  updateImportSource: (id: string, b: Partial<ImportSourceBody>): Promise<ImportSource> =>
+    req(`/epg/import/sources/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteImportSource: (id: string): Promise<{ deleted: boolean; removedProgrammes: number }> =>
+    req(`/epg/import/sources/${id}`, { method: 'DELETE' }),
+  runImportSource: (id: string): Promise<ImportRunResult> => req(`/epg/import/sources/${id}/run`, { method: 'POST' }),
+  /** The file goes up as the request body, untouched (gzip stays gzip). */
+  uploadImportFile: async (id: string, file: File): Promise<ImportRunResult> => {
+    await refreshIfDueSoon()
+    const gz = /\.gz$/i.test(file.name) || file.type === 'application/gzip'
+    const r = await fetch(`/api/epg/import/sources/${id}/upload`, {
+      method: 'POST', body: file,
+      headers: { authorization: `Bearer ${getToken()}`, 'content-type': gz ? 'application/gzip' : 'application/xml' },
+    })
+    const b = await r.json().catch(() => null)
+    if (!r.ok) throw new ApiError(r.status, b?.error || `${r.status}`, b)
+    return b
+  },
+  importChannels: (id: string): Promise<ImportAlias[]> => req(`/epg/import/sources/${id}/channels`),
+  mapImportChannel: (aliasId: string, channelId: string | null): Promise<{ id: string; channelId: string | null; removedFromPrevious: number }> =>
+    req(`/epg/import/aliases/${aliasId}`, { method: 'PUT', body: JSON.stringify({ channelId }) }),
+  importRuns: (id: string): Promise<ImportRun[]> => req(`/epg/import/sources/${id}/runs`),
+  // ---- social publishing (modules/social.ts) ----
+  socialPlatforms: (): Promise<SocialPlatformsStatus> => req('/social/platforms'),
+  socialAccounts: (): Promise<SocialAccount[]> => req('/social/accounts'),
+  socialConnect: (platform: string): Promise<{ url: string }> => req(`/social/connect/${platform}`, { method: 'POST' }),
+  socialSandbox: (platform: string, label?: string): Promise<SocialAccount> =>
+    req(`/social/sandbox/${platform}`, { method: 'POST', body: JSON.stringify({ label }) }),
+  socialSetEnabled: (id: string, enabled: boolean) => req(`/publish-targets/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
+  socialDisconnect: async (id: string): Promise<void> => {
+    const r = await fetch('/api/publish-targets/' + id, { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
+    if (!r.ok && r.status !== 204) throw new ApiError(r.status, `${r.status}`, null)
+  },
+  socialDefaults: (assetId: string): Promise<Record<string, SocialPost>> => req(`/social/publish/${assetId}/defaults`),
+  socialPublish: (assetId: string, targets: { targetId: string; post: SocialPost }[]): Promise<{ publications: any[] }> =>
+    req(`/social/publish/${assetId}`, { method: 'POST', body: JSON.stringify({ targets }) }),
+  socialPublications: (assetId: string): Promise<SocialPublication[]> => req(`/social/publications?assetId=${encodeURIComponent(assetId)}`),
+  socialRetry: (id: string, post?: SocialPost) => req(`/social/publications/${id}/retry`, { method: 'POST', body: JSON.stringify(post ? { post } : {}) }),
+  socialTakeDown: (id: string) => req(`/social/publications/${id}/remove`, { method: 'POST' }),
+  socialSyncViews: (): Promise<{ synced: number }> => req('/social/sync-views', { method: 'POST' }),
+  // ---- notifications (modules/notifications.ts) ----
+  inbox: (): Promise<{ recipient: string; unread: number; items: InboxItem[] }> => req('/notifications/inbox'),
+  markRead: (id: string) => req(`/notifications/inbox/${id}/read`, { method: 'POST' }),
+  markAllRead: (): Promise<{ read: number }> => req('/notifications/inbox/read-all', { method: 'POST' }),
+  notificationConfig: (): Promise<NotificationConfig> => req('/notifications/config'),
+  notifications: (): Promise<NotificationRow[]> => req('/notifications'),
+  notification: (id: string): Promise<NotificationRow & { deliveries: DeliveryRow[] }> => req(`/notifications/${id}`),
+  retryDelivery: (id: string): Promise<DeliveryRow> => req(`/notifications/deliveries/${id}/retry`, { method: 'POST' }),
+  retryAllDeliveries: (): Promise<{ retried: number }> => req('/notifications/retry', { method: 'POST', body: '{}' }),
+  testNotification: (channel: 'email' | 'in_app' | 'push'): Promise<{ id: string; status: string; error: string | null; gaveUp: boolean }> =>
+    req('/notifications/test', { method: 'POST', body: JSON.stringify({ channel }) }),
+  notificationTemplates: (): Promise<NotificationTemplate[]> => req('/notification-templates'),
+  createNotificationTemplate: (b: { key: string; subject: string; body: string }): Promise<NotificationTemplate> =>
+    req('/notification-templates', { method: 'POST', body: JSON.stringify(b) }),
+  updateNotificationTemplate: (id: string, b: { subject?: string; body?: string }): Promise<NotificationTemplate> =>
+    req(`/notification-templates/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteNotificationTemplate: async (id: string): Promise<void> => {
+    const r = await fetch('/api/notification-templates/' + id, { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
+    if (!r.ok && r.status !== 204) throw new ApiError(r.status, `${r.status}`, null)
+  },
+  myDevices: (): Promise<{ id: string; platform: string; label: string | null; created_at: string; last_seen_at: string; token_prefix: string }[]> => req('/notifications/devices'),
+  removeDevice: async (id: string): Promise<void> => {
+    const r = await fetch('/api/notifications/devices/' + id, { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
+    if (!r.ok && r.status !== 204) throw new ApiError(r.status, `${r.status}`, null)
+  },
+  probeSource: (url: string, protocol?: string): Promise<SourceProbe> =>
+    req('/sources/probe', { method: 'POST', body: JSON.stringify({ url, protocol }) }),
   probeRadioSource: (url: string): Promise<IcyProbe> =>
     req('/radio/probe', { method: 'POST', body: JSON.stringify({ url }) }),
   /** The three lanes in one call, so they cannot disagree about a boundary. */
@@ -2166,6 +2241,65 @@ export interface MediaFile {
   tags: string[]; store_key: string; status: string; version: number; created_at: string; url: string
 }
 
+export interface ImportSourceBody {
+  name: string; kind: 'url' | 'upload'; url: string | null; refreshHours: number | null; fallbackTz: string | null
+  keepPastDays: number; lang: string | null; autoMap: boolean; enabled: boolean
+}
+export interface ImportCounts {
+  bytes: number; channelsInFile: number; programmesInFile: number; mappedChannels: number; unmappedChannels: number
+  skippedUnmapped: number; droppedOld: number; droppedFar: number; badTime: number; noEnd: number
+  inserted: number; updated: number; unchanged: number; removed: number; overlaps: number
+}
+export interface ImportRun { id: string; trigger: string; started_at: string; finished_at: string | null; status: 'running' | 'ok' | 'warnings' | 'failed'; counts: Partial<ImportCounts>; warnings: string[]; error: string | null }
+export interface ImportSource extends ImportSourceBody {
+  id: string; nextRunAt: string | null; running: boolean; lastRunAt: string | null; lastStatus: string | null; lastError: string | null
+  mapped?: number; unmapped?: number; lastRun?: ImportRun | null
+}
+export interface ImportRunResult { runId: string; status: string; counts: ImportCounts; warnings: string[]; error?: string }
+export interface ImportAlias {
+  id: string; externalId: string; displayName: string | null; icon: string | null; channelId: string | null; channelName: string | null
+  mappedBy: string | null; lastSeenAt: string; lastProgrammes: number
+}
+export type SocialPlatformId = 'youtube' | 'facebook' | 'x' | 'tiktok' | 'dailymotion'
+export interface SocialPost { title: string; description: string; tags: string[]; privacy: 'public' | 'unlisted' | 'private' }
+export interface SocialPlatformsStatus {
+  tokenKeyConfigured: boolean; callbackBase: string
+  platforms: { id: SocialPlatformId; label: string; accountNoun: string; configured: boolean; env: string[]; callbackUrl: string
+    limits: { title: number | null; description: number; tags: boolean }; privacy: SocialPost['privacy'][]; scopes: string[] }[]
+}
+export interface SocialAccount {
+  id: string; platform: SocialPlatformId; name: string; external_account: string | null; enabled: boolean; mode: 'live' | 'sandbox'
+  account_label: string | null; avatar_url: string | null; link_status: 'connected' | 'expired' | 'error'; link_detail: string | null
+  token_expires_at: string | null; linked_at: string | null; linked_by_email: string | null; published: number; last_published_at: string | null
+}
+export interface SocialPublication {
+  id: string; platform: SocialPlatformId; status: 'pending' | 'published' | 'failed' | 'removed' | 'withdrawn'
+  external_id: string | null; external_url: string | null; views: number; error: string | null; published_at: string | null
+  last_synced_at: string | null; created_at: string; post: SocialPost | null; progress: number | null; stage: string | null
+  attempts: number; stale: boolean; target_id: string; account_label: string | null; target_name: string; mode: 'live' | 'sandbox'; avatar_url: string | null
+}
+export interface InboxItem { id: string; status: string; read_at: string | null; created_at: string; topic: string; subject: string; body: string | null }
+export interface NotificationConfig {
+  channels: Record<'in_app' | 'email' | 'push', { configured: boolean; detail: string }>
+  maxAttempts: number; backoffMinutes: number[]
+}
+export interface NotificationRow {
+  id: string; topic: string; subject: string; body: string | null; created_at: string
+  deliveries: number | any; sent: number; retrying: number; gave_up: number
+}
+export interface DeliveryRow {
+  id: string; recipient: string; channel: 'email' | 'in_app' | 'push'; status: 'pending' | 'sent' | 'failed'
+  attempts: number; last_error: string | null; sent_at: string | null; next_attempt_at: string | null; gave_up_at: string | null
+}
+export interface NotificationTemplate { id: string; key: string; subject: string; body: string; created_at: string }
+export interface SourceProbe {
+  ok: boolean; reachable: boolean
+  container?: { format?: string; bitrate_kbps?: number | null }
+  video?: { codec?: string; width?: number; height?: number; fps?: number | null; pix_fmt?: string; profile?: string; bitrate_kbps?: number | null }
+  audio?: { codec?: string; channels?: number; sample_rate?: number; bitrate_kbps?: number | null; language?: string | null }[]
+  other?: { kind: string; codec?: string; language?: string | null; note?: string }[]
+  note?: string; error?: string
+}
 export interface IngestProtocol {
   id: string; label: string; ingest: 'push' | 'pull'
   urlLabel: string; urlPlaceholder: string; urlExample: string; urlPattern?: string

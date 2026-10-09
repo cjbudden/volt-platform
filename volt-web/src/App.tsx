@@ -37,6 +37,9 @@ import { resetLiveBackoff } from './liveStatus'
 import { UploadIndicator } from './uploads'
 import { IngestQueue } from './IngestQueue'
 import { ErrorBoundary } from './ErrorBoundary'
+import NotificationBell from './NotificationBell'
+import NotificationsPage from './pages/Notifications'
+import SocialAccountsPage from './pages/SocialAccounts'
 
 const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z" /></svg>
 
@@ -57,6 +60,7 @@ const I = {
   epg: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M8 4v16M3 14h18" /></svg>,
   radio: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 11h16a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><circle cx="8" cy="15.5" r="2.5" /><path d="M17 14h2M17 17h2M18 3 7 8" /></svg>,
   key: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.8 7.8 5.5 5.5 0 017.8-7.8zm0 0L15 8m-2 2 4-4m0 0 3 3 3-3-3-3" /></svg>,
+  bell: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" /></svg>,
   users: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" /></svg>,
   shield: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>,
   review: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>,
@@ -160,7 +164,7 @@ export default function App() {
   const openChannel = (id: string) => navigate(`/channels/${id}`)
 
   const account = email.split('@')[1]?.split('.')[0]?.toUpperCase() || 'RTM'
-  const EXTRA_LABEL: Record<string, string> = { apikeys: 'API Keys & Apps', users: 'User Management', system: 'System Admin', 'content-types': 'Content Types', publishing: 'Publishing Rules', ingest: 'Ingest Rules', payments: 'Payments' }
+  const EXTRA_LABEL: Record<string, string> = { apikeys: 'API Keys & Apps', users: 'User Management', system: 'System Admin', 'content-types': 'Content Types', publishing: 'Publishing Rules', ingest: 'Ingest Rules', payments: 'Payments', notifications: 'Notifications', social: 'Social accounts' }
   const label = NAV.flatMap(g => g.items).find(i => i.key === section)?.label
     || EXTRA_LABEL[section]
     || (section ? section.charAt(0).toUpperCase() + section.slice(1) : 'Channels')
@@ -209,6 +213,8 @@ export default function App() {
       { key: 'publishing', label: 'Publishing Rules', icon: I.vod },
       { key: 'ingest', label: 'Ingest Rules', icon: I.vod },
       { key: 'payments', label: 'Payments', icon: I.fleet },
+      { key: 'social', label: 'Social accounts', icon: I.vod },
+      { key: 'notifications', label: 'Notifications', icon: I.bell },
       { key: 'apikeys', label: 'API Keys & Apps', icon: I.key },
       { key: 'users', label: 'User Management', icon: I.users },
     ] }] : []),
@@ -284,7 +290,7 @@ export default function App() {
           <GlobalSearch />
           <div className="top-actions">
             <UploadIndicator />
-            <div className="icon-btn"><span className="dot"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" /></svg></div>
+            <NotificationBell canManage={isAdmin} />
             <button className="btn primary" onClick={() => navigate('/channels/new')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>New Stream
             </button>
@@ -360,6 +366,10 @@ export default function App() {
             ? <IngestRulesPage />
             : section === 'payments'
             ? <PaymentsPage />
+            : section === 'notifications'
+            ? <NotificationsPage />
+            : section === 'social'
+            ? <SocialAccountsPage />
             : section === 'apikeys'
             ? <ApiKeys />
             : section === 'users'

@@ -27,10 +27,10 @@
 </style></head><body>
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
- <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-10T08:15:00Z.</div>
- <div class=sub>Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code: statuses and app surfacing brought up to date, and 16 cards added (14 built features the list was missing, plus Notifications and XMLTV import, which are still being built). Nothing has been approved yet, and nothing was removed.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>40</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>2</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>5</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>32</b> 📱 In app</span><span class=chip><b>14</b> 📱 Partial</span><span class=chip><b>1</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span><span class=chip><b>2</b> ⏳ Not built</span></div>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-10T10:00:00Z.</div>
+ <div class=sub>Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set.</div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>45</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>2</b> ✅ Approved</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>37</b> 📱 In app</span><span class=chip><b>12</b> 📱 Partial</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="partial">
     <div class=top><div class=name>Frame-accurate scrub &amp; clip</div>
@@ -121,6 +121,19 @@
     <div class=actions>
          <button class="btn ok" data-approve="EPG: guides, day builder, slot control &amp; post-airing automation">✓ Approve as working</button>
          <button class="btn warn" data-changes="EPG: guides, day builder, slot control &amp; post-airing automation">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Publish a clip to social media</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>Admin &gt; Social accounts: connect YouTube channels, Facebook Pages and X, TikTok and Dailymotion accounts by signing in on each platform (tokens encrypted), or add a sandbox account that behaves like the platform without sending anything. Media Library &gt; an asset &gt; Where it went &gt; Publish to social: pick accounts, write the post once, adjust it per platform with live character counts against each limit, publish, and watch progress; failures show the platform's own words with Retry; published posts link out, sync views, and can be taken down where the platform allows.</div>
+    <div class=meta>Built 10 Oct. social.check.ts 53/53 against a local stand-in for all five platforms (OAuth with PKCE, Page tokens, chunked and resumable uploads, processing polls, token refresh, revoked accounts, 503 retries, take down); social-api.check.sh 20/20 through the API and worker. NOT YET RUN AGAINST THE LIVE PLATFORMS: that needs each platform's app credentials, and the first real post per platform is the acceptance test. TikTok posts are private until TikTok audits the app.</div>
+    <div class=how><b>How to test:</b> Now, without credentials: Admin &gt; Social accounts &gt; Add sandbox account on YouTube and X &gt; Media Library &gt; a clip &gt; Where it went &gt; Publish to social &gt; tick both &gt; adjust the X caption &gt; Publish: both go to Published with an Open link. Put [fail] in the title to see a failure and Retry it. With credentials: set them, Connect, publish a short clip to a private or unlisted post.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Publish a clip to social media">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Publish a clip to social media">Request changes</button>
        </div>
     
   </div><div class=card data-status="ready_to_test" data-app="full">
@@ -238,6 +251,32 @@
     <div class=actions>
          <button class="btn ok" data-approve="Form &amp; field management (protocol-aware sources)">✓ Approve as working</button>
          <button class="btn warn" data-changes="Form &amp; field management (protocol-aware sources)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Source validate + info (probe)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>A Check source control under every channel and event source: what the source actually carries (container, video codec, resolution, frame rate, bitrate, every audio track and its language, subtitles and timed metadata), with a warning when the top ladder rung would upscale it. Push sources (SRT listener, RTMP) and NDI/ST 2110 say why they cannot be checked from here. Every source is also probed automatically when added (9 Oct), which builds the matching fallback loop.</div>
+    <div class=meta>Built 10 Oct. source-probe.check.ts 16/16 against real ffmpeg media: two audio tracks with languages, a 404, and the fence (a local path, file: URLs and a playlist pointing at a local file are never read).</div>
+    <div class=how><b>How to test:</b> New channel (or Settings) &gt; enter an HLS URL &gt; Check source: the panel lists video and audio. Try a URL that 404s, and an SRT listener.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Source validate + info (probe)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Source validate + info (probe)">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Settings lock while running</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>While a channel is running, the settings the encoder reads at start (sources, ladder, DVR, failover, filler, watermark, subtitles) are locked: shown read-only but still selectable for copying, left out of the save, and refused by the API if changed. Everything that takes effect live (name, metadata, geo, retention, guide, brand, auto connect) stays editable.</div>
+    <div class=meta>Built 10 Oct. settings-lock.check.sh 17/17: changes refused 409 naming the fields, the same value sent back accepted, a mixed edit refused whole, unlocked again once stopped.</div>
+    <div class=how><b>How to test:</b> Start a channel &gt; Settings: the note says what is locked; try to change the source URL (it will not change) and copy it (it copies); change the name and Save (it saves). Stop the channel and change the source.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Settings lock while running">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Settings lock while running">Request changes</button>
        </div>
     
   </div><div class=card data-status="ready_to_test" data-app="full">
@@ -552,6 +591,32 @@
          <button class="btn warn" data-changes="Embeddable player setup (radio)">Request changes</button>
        </div>
     
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Notifications: inbox, email, device push</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>The bell is now a real inbox. Volt tells an account's owners and admins when auto connect gives up, an EPG import fails or a social post cannot be published: in the console inbox always, and by email (SMTP) and device push (Firebase) when configured. Admin &gt; Notifications shows each channel's status with Send me a test, the sent log with what happened to every copy (sent, retrying, gave up and why) and Retry, the templates, and your devices. Failed deliveries retry after 1, 5, 15 and 60 minutes, up to 5 attempts; a rejected address or a dead device is not retried.</div>
+    <div class=meta>Completed 10 Oct. notifications-delivery.check.ts 24/24 against a fake SMTP server and a fake FCM; notifications.check.sh. Email needs SMTP_URL and NOTIFY_FROM, push needs FCM_SERVICE_ACCOUNT.</div>
+    <div class=how><b>How to test:</b> Admin &gt; Notifications &gt; Send me a test on Console inbox: the bell shows 1. With SMTP_URL and NOTIFY_FROM set, Send me a test on Email. Break an import URL and Import now: the failure arrives in the bell.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Notifications: inbox, email, device push">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Notifications: inbox, email, device push">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>XMLTV import (bring in a customer's guide)</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>WHY: onboarding a broadcaster means taking the guide they already have. WHAT: EPG &gt; XMLTV import. Add a source (a URL fetched on a schedule, or uploaded files), run it, map their channels to ours (unambiguous matches are mapped automatically), and the guide fills. Re-runs are a diff: unchanged rows stay, edits update, what the file dropped is removed (never a programme with a clip). Times without an offset are read in the channel's own zone. Gzip and Latin-1 files work. Every run is logged with counts and warnings, and a failure tells the admins.</div>
+    <div class=meta>Built 10 Oct. xmltv-import-pure.check.ts 42/42 (including a round trip through the exporter), xmltv-import.check.sh 40/40 (URL and upload, mapping, the diff, clips protected, remapping, failure notice, schedule, tenancy, and our export imported into a second account).</div>
+    <div class=how><b>How to test:</b> EPG &gt; XMLTV import &gt; New source &gt; paste a guide URL (or choose Uploaded by hand and Upload file) &gt; Import now &gt; Channels: map anything unmapped &gt; Import now again: unchanged, nothing duplicated. Open the channel's guide in EPG to see the programmes.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="XMLTV import (bring in a customer's guide)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="XMLTV import (bring in a customer's guide)">Request changes</button>
+       </div>
+    
   </div><div class=card data-status="in_review" data-app="full">
     <div class=top><div class=name>Analytics &amp; reporting</div>
       <span class=pill style="background:#6366f1">👀 In review</span>
@@ -611,56 +676,6 @@
     
     <div class=approved-line>✅ Approved by you</div>
     <div class=fblog><div class=fb>• 2026-10-10: Approved by Christian as working.</div></div>
-  </div><div class=card data-status="building" data-app="partial">
-    <div class=top><div class=name>Publish a clip to social media</div>
-      <span class=pill style="background:#64748b">🔨 Building</span>
-      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
-    <div class=summary>Push a clip to YouTube / Facebook / X / TikTok / Dailymotion. Data model + APIs exist; real upload adapters pending.</div>
-    <div class=meta>Publish targets and publication records are built, and the Publishing Rules editor can name a social account as a target. Not built: linking accounts (OAuth), the Publish to action on a clip, the caption editor and the real upload adapters (stubs). Needs each platform's app credentials.</div>
-    <div class=how><b>How to test:</b> Not testable yet — needs each platform's OAuth app credentials from you before the upload adapters go live.</div>
-    
-    
-    
-  </div><div class=card data-status="building" data-app="partial">
-    <div class=top><div class=name>Source validate + info (probe)</div>
-      <span class=pill style="background:#64748b">🔨 Building</span>
-      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
-    <div class=summary>Probe a source with ffprobe: codecs, resolution, frame rate, bitrate, audio tracks, timed metadata and subtitles. Since 9 Oct every source is probed automatically when added and the result is stored, which is what builds the matching fallback loop. Radio has a probe in its source panel. Still to build: the Validate button and result panel on the channel and event forms (the endpoint POST /api/sources/probe exists).</div>
-    <div class=meta>Probe runs on add and is stored on stream_inputs.probe (9 Oct). filler-prep.check.ts, source-required.check.ts.</div>
-    <div class=how><b>How to test:</b> Not testable for video in the app yet. Radio: open a station &gt; source panel &gt; probe. API: POST /api/sources/probe with {&quot;url&quot;: ...}.</div>
-    
-    
-    
-  </div><div class=card data-status="building" data-app="pending">
-    <div class=top><div class=name>Settings lock while running</div>
-      <span class=pill style="background:#64748b">🔨 Building</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⏳ Not built yet</span></div>
-    <div class=summary>Channel settings fields read-only (still copyable) while the transcoder is running; editable only when stopped. Next.</div>
-    <div class=meta>Not built: the channel Settings drawer has no running check yet.</div>
-    <div class=how><b>How to test:</b> Not testable yet. When built: start a channel, open Settings, the fields are read-only but copyable until you stop it.</div>
-    
-    
-    
-  </div><div class=card data-status="building" data-app="none">
-    <div class=top><div class=name>Notifications</div>
-      <span class=pill style="background:#64748b">🔨 Building</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
-    <div class=summary>One API to send an event to recipients over channels (email, in-app, device push), templated, with a delivery log and retries. Email and push adapters are stubs and there is no screen; retries have no cap yet.</div>
-    <div class=meta>notifications.check.sh.</div>
-    <div class=how><b>How to test:</b> Not testable in the app. API: POST /api/notifications then GET the inbox.</div>
-    
-    
-    
-  </div><div class=card data-status="building" data-app="pending">
-    <div class=top><div class=name>XMLTV import (bring in a customer's guide)</div>
-      <span class=pill style="background:#64748b">🔨 Building</span>
-      <span class=apill style="border-color:#6b7280;color:#6b7280">⏳ Not built yet</span></div>
-    <div class=summary>WHY: onboarding a broadcaster means taking the guide they already have. WHAT: import an XMLTV file or URL into programmes: map their channel ids to ours (kept across re-imports), resolve times with no offset against the channel time zone, end = next start where stop is missing, idempotent nightly refresh, overlaps flagged rather than rejected.</div>
-    <div class=meta>Designed (docs/DESIGN_epg_xmltv.md), not built. The programme store already has the idempotent import key and overlap index it needs.</div>
-    <div class=how><b>How to test:</b> Not testable yet.</div>
-    
-    
-    
   </div>
 </div>
 <div id=toast></div>

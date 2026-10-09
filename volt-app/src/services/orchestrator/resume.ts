@@ -216,6 +216,7 @@ async function liveness(orch: Orchestrator, kind: OwnerKind, id: string): Promis
 async function stampAttempt(kind: OwnerKind, id: string, error: string | null, attempts: number): Promise<void> {
   const table = kind === 'channel' ? 'channels' : 'events';
   const giveUp = attempts + 1 >= config.orchestrator.resumeMaxAttempts;
+  const wasUp = giveUp ? await one<any>(`SELECT resume_gave_up_at FROM ${table} WHERE id = $1`, [id]) : null;
   await query(
     `UPDATE ${table}
         SET resume_attempts = resume_attempts + 1,
@@ -225,6 +226,29 @@ async function stampAttempt(kind: OwnerKind, id: string, error: string | null, a
       WHERE id = $1`,
     [id, error?.slice(0, 300) ?? null, giveUp]
   );
+  if (giveUp && !wasUp?.resume_gave_up_at) await announceGiveUp(kind, id);
+}
+
+/**
+ * Auto connect giving up is exactly the moment somebody needs to know, and
+ * until now it only showed if somebody happened to open the channel page.
+ * The account's owners and admins are told: in the console inbox always, by
+ * email and push where those are configured. Only on the transition into
+ * given up, so a channel sitting given up does not repeat itself every tick.
+ */
+async function announceGiveUp(kind: OwnerKind, id: string): Promise<void> {
+  const table = kind === 'channel' ? 'channels' : 'events';
+  const row = await one<any>(
+    `SELECT o.name, o.resume_last_error, o.resume_attempts, g.account_id
+       FROM ${table} o JOIN groups g ON g.id = o.group_id WHERE o.id = $1`, [id]).catch(() => null);
+  if (!row) return;
+  const { notifyAccountAdmins } = await import('../notifications');
+  const what = kind === 'channel' ? 'channel' : 'event';
+  await notifyAccountAdmins(row.account_id, 'auto_connect.gave_up',
+    `${row.name}: auto connect has stopped trying`,
+    `Volt tried to bring the ${what} "${row.name}" back ${row.resume_attempts} time(s) and has stopped.\n\n` +
+    `Last error: ${row.resume_last_error ?? 'none recorded'}\n\nOpen the ${what} in the console to see what happened and start it again.`,
+    { kind, id, name: row.name });
 }
 
 /**
@@ -237,6 +261,7 @@ async function stampAttempt(kind: OwnerKind, id: string, error: string | null, a
  */
 async function giveUpNow(kind: OwnerKind, id: string, error: string): Promise<void> {
   const table = kind === 'channel' ? 'channels' : 'events';
+  const wasUp = await one<any>(`SELECT resume_gave_up_at FROM ${table} WHERE id = $1`, [id]);
   await query(
     `UPDATE ${table}
         SET resume_attempts = resume_attempts + 1,
@@ -246,6 +271,7 @@ async function giveUpNow(kind: OwnerKind, id: string, error: string): Promise<vo
       WHERE id = $1`,
     [id, error.slice(0, 300)]
   );
+  if (!wasUp?.resume_gave_up_at) await announceGiveUp(kind, id);
 }
 
 /**

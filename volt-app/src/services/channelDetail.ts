@@ -4,6 +4,7 @@
 // (event log) and programmes (EPG). No fabricated data: when nothing is reporting
 // yet, the fields are empty/idle so the UI shows honest "no signal / no EPG /
 // no data" states rather than invented numbers.
+import { encoderRunning, LOCKED_WHILE_RUNNING } from './settingsLock';
 import { one, query } from '../db';
 import { config } from '../config';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -28,6 +29,10 @@ export interface ChannelDetail {
   metadata: Record<string, any>;
   /** Whether it is MEANT to be running, which survives a crash. */
   desiredState: 'running' | 'stopped';
+  /** An encoder instance is up: the settings it reads at start are locked (services/settingsLock.ts). */
+  encoderRunning: boolean;
+  /** Request-body keys that are locked while it runs. */
+  lockedWhileRunning: string[];
   /** Set only when auto-connect has stopped trying; carries the reason. */
   resumeGaveUpAt: string | null;
   resumeLastError: string | null;
@@ -362,6 +367,8 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     schemaId: channel.schema_id ?? null,
     metadata: (channel.metadata && typeof channel.metadata === 'object') ? channel.metadata : {},
     desiredState: (channel.desired_state ?? 'stopped') as 'running' | 'stopped',
+    encoderRunning: await encoderRunning(channel.id),
+    lockedWhileRunning: Object.keys(LOCKED_WHILE_RUNNING),
     resumeGaveUpAt: channel.resume_gave_up_at ?? null,
     resumeLastError: channel.resume_last_error ?? null,
     resumeArmedAt: channel.resume_armed_at ?? null,

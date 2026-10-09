@@ -53,7 +53,7 @@ const FEATURE_PREFIXES: Record<Feature, string[]> = {
   events: ['/api/events'],
   epg: ['/api/epg'],
   recordings: ['/api/recordings', '/api/scheduled-clips'],
-  vod: ['/api/vod', '/api/publications', '/api/publishing-rules'],
+  vod: ['/api/vod', '/api/publications', '/api/publishing-rules', '/api/social'],
   // /api/uploads belongs here: an upload session creates a filler_asset, so
   // leaving it off the map put it on the unmapped surface, where writes need
   // only operator and reads are open to any authenticated user — bypassing a

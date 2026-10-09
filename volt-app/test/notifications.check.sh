@@ -15,9 +15,15 @@ psql "$DATABASE_URL" -q -c "
 INSERT INTO accounts(id,name) VALUES ('$A','RTM');
 INSERT INTO users(id,account_id,email,password_hash,role,status) VALUES ('$U','$A','ops@rtm.example','x','owner','active');"
 
+# Email goes to a fake SMTP server (test/lib/fake-smtp.mjs): fail@ answers 450,
+# a temporary refusal, so the delivery fails and stays retryable.
+SMTP_PORT=${SMTP_PORT:-2526}; SMTP_OUT=$(mktemp)
+fuser -k "$SMTP_PORT"/tcp 2>/dev/null || true
+node test/lib/fake-smtp.mjs "$SMTP_PORT" "$SMTP_OUT" >/dev/null 2>&1 & SMTPD=$!
+export SMTP_URL="smtp://volt:secret@127.0.0.1:$SMTP_PORT" NOTIFY_FROM="Volt <alerts@volt.example>"
 fuser -k "$PORT"/tcp 2>/dev/null || true; sleep 1
 npx tsx src/index.ts >/tmp/volt-notif.log 2>&1 & SRV=$!
-trap 'kill $SRV 2>/dev/null || true' EXIT
+trap 'kill $SRV $SMTPD 2>/dev/null || true' EXIT
 for i in $(seq 1 30); do curl -fsS "localhost:$PORT/health" >/dev/null 2>&1 && break || sleep 1; done
 T=$(node -e "console.log(require('jsonwebtoken').sign({sub:'$U',account_id:'$A',role:'owner'},process.env.JWT_ACCESS_SECRET,{expiresIn:3600}))")
 BASE="http://localhost:$PORT"; JS="Content-Type: application/json"; AUTH="Authorization: Bearer $T"
@@ -35,7 +41,7 @@ SENT=$(echo "$DET" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end'
 FAILED=$(echo "$DET" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).deliveries.filter(d=>d.status==='failed').length))")
 [ "$SENT" = "3" ] && ok "3 deliveries sent (good×2 + fail's in_app)" || no "sent count=$SENT"
 [ "$FAILED" = "1" ] && ok "1 delivery failed (fail@ email) + recorded" || no "failed count=$FAILED"
-echo "$DET" | grep -q 'smtp rejected' && ok "failure reason recorded on the delivery" || no "no last_error"
+echo "$DET" | grep -q 'RCPT TO refused: 450' && ok "failure reason recorded on the delivery" || no "no last_error"
 
 echo "== in-app inbox =="
 INBOX=$(curl -s -H "$AUTH" "$BASE/api/notifications/inbox?recipient=ops@rtm.example")
@@ -47,6 +53,8 @@ R=$(curl -s -X POST -H "$AUTH" -H "$JS" $BASE/api/notifications/retry -d '{}')
 [ "$(echo "$R" | jf '.retried')" = "1" ] && ok "retry re-attempted the 1 failed delivery" || no "retry count: $R"
 ATT=$(curl -s -H "$AUTH" $BASE/api/notifications/$NID | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(Math.max(...JSON.parse(s).deliveries.map(d=>d.attempts)))) ")
 [ "$ATT" = "2" ] && ok "failed delivery attempts incremented to 2" || no "attempts=$ATT"
+
+grep -q '"to":\["ops@rtm.example"\]' "$SMTP_OUT" && grep -q '"authed":true' "$SMTP_OUT" && ok "the good email reached the SMTP server, authenticated" || no "smtp capture: $(cat "$SMTP_OUT" | head -c 200)"
 
 echo
 echo "== RESULT: $pass passed, $fail failed =="

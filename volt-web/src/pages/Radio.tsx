@@ -310,7 +310,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
           </div>
 
           <div className="sec-label">Source</div>
-          <SourceInput protocols={radioProtocols} value={primary} onChange={setPrimary} label="Audio source" />
+          <SourceInput protocols={radioProtocols} value={primary} onChange={setPrimary} label="Audio source" validate={false} />
           {/* The stream already announces its name, genre, bitrate, codec and
               often a logo. Read it here and adopt what is useful, rather than
               retyping it from the station's website. */}

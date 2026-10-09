@@ -27,12 +27,14 @@ import { fillerAssetsRouter } from './modules/fillerAssets';
 import { uploadsRouter, uploadChunksRouter } from './modules/uploads';
 import { scheduledClipsRouter } from './modules/scheduledClips';
 import { publishTargetsRouter, publicationsRouter } from './modules/publishing';
+import { socialRouter, socialPublicRouter } from './modules/social';
 import { publishingRulesRouter } from './modules/publishingRules';
 import { ingestRouter as ingestRulesRouter, ingestCallbacksRouter } from './modules/ingestRules';
 import { tusRouter } from './modules/tus';
 import { paymentsRouter, paymentsAppRouter, paymentsWebhookRouter } from './modules/payments';
 import { epgRouter } from './modules/epg';
 import { xmltvAdminRouter, xmltvPublicRouter } from './modules/xmltv';
+import { xmltvImportRouter } from './modules/xmltvImport';
 import { appsRouter, availabilityRouter, accessRouter } from './modules/apps';
 import { usersRouter } from './modules/users';
 import { userGroupsRouter } from './modules/userGroups';
@@ -207,6 +209,9 @@ export function createServer() {
   // Public XMLTV partner feeds (NO admin auth): /xmltv/<token>.xml[.gz]. The
   // token is the credential and carries the scope; see modules/xmltv.ts.
   app.use(xmltvPublicRouter);
+  // Social: the OAuth return (the browser arrives without our bearer token)
+  // and the sandbox post page. Everything else under /api/social is authed.
+  app.use(socialPublicRouter);
 
   // Public live delivery (NO admin auth): /live/:id/master.m3u8|manifest.mpd. Only
   // serves when the channel is on air with valid content; off air returns 404.
@@ -317,6 +322,7 @@ export function createServer() {
   app.use('/api/uploads', uploadChunksRouter);
   app.use('/api/uploads', uploadsRouter);
   app.use('/api/scheduled-clips', scheduledClipsRouter); // timeline clip scheduling
+  app.use('/api/epg/import', xmltvImportRouter);          // XMLTV import: sources, channel mapping, runs
   app.use('/api/epg', xmltvAdminRouter);                  // XMLTV export, guide channels, partner feeds (per-route auth)
   app.use('/api/epg', epgRouter);                        // EPG / programme scheduling
   // Icecast asks this before admitting a listener; it is the on-air gate now
@@ -345,6 +351,7 @@ export function createServer() {
   app.use('/api/platform/tickets', platformTicketsRouter); // SaaS-admin ticket triage
   app.use('/api/publish-targets', publishTargetsRouter); // social account config
   app.use('/api/publications', publicationsRouter);      // publish + view tracking
+  app.use('/api/social', socialRouter);                   // linked accounts, publish to social, progress, views
   app.use('/api/publishing-rules', publishingRulesRouter); // the ladder + publishing points
   app.use('/api/ingest', ingestCallbacksRouter);             // provider callbacks, no Volt session
   app.use('/api/ingest', ingestRulesRouter);                 // ingest rules ladder, preview, webhooks

@@ -140,6 +140,7 @@ boot().then(async () => {
   registerVodEncodeHandlers();
   registerRemoteIngestHandlers();
   await registerFillerHandlers();
+  await (await import('./services/social')).registerSocialHandlers();
   worker = startWorker();
 }).catch((e) => {
   console.error('[boot] schema preparation failed — refusing to serve', e);

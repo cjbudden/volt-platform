@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { api, originUrl, thumbUrl, type ChannelDetail as CD, type ChannelSettingsPatch, type WatermarkCfg, type FailoverMode, type FailoverTestState } from '../api'
 import { navigate } from '../router'
 import { TypePicker, MetadataForm } from '../ContentTypeFields'
@@ -1703,6 +1703,14 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   // operator has retyped a form against a record they cannot see. This says so
   // while there is still time to do something about it. See liveRecord.tsx.
   const live = useRecordWatch('channel', d.id, d.version)
+  // SETTINGS LOCK: while the encoder runs, what it read at start cannot change
+  // (services/settingsLock.ts). The fields stay on screen and selectable, so a
+  // URL can still be copied; their setters just do nothing, and save() leaves
+  // them out so the rest of the form still saves.
+  const locked = !!d.encoderRunning
+  function lockSet<T>(f: Dispatch<SetStateAction<T>>): Dispatch<SetStateAction<T>> {
+    return (v) => { if (!locked) f(v) }
+  }
   const [name, setName] = useState(d.name)
   // retention as number + unit dropdown (minutes..months). Seed from seconds if set,
   // else from the legacy days field. Blank number = keep forever.
@@ -1715,20 +1723,25 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   const [retNum, setRetNum] = useState<string>(initRet.n)
   const [retUnit, setRetUnit] = useState<RetUnit>(initRet.unit)
   // DVR
-  const [dvrMode, setDvrMode] = useState<'sliding' | 'event_start'>(d.dvr_mode)
-  const [dvrMin, setDvrMin] = useState<string>(String(Math.round((d.dvr_window_sec ?? d.dvr.effective_sec) / 60)))
+  const [dvrMode, setDvrModeRaw] = useState<'sliding' | 'event_start'>(d.dvr_mode)
+  const setDvrMode = lockSet(setDvrModeRaw)
+  const [dvrMin, setDvrMinRaw] = useState<string>(String(Math.round((d.dvr_window_sec ?? d.dvr.effective_sec) / 60)))
+  const setDvrMin = lockSet(setDvrMinRaw)
   // source (protocol-aware, per input)
   const protocols = useProtocols()
   const src0 = d.sources.find(s => s.role === 'primary') || d.sources[0]
   const src1 = d.sources.find(s => s.role === 'backup')
-  const [primary, setPrimary] = useState<SourceValue>({ protocol: (src0?.protocol || 'srt').toLowerCase(), url: src0?.ingest_url || '' })
-  const [backup, setBackup] = useState<SourceValue>({ protocol: (src1?.protocol || src0?.protocol || 'srt').toLowerCase(), url: src1?.ingest_url || '' })
+  const [primary, setPrimaryRaw] = useState<SourceValue>({ protocol: (src0?.protocol || 'srt').toLowerCase(), url: src0?.ingest_url || '' })
+  const setPrimary = lockSet(setPrimaryRaw)
+  const [backup, setBackupRaw] = useState<SourceValue>({ protocol: (src1?.protocol || src0?.protocol || 'srt').toLowerCase(), url: src1?.ingest_url || '' })
+  const setBackup = lockSet(setBackupRaw)
   // geo
   const [geoMode, setGeoMode] = useState(d.geo_mode)
   const [geoCountries, setGeoCountries] = useState(d.geo_countries.join(', '))
   // output ABR ladder (transcode rungs) — add / remove / edit bitrates
-  const [rungs, setRungs] = useState<{ height: number; bitrateKbps: number }[]>(
+  const [rungs, setRungsRaw] = useState<{ height: number; bitrateKbps: number }[]>(
     (d.ladder || []).map(r => ({ height: r.height, bitrateKbps: r.bitrate_kbps })))
+  const setRungs = lockSet(setRungsRaw)
   // programme guide (EPG) panel visibility
   const [epgOn, setEpgOn] = useState(d.epgEnabled !== false)
   const [autoConn, setAutoConn] = useState(d.autoConnect !== false)
@@ -1737,26 +1750,43 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   const [typeId, setTypeId] = useState<string | null>(d.schemaId ?? null)
   const [meta, setMeta] = useState<Record<string, any>>(d.metadata ?? {})
   // subtitles
-  const [capOn, setCapOn] = useState(d.captions.enabled)
-  const [capLangs, setCapLangs] = useState<string[]>(d.captions.targets.length ? d.captions.targets : ['en'])
-  const [capTrim, setCapTrim] = useState(String(d.captions.offset_sec ?? 0))
+  const [capOn, setCapOnRaw] = useState(d.captions.enabled)
+  const setCapOn = lockSet(setCapOnRaw)
+  const [capLangs, setCapLangsRaw] = useState<string[]>(d.captions.targets.length ? d.captions.targets : ['en'])
+  const setCapLangs = lockSet(setCapLangsRaw)
+  const [capTrim, setCapTrimRaw] = useState(String(d.captions.offset_sec ?? 0))
+  const setCapTrim = lockSet(setCapTrimRaw)
   const langOpts = useCaptionLanguages()
   // filler on loss
-  const [lossBehavior, setLossBehavior] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>(d.input_loss_behavior || 'none')
-  const [slateRef, setSlateRef] = useState(d.filler_slate_ref || '')
-  const [failover, setFailover] = useState(!!d.input_failover_enabled)
-  const [autoFailback, setAutoFailback] = useState(d.auto_failback !== false)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [loopPickerOpen, setLoopPickerOpen] = useState(false)
+  const [lossBehavior, setLossBehaviorRaw] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>(d.input_loss_behavior || 'none')
+  const setLossBehavior = lockSet(setLossBehaviorRaw)
+  const [slateRef, setSlateRefRaw] = useState(d.filler_slate_ref || '')
+  const setSlateRef = lockSet(setSlateRefRaw)
+  const [failover, setFailoverRaw] = useState(!!d.input_failover_enabled)
+  const setFailover = lockSet(setFailoverRaw)
+  const [autoFailback, setAutoFailbackRaw] = useState(d.auto_failback !== false)
+  const setAutoFailback = lockSet(setAutoFailbackRaw)
+  const [pickerOpen, setPickerOpenRaw] = useState(false)
+  const setPickerOpen = lockSet(setPickerOpenRaw)
+  const [loopPickerOpen, setLoopPickerOpenRaw] = useState(false)
+  const setLoopPickerOpen = lockSet(setLoopPickerOpenRaw)
   // watermark / channel brand overlay
-  const [wmEnabled, setWmEnabled] = useState(d.watermark?.enabled ?? false)
-  const [wmRef, setWmRef] = useState(d.watermark?.ref || '')
-  const [wmPos, setWmPos] = useState<WatermarkCfg['position']>(d.watermark?.position || 'br')
-  const [wmX, setWmX] = useState(String(d.watermark?.offsetX ?? 24))
-  const [wmY, setWmY] = useState(String(d.watermark?.offsetY ?? 24))
-  const [wmOpacity, setWmOpacity] = useState(d.watermark?.opacity ?? 100)
-  const [wmScale, setWmScale] = useState(d.watermark?.scale ?? 12)
-  const [wmPickerOpen, setWmPickerOpen] = useState(false)
+  const [wmEnabled, setWmEnabledRaw] = useState(d.watermark?.enabled ?? false)
+  const setWmEnabled = lockSet(setWmEnabledRaw)
+  const [wmRef, setWmRefRaw] = useState(d.watermark?.ref || '')
+  const setWmRef = lockSet(setWmRefRaw)
+  const [wmPos, setWmPosRaw] = useState<WatermarkCfg['position']>(d.watermark?.position || 'br')
+  const setWmPos = lockSet(setWmPosRaw)
+  const [wmX, setWmXRaw] = useState(String(d.watermark?.offsetX ?? 24))
+  const setWmX = lockSet(setWmXRaw)
+  const [wmY, setWmYRaw] = useState(String(d.watermark?.offsetY ?? 24))
+  const setWmY = lockSet(setWmYRaw)
+  const [wmOpacity, setWmOpacityRaw] = useState(d.watermark?.opacity ?? 100)
+  const setWmOpacity = lockSet(setWmOpacityRaw)
+  const [wmScale, setWmScaleRaw] = useState(d.watermark?.scale ?? 12)
+  const setWmScale = lockSet(setWmScaleRaw)
+  const [wmPickerOpen, setWmPickerOpenRaw] = useState(false)
+  const setWmPickerOpen = lockSet(setWmPickerOpenRaw)
   // channel brand image (identity logo, replaces the initials box)
   const [brandRef, setBrandRef] = useState((d as any).brand_ref || '')
   const [brandPickerOpen, setBrandPickerOpen] = useState(false)
@@ -1814,6 +1844,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     }
     patch.brandRef = brandRef.trim() ? brandRef.trim() : null
 
+    if (locked) for (const k of d.lockedWhileRunning ?? []) delete (patch as any)[k]
     setBusy(true)
     try { await api.updateChannel(d.id, patch); onSaved() }
     catch (e: any) {
@@ -1860,9 +1891,15 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             uploadKind="brand" uploadFolder="brands"
             onClose={() => setBrandPickerOpen(false)} onPick={(url) => { setBrandRef(url); setBrandPickerOpen(false) }} />
 
+          {locked && (
+            <div className="lock-note" role="note">
+              <strong>The channel is running.</strong> Sources, failover, filler, DVR, the output ladder, subtitles and the watermark are read by the encoder when it starts, so they are locked until you stop it. You can still select and copy them. Everything else saves as normal.
+            </div>
+          )}
+          <div className={locked ? 'locked-zone' : undefined} aria-disabled={locked || undefined}>
           <div className="sec-label">Source</div>
-          <SourceInput protocols={protocols} value={primary} onChange={setPrimary} label="Primary source" />
-          <SourceInput protocols={protocols} value={backup} onChange={setBackup} label="Backup source (optional)" />
+          <SourceInput protocols={protocols} value={primary} onChange={setPrimary} label="Primary source" ladderTop={d.profile?.workflow_type === 'transcode' && rungs.length ? Math.max(...rungs.map(r => r.height)) : undefined} />
+          <SourceInput protocols={protocols} value={backup} onChange={setBackup} label="Backup source (optional)" ladderTop={d.profile?.workflow_type === 'transcode' && rungs.length ? Math.max(...rungs.map(r => r.height)) : undefined} />
 
           <div className="sec-label">Failover</div>
           <div className="toggle-row">
@@ -1930,6 +1967,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             </div>
           )}
 
+          </div>
+
           <div className="sec-label">Source geo rules</div>
           <div className="field"><label>Access</label>
             <select className="inp" value={geoMode} onChange={e => setGeoMode(e.target.value as any)}>
@@ -1942,6 +1981,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             <div className="field"><label>Countries (ISO-2, comma-separated)</label><input className="inp" value={geoCountries} onChange={e => setGeoCountries(e.target.value)} placeholder="MY, SG, ID" /></div>
           )}
 
+          <div className={locked ? 'locked-zone' : undefined} aria-disabled={locked || undefined}>
           {d.profile?.workflow_type === 'transcode' && (
             <>
               <div className="sec-label">Output bitrates (ABR ladder)</div>
@@ -1962,6 +2002,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
               <button className="btn ghost" onClick={() => setRungs(rs => [...rs, { height: 720, bitrateKbps: 2800 }])}>+ Add rung</button>
             </>
           )}
+
+          </div>
 
           <div className="sec-label">Availability</div>
           <div className="toggle-row">
@@ -1996,6 +2038,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             <div className={`sw ${epgOn ? '' : 'off'}`} {...pressable((e: any) => { ((() => setEpgOn(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
           </div>
 
+          <div className={locked ? 'locked-zone' : undefined} aria-disabled={locked || undefined}>
           <div className="sec-label">Subtitles</div>
           <div className="toggle-row">
             <div><div className="tt">Live captions / subtitles</div><div className="td">Applies to this channel’s output profile.</div></div>
@@ -2013,11 +2056,14 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             </>
           )}
 
+          </div>
+
           <RecordingSection ctx="channel" recOn={recOn} setRecOn={setRecOn}
             retNum={retNum} setRetNum={setRetNum} retUnit={retUnit} setRetUnit={setRetUnit}
             retWarn={dvrMode === 'sliding' && retNum && Number(retNum) * RET_UNIT_SEC[retUnit] < dvrMinNum * 60
               ? `Will be raised to the DVR window (${fmtWindow(dvrMinNum * 60)}) — retention can’t be shorter than DVR.` : null} />
 
+          <div className={locked ? 'locked-zone' : undefined} aria-disabled={locked || undefined}>
           {d.profile?.workflow_type === 'transcode' && (<>
           <div className="sec-label">Watermark <span style={{ color: 'var(--faint)', fontWeight: 400 }}>: burned into the transcode output</span></div>
           <div className="toggle-row">
@@ -2060,6 +2106,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             uploadKind="brand" uploadFolder="brands"
             onClose={() => setWmPickerOpen(false)} onPick={(url) => { setWmRef(url); setWmPickerOpen(false) }} />
           </>)}
+          </div>
           </TabPane>
 
           {err && <div className="err">{err}</div>}

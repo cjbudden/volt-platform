@@ -66,6 +66,8 @@ export type StopIntent = 'operator' | 'schedule' | 'fault' | 'internal';
  */
 export type StartIntent = 'operator' | 'resume' | 'schedule';
 
+let xmltvImportBusy = false;
+
 export class Orchestrator {
   constructor(private launcher: TaskLauncher = makeLauncher()) {}
 
@@ -784,6 +786,27 @@ export class Orchestrator {
     }
     // 3) roll channel recordings at the UTC day boundary (close stale, open today's)
     await this.rollChannelRecordings();
+    // 3b) notification deliveries whose backoff has elapsed (services/notifications.ts).
+    //     Never allowed to fail the tick: a mail server being down is not a
+    //     reason to stop provisioning events.
+    try {
+      const { retryDue } = await import('../notifications');
+      await retryDue();
+    } catch (e) { console.error('[orchestrator] notification retry failed', e); }
+    // 3c) XMLTV import sources whose refresh is due. Fired, not awaited: a
+    //     guide download can take minutes and the tick must not wait on it.
+    //     One batch at a time; claimSource stops two runs of the same source.
+    if (!xmltvImportBusy) {
+      xmltvImportBusy = true;
+      import('../xmltvImport').then((m) => m.runDueImports())
+        .catch((e) => console.error('[orchestrator] xmltv import failed', e))
+        .finally(() => { xmltvImportBusy = false; });
+    }
+    // 3d) social view counts, hourly per publication, a small batch per tick.
+    try {
+      const { syncViews } = await import('../social');
+      await syncViews({ limit: 20 });
+    } catch (e) { console.error('[orchestrator] social view sync failed', e); }
     // 4) fire scheduled clips whose end time has passed
     await this.fireScheduledClips();
     // 4b) post-airing EPG automation: cut a clip/VOD for ended programmes

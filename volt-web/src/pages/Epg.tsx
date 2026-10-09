@@ -4,6 +4,7 @@ import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 import { navigate } from '../router'
 import { pressable } from '../a11y'
 import XmltvDrawer from './EpgXmltv'
+import XmltvImportDrawer from './EpgXmltvImport'
 
 /* ============================================================================
    EPG section — one guide per channel (the traditional programme guide) and
@@ -36,6 +37,7 @@ export default function Epg() {
   const [filter, setFilter] = useState<'all' | 'channel' | 'radio' | 'event'>('all')
   const [pickerOpen, setPickerOpen] = useState(false)
   const [xmltvOpen, setXmltvOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
 
   useEffect(() => {
     api.epgOwners().then(setRows).catch((e: any) => setErr(e.message))
@@ -63,6 +65,10 @@ export default function Epg() {
     <>
       <PageHead title="EPG" sub="Programme guides. Channels and radio stations carry a traditional guide; events carry the day's schedule. Each slot can control geo access, trigger a slate/loop/VOD replacement, and cut a clip automatically after airing."
         action={<div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn" onClick={() => setImportOpen(true)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" width="14" height="14" aria-hidden="true"><path d="M12 15V4M7 9l5-5 5 5M5 20h14" /></svg>
+            XMLTV import
+          </button>
           <button className="btn" onClick={() => setXmltvOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" width="14" height="14" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
             XMLTV export
@@ -70,6 +76,7 @@ export default function Epg() {
           <NewButton label="New EPG" onClick={() => setPickerOpen(true)} />
         </div>} />
       {xmltvOpen && <XmltvDrawer onClose={() => setXmltvOpen(false)} />}
+      {importOpen && <XmltvImportDrawer onClose={() => setImportOpen(false)} onImported={() => api.epgOwners().then(setRows).catch(() => {})} />}
       {err && <div className="err">{err}</div>}
       {rows === null ? (
         <div className="loading">Loading guides…</div>

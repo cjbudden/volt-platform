@@ -14,10 +14,8 @@ import { actorLabel } from '../util/actor';
  * account per platform). publications = a record per (asset, destination) we
  * pushed to, tracking the external id/url, status, and synced view count.
  *
- * The actual platform push is an ADAPTER (see socialAdapter) — the data model,
- * config, publish record and view tracking are real; the live upload to
- * YouTube/Facebook/X/TikTok/Dailymotion needs each platform's OAuth app + token
- * (from Secrets Manager) and is stubbed until those are wired.
+ * The platform push, account linking (OAuth) and view sync are in
+ * services/social and modules/social.ts (/api/social).
  */
 const PLATFORMS = ['portal', 'youtube', 'facebook', 'x', 'tiktok', 'dailymotion'] as const;
 
@@ -154,22 +152,11 @@ publicationsRouter.post(
   })
 );
 
-/** Sync view counts from platforms (stub: adapter would call each platform's API). */
+/** Sync view counts from each platform now (services/social). */
 publicationsRouter.post(
   '/sync-views',
   asyncHandler(async (req, res) => {
-    // scope to this tenant's publications
-    const updated = await query(
-      `UPDATE publications p SET views = views + 0, last_synced_at = now()
-         FROM vod_assets v
-         LEFT JOIN channels c ON c.id=v.channel_id
-         LEFT JOIN events e ON e.id=v.event_id
-         JOIN groups g ON g.id=COALESCE(c.group_id,e.group_id)
-        WHERE p.vod_asset_id=v.id AND g.account_id=$1 AND p.status='published'
-        RETURNING p.id`,
-      [accountId(req)]
-    );
-    // TODO(adapter): fetch real counts per platform and set views.
-    res.json({ synced: updated.length });
+    const { syncViews } = await import('../services/social');
+    res.json({ synced: await syncViews({ accountId: accountId(req), force: true }) });
   })
 );

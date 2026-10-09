@@ -1,3 +1,4 @@
+import { SocialComposer, SocialPanel } from './SocialPublish'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { IngestPanel } from '../IngestPanel'
 import { api, type VodAssetRow } from '../api'
@@ -110,6 +111,8 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
   const [tab, setTab] = useState<'play' | 'sources' | 'publishing' | 'availability' | 'metadata'>('play')
+  const [composeOpen, setComposeOpen] = useState(false)
+  const [socialKey, setSocialKey] = useState(0)
   async function load() {
     try { setD(await api.vodAsset(id)); setErr('') } catch (e: any) { setErr(e.message) }
   }
@@ -128,7 +131,9 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   const file = audioOnly ? (d.export_mp3_key || d.export_m4a_key || d.progressive_key || null) : (d.progressive_key || null)
   const hls = d.master_key || null
   const playable = !!(file || hls)
-  const pubs = d.publications ?? []
+  // Social posts have their own panel below (progress, retry, take down);
+  // this table keeps the portal and app publishing points.
+  const pubs = (d.publications ?? []).filter((p: any) => p.platform === 'portal' || p.platform === 'app')
 
   async function act(fn: () => Promise<any>, label: string) {
     setBusy(label); setErr('')
@@ -223,6 +228,14 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
 
       {tab === 'publishing' && (
         <div>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+            <div className="sec-label" style={{ margin: 0 }}>Publishing points</div>
+            <div style={{ flex: 1 }} />
+            <button className="btn" onClick={() => setComposeOpen(true)}>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7M12 3v12M7 8l5-5 5 5" /></svg>
+              Publish to social
+            </button>
+          </div>
           {pubs.length === 0 ? (
             <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', padding: '6px 0' }}>
               This asset has not been published anywhere.
@@ -265,6 +278,8 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
           <div style={{ marginTop: 12, fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
             Publishing goes through the asset's rules: see the Availability tab. App publications link to the app's registration under API Keys & Apps.
           </div>
+          <SocialPanel assetId={d.id} refreshKey={socialKey} />
+          {composeOpen && <SocialComposer assetId={d.id} onClose={() => setComposeOpen(false)} onPublished={() => { setSocialKey(k => k + 1); load(); onChanged() }} />}
         </div>
       )}
 

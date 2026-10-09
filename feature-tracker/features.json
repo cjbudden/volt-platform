@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-10T08:15:00Z",
+  "updated": "2026-10-10T10:00:00Z",
   "features": [
     {
       "id": "live-stream-e2e",
@@ -157,15 +157,15 @@
     {
       "id": "social-publish",
       "name": "Publish a clip to social media",
-      "summary": "Push a clip to YouTube / Facebook / X / TikTok / Dailymotion. Data model + APIs exist; real upload adapters pending.",
-      "status": "building",
+      "summary": "Admin > Social accounts: connect YouTube channels, Facebook Pages and X, TikTok and Dailymotion accounts by signing in on each platform (tokens encrypted), or add a sandbox account that behaves like the platform without sending anything. Media Library > an asset > Where it went > Publish to social: pick accounts, write the post once, adjust it per platform with live character counts against each limit, publish, and watch progress; failures show the platform's own words with Retry; published posts link out, sync views, and can be taken down where the platform allows.",
+      "status": "ready_to_test",
       "test": {
-        "how": "Not testable yet — needs each platform's OAuth app credentials from you before the upload adapters go live.",
+        "how": "Now, without credentials: Admin > Social accounts > Add sandbox account on YouTube and X > Media Library > a clip > Where it went > Publish to social > tick both > adjust the X caption > Publish: both go to Published with an Open link. Put [fail] in the title to see a failure and Retry it. With credentials: set them, Connect, publish a short clip to a private or unlisted post.",
         "artifact": null
       },
-      "checks": "Publish targets and publication records are built, and the Publishing Rules editor can name a social account as a target. Not built: linking accounts (OAuth), the Publish to action on a clip, the caption editor and the real upload adapters (stubs). Needs each platform's app credentials.",
+      "checks": "Built 10 Oct. social.check.ts 53/53 against a local stand-in for all five platforms (OAuth with PKCE, Page tokens, chunked and resumable uploads, processing polls, token refresh, revoked accounts, 503 retries, take down); social-api.check.sh 20/20 through the API and worker. NOT YET RUN AGAINST THE LIVE PLATFORMS: that needs each platform's app credentials, and the first real post per platform is the acceptance test. TikTok posts are private until TikTok audits the app.",
       "feedback": [],
-      "app_surface": "partial"
+      "app_surface": "full"
     },
     {
       "id": "file-manager",
@@ -287,28 +287,28 @@
     {
       "id": "source-validate",
       "name": "Source validate + info (probe)",
-      "summary": "Probe a source with ffprobe: codecs, resolution, frame rate, bitrate, audio tracks, timed metadata and subtitles. Since 9 Oct every source is probed automatically when added and the result is stored, which is what builds the matching fallback loop. Radio has a probe in its source panel. Still to build: the Validate button and result panel on the channel and event forms (the endpoint POST /api/sources/probe exists).",
-      "status": "building",
+      "summary": "A Check source control under every channel and event source: what the source actually carries (container, video codec, resolution, frame rate, bitrate, every audio track and its language, subtitles and timed metadata), with a warning when the top ladder rung would upscale it. Push sources (SRT listener, RTMP) and NDI/ST 2110 say why they cannot be checked from here. Every source is also probed automatically when added (9 Oct), which builds the matching fallback loop.",
+      "status": "ready_to_test",
       "test": {
-        "how": "Not testable for video in the app yet. Radio: open a station > source panel > probe. API: POST /api/sources/probe with {\"url\": ...}.",
+        "how": "New channel (or Settings) > enter an HLS URL > Check source: the panel lists video and audio. Try a URL that 404s, and an SRT listener.",
         "artifact": ""
       },
-      "checks": "Probe runs on add and is stored on stream_inputs.probe (9 Oct). filler-prep.check.ts, source-required.check.ts.",
+      "checks": "Built 10 Oct. source-probe.check.ts 16/16 against real ffmpeg media: two audio tracks with languages, a 404, and the fence (a local path, file: URLs and a playlist pointing at a local file are never read).",
       "feedback": [],
-      "app_surface": "partial"
+      "app_surface": "full"
     },
     {
       "id": "settings-lock",
       "name": "Settings lock while running",
-      "summary": "Channel settings fields read-only (still copyable) while the transcoder is running; editable only when stopped. Next.",
-      "status": "building",
+      "summary": "While a channel is running, the settings the encoder reads at start (sources, ladder, DVR, failover, filler, watermark, subtitles) are locked: shown read-only but still selectable for copying, left out of the save, and refused by the API if changed. Everything that takes effect live (name, metadata, geo, retention, guide, brand, auto connect) stays editable.",
+      "status": "ready_to_test",
       "test": {
-        "how": "Not testable yet. When built: start a channel, open Settings, the fields are read-only but copyable until you stop it.",
+        "how": "Start a channel > Settings: the note says what is locked; try to change the source URL (it will not change) and copy it (it copies); change the name and Save (it saves). Stop the channel and change the source.",
         "artifact": ""
       },
-      "checks": "Not built: the channel Settings drawer has no running check yet.",
+      "checks": "Built 10 Oct. settings-lock.check.sh 17/17: changes refused 409 naming the fields, the same value sent back accepted, a mixed edit refused whole, unlocked again once stopped.",
       "feedback": [],
-      "app_surface": "pending"
+      "app_surface": "full"
     },
     {
       "id": "on-air-public",
@@ -637,30 +637,30 @@
     },
     {
       "id": "notifications",
-      "name": "Notifications",
-      "summary": "One API to send an event to recipients over channels (email, in-app, device push), templated, with a delivery log and retries. Email and push adapters are stubs and there is no screen; retries have no cap yet.",
-      "status": "building",
-      "app_surface": "none",
+      "name": "Notifications: inbox, email, device push",
+      "summary": "The bell is now a real inbox. Volt tells an account's owners and admins when auto connect gives up, an EPG import fails or a social post cannot be published: in the console inbox always, and by email (SMTP) and device push (Firebase) when configured. Admin > Notifications shows each channel's status with Send me a test, the sent log with what happened to every copy (sent, retrying, gave up and why) and Retry, the templates, and your devices. Failed deliveries retry after 1, 5, 15 and 60 minutes, up to 5 attempts; a rejected address or a dead device is not retried.",
+      "status": "ready_to_test",
+      "app_surface": "full",
       "test": {
-        "how": "Not testable in the app. API: POST /api/notifications then GET the inbox.",
+        "how": "Admin > Notifications > Send me a test on Console inbox: the bell shows 1. With SMTP_URL and NOTIFY_FROM set, Send me a test on Email. Break an import URL and Import now: the failure arrives in the bell.",
         "artifact": ""
       },
-      "checks": "notifications.check.sh.",
+      "checks": "Completed 10 Oct. notifications-delivery.check.ts 24/24 against a fake SMTP server and a fake FCM; notifications.check.sh. Email needs SMTP_URL and NOTIFY_FROM, push needs FCM_SERVICE_ACCOUNT.",
       "feedback": []
     },
     {
       "id": "xmltv-import",
       "name": "XMLTV import (bring in a customer's guide)",
-      "summary": "WHY: onboarding a broadcaster means taking the guide they already have. WHAT: import an XMLTV file or URL into programmes: map their channel ids to ours (kept across re-imports), resolve times with no offset against the channel time zone, end = next start where stop is missing, idempotent nightly refresh, overlaps flagged rather than rejected.",
-      "status": "building",
-      "app_surface": "pending",
+      "summary": "WHY: onboarding a broadcaster means taking the guide they already have. WHAT: EPG > XMLTV import. Add a source (a URL fetched on a schedule, or uploaded files), run it, map their channels to ours (unambiguous matches are mapped automatically), and the guide fills. Re-runs are a diff: unchanged rows stay, edits update, what the file dropped is removed (never a programme with a clip). Times without an offset are read in the channel's own zone. Gzip and Latin-1 files work. Every run is logged with counts and warnings, and a failure tells the admins.",
+      "status": "ready_to_test",
+      "app_surface": "full",
       "test": {
-        "how": "Not testable yet.",
+        "how": "EPG > XMLTV import > New source > paste a guide URL (or choose Uploaded by hand and Upload file) > Import now > Channels: map anything unmapped > Import now again: unchanged, nothing duplicated. Open the channel's guide in EPG to see the programmes.",
         "artifact": ""
       },
-      "checks": "Designed (docs/DESIGN_epg_xmltv.md), not built. The programme store already has the idempotent import key and overlap index it needs.",
+      "checks": "Built 10 Oct. xmltv-import-pure.check.ts 42/42 (including a round trip through the exporter), xmltv-import.check.sh 40/40 (URL and upload, mapping, the diff, clips protected, remapping, failure notice, schedule, tenancy, and our export imported into a second account).",
       "feedback": []
     }
   ],
-  "note": "Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code: statuses and app surfacing brought up to date, and 16 cards added (14 built features the list was missing, plus Notifications and XMLTV import, which are still being built). Nothing has been approved yet, and nothing was removed."
+  "note": "Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set."
 }

@@ -52,7 +52,7 @@ export async function assetAccount(assetId: string): Promise<{ asset: any; accou
  * `targets` overrides the plan's targets for this one publish (a manual
  * "just YouTube this time"); everything else comes from the ladder.
  */
-export async function publish(assetId: string, by: string, opts: { targets?: Target[]; auto?: boolean } = {}): Promise<PublishOutcome> {
+export async function publish(assetId: string, by: string, opts: { targets?: Target[]; auto?: boolean; posts?: Record<string, any> } = {}): Promise<PublishOutcome> {
   const found = await assetAccount(assetId);
   if (!found) throw new NotPublishable('not_found', 'Asset not found');
   const { asset, accountId } = found;
@@ -105,15 +105,19 @@ export async function publish(assetId: string, by: string, opts: { targets?: Tar
       const target = await one<any>(
         `SELECT * FROM publish_targets WHERE id = $1 AND account_id = $2 AND enabled = true`, [t.targetId, accountId]);
       if (!target) continue;
+      // THE REAL UPLOAD, as a job (services/social): the row starts pending
+      // with the post the person wrote (or the asset's own title, description
+      // and tags), and the job moves it to published or failed with progress.
+      const social = await import('./social');
+      const given = opts.posts?.[target.id];
+      const { post } = social.fitPost(target.platform, given ?? social.defaultPost(asset, target.platform));
       const pub = await one<any>(
-        `INSERT INTO publications(vod_asset_id, platform, target_id, status,
+        `INSERT INTO publications(vod_asset_id, platform, target_id, status, post, progress, stage,
             published_build_at, published_review_state, published_qc_state, published_duration_ms, published_by)
-         VALUES ($1,$2::publish_platform,$3,'pending',$4,$5,$6,$7,$8) RETURNING *`,
-        [assetId, target.platform, target.id, stamp.buildAt, stamp.review, stamp.qc, stamp.durationMs, by]);
-      // TODO(adapter): the real upload. The stub marks it published with a placeholder URL.
-      pubs.push(await one(
-        `UPDATE publications SET status='published', external_id=$2, external_url=$3, published_at=now() WHERE id=$1 RETURNING *`,
-        [pub.id, `stub-${pub.id.slice(0, 8)}`, `https://${target.platform}.example/watch/${pub.id.slice(0, 8)}`]));
+         VALUES ($1,$2::publish_platform,$3,'pending',$4::jsonb,0,'queued',$5,$6,$7,$8,$9) RETURNING *`,
+        [assetId, target.platform, target.id, JSON.stringify(post), stamp.buildAt, stamp.review, stamp.qc, stamp.durationMs, by]);
+      await social.queueSocialPublication(pub.id, null);
+      pubs.push(await one(`SELECT * FROM publications WHERE id = $1`, [pub.id]));
     }
   }
 

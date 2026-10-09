@@ -23,18 +23,58 @@ function fps(r?: string): number | null {
 }
 function kbps(v: any): number | null { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.round(n / 1000) : null; }
 
+// WHAT THE PROBE MAY OPEN. It runs ffprobe on a string an operator typed, from
+// the control plane, so without a fence it reads local files (`/etc/passwd`,
+// `file:` URLs, or a playlist whose segments point at them) and anything else
+// ffmpeg has a protocol for. Network schemes only, and the same list is handed
+// to ffprobe as its protocol whitelist so a playlist cannot reach outside it.
+export const PROBE_SCHEMES = ['http', 'https', 'rtmp', 'rtmps', 'rtsp', 'srt', 'udp', 'rtp'];
+const PROTOCOL_WHITELIST = 'http,https,tls,tcp,udp,rtp,rtmp,rtmps,rtsp,srt,crypto,hls,httpproxy';
+// A probe holds an ffprobe process for up to 20 s. A small global cap keeps a
+// burst of clicks (or a script) from spawning dozens of them.
+const MAX_CONCURRENT = 4;
+let inFlight = 0;
+
+export function probeUrlProblem(url: string): string | null {
+  const m = /^([a-z][a-z0-9+.-]*):\/\//i.exec(url.trim());
+  if (!m) return 'Enter a full URL, starting with its scheme (for example https:// or srt://).';
+  if (!PROBE_SCHEMES.includes(m[1].toLowerCase())) return `${m[1]}:// sources cannot be checked from here.`;
+  return null;
+}
+
 export async function probeSource(url: string, protocol?: string, timeoutMs = 20000): Promise<SourceProbe> {
   const proto = (protocol || '').toLowerCase();
-  if (proto === 'srt' || proto === 'rtmp' || proto === 'rtmps') {
+  if (proto === 'ndi' || proto === 'st2110') {
+    return { ok: true, reachable: false, note: `${proto === 'ndi' ? 'NDI' : 'ST 2110'} is only visible on the local network of the ingest node, so it is checked when the channel starts.` };
+  }
+  // A push source is a LISTENER we open: there is nothing to dial until the
+  // sender connects. A caller-mode SRT URL (mode=caller) is a pull and is probed.
+  const pushListener = (proto === 'rtmp' || proto === 'rtmps') || (proto === 'srt' && !/[?&]mode=caller\b/i.test(url));
+  if (pushListener) {
     return { ok: true, reachable: false, note: `${proto.toUpperCase()} is a push source; received details appear once a feed is pushed to the ingest endpoint.` };
   }
-  const args = ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', '-rw_timeout', '8000000', url];
+  const problem = probeUrlProblem(url);
+  if (problem) return { ok: false, reachable: false, error: problem };
+  if (inFlight >= MAX_CONCURRENT) return { ok: false, reachable: false, error: 'Several sources are being checked already. Try again in a few seconds.' };
+  inFlight++;
+  try { return await runProbe(url, timeoutMs); } finally { inFlight--; }
+}
+
+async function runProbe(url: string, timeoutMs: number): Promise<SourceProbe> {
+  const args = ['-v', 'error', '-protocol_whitelist', PROTOCOL_WHITELIST, '-show_format', '-show_streams', '-of', 'json', '-rw_timeout', '8000000', url];
   return await new Promise<SourceProbe>((resolve) => {
     execFile('ffprobe', args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
       if (err && !stdout) { resolve({ ok: false, reachable: false, error: 'Could not read the source (unreachable, blocked, or not a stream).' }); return; }
       let j: any;
       try { j = JSON.parse(stdout); } catch { resolve({ ok: false, reachable: false, error: 'Source did not return a probeable stream.' }); return; }
       const streams: any[] = j.streams || [];
+      // ffprobe prints an empty object on most failures (a 404, a refused
+      // protocol), so an exit error or a stream with nothing in it is a failure,
+      // not a reachable source with no tracks.
+      if (!streams.length) {
+        resolve({ ok: false, reachable: false, error: err ? 'Could not read the source (unreachable, blocked, or not a stream).' : 'The source answered but carries no audio or video.' });
+        return;
+      }
       const v = streams.find((s) => s.codec_type === 'video');
       const audio = streams.filter((s) => s.codec_type === 'audio').map((s) => ({
         codec: s.codec_name, channels: s.channels,
