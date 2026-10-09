@@ -511,8 +511,12 @@ function HlsVideo({ src, fallbackSrc, hostRef }: { src: string; fallbackSrc?: st
     let cancelled = false; let hls: any; let usingFallback = false; let fails = 0
     const v = ref.current; if (!v || !src) return
     const resolve = (s: string) => /^https?:\/\//i.test(s) ? s : originUrl(s)
-    // keep the preview pinned to the live edge; if it falls >20s behind, jump forward
-    const snapLive = () => { try { const sk = v.seekable; if (sk.length) { const end = sk.end(sk.length - 1); if (end - v.currentTime > 20) v.currentTime = end - 0.5 } } catch {} }
+    // keep the preview near the live edge; if it falls >20s behind, jump forward to
+    // hls.js's own live sync point (three segments back). It used to jump to 0.5s
+    // behind the newest data, which ran the buffer dry at once: the preview stalled,
+    // fell behind, jumped again, and the source panel looked jumpy (seen on the
+    // 9 Oct demo capture).
+    const snapLive = () => { try { const sk = v.seekable; if (sk.length) { const end = sk.end(sk.length - 1); if (end - v.currentTime > 20) { const sync = hls?.liveSyncPosition; v.currentTime = Number.isFinite(sync) && sync > 0 ? sync : Math.max(sk.start(0), end - 8) } } } catch {} }
     ;(async () => {
       const Hls = (await import('hls.js')).default
       if (cancelled) return
