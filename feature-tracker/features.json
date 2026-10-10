@@ -287,13 +287,13 @@
     {
       "id": "source-validate",
       "name": "Source validate + info (probe)",
-      "summary": "A Check source control under every channel and event source: what the source actually carries (container, video codec, resolution, frame rate, bitrate, every audio track and its language, subtitles and timed metadata), with a warning when the top ladder rung would upscale it. Push sources (SRT listener, RTMP) and NDI/ST 2110 say why they cannot be checked from here. Every source is also probed automatically when added (9 Oct), which builds the matching fallback loop.",
+      "summary": "A Check source control under every channel and event source: what the source actually carries (container, video codec, resolution, frame rate, bitrate, every audio track and its language, subtitles and timed metadata), with a warning when the top ladder rung would upscale it. Push sources (SRT listener, RTMP) and NDI/ST 2110 say why they cannot be checked from here. Every source is also probed automatically when added (9 Oct), which builds the matching fallback loop. HLS MASTERS: an HLS address is read as a playlist as you type it, on channels, events and radio stations. A redirect is shown (ABC Jazz's old master address now leads to NewsRadio). A master lists its variants (codec, bitrate, resolution) and you pick the one the source uses, or keep the master; saving a new master with several variants asks you to choose first.",
       "status": "ready_to_test",
       "test": {
-        "how": "New channel (or Settings) > enter an HLS URL > Check source: the panel lists video and audio. Try a URL that 404s, and an SRT listener.",
+        "how": "New channel (or Settings) > enter an HLS URL > Check source: the panel lists video and audio. Try a URL that 404s, and an SRT listener. HLS master: Radio > New station > HLS > paste https://mediaserviceslive.akamaized.net/hls/live/2038311/abcjazz/masterhls.m3u8 > the field shows it redirects (to NewsRadio) > Use the final address, or paste https://streaming.abc-cdn.net.au/audio/hls/abcjazz.m3u8 > two variants (AAC-LC 252 kbps, HE-AAC v2 140 kbps) > Create station without choosing: you are asked to choose > pick one: the source becomes that variant, Back to the master undoes it. On the station page a long source URL is cut with … (hover for all, click to copy).",
         "artifact": ""
       },
-      "checks": "Built 10 Oct. source-probe.check.ts 16/16 against real ffmpeg media: two audio tracks with languages, a 404, and the fence (a local path, file: URLs and a playlist pointing at a local file are never read).",
+      "checks": "Built 10 Oct. source-probe.check.ts 16/16 against real ffmpeg media: two audio tracks with languages, a 404, and the fence (a local path, file: URLs and a playlist pointing at a local file are never read). HLS masters: hls-master-pure 18/18 on the real ABC masters, hls-master 12/12 (redirects, variants, media playlists, refusals). Checked in a browser: picker, save gate, and the station page URL truncation.",
       "feedback": [],
       "app_surface": "full"
     },

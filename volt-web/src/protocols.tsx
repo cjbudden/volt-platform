@@ -4,7 +4,7 @@
 // selected protocol. A tiny built-in fallback keeps the form usable if the fetch
 // is momentarily unavailable. See docs/DESIGN_forms_and_fields.md.
 import { useEffect, useState } from 'react'
-import { api, type IngestProtocol, type SourceProbe } from './api'
+import { api, type IngestProtocol, type SourceProbe, type HlsInspection, type HlsVariant } from './api'
 
 const FALLBACK: IngestProtocol[] = [
   { id: 'srt', label: 'SRT', ingest: 'push', urlLabel: 'SRT URL', urlPlaceholder: 'srt://host:9000?streamid=…', urlExample: 'srt://ingest.volt.example:9000?streamid=live&latency=200', urlPattern: '^srt://', streamKey: { show: false }, hint: 'streamid selects the channel; add latency/passphrase as query params.', packageFriendly: false },
@@ -63,7 +63,143 @@ export function SourceInput({ protocols, value, onChange, label, packageOnly, va
         <input className="inp" style={{ marginTop: 8 }} value={value.streamKey ?? ''} onChange={e => onChange({ ...value, streamKey: e.target.value })} placeholder={d.streamKey.placeholder ?? 'stream key'} />
       )}
       <div className="hintxt">{d.hint} e.g. <span style={{ fontFamily: 'ui-monospace,monospace', color: 'var(--muted)' }}>{d.urlExample}</span></div>
+      <HlsChoice protocol={value.protocol} url={value.url} onPick={(url) => onChange({ ...value, url })} />
       {validate && <SourceCheck protocol={value.protocol} url={value.url} ladderTop={ladderTop} />}
+    </div>
+  )
+}
+
+/* ============================================================================
+   HLS MASTER CHOICE. An HLS address is read as a playlist as soon as it is
+   typed (the playlist only, not the stream, so it is quick). For a MASTER with
+   several variants the field lists them and asks which one this source takes:
+   picking one makes its own address the source, and "Back to the master"
+   undoes that. "Keep the master" is a choice too: the encoder then picks a
+   variant itself, which can change if the provider reorders the list.
+
+   A redirect is always shown, because it can lead somewhere else entirely:
+   ABC Jazz's old master address now redirects to NewsRadio's.
+
+   A variant whose audio lives in a separate playlist is listed but cannot be
+   picked: its own address carries no sound.
+
+   SAVING: forms call hlsChoicePending() before saving. A NEW master address
+   with more than one usable variant and no decision stops the save once, and
+   the field below it lights up asking for the choice.
+   ========================================================================== */
+export const looksLikeHls = (url: string, protocol?: string) =>
+  /^https?:\/\//i.test(url.trim()) && ((protocol ?? '').toLowerCase() === 'hls' || /\.m3u8?(\?|#|$)/i.test(url.trim()))
+
+const hlsCache = new Map<string, { at: number; res: Promise<HlsInspection> }>()
+function inspect(url: string): Promise<HlsInspection> {
+  const hit = hlsCache.get(url)
+  if (hit && Date.now() - hit.at < 60_000) return hit.res
+  const res = api.inspectHls(url).catch((e: any) => ({ ok: false, error: e?.message ?? String(e) } as HlsInspection))
+  hlsCache.set(url, { at: Date.now(), res })
+  return res
+}
+/** Masters somebody chose to keep as they are, and the master each picked variant came from. */
+const keptMasters = new Set<string>()
+const pickedFrom = new Map<string, string>()
+const usable = (r: HlsInspection | null | undefined) => (r?.kind === 'master' ? (r.variants ?? []).filter(v => !v.externalAudio) : [])
+
+/**
+ * Before saving: is any NEW HLS master address (one that differs from what was
+ * loaded) still waiting for a variant to be chosen? Returns the message to show,
+ * or null to go ahead.
+ */
+export async function hlsChoicePending(sources: { url?: string | null; protocol?: string | null; original?: string | null }[]): Promise<string | null> {
+  for (const s of sources) {
+    const url = (s.url ?? '').trim()
+    if (!url || url === (s.original ?? '').trim() || !looksLikeHls(url, s.protocol ?? undefined) || keptMasters.has(url)) continue
+    const r = await inspect(url)
+    if (usable(r).length > 1) {
+      window.dispatchEvent(new CustomEvent('volt:hls-choose', { detail: url }))
+      return `The source is an HLS master playlist with ${usable(r).length} variants. Choose the one to use under the source (or keep the master), then save again.`
+    }
+  }
+  return null
+}
+
+const kb = (n: number | null) => n == null ? null : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)} Mbps` : `${Math.round(n / 1000)} kbps`
+export function variantLabel(v: HlsVariant): string {
+  return [v.codecNames.filter(c => c !== 'subtitles').join(' + ') || 'unknown codec', v.resolution?.replace('x', '×'), v.frameRate ? `${v.frameRate} fps` : null,
+    kb(v.bandwidth) ? `${kb(v.bandwidth)}${v.averageBandwidth && v.averageBandwidth !== v.bandwidth ? ` (avg ${kb(v.averageBandwidth)})` : ''}` : null,
+    v.audioOnly ? 'audio only' : null].filter(Boolean).join(' · ')
+}
+const tail = (u: string) => { try { const x = new URL(u); return `${x.host}…${x.pathname.split('/').slice(-2).join('/')}` } catch { return u } }
+
+export function HlsChoice({ protocol, url, onPick }: { protocol: string; url: string; onPick: (url: string) => void }) {
+  const u = url.trim()
+  const on = looksLikeHls(u, protocol)
+  const [res, setRes] = useState<{ for: string; r: HlsInspection } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [, bump] = useState(0)
+  const [ask, setAsk] = useState(false)
+  useEffect(() => {
+    setAsk(false)
+    if (!on) return
+    let live = true
+    const t = setTimeout(() => { setBusy(true); inspect(u).then(r => { if (live) setRes({ for: u, r }) }).finally(() => live && setBusy(false)) }, 700)
+    return () => { live = false; clearTimeout(t) }
+  }, [u, on])
+  useEffect(() => {
+    const h = (e: Event) => { if ((e as CustomEvent).detail === u) setAsk(true) }
+    window.addEventListener('volt:hls-choose', h)
+    return () => window.removeEventListener('volt:hls-choose', h)
+  }, [u])
+  if (!on) return null
+  const r = res?.for === u ? res.r : null
+  const master = pickedFrom.get(u)
+  if (!r) return busy ? <div className="hintxt">Reading the HLS playlist…</div> : null
+  if (!r.ok) return <div className="hintxt" style={{ color: 'var(--warn)' }}>HLS playlist: {r.error}{r.redirectedTo ? ` (after a redirect to ${r.redirectedTo})` : ''}</div>
+  const variants = r.variants ?? []
+  const audioR = (r.renditions ?? []).filter(x => x.type === 'AUDIO')
+  const kept = keptMasters.has(u)
+  return (
+    <div className={`hls-choice${ask && !kept ? ' ask' : ''}`} role="group" aria-label="HLS playlist">
+      {r.redirectedTo && (
+        <div className="hls-redirect">
+          This address redirects to <span className="mono">{r.redirectedTo}</span>. Check it is the stream you expect: an old address can now point somewhere else.
+          <button type="button" className="lineup-suggest" onClick={() => onPick(r.redirectedTo!)}>Use the final address</button>
+        </div>
+      )}
+      {r.kind === 'media' && (
+        <div className="hintxt" style={{ marginTop: 0 }}>
+          HLS media playlist ({r.live ? 'live' : 'on demand'}{r.targetDuration ? `, ${r.targetDuration} s segments` : ''}): a single variant.
+          {master && <> Chosen from <span className="mono">{tail(master)}</span>. <button type="button" className="lineup-suggest" style={{ display: 'inline-block' }} onClick={() => onPick(master)}>Back to the master</button></>}
+        </div>
+      )}
+      {r.kind === 'master' && (
+        <>
+          <div className="hls-head">
+            HLS master playlist: {variants.length} variant{variants.length === 1 ? '' : 's'}
+            {audioR.length > 0 && `, ${audioR.length} audio rendition${audioR.length === 1 ? '' : 's'}`}
+            {usable(r).length > 1 && <span className="hintxt" style={{ marginTop: 0 }}> Choose the one this source uses.</span>}
+          </div>
+          {ask && !kept && <div className="hintxt" style={{ color: 'var(--warn)', marginTop: 2 }}>Choose a variant, or keep the master, before saving.</div>}
+          <div className="hls-options">
+            <label className={`hls-opt${kept ? ' sel' : ''}`}>
+              <input type="radio" name={`hls-${u}`} checked={kept} onChange={() => { keptMasters.add(u); setAsk(false); bump(n => n + 1) }} />
+              <span><strong>Keep the master</strong><span className="hintxt" style={{ display: 'block', marginTop: 0 }}>The encoder picks a variant itself; which one can change if the provider reorders the list.</span></span>
+            </label>
+            {variants.map((v, i) => (
+              <label key={v.uri + i} className={`hls-opt${v.externalAudio ? ' off' : ''}`} title={v.uri}>
+                <input type="radio" name={`hls-${u}`} disabled={v.externalAudio} checked={false}
+                  onChange={() => { pickedFrom.set(v.uri, u); keptMasters.delete(u); onPick(v.uri) }} />
+                <span>
+                  <strong>{variantLabel(v)}</strong>
+                  <span className="hintxt mono" style={{ display: 'block', marginTop: 0 }}>{tail(v.uri)}</span>
+                  {v.externalAudio && <span className="hintxt" style={{ display: 'block', marginTop: 0, color: 'var(--warn)' }}>Its audio is in a separate playlist ({v.audioGroup}), so this address alone has no sound: keep the master to use it.</span>}
+                </span>
+              </label>
+            ))}
+          </div>
+          {audioR.length > 0 && (
+            <div className="hintxt">Audio renditions: {audioR.map(a => `${a.name}${a.language ? ` (${a.language})` : ''}${a.default ? ', default' : ''}`).join(' · ')}</div>
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -130,6 +266,9 @@ export function SourceCheck({ protocol, url, ladderTop }: { protocol: string; ur
                   {[o.note ?? o.codec, o.language].filter(Boolean).join(' · ')}
                 </span></div>
               ))}
+              {shown.hls?.kind === 'master' && (shown.hls.variants?.length ?? 0) > 1 && (
+                <div className="hintxt">This is an HLS master, so the tracks above are its {shown.hls.variants!.length} variants together. The source takes one of them: see the choice above.</div>
+              )}
               {upscale && <div className="hintxt" style={{ color: 'var(--warn)' }}>The output ladder's top rung is {upscale}p but the source is {v!.height}p, so that rung would be upscaled. Lower it to {v!.height}p or below.</div>}
             </>
           )}

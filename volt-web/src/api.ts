@@ -1145,6 +1145,8 @@ export const api = {
     const r = await fetch('/api/notifications/devices/' + id, { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
     if (!r.ok && r.status !== 204) throw new ApiError(r.status, `${r.status}`, null)
   },
+  /** Read an HLS playlist (master variants or media) without probing the stream. Quick. */
+  inspectHls: (url: string): Promise<HlsInspection> => req('/sources/hls', { method: 'POST', body: JSON.stringify({ url }) }),
   probeSource: (url: string, protocol?: string): Promise<SourceProbe> =>
     req('/sources/probe', { method: 'POST', body: JSON.stringify({ url, protocol }) }),
   probeRadioSource: (url: string): Promise<IcyProbe> =>
@@ -2341,6 +2343,19 @@ export interface SourceProbe {
   audio?: { codec?: string; channels?: number; sample_rate?: number; bitrate_kbps?: number | null; language?: string | null }[]
   other?: { kind: string; codec?: string; language?: string | null; note?: string }[]
   note?: string; error?: string
+  /** For an HLS address: the playlist (master with variants, or media) and any redirect. */
+  hls?: HlsInspection
+}
+export interface HlsVariant {
+  uri: string; bandwidth: number | null; averageBandwidth: number | null; codecs: string[]; codecNames: string[]
+  resolution: string | null; frameRate: number | null; audioGroup: string | null
+  /** Audio is in a separate rendition playlist: this variant's own address has no sound. */
+  externalAudio: boolean; audioOnly: boolean
+}
+export interface HlsRendition { type: string; groupId: string; name: string; language: string | null; default: boolean; channels: string | null; uri: string | null }
+export interface HlsInspection {
+  ok: boolean; error?: string; redirectedTo?: string | null; kind?: 'master' | 'media'
+  variants?: HlsVariant[]; renditions?: HlsRendition[]; live?: boolean; targetDuration?: number | null
 }
 export interface IngestProtocol {
   id: string; label: string; ingest: 'push' | 'pull'

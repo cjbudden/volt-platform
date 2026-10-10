@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type RadioStationRow, type Group, type RadioCfg } from '../api'
-import { useProtocols, SourceInput, type SourceValue } from '../protocols'
+import { useProtocols, SourceInput, hlsChoicePending, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { PageHead, NewButton, FChip, EntityCell, StatusPill, Preset, RecordingSection, RET_UNIT_SEC, splitDuration, type RetUnit, type PipelineState } from '../scaffold'
 import { SourceMetadataButton } from '../SourceMetadata'
@@ -234,6 +234,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
     if (!isEdit && !primary.url.trim()) { setErr('Add the source stream URL'); return }
     if (!isEdit && !groupId) { setErr('No group set up yet'); return }
     if (!outMp3 && !outHls && !outDash) { setErr('Enable at least one output'); return }
+    const hlsWait = await hlsChoicePending([{ url: primary.url, protocol: primary.protocol, original: src0?.ingest_url }]); if (hlsWait) { setErr(hlsWait); return }
     const radio: RadioCfg = {
       outputs: { mp3: outMp3, hls: outHls, dash: outDash },
       bitrateKbps: bitrate,

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, thumbUrl, type Group } from '../api'
 import { subscribeLive } from '../liveStatus'
-import { useProtocols, protoOf, SourceInput, type SourceValue } from '../protocols'
+import { useProtocols, protoOf, SourceInput, hlsChoicePending, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, type RetUnit } from '../scaffold'
@@ -274,6 +274,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
     setErr('')
     if (!name.trim()) { setErr('Give the channel a name'); return }
     if (!group) { setErr(`No ${type === 'transcode' ? 'transcode' : 'packaging'} group set up yet`); return }
+    const hlsWait = await hlsChoicePending([tSrc, ...(tBackupOn ? [tBackup] : []), fbSrc]); if (hlsWait) { setErr(hlsWait); return }
 
     const sources: NonNullable<Parameters<typeof api.createChannel>[0]['sources']> = []
     let outputLadder: { height: number; bitrateKbps: number }[] = []

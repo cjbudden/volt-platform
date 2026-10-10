@@ -4,6 +4,7 @@
 // Push protocols (SRT/RTMP) cannot be probed on demand; their details appear once a feed
 // is actually being received (surfaced live from the ingest instead).
 import { execFile } from 'node:child_process';
+import { inspectHls, looksLikeHls, type HlsInspection } from './hlsMaster';
 
 export interface SourceProbe {
   ok: boolean;
@@ -14,6 +15,8 @@ export interface SourceProbe {
   other?: Array<{ kind: string; codec?: string; language?: string | null; note?: string }>;
   note?: string;
   error?: string;
+  /** For an HLS address: the playlist itself (master with its variants, or media), and any redirect. */
+  hls?: HlsInspection;
 }
 
 function fps(r?: string): number | null {
@@ -57,7 +60,13 @@ export async function probeSource(url: string, protocol?: string, timeoutMs = 20
   if (problem) return { ok: false, reachable: false, error: problem };
   if (inFlight >= MAX_CONCURRENT) return { ok: false, reachable: false, error: 'Several sources are being checked already. Try again in a few seconds.' };
   inFlight++;
-  try { return await runProbe(url, timeoutMs); } finally { inFlight--; }
+  try {
+    // An HLS address is also read as a playlist, alongside ffprobe: ffprobe
+    // flattens a master's variants into one list of tracks, the playlist says
+    // which variant each belongs to and lets one be chosen.
+    const [probe, hls] = await Promise.all([runProbe(url, timeoutMs), looksLikeHls(url, proto) ? inspectHls(url) : Promise.resolve(undefined)]);
+    return hls ? { ...probe, hls } : probe;
+  } finally { inFlight--; }
 }
 
 async function runProbe(url: string, timeoutMs: number): Promise<SourceProbe> {

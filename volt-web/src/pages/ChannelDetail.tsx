@@ -5,7 +5,7 @@ import { TypePicker, MetadataForm } from '../ContentTypeFields'
 import { RuleEditor } from '../RuleEditor'
 import { subscribeLive } from '../liveStatus'
 import { useRecordWatch, LiveEditNotice } from '../liveRecord'
-import { useProtocols, SourceInput, type SourceValue } from '../protocols'
+import { useProtocols, SourceInput, hlsChoicePending, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
 import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, GATE_COLOR, RecoveryNote, DiagnosisBlock, DrawerTabs, TabPane, type DrawerTab, type RetUnit } from '../scaffold'
@@ -1798,6 +1798,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
 
   async function save() {
     setErr('')
+    const hlsWait = await hlsChoicePending([{ url: primary.url, protocol: primary.protocol, original: src0?.ingest_url }, { url: backup.url, protocol: backup.protocol, original: src1?.ingest_url }]); if (hlsWait) { setErr(hlsWait); return }
     const patch: ChannelSettingsPatch = { version: d.version }
     if (name.trim() && name.trim() !== d.name) patch.name = name.trim()
     patch.dvrMode = dvrMode

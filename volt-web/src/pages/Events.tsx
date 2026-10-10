@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type EventRow, type Group } from '../api'
-import { useProtocols, SourceInput, type SourceValue } from '../protocols'
+import { useProtocols, SourceInput, hlsChoicePending, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, splitDuration, DrawerTabs, TabPane, type DrawerTab, type RetUnit } from '../scaffold'
 import { ShareDrawer } from '../ShareDrawer'
@@ -224,6 +224,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
     const sMs = new Date(start).getTime(), eMs = new Date(end).getTime()
     if (!(eMs > sMs)) { setErr('End must be after start'); return }
     if (!isEdit && !primary.url.trim()) { setErr('Add the primary source URL'); return }
+    const hlsWait = await hlsChoicePending([{ url: primary.url, protocol: primary.protocol, original: src0?.ingest_url }, ...(backupOn ? [{ url: backup.url, protocol: backup.protocol, original: src1?.ingest_url }] : [])]); if (hlsWait) { setErr(hlsWait); return }
     const sources: NonNullable<Parameters<typeof api.createEvent>[0]['sources']> = []
     if (primary.url.trim()) sources.push({ role: 'primary', protocol: primary.protocol, ingestUrl: primary.url.trim(), streamKey: primary.streamKey?.trim() || undefined })
     if (backupOn && backup.url.trim()) sources.push({ role: 'backup', protocol: backup.protocol, ingestUrl: backup.url.trim(), streamKey: backup.streamKey?.trim() || undefined })

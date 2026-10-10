@@ -1021,11 +1021,12 @@ function OutputPreview({ label, url, kind, playing, onToggle, onCopy, reason, of
 function MetaRow({ k, v }: { k: string; v?: string | null }) {
   if (!v) return null
   return (
-    <div style={{ display: 'flex', gap: 8 }}>
-      <span style={{ width: 110, color: 'var(--faint)' }}>{k}</span>
-      {/* minWidth: 0 is what lets a flex child shrink below its content, and
-          without it a long URL simply ran off the card. Hover for the whole
-          thing; click to copy. */}
+    // minWidth: 0 on the ROW as well as the value. The rows sit in a grid, and a
+    // grid item's default minimum is its content: a long URL made the row as
+    // wide as the URL, so the value's own ellipsis never applied and the text
+    // ran out of the card. Hover for the whole thing; click to copy.
+    <div style={{ display: 'flex', gap: 8, minWidth: 0 }}>
+      <span style={{ width: 110, flex: 'none', color: 'var(--faint)' }}>{k}</span>
       <span title={`${v}\nClick to copy`} onClick={() => { try { navigator.clipboard.writeText(v) } catch {} }}
         style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: v.length > 40 ? 'copy' : undefined }}>{v}</span>
     </div>
