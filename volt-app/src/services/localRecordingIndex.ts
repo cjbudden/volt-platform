@@ -132,42 +132,103 @@ export function scanRun(streamId: string, runId: string, rendition: string): Loc
     next.set(f, e);
     return e;
   });
-  const out: LocalSegment[] = [];
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i];
-    const nxt = entries[i + 1];
-    // A tfdt DELTA is this segment's duration only when the next entry is the
-    // segment that genuinely follows it. Two ways that fails, both seen on real
-    // runs, and both placing media badly wrong rather than slightly wrong —
-    // because a segment's start is its write time MINUS its duration, so a wrong
-    // duration moves the segment, not just its length:
-    //
-    //   REBASED TIMELINE. An encoder restarting inside a run resets tfdt and the
-    //   delta comes out negative; one real run produced -1,264,001 ms, placing a
-    //   segment twenty-one minutes into the future.
-    //
-    //   A MISSING NEIGHBOUR. When a segment is absent — pruned, lost to a killed
-    //   process — the next entry is not seq+1, and the delta measures across the
-    //   hole. The segment before a five-segment hole took a 24s duration and was
-    //   placed 20s early, on top of its own predecessors.
-    //
-    // So: consecutive sequence numbers AND a plausible value, or fall back to
-    // the neighbouring segment's measured length.
+  const out = placeSegments(entries.map((e) => ({ seq: e.seq, tfdt: e.tfdt, mtimeMs: e.mtimeMs })), ts)
+    .map((p, i) => ({
+      runId, rendition, file: entries[i].f, seq: entries[i].seq,
+      startMs: p.startMs, durMs: p.durMs,
+      uri: `/origin/${streamId}/runs/${runId}/${rendition}/${entries[i].f}`,
+    }));
+  scanCache.set(key, { ts, entries: next, result: out, at: now });
+  return out;
+}
+
+// ---- placement: where each segment sits on the wall clock -------------------
+//
+//  DURATION. A tfdt DELTA is a segment's duration only when the next entry is
+//  the segment that genuinely follows it. Two ways that fails, both seen on
+//  real runs:
+//    REBASED TIMELINE. An encoder restarting inside a run resets tfdt and the
+//    delta comes out negative; one real run produced -1,264,001 ms.
+//    A MISSING NEIGHBOUR. When a segment is absent (pruned, lost to a killed
+//    process) the next entry is not seq+1 and the delta measures across the
+//    hole: the segment before a five-segment hole took a 24s duration.
+//  So: consecutive sequence numbers AND a plausible value, or the neighbouring
+//  segment's measured length.
+//
+//  POSITION. Segments used to be placed at "file written minus duration". That
+//  holds only when the encoder writes each segment as its content finishes.
+//  It does not when the SOURCE arrives in chunks: a radio station pulling an
+//  HLS source (ABC Jazz, 10 Oct 2026) receives 10 s at a time and the packager
+//  writes two or three 4 s segments within 0.1 s of each other, every 10 s.
+//  Each burst was stacked into one 4 s slot followed by 6 s of nothing, so a
+//  continuous recording showed a "gap" every 10 s: 29 false gaps in a 5 minute
+//  clip, the waveform and EPG out of step with what was heard, and clips
+//  refused or cut short, while playback (which follows the media clock) was
+//  smooth.
+//
+//  Now the MEDIA clock places segments, anchored to the wall clock:
+//    - a PIECE is a stretch of consecutive sequence numbers whose tfdt runs on
+//      without a reset. Inside it, segment i starts at anchor + its media offset.
+//    - a segment's write time can only be LATER than its content ended (it is
+//      written after the content exists, sometimes a whole burst later), so
+//      lag_i = write_i - mediaEnd_i over-estimates the anchor and the smallest
+//      lag is the best estimate. Taken as a suffix minimum, so the anchor only
+//      ever steps forward.
+//    - a STALL (the encoder fell behind and carried on, delivery paused and the
+//      source skipped ahead) shows as the lag stepping up for good. A step
+//      larger than this run's normal burst spread is a real hole and starts a
+//      new anchor; smaller ones are delivery jitter and are absorbed.
+//    - between pieces (a missing segment, a reset clock) the next piece is
+//      anchored on its own and never starts before the previous one ended.
+//  Every segment still ends no later than it was written, and a run written
+//  steadily (a transcoding encoder) is placed exactly as before.
+export interface SegmentFacts { seq: number; tfdt: bigint | null; mtimeMs: number }
+
+export function placeSegments(entries: SegmentFacts[], timescale: number): { startMs: number; durMs: number }[] {
+  const n = entries.length;
+  if (!n) return [];
+  // 1. durations, and where the media clock breaks
+  const dur: number[] = [];
+  const breakBefore: boolean[] = [true];
+  for (let i = 0; i < n; i++) {
+    const e = entries[i], nxt = entries[i + 1];
     const consecutive = nxt != null && nxt.seq === e.seq + 1;
     const raw = (consecutive && e.tfdt != null && nxt!.tfdt != null)
-      ? Number((nxt!.tfdt - e.tfdt) * 1000n / BigInt(ts))
-      : null;
+      ? Number((nxt!.tfdt - e.tfdt) * 1000n / BigInt(timescale)) : null;
     const plausible = raw != null && raw > 0 && raw <= MAX_SEGMENT_MS;
-    const durMs = plausible ? raw
-      : (i > 0 ? out[i - 1].durMs : NOMINAL_SEGMENT_MS);
-    out.push({
-      runId, rendition, file: e.f, seq: e.seq,
-      startMs: e.mtimeMs - durMs,   // measured write clock, same rule as live PDT
-      durMs,
-      uri: `/origin/${streamId}/runs/${runId}/${rendition}/${e.f}`,
-    });
+    dur.push(plausible ? raw! : (i > 0 ? dur[i - 1] : NOMINAL_SEGMENT_MS));
+    if (i + 1 < n) breakBefore.push(!consecutive || (raw != null && !plausible));
   }
-  scanCache.set(key, { ts, entries: next, result: out, at: now });
+  // 2. this run's normal delivery cadence: the typical spacing between writes,
+  //    ignoring files written in the same burst (under a second apart). The
+  //    MEDIAN, so one stall cannot pass itself off as normal: a 90th percentile
+  //    did, in a short run, and hid a 60 s stall. A burst source (10 s chunks)
+  //    reads 10 s, a steady 4 s encoder 4 s; a step in the lag beyond 1.5x that
+  //    (and at least 6 s) is a real hole.
+  const spacing = entries.slice(1).map((e, i) => e.mtimeMs - entries[i].mtimeMs).filter((d) => d >= 1000).sort((a, b) => a - b);
+  const cadence = spacing.length ? spacing[Math.floor(spacing.length / 2)] : NOMINAL_SEGMENT_MS;
+  const stallMs = Math.max(6000, cadence * 1.5);
+  // 3. place each piece
+  const out: { startMs: number; durMs: number }[] = new Array(n);
+  let prevEnd = -Infinity;
+  for (let a = 0; a < n;) {
+    let b = a + 1;
+    while (b < n && !breakBefore[b]) b++;
+    const media: number[] = [];
+    let acc = 0;
+    for (let i = a; i < b; i++) { media.push(acc); acc += dur[i]; }
+    const lag = media.map((m, k) => entries[a + k].mtimeMs - (m + dur[a + k]));
+    const suffixMin = new Array(lag.length);
+    for (let k = lag.length - 1; k >= 0; k--) suffixMin[k] = Math.min(lag[k], k + 1 < lag.length ? suffixMin[k + 1] : Infinity);
+    let anchor = suffixMin[0];
+    for (let k = 0; k < lag.length; k++) {
+      if (suffixMin[k] - anchor > stallMs) anchor = suffixMin[k];
+      const startMs = Math.max(anchor + media[k], prevEnd);
+      out[a + k] = { startMs, durMs: dur[a + k] };
+      prevEnd = startMs + dur[a + k];
+    }
+    a = b;
+  }
   return out;
 }
 

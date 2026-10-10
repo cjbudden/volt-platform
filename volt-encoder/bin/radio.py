@@ -183,6 +183,21 @@ def input_args(protocol, url):
                             at the newest complete segment, the closest to live
                             HLS allows.
 
+                            -re and -2 since 11 Oct 2026. Read as fast as it
+                            arrived, an HLS source came out in BURSTS: ABC Jazz
+                            delivers 10 s segments, so every 10 s the station
+                            wrote two or three output segments within 0.1 s
+                            and then nothing. The Icecast relay drops a source
+                            that sends nothing for 10 s (its default
+                            source-timeout), so whenever a burst came a little
+                            late the mp3 output broke its pipe, the whole
+                            pipeline exited and auto-connect started a new
+                            run: 28 runs in an hour, a recording in 2 minute
+                            pieces. -re reads the source at real time, so the
+                            audio leaves evenly; it needs one segment in hand
+                            to do that, hence -2 rather than -1. The cost is
+                            one source segment of latency.
+
                             -http_persistent 0 because these playlists are
                             normally behind a CDN that serves segments from a
                             different host than the manifest, and reusing the
@@ -203,7 +218,7 @@ def input_args(protocol, url):
     http = str(url).startswith(("http://", "https://"))
 
     if looks_like_hls(p, url) and http:
-        return RECONNECT + ["-fflags", "+genpts", "-live_start_index", "-1",
+        return RECONNECT + ["-re", "-fflags", "+genpts", "-live_start_index", "-2",
                             "-http_persistent", "0", "-i", url]
     if p == "icecast" or http:
         return RECONNECT + ["-i", url]

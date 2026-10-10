@@ -155,6 +155,16 @@ export function looksLikeHls(protocol: string, url: string): boolean {
  *                         Icecast mount. `-1` starts at the newest complete
  *                         segment, which is the closest to live that HLS allows.
  *
+ *                         `-re` and `-2` since 11 Oct 2026. Read as fast as it
+ *                         arrived, an HLS source came out in BURSTS (ABC Jazz:
+ *                         10 s segments, so two or three output segments within
+ *                         0.1 s, then nothing for 10 s). The Icecast relay drops
+ *                         a source silent for 10 s, the mp3 output broke its
+ *                         pipe, the pipeline exited and auto-connect started a
+ *                         new run: 28 runs in an hour. `-re` reads at real time
+ *                         so audio leaves evenly; it needs one segment in hand,
+ *                         hence `-2`. The cost is one source segment of latency.
+ *
  *                         `-http_persistent 0` is here because these playlists
  *                         are normally fronted by a CDN that redirects segments
  *                         to a different host than the manifest; reusing the
@@ -176,7 +186,7 @@ export function inputArgs(protocol: string, url: string): string[] {
   const http = /^https?:/i.test(String(url));
 
   if (looksLikeHls(p, url) && http) {
-    return [...RECONNECT, '-fflags', '+genpts', '-live_start_index', '-1', '-http_persistent', '0', '-i', url];
+    return [...RECONNECT, '-re', '-fflags', '+genpts', '-live_start_index', '-2', '-http_persistent', '0', '-i', url];
   }
   if (p === 'icecast' || http) return [...RECONNECT, '-i', url];
   if (p === 'srt') return ['-fflags', '+genpts', '-i', url];

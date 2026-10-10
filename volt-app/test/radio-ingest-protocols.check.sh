@@ -107,8 +107,16 @@ ok "and asks for nothing playlist-shaped" \
 # for the entire run, and it does not look like a fault: the station is on air,
 # the meters move, and it is simply late. -1 is the newest complete segment,
 # which is as close to live as HLS gets.
-ok "an HLS source starts at the LIVE EDGE, not three segments back" \
-   '[[ "$HLS_ARGV" == *"-live_start_index -1"* ]]'
+#
+# Since 11 Oct 2026: -2 and -re. Read at full speed a 10 s-segment source left
+# the station in bursts, the Icecast relay timed the mp3 out after 10 s of
+# nothing and every station restart cut the recording into pieces. -re paces the
+# source at real time and needs one segment in hand, so -2: one segment behind
+# live, not three.
+ok "an HLS source starts ONE segment back (one in hand for -re), not three" \
+   '[[ "$HLS_ARGV" == *"-live_start_index -2"* ]]'
+ok "and is read at real time, so the audio leaves evenly, not in 10 s bursts" \
+   '[[ "$HLS_ARGV" == *"-re "* ]]'
 ok "and does not reuse connections across a CDN's segment host" \
    '[[ "$HLS_ARGV" == *"-http_persistent 0"* ]]'
 ok "an SRT source generates timestamps, as encoder.py already does" \

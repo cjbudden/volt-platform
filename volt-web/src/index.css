@@ -646,3 +646,14 @@ button{font-family:inherit}
 /* ---- New channel: missing group notice, footer error ---- */
 .group-missing{font-size:var(--fs-sm);color:var(--text);padding:10px 12px;border:1px solid var(--warn);border-radius:10px;background:rgba(245,158,11,.06);line-height:1.5}
 .drawer-f-err{flex:1;margin:0 8px 0 0;align-self:center;min-width:0}
+
+/* ---- recording timeline: zoom focus (ClipTimeline.tsx) ---- */
+.zoom-focus{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-right:6px}
+.zoom-focus button{background:transparent;border:0;color:var(--muted);font-size:var(--fs-xs);padding:3px 9px;cursor:pointer}
+.zoom-focus button+button{border-left:1px solid var(--border)}
+.zoom-focus button.on{background:var(--brand-dim);color:var(--text)}
+.zoom-focus-line,.zoom-hover-line{position:absolute;top:0;bottom:0;width:0;pointer-events:none}
+.zoom-focus-line{border-left:1px dashed rgba(250,204,21,.85)}
+.zoom-focus-line span{position:absolute;top:2px;left:3px;font-size:10px;font-weight:600;color:#facc15;background:rgba(11,15,22,.8);padding:0 3px;border-radius:3px;white-space:nowrap}
+.zoom-hover-line{border-left:1px solid rgba(255,255,255,.35)}
+.zoom-hover-line span{position:absolute;bottom:2px;left:3px;font-size:10px;color:var(--text);background:rgba(11,15,22,.85);padding:0 3px;border-radius:3px;white-space:nowrap;font-variant-numeric:tabular-nums}

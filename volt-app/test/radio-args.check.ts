@@ -141,7 +141,11 @@ truthy('but does get +genpts, exactly as encoder.py does for contribution TS',
 // move -- it is just permanently late, which is the hardest kind of wrong to
 // notice. `-1` is the newest complete segment, the closest to live HLS allows.
 const hls = buildRadioArgs(base({ protocol: 'hls', url: 'https://cdn.example/master.m3u8' }), { ...PATHS });
-check('an HLS source starts at the live edge', after(hls, '-live_start_index'), '-1');
+check('an HLS source starts one segment back from the live edge (one in hand for -re)', after(hls, '-live_start_index'), '-2');
+truthy('and is read at real time, so a source that arrives in 10 s chunks leaves evenly (no Icecast timeouts)',
+  hls.includes('-re') && hls.indexOf('-re') < hls.indexOf('-i'));
+falsy('a plain Icecast mount is not paced: it already arrives at real time',
+  ice.includes('-re'));
 check('and does not reuse a connection across a CDN segment host',
   after(hls, '-http_persistent'), '0');
 truthy('while still reconnecting: a playlist fetch fails like any other GET',
@@ -152,7 +156,7 @@ truthy('while still reconnecting: a playlist fetch fails like any other GET',
 // alternative is a source that works and is silently late.
 check('a .m3u8 url is treated as a playlist whatever the row says it is',
   after(buildRadioArgs(base({ protocol: 'icecast', url: 'https://cdn.example/live.m3u8' }), { ...PATHS }),
-    '-live_start_index'), '-1');
+    '-live_start_index'), '-2');
 falsy('but a plain mount is not, so ordinary stations are untouched',
   buildRadioArgs(base({ protocol: 'icecast', url: 'https://ice.example/station-128-mp3' }), { ...PATHS })
     .includes('-live_start_index'));

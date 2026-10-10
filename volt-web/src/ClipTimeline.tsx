@@ -94,6 +94,8 @@ function tickStep(spanMs: number, px: number): number {
 //              coverage scan grow with the span, and past a day the picture is
 //              a smear nobody can trim on. Fit all shows the LAST day; the
 //              overview strip still spans the whole recording for navigation.
+type FocusMode = 'playhead' | 'in' | 'out' | 'centre'
+const FOCUS_LABEL: Record<FocusMode, string> = { playhead: 'Playhead', in: 'In', out: 'Out', centre: 'Middle' }
 const MIN_SPAN = 10_000
 const MAX_SPAN = 24 * 3600_000
 
@@ -142,6 +144,17 @@ export default function ClipTimeline({
   const waveRef = useRef<HTMLCanvasElement | null>(null)
   const drag = useRef<{ mode: 'new' | 'from' | 'to' | 'pan'; anchor: number; startX: number; viewStart: number; moved: boolean } | null>(null)
   const [width, setWidth] = useState(1000)
+  // ZOOM FOCUS. The buttons used to zoom on the middle of the window whatever
+  // you were working on, so the playhead or the marks slid out of view as you
+  // zoomed in. Now they zoom on a focus point you choose, drawn on the
+  // waveform; the wheel still zooms where the pointer is, and the pointer
+  // shows a line with its time so you can see where that will be.
+  const [focusMode, setFocusModeRaw] = useState<FocusMode>(() => {
+    try { const v = localStorage.getItem('volt.clip.zoomFocus'); if (v && v in FOCUS_LABEL) return v as FocusMode } catch { /* no storage */ }
+    return 'playhead'
+  })
+  const setFocusMode = (m: FocusMode) => { setFocusModeRaw(m); try { localStorage.setItem('volt.clip.zoomFocus', m) } catch { /* no storage */ } }
+  const [hoverMs, setHoverMs] = useState<number | null>(null)
 
   const VW = Math.max(1000, view.end - view.start)
   const DW = Math.max(1, domain.end - domain.start)
@@ -181,6 +194,36 @@ export default function ClipTimeline({
     if (e > domain.end) { e = domain.end; s = Math.max(domain.start, e - span) }
     setView({ start: s, end: e })
   }
+  /** Where the zoom buttons zoom: the chosen point, or the middle when it has nothing to point at. */
+  function focusMs(): number | null {
+    if (focusMode === 'playhead') return playheadMs
+    if (focusMode === 'in') return from
+    if (focusMode === 'out') return to
+    return null
+  }
+  /** Zoom on the focus point. When it is off screen, bring it to the middle first. */
+  function zoomFocused(newSpan: number) {
+    const f = focusMs()
+    if (f == null) { zoomTo(newSpan); return }
+    if (f >= view.start && f <= view.end) { zoomTo(newSpan, f); return }
+    const span = Math.max(MIN_SPAN, Math.min(MAX_SPAN, DW, newSpan))
+    let s2 = f - span / 2, e2 = s2 + span
+    if (s2 < domain.start) { s2 = domain.start; e2 = s2 + span }
+    if (e2 > domain.end) { e2 = domain.end; s2 = Math.max(domain.start, e2 - span) }
+    setView({ start: s2, end: e2 })
+  }
+  // + / - on the keyboard zoom on the focus too (not while typing in a field)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomFocused(VW / 2) }
+      else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomFocused(VW * 2) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
   function panBy(deltaMs: number) {
     let s = view.start + deltaMs, e = view.end + deltaMs
     if (s < domain.start) { e += domain.start - s; s = domain.start }
@@ -381,12 +424,22 @@ export default function ClipTimeline({
 
       {/* ---------- zoom controls ---------- */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)', marginRight: 2 }}>Zoom</span>
+        <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)', marginRight: 2 }}>Zoom on</span>
+        <div className="zoom-focus" role="radiogroup" aria-label="What the zoom buttons zoom on">
+          {(Object.keys(FOCUS_LABEL) as FocusMode[]).map(m => {
+            const missing = (m === 'playhead' && playheadMs == null) || (m === 'in' && from == null) || (m === 'out' && to == null)
+            return (
+              <button key={m} type="button" role="radio" aria-checked={focusMode === m} className={focusMode === m ? 'on' : ''}
+                title={missing ? `${FOCUS_LABEL[m]}: not set yet, zooms on the middle until it is` : `Zoom buttons and +/- keys zoom on the ${FOCUS_LABEL[m].toLowerCase()}`}
+                onClick={() => setFocusMode(m)}>{FOCUS_LABEL[m]}</button>
+            )
+          })}
+        </div>
         {PRESETS.map(([label, ms]) => (
           <button key={label} className={`chip ${Math.abs(VW - ms) / ms < 0.05 ? 'active' : ''}`}
             style={{ padding: '3px 10px', fontSize: 'var(--fs-xs)' }}
             disabled={ms > DW * 1.05}
-            onClick={() => zoomTo(ms)}>{label}</button>
+            onClick={() => zoomFocused(ms)}>{label}</button>
         ))}
         <button className="chip" style={{ padding: '3px 10px', fontSize: 'var(--fs-xs)' }}
           title={DW > MAX_SPAN ? 'The view is capped at one day: this shows the most recent day' : 'Show the whole recording'}
@@ -394,8 +447,8 @@ export default function ClipTimeline({
           {DW > MAX_SPAN ? 'Last day' : 'Fit all'}
         </button>
         <div style={{ display: 'flex', gap: 4, marginLeft: 4 }}>
-          <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title={VW >= Math.min(MAX_SPAN, DW) ? 'Widest view' : 'Zoom out'} disabled={VW >= Math.min(MAX_SPAN, DW)} onClick={() => zoomTo(VW * 2)}>−</button>
-          <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title={VW <= MIN_SPAN ? 'Closest view (10s)' : 'Zoom in'} disabled={VW <= MIN_SPAN} onClick={() => zoomTo(VW / 2)}>+</button>
+          <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title={VW >= Math.min(MAX_SPAN, DW) ? 'Widest view' : 'Zoom out'} disabled={VW >= Math.min(MAX_SPAN, DW)} onClick={() => zoomFocused(VW * 2)}>−</button>
+          <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title={VW <= MIN_SPAN ? 'Closest view (10s)' : 'Zoom in'} disabled={VW <= MIN_SPAN} onClick={() => zoomFocused(VW / 2)}>+</button>
           <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title="Pan left" onClick={() => panBy(-VW / 3)}>◀</button>
           <button className="chip" style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }} title="Pan right" onClick={() => panBy(VW / 3)}>▶</button>
         </div>
@@ -413,8 +466,17 @@ export default function ClipTimeline({
       </div>
 
       {/* ---------- waveform ---------- */}
-      <div style={{ position: 'relative', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: '#0b0f16' }}>
+      <div style={{ position: 'relative', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: '#0b0f16' }}
+        onPointerMove={e => setHoverMs(msAt(e.clientX))} onPointerLeave={() => setHoverMs(null)}>
         <canvas ref={waveRef} style={{ width: '100%', height: 96, display: 'block' }} />
+        {(() => {
+          const f = focusMs()
+          if (f == null || !inView(f)) return null
+          return <div className="zoom-focus-line" style={{ left: pct(f) }} title={`Zoom focus: ${FOCUS_LABEL[focusMode].toLowerCase()} ${clockOf(f, true)}`}><span>{FOCUS_LABEL[focusMode]}</span></div>
+        })()}
+        {hoverMs != null && inView(hoverMs) && (
+          <div className="zoom-hover-line" style={{ left: pct(hoverMs) }}><span>{clockOf(hoverMs, VW < 3600_000)}</span></div>
+        )}
         {(!waveform || (waveform.coverage && waveform.coverage.measured === 0 && waveform.coverage.total > 0)) && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontSize: 'var(--fs-xs)', color: 'var(--faint)', pointerEvents: 'none' }}>
             {waveLoading ? waveStatus(waveform, true) : 'no audio measured for this window'}
@@ -447,7 +509,7 @@ export default function ClipTimeline({
       </div>
 
       {/* ---------- scrub bar: coverage, marks, playhead ---------- */}
-      <div ref={barRef} className="rec-timeline" onPointerDown={e => down(e, 'new')} onPointerMove={move} onPointerUp={up}
+      <div ref={barRef} className="rec-timeline" onPointerDown={e => down(e, 'new')} onPointerMove={e => { setHoverMs(msAt(e.clientX)); move(e) }} onPointerUp={up} onPointerLeave={() => setHoverMs(null)}
         style={{ position: 'relative', height: 40, marginTop: 4, background: '#0b0f16', border: '1px solid var(--border)', borderRadius: 8, cursor: 'crosshair', userSelect: 'none', touchAction: 'none' }}>
         {loaded && (
           <div style={{ position: 'absolute', top: 0, bottom: 0, left: pct(loaded.from), width: `calc(${pct(loaded.to)} - ${pct(loaded.from)})`, background: 'rgba(120,150,255,.07)', borderLeft: '1px dashed rgba(120,150,255,.4)', borderRight: '1px dashed rgba(120,150,255,.4)', pointerEvents: 'none' }} />
@@ -504,7 +566,7 @@ export default function ClipTimeline({
         ))}
       </div>
       <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', marginTop: 3 }}>
-        wheel = zoom · shift+wheel or alt+drag = pan · drag = mark in/out · click = seek · click a metadata item to trim to it
+        wheel = zoom where you point · + / − and the zoom buttons zoom on the focus line · shift+wheel or alt+drag = pan · drag = mark in/out · click = seek · click a metadata item to trim to it
       </div>
     </div>
   )

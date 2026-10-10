@@ -606,8 +606,9 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
               <label>Output</label>
               <select className="inp" value={outputKind} onChange={e => setOutputKind(e.target.value as any)}>
                 <option value="manifest">Streaming (HLS/DASH)</option>
-                <option value="progressive">Downloadable MP4</option>
-                <option value="both">Streaming + MP4</option>
+                {/* A radio recording downloads as MP3 (the AAC .m4a comes with it); video as MP4. */}
+                <option value="progressive">{tl?.audioOnly ? 'Downloadable MP3' : 'Downloadable MP4'}</option>
+                <option value="both">{tl?.audioOnly ? 'Streaming + MP3' : 'Streaming + MP4'}</option>
               </select>
             </div>
             <button className="btn primary" disabled={busy === 'clip' || !selOk}

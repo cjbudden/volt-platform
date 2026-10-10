@@ -10,7 +10,11 @@ import { inheritedMetadata } from './contentTypes';
  */
 export type OutputKind = 'manifest' | 'progressive' | 'both';
 
-export function formatsFor(kind: OutputKind) {
+export function formatsFor(kind: OutputKind, audio = false) {
+  // AUDIO: the downloadable file is an MP3 (with the AAC .m4a beside it), never
+  // an audio-only .mp4. The clip dropdown on a radio recording said
+  // "Downloadable MP4" and built one; it says MP3 now and builds that.
+  if (audio) return { hls: kind !== 'progressive', dash: kind !== 'progressive', progressive: false, mp3: true, m4a: true };
   return {
     hls: kind !== 'progressive',
     dash: kind !== 'progressive',
@@ -52,7 +56,11 @@ export async function createClipVod(opts: {
 }) {
   const { ownerCol, ownerId, recordingId, title, startMs, endMs, outputKind, masterKeyBase } = opts;
   const base = `${masterKeyBase}/clip-${startMs}-${endMs}`;
-  const progressiveKey = outputKind !== 'manifest' ? `${base}/progressive.mp4` : null;
+  // A radio station (or any audio-only stream) gets an MP3 download, which the
+  // extractor writes to export_mp3_key; there is no progressive MP4 to promise.
+  const { isAudioOnly } = await import('./localRecordingIndex');
+  const audio = isAudioOnly(ownerId);
+  const progressiveKey = outputKind !== 'manifest' && !audio ? `${base}/progressive.mp4` : null;
   // THE CLIP CARRIES ITS OWNER'S TYPE. A cut from a sports match is sports
   // metadata; a cut from a station carries the station's identity. Copied at
   // creation so the asset can be edited on its own afterwards.
@@ -72,7 +80,7 @@ export async function createClipVod(opts: {
       endMs,
       endMs - startMs,
       outputKind,
-      JSON.stringify(formatsFor(outputKind)),
+      JSON.stringify(formatsFor(outputKind, audio)),
       progressiveKey,
       inh.schemaId,
       JSON.stringify(inh.metadata),
@@ -123,11 +131,12 @@ export async function enqueueClipBuild(opts: {
   const audio = isAudioOnly(opts.streamId);
   const formats: string[] = [];
   if (opts.outputKind !== 'progressive') formats.push('hls');
-  if (opts.outputKind !== 'manifest') formats.push('mp4');
-  if (!formats.length) formats.push('mp4');
-  // An audio clip also gets the two AUDIO files: MP3 for anywhere, M4A as
-  // the AAC exactly as broadcast. The VOD library offers them for download.
+  // An audio clip's download is the two AUDIO files: MP3 for anywhere, M4A as
+  // the AAC exactly as broadcast. No audio-only .mp4: "Downloadable" on a radio
+  // recording means MP3. A video clip's download is the MP4.
   if (audio) formats.push('mp3', 'm4a');
+  else if (opts.outputKind !== 'manifest') formats.push('mp4');
+  if (!formats.length) formats.push('mp4');
 
   const job = await enqueue({
     type: CLIP_EXTRACT,

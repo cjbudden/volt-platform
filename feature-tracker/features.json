@@ -401,7 +401,7 @@
     {
       "id": "audio-only-radio",
       "name": "Radio: audio-only streaming workflows",
-      "summary": "A full Radio section on the shared design language (list, create/settings, detail). WHY: radio and audio-first broadcasters need the same operate/record/clip toolchain as TV without paying for video, and the now-playing metadata a station already emits is the cheapest possible content log. WHAT: audio-valid inputs only, including Icecast (plus HLS/SRT pull); live outputs MP3, HLS and DASH, all single bitrate; packaging is the default and transcode is offered only to change bitrate or format. Icecast ICY now-playing metadata is captured as a TIMED LOG stored in the existing EPG tables/APIs, each entry classified as song / ad / content (news, DJ talk) so you can see what was received and broadcast, search it, and jump straight to trim/clip points in the recording. The detail page replaces the 16:9 video with an audio visualiser (proves signal even when muted) and shows station artwork plus the live ICY metadata. Transcription is only offered for Icecast sources, where metadata can tell speech from songs and ads. REBUILD NOTE: the 16 Aug audio-only channel work was lost in the two-session merge (see d460f5b); this supersedes it.",
+      "summary": "A full Radio section on the shared design language (list, create/settings, detail). WHY: radio and audio-first broadcasters need the same operate/record/clip toolchain as TV without paying for video, and the now-playing metadata a station already emits is the cheapest possible content log. WHAT: audio-valid inputs only, including Icecast (plus HLS/SRT pull); live outputs MP3, HLS and DASH, all single bitrate; packaging is the default and transcode is offered only to change bitrate or format. Icecast ICY now-playing metadata is captured as a TIMED LOG stored in the existing EPG tables/APIs, each entry classified as song / ad / content (news, DJ talk) so you can see what was received and broadcast, search it, and jump straight to trim/clip points in the recording. The detail page replaces the 16:9 video with an audio visualiser (proves signal even when muted) and shows station artwork plus the live ICY metadata. Transcription is only offered for Icecast sources, where metadata can tell speech from songs and ads. REBUILD NOTE: the 16 Aug audio-only channel work was lost in the two-session merge (see d460f5b); this supersedes it. 11 Oct: HLS sources are read at real time (-re, one segment back) so the station sends audio evenly; read in 10 s bursts it was being dropped by the Icecast relay (10 s source timeout) and restarted: ABC Jazz ran as 28 separate runs in an hour.",
       "status": "ready_to_test",
       "app_surface": "full",
       "test": {
@@ -409,7 +409,12 @@
         "artifact": ""
       },
       "checks": "Built 23 Aug: 22/22 e2e (radio.check.sh, offline via an Icecast simulator with rotating song/ad/DJ titles) plus a LIVE SomaFM run: Groove Salad ingested, HLS/DASH/MP3 served, now-playing captured and classified, station artwork picked up from StreamUrl. UI verified in-browser (list, gated create form, detail, MP3 byte flow); visualiser analyser wiring proven with a decodable test tone. Regressions clean: recordings 34/34, admin 47/47.",
-      "feedback": []
+      "feedback": [
+        {
+          "date": "2026-10-11",
+          "note": "Found while fixing the recording gaps: ABC Jazz (HLS) restarted 28 times in an hour (mp3 broken pipe to the Icecast relay). Fixed by pacing HLS input; to confirm on the next long run."
+        }
+      ]
     },
     {
       "id": "site-search",
@@ -440,15 +445,20 @@
     {
       "id": "recordings-workbench",
       "name": "Recordings: searchable library + NLE clipping workbench",
-      "summary": "WHY: recordings are the raw material for clips and VOD; finding the right moment fast is the whole value. WHAT: list>detail flow; search matches names, EPG programmes that aired inside a recording, and the spoken words (transcript index); detail page has range playback across runs, NLE keyboard (space, arrows, frame step, in/out points), a transcript column synced to the playhead (click a line to jump, search within), and clips listed under the player.",
+      "summary": "WHY: recordings are the raw material for clips and VOD; finding the right moment fast is the whole value. WHAT: list>detail flow; search matches names, EPG programmes that aired inside a recording, and the spoken words (transcript index); detail page has range playback across runs, NLE keyboard (space, arrows, frame step, in/out points), a transcript column synced to the playhead (click a line to jump, search within), and clips listed under the player. 11 Oct: segments are placed by the media clock, so a burst-delivered source (HLS radio such as ABC Jazz) no longer shows a false gap every 10 s; the zoom buttons zoom on a chosen focus (playhead, In, Out, middle) drawn on the waveform, with a hover line for the wheel; a radio recording's clip downloads as MP3.",
       "status": "ready_to_test",
       "app_surface": "full",
       "test": {
-        "how": "Recordings > search a spoken phrase > open the match: it lands with the search run; set in/out with keys, Create clip.",
+        "how": "Recordings > search a spoken phrase > open the match: it lands with the search run; set in/out with keys, Create clip. 11 Oct: open an ABC Jazz (HLS) recording: no red gap bands inside a run. Set In/Out, choose Zoom on: In, press 1m and +: the In mark stays in view with a yellow focus line. Output on a radio recording offers Downloadable MP3.",
         "artifact": ""
       },
-      "checks": "34/34 recordings e2e; transcript+EPG search verified in-browser.",
-      "feedback": []
+      "checks": "34/34 recordings e2e; transcript+EPG search verified in-browser. 11 Oct: segment-placement 17/17 on real ABC Jazz segment data; all 28 real runs of that station placed with no false gaps; checked in a browser on a run with the same burst write times.",
+      "feedback": [
+        {
+          "date": "2026-10-11",
+          "note": "Christian: playback smooth but the recording showed gaps where there were none, so the timeline did not match what was heard; zoom needs a way to show the focal point; radio clip download should be MP3 not MP4. Fixed as described."
+        }
+      ]
     },
     {
       "id": "xmltv-export",
