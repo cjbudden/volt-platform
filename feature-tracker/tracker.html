@@ -27,7 +27,7 @@
 </style></head><body>
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
- <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-10T10:00:00Z.</div>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-10.</div>
  <div class=sub>Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set.</div>
  <div class=chips><span class=chip style="border-color:#0891b2"><b>45</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>2</b> ✅ Approved</span></div>
  <div class=chips style="margin-bottom:12px"><span class=chip><b>37</b> 📱 In app</span><span class=chip><b>12</b> 📱 Partial</span><span class=chip><b>1</b> — no UI</span></div>
@@ -605,16 +605,16 @@
        </div>
     
   </div><div class=card data-status="ready_to_test" data-app="full">
-    <div class=top><div class=name>XMLTV import (bring in a customer's guide)</div>
+    <div class=top><div class=name>XMLTV import (bring in a customer's guide, from a file or a hosted guide API)</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
-    <div class=summary>WHY: onboarding a broadcaster means taking the guide they already have. WHAT: EPG &gt; XMLTV import. Add a source (a URL fetched on a schedule, or uploaded files), run it, map their channels to ours (unambiguous matches are mapped automatically), and the guide fills. Re-runs are a diff: unchanged rows stay, edits update, what the file dropped is removed (never a programme with a clip). Times without an offset are read in the channel's own zone. Gzip and Latin-1 files work. Every run is logged with counts and warnings, and a failure tells the admins.</div>
-    <div class=meta>Built 10 Oct. xmltv-import-pure.check.ts 42/42 (including a round trip through the exporter), xmltv-import.check.sh 40/40 (URL and upload, mapping, the diff, clips protected, remapping, failure notice, schedule, tenancy, and our export imported into a second account).</div>
-    <div class=how><b>How to test:</b> EPG &gt; XMLTV import &gt; New source &gt; paste a guide URL (or choose Uploaded by hand and Upload file) &gt; Import now &gt; Channels: map anything unmapped &gt; Import now again: unchanged, nothing duplicated. Open the channel's guide in EPG to see the programmes.</div>
-    
+    <div class=summary>WHY: onboarding a broadcaster means taking the guide they already have. WHAT: EPG &gt; XMLTV import. Add a source (a URL fetched on a schedule, or uploaded files), run it, map their channels to ours (unambiguous matches are mapped automatically), and the guide fills. Re-runs are a diff: unchanged rows stay, edits update, what the file dropped is removed (never a programme with a clip). Times without an offset are read in the channel's own zone. Gzip and Latin-1 files work. Every run is logged with counts and warnings, and a failure tells the admins. A URL source can be a hosted guide API kept topped up: put {date} (one request per day) or {from}/{to} (one request for the window) in the URL, set how many days ahead to keep (default 7) and the minimum before owners are alerted (default 5), add an API key header if needed, and Try it before switching it on. Coverage is measured per channel up to the first missing stretch, a failed day is left as it was, and a failed run retries within 15 minutes.</div>
+    <div class=meta>Built 10 Oct. xmltv-import-pure 42/42, xmltv-import 34/34, plus hosted guide API: xmltv-import-api-pure 31/31 (dates per zone, formats, DST, template mistakes) and xmltv-import-api 39/39 against a stand-in API (API key header, per-day runs, window cut, failed day left alone, continuous-coverage alert once, retry 15/30 min, ETag 304, tenancy). Not yet run against a real provider's API.</div>
+    <div class=how><b>How to test:</b> EPG &gt; XMLTV import &gt; New source &gt; paste a guide URL (or choose Uploaded by hand and Upload file) &gt; Import now &gt; Channels: map anything unmapped &gt; Import now again: unchanged, nothing duplicated. Open the channel's guide in EPG to see the programmes. Hosted API: New source &gt; Requests: One request per day &gt; URL with {date} (use the Insert buttons) &gt; Keep days ahead 7, Alert below 5 &gt; add x-api-key if the API needs it &gt; Add source &gt; Try it (shows channels, programmes and how far ahead today's response reaches) &gt; Import now &gt; the card shows 'Guide reaches N days ahead' and Channels shows Guide until per channel.</div>
+    <div class=note>Test tool: open <b>“volt-app/docs/DESIGN_epg_xmltv.md”</b> in your artifacts gallery.</div>
     <div class=actions>
-         <button class="btn ok" data-approve="XMLTV import (bring in a customer's guide)">✓ Approve as working</button>
-         <button class="btn warn" data-changes="XMLTV import (bring in a customer's guide)">Request changes</button>
+         <button class="btn ok" data-approve="XMLTV import (bring in a customer's guide, from a file or a hosted guide API)">✓ Approve as working</button>
+         <button class="btn warn" data-changes="XMLTV import (bring in a customer's guide, from a file or a hosted guide API)">Request changes</button>
        </div>
     
   </div><div class=card data-status="in_review" data-app="full">

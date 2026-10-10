@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type ImportSource, type ImportAlias, type ImportRun, type GuideChannel, type ImportCounts } from '../api'
+import { api, type ImportSource, type ImportAlias, type ImportRun, type GuideChannel, type ImportCounts, type ImportTestResult, type ImportSourceBody } from '../api'
 import { pressable } from '../a11y'
 
 /* ============================================================================
    XMLTV IMPORT drawer, opened from the EPG list.
 
    A SOURCE is one guide we take in: a URL Volt fetches on a schedule (a
-   provider's nightly file) or files uploaded by hand. Each run reads the file,
+   provider's nightly file, or a hosted guide API with the dates in the URL)
+   or files uploaded by hand.
+
+   A URL source KEEPS THE GUIDE N DAYS AHEAD: each run asks for today through
+   today + days ahead (one request, or one per day with {date}), programmes
+   beyond that are not imported, and when any mapped channel's guide ends
+   sooner than the minimum, the run warns and owners are alerted once. A
+   failed run retries sooner than the refresh (15 min, 30, 60 ...). "Try it"
+   fetches the first request and shows what is in it without importing. Each run reads the file,
    records the channels it names, maps them to ours, and writes the programmes
    as a diff: unchanged rows are left alone, changed ones updated, and what the
    file no longer lists inside the window it covers is removed.
@@ -21,10 +29,42 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   ok: { label: 'Imported', cls: 'ok' }, warnings: { label: 'Imported with warnings', cls: 'warn' },
   failed: { label: 'Failed', cls: 'bad' }, running: { label: 'Running', cls: 'muted' },
 }
+const MODE_LABEL = { single: 'one request for the window', per_day: 'one request per day' }
+const fmtDay = (iso: string | null) => iso ? new Date(iso).toLocaleString([], { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+const PLACEHOLDERS: { t: string; mode: 'single' | 'per_day' | 'both'; hint: string }[] = [
+  { t: '{date}', mode: 'per_day', hint: 'the day being fetched' },
+  { t: '{from}', mode: 'both', hint: 'today' },
+  { t: '{to}', mode: 'both', hint: 'today + days ahead' },
+  { t: '{days}', mode: 'both', hint: 'days ahead, as a number' },
+  { t: '{from_unix}', mode: 'both', hint: 'today 00:00, unix seconds' },
+  { t: '{to_unix}', mode: 'both', hint: 'end of the window, unix seconds' },
+]
+
+type Form = {
+  id?: string; name: string; kind: 'url' | 'upload'; url: string; refreshHours: number; fallbackTz: string; keepPastDays: number; autoMap: boolean
+  requestMode: 'single' | 'per_day'; daysAhead: number; minDaysAhead: number; dateFormat: ImportSourceBody['dateFormat']
+  headerNames: string[]; headerChanges: Record<string, string | null>; newHeader: { name: string; value: string }
+}
+const blankForm = (): Form => ({ name: '', kind: 'url', url: '', refreshHours: 6, fallbackTz: '', keepPastDays: 1, autoMap: true,
+  requestMode: 'single', daysAhead: 7, minDaysAhead: 5, dateFormat: 'YYYY-MM-DD', headerNames: [], headerChanges: {}, newHeader: { name: '', value: '' } })
+const clampInt = (v: string, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(+v || 0)))
+
+function Coverage({ s }: { s: ImportSource }) {
+  if (s.kind !== 'url') return null
+  if (s.coverageDaysAhead == null) return <div className="hintxt" style={{ marginTop: 2 }}>Keeps {s.daysAhead} days ahead{s.minDaysAhead ? `, alerts below ${s.minDaysAhead}` : ''}. Coverage shows after the first run with a mapped channel.</div>
+  return (
+    <div className="hintxt" style={{ marginTop: 2, color: s.coverageLow ? 'var(--warn)' : undefined }}>
+      Guide reaches {s.coverageDaysAhead} days ahead ({fmtDay(s.coverageUntil)}) · keeps {s.daysAhead}{s.minDaysAhead ? `, alerts below ${s.minDaysAhead}` : ''}
+      {s.coverageLow && ' · running short: check the provider'}
+    </div>
+  )
+}
+
 const MAPPED_BY: Record<string, string> = { 'auto:xmltv_id': 'matched by XMLTV id', 'auto:name': 'matched by name', user: 'mapped by you' }
 
 function summary(c: Partial<ImportCounts> | undefined): string {
   if (!c) return ''
+  if (c.notModified) return 'guide unchanged since the last run'
   const parts = [
     c.inserted ? `${c.inserted} new` : '', c.updated ? `${c.updated} changed` : '', c.removed ? `${c.removed} removed` : '',
     c.unchanged ? `${c.unchanged} unchanged` : '',
@@ -43,8 +83,10 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
   const [sources, setSources] = useState<ImportSource[] | null>(null)
   const [channels, setChannels] = useState<GuideChannel[]>([])
   const [err, setErr] = useState('')
-  const [form, setForm] = useState<{ id?: string; name: string; kind: 'url' | 'upload'; url: string; refreshHours: number; fallbackTz: string; keepPastDays: number; autoMap: boolean } | null>(null)
-  const [panel, setPanel] = useState<Record<string, 'channels' | 'runs' | null>>({})
+  const [form, setForm] = useState<Form | null>(null)
+  const [panel, setPanel] = useState<Record<string, 'channels' | 'runs' | 'test' | null>>({})
+  const [tests, setTests] = useState<Record<string, ImportTestResult | null>>({})
+  const urlRef = useRef<HTMLInputElement>(null)
   const [aliases, setAliases] = useState<Record<string, ImportAlias[]>>({})
   const [runs, setRuns] = useState<Record<string, ImportRun[]>>({})
   const [busy, setBusy] = useState<Record<string, string>>({})
@@ -60,13 +102,20 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
     setErr('')
     if (!form.name.trim()) { setErr('Name the source after where the guide comes from'); return }
     if (form.kind === 'url' && !/^https?:\/\//i.test(form.url.trim())) { setErr('Enter the guide URL, starting with https://'); return }
-    const body = {
+    if (form.kind === 'url' && form.requestMode === 'per_day' && !form.url.includes('{date}')) { setErr('One request per day needs {date} in the URL, where the day goes'); return }
+    if (form.kind === 'url' && form.requestMode === 'single' && form.url.includes('{date}')) { setErr('{date} is for one request per day. For one request covering the window, use {from} and {to}'); return }
+    if (form.minDaysAhead > form.daysAhead) { setErr('The alert threshold cannot be more than the days kept ahead'); return }
+    const headers = Object.fromEntries(Object.entries(form.headerChanges).filter(([, v]) => v !== '')) as Record<string, string | null>
+    if (form.newHeader.name.trim() && form.newHeader.value) headers[form.newHeader.name.trim()] = form.newHeader.value
+    const body: Partial<ImportSourceBody> = {
       name: form.name.trim(), url: form.kind === 'url' ? form.url.trim() : null, refreshHours: form.kind === 'url' ? form.refreshHours : null,
       fallbackTz: form.fallbackTz || null, keepPastDays: form.keepPastDays, autoMap: form.autoMap,
+      ...(form.kind === 'url' ? { requestMode: form.requestMode, daysAhead: form.daysAhead, minDaysAhead: form.minDaysAhead, dateFormat: form.dateFormat,
+        ...(Object.keys(headers).length ? { headers } : {}) } : {}),
     }
     try {
       if (form.id) await api.updateImportSource(form.id, body)
-      else await api.createImportSource({ ...body, kind: form.kind })
+      else await api.createImportSource({ ...body, name: body.name!, kind: form.kind })
       setForm(null); load()
     } catch (e: any) { setErr(e.message) }
   }
@@ -87,6 +136,22 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
     setBusy(b => ({ ...b, [id]: `Uploading ${file.name}…` })); setErr('')
     try { showResult(id, await api.uploadImportFile(id, file)) } catch (e: any) { setErr(e.message) } finally { setBusy(b => ({ ...b, [id]: '' })) }
   }
+  async function tryIt(s: ImportSource) {
+    setPanel(p => ({ ...p, [s.id]: 'test' })); setTests(t => ({ ...t, [s.id]: null })); setErr('')
+    try { const r = await api.testImportSource(s.id); setTests(t => ({ ...t, [s.id]: r })) }
+    catch (e: any) { setErr(e.message); setPanel(p => ({ ...p, [s.id]: null })) }
+  }
+  function insertToken(t: string) {
+    if (!form) return
+    const el = urlRef.current
+    const at = el?.selectionStart ?? form.url.length
+    const url = form.url.slice(0, at) + t + form.url.slice(el?.selectionEnd ?? at)
+    setForm({ ...form, url })
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(at + t.length, at + t.length) })
+  }
+  const editForm = (s: ImportSource): Form => ({ id: s.id, name: s.name, kind: s.kind, url: s.url ?? '', refreshHours: s.refreshHours ?? 6, fallbackTz: s.fallbackTz ?? '',
+    keepPastDays: s.keepPastDays, autoMap: s.autoMap, requestMode: s.requestMode ?? 'single', daysAhead: s.daysAhead ?? 7, minDaysAhead: s.minDaysAhead ?? 5,
+    dateFormat: s.dateFormat ?? 'YYYY-MM-DD', headerNames: s.headerNames ?? [], headerChanges: {}, newHeader: { name: '', value: '' } })
   async function togglePanel(id: string, which: 'channels' | 'runs') {
     const next = panel[id] === which ? null : which
     setPanel(p => ({ ...p, [id]: next }))
@@ -116,9 +181,9 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
 
           <div className="sec-label" style={{ display: 'flex', alignItems: 'center' }}>
             <span>Guide sources</span><div style={{ flex: 1 }} />
-            {!form && <button className="btn ghost" onClick={() => setForm({ name: '', kind: 'url', url: '', refreshHours: 24, fallbackTz: '', keepPastDays: 1, autoMap: true })}>New source</button>}
+            {!form && <button className="btn ghost" onClick={() => setForm(blankForm())}>New source</button>}
           </div>
-          <div className="hintxt" style={{ marginBottom: 10 }}>Bring in a guide your customer or a provider already has. Each run updates what changed and removes what the file no longer lists, so a nightly refresh never piles up duplicates.</div>
+          <div className="hintxt" style={{ marginBottom: 10 }}>Bring in a guide your customer or a provider already has, as a file or from a hosted guide API. A URL source is fetched on a schedule and keeps the guide a set number of days ahead. Each run updates what changed and removes what the guide no longer lists, so refreshes never pile up duplicates.</div>
 
           {form && (
             <div className="card" style={{ padding: 14, marginBottom: 12 }}>
@@ -128,22 +193,76 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
               {!form.id && (
                 <div className="field"><label>How the guide arrives</label>
                   <select className="inp" value={form.kind} onChange={e => setForm({ ...form, kind: e.target.value as any })}>
-                    <option value="url">From a URL, fetched on a schedule</option>
+                    <option value="url">From a URL or hosted guide API, kept up to date</option>
                     <option value="upload">Uploaded by hand</option>
                   </select>
                 </div>
               )}
               {form.kind === 'url' && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: 10 }}>
-                  <div className="field"><label>Guide URL</label>
-                    <input className="inp" value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} placeholder="https://provider.example/guide.xml.gz" style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)' }} />
-                  </div>
-                  <div className="field"><label>Refresh every</label>
-                    <select className="inp" value={form.refreshHours} onChange={e => setForm({ ...form, refreshHours: +e.target.value })}>
-                      {[1, 3, 6, 12, 24, 48, 168].map(h => <option key={h} value={h}>{h === 168 ? 'week' : h === 1 ? 'hour' : `${h} hours`}</option>)}
+                <>
+                  <div className="field"><label>Requests</label>
+                    <select className="inp" value={form.requestMode} onChange={e => setForm({ ...form, requestMode: e.target.value as Form['requestMode'] })}>
+                      <option value="single">One request for the whole window (a file, or an API taking a date range)</option>
+                      <option value="per_day">One request per day (an API serving a day at a time)</option>
                     </select>
                   </div>
-                </div>
+                  <div className="field"><label>Guide URL</label>
+                    <input ref={urlRef} className="inp" value={form.url} onChange={e => setForm({ ...form, url: e.target.value })}
+                      placeholder={form.requestMode === 'per_day' ? 'https://api.provider.example/epg/{date}.xml?apikey=…' : 'https://provider.example/guide.xml.gz  or  …/epg?from={from}&to={to}'}
+                      style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)' }} />
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
+                      <span className="hintxt" style={{ marginTop: 0 }}>Insert:</span>
+                      {PLACEHOLDERS.filter(p => p.mode === 'both' || p.mode === form.requestMode).map(p => (
+                        <button key={p.t} type="button" className="btn ghost" style={{ padding: '2px 8px', fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)' }} title={p.hint} onClick={() => insertToken(p.t)}>{p.t}</button>
+                      ))}
+                    </div>
+                    <div className="hintxt" style={{ marginTop: 4 }}>
+                      {form.requestMode === 'per_day'
+                        ? 'Volt asks for today and each day up to the days ahead, putting the day where {date} is. A day that fails is retried on the next run and its part of the guide is left as it was.'
+                        : 'A static file needs no placeholders. For an API that takes a range, {from} and {to} are filled with today and today + days ahead.'}
+                      {' '}Dates are in the zone below, or UTC.
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
+                    <div className="field"><label>Keep days ahead</label>
+                      <input className="inp" type="number" min={1} max={21} value={form.daysAhead} onChange={e => { const d = clampInt(e.target.value, 1, 21); setForm({ ...form, daysAhead: d, minDaysAhead: Math.min(form.minDaysAhead, d) }) }} />
+                    </div>
+                    <div className="field"><label>Alert below (days)</label>
+                      <input className="inp" type="number" min={0} max={form.daysAhead} value={form.minDaysAhead} onChange={e => setForm({ ...form, minDaysAhead: clampInt(e.target.value, 0, form.daysAhead) })} />
+                    </div>
+                    <div className="field"><label>Refresh every</label>
+                      <select className="inp" value={form.refreshHours} onChange={e => setForm({ ...form, refreshHours: +e.target.value })}>
+                        {[1, 3, 6, 12, 24, 48, 168].map(h => <option key={h} value={h}>{h === 168 ? 'week' : h === 1 ? 'hour' : `${h} hours`}</option>)}
+                      </select>
+                    </div>
+                    <div className="field"><label>Date format</label>
+                      <select className="inp" value={form.dateFormat} onChange={e => setForm({ ...form, dateFormat: e.target.value as Form['dateFormat'] })}>
+                        <option value="YYYY-MM-DD">2026-10-17</option>
+                        <option value="YYYYMMDD">20261017</option>
+                        <option value="DD/MM/YYYY">17/10/2026</option>
+                        <option value="unix">Unix seconds</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="hintxt" style={{ marginTop: -4, marginBottom: 10 }}>
+                    Programmes further out than {form.daysAhead} days are not imported. {form.minDaysAhead ? `If any mapped channel's guide ends sooner than ${form.minDaysAhead} days ahead, the run says so and owners and admins are alerted.` : 'No alert when the guide runs short.'}
+                  </div>
+                  <div className="field"><label>Request headers (an API key, say)</label>
+                    {form.headerNames.filter(n => form.headerChanges[n] !== null).map(n => (
+                      <div key={n} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                        <code style={{ flex: '0 0 180px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{n}</code>
+                        <input className="inp" type="password" autoComplete="new-password" placeholder="Saved, hidden. Type to replace" value={form.headerChanges[n] ?? ''}
+                          onChange={e => setForm({ ...form, headerChanges: { ...form.headerChanges, [n]: e.target.value } })} />
+                        <button type="button" className="btn ghost" onClick={() => setForm({ ...form, headerChanges: { ...form.headerChanges, [n]: null } })}>Remove</button>
+                      </div>
+                    ))}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input className="inp" style={{ flex: '0 0 180px' }} placeholder="x-api-key" value={form.newHeader.name} onChange={e => setForm({ ...form, newHeader: { ...form.newHeader, name: e.target.value } })} />
+                      <input className="inp" type="password" autoComplete="new-password" placeholder="Value" value={form.newHeader.value} onChange={e => setForm({ ...form, newHeader: { ...form.newHeader, value: e.target.value } })} />
+                    </div>
+                    <div className="hintxt" style={{ marginTop: 4 }}>Stored encrypted and never shown again. A key that goes in the URL can stay in the URL.</div>
+                  </div>
+                </>
               )}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: 10 }}>
                 <div className="field"><label>Times with no offset are in</label>
@@ -179,8 +298,16 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600 }}>{s.name}{st && <span className={`nt-pill ${st.cls}`}>{st.label}</span>}</div>
                     <div className="hintxt" style={{ marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {s.kind === 'url' ? <><span style={{ fontFamily: 'ui-monospace,monospace' }}>{s.url}</span> · every {s.refreshHours} h · next {fmt(s.nextRunAt)}</> : 'Uploaded files'}
+                      {s.kind === 'url' ? <><span style={{ fontFamily: 'ui-monospace,monospace' }}>{s.url}</span></> : 'Uploaded files'}
                     </div>
+                    {s.kind === 'url' && (
+                      <div className="hintxt" style={{ marginTop: 2 }}>
+                        {MODE_LABEL[s.requestMode ?? 'single']}{s.requestMode === 'per_day' ? ` (${s.plannedRequests.length} a run)` : ''} · every {s.refreshHours} h · next {fmt(s.nextRunAt)}
+                        {s.headerNames.length > 0 && <> · sends {s.headerNames.join(', ')}</>}
+                        {s.consecutiveFailures > 0 && <span style={{ color: 'var(--warn)' }}> · failed {s.consecutiveFailures} time{s.consecutiveFailures === 1 ? '' : 's'} in a row, retrying sooner</span>}
+                      </div>
+                    )}
+                    <Coverage s={s} />
                     <div className="hintxt" style={{ marginTop: 2 }}>
                       Last run {fmt(s.lastRunAt)}{last ? ` · ${summary(last.counts)}` : ''} · {s.mapped ?? 0} channel{s.mapped === 1 ? '' : 's'} mapped
                       {(s.unmapped ?? 0) > 0 && <span style={{ color: 'var(--warn)' }}> · {s.unmapped} waiting to be mapped</span>}
@@ -196,14 +323,41 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
                     {s.kind === 'url'
-                      ? <button className="btn" disabled={!!busy[s.id] || s.running} onClick={() => run(s)}>Import now</button>
+                      ? <><button className="btn" disabled={!!busy[s.id] || s.running} onClick={() => run(s)}>Import now</button>
+                        <button className="btn ghost" onClick={() => panel[s.id] === 'test' ? setPanel(p => ({ ...p, [s.id]: null })) : tryIt(s)}>Try it</button></>
                       : <button className="btn" disabled={!!busy[s.id] || s.running} onClick={() => { uploadFor.current = s.id; fileRef.current?.click() }}>Upload file</button>}
                     <button className="btn ghost" onClick={() => togglePanel(s.id, 'channels')}>Channels</button>
                     <button className="btn ghost" onClick={() => togglePanel(s.id, 'runs')}>Runs</button>
-                    <button className="btn ghost" onClick={() => setForm({ id: s.id, name: s.name, kind: s.kind, url: s.url ?? '', refreshHours: s.refreshHours ?? 24, fallbackTz: s.fallbackTz ?? '', keepPastDays: s.keepPastDays, autoMap: s.autoMap })}>Edit</button>
+                    <button className="btn ghost" onClick={() => setForm(editForm(s))}>Edit</button>
                     <button className="btn ghost" onClick={() => remove(s)}>Remove</button>
                   </div>
                 </div>
+
+                {panel[s.id] === 'test' && (
+                  <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px' }}>
+                    {!tests[s.id] ? <div className="loading">Fetching the first request…</div> : (() => {
+                      const t = tests[s.id]!
+                      return (
+                        <>
+                          <div className="hintxt" style={{ marginTop: 0 }}>Fetched <span style={{ fontFamily: 'ui-monospace,monospace', wordBreak: 'break-all' }}>{t.tried}</span>. Nothing was imported.</div>
+                          {t.status === 'failed' ? <div className="err" style={{ marginTop: 6 }}>{t.error}</div> : (
+                            <div style={{ marginTop: 6 }}>
+                              <div style={{ fontWeight: 600 }}>{t.channels} channel{t.channels === 1 ? '' : 's'}, {t.programmes} programme{t.programmes === 1 ? '' : 's'} · {Math.round((t.bytes ?? 0) / 1024)} KB</div>
+                              {t.firstStart && <div className="hintxt" style={{ marginTop: 2 }}>From {fmtDay(t.firstStart)} to {fmtDay(t.lastEnd ?? null)}{t.daysAhead != null ? `, ${t.daysAhead} days ahead` : ''}{s.requestMode === 'per_day' ? ' (this is one day: a run fetches every day)' : ''}</div>}
+                              {!!t.sampleChannels?.length && <div className="hintxt" style={{ marginTop: 2 }}>Channels: {t.sampleChannels.map(c => c.name ? `${c.name} (${c.id})` : c.id).join(', ')}{(t.channels ?? 0) > t.sampleChannels.length ? '…' : ''}</div>}
+                            </div>
+                          )}
+                          {t.requests.length > 1 && (
+                            <details style={{ marginTop: 8 }}>
+                              <summary className="hintxt" style={{ cursor: 'pointer' }}>The {t.requests.length} requests a run makes today</summary>
+                              {t.requests.map(r => <div key={r.url} className="hintxt" style={{ fontFamily: 'ui-monospace,monospace', marginTop: 2, wordBreak: 'break-all' }}>{r.url}</div>)}
+                            </details>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </div>
+                )}
 
                 {panel[s.id] === 'channels' && (
                   <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px' }}>
@@ -211,7 +365,7 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
                       <div className="hintxt">No channels yet: they appear here after the first run.</div>
                     ) : (
                       <table>
-                        <thead><tr><th>Their channel</th><th>Programmes</th><th>Volt channel</th></tr></thead>
+                        <thead><tr><th>Their channel</th><th>Programmes</th>{s.kind === 'url' && <th>Guide until</th>}<th>Volt channel</th></tr></thead>
                         <tbody>
                           {aliases[s.id].map(a => (
                             <tr key={a.id}>
@@ -225,6 +379,11 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
                                 </div>
                               </td>
                               <td style={{ color: 'var(--muted)' }}>{a.channelId ? a.lastProgrammes : '–'}</td>
+                              {s.kind === 'url' && (
+                                <td style={{ whiteSpace: 'nowrap', color: a.channelId && (a.guideDaysAhead ?? 0) < s.minDaysAhead && s.minDaysAhead > 0 ? 'var(--warn)' : 'var(--muted)' }}>
+                                  {a.channelId ? (a.guideDaysAhead != null ? `${a.guideDaysAhead} days` : 'nothing yet') : '–'}
+                                </td>
+                              )}
                               <td style={{ minWidth: 220 }}>
                                 <select className="inp" value={a.channelId ?? ''} onChange={e => map(s.id, a, e.target.value || null)}>
                                   <option value="">Not mapped (skipped)</option>

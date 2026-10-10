@@ -1078,6 +1078,8 @@ export const api = {
   deleteImportSource: (id: string): Promise<{ deleted: boolean; removedProgrammes: number }> =>
     req(`/epg/import/sources/${id}`, { method: 'DELETE' }),
   runImportSource: (id: string): Promise<ImportRunResult> => req(`/epg/import/sources/${id}/run`, { method: 'POST' }),
+  /** Fetch the source's first request and say what is in it, writing nothing. */
+  testImportSource: (id: string): Promise<ImportTestResult> => req(`/epg/import/sources/${id}/test`, { method: 'POST' }),
   /** The file goes up as the request body, untouched (gzip stays gzip). */
   uploadImportFile: async (id: string, file: File): Promise<ImportRunResult> => {
     await refreshIfDueSoon()
@@ -2244,21 +2246,37 @@ export interface MediaFile {
 export interface ImportSourceBody {
   name: string; kind: 'url' | 'upload'; url: string | null; refreshHours: number | null; fallbackTz: string | null
   keepPastDays: number; lang: string | null; autoMap: boolean; enabled: boolean
+  /** 'single': one request for the window. 'per_day': one per day, with {date} in the URL. */
+  requestMode: 'single' | 'per_day'
+  /** How far ahead the guide is kept, and the floor below which owners are alerted. */
+  daysAhead: number; minDaysAhead: number
+  dateFormat: 'YYYY-MM-DD' | 'YYYYMMDD' | 'DD/MM/YYYY' | 'unix'
+  /** Write-only: a string sets that header, null removes it. Values are never read back. */
+  headers?: Record<string, string | null>
 }
 export interface ImportCounts {
   bytes: number; channelsInFile: number; programmesInFile: number; mappedChannels: number; unmappedChannels: number
   skippedUnmapped: number; droppedOld: number; droppedFar: number; badTime: number; noEnd: number
   inserted: number; updated: number; unchanged: number; removed: number; overlaps: number
+  notModified?: number
 }
 export interface ImportRun { id: string; trigger: string; started_at: string; finished_at: string | null; status: 'running' | 'ok' | 'warnings' | 'failed'; counts: Partial<ImportCounts>; warnings: string[]; error: string | null }
 export interface ImportSource extends ImportSourceBody {
   id: string; nextRunAt: string | null; running: boolean; lastRunAt: string | null; lastStatus: string | null; lastError: string | null
   mapped?: number; unmapped?: number; lastRun?: ImportRun | null
+  headerNames: string[]; plannedRequests: { url: string; day: string | null }[]; consecutiveFailures: number
+  coverageUntil: string | null; coverageDaysAhead: number | null; coverageLow: boolean
 }
 export interface ImportRunResult { runId: string; status: string; counts: ImportCounts; warnings: string[]; error?: string }
+export interface ImportTestResult {
+  requests: { url: string; day: string | null }[]; tried: string; status: 'ok' | 'failed'; error?: string
+  bytes?: number; channels?: number; programmes?: number; firstStart?: string | null; lastEnd?: string | null; daysAhead?: number | null
+  sampleChannels?: { id: string; name: string | null }[]
+}
 export interface ImportAlias {
   id: string; externalId: string; displayName: string | null; icon: string | null; channelId: string | null; channelName: string | null
   mappedBy: string | null; lastSeenAt: string; lastProgrammes: number
+  guideUntil: string | null; guideDaysAhead: number | null
 }
 export type SocialPlatformId = 'youtube' | 'facebook' | 'x' | 'tiktok' | 'dailymotion'
 export interface SocialPost { title: string; description: string; tags: string[]; privacy: 'public' | 'unlisted' | 'private' }

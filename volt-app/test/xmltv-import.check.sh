@@ -138,7 +138,7 @@ iconv -f UTF-8 -t ISO-8859-1 <<XML | gzip > "$W/latin.xml.gz"
 <tv><channel id="charlie.example"><display-name>Charlie</display-name></channel>
 <programme start="${D1}150000 +0000" stop="${D1}160000 +0000" channel="charlie.example"><title>Café Société</title></programme></tv>
 XML
-U=$(curl -s -X POST "$B/api/epg/import/sources" -H "$A" -H "$J" -d "{\"name\":\"Nightly feed\",\"kind\":\"url\",\"url\":\"http://127.0.0.1:$FPORT/latin.xml.gz\",\"refreshHours\":12}")
+U=$(curl -s -X POST "$B/api/epg/import/sources" -H "$A" -H "$J" -d "{\"name\":\"Nightly feed\",\"kind\":\"url\",\"url\":\"http://127.0.0.1:$FPORT/latin.xml.gz\",\"refreshHours\":12,\"minDaysAhead\":0}")
 UID_=$(echo "$U" | jget 'd["id"]')
 R=$(curl -s -X POST "$B/api/epg/import/sources/$UID_/run" -H "$A")
 ok "URL source, gzipped Latin-1: imported and auto-mapped by name" '[ "$(echo "$R" | jget "d[\"status\"]")" = ok ] && [ "$(q "SELECT title FROM programmes WHERE channel_id='"'"'$CHC'"'"'")" = "Café Société" ]'

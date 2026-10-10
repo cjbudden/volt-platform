@@ -160,4 +160,41 @@ the account's admins.
 
 **API** (`/api/epg/import`): `GET/POST /sources`, `PATCH/DELETE /sources/:id`,
 `POST /sources/:id/run`, `POST /sources/:id/upload` (the file as the body),
-`GET /sources/:id/channels`, `PUT /aliases/:id`, `GET /sources/:id/runs`.
+`GET /sources/:id/channels`, `PUT /aliases/:id`, `GET /sources/:id/runs`,
+`POST /sources/:id/test` (fetch the first request, report, write nothing).
+
+### Hosted guide APIs, kept N days ahead (built 10 Oct)
+
+A URL source can be a guide API rather than a static file, and is kept topped
+up on its refresh schedule. `services/xmltvRequests.ts` (pure) plans each run's
+requests; migration `0039_xmltv_import_api.sql` adds the settings.
+
+- **URL template.** `{date}` (the day being fetched), `{from}` (today), `{to}`
+  (today + days ahead), `{days}`, `{from_unix}`, `{to_unix}`. Dates are written
+  in the source's date format (`YYYY-MM-DD`, `YYYYMMDD`, `DD/MM/YYYY`, unix
+  seconds) and taken in the source's fallback zone, else UTC. Unknown
+  placeholders and a mode that does not match the template are refused on save.
+- **Request mode.** `single`: one request for today .. today + days ahead (a
+  static file, or an API taking a range). `per_day`: one request per day for the
+  same span, for APIs that serve a day at a time. A day that fails is a warning,
+  its part of the guide is left exactly as it was (the removal diff runs per day
+  that was read), and the run only fails when every day fails.
+- **Days ahead** (1 to 21, default 7). Programmes starting at or after local
+  midnight after the last day are not imported (counted as beyond the window).
+- **Minimum days ahead** (0 to 21, default 5, 0 = off). After each run Volt
+  measures, per mapped channel, how far ahead this source's guide reaches
+  *continuously*: from now, programme after programme, up to the first hole of
+  more than 12 hours (an overnight close-down is not a hole, a missing day is).
+  Below the minimum, the run is "with warnings" naming the channels, and owners
+  and admins get one `epg.coverage_low` alert; it re-arms once coverage recovers.
+- **Headers.** Up to 10 request headers (an API key, say), sealed with the same
+  AES-256-GCM key as social tokens. Only the names are ever returned.
+- **Unchanged guides.** A scheduled `single` run sends the last ETag /
+  Last-Modified; a 304 is a run with "guide unchanged" and no re-import.
+  Manual runs, and the first run after any edit or remapping, always read in full.
+- **Retries.** A failed run of a scheduled source retries in 15 min, then 30,
+  60 ... never later than the refresh interval. Owners and admins are alerted
+  on the first failure of a run of them, not on every retry.
+
+Checks: `test/xmltv-import-api-pure.check.ts` 31/31, `test/xmltv-import-api.check.sh`
+39/39 against a stand-in guide API (`test/lib/fake-guide-api.py`).
