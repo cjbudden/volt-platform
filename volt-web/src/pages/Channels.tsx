@@ -7,6 +7,8 @@ import { LangPicker, useCaptionLanguages } from '../LangPicker'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, type RetUnit } from '../scaffold'
 import { pressable } from '../a11y'
 import { TypePicker, MetadataForm } from '../ContentTypeFields'
+import { DrawerTabs, TabPane, type DrawerTab } from '../scaffold'
+import { WatermarkFields, wmDefaults, wmPatch, wmProblem, type WmForm } from '../WatermarkFields'
 
 type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
 
@@ -216,13 +218,35 @@ const RUNG_PRESETS = [
 ]
 type PkgRow = { label: string; bitrateKbps: number; protocol: string; url: string; backupUrl: string }
 
+/* ============================================================================
+   NEW CHANNEL, in the same three tabs as a radio station:
+     Settings  what the channel IS and how it runs: name and logo, transcode or
+               packaging and the GROUP it goes in, sources, ladder, watermark,
+               filler, captions, delivery, recording
+     Metadata  its content type and the guide fields (EPG title, description,
+               genre, language ...). The EPG name follows the channel name
+               until it is edited on its own, so it is not typed twice.
+     Access    publishing and access rules, set once the channel exists
+
+   THE GROUP. A channel goes into a group, and the group's profile decides
+   what kind of channel it is. The form used to pick the first group of the
+   chosen type silently and say "No transcode group set up yet" at the bottom
+   after everything was filled in. Now the group is a visible choice, a type
+   with no group in the account says so where the type is chosen (with what to
+   do about it), and the form starts on a type the account can actually create.
+   ========================================================================== */
 function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClose: () => void; onCreated: () => void }) {
-  const byType = useMemo(() => ({
-    transcode: groups.find(g => g.workflow_type === 'transcode'),
-    package_only: groups.find(g => g.workflow_type === 'package_only'),
+  const ofType = useMemo(() => ({
+    transcode: groups.filter(g => g.workflow_type === 'transcode'),
+    package_only: groups.filter(g => g.workflow_type === 'package_only'),
   }), [groups])
-  const [type, setType] = useState<'transcode' | 'package_only'>('transcode')
-  const [name, setName] = useState('')
+  const [type, setType] = useState<'transcode' | 'package_only'>(() => groups.some(g => g.workflow_type === 'transcode') || !groups.some(g => g.workflow_type === 'package_only') ? 'transcode' : 'package_only')
+  const [groupId, setGroupId] = useState('')
+  const [tab, setTab] = useState<DrawerTab>('settings')
+  const [name, setNameRaw] = useState('')
+  const [brandRef, setBrandRef] = useState('')
+  const [brandPickerOpen, setBrandPickerOpen] = useState(false)
+  const [wm, setWm] = useState<WmForm>(wmDefaults())
   const [typeId, setTypeId] = useState<string | null>(null)
   const [meta, setMeta] = useState<Record<string, any>>({})
   const [purchasing, setPurchasing] = useState('reserved')
@@ -263,7 +287,15 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
 
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const group = byType[type]
+  const candidates = ofType[type]
+  const group = candidates.find(g => g.id === groupId) ?? candidates.find(g => g.channel_count < g.max_channels) ?? candidates[0]
+  const groupFull = !!group && group.channel_count >= group.max_channels
+
+  // The EPG title follows the channel name until somebody edits it on its own.
+  function setName(v: string) {
+    setMeta(m => (!m.name || m.name === name) ? { ...m, name: v } : m)
+    setNameRaw(v)
+  }
 
   function setRow(i: number, patch: Partial<PkgRow>) { setRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r)) }
   function addRow() { setRows(rs => [...rs, { label: '', bitrateKbps: 1000, protocol: 'hls', url: '', backupUrl: '' }]) }
@@ -272,8 +304,10 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
 
   async function submit() {
     setErr('')
-    if (!name.trim()) { setErr('Give the channel a name'); return }
-    if (!group) { setErr(`No ${type === 'transcode' ? 'transcode' : 'packaging'} group set up yet`); return }
+    if (!name.trim()) { setTab('settings'); setErr('Give the channel a name'); return }
+    if (!group) { setTab('settings'); setErr(`This account has no ${type === 'transcode' ? 'transcode' : 'packaging'} group, so a ${type === 'transcode' ? 'transcode' : 'packaging'} channel cannot be created yet. See Group under Type.`); return }
+    if (groupFull) { setTab('settings'); setErr(`${group.name} is full (${group.max_channels} channels). Choose another group or ask for a higher limit.`); return }
+    if (type === 'transcode') { const w = wmProblem(wm); if (w) { setTab('settings'); setErr(w); return } }
     const hlsWait = await hlsChoicePending([tSrc, ...(tBackupOn ? [tBackup] : []), fbSrc]); if (hlsWait) { setErr(hlsWait); return }
 
     const sources: NonNullable<Parameters<typeof api.createChannel>[0]['sources']> = []
@@ -314,6 +348,9 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
         inputLossBehavior: lossBehavior,
         fillerSlateRef: (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && slateRef.trim() ? slateRef.trim() : null,
         fallbackTranscode,
+        brandRef: brandRef.trim() || null,
+        // Burned in by the encoder, so transcode only: a packaging channel passes the source through.
+        ...(type === 'transcode' ? { watermark: wmPatch(wm) } : {}),
         ...(typeId ? { schemaId: typeId, metadata: meta } : {}),
       })
       // captions ride on the group's shared output profile, so they are applied via the
@@ -323,7 +360,11 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
         catch { /* channel created fine; captions can still be set in Settings */ }
       }
       onCreated()
-    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+    } catch (e: any) {
+      // A guide field the content type requires is on the Metadata tab: go there.
+      if (/metadata|required field/i.test(String(e.message))) setTab('metadata')
+      setErr(e.message)
+    } finally { setBusy(false) }
   }
 
   return (
@@ -331,19 +372,54 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
       <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">New channel</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
+          <DrawerTabs tab={tab} setTab={setTab} />
+          <TabPane active={tab === 'metadata'}>
+            <TypePicker appliesTo="tv" value={typeId} onChange={(id) => setTypeId(id)}
+              hint="The channel's identity (schema.org TelevisionChannel). Its metadata is what the guide and now/next show when no programme is scheduled." />
+            <MetadataForm typeId={typeId} value={meta} onChange={setMeta} />
+            <div className="hintxt">The EPG name follows the channel name on Settings until you change it here.</div>
+          </TabPane>
+          <TabPane active={tab === 'access'}>
+            <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Create the channel first; its publishing and access rules are set here afterwards, from the channel's Settings. Until then it inherits its content type's and the account's rules.</div>
+          </TabPane>
+          <TabPane active={tab === 'settings'}>
           <div className="field"><label>Channel name</label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. RTM News 24" />
           </div>
-          <TypePicker appliesTo="tv" value={typeId} onChange={(id) => setTypeId(id)} />
-          <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact />
+          <div className="field"><label>Channel logo <span style={{ color: 'var(--faint)', fontWeight: 400 }}>: shown in lists, on the channel page and in the guide</span></label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {brandRef.trim() && <img src={thumbUrl(brandRef.trim(), 92, 68)} alt="" style={{ width: 46, height: 34, objectFit: 'contain', borderRadius: 6, background: '#0b0f16', flex: 'none' }} />}
+              <input className="inp" value={brandRef} onChange={e => setBrandRef(e.target.value)} placeholder="Pick from library or paste a URL" />
+              <button type="button" className="btn ghost" onClick={() => setBrandPickerOpen(true)}>Browse…</button>
+            </div>
+          </div>
+          <ImagePicker open={brandPickerOpen} kinds={['brand', 'other']} title="Choose or upload the channel logo"
+            uploadKind="brand" uploadFolder="brand" allowUpload
+            onClose={() => setBrandPickerOpen(false)} onPick={(url) => { setBrandRef(url); setBrandPickerOpen(false) }} />
 
           <div className="field"><label>Type</label>
             <div className="presets">
-              <Preset sel={type === 'transcode'} onClick={() => setType('transcode')} title="Transcode"
-                desc="One source in. We build the ABR ladder with FFmpeg." meta="1 input → many outputs" />
-              <Preset sel={type === 'package_only'} onClick={() => setType('package_only')} title="Packaging"
-                desc="You send a pre-encoded ladder; we just package it." meta="N inputs → N outputs" />
+              <Preset sel={type === 'transcode'} onClick={() => { setType('transcode'); setGroupId('') }} title="Transcode"
+                desc="One source in. We build the ABR ladder with FFmpeg." meta={ofType.transcode.length ? '1 input → many outputs' : 'no transcode group yet'} />
+              <Preset sel={type === 'package_only'} onClick={() => { setType('package_only'); setGroupId('') }} title="Packaging"
+                desc="You send a pre-encoded ladder; we just package it." meta={ofType.package_only.length ? 'N inputs → N outputs' : 'no packaging group yet'} />
             </div>
+          </div>
+          <div className="field"><label>Group</label>
+            {candidates.length === 0 ? (
+              <div className="group-missing" role="status">
+                <strong>This account has no {type === 'transcode' ? 'transcode' : 'packaging'} group.</strong> A channel goes into a group, and the group decides whether it is transcode or packaging.
+                {' '}A platform administrator adds one under System admin, then the account, then Groups.
+                {ofType[type === 'transcode' ? 'package_only' : 'transcode'].length > 0 && <> You can create a {type === 'transcode' ? 'packaging' : 'transcode'} channel now.</>}
+              </div>
+            ) : (
+              <>
+                <select className="inp" value={group?.id ?? ''} onChange={e => setGroupId(e.target.value)} disabled={candidates.length === 1}>
+                  {candidates.map(g => <option key={g.id} value={g.id} disabled={g.channel_count >= g.max_channels}>{g.name}: {g.channel_count} of {g.max_channels} channels{g.channel_count >= g.max_channels ? ' (full)' : ''}</option>)}
+                </select>
+                <div className="hintxt">{group?.profile_name ? `Output profile ${group.profile_name}` : ''}{group?.rungs?.length ? `, default ladder ${group.rungs.map(r => `${r.height}p`).join(', ')}` : ''}{candidates.length === 1 ? '. The only group of this type in the account.' : ''}</div>
+              </>
+            )}
           </div>
 
           {type === 'transcode' ? (
@@ -409,6 +485,11 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
             </>
           )}
 
+          <div className="sec-label">Watermark</div>
+          {type === 'transcode'
+            ? <WatermarkFields value={wm} onChange={(p) => setWm(w => ({ ...w, ...p }))} />
+            : <div className="hintxt" style={{ marginTop: 0, marginBottom: 12 }}>A packaging channel passes your encoded ladder through untouched, so a watermark cannot be added here: burn it in upstream, or choose Transcode.</div>}
+
           <div className="sec-label">Filler on total loss</div>
           <div className="field"><label>When no source is available</label>
             <select className="inp" value={lossBehavior} onChange={e => setLossBehavior(e.target.value as any)}>
@@ -473,13 +554,14 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
           <RecordingSection ctx="channel" recOn={recOn} setRecOn={setRecOn}
             retNum={retNum} setRetNum={setRetNum} retUnit={retUnit} setRetUnit={setRetUnit}
             retWarn={retNum && Number(retNum) * RET_UNIT_SEC[retUnit] < dvrMin * 60
-              ? `Will be raised to the DVR window (${dvrMin}m) — retention can’t be shorter than DVR.` : null} />
-
-          {err && <div className="err">{err}</div>}
+              ? `Will be raised to the DVR window (${dvrMin}m): retention can’t be shorter than DVR.` : null} />
+          </TabPane>
         </div>
         <div className="drawer-f">
+          {/* In the footer, so a problem is seen wherever the form is scrolled to. */}
+          {err && <div className="err drawer-f-err" role="alert">{err}</div>}
           <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Creating…' : 'Create channel'}</button>
+          <button className="btn primary" disabled={busy || !group || groupFull} onClick={submit} title={!group ? `No ${type === 'transcode' ? 'transcode' : 'packaging'} group in this account` : ''}>{busy ? 'Creating…' : 'Create channel'}</button>
         </div>
       </div>
     </div>

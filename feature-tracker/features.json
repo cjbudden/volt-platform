@@ -224,13 +224,18 @@
       "name": "Channels — list & create (transcode/package)",
       "app_surface": "full",
       "status": "ready_to_test",
-      "summary": "Channels list (empty state, filter chips, start/stop) + a create drawer that branches by type: transcode = one source + optional backup + selectable output ladder + filler-on-loss; package = per-rendition input rows + fallback (matching URLs or a single source transcoded to all bitrates).",
-      "checks": "create inserts channel + stream_inputs + ladder + filler (both flows) verified via API",
+      "summary": "Channels list (empty state, filter chips, start/stop) and a New channel drawer in three tabs like radio. SETTINGS: name and logo, Transcode or Packaging with the GROUP it goes in (a type the account has no group for says so where the type is chosen, and the form starts on a type that works), sources, ladder (transcode) or per-rendition inputs and fallback (packaging), watermark with a placement preview (transcode), filler on loss, captions, delivery, recording. METADATA: content type and guide fields; the EPG name follows the channel name. ACCESS: set after creation. Errors show in the footer. Groups are added per account in System admin.",
+      "checks": "Built 10 Oct (rework): platform-groups 11/11 (a packaging-only client gets a transcode group from System admin, only the SaaS admin can add one, and a transcode channel created into it keeps its logo, watermark and EPG name). Walked through in a browser on the RTM demo account: no transcode group explained, group added, transcode channel with a watermark created, and the watermark shown in the channel's Settings.",
       "test": {
-        "how": "Channels → New channel. Pick Transcode or Packaging; fill the type-specific fields; Create. It appears in the list.",
+        "how": "Channels > New channel. Settings: name it (check Metadata: the EPG name matches), pick a logo. Transcode on an account with no transcode group: the Group field explains it; as the platform admin, System admin > the account > Groups > Add group (Transcode). Back on New channel: Transcode > the group is listed > source > Watermark on, pick an image, choose a corner and watch the preview > Create. Open the channel > Settings: the watermark is as you set it.",
         "artifact": null
       },
-      "feedback": []
+      "feedback": [
+        {
+          "date": "2026-10-10",
+          "note": "Christian: the live channel form was not working (No transcode group set up yet, no group field), had no watermark fields, and should use Settings / Metadata / Access tabs like radio. Reworked as described."
+        }
+      ]
     },
     {
       "id": "channel-detail",

@@ -197,6 +197,65 @@ platformRouter.patch(
 );
 
 /**
+ * An account's GROUPS. A group ties channels to an output profile, and the
+ * profile's workflow decides what the group's channels are: TRANSCODE (one
+ * source in, a ladder built by us; watermark and captions possible) or
+ * PACKAGING (a pre-encoded ladder passed through). New channels pick a group,
+ * so an account with no transcode group cannot create a transcode channel:
+ * this is where one is added. Group caps (channels, concurrent sources) are
+ * entitlements, so only the SaaS admin sets them.
+ */
+platformRouter.get(
+  '/accounts/:id/groups',
+  ...requirePlatform('saas_admin'),
+  asyncHandler(async (req, res) => {
+    res.json(await query(
+      `SELECT g.id, g.name, g.max_channels, g.max_concurrent, p.name AS profile_name, p.workflow_type, p.rungs,
+              (SELECT count(*)::int FROM channels c WHERE c.group_id = g.id) AS channel_count
+         FROM groups g LEFT JOIN output_profiles p ON p.id = g.output_profile_id
+        WHERE g.account_id = $1 ORDER BY g.name`, [req.params.id]));
+  })
+);
+
+const DEFAULT_LADDER = [{ height: 1080, bitrate_kbps: 5000 }, { height: 720, bitrate_kbps: 2800 }, { height: 480, bitrate_kbps: 1200 }];
+const addGroupSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  workflowType: z.enum(['transcode', 'package_only']),
+  maxChannels: z.number().int().min(1).max(1000).default(5),
+  maxConcurrent: z.number().int().min(1).max(500).default(3),
+  rungs: z.array(z.object({ height: z.number().int().min(144).max(4320), bitrate_kbps: z.number().int().min(64).max(100000) })).min(1).max(10).optional(),
+});
+
+platformRouter.post(
+  '/accounts/:id/groups',
+  ...requirePlatform('saas_admin'),
+  asyncHandler(async (req, res) => {
+    const b = addGroupSchema.parse(req.body);
+    const acc = await one<any>('SELECT id FROM accounts WHERE id = $1', [req.params.id]);
+    if (!acc) throw notFound('account not found');
+    const clash = await one<any>('SELECT 1 FROM groups WHERE account_id = $1 AND lower(name) = lower($2)', [acc.id, b.name]);
+    if (clash) throw badRequest(`This account already has a group called "${b.name}"`);
+    const out = await tx(async (c) => {
+      // The group's own profile: its ladder is the default for the group's
+      // channels (each channel can still set its own ladder).
+      const profile = (await c.query(
+        `INSERT INTO output_profiles(account_id, name, rungs, workflow_type) VALUES ($1,$2,$3::jsonb,$4) RETURNING id, name, workflow_type, rungs`,
+        [acc.id, `${b.name} (${b.workflowType === 'transcode' ? 'transcode' : 'packaging'})`, JSON.stringify(b.rungs ?? DEFAULT_LADDER), b.workflowType])).rows[0];
+      const group = (await c.query(
+        `INSERT INTO groups(account_id, name, output_profile_id, max_channels, max_concurrent) VALUES ($1,$2,$3,$4,$5)
+         RETURNING id, name, max_channels, max_concurrent`,
+        [acc.id, b.name, profile.id, b.maxChannels, b.maxConcurrent])).rows[0];
+      await c.query(
+        `INSERT INTO audit_log(account_id, user_id, action, entity_type, entity_id, detail)
+         VALUES ($1,$2,'platform.group_create','group',$3,$4::jsonb)`,
+        [acc.id, req.auth!.sub, group.id, JSON.stringify(b)]);
+      return { ...group, profile_name: profile.name, workflow_type: profile.workflow_type, rungs: profile.rungs, channel_count: 0 };
+    });
+    res.status(201).json(out);
+  })
+);
+
+/**
  * Account impersonation ("view as") — PLANNED / behind saas_admin. Mints a
  * short-lived tenant-scoped token as the account's owner and audit-logs it.
  * Deferred past the initial deployment but wired so support can use it safely.

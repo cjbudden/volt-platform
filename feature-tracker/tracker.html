@@ -192,15 +192,15 @@
     <div class=top><div class=name>Channels — list &amp; create (transcode/package)</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
-    <div class=summary>Channels list (empty state, filter chips, start/stop) + a create drawer that branches by type: transcode = one source + optional backup + selectable output ladder + filler-on-loss; package = per-rendition input rows + fallback (matching URLs or a single source transcoded to all bitrates).</div>
-    <div class=meta>create inserts channel + stream_inputs + ladder + filler (both flows) verified via API</div>
-    <div class=how><b>How to test:</b> Channels → New channel. Pick Transcode or Packaging; fill the type-specific fields; Create. It appears in the list.</div>
+    <div class=summary>Channels list (empty state, filter chips, start/stop) and a New channel drawer in three tabs like radio. SETTINGS: name and logo, Transcode or Packaging with the GROUP it goes in (a type the account has no group for says so where the type is chosen, and the form starts on a type that works), sources, ladder (transcode) or per-rendition inputs and fallback (packaging), watermark with a placement preview (transcode), filler on loss, captions, delivery, recording. METADATA: content type and guide fields; the EPG name follows the channel name. ACCESS: set after creation. Errors show in the footer. Groups are added per account in System admin.</div>
+    <div class=meta>Built 10 Oct (rework): platform-groups 11/11 (a packaging-only client gets a transcode group from System admin, only the SaaS admin can add one, and a transcode channel created into it keeps its logo, watermark and EPG name). Walked through in a browser on the RTM demo account: no transcode group explained, group added, transcode channel with a watermark created, and the watermark shown in the channel's Settings.</div>
+    <div class=how><b>How to test:</b> Channels &gt; New channel. Settings: name it (check Metadata: the EPG name matches), pick a logo. Transcode on an account with no transcode group: the Group field explains it; as the platform admin, System admin &gt; the account &gt; Groups &gt; Add group (Transcode). Back on New channel: Transcode &gt; the group is listed &gt; source &gt; Watermark on, pick an image, choose a corner and watch the preview &gt; Create. Open the channel &gt; Settings: the watermark is as you set it.</div>
     
     <div class=actions>
          <button class="btn ok" data-approve="Channels — list &amp; create (transcode/package)">✓ Approve as working</button>
          <button class="btn warn" data-changes="Channels — list &amp; create (transcode/package)">Request changes</button>
        </div>
-    
+    <div class=fblog><div class=fb>• 2026-10-10: Christian: the live channel form was not working (No transcode group set up yet, no group field), had no watermark fields, and should use Settings / Metadata / Access tabs like radio. Reworked as described.</div></div>
   </div><div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>Channel detail / control page</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>

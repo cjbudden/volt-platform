@@ -6,6 +6,7 @@ import { RuleEditor } from '../RuleEditor'
 import { subscribeLive } from '../liveStatus'
 import { useRecordWatch, LiveEditNotice } from '../liveRecord'
 import { useProtocols, SourceInput, hlsChoicePending, type SourceValue } from '../protocols'
+import { WatermarkFields } from '../WatermarkFields'
 import { ImagePicker } from '../ImagePicker'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
 import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, GATE_COLOR, RecoveryNote, DiagnosisBlock, DrawerTabs, TabPane, type DrawerTab, type RetUnit } from '../scaffold'
@@ -1785,8 +1786,6 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   const setWmOpacity = lockSet(setWmOpacityRaw)
   const [wmScale, setWmScaleRaw] = useState(d.watermark?.scale ?? 12)
   const setWmScale = lockSet(setWmScaleRaw)
-  const [wmPickerOpen, setWmPickerOpenRaw] = useState(false)
-  const setWmPickerOpen = lockSet(setWmPickerOpenRaw)
   // channel brand image (identity logo, replaces the initials box)
   const [brandRef, setBrandRef] = useState((d as any).brand_ref || '')
   const [brandPickerOpen, setBrandPickerOpen] = useState(false)
@@ -2067,45 +2066,17 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           <div className={locked ? 'locked-zone' : undefined} aria-disabled={locked || undefined}>
           {d.profile?.workflow_type === 'transcode' && (<>
           <div className="sec-label">Watermark <span style={{ color: 'var(--faint)', fontWeight: 400 }}>: burned into the transcode output</span></div>
-          <div className="toggle-row">
-            <div><div className="tt">Overlay a brand watermark</div><div className="td">Burned into the output for this transcode channel.</div></div>
-            <div className={`sw ${wmEnabled ? '' : 'off'}`} {...pressable((e: any) => { ((() => setWmEnabled(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
-          </div>
-          {wmEnabled && (
-            <>
-              <div className="field"><label>Watermark image</label>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {wmRef && <img src={thumbUrl(wmRef, 92, 68)} alt="" style={{ width: 46, height: 34, objectFit: 'contain', borderRadius: 6, background: '#0b0f16', flex: 'none' }} />}
-                  <input className="inp" value={wmRef} onChange={e => setWmRef(e.target.value)} placeholder="Pick a brand/logo, upload, or paste a URL" />
-                  <button type="button" className="btn ghost" onClick={() => setWmPickerOpen(true)}>Browse / upload…</button>
-                </div>
-              </div>
-              <div className="field"><label>Position</label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6, maxWidth: 260 }}>
-                  {([['tl','Top L'],['tc','Top C'],['tr','Top R'],['bl','Bot L'],['bc','Bot C'],['br','Bot R']] as const).map(([p, lbl]) => (
-                    <button key={p} type="button" className={`btn ${wmPos === p ? 'primary' : 'ghost'}`} style={{ padding: '6px 4px', fontSize: 'var(--fs-sm)' }} onClick={() => setWmPos(p)}>{lbl}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="field"><label>Offsets (px from the edge)</label>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>X</span>
-                  <input className="inp" style={{ width: 90 }} inputMode="numeric" value={wmX} onChange={e => setWmX(e.target.value.replace(/[^0-9]/g, ''))} />
-                  <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Y</span>
-                  <input className="inp" style={{ width: 90 }} inputMode="numeric" value={wmY} onChange={e => setWmY(e.target.value.replace(/[^0-9]/g, ''))} />
-                </div>
-              </div>
-              <div className="field"><label>Size — {wmScale}% of frame height</label>
-                <input type="range" min={2} max={40} step={1} value={wmScale} onChange={e => setWmScale(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
-              </div>
-              <div className="field"><label>Opacity — {wmOpacity}%</label>
-                <input type="range" min={10} max={100} step={5} value={wmOpacity} onChange={e => setWmOpacity(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
-              </div>
-            </>
-          )}
-          <ImagePicker open={wmPickerOpen} kinds={['brand', 'slate', 'other']} title="Choose or upload a brand watermark"
-            uploadKind="brand" uploadFolder="brands"
-            onClose={() => setWmPickerOpen(false)} onPick={(url) => { setWmRef(url); setWmPickerOpen(false) }} />
+          <WatermarkFields hint="Burned into every rendition of this transcode channel."
+            value={{ enabled: wmEnabled, ref: wmRef, position: wmPos, x: wmX, y: wmY, opacity: wmOpacity, scale: wmScale }}
+            onChange={(p) => {
+              if (p.enabled !== undefined) setWmEnabled(p.enabled)
+              if (p.ref !== undefined) setWmRef(p.ref)
+              if (p.position !== undefined) setWmPos(p.position)
+              if (p.x !== undefined) setWmX(p.x)
+              if (p.y !== undefined) setWmY(p.y)
+              if (p.opacity !== undefined) setWmOpacity(p.opacity)
+              if (p.scale !== undefined) setWmScale(p.scale)
+            }} />
           </>)}
           </div>
           </TabPane>

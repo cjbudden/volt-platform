@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, type PlatformAccountRow } from '../api'
+import { api, type PlatformAccountRow, type PlatformGroupRow } from '../api'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 import { pressable } from '../a11y'
 
@@ -228,6 +228,8 @@ function AccountDrawer({ account, onClose, onDone }: {
             </>
           )}
 
+          {isEdit && <AccountGroups accountId={account!.id} />}
+
           {isEdit && (
             <>
               <div className="sec-label">Access</div>
@@ -251,5 +253,82 @@ function AccountDrawer({ account, onClose, onDone }: {
         </div>
       </div>
     </div>
+  )
+}
+
+/* An account's GROUPS. A new channel goes into a group, and the group's profile
+   decides whether it is a TRANSCODE channel (one source in, our ladder,
+   watermark and captions possible) or a PACKAGING channel (a pre-encoded
+   ladder passed through). A client with no transcode group cannot create a
+   transcode channel; this is where one is added. Caps are entitlements. */
+function AccountGroups({ accountId }: { accountId: string }) {
+  const [groups, setGroups] = useState<PlatformGroupRow[] | null>(null)
+  const [form, setForm] = useState<{ name: string; type: 'transcode' | 'package_only'; maxCh: string; maxConc: string } | null>(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const load = () => api.platformAccountGroups(accountId).then(setGroups).catch(e => setErr(e.message))
+  useEffect(() => { load() }, [accountId])
+  const has = (t: string) => (groups ?? []).some(g => g.workflow_type === t)
+  async function add() {
+    if (!form) return
+    if (!form.name.trim()) { setErr('Name the group'); return }
+    setBusy(true); setErr('')
+    try {
+      await api.platformAddGroup(accountId, { name: form.name.trim(), workflowType: form.type, maxChannels: Number(form.maxCh) || 5, maxConcurrent: Number(form.maxConc) || 3 })
+      setForm(null); load()
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <>
+      <div className="sec-label" style={{ display: 'flex', alignItems: 'center' }}>
+        <span>Groups</span><div style={{ flex: 1 }} />
+        {!form && <button type="button" className="btn ghost" onClick={() => setForm({ name: has('transcode') ? '' : 'Transcode', type: has('transcode') ? 'package_only' : 'transcode', maxCh: '5', maxConc: '3' })}>Add group</button>}
+      </div>
+      <div className="hintxt" style={{ marginTop: -4, marginBottom: 8 }}>A new channel goes into a group; the group decides whether it is transcode or packaging.</div>
+      {groups === null ? <div className="loading">Loading…</div> : (
+        <div style={{ display: 'grid', gap: 6 }}>
+          {groups.map(g => (
+            <div key={g.id} className="toggle-row" style={{ padding: '8px 12px' }}>
+              <div style={{ minWidth: 0 }}>
+                <div className="tt">{g.name}</div>
+                <div className="td">{g.workflow_type === 'transcode' ? 'Transcode' : g.workflow_type === 'package_only' ? 'Packaging' : 'No profile'}
+                  {g.rungs?.length ? ` · ladder ${g.rungs.map(r => `${r.height}p`).join(', ')}` : ''} · {g.channel_count}/{g.max_channels} channels · {g.max_concurrent} concurrent</div>
+              </div>
+            </div>
+          ))}
+          {!has('transcode') && <div className="hintxt" style={{ color: 'var(--warn)' }}>No transcode group: this client cannot create transcode channels (watermark, captions, our ladder).</div>}
+          {!has('package_only') && <div className="hintxt">No packaging group: this client cannot pass a pre-encoded ladder through.</div>}
+        </div>
+      )}
+      {form && (
+        <div className="card" style={{ padding: 12, marginTop: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 150px', gap: 10 }}>
+            <div className="field"><label>Group name</label>
+              <input className="inp" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Transcode" />
+            </div>
+            <div className="field"><label>Type</label>
+              <select className="inp" value={form.type} onChange={e => setForm({ ...form, type: e.target.value as any })}>
+                <option value="transcode">Transcode</option>
+                <option value="package_only">Packaging</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div className="field"><label>Max channels</label>
+              <input className="inp" inputMode="numeric" value={form.maxCh} onChange={e => setForm({ ...form, maxCh: e.target.value.replace(/[^0-9]/g, '') })} />
+            </div>
+            <div className="field"><label>Max concurrent sources</label>
+              <input className="inp" inputMode="numeric" value={form.maxConc} onChange={e => setForm({ ...form, maxConc: e.target.value.replace(/[^0-9]/g, '') })} />
+            </div>
+          </div>
+          {form.type === 'transcode' && <div className="hintxt" style={{ marginTop: -4 }}>Starts with a 1080p, 720p and 480p ladder; each channel can choose its own renditions.</div>}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+            <button type="button" className="btn ghost" onClick={() => setForm(null)}>Cancel</button>
+            <button type="button" className="btn primary" disabled={busy} onClick={add}>{busy ? 'Adding…' : 'Add group'}</button>
+          </div>
+        </div>
+      )}
+      {err && <div className="err">{err}</div>}
+    </>
   )
 }

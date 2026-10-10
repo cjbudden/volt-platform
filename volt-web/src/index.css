@@ -455,6 +455,8 @@ tbody tr:last-child td{border-bottom:none}
 .wpanel .lead{color:var(--muted);font-size:var(--fs-body);margin:0 0 18px}
 .field{margin-bottom:15px}
 .field > label{display:block;font-size:var(--fs-sm);font-weight:600;margin-bottom:7px}
+/* A hint reads as a hint wherever it sits; inside a field it also gets its spacing. */
+.hintxt{font-size:var(--fs-xs);color:var(--faint);line-height:1.5}
 .field .hintxt{font-size:var(--fs-xs);color:var(--faint);margin-top:7px}
 .inp{width:100%;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-family:inherit;font-size:var(--fs-body);outline:none;transition:.15s}
 .inp:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-dim)}
@@ -625,3 +627,22 @@ button{font-family:inherit}
 .hls-opt input{margin-top:3px;flex:none}
 .hls-opt > span{min-width:0;overflow-wrap:anywhere}
 .mono{font-family:ui-monospace,monospace}
+
+/* ---- watermark fields (WatermarkFields.tsx) ---- */
+.wm-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:4px}
+.wm-grid .wm-frame{max-width:300px}
+.wm-frame{position:relative;aspect-ratio:16/9;border-radius:8px;overflow:hidden;border:1px solid var(--border);
+  background:linear-gradient(135deg,#1b2433 0%,#0d1118 60%,#151b26 100%)}
+.wm-ghost{display:flex;align-items:center;justify-content:center;aspect-ratio:2/1;border:1px dashed var(--border-2);border-radius:4px;
+  color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.08em}
+.wm-pos{display:grid;grid-template-columns:repeat(3,44px);gap:6px}
+.wm-pos-btn{position:relative;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--panel-2);cursor:pointer}
+.wm-pos-btn.sel{border-color:var(--brand);background:var(--brand-dim)}
+.wm-dot{position:absolute;width:8px;height:6px;border-radius:2px;background:var(--muted)}
+.wm-pos-btn.sel .wm-dot{background:var(--brand)}
+.wm-dot.tl{top:4px;left:5px}.wm-dot.tc{top:4px;left:calc(50% - 4px)}.wm-dot.tr{top:4px;right:5px}
+.wm-dot.bl{bottom:4px;left:5px}.wm-dot.bc{bottom:4px;left:calc(50% - 4px)}.wm-dot.br{bottom:4px;right:5px}
+
+/* ---- New channel: missing group notice, footer error ---- */
+.group-missing{font-size:var(--fs-sm);color:var(--text);padding:10px 12px;border:1px solid var(--warn);border-radius:10px;background:rgba(245,158,11,.06);line-height:1.5}
+.drawer-f-err{flex:1;margin:0 8px 0 0;align-self:center;min-width:0}

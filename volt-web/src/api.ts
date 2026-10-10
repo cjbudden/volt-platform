@@ -1486,6 +1486,10 @@ export const api = {
     name?: string; planTier?: 'standard' | 'pro' | 'enterprise'
     maxChannels?: number; maxConcurrentSources?: number; status?: 'active' | 'suspended'
   }): Promise<PlatformAccountRow> => req(`/platform/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  /** An account's groups: each ties channels to a transcode or packaging profile. */
+  platformAccountGroups: (id: string): Promise<PlatformGroupRow[]> => req(`/platform/accounts/${id}/groups`),
+  platformAddGroup: (id: string, b: { name: string; workflowType: 'transcode' | 'package_only'; maxChannels?: number; maxConcurrent?: number }): Promise<PlatformGroupRow> =>
+    req(`/platform/accounts/${id}/groups`, { method: 'POST', body: JSON.stringify(b) }),
 
   deleteFile: async (id: string, opts: { confirm?: boolean; force?: boolean } = {}): Promise<{ ok: boolean; status: number; body?: any }> => {
     const qs = new URLSearchParams()
@@ -1661,6 +1665,11 @@ export interface AccountKeyRow extends ApiKeyRow {
   app_id: string | null; app_name: string | null
 }
 
+export interface PlatformGroupRow {
+  id: string; name: string; max_channels: number; max_concurrent: number
+  profile_name: string | null; workflow_type: 'transcode' | 'package_only' | null
+  rungs: { height: number; bitrate_kbps: number }[] | null; channel_count: number
+}
 export interface PlatformAccountRow {
   id: string; name: string; plan_tier: string
   max_channels: number; max_concurrent_sources?: number
