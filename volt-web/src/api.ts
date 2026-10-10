@@ -1073,7 +1073,7 @@ export const api = {
   importSources: (): Promise<ImportSource[]> => req('/epg/import/sources'),
   createImportSource: (b: Partial<ImportSourceBody> & { name: string; kind: 'url' | 'upload' }): Promise<ImportSource> =>
     req('/epg/import/sources', { method: 'POST', body: JSON.stringify(b) }),
-  updateImportSource: (id: string, b: Partial<ImportSourceBody>): Promise<ImportSource> =>
+  updateImportSource: (id: string, b: Partial<ImportSourceBody>): Promise<ImportSource & { reread?: { removedProgrammes: number; reimporting: boolean } }> =>
     req(`/epg/import/sources/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
   deleteImportSource: (id: string): Promise<{ deleted: boolean; removedProgrammes: number }> =>
     req(`/epg/import/sources/${id}`, { method: 'DELETE' }),
@@ -2261,6 +2261,8 @@ export interface ImportSourceBody {
   headers?: Record<string, string | null>
   /** What a channel the feed has never listed before starts as. */
   newChannels: 'review' | 'ignore'
+  /** 'offsets': times as stamped. 'local': offsets ignored, times are local in the source zone (fallbackTz). */
+  timeMode: 'offsets' | 'local'
 }
 export interface ImportCounts {
   bytes: number; channelsInFile: number; programmesInFile: number; mappedChannels: number; unmappedChannels: number
@@ -2282,6 +2284,9 @@ export interface ImportTestResult {
   bytes?: number; channels?: number; programmes?: number; firstStart?: string | null; lastEnd?: string | null; daysAhead?: number | null
   sampleChannels?: { id: string; name: string | null }[]
   lineup?: { used: number; notUsed: number; waiting: number }
+  offsets?: { offset: string; count: number }[]
+  timeReading?: { zone: string | null; mode: 'offsets' | 'local' }
+  samples?: { channel: string; title: string; raw: string; startsAt: string }[]
 }
 export interface ImportAlias {
   id: string; externalId: string; displayName: string | null; icon: string | null; channelId: string | null; channelName: string | null

@@ -605,3 +605,6 @@ button{font-family:inherit}
 .lineup-suggest{display:block;margin-top:4px;padding:2px 8px;font-size:var(--fs-sm);border-radius:7px;border:1px dashed var(--border-2);background:transparent;color:var(--text);cursor:pointer}
 .lineup-suggest:hover{border-style:solid;background:var(--panel-2)}
 .hintxt.mono{font-family:ui-monospace,monospace}
+.tz-box{padding:10px 12px;margin-bottom:12px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px}
+.tz-samples{margin-top:8px}
+.tz-samples table td{padding:4px 8px;vertical-align:top}

@@ -7,6 +7,7 @@
 //
 //  Usage: npx tsx test/xmltv-import-api-pure.check.ts
 // ============================================================================
+import { xmltvOffset, stripOffset, resolveChannel, parseXmltvTime } from '../src/services/xmltvParse';
 import { planRequests, templateProblem, headerProblem, retryDelayMinutes, todayIn, localMidnight, formatDay, daysAheadOf } from '../src/services/xmltvRequests';
 
 let pass = 0, fail = 0;
@@ -63,6 +64,19 @@ check('a header name with a space is refused', !!headerProblem('x api key'), tru
 check('retry backoff 15, 30, 60, 120', [1, 2, 3, 4].map((n) => retryDelayMinutes(n, 24)), [15, 30, 60, 120]);
 check('retry never waits longer than the refresh', retryDelayMinutes(9, 6), 360);
 check('days ahead to one decimal', daysAheadOf(new Date(now.getTime() + 6.44 * 86_400_000), now), 6.4);
+
+// ---- the source time zone and how times are read
+check('offset read from a time', [xmltvOffset('20261010080000 +0000'), xmltvOffset('20261010190000 +11:00'), xmltvOffset('20261010190000'), xmltvOffset('20261010080000Z')], ['+0000', '+1100', null, 'Z']);
+check('offset stripped', [stripOffset('20261010190000 +0000'), stripOffset('20261010190000 +11:00'), stripOffset('20261010190000')], ['20261010190000', '20261010190000', '20261010190000']);
+check('a correct feed: ABC News stamped 08:00 +0000 is 19:00 in Sydney (AEDT)', parseXmltvTime('20261010080000 +0000', 'Australia/Sydney')?.toISOString(), '2026-10-10T08:00:00.000Z');
+check('no offset: read in the zone given (Sydney 19:00 AEDT = 08:00 UTC)', parseXmltvTime('20261010190000', 'Australia/Sydney')?.toISOString(), '2026-10-10T08:00:00.000Z');
+const wrong = [{ channel: 'c', startRaw: '20261010190000 +0000', stopRaw: '20261010193000 +0000', title: 'News', lengthSec: null, metadata: {} }];
+check('a mislabelled feed read as stamped lands 11 hours late', resolveChannel(wrong, 'Australia/Sydney').ok[0].startsAt.toISOString(), '2026-10-10T19:00:00.000Z');
+check('with offsets ignored it is 19:00 Sydney', resolveChannel(wrong, 'Australia/Sydney', true).ok[0].startsAt.toISOString(), '2026-10-10T08:00:00.000Z');
+check('offsets ignored across the DST change (4 Oct, Sydney +10 then +11)',
+  resolveChannel([{ channel: 'c', startRaw: '20261003190000 +0000', stopRaw: null, title: 'A', lengthSec: 1800, metadata: {} },
+                  { channel: 'c', startRaw: '20261004190000 +0000', stopRaw: null, title: 'B', lengthSec: 1800, metadata: {} }], 'Australia/Sydney', true).ok.map((p) => p.startsAt.toISOString()),
+  ['2026-10-03T09:00:00.000Z', '2026-10-04T08:00:00.000Z']);
 
 console.log(`\nxmltv-import-api-pure.check: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

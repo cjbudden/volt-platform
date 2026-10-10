@@ -57,7 +57,7 @@ const sourceOut = (s: any) => ({
   requestMode: s.request_mode, daysAhead: s.days_ahead, minDaysAhead: s.min_days_ahead, dateFormat: s.date_format,
   headerNames: Object.keys(sourceHeaders(s)), plannedRequests: plannedUrls(s), consecutiveFailures: s.consecutive_failures,
   coverageUntil: s.coverage_until, coverageDaysAhead: daysAheadOf(s.coverage_until ? new Date(s.coverage_until) : null, new Date()),
-  coverageLow: !!s.coverage_low_since, newChannels: s.new_channels,
+  coverageLow: !!s.coverage_low_since, newChannels: s.new_channels, timeMode: s.time_mode,
   notUsed: s.not_used ?? undefined,
   keepPastDays: s.keep_past_days, lang: s.lang, autoMap: s.auto_map, enabled: s.enabled,
   nextRunAt: s.next_run_at, running: !!s.running_since, lastRunAt: s.last_run_at, lastStatus: s.last_status, lastError: s.last_error,
@@ -94,6 +94,8 @@ const fields = {
   headers: z.record(z.string(), z.string().max(4000).nullable()),
   /** What a channel the feed has never listed before starts as. */
   newChannels: z.enum(['review', 'ignore']),
+  /** 'offsets': times as stamped. 'local': offsets ignored, times are local in the source zone. */
+  timeMode: z.enum(['offsets', 'local']),
 };
 
 function checkSource(b: any) {
@@ -123,16 +125,16 @@ xmltvImportRouter.post('/sources', asyncHandler(async (req, res) => {
   const b = z.object({ ...fields, url: fields.url.optional(), refreshHours: fields.refreshHours.optional(), fallbackTz: fields.fallbackTz.optional(),
     keepPastDays: fields.keepPastDays.optional(), lang: fields.lang.optional(), autoMap: fields.autoMap.optional(), enabled: fields.enabled.optional(),
     requestMode: fields.requestMode.optional(), daysAhead: fields.daysAhead.optional(), minDaysAhead: fields.minDaysAhead.optional(),
-    dateFormat: fields.dateFormat.optional(), headers: fields.headers.optional(), newChannels: fields.newChannels.optional() }).parse(req.body ?? {});
+    dateFormat: fields.dateFormat.optional(), headers: fields.headers.optional(), newChannels: fields.newChannels.optional(), timeMode: fields.timeMode.optional() }).parse(req.body ?? {});
   checkSource(b);
   const refresh = b.kind === 'url' ? (b.refreshHours ?? 24) : null;
   const days = b.daysAhead ?? 7;
   const row = await one<any>(
     `INSERT INTO epg_import_sources(account_id, name, kind, url, refresh_hours, fallback_tz, keep_past_days, lang, auto_map, enabled, next_run_at,
-                                    request_mode, days_ahead, min_days_ahead, date_format, request_headers, new_channels)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, CASE WHEN $3 = 'url' THEN now() ELSE NULL END, $11,$12,$13,$14,$15,$16) RETURNING *`,
+                                    request_mode, days_ahead, min_days_ahead, date_format, request_headers, new_channels, time_mode)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, CASE WHEN $3 = 'url' THEN now() ELSE NULL END, $11,$12,$13,$14,$15,$16,$17) RETURNING *`,
     [accountId(req), b.name, b.kind, b.kind === 'url' ? b.url : null, refresh, b.fallbackTz ?? null, b.keepPastDays ?? 1, b.lang ?? null, b.autoMap ?? true, b.enabled ?? true,
-     b.requestMode ?? 'single', days, b.minDaysAhead ?? Math.min(5, days), b.dateFormat ?? 'YYYY-MM-DD', b.kind === 'url' ? mergeHeaders(null, b.headers) : null, b.newChannels ?? 'review']);
+     b.requestMode ?? 'single', days, b.minDaysAhead ?? Math.min(5, days), b.dateFormat ?? 'YYYY-MM-DD', b.kind === 'url' ? mergeHeaders(null, b.headers) : null, b.newChannels ?? 'review', b.timeMode ?? 'offsets']);
   res.status(201).json(sourceOut(row));
 }));
 
@@ -151,15 +153,27 @@ xmltvImportRouter.patch('/sources/:id', asyncHandler(async (req, res) => {
   // Any change means the next scheduled run reads the guide in full (no 304 shortcut).
   const row = await one<any>(
     `UPDATE epg_import_sources SET name=$2, url=$3, refresh_hours=$4::int, fallback_tz=$5, keep_past_days=$6, lang=$7, auto_map=$8, enabled=$9::boolean,
-            request_mode=$10, days_ahead=$11, min_days_ahead=$12, date_format=$13, request_headers=$14, new_channels=$15,
+            request_mode=$10, days_ahead=$11, min_days_ahead=$12, date_format=$13, request_headers=$14, new_channels=$15, time_mode=$16,
             etag=NULL, last_modified=NULL, conditional_url=NULL,
             next_run_at = CASE WHEN kind = 'url' AND $9::boolean AND $4::int IS NOT NULL THEN COALESCE(last_run_at, now()) + make_interval(hours => $4::int) ELSE NULL END,
             updated_at=now()
       WHERE id=$1 RETURNING *`,
     [cur.id, b.name ?? cur.name, next.url, has('refreshHours') ? b.refreshHours : cur.refresh_hours, next.fallbackTz,
      b.keepPastDays ?? cur.keep_past_days, has('lang') ? b.lang : cur.lang, b.autoMap ?? cur.auto_map, b.enabled ?? cur.enabled,
-     next.requestMode, next.daysAhead, next.minDaysAhead, b.dateFormat ?? cur.date_format, headers, b.newChannels ?? cur.new_channels]);
-  res.json(sourceOut(row));
+     next.requestMode, next.daysAhead, next.minDaysAhead, b.dateFormat ?? cur.date_format, headers, b.newChannels ?? cur.new_channels, b.timeMode ?? cur.time_mode]);
+  // The zone or the way times are read changed: what this source already wrote
+  // and has not aired is at the old times. Clear it and read the guide again now,
+  // rather than leave a shifted copy beside the corrected one.
+  let reread = null as null | { removedProgrammes: number; reimporting: boolean };
+  if ((row.fallback_tz ?? null) !== (cur.fallback_tz ?? null) || row.time_mode !== cur.time_mode) {
+    const gone = await query<any>(
+      `DELETE FROM programmes WHERE source_ref LIKE $1 ESCAPE '\\' AND starts_at > now() AND clip_status = 'none' AND clip_asset_id IS NULL RETURNING id`,
+      [escapeLike(`xmltv:${cur.id}:`) + '%']);
+    const again = row.kind === 'url' && row.enabled;
+    if (again) await query(`UPDATE epg_import_sources SET next_run_at = now() WHERE id = $1`, [row.id]);
+    reread = { removedProgrammes: gone.length, reimporting: again };
+  }
+  res.json({ ...sourceOut(row), ...(reread ? { reread } : {}) });
 }));
 
 xmltvImportRouter.delete('/sources/:id', asyncHandler(async (req, res) => {

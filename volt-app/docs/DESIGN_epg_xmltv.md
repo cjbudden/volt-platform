@@ -243,3 +243,36 @@ API: `GET /sources/:id/channels` (state, lcn, programmes in the feed and span,
 Checks: `test/xmltv-lineup-pure.check.ts` 20/20 (the real Sydney lineup),
 `test/xmltv-lineup.check.sh` 27/27 (optionally reading a real feed via
 `XMLTV_REAL_FEED`).
+
+### Source time zone (built 10 Oct)
+
+Migration `0041_xmltv_source_timezone.sql`. Each source has a **source time
+zone** (the zone the guide is for, `fallback_tz`) and a **time mode**:
+
+- **Read as stamped** (default): a time with an offset is exact whatever zone
+  is set. xmltv.net's Sydney feed is UTC (`+0000`) and correct: ABC News at
+  `08:00 +0000` is 19:00 AEDT, SBS World News 18:30.
+- **Ignore the offsets**: every time is local time in the source zone (or each
+  channel's zone when none is set), for feeds that stamp local times as `+0000`
+  or carry a wrong offset. DST is applied per date.
+
+The source zone now **wins over each channel's own zone** (before, a channel's
+zone always won, and every channel has one, so the setting never applied). It
+reads times with no offset, decides "today" for `{date}`, `{from}`, `{to}` and
+the days-ahead window, and is the zone of channels created from the feed. Not
+set: each channel's own zone for times, UTC for dates.
+
+**Changing the zone or the time mode** clears the source's not-yet-aired
+programmes (never one with a clip) and re-reads the guide at once, so no copy
+is left at the old times. The PATCH answers `reread: { removedProgrammes,
+reimporting }`.
+
+**Try it** reports the offsets the feed's times carry (`+0000 (11063)`, or "no
+offset"), warns when some have none and no zone is set, and lists a few
+programmes as they will land in the source zone next to the raw stamp, so a
+known slot can be checked before importing.
+
+Checks: `test/xmltv-import-api-pure.check.ts` 38/38 (offsets, stripping, a
+mislabelled feed, DST), `test/xmltv-timezone.check.sh` 16/16 (correct feed,
+source zone over the channel's, mislabelled feed fixed and re-read, `{date}` in
+UTC+14).

@@ -31,6 +31,10 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   failed: { label: 'Failed', cls: 'bad' }, running: { label: 'Running', cls: 'muted' },
 }
 const MODE_LABEL = { single: 'one request for the window', per_day: 'one request per day' }
+const inZone = (iso: string, zone: string) => {
+  try { return new Date(iso).toLocaleString([], { timeZone: zone, weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) }
+  catch { return new Date(iso).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' }
+}
 const fmtDay = (iso: string | null) => iso ? new Date(iso).toLocaleString([], { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
 const PLACEHOLDERS: { t: string; mode: 'single' | 'per_day' | 'both'; hint: string }[] = [
   { t: '{date}', mode: 'per_day', hint: 'the day being fetched' },
@@ -45,10 +49,10 @@ type Form = {
   id?: string; name: string; kind: 'url' | 'upload'; url: string; refreshHours: number; fallbackTz: string; keepPastDays: number; autoMap: boolean
   requestMode: 'single' | 'per_day'; daysAhead: number; minDaysAhead: number; dateFormat: ImportSourceBody['dateFormat']
   headerNames: string[]; headerChanges: Record<string, string | null>; newHeader: { name: string; value: string }
-  newChannels: 'review' | 'ignore'
+  newChannels: 'review' | 'ignore'; timeMode: 'offsets' | 'local'
 }
 const blankForm = (): Form => ({ name: '', kind: 'url', url: '', refreshHours: 6, fallbackTz: '', keepPastDays: 1, autoMap: true,
-  requestMode: 'single', daysAhead: 7, minDaysAhead: 5, dateFormat: 'YYYY-MM-DD', headerNames: [], headerChanges: {}, newHeader: { name: '', value: '' }, newChannels: 'review' })
+  requestMode: 'single', daysAhead: 7, minDaysAhead: 5, dateFormat: 'YYYY-MM-DD', headerNames: [], headerChanges: {}, newHeader: { name: '', value: '' }, newChannels: 'review', timeMode: 'offsets' })
 const clampInt = (v: string, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(+v || 0)))
 
 function Coverage({ s }: { s: ImportSource }) {
@@ -73,6 +77,7 @@ function summary(c: Partial<ImportCounts> | undefined): string {
   return parts.length ? parts.join(' · ') : 'no changes'
 }
 
+const myZone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return '' } })()
 let zonesCache: string[] | null = null
 function zones(): string[] {
   if (zonesCache) return zonesCache
@@ -105,17 +110,29 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
     if (form.kind === 'url' && form.requestMode === 'per_day' && !form.url.includes('{date}')) { setErr('One request per day needs {date} in the URL, where the day goes'); return }
     if (form.kind === 'url' && form.requestMode === 'single' && form.url.includes('{date}')) { setErr('{date} is for one request per day. For one request covering the window, use {from} and {to}'); return }
     if (form.minDaysAhead > form.daysAhead) { setErr('The alert threshold cannot be more than the days kept ahead'); return }
+    if (form.timeMode === 'local' && !form.fallbackTz && !window.confirm("Ignoring the feed's offsets with no source time zone reads every time in each channel's own zone. Continue?")) return
+    const before = form.id ? sources?.find(x => x.id === form.id) : null
+    const timesChanged = !!before && ((before.fallbackTz ?? '') !== form.fallbackTz || (before.timeMode ?? 'offsets') !== form.timeMode)
+    if (timesChanged && !window.confirm("The time zone or how times are read changed. This source's programmes that have not aired yet are cleared and the guide is read again at the corrected times. Continue?")) return
     const headers = Object.fromEntries(Object.entries(form.headerChanges).filter(([, v]) => v !== '')) as Record<string, string | null>
     if (form.newHeader.name.trim() && form.newHeader.value) headers[form.newHeader.name.trim()] = form.newHeader.value
     const body: Partial<ImportSourceBody> = {
       name: form.name.trim(), url: form.kind === 'url' ? form.url.trim() : null, refreshHours: form.kind === 'url' ? form.refreshHours : null,
-      fallbackTz: form.fallbackTz || null, keepPastDays: form.keepPastDays, autoMap: form.autoMap, newChannels: form.newChannels,
+      fallbackTz: form.fallbackTz || null, keepPastDays: form.keepPastDays, autoMap: form.autoMap, newChannels: form.newChannels, timeMode: form.timeMode,
       ...(form.kind === 'url' ? { requestMode: form.requestMode, daysAhead: form.daysAhead, minDaysAhead: form.minDaysAhead, dateFormat: form.dateFormat,
         ...(Object.keys(headers).length ? { headers } : {}) } : {}),
     }
     try {
-      if (form.id) await api.updateImportSource(form.id, body)
-      else await api.createImportSource({ ...body, name: body.name!, kind: form.kind })
+      if (form.id) {
+        const saved = await api.updateImportSource(form.id, body)
+        setForm(null); load()
+        if (saved.reread) {
+          setResult(m => ({ ...m, [saved.id]: { status: 'ok', text: `Times changed: ${saved.reread!.removedProgrammes} programme(s) at the old times cleared${saved.reread!.reimporting ? ', reading the guide again' : '. Upload the file again to re-import'}.`, warnings: [] } }))
+          if (saved.reread.reimporting) run(saved).catch(() => {})
+        }
+        return
+      }
+      await api.createImportSource({ ...body, name: body.name!, kind: form.kind })
       setForm(null); load()
     } catch (e: any) { setErr(e.message) }
   }
@@ -150,7 +167,7 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
   }
   const editForm = (s: ImportSource): Form => ({ id: s.id, name: s.name, kind: s.kind, url: s.url ?? '', refreshHours: s.refreshHours ?? 6, fallbackTz: s.fallbackTz ?? '',
     keepPastDays: s.keepPastDays, autoMap: s.autoMap, requestMode: s.requestMode ?? 'single', daysAhead: s.daysAhead ?? 7, minDaysAhead: s.minDaysAhead ?? 5,
-    dateFormat: s.dateFormat ?? 'YYYY-MM-DD', headerNames: s.headerNames ?? [], headerChanges: {}, newHeader: { name: '', value: '' }, newChannels: s.newChannels ?? 'review' })
+    dateFormat: s.dateFormat ?? 'YYYY-MM-DD', headerNames: s.headerNames ?? [], headerChanges: {}, newHeader: { name: '', value: '' }, newChannels: s.newChannels ?? 'review', timeMode: s.timeMode ?? 'offsets' })
   async function togglePanel(id: string, which: 'channels' | 'runs') {
     const next = panel[id] === which ? null : which
     setPanel(p => ({ ...p, [id]: next }))
@@ -255,16 +272,33 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
                   </div>
                 </>
               )}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: 10 }}>
-                <div className="field"><label>Times with no offset are in</label>
-                  <select className="inp" value={form.fallbackTz} onChange={e => setForm({ ...form, fallbackTz: e.target.value })}>
-                    <option value="">Each channel's own time zone</option>
-                    {zones().map(z => <option key={z} value={z}>{z}</option>)}
-                  </select>
+              <div className="tz-box">
+                <div className="sec-label" style={{ margin: '0 0 6px' }}>Time zone</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div className="field" style={{ marginBottom: 0 }}><label>Source time zone (the zone the guide is for)</label>
+                    <select className="inp" value={form.fallbackTz} onChange={e => setForm({ ...form, fallbackTz: e.target.value })}>
+                      <option value="">Not set: each channel's own zone</option>
+                      {zones().map(z => <option key={z} value={z}>{z}</option>)}
+                    </select>
+                    {myZone && form.fallbackTz !== myZone && (
+                      <button type="button" className="lineup-suggest" onClick={() => setForm({ ...form, fallbackTz: myZone })}>Use my zone: {myZone}</button>
+                    )}
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}><label>Times in the feed</label>
+                    <select className="inp" value={form.timeMode} onChange={e => setForm({ ...form, timeMode: e.target.value as Form['timeMode'] })}>
+                      <option value="offsets">Read as stamped (+0000, +1100 …)</option>
+                      <option value="local">Ignore the offsets: they are local times</option>
+                    </select>
+                  </div>
                 </div>
-                <div className="field"><label>Keep past days</label>
-                  <input className="inp" type="number" min={0} max={365} value={form.keepPastDays} onChange={e => setForm({ ...form, keepPastDays: Math.max(0, Math.min(365, +e.target.value || 0)) })} />
+                <div className="hintxt" style={{ marginTop: 6 }}>
+                  {form.timeMode === 'offsets'
+                    ? <>Times with an offset are exact, whatever zone is set. The source zone reads times that have no offset{form.kind === 'url' ? ', decides which day is today for the URL dates and days ahead,' : ''} and is the zone of channels created from this feed.</>
+                    : <>Every time is read as local time in {form.fallbackTz || "each channel's own zone"}, whatever offset it carries. Use this only for a feed whose offsets are wrong: Try it shows sample programmes so you can check a slot you know, such as the evening news.</>}
                 </div>
+              </div>
+              <div className="field"><label>Keep past days</label>
+                <input className="inp" type="number" min={0} max={365} style={{ width: 120 }} value={form.keepPastDays} onChange={e => setForm({ ...form, keepPastDays: Math.max(0, Math.min(365, +e.target.value || 0)) })} />
               </div>
               <div className="field"><label>Channels the feed adds later</label>
                 <select className="inp" value={form.newChannels} onChange={e => setForm({ ...form, newChannels: e.target.value as Form['newChannels'] })}>
@@ -304,6 +338,9 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
                         {s.consecutiveFailures > 0 && <span style={{ color: 'var(--warn)' }}> · failed {s.consecutiveFailures} time{s.consecutiveFailures === 1 ? '' : 's'} in a row, retrying sooner</span>}
                       </div>
                     )}
+                    <div className="hintxt" style={{ marginTop: 2 }}>
+                      Time zone {s.fallbackTz ?? "not set (each channel's own)"} · {s.timeMode === 'local' ? <span style={{ color: 'var(--warn)' }}>feed offsets ignored, times read as local</span> : 'times read as stamped'}
+                    </div>
                     <Coverage s={s} />
                     <div className="hintxt" style={{ marginTop: 2 }}>
                       Last run {fmt(s.lastRunAt)}{last ? ` · ${summary(last.counts)}` : ''} · {s.mapped ?? 0} channel{s.mapped === 1 ? '' : 's'} used
@@ -341,7 +378,32 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
                           {t.status === 'failed' ? <div className="err" style={{ marginTop: 6 }}>{t.error}</div> : (
                             <div style={{ marginTop: 6 }}>
                               <div style={{ fontWeight: 600 }}>{t.channels} channel{t.channels === 1 ? '' : 's'}, {t.programmes} programme{t.programmes === 1 ? '' : 's'} · {Math.round((t.bytes ?? 0) / 1024)} KB</div>
-                              {t.firstStart && <div className="hintxt" style={{ marginTop: 2 }}>From {fmtDay(t.firstStart)} to {fmtDay(t.lastEnd ?? null)}{t.daysAhead != null ? `, ${t.daysAhead} days ahead` : ''}{s.requestMode === 'per_day' ? ' (this is one day: a run fetches every day)' : ''}</div>}
+                              {t.firstStart && <div className="hintxt" style={{ marginTop: 2 }}>From {inZone(t.firstStart, t.timeReading?.zone ?? 'UTC')} to {t.lastEnd ? inZone(t.lastEnd, t.timeReading?.zone ?? 'UTC') : ''}{t.daysAhead != null ? `, ${t.daysAhead} days ahead` : ''}{s.requestMode === 'per_day' ? ' (this is one day: a run fetches every day)' : ''}</div>}
+                              {!!t.offsets?.length && (
+                                <div className="hintxt" style={{ marginTop: 4 }}>
+                                  Times in the feed carry {t.offsets.map(o => `${o.offset === 'none' ? 'no offset' : o.offset === 'Z' ? 'Z (UTC)' : o.offset} (${o.count})`).join(', ')}.
+                                  {t.offsets.some(o => o.offset === 'none') && !s.fallbackTz && <span style={{ color: 'var(--warn)' }}> Some have no offset: set the source time zone so they are read in the right zone.</span>}
+                                </div>
+                              )}
+                              {!!t.samples?.length && (
+                                <div className="tz-samples">
+                                  <div className="hintxt" style={{ marginTop: 0 }}>
+                                    As they will land in {t.timeReading?.zone ?? 'UTC (no source zone set)'}, {t.timeReading?.mode === 'local' ? 'offsets ignored' : 'read as stamped'}. Check one you know, such as the evening news.
+                                  </div>
+                                  <table>
+                                    <tbody>
+                                      {t.samples.map((x, i) => (
+                                        <tr key={i}>
+                                          <td style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>{inZone(x.startsAt, t.timeReading?.zone ?? 'UTC')}</td>
+                                          <td>{x.title}<div className="hintxt" style={{ marginTop: 0 }}>{x.channel}</div></td>
+                                          <td className="hintxt mono" style={{ whiteSpace: 'nowrap' }}>{x.raw}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                  <div className="hintxt" style={{ marginTop: 4 }}>If every time is out by the same few hours, the feed's offsets are wrong: Edit, then Times in the feed: Ignore the offsets.</div>
+                                </div>
+                              )}
                               {t.lineup && (
                                 <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
                                   <span className="hintxt" style={{ marginTop: 0 }}>Lineup loaded: {t.lineup.used} used, {t.lineup.notUsed} not used, {t.lineup.waiting} waiting for you to choose.</span>

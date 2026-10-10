@@ -24,6 +24,7 @@ import { query, one } from '../db';
 import { open as openSealed } from './social/crypto';
 import { recordLineup, type FeedChannelStats } from './xmltvLineup';
 import { planRequests, retryDelayMinutes, daysAheadOf, type PlannedRequest } from './xmltvRequests';
+import { xmltvOffset, stripOffset } from './xmltvParse';
 import { XmlStream, mapChannel, mapProgramme, resolveChannel, parseXmltvTime, type XmltvChannelIn, type XmltvProgrammeIn } from './xmltvParse';
 
 const DAY = 86_400_000;
@@ -274,8 +275,9 @@ async function writeProgrammes(src: any, channels: Map<string, XmltvChannelIn>, 
     if (!a.channel_id && a.ignored) { counts.ignoredChannels++; counts.skippedIgnored += list.length; continue; }
     if (!a.channel_id) { waiting.push(a.display_name ? `${a.display_name}${a.lcn ? ` (${a.lcn})` : ''}` : a.external_id); counts.skippedUnmapped += list.length; continue; }
     counts.mappedChannels++;
-    const zone = a.tz || src.fallback_tz || null;
-    const res = resolveChannel(list, zone);
+    // The source's zone, when set, is the zone the guide is for and wins over the channel's own.
+    const zone = src.fallback_tz || a.tz || null;
+    const res = resolveChannel(list, zone, src.time_mode === 'local');
     counts.badTime += res.badTime; counts.noEnd += res.noEnd;
     let keep = res.ok.filter((p) => p.endsAt.getTime() > now - src.keep_past_days * DAY);
     counts.droppedOld += res.ok.length - keep.length;
@@ -464,6 +466,11 @@ export async function testSource(src: any): Promise<{
   bytes?: number; channels?: number; programmes?: number; firstStart?: string | null; lastEnd?: string | null; daysAhead?: number | null;
   sampleChannels?: { id: string; name: string | null }[];
   lineup?: { used: number; notUsed: number; waiting: number };
+  /** The offsets the feed's start times carry, most used first ("none" = no offset). */
+  offsets?: { offset: string; count: number }[];
+  /** How times will be read with the current settings, and a few programmes as they will land. */
+  timeReading?: { zone: string | null; mode: 'offsets' | 'local' };
+  samples?: { channel: string; title: string; raw: string; startsAt: string }[];
 }> {
   if (src.kind !== 'url' || !src.url) throw new ImportError('Only a URL source can be tried.');
   const now = new Date();
@@ -474,15 +481,22 @@ export async function testSource(src: any): Promise<{
     const f = await fetchGuide(req.url, sourceHeaders(src), null);
     const chans: { id: string; name: string | null }[] = [];
     const chanMap = new Map<string, XmltvChannelIn>();
+    const offsets = new Map<string, number>();
+    const samples: { channel: string; title: string; raw: string; startsAt: number }[] = [];
+    // As a run will read them: the offsets as stamped, or ignored and read in the source zone.
+    const zone = src.fallback_tz || null;
+    const readTime = (raw: string) => parseXmltvTime(src.time_mode === 'local' ? stripOffset(raw) : raw, zone || 'UTC');
     const stats = new Map<string, FeedChannelStats>();
     let programmes = 0, first: number | null = null, last: number | null = null, bytes = 0, rootOk = false;
     const xml = new XmlStream(new Set(['channel', 'programme']), (n) => {
       if (n.name === 'channel') { const c = mapChannel(n); if (c.id) { chans.push({ id: c.id, name: c.displayNames[0] ?? null }); chanMap.set(c.id, c); } return; }
       programmes++;
       const m = mapProgramme(n, src.lang);
-      const s = m && parseXmltvTime(m.startRaw, src.fallback_tz || 'UTC');
+      if (m) { const o = xmltvOffset(m.startRaw) ?? 'none'; offsets.set(o, (offsets.get(o) ?? 0) + 1); }
+      const s = m && readTime(m.startRaw);
       if (m && s) noteStats(stats, m, s);
-      const e = m?.stopRaw ? parseXmltvTime(m.stopRaw, src.fallback_tz || 'UTC') : s;
+      const e = m?.stopRaw ? readTime(m.stopRaw) : s;
+      if (m && s && samples.length < 400) samples.push({ channel: m.channel, title: m.title, raw: m.startRaw, startsAt: s.getTime() });
       if (s) first = Math.min(first ?? s.getTime(), s.getTime());
       if (e) last = Math.max(last ?? e.getTime(), e.getTime());
     }, () => { rootOk = true; });
@@ -495,8 +509,14 @@ export async function testSource(src: any): Promise<{
     const lu = await one<any>(
       `SELECT count(*) FILTER (WHERE channel_id IS NOT NULL)::int AS used, count(*) FILTER (WHERE channel_id IS NULL AND ignored)::int AS not_used,
               count(*) FILTER (WHERE channel_id IS NULL AND NOT ignored)::int AS waiting FROM epg_channel_aliases WHERE source_id = $1`, [src.id]);
+    // Samples: the first channel's programmes from now on, so a known slot (the evening news) can be checked.
+    const firstCh = samples.find((x) => x.startsAt >= now.getTime())?.channel ?? samples[0]?.channel;
+    const picked = samples.filter((x) => x.channel === firstCh && x.startsAt >= now.getTime() - 3_600_000).slice(0, 8);
     return { requests, tried: req.url, status: 'ok', bytes, channels: chans.length, programmes,
       lineup: { used: lu.used, notUsed: lu.not_used, waiting: lu.waiting },
+      offsets: [...offsets].sort((a, b) => b[1] - a[1]).map(([offset, count]) => ({ offset, count })),
+      timeReading: { zone, mode: src.time_mode === 'local' ? 'local' : 'offsets' },
+      samples: picked.map((x) => ({ channel: chanMap.get(x.channel)?.displayNames[0] ?? x.channel, title: x.title, raw: x.raw, startsAt: new Date(x.startsAt).toISOString() })),
       firstStart: first != null ? new Date(first).toISOString() : null, lastEnd: last != null ? new Date(last).toISOString() : null,
       daysAhead: last != null ? daysAheadOf(new Date(last), now) : null, sampleChannels: chans.slice(0, 12) };
   } catch (e: any) {

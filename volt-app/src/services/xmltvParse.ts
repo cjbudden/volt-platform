@@ -156,6 +156,17 @@ export class XmlStream {
  * Parse an XMLTV time. `zone` resolves times with no offset. Returns null for
  * anything unparseable rather than guessing.
  */
+/** The offset written after an XMLTV time ("+0000", "-0500", "Z"), or null when there is none. */
+export function xmltvOffset(s: string | undefined | null): string | null {
+  const m = /(?:\s*([+-]\d{2}:?\d{2})|(Z|UTC|GMT))\s*$/i.exec(s ?? '');
+  return m ? (m[1] ? m[1].replace(':', '') : 'Z') : null;
+}
+
+/** The time with its offset removed, so it is read as local time in a zone. */
+export function stripOffset(s: string): string {
+  return s.replace(/\s*(?:[+-]\d{2}:?\d{2}|Z|UTC|GMT)\s*$/i, '');
+}
+
 export function parseXmltvTime(s: string | undefined, zone: string | null): Date | null {
   if (!s) return null;
   const m = /^\s*(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?\s*(?:([+-])(\d{2}):?(\d{2})|(Z|UTC|GMT))?\s*$/i.exec(s);
@@ -282,9 +293,11 @@ export interface ResolvedProgramme { channel: string; startsAt: Date; endsAt: Da
  * a missing stop taken from the next start or the length. Returns the
  * programmes and what could not be resolved, so the run can report it.
  */
-export function resolveChannel(progs: XmltvProgrammeIn[], zone: string | null): { ok: ResolvedProgramme[]; badTime: number; noEnd: number } {
+export function resolveChannel(progs: XmltvProgrammeIn[], zone: string | null, ignoreOffsets = false): { ok: ResolvedProgramme[]; badTime: number; noEnd: number } {
+  // ignoreOffsets: the feed's offsets are wrong, every time is local time in `zone`.
+  const t = (raw: string) => parseXmltvTime(ignoreOffsets ? stripOffset(raw) : raw, zone);
   const parsed = progs
-    .map((p) => ({ p, start: parseXmltvTime(p.startRaw, zone), stop: p.stopRaw ? parseXmltvTime(p.stopRaw, zone) : null }))
+    .map((p) => ({ p, start: t(p.startRaw), stop: p.stopRaw ? t(p.stopRaw) : null }))
     .filter((x) => x.start);
   const badTime = progs.length - parsed.length;
   parsed.sort((a, b) => a.start!.getTime() - b.start!.getTime());
