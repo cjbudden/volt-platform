@@ -589,3 +589,19 @@ button{font-family:inherit}
 .sp-count.bad{color:var(--down)}
 .sp-progress{height:4px;border-radius:2px;background:var(--panel-3);margin-top:6px;overflow:hidden}
 .sp-progress i{display:block;height:100%;background:var(--brand);transition:width .4s}
+
+/* ---- XMLTV import lineup (pages/EpgXmltvLineup.tsx) ---- */
+.lineup-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.lineup-bar .chip{padding:5px 11px}
+.lineup-bulk{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;margin-top:4px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px}
+.lineup-bulk .btn{padding:5px 10px}
+.lineup-create{display:inline-flex;gap:6px;align-items:center}
+.lineup-create .inp{width:auto;padding:5px 8px}
+.lineup-table{margin-top:8px;width:100%}
+.lineup-table td{vertical-align:top}
+.lineup-table td.lcn{font-variant-numeric:tabular-nums;font-weight:600;color:var(--muted)}
+.lineup-table tr.st-not_used td:not(:last-child){opacity:.55}
+.lineup-logo{width:34px;height:22px;object-fit:contain;flex:none;display:inline-block}
+.lineup-suggest{display:block;margin-top:4px;padding:2px 8px;font-size:var(--fs-sm);border-radius:7px;border:1px dashed var(--border-2);background:transparent;color:var(--text);cursor:pointer}
+.lineup-suggest:hover{border-style:solid;background:var(--panel-2)}
+.hintxt.mono{font-family:ui-monospace,monospace}

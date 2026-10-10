@@ -22,6 +22,7 @@ import { TextDecoder } from 'node:util';
 import { createGunzip } from 'node:zlib';
 import { query, one } from '../db';
 import { open as openSealed } from './social/crypto';
+import { recordLineup, type FeedChannelStats } from './xmltvLineup';
 import { planRequests, retryDelayMinutes, daysAheadOf, type PlannedRequest } from './xmltvRequests';
 import { XmlStream, mapChannel, mapProgramme, resolveChannel, parseXmltvTime, type XmltvChannelIn, type XmltvProgrammeIn } from './xmltvParse';
 
@@ -46,6 +47,9 @@ export interface ImportCounts {
   unchanged: number;
   removed: number;
   overlaps: number;
+  /** Channels marked not used, and their programmes skipped without a warning. */
+  ignoredChannels?: number;
+  skippedIgnored?: number;
   /** 1 when a scheduled run was answered 304: the guide had not changed. */
   notModified?: number;
 }
@@ -119,6 +123,16 @@ async function* textChunks(input: Readable, onBytes: (n: number) => void): Async
   if (decoder) { const tail = decoder.decode(); if (tail) yield tail; }
 }
 
+function noteStats(stats: Map<string, FeedChannelStats>, p: XmltvProgrammeIn, start: Date) {
+  let st = stats.get(p.channel);
+  if (!st) { st = { count: 0, from: null, to: null }; stats.set(p.channel, st); }
+  st.count++;
+  const t = start.getTime();
+  const e = (p.stopRaw ? parseXmltvTime(p.stopRaw, 'UTC')?.getTime() : null) ?? t;
+  st.from = st.from == null ? t : Math.min(st.from, t);
+  st.to = st.to == null ? e : Math.max(st.to, e);
+}
+
 /** Claim a source for a run, so two ticks (or a tick and a click) cannot run it at once. */
 export async function claimSource(sourceId: string): Promise<boolean> {
   const r = await one(
@@ -160,6 +174,7 @@ export async function runImport(sourceId: string, trigger: 'schedule' | 'manual'
 
     const channels = new Map<string, XmltvChannelIn>();
     const progs = new Map<string, XmltvProgrammeIn[]>();
+    const stats = new Map<string, FeedChannelStats>();
     const spans: { from: number; to: number }[] = [];   // the parts of the window this run actually read
     const failedDays: string[] = [];
     let firstError: string | null = null;
@@ -186,6 +201,7 @@ export async function runImport(sourceId: string, trigger: 'schedule' | 'manual'
           if (!p) { counts.badTime++; return; }
           const rough = parseXmltvTime(p.startRaw, 'UTC');
           if (!rough) { counts.badTime++; return; }
+          noteStats(stats, p, rough);
           if (rough.getTime() < oldest && (!p.stopRaw || (parseXmltvTime(p.stopRaw, 'UTC')?.getTime() ?? 0) < oldest)) { counts.droppedOld++; return; }
           if (rough.getTime() >= windowEnd + DAY) { counts.droppedFar++; return; }   // exact cut after zones are known
           let list = progs.get(p.channel);
@@ -218,6 +234,7 @@ export async function runImport(sourceId: string, trigger: 'schedule' | 'manual'
     } else {
       counts.channelsInFile = channels.size;
       if (!channels.size && !progs.size) throw new ImportError('No <channel> or <programme> elements: this does not look like an XMLTV file.');
+      await recordLineup(src, channels, stats);
       await writeProgrammes(src, channels, progs, spans, upload ? null : windowEnd, now, counts, warnings);
     }
 
@@ -243,46 +260,19 @@ export async function runImport(sourceId: string, trigger: 'schedule' | 'manual'
 /** Channels recorded, mapped, and their programmes written as a diff inside the spans this run read. */
 async function writeProgrammes(src: any, channels: Map<string, XmltvChannelIn>, progs: Map<string, XmltvProgrammeIn[]>,
   spans: { from: number; to: number }[], windowEnd: number | null, now: number, counts: ImportCounts, warnings: string[]) {
-  // ---- record every channel the file names (declared or only referenced)
+  // The lineup (every channel recorded, safe matches made) is done by recordLineup first.
   const ids = new Set([...channels.keys(), ...progs.keys()]);
-  for (const id of ids) {
-    const c = channels.get(id);
-    await query(
-      `INSERT INTO epg_channel_aliases(account_id, source_id, external_id, display_name, icon, last_seen_at)
-       VALUES ($1,$2,$3,$4,$5, now())
-       ON CONFLICT (source_id, external_id) DO UPDATE SET display_name = COALESCE(EXCLUDED.display_name, epg_channel_aliases.display_name),
-             icon = COALESCE(EXCLUDED.icon, epg_channel_aliases.icon), last_seen_at = now()`,
-      [src.account_id, src.id, id, c?.displayNames[0] ?? null, c?.icon ?? null]);
-  }
-
-  // ---- unambiguous auto-mapping for the ones nobody has mapped yet
-  if (src.auto_map) {
-    const unmapped = await query<any>(`SELECT id, external_id FROM epg_channel_aliases WHERE source_id = $1 AND channel_id IS NULL`, [src.id]);
-    for (const a of unmapped) {
-      const names = (channels.get(a.external_id)?.displayNames ?? []).map((n) => n.toLowerCase());
-      const byId = await query<any>(
-        `SELECT c.id FROM channels c JOIN groups g ON g.id = c.group_id WHERE g.account_id = $1 AND lower(c.xmltv_id) = lower($2)`,
-        [src.account_id, a.external_id]);
-      let target: string | null = null, how = '';
-      if (byId.length === 1) { target = byId[0].id; how = 'auto:xmltv_id'; }
-      else if (names.length) {
-        const byName = await query<any>(
-          `SELECT c.id FROM channels c JOIN groups g ON g.id = c.group_id WHERE g.account_id = $1 AND lower(c.name) = ANY($2::text[])`,
-          [src.account_id, names]);
-        if (byName.length === 1) { target = byName[0].id; how = 'auto:name'; }
-      }
-      if (target) await query(`UPDATE epg_channel_aliases SET channel_id = $2, mapped_by = $3 WHERE id = $1`, [a.id, target, how]);
-    }
-  }
 
   // ---- write each mapped channel
   const aliases = await query<any>(
-    `SELECT a.external_id, a.channel_id, c.tz FROM epg_channel_aliases a LEFT JOIN channels c ON c.id = a.channel_id
+    `SELECT a.external_id, a.display_name, a.lcn, a.ignored, a.channel_id, c.tz FROM epg_channel_aliases a LEFT JOIN channels c ON c.id = a.channel_id
       WHERE a.source_id = $1 AND a.external_id = ANY($2::text[])`, [src.id, [...ids]]);
-  const unmappedIds: string[] = [];
+  const waiting: string[] = [];
+  counts.ignoredChannels = 0; counts.skippedIgnored = 0;
   for (const a of aliases) {
     const list = progs.get(a.external_id) ?? [];
-    if (!a.channel_id) { unmappedIds.push(a.external_id); counts.skippedUnmapped += list.length; continue; }
+    if (!a.channel_id && a.ignored) { counts.ignoredChannels++; counts.skippedIgnored += list.length; continue; }
+    if (!a.channel_id) { waiting.push(a.display_name ? `${a.display_name}${a.lcn ? ` (${a.lcn})` : ''}` : a.external_id); counts.skippedUnmapped += list.length; continue; }
     counts.mappedChannels++;
     const zone = a.tz || src.fallback_tz || null;
     const res = resolveChannel(list, zone);
@@ -344,12 +334,12 @@ async function writeProgrammes(src: any, channels: Map<string, XmltvChannelIn>, 
     }
     await query(`UPDATE epg_channel_aliases SET last_programmes = $3 WHERE source_id = $1 AND external_id = $2`, [src.id, a.external_id, keep.length]);
   }
-  counts.unmappedChannels = unmappedIds.length;
-  if (unmappedIds.length) warnings.push(`${unmappedIds.length} channel(s) in the file are not mapped to a Volt channel, so their ${counts.skippedUnmapped} programme(s) were skipped: ${unmappedIds.slice(0, 8).join(', ')}${unmappedIds.length > 8 ? '…' : ''}`);
+  counts.unmappedChannels = waiting.length;
+  if (waiting.length) warnings.push(`${waiting.length} channel(s) in the feed are waiting for you to choose: use them on a Volt channel or mark them not used (Channels in this source). Their ${counts.skippedUnmapped} programme(s) were skipped: ${waiting.slice(0, 8).join(', ')}${waiting.length > 8 ? '…' : ''}`);
   if (counts.badTime) warnings.push(`${counts.badTime} programme(s) had a start time, title or channel we could not read and were skipped.`);
   if (counts.noEnd) warnings.push(`${counts.noEnd} programme(s) had no stop, no length and nothing after them, so their end is unknown and they were skipped.`);
   if (counts.overlaps) warnings.push(`${counts.overlaps} overlapping pair(s) in the imported window. They are kept: see the conflicts view in the EPG builder.`);
-  if (!counts.mappedChannels && ids.size) warnings.push('No channel in the file is mapped yet. Map them under Channels in this source, then run it again.');
+  if (!counts.mappedChannels && waiting.length) warnings.push('No channel in the feed is in use yet. Choose them under Channels in this source, then run it again.');
 }
 
 export interface Coverage {
@@ -473,6 +463,7 @@ export async function testSource(src: any): Promise<{
   requests: { url: string; day: string | null }[]; tried: string; status: 'ok' | 'failed'; error?: string;
   bytes?: number; channels?: number; programmes?: number; firstStart?: string | null; lastEnd?: string | null; daysAhead?: number | null;
   sampleChannels?: { id: string; name: string | null }[];
+  lineup?: { used: number; notUsed: number; waiting: number };
 }> {
   if (src.kind !== 'url' || !src.url) throw new ImportError('Only a URL source can be tried.');
   const now = new Date();
@@ -482,12 +473,15 @@ export async function testSource(src: any): Promise<{
   try {
     const f = await fetchGuide(req.url, sourceHeaders(src), null);
     const chans: { id: string; name: string | null }[] = [];
+    const chanMap = new Map<string, XmltvChannelIn>();
+    const stats = new Map<string, FeedChannelStats>();
     let programmes = 0, first: number | null = null, last: number | null = null, bytes = 0, rootOk = false;
     const xml = new XmlStream(new Set(['channel', 'programme']), (n) => {
-      if (n.name === 'channel') { const c = mapChannel(n); if (c.id) chans.push({ id: c.id, name: c.displayNames[0] ?? null }); return; }
+      if (n.name === 'channel') { const c = mapChannel(n); if (c.id) { chans.push({ id: c.id, name: c.displayNames[0] ?? null }); chanMap.set(c.id, c); } return; }
       programmes++;
       const m = mapProgramme(n, src.lang);
       const s = m && parseXmltvTime(m.startRaw, src.fallback_tz || 'UTC');
+      if (m && s) noteStats(stats, m, s);
       const e = m?.stopRaw ? parseXmltvTime(m.stopRaw, src.fallback_tz || 'UTC') : s;
       if (s) first = Math.min(first ?? s.getTime(), s.getTime());
       if (e) last = Math.max(last ?? e.getTime(), e.getTime());
@@ -496,7 +490,13 @@ export async function testSource(src: any): Promise<{
     xml.end();
     if (!rootOk) throw new ImportError('The response is empty or is not XML.');
     if (!chans.length && !programmes) throw new ImportError('No <channel> or <programme> elements: the response does not look like XMLTV.');
+    // The lineup is recorded (no programmes), so channels can be chosen before the first import.
+    await recordLineup(src, chanMap, stats);
+    const lu = await one<any>(
+      `SELECT count(*) FILTER (WHERE channel_id IS NOT NULL)::int AS used, count(*) FILTER (WHERE channel_id IS NULL AND ignored)::int AS not_used,
+              count(*) FILTER (WHERE channel_id IS NULL AND NOT ignored)::int AS waiting FROM epg_channel_aliases WHERE source_id = $1`, [src.id]);
     return { requests, tried: req.url, status: 'ok', bytes, channels: chans.length, programmes,
+      lineup: { used: lu.used, notUsed: lu.not_used, waiting: lu.waiting },
       firstStart: first != null ? new Date(first).toISOString() : null, lastEnd: last != null ? new Date(last).toISOString() : null,
       daysAhead: last != null ? daysAheadOf(new Date(last), now) : null, sampleChannels: chans.slice(0, 12) };
   } catch (e: any) {

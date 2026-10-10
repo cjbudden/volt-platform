@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type ImportSource, type ImportAlias, type ImportRun, type GuideChannel, type ImportCounts, type ImportTestResult, type ImportSourceBody } from '../api'
+import { api, type ImportSource, type ImportRun, type GuideChannel, type ImportCounts, type ImportTestResult, type ImportSourceBody } from '../api'
 import { pressable } from '../a11y'
+import XmltvLineup from './EpgXmltvLineup'
 
 /* ============================================================================
    XMLTV IMPORT drawer, opened from the EPG list.
@@ -44,9 +45,10 @@ type Form = {
   id?: string; name: string; kind: 'url' | 'upload'; url: string; refreshHours: number; fallbackTz: string; keepPastDays: number; autoMap: boolean
   requestMode: 'single' | 'per_day'; daysAhead: number; minDaysAhead: number; dateFormat: ImportSourceBody['dateFormat']
   headerNames: string[]; headerChanges: Record<string, string | null>; newHeader: { name: string; value: string }
+  newChannels: 'review' | 'ignore'
 }
 const blankForm = (): Form => ({ name: '', kind: 'url', url: '', refreshHours: 6, fallbackTz: '', keepPastDays: 1, autoMap: true,
-  requestMode: 'single', daysAhead: 7, minDaysAhead: 5, dateFormat: 'YYYY-MM-DD', headerNames: [], headerChanges: {}, newHeader: { name: '', value: '' } })
+  requestMode: 'single', daysAhead: 7, minDaysAhead: 5, dateFormat: 'YYYY-MM-DD', headerNames: [], headerChanges: {}, newHeader: { name: '', value: '' }, newChannels: 'review' })
 const clampInt = (v: string, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(+v || 0)))
 
 function Coverage({ s }: { s: ImportSource }) {
@@ -60,7 +62,6 @@ function Coverage({ s }: { s: ImportSource }) {
   )
 }
 
-const MAPPED_BY: Record<string, string> = { 'auto:xmltv_id': 'matched by XMLTV id', 'auto:name': 'matched by name', user: 'mapped by you' }
 
 function summary(c: Partial<ImportCounts> | undefined): string {
   if (!c) return ''
@@ -87,7 +88,6 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
   const [panel, setPanel] = useState<Record<string, 'channels' | 'runs' | 'test' | null>>({})
   const [tests, setTests] = useState<Record<string, ImportTestResult | null>>({})
   const urlRef = useRef<HTMLInputElement>(null)
-  const [aliases, setAliases] = useState<Record<string, ImportAlias[]>>({})
   const [runs, setRuns] = useState<Record<string, ImportRun[]>>({})
   const [busy, setBusy] = useState<Record<string, string>>({})
   const [result, setResult] = useState<Record<string, { status: string; text: string; warnings: string[] }>>({})
@@ -109,7 +109,7 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
     if (form.newHeader.name.trim() && form.newHeader.value) headers[form.newHeader.name.trim()] = form.newHeader.value
     const body: Partial<ImportSourceBody> = {
       name: form.name.trim(), url: form.kind === 'url' ? form.url.trim() : null, refreshHours: form.kind === 'url' ? form.refreshHours : null,
-      fallbackTz: form.fallbackTz || null, keepPastDays: form.keepPastDays, autoMap: form.autoMap,
+      fallbackTz: form.fallbackTz || null, keepPastDays: form.keepPastDays, autoMap: form.autoMap, newChannels: form.newChannels,
       ...(form.kind === 'url' ? { requestMode: form.requestMode, daysAhead: form.daysAhead, minDaysAhead: form.minDaysAhead, dateFormat: form.dateFormat,
         ...(Object.keys(headers).length ? { headers } : {}) } : {}),
     }
@@ -123,7 +123,6 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
   function showResult(id: string, r: { status: string; counts: ImportCounts; warnings: string[]; error?: string }) {
     setResult(m => ({ ...m, [id]: { status: r.status, text: r.error ?? summary(r.counts), warnings: r.warnings ?? [] } }))
     load()
-    if (panel[id] === 'channels') api.importChannels(id).then(a => setAliases(m => ({ ...m, [id]: a })))
     if (r.status !== 'failed') onImported?.()
   }
   async function run(s: ImportSource) {
@@ -151,19 +150,11 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
   }
   const editForm = (s: ImportSource): Form => ({ id: s.id, name: s.name, kind: s.kind, url: s.url ?? '', refreshHours: s.refreshHours ?? 6, fallbackTz: s.fallbackTz ?? '',
     keepPastDays: s.keepPastDays, autoMap: s.autoMap, requestMode: s.requestMode ?? 'single', daysAhead: s.daysAhead ?? 7, minDaysAhead: s.minDaysAhead ?? 5,
-    dateFormat: s.dateFormat ?? 'YYYY-MM-DD', headerNames: s.headerNames ?? [], headerChanges: {}, newHeader: { name: '', value: '' } })
+    dateFormat: s.dateFormat ?? 'YYYY-MM-DD', headerNames: s.headerNames ?? [], headerChanges: {}, newHeader: { name: '', value: '' }, newChannels: s.newChannels ?? 'review' })
   async function togglePanel(id: string, which: 'channels' | 'runs') {
     const next = panel[id] === which ? null : which
     setPanel(p => ({ ...p, [id]: next }))
-    if (next === 'channels') api.importChannels(id).then(a => setAliases(m => ({ ...m, [id]: a }))).catch(e => setErr(e.message))
     if (next === 'runs') api.importRuns(id).then(r => setRuns(m => ({ ...m, [id]: r }))).catch(e => setErr(e.message))
-  }
-  async function map(sourceId: string, a: ImportAlias, channelId: string | null) {
-    try {
-      await api.mapImportChannel(a.id, channelId)
-      setAliases(m => ({ ...m, [sourceId]: (m[sourceId] ?? []).map(x => x.id === a.id ? { ...x, channelId, channelName: channels.find(c => c.id === channelId)?.name ?? null, mappedBy: channelId ? 'user' : null } : x) }))
-      load()
-    } catch (e: any) { setErr(e.message) }
   }
   async function remove(s: ImportSource) {
     if (!window.confirm(`Remove "${s.name}"? Its programmes that have not aired yet are removed from the guide with it. Programmes that already aired stay.`)) return
@@ -172,7 +163,7 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
 
   return (
     <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="">
-      <div className="drawer" style={{ width: 680, maxWidth: '100vw' }} {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
+      <div className="drawer" style={{ width: 860, maxWidth: '100vw' }} {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">XMLTV import</div><button className="xbtn" onClick={onClose} aria-label="Close">✕</button></div>
         <div className="drawer-b">
           {err && <div className="err">{err}</div>}
@@ -275,9 +266,15 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
                   <input className="inp" type="number" min={0} max={365} value={form.keepPastDays} onChange={e => setForm({ ...form, keepPastDays: Math.max(0, Math.min(365, +e.target.value || 0)) })} />
                 </div>
               </div>
+              <div className="field"><label>Channels the feed adds later</label>
+                <select className="inp" value={form.newChannels} onChange={e => setForm({ ...form, newChannels: e.target.value as Form['newChannels'] })}>
+                  <option value="review">Wait for me to choose (listed as waiting, named on each run)</option>
+                  <option value="ignore">Not used unless I choose them (for big feeds where only a few matter)</option>
+                </select>
+              </div>
               <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
                 <input type="checkbox" checked={form.autoMap} onChange={e => setForm({ ...form, autoMap: e.target.checked })} />
-                Map channels automatically when the match is unambiguous (same XMLTV id, or exactly one channel with the same name)
+                Use channels automatically when the match is certain: our channel has their XMLTV id, or the name is unique on both sides
               </label>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
                 <button className="btn ghost" onClick={() => setForm(null)}>Cancel</button>
@@ -309,8 +306,9 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
                     )}
                     <Coverage s={s} />
                     <div className="hintxt" style={{ marginTop: 2 }}>
-                      Last run {fmt(s.lastRunAt)}{last ? ` · ${summary(last.counts)}` : ''} · {s.mapped ?? 0} channel{s.mapped === 1 ? '' : 's'} mapped
-                      {(s.unmapped ?? 0) > 0 && <span style={{ color: 'var(--warn)' }}> · {s.unmapped} waiting to be mapped</span>}
+                      Last run {fmt(s.lastRunAt)}{last ? ` · ${summary(last.counts)}` : ''} · {s.mapped ?? 0} channel{s.mapped === 1 ? '' : 's'} used
+                      {(s.notUsed ?? 0) > 0 && <> · {s.notUsed} not used</>}
+                      {(s.unmapped ?? 0) > 0 && <span style={{ color: 'var(--warn)' }}> · {s.unmapped} waiting for you to choose</span>}
                     </div>
                     {s.lastError && !r && <div className="err" style={{ marginTop: 4 }}>{s.lastError}</div>}
                     {busy[s.id] && <div className="hintxt" style={{ marginTop: 4, color: 'var(--text)' }}>{busy[s.id]}</div>}
@@ -326,7 +324,7 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
                       ? <><button className="btn" disabled={!!busy[s.id] || s.running} onClick={() => run(s)}>Import now</button>
                         <button className="btn ghost" onClick={() => panel[s.id] === 'test' ? setPanel(p => ({ ...p, [s.id]: null })) : tryIt(s)}>Try it</button></>
                       : <button className="btn" disabled={!!busy[s.id] || s.running} onClick={() => { uploadFor.current = s.id; fileRef.current?.click() }}>Upload file</button>}
-                    <button className="btn ghost" onClick={() => togglePanel(s.id, 'channels')}>Channels</button>
+                    <button className="btn ghost" onClick={() => togglePanel(s.id, 'channels')}>Channels{(s.unmapped ?? 0) > 0 ? ` (${s.unmapped} waiting)` : ''}</button>
                     <button className="btn ghost" onClick={() => togglePanel(s.id, 'runs')}>Runs</button>
                     <button className="btn ghost" onClick={() => setForm(editForm(s))}>Edit</button>
                     <button className="btn ghost" onClick={() => remove(s)}>Remove</button>
@@ -339,12 +337,17 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
                       const t = tests[s.id]!
                       return (
                         <>
-                          <div className="hintxt" style={{ marginTop: 0 }}>Fetched <span style={{ fontFamily: 'ui-monospace,monospace', wordBreak: 'break-all' }}>{t.tried}</span>. Nothing was imported.</div>
+                          <div className="hintxt" style={{ marginTop: 0 }}>Fetched <span style={{ fontFamily: 'ui-monospace,monospace', wordBreak: 'break-all' }}>{t.tried}</span>. No programmes were imported.</div>
                           {t.status === 'failed' ? <div className="err" style={{ marginTop: 6 }}>{t.error}</div> : (
                             <div style={{ marginTop: 6 }}>
                               <div style={{ fontWeight: 600 }}>{t.channels} channel{t.channels === 1 ? '' : 's'}, {t.programmes} programme{t.programmes === 1 ? '' : 's'} · {Math.round((t.bytes ?? 0) / 1024)} KB</div>
                               {t.firstStart && <div className="hintxt" style={{ marginTop: 2 }}>From {fmtDay(t.firstStart)} to {fmtDay(t.lastEnd ?? null)}{t.daysAhead != null ? `, ${t.daysAhead} days ahead` : ''}{s.requestMode === 'per_day' ? ' (this is one day: a run fetches every day)' : ''}</div>}
-                              {!!t.sampleChannels?.length && <div className="hintxt" style={{ marginTop: 2 }}>Channels: {t.sampleChannels.map(c => c.name ? `${c.name} (${c.id})` : c.id).join(', ')}{(t.channels ?? 0) > t.sampleChannels.length ? '…' : ''}</div>}
+                              {t.lineup && (
+                                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                                  <span className="hintxt" style={{ marginTop: 0 }}>Lineup loaded: {t.lineup.used} used, {t.lineup.notUsed} not used, {t.lineup.waiting} waiting for you to choose.</span>
+                                  <button className="btn" onClick={() => togglePanel(s.id, 'channels')}>Choose channels</button>
+                                </div>
+                              )}
                             </div>
                           )}
                           {t.requests.length > 1 && (
@@ -361,42 +364,7 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
 
                 {panel[s.id] === 'channels' && (
                   <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px' }}>
-                    {!aliases[s.id] ? <div className="loading">Loading…</div> : aliases[s.id].length === 0 ? (
-                      <div className="hintxt">No channels yet: they appear here after the first run.</div>
-                    ) : (
-                      <table>
-                        <thead><tr><th>Their channel</th><th>Programmes</th>{s.kind === 'url' && <th>Guide until</th>}<th>Volt channel</th></tr></thead>
-                        <tbody>
-                          {aliases[s.id].map(a => (
-                            <tr key={a.id}>
-                              <td>
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                  {a.icon && <img src={a.icon} alt="" style={{ width: 28, height: 20, objectFit: 'contain', flex: 'none' }} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />}
-                                  <div style={{ minWidth: 0 }}>
-                                    <div style={{ fontWeight: 600 }}>{a.displayName ?? a.externalId}</div>
-                                    <div className="hintxt" style={{ marginTop: 0, fontFamily: 'ui-monospace,monospace' }}>{a.externalId}</div>
-                                  </div>
-                                </div>
-                              </td>
-                              <td style={{ color: 'var(--muted)' }}>{a.channelId ? a.lastProgrammes : '–'}</td>
-                              {s.kind === 'url' && (
-                                <td style={{ whiteSpace: 'nowrap', color: a.channelId && (a.guideDaysAhead ?? 0) < s.minDaysAhead && s.minDaysAhead > 0 ? 'var(--warn)' : 'var(--muted)' }}>
-                                  {a.channelId ? (a.guideDaysAhead != null ? `${a.guideDaysAhead} days` : 'nothing yet') : '–'}
-                                </td>
-                              )}
-                              <td style={{ minWidth: 220 }}>
-                                <select className="inp" value={a.channelId ?? ''} onChange={e => map(s.id, a, e.target.value || null)}>
-                                  <option value="">Not mapped (skipped)</option>
-                                  {channels.map(c => <option key={c.id} value={c.id}>{c.name}{c.medium === 'radio' ? ' (radio)' : ''}</option>)}
-                                </select>
-                                {a.mappedBy && <div className="hintxt" style={{ marginTop: 2 }}>{MAPPED_BY[a.mappedBy] ?? a.mappedBy}</div>}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                    <div className="hintxt" style={{ marginTop: 8 }}>Changes apply on the next run. Moving a channel takes this source's programmes that have not aired yet off the old channel.</div>
+                    <XmltvLineup key={s.lastRunAt ?? 'new'} source={s} channels={channels} onChanged={load} />
                   </div>
                 )}
 

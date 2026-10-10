@@ -178,7 +178,7 @@ export function parseXmltvTime(s: string | undefined, zone: string | null): Date
 
 // ---------------------------------------------------------------- mapping
 
-export interface XmltvChannelIn { id: string; displayNames: string[]; icon: string | null; url: string | null }
+export interface XmltvChannelIn { id: string; displayNames: string[]; icon: string | null; url: string | null; lcn: string | null }
 
 export interface XmltvProgrammeIn {
   channel: string;
@@ -207,6 +207,9 @@ export function mapChannel(n: XmlNode): XmltvChannelIn {
     displayNames: kids(n, 'display-name').map(txt).filter(Boolean),
     icon: kids(n, 'icon')[0]?.attrs.src ?? null,
     url: txt(kids(n, 'url')[0]) || null,
+    // <lcn> is not in the DTD but common (xmltv.net, Australian and UK feeds):
+    // the channel NUMBER, often the only thing telling same-named channels apart.
+    lcn: txt(kids(n, 'lcn')[0]) || null,
   };
 }
 

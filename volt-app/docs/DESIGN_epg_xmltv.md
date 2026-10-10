@@ -198,3 +198,48 @@ requests; migration `0039_xmltv_import_api.sql` adds the settings.
 
 Checks: `test/xmltv-import-api-pure.check.ts` 31/31, `test/xmltv-import-api.check.sh`
 39/39 against a stand-in guide API (`test/lib/fake-guide-api.py`).
+
+### Channel lineup: choosing and assigning a feed's channels (built 10 Oct)
+
+Tested against xmltv.net's Sydney feed (9 MB, 47 channels, 11,063 programmes
+over 8 days). A feed is a lineup, not a channel: "7 Sydney" appears on 7, 70
+and 71, SD and HD simulcasts sit side by side (ABC TV on 2, 20 and 21), radio
+(Double J, SBS Radio) is mixed with TV, two channels have no programmes, and a
+name ends in a tab. Migration `0040_xmltv_lineup.sql`, `services/xmltvLineup.ts`,
+console `pages/EpgXmltvLineup.tsx`.
+
+- **Three states per feed channel.** *Used* (on one Volt channel), *not used*
+  (`ignored`: skipped quietly, counted as `ignoredChannels`, never a warning),
+  *waiting* (new, undecided: skipped and named in the run's warning).
+- **New channels** the feed adds later start as waiting, or as not used when
+  the source's `new_channels` is `ignore` (big feeds where a few channels matter).
+- **Channel number.** `<lcn>` (not in the DTD, common in AU/UK feeds) is read
+  and shown first; the lineup is in number order, and same-named channels say
+  "Same name as 70, 71: check the number".
+- **Automatic use, only when certain.** Our XMLTV id equals theirs, or the name
+  is unique on BOTH sides. None of the three "7 Sydney" is matched.
+- **One feed channel per Volt channel** within a source (unique index); a
+  second is refused naming the one it has. Another source feeding the same Volt
+  channel is allowed and flagged "Also fed by …: expect overlaps".
+- **Suggestions** (shown, never applied on their own). The feed's regional
+  words (in at least a quarter of names: "sydney", "nsw") are set aside and the
+  rest compared with our channel names, exactly or without HD/SD/+1. One to
+  one: per Volt channel only the best candidate is suggested, a channel with
+  programmes first (7mate 74, not the empty 73), then an exact name (SBS on 3,
+  not 30), then the lowest number.
+- **Bulk.** Select any rows (or all shown): use suggestions, don't use, back to
+  waiting, or **create Volt channels** in a group as TV or radio, named after the
+  feed channel with its id as the XMLTV id (when free), no stream source yet,
+  audited as created from the import. Needs manage on channels.
+- **Before the first import.** Try it records the lineup (no programmes), so a
+  big feed can be narrowed down before anything is imported.
+- **Changing your mind.** Taking a channel out of use, or moving it, removes
+  that source's not-yet-aired programmes from the Volt channel it was on.
+
+API: `GET /sources/:id/channels` (state, lcn, programmes in the feed and span,
+`sameNameAs`, `suggestion`, `alsoFedBy`, guide coverage), `PUT /aliases/:id`
+(`channelId` and/or `ignored`), `POST /sources/:id/channels/bulk`
+(`not_used | waiting | accept_suggestions | create`).
+Checks: `test/xmltv-lineup-pure.check.ts` 20/20 (the real Sydney lineup),
+`test/xmltv-lineup.check.sh` 27/27 (optionally reading a real feed via
+`XMLTV_REAL_FEED`).

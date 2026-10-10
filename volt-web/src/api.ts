@@ -1095,6 +1095,12 @@ export const api = {
   importChannels: (id: string): Promise<ImportAlias[]> => req(`/epg/import/sources/${id}/channels`),
   mapImportChannel: (aliasId: string, channelId: string | null): Promise<{ id: string; channelId: string | null; removedFromPrevious: number }> =>
     req(`/epg/import/aliases/${aliasId}`, { method: 'PUT', body: JSON.stringify({ channelId }) }),
+  /** Use a feed channel on a Volt channel, or mark it not used (ignored) / waiting. */
+  setImportChannel: (aliasId: string, b: { channelId?: string | null; ignored?: boolean }): Promise<{ id: string; state: ImportAlias['state']; removedFromPrevious: number }> =>
+    req(`/epg/import/aliases/${aliasId}`, { method: 'PUT', body: JSON.stringify(b) }),
+  bulkImportChannels: (sourceId: string, b: { aliasIds: string[]; action: 'not_used' | 'waiting' | 'accept_suggestions' | 'create'; groupId?: string; kind?: 'tv' | 'radio'; tz?: string }):
+    Promise<{ done: number; skipped: { id: string; reason: string }[] }> =>
+    req(`/epg/import/sources/${sourceId}/channels/bulk`, { method: 'POST', body: JSON.stringify(b) }),
   importRuns: (id: string): Promise<ImportRun[]> => req(`/epg/import/sources/${id}/runs`),
   // ---- social publishing (modules/social.ts) ----
   socialPlatforms: (): Promise<SocialPlatformsStatus> => req('/social/platforms'),
@@ -2253,6 +2259,8 @@ export interface ImportSourceBody {
   dateFormat: 'YYYY-MM-DD' | 'YYYYMMDD' | 'DD/MM/YYYY' | 'unix'
   /** Write-only: a string sets that header, null removes it. Values are never read back. */
   headers?: Record<string, string | null>
+  /** What a channel the feed has never listed before starts as. */
+  newChannels: 'review' | 'ignore'
 }
 export interface ImportCounts {
   bytes: number; channelsInFile: number; programmesInFile: number; mappedChannels: number; unmappedChannels: number
@@ -2266,17 +2274,28 @@ export interface ImportSource extends ImportSourceBody {
   mapped?: number; unmapped?: number; lastRun?: ImportRun | null
   headerNames: string[]; plannedRequests: { url: string; day: string | null }[]; consecutiveFailures: number
   coverageUntil: string | null; coverageDaysAhead: number | null; coverageLow: boolean
+  notUsed?: number
 }
 export interface ImportRunResult { runId: string; status: string; counts: ImportCounts; warnings: string[]; error?: string }
 export interface ImportTestResult {
   requests: { url: string; day: string | null }[]; tried: string; status: 'ok' | 'failed'; error?: string
   bytes?: number; channels?: number; programmes?: number; firstStart?: string | null; lastEnd?: string | null; daysAhead?: number | null
   sampleChannels?: { id: string; name: string | null }[]
+  lineup?: { used: number; notUsed: number; waiting: number }
 }
 export interface ImportAlias {
   id: string; externalId: string; displayName: string | null; icon: string | null; channelId: string | null; channelName: string | null
   mappedBy: string | null; lastSeenAt: string; lastProgrammes: number
   guideUntil: string | null; guideDaysAhead: number | null
+  /** used: on channelId. not_used: skipped quietly. waiting: new, nobody has decided. */
+  state: 'used' | 'not_used' | 'waiting'
+  lcn: string | null; channelKind: 'tv' | 'radio' | null; firstSeenAt: string
+  programmesInFeed: number; feedFrom: string | null; feedTo: string | null
+  /** Channel numbers (or ids) of same-named channels in this feed. */
+  sameNameAs: string[]
+  suggestion: { channelId: string; channelName: string } | null
+  /** Other import sources that also write into this alias's Volt channel. */
+  alsoFedBy: string[]
 }
 export type SocialPlatformId = 'youtube' | 'facebook' | 'x' | 'tiktok' | 'dailymotion'
 export interface SocialPost { title: string; description: string; tags: string[]; privacy: 'public' | 'unlisted' | 'private' }

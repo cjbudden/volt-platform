@@ -22,6 +22,7 @@ G=0000000d-0000-0000-0000-0000000000f1
 CHA=0000000e-0000-0000-0000-0000000000f1   # xmltv_id match
 CHB=0000000e-0000-0000-0000-0000000000f2   # name match
 CHC=0000000e-0000-0000-0000-0000000000f3   # manual target
+CHD=0000000e-0000-0000-0000-0000000000f4   # free target for a remap
 CHX=0000000e-0000-0000-0000-0000000000f9   # other tenant
 q(){ psql "$DATABASE_URL" -tA -c "$1"; }
 
@@ -40,8 +41,9 @@ INSERT INTO channels(id,group_id,name,status,tz,xmltv_id) VALUES
   ('$CHA','$G','Alpha TV','ended','Australia/Sydney','alpha.tv.example'),
   ('$CHB','$G','Bravo Radio','ended','Europe/London',NULL),
   ('$CHC','$G','Charlie','ended','UTC',NULL),
+  ('$CHD','$G','Delta Spare','ended','UTC',NULL),
   ('$CHX','0000000d-0000-0000-0000-0000000000f2','Delta Elsewhere','ended','UTC','delta.example') ON CONFLICT (id) DO NOTHING;
-DELETE FROM programmes WHERE channel_id IN ('$CHA','$CHB','$CHC','$CHX');
+DELETE FROM programmes WHERE channel_id IN ('$CHA','$CHB','$CHC','$CHD','$CHX');
 DELETE FROM epg_import_sources WHERE account_id IN ('$ACC','$OTH');
 DELETE FROM notifications WHERE account_id='$ACC';
 SQL
@@ -91,7 +93,7 @@ ok "upload source created" '[ -n "$SID" ]'
 R=$(curl -s -X POST "$B/api/epg/import/sources/$SID/upload" -H "$A" -H 'content-type: application/xml' --data-binary @"$W/guide.xml")
 ok "run finished with warnings (one unmapped channel)" '[ "$(echo "$R" | jget "d[\"status\"]")" = warnings ]'
 ok "counts: 6 in file, 2 mapped, 1 unmapped, 2 skipped, 4 inserted" '[ "$(echo "$R" | jget "[d[\"counts\"][k] for k in (\"programmesInFile\",\"mappedChannels\",\"unmappedChannels\",\"skippedUnmapped\",\"inserted\")]")" = "[6, 2, 1, 2, 4]" ]'
-ok "the warning names the unmapped channel" 'echo "$R" | grep -q "mystery.example"'
+ok "the warning names the waiting channel by its name" 'echo "$R" | grep -q "Mystery Channel" && echo "$R" | grep -q "waiting for you to choose"'
 ok "auto-mapped by XMLTV id" '[ "$(q "SELECT mapped_by FROM epg_channel_aliases WHERE source_id='"'"'$SID'"'"' AND external_id='"'"'alpha.tv.example'"'"'")" = auto:xmltv_id ]'
 ok "auto-mapped by name, case-insensitive" '[ "$(q "SELECT channel_id||'"'"'|'"'"'||mapped_by FROM epg_channel_aliases WHERE source_id='"'"'$SID'"'"' AND external_id='"'"'bravo-01'"'"'")" = "$CHB|auto:name" ]'
 ok "the other tenant's channel was never a candidate" '[ -z "$(q "SELECT 1 FROM epg_channel_aliases WHERE channel_id='"'"'$CHX'"'"'")" ]'
@@ -101,7 +103,7 @@ ST=$(q "SELECT to_char(starts_at AT TIME ZONE 'UTC','HH24:MI') FROM programmes W
 ok "no-offset time read in the channel's zone, London BST 19:00 = 18:00 UTC ($ST)" '[ "$ST" = "18:00" ]'
 ok "metadata mapped (desc, genre, season/episode)" '[ "$(q "SELECT (metadata->>'"'"'description'"'"')||(metadata->>'"'"'genre'"'"')||(metadata->>'"'"'season'"'"')||(metadata->>'"'"'episodeNumber'"'"') FROM programmes WHERE title='"'"'Alpha Breakfast'"'"'")" = "MorningNews25" ]'
 CH=$(curl -s "$B/api/epg/import/sources/$SID/channels" -H "$A")
-ok "channel list shows the unmapped one first" '[ "$(echo "$CH" | jget "d[0][\"externalId\"]")" = mystery.example ]'
+ok "the lineup shows the unmapped one as waiting" '[ "$(echo "$CH" | jget "[c[\"state\"] for c in d if c[\"externalId\"]==\"mystery.example\"][0]")" = waiting ]'
 
 # ---- same file again: idempotent
 R=$(curl -s -X POST "$B/api/epg/import/sources/$SID/upload" -H "$A" -H 'content-type: application/xml' --data-binary @"$W/guide.xml")
@@ -129,7 +131,9 @@ ok "once unprotected, the programme the file dropped is removed (1)" '[ "$(echo 
 ok "the edit landed" '[ "$(q "SELECT count(*) FROM programmes WHERE title='"'"'Alpha Breakfast (extended)'"'"'")" = 1 ]'
 
 # ---- remap mystery: its future programmes leave Charlie
-R=$(curl -s -X PUT "$B/api/epg/import/aliases/$AL" -H "$A" -H "$J" -d "{\"channelId\":\"$CHA\"}")
+C=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/api/epg/import/aliases/$AL" -H "$A" -H "$J" -d "{\"channelId\":\"$CHA\"}")
+ok "a Volt channel already fed by this source cannot take a second feed channel ($C)" '[ "$C" = 409 ]'
+R=$(curl -s -X PUT "$B/api/epg/import/aliases/$AL" -H "$A" -H "$J" -d "{\"channelId\":\"$CHD\"}")
 ok "remapping removes the source's future programmes from the old channel" '[ "$(echo "$R" | jget "d[\"removedFromPrevious\"]")" = 2 ] && [ "$(q "SELECT count(*) FROM programmes WHERE channel_id='"'"'$CHC'"'"'")" = 0 ]'
 
 # ---- gzip + Latin-1 + URL source + schedule
