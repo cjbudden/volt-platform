@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, type ImportAlias, type ImportSource, type GuideChannel, type Group } from '../api'
+import { api, thumbUrl, type ImportAlias, type ImportSource, type GuideChannel, type Group } from '../api'
 
 /* ============================================================================
    CHANNEL LINEUP of one XMLTV import source: which of the feed's channels are
@@ -73,6 +73,15 @@ export default function XmltvLineup({ source, channels, onChanged }: { source: I
       await load(); onChanged()
     } catch (e: any) { setNote({ ok: false, text: e.message }) }
   }
+  async function adoptTheirIcon(r: ImportAlias) {
+    setNote(null)
+    try {
+      await api.useImportIcon(source.id, r.id)
+      setNote({ ok: true, text: `${r.channelName} now uses their logo. Change it any time in the channel's Settings.` })
+      load(); onChanged()
+    } catch (e: any) { setNote({ ok: false, text: e.message }) }
+  }
+
   async function bulk(action: 'not_used' | 'waiting' | 'accept_suggestions' | 'create') {
     if (!selected.length) return
     if (action === 'create' && !create?.groupId) { setNote({ ok: false, text: 'Choose the group the new channels go in.' }); return }
@@ -191,6 +200,16 @@ export default function XmltvLineup({ source, channels, onChanged }: { source: I
                     <button type="button" className="lineup-suggest" onClick={() => choose(r, r.suggestion!.channelId)}>Use suggested: {r.suggestion.channelName}</button>
                   )}
                   {r.state === 'used' && r.mappedBy && <div className="hintxt" style={{ marginTop: 2 }}>{MAPPED_BY[r.mappedBy] ?? r.mappedBy}</div>}
+                  {r.state === 'used' && (
+                    <div className="guide-icon-cell" style={{ marginTop: 4 }}>
+                      {r.channelIconRef
+                        ? <><img src={thumbUrl(r.channelIconRef, 68, 44, 'inside')} alt="" className="lineup-logo" /><span className="hintxt" style={{ marginTop: 0 }}>Guide shows {r.channelName}'s image</span></>
+                        : r.icon && /^https?:/i.test(r.icon)
+                          ? <><span className="hintxt" style={{ marginTop: 0 }}>{r.channelName} has no image, so the guide uses theirs.</span>
+                              <button type="button" className="lineup-suggest" onClick={() => adoptTheirIcon(r)}>Keep it as the logo</button></>
+                          : <span className="hintxt" style={{ marginTop: 0 }}>{r.channelName} has no image yet</span>}
+                    </div>
+                  )}
                   {r.alsoFedBy.length > 0 && <div className="hintxt" style={{ marginTop: 2, color: 'var(--warn)' }}>Also fed by {r.alsoFedBy.join(', ')}: expect overlaps</div>}
                 </td>
               </tr>

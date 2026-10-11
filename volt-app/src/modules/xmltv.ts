@@ -36,6 +36,7 @@ import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, badRequest, notFound, conflict } from '../util/http';
 import { ownerBaseEntry } from './epg';
+import { pickGuideIcon, feedIconsFor } from '../services/guideIcon';
 import {
   channelXml, programmeXml, documentHead, DOCUMENT_TAIL, XMLTV_ID_RX,
   type XmltvChannel, type TimeBasis, type TzMode, type BuildOptions,
@@ -74,6 +75,9 @@ interface OwnerRow {
   name: string;
   xmltv_id: string | null;
   brand_ref: string | null;
+  guide_icon_ref: string | null;
+  /** Icon of a linked imported feed channel; only used when we have no image. */
+  feed_icon?: string | null;
   tz: string | null;
   metadata: any;
   updated_at: string;
@@ -82,7 +86,7 @@ interface OwnerRow {
 /** The channels (and optionally events) a scope covers, in a stable order. */
 async function scopedOwners(s: GuideScope): Promise<OwnerRow[]> {
   const rows = await query<OwnerRow>(
-    `SELECT c.kind, c.id, c.name, c.xmltv_id, c.brand_ref, c.tz, c.metadata, c.updated_at
+    `SELECT c.kind, c.id, c.name, c.xmltv_id, c.brand_ref, c.guide_icon_ref, c.tz, c.metadata, c.updated_at
        FROM channels c JOIN groups g ON g.id = c.group_id
       WHERE g.account_id = $1 AND COALESCE(c.epg_enabled, true)
         AND ($2::uuid[] IS NULL OR c.id = ANY($2::uuid[]))
@@ -91,7 +95,7 @@ async function scopedOwners(s: GuideScope): Promise<OwnerRow[]> {
   );
   if (s.includeEvents) {
     rows.push(...await query<OwnerRow>(
-      `SELECT 'event' AS kind, e.id, e.name, e.xmltv_id, NULL::text AS brand_ref, NULL::text AS tz, e.metadata, e.updated_at
+      `SELECT 'event' AS kind, e.id, e.name, e.xmltv_id, NULL::text AS brand_ref, NULL::text AS guide_icon_ref, NULL::text AS tz, e.metadata, e.updated_at
          FROM events e JOIN groups g ON g.id = e.group_id
         WHERE g.account_id = $1
           AND EXISTS (SELECT 1 FROM programmes p WHERE p.event_id = e.id AND p.span && tstzrange($2, $3, '[)'))
@@ -112,7 +116,7 @@ async function toXmltvChannel(o: OwnerRow, account: string): Promise<XmltvChanne
   return {
     xmltvId: o.xmltv_id || o.id,
     displayNames: names,
-    icon: absoluteImage(o.brand_ref) ?? absoluteImage(base?.icon ?? md.logo ?? null),
+    icon: absoluteImage(pickGuideIcon({ guideIconRef: o.guide_icon_ref, brandRef: o.brand_ref, feedIcon: o.feed_icon, metadataIcon: base?.icon ?? md.logo ?? null })?.ref),
     url: typeof md.website === 'string' && /^https?:\/\//.test(md.website) ? md.website : null,
     tz: o.tz,
     medium: o.kind === 'event' ? 'event' : o.kind,
@@ -135,7 +139,7 @@ async function guideEtag(s: GuideScope, owners: OwnerRow[]): Promise<{ etag: str
   const h = createHash('sha256');
   h.update(JSON.stringify({
     v: 1, basis: s.timeBasis, tz: s.tzMode, lang: s.lang, base: publicBase(),
-    owners: owners.map((o) => [o.id, o.xmltv_id, o.name, o.brand_ref, o.tz, String(o.updated_at)]),
+    owners: owners.map((o) => [o.id, o.xmltv_id, o.name, o.brand_ref, o.guide_icon_ref, o.feed_icon ?? null, o.tz, String(o.updated_at)]),
     p: agg?.digest, n: agg?.n,
   }));
   const ownerLast = owners.reduce<number>((m, o) => Math.max(m, Date.parse(String(o.updated_at)) || 0), 0);
@@ -305,24 +309,30 @@ xmltvAdminRouter.get(
   asyncHandler(async (req, res) => {
     const account = accountId(req);
     const rows = await query<any>(
-      `SELECT c.id, c.kind, c.name, c.xmltv_id, c.brand_ref, c.tz, c.metadata, c.updated_at,
+      `SELECT c.id, c.kind, c.name, c.xmltv_id, c.brand_ref, c.guide_icon_ref, c.tz, c.metadata, c.updated_at,
               COALESCE(c.epg_enabled, true) AS epg_enabled
          FROM channels c JOIN groups g ON g.id = c.group_id
         WHERE g.account_id = $1
         ORDER BY lower(c.name), c.id`,
       [account],
     );
+    const feed = await feedIconsFor(rows.map((r) => r.id));
     const out = [];
     for (const r of rows) {
       const base = await ownerBaseEntry('channel', r.id, account).catch(() => null);
+      const pick = pickGuideIcon({ guideIconRef: r.guide_icon_ref, brandRef: r.brand_ref, feedIcon: feed.get(r.id), metadataIcon: base?.icon ?? r.metadata?.logo ?? null });
       out.push({
         id: r.id,
         xmltvId: r.xmltv_id || r.id,
         xmltvIdSet: !!r.xmltv_id,
         name: r.name,
         medium: r.kind,
-        icon: absoluteImage(r.brand_ref) ?? absoluteImage(base?.icon ?? null),
+        icon: absoluteImage(pick?.ref),
+        iconRef: pick?.ref ?? null,
+        iconFrom: pick?.from ?? null,
         brandRef: r.brand_ref ?? null,
+        guideIconRef: r.guide_icon_ref ?? null,
+        feedIcon: feed.get(r.id) ?? null,
         description: base?.description ?? null,
         language: base?.language ?? null,
         tz: r.tz,
@@ -358,6 +368,33 @@ xmltvAdminRouter.put(
     }
     await query(`UPDATE channels SET xmltv_id = $2, updated_at = now() WHERE id = $1`, [ch.id, v]);
     res.json({ id: ch.id, xmltvId: v || ch.id, xmltvIdSet: !!v });
+  }),
+);
+
+/** A guide icon reference: a library image or an http(s) URL. */
+export const ICON_REF_RX = /^(\/library\/[^\s]+|https?:\/\/[^\s]+)$/i;
+
+/**
+ * Set or clear a channel's guide icon. Null (or blank) goes back to the
+ * channel's own brand image, which is the normal case.
+ */
+xmltvAdminRouter.put(
+  '/channels/:id/guide-icon',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const account = accountId(req);
+    const b = z.object({ ref: z.string().trim().max(2048).nullable() }).parse(req.body ?? {});
+    const v = b.ref ? b.ref : null;
+    if (v && !ICON_REF_RX.test(v)) throw badRequest('Guide icon: choose a library image or paste an http(s) image URL');
+    const ch = await one<any>(
+      `SELECT c.id FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1 AND g.account_id = $2`,
+      [req.params.id, account],
+    );
+    if (!ch) throw notFound('Channel not found');
+    const r = await one<any>(`UPDATE channels SET guide_icon_ref = $2, updated_at = now() WHERE id = $1 RETURNING brand_ref, guide_icon_ref`, [ch.id, v]);
+    const feed = (await feedIconsFor([ch.id])).get(ch.id) ?? null;
+    const pick = pickGuideIcon({ guideIconRef: r.guide_icon_ref, brandRef: r.brand_ref, feedIcon: feed });
+    res.json({ id: ch.id, guideIconRef: r.guide_icon_ref, iconRef: pick?.ref ?? null, iconFrom: pick?.from ?? null, icon: absoluteImage(pick?.ref) });
   }),
 );
 

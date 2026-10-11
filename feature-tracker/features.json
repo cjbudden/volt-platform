@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-10",
+  "updated": "2026-10-11",
   "features": [
     {
       "id": "live-stream-e2e",
@@ -388,15 +388,20 @@
     {
       "id": "channel-brand-image",
       "name": "Channel brand image (info + guide)",
-      "summary": "A logo or artwork image on the channel: its identity, kept separate from the burned-in watermark. Set on the create form and in Settings from the Image Library. Shown as the list thumbnail and in the detail header, and served to guide clients via GET /api/epg/channels and as the XMLTV <channel><icon>. The description comes from the channel's content type (the separate description column described on 16 Aug is not in the schema).",
+      "summary": "A logo or artwork image on the channel: its identity, kept separate from the burned-in watermark. Set on the create form and in Settings from the Image Library. Shown as the list thumbnail and in the detail header, and served to guide clients via GET /api/epg/channels and as the XMLTV <channel><icon>. The description comes from the channel's content type (the separate description column described on 16 Aug is not in the schema). 11 Oct: one image field everywhere (channel logo, station artwork, guide icon, watermark) with a preview and the library file name instead of the raw path. Guide icon: the guide uses the channel or station image unless a guide icon is set on the Metadata tab or in XMLTV export; a linked imported channel's icon only fills in when we have no image. The EPG list shows each channel's image.",
       "status": "ready_to_test",
       "app_surface": "full",
       "test": {
-        "how": "Channels > New channel > Brand: pick a logo, create. The list thumbnail and detail header show it. Then EPG > XMLTV export > Download and check the channel has an <icon>.",
+        "how": "Channels > New channel > Brand: pick a logo, create. The list thumbnail and detail header show it. Then EPG > XMLTV export > Download and check the channel has an <icon>. 11 Oct: Radio > a station > Settings: Station artwork shows a preview and the file name. Metadata tab > Guide icon: A different image, pick one, save; EPG > XMLTV export > Channels in the guide shows it as 'Guide icon, set here'; Use logo goes back. EPG list shows channel images.",
         "artifact": ""
       },
-      "checks": "Built 16 Aug, endpoint added 10 Oct. Brand is never passed to the encoder (radio-brand.check.ts).",
-      "feedback": []
+      "checks": "Built 16 Aug, endpoint added 10 Oct. Brand is never passed to the encoder (radio-brand.check.ts). 11 Oct: guide-icon 23/23 (order of images, create and settings saves, XMLTV <icon>, JSON guide, endpoint refusals and tenancy, lineup, keep their logo); forms checked in a browser.",
+      "feedback": [
+        {
+          "date": "2026-10-11",
+          "note": "Christian: station image field should match the channel brand setup with a preview; a linked EPG channel should use the channel or station image; allow a manual guide icon; the picker paths show an all-zeros GUID. Done: One shared image field with preview and file name; guide icon with logo as default and a manual override; EPG list and lineup show our image. The zeros were hand-typed demo ids, now random, with a re-key for existing data."
+        }
+      ]
     },
     {
       "id": "audio-only-radio",

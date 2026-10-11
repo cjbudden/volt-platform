@@ -8,6 +8,7 @@ import { useRecordWatch, LiveEditNotice } from '../liveRecord'
 import { useProtocols, SourceInput, hlsChoicePending, type SourceValue } from '../protocols'
 import { WatermarkFields } from '../WatermarkFields'
 import { ImagePicker } from '../ImagePicker'
+import { ImageRefField, GuideIconField } from '../ImageRefField'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
 import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, GATE_COLOR, RecoveryNote, DiagnosisBlock, DrawerTabs, TabPane, type DrawerTab, type RetUnit } from '../scaffold'
 // The meter reads the SAME quantity as the radio waveform and the clipping
@@ -1788,7 +1789,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   const setWmScale = lockSet(setWmScaleRaw)
   // channel brand image (identity logo, replaces the initials box)
   const [brandRef, setBrandRef] = useState((d as any).brand_ref || '')
-  const [brandPickerOpen, setBrandPickerOpen] = useState(false)
+  const [guideIcon, setGuideIcon] = useState((d as any).guide_icon_ref || '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -1843,6 +1844,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
       scale: wmScale,
     }
     patch.brandRef = brandRef.trim() ? brandRef.trim() : null
+    patch.guideIconRef = guideIcon.trim() ? guideIcon.trim() : null
 
     if (locked) for (const k of d.lockedWhileRunning ?? []) delete (patch as any)[k]
     setBusy(true)
@@ -1868,6 +1870,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             <TypePicker appliesTo="tv" value={typeId} onChange={(id) => setTypeId(id)}
               hint="The channel's identity. Its metadata is what the guide and now/next show when no programme is scheduled." />
             <MetadataForm typeId={typeId} value={meta} onChange={setMeta} />
+            <GuideIconField value={guideIcon} onChange={setGuideIcon} brandRef={brandRef} />
           </TabPane>
           <TabPane active={tab === 'access'}>
             <RuleEditor scopeKind="owner" scopeId={d.id} compact resolveQuery={{ channelId: d.id, schemaId: typeId }} />
@@ -1875,21 +1878,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           <TabPane active={tab === 'settings'}>
           <div className="field"><label>Channel name</label><input className="inp" value={name} onChange={e => setName(e.target.value)} /></div>
 
-          <div className="field"><label>Channel brand image <span style={{ color: 'var(--faint)' }}>— shown in place of the initials box</span></label>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ width: 44, height: 44, borderRadius: 10, background: '#0b0f16', border: '1px solid var(--border)', display: 'grid', placeItems: 'center', overflow: 'hidden', flex: 'none' }}>
-                {brandRef
-                  ? <img src={thumbUrl(brandRef, 88, 88, 'inside')} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                  : <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--faint)" strokeWidth="2"><rect x="2" y="7" width="20" height="13" rx="2" /><path d="m17 2-5 5-5-5" /></svg>}
-              </span>
-              <input className="inp" value={brandRef} onChange={e => setBrandRef(e.target.value)} placeholder="Pick a channel logo, upload, or paste a URL" />
-              <button type="button" className="btn ghost" onClick={() => setBrandPickerOpen(true)}>Browse / upload…</button>
-              {brandRef && <button type="button" className="btn ghost" onClick={() => setBrandRef('')}>Clear</button>}
-            </div>
-          </div>
-          <ImagePicker open={brandPickerOpen} kinds={['brand', 'poster', 'slate', 'other']} title="Choose or upload a channel brand image"
-            uploadKind="brand" uploadFolder="brands"
-            onClose={() => setBrandPickerOpen(false)} onPick={(url) => { setBrandRef(url); setBrandPickerOpen(false) }} />
+          <ImageRefField label="Channel logo" hint="shown in lists, on the channel page and in the guide"
+            value={brandRef} onChange={setBrandRef} pickerTitle="Choose or upload the channel logo" kinds={['brand', 'poster', 'slate', 'other']} />
 
           {locked && (
             <div className="lock-note" role="note">

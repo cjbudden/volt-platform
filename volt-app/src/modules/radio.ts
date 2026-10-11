@@ -104,7 +104,7 @@ radioRouter.post('/probe', asyncHandler(async (req, res) => {
 radioRouter.get('/', asyncHandler(async (req, res) => {
   const rows = await query<any>(
     `SELECT c.id, c.name, c.status, c.group_id, g.name AS group_name, c.kind,
-            c.radio_config, c.recording_enabled, c.recording_retention_sec, c.brand_ref,
+            c.radio_config, c.recording_enabled, c.recording_retention_sec, c.brand_ref, c.guide_icon_ref,
             c.on_air, c.created_at, c.version
        FROM channels c JOIN groups g ON g.id=c.group_id
       WHERE g.account_id=$1 AND c.kind='radio' ORDER BY c.created_at DESC`,
@@ -478,8 +478,11 @@ radioRouter.get('/:id/log', asyncHandler(async (req, res) => {
        FROM programmes
       WHERE channel_id=$1 AND metadata->>'source'='icy' AND ends_at > $2 AND starts_at < $3
         AND ($4::text IS NULL OR title ILIKE '%'||$4||'%')
-        AND ($6::int IS NULL OR ends_at - starts_at >= make_interval(secs => $6))
-      GROUP BY 1`, [c.id, from.toISOString(), to.toISOString(), p.q?.trim() || null, null, p.minSec ?? null]);
+        AND ($5::int IS NULL OR ends_at - starts_at >= make_interval(secs => $5))
+      GROUP BY 1`, [c.id, from.toISOString(), to.toISOString(), p.q?.trim() || null, p.minSec ?? null]);
+  // (The counts ignore the class filter on purpose: they are the tab badges. They
+  // used to pass a placeholder $5 the SQL never read, which Postgres cannot type,
+  // so every request for this log failed with a 500.)
   res.json({
     stationId: c.id,
     from: from.toISOString(), to: to.toISOString(),

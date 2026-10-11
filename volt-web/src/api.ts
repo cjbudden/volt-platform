@@ -371,6 +371,8 @@ export interface ChannelSettingsPatch {
   fillerSlateRef?: string | null
   watermark?: WatermarkPatch
   brandRef?: string | null
+  /** Guide icon; null uses brandRef. */
+  guideIconRef?: string | null
   radio?: RadioCfg
   version?: number
 }
@@ -865,6 +867,7 @@ export const api = {
     fallbackTranscode?: boolean
     watermark?: WatermarkPatch
     brandRef?: string | null
+    guideIconRef?: string | null
     kind?: 'tv' | 'radio'
     radio?: RadioCfg
     schemaId?: string
@@ -1004,6 +1007,8 @@ export const api = {
   epgOwners: (): Promise<EpgOwnerRow[]> => req('/epg/owners'),
   // ---- XMLTV export (modules/xmltv.ts) ----
   guideChannels: (): Promise<GuideChannel[]> => req('/epg/channels'),
+  setGuideIcon: (channelId: string, ref: string | null): Promise<{ id: string; guideIconRef: string | null; iconRef: string | null; iconFrom: GuideChannel['iconFrom']; icon: string | null }> =>
+    req(`/epg/channels/${channelId}/guide-icon`, { method: 'PUT', body: JSON.stringify({ ref }) }),
   setXmltvId: (channelId: string, xmltvId: string | null): Promise<{ id: string; xmltvId: string; xmltvIdSet: boolean }> =>
     req(`/epg/channels/${channelId}/xmltv-id`, { method: 'PUT', body: JSON.stringify({ xmltvId }) }),
   xmltvFeeds: (): Promise<XmltvFeed[]> => req('/epg/xmltv/feeds'),
@@ -1101,6 +1106,9 @@ export const api = {
   bulkImportChannels: (sourceId: string, b: { aliasIds: string[]; action: 'not_used' | 'waiting' | 'accept_suggestions' | 'create'; groupId?: string; kind?: 'tv' | 'radio'; tz?: string }):
     Promise<{ done: number; skipped: { id: string; reason: string }[] }> =>
     req(`/epg/import/sources/${sourceId}/channels/bulk`, { method: 'POST', body: JSON.stringify(b) }),
+  /** Use their channel's icon as the linked Volt channel's logo (only when it has none). */
+  useImportIcon: (sourceId: string, aliasId: string): Promise<{ channelId: string; brandRef: string }> =>
+    req(`/epg/import/sources/${sourceId}/channels/${aliasId}/use-icon`, { method: 'POST' }),
   importRuns: (id: string): Promise<ImportRun[]> => req(`/epg/import/sources/${id}/runs`),
   // ---- social publishing (modules/social.ts) ----
   socialPlatforms: (): Promise<SocialPlatformsStatus> => req('/social/platforms'),
@@ -1733,6 +1741,8 @@ export interface EpgOwnerRow {
    *  than emitting a literal, which is what used to bury every station in the
    *  Channels filter. */
   kind: 'channel' | 'radio' | 'event'; id: string; name: string; status: string
+  /** The image the guide shows for it; null for events and for channels with none. */
+  icon_ref: string | null
   programme_count: number; first_at: string | null; last_at: string | null
   auto_clip_count: number; next_title: string | null; next_at: string | null
 }
@@ -1740,6 +1750,9 @@ export interface EpgOwnerRow {
 export interface GuideChannel {
   id: string; xmltvId: string; xmltvIdSet: boolean; name: string; medium: 'tv' | 'radio'
   icon: string | null; brandRef: string | null; description: string | null; language: string | null
+  /** The image the guide uses, and where it came from (see services/guideIcon.ts). */
+  iconRef: string | null; iconFrom: 'guide' | 'brand' | 'feed' | 'metadata' | null
+  guideIconRef: string | null; feedIcon: string | null
   tz: string; epgEnabled: boolean
 }
 export interface XmltvFeedBody {
@@ -2312,6 +2325,8 @@ export interface ImportAlias {
   suggestion: { channelId: string; channelName: string } | null
   /** Other import sources that also write into this alias's Volt channel. */
   alsoFedBy: string[]
+  /** The linked Volt channel's own image (guide icon, else logo). The guide uses this, not theirs. */
+  channelIconRef: string | null
 }
 export type SocialPlatformId = 'youtube' | 'facebook' | 'x' | 'tiktok' | 'dailymotion'
 export interface SocialPost { title: string; description: string; tags: string[]; privacy: 'public' | 'unlisted' | 'private' }

@@ -3,6 +3,7 @@ import { api, thumbUrl, type Group } from '../api'
 import { subscribeLive } from '../liveStatus'
 import { useProtocols, protoOf, SourceInput, hlsChoicePending, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
+import { ImageRefField, GuideIconField } from '../ImageRefField'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, type RetUnit } from '../scaffold'
 import { pressable } from '../a11y'
@@ -245,7 +246,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   const [tab, setTab] = useState<DrawerTab>('settings')
   const [name, setNameRaw] = useState('')
   const [brandRef, setBrandRef] = useState('')
-  const [brandPickerOpen, setBrandPickerOpen] = useState(false)
+  const [guideIcon, setGuideIcon] = useState('')
   const [wm, setWm] = useState<WmForm>(wmDefaults())
   const [typeId, setTypeId] = useState<string | null>(null)
   const [meta, setMeta] = useState<Record<string, any>>({})
@@ -348,7 +349,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
         inputLossBehavior: lossBehavior,
         fillerSlateRef: (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && slateRef.trim() ? slateRef.trim() : null,
         fallbackTranscode,
-        brandRef: brandRef.trim() || null,
+        brandRef: brandRef.trim() || null, guideIconRef: guideIcon.trim() || null,
         // Burned in by the encoder, so transcode only: a packaging channel passes the source through.
         ...(type === 'transcode' ? { watermark: wmPatch(wm) } : {}),
         ...(typeId ? { schemaId: typeId, metadata: meta } : {}),
@@ -378,6 +379,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
               hint="The channel's identity (schema.org TelevisionChannel). Its metadata is what the guide and now/next show when no programme is scheduled." />
             <MetadataForm typeId={typeId} value={meta} onChange={setMeta} />
             <div className="hintxt">The EPG name follows the channel name on Settings until you change it here.</div>
+            <GuideIconField value={guideIcon} onChange={setGuideIcon} brandRef={brandRef} />
           </TabPane>
           <TabPane active={tab === 'access'}>
             <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Create the channel first; its publishing and access rules are set here afterwards, from the channel's Settings. Until then it inherits its content type's and the account's rules.</div>
@@ -386,16 +388,8 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
           <div className="field"><label>Channel name</label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. RTM News 24" />
           </div>
-          <div className="field"><label>Channel logo <span style={{ color: 'var(--faint)', fontWeight: 400 }}>: shown in lists, on the channel page and in the guide</span></label>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              {brandRef.trim() && <img src={thumbUrl(brandRef.trim(), 92, 68)} alt="" style={{ width: 46, height: 34, objectFit: 'contain', borderRadius: 6, background: '#0b0f16', flex: 'none' }} />}
-              <input className="inp" value={brandRef} onChange={e => setBrandRef(e.target.value)} placeholder="Pick from library or paste a URL" />
-              <button type="button" className="btn ghost" onClick={() => setBrandPickerOpen(true)}>Browse…</button>
-            </div>
-          </div>
-          <ImagePicker open={brandPickerOpen} kinds={['brand', 'other']} title="Choose or upload the channel logo"
-            uploadKind="brand" uploadFolder="brand" allowUpload
-            onClose={() => setBrandPickerOpen(false)} onPick={(url) => { setBrandRef(url); setBrandPickerOpen(false) }} />
+          <ImageRefField label="Channel logo" hint="shown in lists, on the channel page and in the guide"
+            value={brandRef} onChange={setBrandRef} pickerTitle="Choose or upload the channel logo" kinds={['brand', 'poster', 'other']} />
 
           <div className="field"><label>Type</label>
             <div className="presets">

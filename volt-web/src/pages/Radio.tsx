@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type RadioStationRow, type Group, type RadioCfg } from '../api'
 import { useProtocols, SourceInput, hlsChoicePending, type SourceValue } from '../protocols'
-import { ImagePicker } from '../ImagePicker'
+import { ImageRefField, GuideIconField } from '../ImageRefField'
 import { PageHead, NewButton, FChip, EntityCell, StatusPill, Preset, RecordingSection, RET_UNIT_SEC, splitDuration, type RetUnit, type PipelineState } from '../scaffold'
 import { SourceMetadataButton } from '../SourceMetadata'
 import { navigate } from '../router'
@@ -181,7 +181,7 @@ export default function Radio() {
 export function RadioDrawer({ groups, station, onClose, onDone }: {
   groups: Group[]
   station?: {
-    id: string; name: string; version: number; brand_ref?: string | null
+    id: string; name: string; version: number; brand_ref?: string | null; guide_icon_ref?: string | null
     schema_id?: string | null; metadata?: Record<string, any>
     radio_config: RadioCfg | null; recording_enabled?: boolean
     recording_retention_sec?: number | string | null
@@ -217,7 +217,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
   const [metaCapture, setMetaCapture] = useState(cfg.metadataCapture !== false)
   const [transcription, setTranscription] = useState(cfg.transcription === true)
   const [artRef, setArtRef] = useState(station?.brand_ref || '')
-  const [pickerOpen, setPickerOpen] = useState(false)
+  const [guideIcon, setGuideIcon] = useState(station?.guide_icon_ref || '')
   const [recOn, setRecOn] = useState(station ? station.recording_enabled !== false : true)
   const initRet = splitDuration(station?.recording_retention_sec != null ? Number(station.recording_retention_sec) : null)
   const [retNum, setRetNum] = useState(isEdit ? initRet.n : '')
@@ -251,7 +251,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
       if (isEdit) {
         await api.updateChannel(station!.id, {
           name: name.trim(), radio, recordingEnabled: recOn, recordingRetentionSec: retention,
-          ...(sources.length ? { sources } : {}), brandRef: artRef.trim() || null,
+          ...(sources.length ? { sources } : {}), brandRef: artRef.trim() || null, guideIconRef: guideIcon.trim() || null,
           ...(typeId ? { schemaId: typeId, metadata: meta } : {}),
           version: station!.version,
         } as any)
@@ -260,7 +260,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
         const ch = await api.createChannel({
           groupId, name: name.trim(), kind: 'radio', radio,
           recordingEnabled: recOn, recordingRetentionSec: retention,
-          sources, brandRef: artRef.trim() || null,
+          sources, brandRef: artRef.trim() || null, guideIconRef: guideIcon.trim() || null,
           ...(typeId ? { schemaId: typeId, metadata: meta } : {}),
         })
         onDone(ch.id)
@@ -281,6 +281,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
             <TypePicker appliesTo="radio" value={typeId} onChange={(id) => setTypeId(id)}
               hint="The station's identity (schema.org RadioStation). Its metadata is what the guide and now/next show when nothing is scheduled." />
             <MetadataForm typeId={typeId} value={meta} onChange={setMeta} />
+            <GuideIconField what="station" value={guideIcon} onChange={setGuideIcon} brandRef={artRef} />
           </TabPane>
           <TabPane active={tab === 'access'}>
             {isEdit
@@ -291,15 +292,8 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
           <div className="field"><label>Station name</label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Groove Salad" />
           </div>
-          <div className="field"><label>Station artwork <span style={{ color: 'var(--faint)' }}>— shown on the detail page and player</span></label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input className="inp" value={artRef} onChange={e => setArtRef(e.target.value)} placeholder="Pick from library or paste a URL" />
-              <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse…</button>
-            </div>
-          </div>
-          <ImagePicker open={pickerOpen} kinds={['brand', 'other']} title="Choose or upload station artwork"
-            uploadKind="brand" uploadFolder="brand" allowUpload
-            onClose={() => setPickerOpen(false)} onPick={(url) => { setArtRef(url); setPickerOpen(false) }} />
+          <ImageRefField label="Station artwork" hint="shown on the detail page, the player and the guide"
+            value={artRef} onChange={setArtRef} pickerTitle="Choose or upload station artwork" />
 
           <div className="field"><label>Type</label>
             <div className="presets">

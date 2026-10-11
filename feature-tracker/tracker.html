@@ -27,7 +27,7 @@
 </style></head><body>
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
- <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-10.</div>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-11.</div>
  <div class=sub>Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set.</div>
  <div class=chips><span class=chip style="border-color:#0891b2"><b>44</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span></div>
  <div class=chips style="margin-bottom:12px"><span class=chip><b>37</b> 📱 In app</span><span class=chip><b>12</b> 📱 Partial</span><span class=chip><b>1</b> — no UI</span></div>
@@ -322,15 +322,15 @@
     <div class=top><div class=name>Channel brand image (info + guide)</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
-    <div class=summary>A logo or artwork image on the channel: its identity, kept separate from the burned-in watermark. Set on the create form and in Settings from the Image Library. Shown as the list thumbnail and in the detail header, and served to guide clients via GET /api/epg/channels and as the XMLTV &lt;channel&gt;&lt;icon&gt;. The description comes from the channel's content type (the separate description column described on 16 Aug is not in the schema).</div>
-    <div class=meta>Built 16 Aug, endpoint added 10 Oct. Brand is never passed to the encoder (radio-brand.check.ts).</div>
-    <div class=how><b>How to test:</b> Channels &gt; New channel &gt; Brand: pick a logo, create. The list thumbnail and detail header show it. Then EPG &gt; XMLTV export &gt; Download and check the channel has an &lt;icon&gt;.</div>
+    <div class=summary>A logo or artwork image on the channel: its identity, kept separate from the burned-in watermark. Set on the create form and in Settings from the Image Library. Shown as the list thumbnail and in the detail header, and served to guide clients via GET /api/epg/channels and as the XMLTV &lt;channel&gt;&lt;icon&gt;. The description comes from the channel's content type (the separate description column described on 16 Aug is not in the schema). 11 Oct: one image field everywhere (channel logo, station artwork, guide icon, watermark) with a preview and the library file name instead of the raw path. Guide icon: the guide uses the channel or station image unless a guide icon is set on the Metadata tab or in XMLTV export; a linked imported channel's icon only fills in when we have no image. The EPG list shows each channel's image.</div>
+    <div class=meta>Built 16 Aug, endpoint added 10 Oct. Brand is never passed to the encoder (radio-brand.check.ts). 11 Oct: guide-icon 23/23 (order of images, create and settings saves, XMLTV &lt;icon&gt;, JSON guide, endpoint refusals and tenancy, lineup, keep their logo); forms checked in a browser.</div>
+    <div class=how><b>How to test:</b> Channels &gt; New channel &gt; Brand: pick a logo, create. The list thumbnail and detail header show it. Then EPG &gt; XMLTV export &gt; Download and check the channel has an &lt;icon&gt;. 11 Oct: Radio &gt; a station &gt; Settings: Station artwork shows a preview and the file name. Metadata tab &gt; Guide icon: A different image, pick one, save; EPG &gt; XMLTV export &gt; Channels in the guide shows it as 'Guide icon, set here'; Use logo goes back. EPG list shows channel images.</div>
     
     <div class=actions>
          <button class="btn ok" data-approve="Channel brand image (info + guide)">✓ Approve as working</button>
          <button class="btn warn" data-changes="Channel brand image (info + guide)">Request changes</button>
        </div>
-    
+    <div class=fblog><div class=fb>• 2026-10-11: Christian: station image field should match the channel brand setup with a preview; a linked EPG channel should use the channel or station image; allow a manual guide icon; the picker paths show an all-zeros GUID. Done: One shared image field with preview and file name; guide icon with logo as default and a manual override; EPG list and lineup show our image. The zeros were hand-typed demo ids, now random, with a re-key for existing data.</div></div>
   </div><div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>Radio: audio-only streaming workflows</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>

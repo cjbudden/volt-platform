@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, type EpgOwnerRow } from '../api'
+import { api, thumbUrl, type EpgOwnerRow } from '../api'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 import { navigate } from '../router'
 import { pressable } from '../a11y'
@@ -94,7 +94,7 @@ export default function Epg() {
               <tbody>
                 {shown.map((r, i) => (
                   <tr key={r.kind + r.id} onClick={() => open(r)} style={{ cursor: 'pointer' }}>
-                    <td><EntityCell name={r.name} sub={SUB[r.kind]} index={i} /></td>
+                    <td><EntityCell name={r.name} sub={SUB[r.kind]} index={i} imgUrl={r.icon_ref ? thumbUrl(r.icon_ref, 80, 80, 'inside') : null} /></td>
                     <td><span className={`tag type ${TAG_CLASS[r.kind]}`}>{LABEL[r.kind]}</span></td>
                     <td style={{ color: 'var(--muted)' }}>{r.programme_count || '—'}</td>
                     <td style={{ color: 'var(--muted)' }}>

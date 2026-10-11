@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { thumbUrl, type WatermarkCfg, type WatermarkPatch } from './api'
-import { ImagePicker } from './ImagePicker'
+import { ImageRefField } from './ImageRefField'
 import { pressable } from './a11y'
 
 /* ============================================================================
@@ -33,7 +33,6 @@ export const wmProblem = (v: WmForm) => v.enabled && !v.ref.trim() ? 'Choose the
 const POSITIONS: [WatermarkCfg['position'], string][] = [['tl', 'Top left'], ['tc', 'Top centre'], ['tr', 'Top right'], ['bl', 'Bottom left'], ['bc', 'Bottom centre'], ['br', 'Bottom right']]
 
 export function WatermarkFields({ value: v, onChange, hint }: { value: WmForm; onChange: (p: Partial<WmForm>) => void; hint?: string }) {
-  const [pickerOpen, setPickerOpen] = useState(false)
   const [broken, setBroken] = useState('')
   // Preview geometry, as fractions of a 1920×1080 frame.
   const ox = (Number(v.x) || 0) / 1920 * 100, oy = (Number(v.y) || 0) / 1080 * 100
@@ -59,13 +58,9 @@ export function WatermarkFields({ value: v, onChange, hint }: { value: WmForm; o
             <div className="hintxt" style={{ textAlign: 'center' }}>Placement on a 16:9 frame</div>
           </div>
           <div style={{ minWidth: 0 }}>
-            <div className="field"><label>Watermark image</label>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input className="inp" value={v.ref} onChange={e => onChange({ ref: e.target.value })} placeholder="Pick a logo, upload, or paste a URL" />
-                <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse / upload…</button>
-              </div>
-              <div className="hintxt">A PNG with transparency works best.</div>
-            </div>
+            <ImageRefField label="Watermark image" value={v.ref} onChange={ref => onChange({ ref })} preview={false}
+              pickerTitle="Choose or upload a brand watermark" kinds={['brand', 'slate', 'other']}
+              help="A PNG with transparency works best." />
             <div className="field"><label>Position</label>
               <div className="wm-pos" role="radiogroup" aria-label="Watermark position">
                 {POSITIONS.map(([p, lbl]) => (
@@ -93,9 +88,6 @@ export function WatermarkFields({ value: v, onChange, hint }: { value: WmForm; o
           </div>
         </div>
       )}
-      <ImagePicker open={pickerOpen} kinds={['brand', 'slate', 'other']} title="Choose or upload a brand watermark"
-        uploadKind="brand" uploadFolder="brands"
-        onClose={() => setPickerOpen(false)} onPick={(url) => { onChange({ ref: url }); setPickerOpen(false) }} />
     </>
   )
 }

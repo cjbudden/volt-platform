@@ -51,7 +51,7 @@ epgRouter.get(
   '/owners',
   asyncHandler(async (req, res) => {
     const rows = await query(
-      `SELECT o.kind, o.id, o.name, o.status,
+      `SELECT o.kind, o.id, o.name, o.status, o.icon_ref,
               count(p.id)::int AS programme_count,
               min(p.starts_at) AS first_at,
               max(p.ends_at)   AS last_at,
@@ -75,14 +75,20 @@ epgRouter.get(
            -- is channel / radio / event, and a kind called 'tv' would need
            -- translating at every consumer.
            SELECT CASE WHEN c.kind = 'radio' THEN 'radio' ELSE 'channel' END AS kind,
-                  c.id, c.name, c.status::text FROM channels c
+                  c.id, c.name, c.status::text,
+                  -- The image the guide shows (services/guideIcon.ts): guide icon,
+                  -- else the channel / station image, else a linked feed's icon.
+                  COALESCE(c.guide_icon_ref, c.brand_ref,
+                    (SELECT a.icon FROM epg_channel_aliases a WHERE a.channel_id = c.id AND a.icon <> ''
+                      ORDER BY a.last_seen_at DESC NULLS LAST LIMIT 1)) AS icon_ref
+             FROM channels c
              JOIN groups g ON g.id=c.group_id WHERE g.account_id=$1
            UNION ALL
-           SELECT 'event', e.id, e.name, e.status::text FROM events e
+           SELECT 'event', e.id, e.name, e.status::text, NULL::text FROM events e
              JOIN groups g ON g.id=e.group_id WHERE g.account_id=$1
          ) o
          LEFT JOIN programmes p ON (p.channel_id = o.id OR p.event_id = o.id)
-        GROUP BY o.kind, o.id, o.name, o.status
+        GROUP BY o.kind, o.id, o.name, o.status, o.icon_ref
         ORDER BY count(p.id) DESC, o.name`,
       [accountId(req)]
     );

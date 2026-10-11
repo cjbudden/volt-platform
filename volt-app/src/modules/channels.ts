@@ -26,7 +26,7 @@ const CHANNEL_EDITABLE = [
   'filler_slate_ref', 'filler_asset_id', 'fallback_transcode',
   'watermark_enabled', 'watermark_ref', 'watermark_position',
   'watermark_offset_x', 'watermark_offset_y', 'watermark_opacity', 'watermark_scale',
-  'brand_ref', 'radio_config',
+  'brand_ref', 'guide_icon_ref', 'radio_config',
   // AUTO CONNECT. Whether a reboot puts this channel back on air if it was
   // running and nobody recorded a stop. Default true; see migration 0017.
   'auto_connect',
@@ -145,6 +145,7 @@ const createSchema = z.object({
   ...FILLER,
   watermark: WATERMARK,
   brandRef: z.string().nullable().optional(),   // channel brand/logo image (identity)
+  guideIconRef: z.string().max(2048).nullable().optional(), // guide icon; null = use brandRef
   kind: z.enum(['tv', 'radio']).default('tv'),  // radio = audio-only workflows
   radio: RADIO_CFG,
   // CONTENT TYPE. A station or channel always has one: it is the base
@@ -222,6 +223,9 @@ channelsRouter.post(
     if (body.brandRef !== undefined) {
       await query('UPDATE channels SET brand_ref=$2 WHERE id=$1', [row.id, body.brandRef ?? null]);
     }
+    if (body.guideIconRef !== undefined) {
+      await query('UPDATE channels SET guide_icon_ref=$2 WHERE id=$1', [row.id, body.guideIconRef?.trim() || null]);
+    }
 
     await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
       action: 'create', entityType: 'channel', entityId: row.id,
@@ -268,6 +272,7 @@ const editSchema = z.object({
   // watermark / channel brand overlay
   watermark: WATERMARK,
   brandRef: z.string().nullable().optional(),
+  guideIconRef: z.string().max(2048).nullable().optional(),
   // subtitles / live captions (persisted to the group's shared output profile)
   captions: z.object({
     enabled: z.boolean().optional(),
@@ -332,6 +337,7 @@ const editChannel = asyncHandler(async (req, res) => {
     if (w.scale !== undefined) patch.watermark_scale = w.scale;
   }
   if (has('brandRef')) patch.brand_ref = body.brandRef ?? null;
+  if (has('guideIconRef')) patch.guide_icon_ref = body.guideIconRef?.trim() || null;
   if (has('radio') && body.radio && current.kind === 'radio') {
     // shallow-merge over the stored config so partial patches keep other keys
     const cur = current.radio_config ?? {};

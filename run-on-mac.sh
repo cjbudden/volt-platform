@@ -400,6 +400,16 @@ install_if_needed() {
 }
 
 install_if_needed "$ROOT/volt-app" "API"
+
+# HAND-TYPED IDS -> RANDOM UUIDS. The demo data used ids typed to be easy to
+# spot (...0000a001 for RTM, ...0c0001 for RTM News 24), which showed in every
+# URL and image path. This gives them real random ids, in the database and in
+# the origin / image-store folders named by them. It runs before the API so
+# nothing is writing to those folders, and once done it finds nothing and
+# changes nothing. Refuses if something is already serving on :8080.
+( cd volt-app && npx tsx scripts/rekey-placeholder-ids.ts --apply 2>&1 \
+    | grep -Ev '^  [a-z_0-9]+\.[a-z_0-9]+: [0-9]+$' | sed 's/^/    /' ) || true
+
 ( cd volt-app && mkdir -p "$ROOT/volt-app/origin"; npx tsx src/index.ts > "$ROOT/volt-app/origin/_control-plane.log" 2>&1 ) &
 API_PID=$!
 echo "    waiting for API..."

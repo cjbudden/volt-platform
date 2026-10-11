@@ -8,15 +8,20 @@
 import { query, pool } from '../src/db';
 import { hashPassword } from '../src/auth/password';
 
-const A = '00000000-0000-0000-0000-00000000a001';   // RTM
-const A2 = '00000000-0000-0000-0000-00000000a002';  // OtherCo
-const D = '00000000-0000-0000-0000-00000000d001', D2 = '00000000-0000-0000-0000-00000000d002';
-const G = '00000000-0000-0000-0000-00000000b001', G2 = '00000000-0000-0000-0000-00000000b002';
-const C1 = '00000000-0000-0000-0000-0000000c0001'; // RTM News 24 (live)
-const C2 = '00000000-0000-0000-0000-0000000c0002'; // RTM Sport (scheduled)
-const C3 = '00000000-0000-0000-0000-0000000c0003'; // OtherCo News (live)
-const UAD = '00000000-0000-0000-0000-0000000u0001'.replace(/u/g, 'a');
-const USA = '00000000-0000-0000-0000-0000000u0002'.replace(/u/g, 'a');
+// Real random (version 4) UUIDs, fixed so the seed stays idempotent. These
+// used to be hand-typed (…0000a001, …0c0001) to be easy to spot, which put
+// sequential-looking ids in every URL and image path. Anything the app creates
+// gets gen_random_uuid(); the demo should look the same.
+// scripts/rekey-placeholder-ids.ts moves an existing database off the old ones.
+const A = '3de20755-af2b-46d0-8d24-f39afbf4b3a0';   // RTM
+const A2 = '7cb4998a-f636-411b-bf18-598310209a49';  // OtherCo
+const D = '397db5f6-be10-4beb-a85a-07773abc9e00', D2 = 'c2ddf280-ffd7-4bf3-a2d1-45f622128b64';
+const G = '32bbbe70-627a-4f5a-9c69-842e0c15e228', G2 = 'a9c60eb9-aa90-478d-ab97-de6e7eb58ce5';
+const C1 = 'ae0e5ac4-9833-48b7-ab97-91df0d27467c'; // RTM News 24 (live)
+const C2 = '32cfef30-0d1d-44df-b2b8-0ed5a06bdf80'; // RTM Sport (scheduled)
+const C3 = '42da3ae9-9bc8-460e-9ad8-95f8e076c8ca'; // OtherCo News (live)
+const UAD = '8342a24d-751f-46ca-9636-f72a8a1110ef';
+const USA = '94a52932-7284-4e23-8978-96567240b68b';
 
 async function main() {
   const pw = await hashPassword('volt1234');

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, type GuideChannel, type XmltvFeed } from '../api'
+import { api, thumbUrl, type GuideChannel, type XmltvFeed } from '../api'
+import { ImagePicker } from '../ImagePicker'
 import { pressable } from '../a11y'
 
 /* ============================================================================
@@ -15,6 +16,10 @@ import { pressable } from '../a11y'
    ========================================================================== */
 
 const mono = { fontFamily: 'ui-monospace,monospace' } as const
+/** Where the image the guide shows comes from (services/guideIcon.ts). */
+const ICON_FROM: Record<string, string> = {
+  guide: 'Guide icon, set here', brand: 'The channel logo', feed: 'From the imported guide', metadata: 'From the metadata logo',
+}
 const fmtWhen = (iso: string | null) => iso ? new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'never'
 
 function CopyField({ value }: { value: string }) {
@@ -31,6 +36,15 @@ function CopyField({ value }: { value: string }) {
 
 export default function XmltvDrawer({ onClose }: { onClose: () => void }) {
   const [channels, setChannels] = useState<GuideChannel[] | null>(null)
+  const [iconFor, setIconFor] = useState<GuideChannel | null>(null)
+  const [iconMsg, setIconMsg] = useState<Record<string, string>>({})
+  async function setIcon(c: GuideChannel, ref: string | null) {
+    try {
+      const r = await api.setGuideIcon(c.id, ref)
+      setChannels(cs => cs && cs.map(x => x.id === c.id ? { ...x, guideIconRef: r.guideIconRef, iconRef: r.iconRef, iconFrom: r.iconFrom, icon: r.icon } : x))
+      setIconMsg(m => ({ ...m, [c.id]: '' }))
+    } catch (e: any) { setIconMsg(m => ({ ...m, [c.id]: e.message })) }
+  }
   const [feeds, setFeeds] = useState<XmltvFeed[] | null>(null)
   const [err, setErr] = useState('')
 
@@ -256,11 +270,11 @@ export default function XmltvDrawer({ onClose }: { onClose: () => void }) {
           )}
 
           {/* ---------------------------------------------------- channel ids */}
-          <div className="sec-label" style={{ marginTop: 22 }}>Channel IDs in the guide</div>
+          <div className="sec-label" style={{ marginTop: 22 }}>Channels in the guide</div>
           <div className="hintxt" style={{ marginBottom: 10 }}>How each channel is identified to partners. Blank uses the channel's internal ID. A readable, stable ID such as <span style={mono}>news.yourbrand.com</span> is what most guide systems expect. Changing it later breaks the partner's mapping, so agree it once.</div>
           {channels === null ? <div className="loading">Loading channels…</div> : (
             <table>
-              <thead><tr><th>Channel</th><th>XMLTV ID</th><th></th></tr></thead>
+              <thead><tr><th>Channel</th><th>Guide icon</th><th>XMLTV ID</th><th></th></tr></thead>
               <tbody>
                 {channels.map(c => (
                   <tr key={c.id}>
@@ -268,7 +282,22 @@ export default function XmltvDrawer({ onClose }: { onClose: () => void }) {
                       <div style={{ fontWeight: 600 }}>{c.name}</div>
                       <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>{c.medium === 'radio' ? 'Radio' : 'Channel'} · {c.tz}{!c.epgEnabled && ' · guide off, not exported'}</div>
                     </td>
-                    <td style={{ width: '50%' }}>
+                    <td style={{ minWidth: 190 }}>
+                      <div className="guide-icon-cell">
+                        <span className="imgref-prev" style={{ width: 40, height: 40 }}>
+                          {c.iconRef ? <img src={thumbUrl(c.iconRef, 80, 80, 'inside')} alt="" /> : <span className="imgref-bad" style={{ color: 'var(--faint)' }}>None</span>}
+                        </span>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="hintxt" style={{ marginTop: 0 }}>{ICON_FROM[c.iconFrom ?? ''] ?? 'No image yet'}</div>
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 3 }}>
+                            <button type="button" className="btn ghost sm" onClick={() => setIconFor(c)}>{c.guideIconRef ? 'Change' : 'Set guide icon'}</button>
+                            {c.guideIconRef && <button type="button" className="btn ghost sm" onClick={() => setIcon(c, null)}>Use {c.medium === 'radio' ? 'artwork' : 'logo'}</button>}
+                          </div>
+                          {iconMsg[c.id] && <div className="err" style={{ fontSize: 'var(--fs-xs)' }}>{iconMsg[c.id]}</div>}
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ width: '40%' }}>
                       <input className="inp" value={ids[c.id] ?? ''} placeholder={c.id} style={{ ...mono, fontSize: 'var(--fs-sm)' }}
                         onChange={e => setIds(m => ({ ...m, [c.id]: e.target.value }))} />
                       {idMsg[c.id] && <div style={{ fontSize: 'var(--fs-xs)', color: idMsg[c.id] === 'Saved' ? 'var(--muted)' : 'var(--danger, #f87171)', marginTop: 3 }}>{idMsg[c.id]}</div>}
@@ -281,6 +310,9 @@ export default function XmltvDrawer({ onClose }: { onClose: () => void }) {
               </tbody>
             </table>
           )}
+          <ImagePicker open={!!iconFor} kinds={['brand', 'poster', 'other']} title={`Guide icon for ${iconFor?.name ?? ''}`}
+            uploadKind="brand" uploadFolder="brands" allowUpload
+            onClose={() => setIconFor(null)} onPick={(url) => { const c = iconFor!; setIconFor(null); setIcon(c, url) }} />
         </div>
       </div>
     </div>

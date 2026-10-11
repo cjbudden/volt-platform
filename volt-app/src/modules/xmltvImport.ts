@@ -219,7 +219,8 @@ xmltvImportRouter.get('/sources/:id/channels', asyncHandler(async (req, res) => 
   const cur = await ownedSource(req.params.id, accountId(req));
   if (!cur) throw notFound('Import source not found');
   const rows = await query<any>(
-    `SELECT a.*, c.name AS channel_name, c.kind AS channel_kind FROM epg_channel_aliases a LEFT JOIN channels c ON c.id = a.channel_id
+    `SELECT a.*, c.name AS channel_name, c.kind AS channel_kind, COALESCE(c.guide_icon_ref, c.brand_ref) AS channel_icon_ref
+       FROM epg_channel_aliases a LEFT JOIN channels c ON c.id = a.channel_id
       WHERE a.source_id = $1`, [cur.id]);
   const ours = await query<any>(`SELECT c.id, c.name FROM channels c JOIN groups g ON g.id = c.group_id WHERE g.account_id = $1`, [accountId(req)]);
   const used = new Set(rows.filter((r) => r.channel_id).map((r) => r.channel_id));
@@ -235,6 +236,8 @@ xmltvImportRouter.get('/sources/:id/channels', asyncHandler(async (req, res) => 
     id: r.id, externalId: r.external_id, displayName: r.display_name, icon: r.icon, lcn: r.lcn,
     state: r.channel_id ? 'used' : r.ignored ? 'not_used' : 'waiting',
     channelId: r.channel_id, channelName: r.channel_name, channelKind: r.channel_kind, mappedBy: r.mapped_by,
+    // Once linked, the guide shows OUR image; theirs only fills in when we have none.
+    channelIconRef: r.channel_icon_ref ?? null,
     lastSeenAt: r.last_seen_at, firstSeenAt: r.first_seen_at, lastProgrammes: r.last_programmes,
     programmesInFeed: r.programmes_in_feed, feedFrom: r.feed_from, feedTo: r.feed_to,
     sameNameAs: dup.get(r.id) ?? [],
@@ -352,6 +355,27 @@ xmltvImportRouter.post('/sources/:id/channels/bulk', asyncHandler(async (req, re
     }
   }
   res.json({ done: done.length, skipped });
+}));
+
+/**
+ * Use their channel's icon as the linked Volt channel's brand image. Only
+ * when the Volt channel has no image of its own: this never replaces a logo
+ * someone chose. The URL is kept as theirs, so it follows their artwork.
+ */
+xmltvImportRouter.post('/sources/:id/channels/:aliasId/use-icon', asyncHandler(async (req, res) => {
+  const account = accountId(req);
+  const cur = await ownedSource(req.params.id, account);
+  if (!cur) throw notFound('Import source not found');
+  const a = await one<any>(`SELECT * FROM epg_channel_aliases WHERE source_id = $1 AND id = $2`, [cur.id, req.params.aliasId]);
+  if (!a) throw notFound('Channel not found in this feed');
+  if (!a.channel_id) throw badRequest('Link this channel to a Volt channel first');
+  if (!a.icon || !/^https?:\/\//i.test(a.icon)) throw badRequest('Their channel has no usable icon');
+  const ch = await one<any>(`UPDATE channels SET brand_ref = $2, updated_at = now() WHERE id = $1 AND brand_ref IS NULL AND guide_icon_ref IS NULL RETURNING id, brand_ref`, [a.channel_id, a.icon]);
+  if (!ch) throw badRequest('That channel already has its own image');
+  const who = actor(req);
+  await writeAudit(null, { accountId: account, userId: who.userId, label: who.label, action: 'update', entityType: 'channel', entityId: ch.id,
+    snapshot: { brand_ref: a.icon, from: `XMLTV import "${cur.name}"` } });
+  res.json({ channelId: ch.id, brandRef: ch.brand_ref });
 }));
 
 xmltvImportRouter.get('/sources/:id/runs', asyncHandler(async (req, res) => {
