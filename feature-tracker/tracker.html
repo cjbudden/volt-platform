@@ -478,15 +478,15 @@
     <div class=top><div class=name>Content types (standard schema.org types)</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>
       <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
-    <div class=summary>Every account gets standard types (radio station, TV channel, broadcast event and its family, clip, episode), each editable and cloneable. A channel, station or event always has a type; its fields feed the guide (EPG slots), schema.org output and anything derived from it, which inherits the type and a copy of its metadata.</div>
-    <div class=meta>content-types.check.ts 121/121.</div>
-    <div class=how><b>How to test:</b> Admin &gt; Content Types &gt; add a field to TV channel and map it to an EPG slot &gt; open a channel &gt; Metadata tab: the field is there &gt; add a programme on that channel: it is prefilled.</div>
+    <div class=summary>Every account gets standard types (radio station, TV channel, broadcast event and its family, clip, episode), each editable and cloneable. A channel, station or event always has a type; its fields feed the guide (EPG slots), schema.org output and anything derived from it, which inherits the type and a copy of its metadata. 11 Oct: the channel, station or event name on Settings is the metadata name: always written to metadata.name, shown read-only on the Metadata tab instead of a second box; the metadata Logo is replaced by the Guide icon on channel and station forms.</div>
+    <div class=meta>content-types.check.ts 121/121. 11 Oct: metadata-name 10/10 (create, rename, metadata cannot override, station, event, guide title, migration, history), edit-audit 23/23.</div>
+    <div class=how><b>How to test:</b> Admin &gt; Content Types &gt; add a field to TV channel and map it to an EPG slot &gt; open a channel &gt; Metadata tab: the field is there &gt; add a programme on that channel: it is prefilled. 11 Oct: open a channel's Settings &gt; Metadata: Name shows the channel name read-only, no Logo field. Rename the channel on Settings and save: the guide and the metadata carry the new name, and History shows one change (name).</div>
     
     <div class=actions>
          <button class="btn ok" data-approve="Content types (standard schema.org types)">✓ Approve as working</button>
          <button class="btn warn" data-changes="Content types (standard schema.org types)">Request changes</button>
        </div>
-    
+    <div class=fblog><div class=fb>• 2026-10-11: Christian: station, channel and event name are default, required fields; map them to the metadata name field and hide that field in the app. Done: the name is always written to metadata.name and shown read-only on the Metadata tab.</div></div>
   </div><div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>Review and QC</div>
       <span class=pill style="background:#0891b2">🧪 Ready to test</span>

@@ -559,15 +559,20 @@
     {
       "id": "content-types",
       "name": "Content types (standard schema.org types)",
-      "summary": "Every account gets standard types (radio station, TV channel, broadcast event and its family, clip, episode), each editable and cloneable. A channel, station or event always has a type; its fields feed the guide (EPG slots), schema.org output and anything derived from it, which inherits the type and a copy of its metadata.",
+      "summary": "Every account gets standard types (radio station, TV channel, broadcast event and its family, clip, episode), each editable and cloneable. A channel, station or event always has a type; its fields feed the guide (EPG slots), schema.org output and anything derived from it, which inherits the type and a copy of its metadata. 11 Oct: the channel, station or event name on Settings is the metadata name: always written to metadata.name, shown read-only on the Metadata tab instead of a second box; the metadata Logo is replaced by the Guide icon on channel and station forms.",
       "status": "ready_to_test",
       "app_surface": "full",
       "test": {
-        "how": "Admin > Content Types > add a field to TV channel and map it to an EPG slot > open a channel > Metadata tab: the field is there > add a programme on that channel: it is prefilled.",
+        "how": "Admin > Content Types > add a field to TV channel and map it to an EPG slot > open a channel > Metadata tab: the field is there > add a programme on that channel: it is prefilled. 11 Oct: open a channel's Settings > Metadata: Name shows the channel name read-only, no Logo field. Rename the channel on Settings and save: the guide and the metadata carry the new name, and History shows one change (name).",
         "artifact": ""
       },
-      "checks": "content-types.check.ts 121/121.",
-      "feedback": []
+      "checks": "content-types.check.ts 121/121. 11 Oct: metadata-name 10/10 (create, rename, metadata cannot override, station, event, guide title, migration, history), edit-audit 23/23.",
+      "feedback": [
+        {
+          "date": "2026-10-11",
+          "note": "Christian: station, channel and event name are default, required fields; map them to the metadata name field and hide that field in the app. Done: the name is always written to metadata.name and shown read-only on the Metadata tab."
+        }
+      ]
     },
     {
       "id": "review-qc",

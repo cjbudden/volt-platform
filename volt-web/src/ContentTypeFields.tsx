@@ -47,11 +47,19 @@ export function TypePicker({ appliesTo, value, onChange, disabled, hint }: {
 /** Turn a stored value into what the control shows, and back. */
 const toText = (v: any) => v == null ? '' : Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? (v.name ?? JSON.stringify(v)) : String(v)
 
-export function MetadataForm({ typeId, value, onChange, compact }: {
+export function MetadataForm({ typeId, value, onChange, compact, entityName, hide }: {
   typeId: string | null
   value: Record<string, any>
   onChange: (v: Record<string, any>) => void
   compact?: boolean
+  /**
+   * For a channel, station or event. Its name (Settings) IS the metadata name:
+   * the server always writes it there, so the type's `name` field is not shown
+   * as a second box to fill in. The name is shown read-only instead.
+   */
+  entityName?: { value: string; where: string }
+  /** Field keys another part of the form already sets (a channel's logo is its Guide icon). */
+  hide?: string[]
 }) {
   const [fields, setFields] = useState<SchemaField[] | null>(null)
   useEffect(() => {
@@ -67,9 +75,18 @@ export function MetadataForm({ typeId, value, onChange, compact }: {
     if (v === '' || v == null || (Array.isArray(v) && !v.length)) delete next[k]; else next[k] = v
     onChange(next)
   }
+  const shown = fields.filter(f => !(entityName && f.key === 'name') && !hide?.includes(f.key))
+  const nameField = entityName ? fields.find(f => f.key === 'name') : undefined
   return (
     <div style={compact ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0 14px' } : undefined}>
-      {fields.map(f => {
+      {entityName && (
+        <div className="field">
+          <label>{nameField?.label || 'Name'}{nameField?.epg && <span style={{ marginLeft: 6, fontSize: 'var(--fs-micro)', color: 'var(--faint)', fontWeight: 400 }}>→ EPG {nameField.epg}</span>}</label>
+          <div className="meta-name-ro" aria-readonly="true">{entityName.value.trim() || <span style={{ color: 'var(--faint)', fontWeight: 400 }}>Not named yet</span>}</div>
+          <div className="hintxt">The {entityName.where} name, set on Settings. It is the name in the metadata and the guide.</div>
+        </div>
+      )}
+      {shown.map(f => {
         const v = value[f.key]
         const label = <label>{f.label || f.key}{f.required && <span style={{ color: 'var(--warn,#fbbf24)' }}> *</span>}
           {f.epg && <span style={{ marginLeft: 6, fontSize: 'var(--fs-micro)', color: 'var(--faint)', fontWeight: 400 }}>→ EPG {f.epg}</span>}</label>

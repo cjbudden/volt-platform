@@ -677,3 +677,5 @@ button{font-family:inherit}
 .seg-choice button+button{border-left:1px solid var(--border)}
 .seg-choice button.sel{background:var(--brand-dim);color:var(--text)}
 .guide-icon-cell{display:flex;gap:8px;align-items:center}
+.req{color:var(--warn,#fbbf24);font-weight:400}
+.meta-name-ro{padding:2px 0;font-weight:600;font-size:var(--fs-body);color:var(--text)}

@@ -48,6 +48,14 @@ export function diff(current: Record<string, any>, patch: Record<string, any>, a
     const from = current[k];
     if (JSON.stringify(from ?? null) !== JSON.stringify(to ?? null)) { changes[k] = { from, to }; set[k] = to; }
   }
+  // A RENAME IS ONE CHANGE. metadata.name is always the entity's own name
+  // (channels.ts, events.ts), so a rename rewrites it too. That is stored, but
+  // reported as the rename alone: the history should say "name", not "name and
+  // metadata", when nothing else in the metadata moved.
+  if (changes.name && changes.metadata) {
+    const rest = (m: any) => { const { name: _n, ...r } = (m ?? {}) as Record<string, any>; return JSON.stringify(r); };
+    if (rest(changes.metadata.from) === rest(changes.metadata.to)) delete changes.metadata;
+  }
   return { changes, set };
 }
 
@@ -90,6 +98,7 @@ export async function patchEntity(o: {
   const { changes, set } = diff(o.current, o.patch, o.allowed);
   const cols = Object.keys(set);
   if (!cols.length) return { row: o.current, changed: [] };
+  const reported = Object.keys(changes);   // what moved, as a person would say it (see diff)
   for (const c of cols) if (!IDENT.test(c)) throw new Error(`bad column name: ${c}`);
 
   return tx(async (client) => {
@@ -140,14 +149,14 @@ export async function patchEntity(o: {
         publish(o.accountId, 'record', {
           kind: o.entityType,
           id: o.id,
-          changed: cols,
+          changed: reported,
           version: Number(row.version),
           by: o.userId ?? null,
           label: o.label ?? null,
         });
       } catch { /* telemetry must never break a write */ }
     }
-    return { row, changed: cols };
+    return { row, changed: reported };
   });
 }
 

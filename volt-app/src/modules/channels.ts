@@ -174,9 +174,10 @@ channelsRouter.post(
       : null;
     const typeId = body.schemaId ?? await defaultTypeId(accountId(req), body.kind === 'radio' ? 'radio' : 'tv');
     const md = await validateEntityMetadata(accountId(req), typeId,
-      // The type's required `name` IS the channel's own name: an API client that
-      // sends a name but no metadata was refused with "missing required field: name".
-      { name: body.name, ...(body.metadata ?? {}) }, ['channel']);
+      // THE METADATA NAME IS THE CHANNEL'S NAME. The type's required `name` is
+      // not a second field to keep in step: it is always the channel's own name,
+      // which wins over any `name` sent inside metadata.
+      { ...(body.metadata ?? {}), name: body.name }, ['channel']);
 
     // retention: seconds is the source of truth; derive the coarse day field in sync
     const retSec = body.recordingRetentionSec ?? (body.recordingRetentionDays != null ? body.recordingRetentionDays * 86400 : null);
@@ -344,12 +345,13 @@ const editChannel = asyncHandler(async (req, res) => {
     patch.radio_config = { ...cur, ...body.radio,
       outputs: { ...(cur.outputs ?? {}), ...(body.radio.outputs ?? {}) } };
   }
-  const touchMeta = has('schemaId') || has('metadata');
+  // A rename rewrites metadata.name too: it is the same value (see create).
+  const touchMeta = has('schemaId') || has('metadata') || has('name');
   if (touchMeta) {
     // A type is required: clearing it is refused, changing it is allowed.
     if (has('schemaId') && body.schemaId == null) throw badRequest('A content type is required. Choose another type instead of clearing it.');
     const md = await validateEntityMetadata(accountId(req), (has('schemaId') ? body.schemaId : current.schema_id) ?? null,
-      has('metadata') ? body.metadata : current.metadata, ['channel']);
+      { ...((has('metadata') ? body.metadata : current.metadata) ?? {}), name: has('name') ? body.name : current.name }, ['channel']);
     patch.schema_id = md.schemaId;
     patch.metadata = md.metadata;
   }

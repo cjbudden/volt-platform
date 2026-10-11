@@ -1798,6 +1798,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
 
   async function save() {
     setErr('')
+    if (!name.trim()) { setTab('settings'); setErr('Give the channel a name'); return }
     const hlsWait = await hlsChoicePending([{ url: primary.url, protocol: primary.protocol, original: src0?.ingest_url }, { url: backup.url, protocol: backup.protocol, original: src1?.ingest_url }]); if (hlsWait) { setErr(hlsWait); return }
     const patch: ChannelSettingsPatch = { version: d.version }
     if (name.trim() && name.trim() !== d.name) patch.name = name.trim()
@@ -1869,14 +1870,14 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           <TabPane active={tab === 'metadata'}>
             <TypePicker appliesTo="tv" value={typeId} onChange={(id) => setTypeId(id)}
               hint="The channel's identity. Its metadata is what the guide and now/next show when no programme is scheduled." />
-            <MetadataForm typeId={typeId} value={meta} onChange={setMeta} />
+            <MetadataForm typeId={typeId} value={meta} onChange={setMeta} entityName={{ value: name, where: 'channel' }} hide={['logo']} />
             <GuideIconField value={guideIcon} onChange={setGuideIcon} brandRef={brandRef} />
           </TabPane>
           <TabPane active={tab === 'access'}>
             <RuleEditor scopeKind="owner" scopeId={d.id} compact resolveQuery={{ channelId: d.id, schemaId: typeId }} />
           </TabPane>
           <TabPane active={tab === 'settings'}>
-          <div className="field"><label>Channel name</label><input className="inp" value={name} onChange={e => setName(e.target.value)} /></div>
+          <div className="field"><label>Channel name <span className="req">*</span></label><input className="inp" value={name} onChange={e => setName(e.target.value)} /></div>
 
           <ImageRefField label="Channel logo" hint="shown in lists, on the channel page and in the guide"
             value={brandRef} onChange={setBrandRef} pickerTitle="Choose or upload the channel logo" kinds={['brand', 'poster', 'slate', 'other']} />

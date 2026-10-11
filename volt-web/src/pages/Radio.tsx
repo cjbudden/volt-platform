@@ -280,7 +280,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
           <TabPane active={tab === 'metadata'}>
             <TypePicker appliesTo="radio" value={typeId} onChange={(id) => setTypeId(id)}
               hint="The station's identity (schema.org RadioStation). Its metadata is what the guide and now/next show when nothing is scheduled." />
-            <MetadataForm typeId={typeId} value={meta} onChange={setMeta} />
+            <MetadataForm typeId={typeId} value={meta} onChange={setMeta} entityName={{ value: name, where: 'station' }} hide={['logo']} />
             <GuideIconField what="station" value={guideIcon} onChange={setGuideIcon} brandRef={artRef} />
           </TabPane>
           <TabPane active={tab === 'access'}>
@@ -289,7 +289,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
               : <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Create the station first; its publishing and access rules are set here afterwards. Until then it inherits its content type's and the account's rules.</div>}
           </TabPane>
           <TabPane active={tab === 'settings'}>
-          <div className="field"><label>Station name</label>
+          <div className="field"><label>Station name <span className="req">*</span></label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Groove Salad" />
           </div>
           <ImageRefField label="Station artwork" hint="shown on the detail page, the player and the guide"

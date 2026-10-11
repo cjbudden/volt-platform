@@ -124,9 +124,9 @@ eventsRouter.post(
     // generic Broadcast event.
     const typeId = b.schemaId ?? await defaultTypeId(accountId(req), 'event');
     const md = await validateEntityMetadata(accountId(req), typeId,
-      // The type's required `name` IS the event's own name: an API client that
-      // sends a name but no metadata was refused with "missing required field: name".
-      { name: b.name, ...(b.metadata ?? {}) }, ['event']);
+      // THE METADATA NAME IS THE EVENT'S NAME, always; it wins over any `name`
+      // sent inside metadata (see channels.ts).
+      { ...(b.metadata ?? {}), name: b.name }, ['event']);
     const who = actor(req);
     const row = await one<any>(
       `INSERT INTO events(group_id, name, scheduled_start, scheduled_end,
@@ -207,10 +207,10 @@ const editEvent = asyncHandler(async (req, res) => {
   if (has('autoFailback')) patch.auto_failback = b.autoFailback;
   if (has('inputLossBehavior')) patch.input_loss_behavior = b.inputLossBehavior;
   if (has('fillerSlateRef')) patch.filler_slate_ref = b.fillerSlateRef ?? null;
-  if (has('schemaId') || has('metadata')) {
+  if (has('schemaId') || has('metadata') || has('name')) {
     if (has('schemaId') && b.schemaId == null) throw badRequest('A content type is required. Choose another type instead of clearing it.');
     const md = await validateEntityMetadata(accountId(req), (has('schemaId') ? b.schemaId : current.schema_id) ?? null,
-      has('metadata') ? b.metadata : current.metadata, ['event']);
+      { ...((has('metadata') ? b.metadata : current.metadata) ?? {}), name: has('name') ? b.name : current.name }, ['event']);
     patch.schema_id = md.schemaId;
     patch.metadata = md.metadata;
   }

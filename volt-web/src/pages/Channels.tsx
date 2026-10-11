@@ -224,9 +224,9 @@ type PkgRow = { label: string; bitrateKbps: number; protocol: string; url: strin
      Settings  what the channel IS and how it runs: name and logo, transcode or
                packaging and the GROUP it goes in, sources, ladder, watermark,
                filler, captions, delivery, recording
-     Metadata  its content type and the guide fields (EPG title, description,
-               genre, language ...). The EPG name follows the channel name
-               until it is edited on its own, so it is not typed twice.
+     Metadata  its content type and the guide fields (description, genre,
+               language ...). The name is not one of them: the channel name on
+               Settings is the metadata name, so it is never typed twice.
      Access    publishing and access rules, set once the channel exists
 
    THE GROUP. A channel goes into a group, and the group's profile decides
@@ -292,11 +292,8 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   const group = candidates.find(g => g.id === groupId) ?? candidates.find(g => g.channel_count < g.max_channels) ?? candidates[0]
   const groupFull = !!group && group.channel_count >= group.max_channels
 
-  // The EPG title follows the channel name until somebody edits it on its own.
-  function setName(v: string) {
-    setMeta(m => (!m.name || m.name === name) ? { ...m, name: v } : m)
-    setNameRaw(v)
-  }
+  // The channel name IS the metadata name (the server writes it there).
+  const setName = setNameRaw
 
   function setRow(i: number, patch: Partial<PkgRow>) { setRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r)) }
   function addRow() { setRows(rs => [...rs, { label: '', bitrateKbps: 1000, protocol: 'hls', url: '', backupUrl: '' }]) }
@@ -377,15 +374,14 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
           <TabPane active={tab === 'metadata'}>
             <TypePicker appliesTo="tv" value={typeId} onChange={(id) => setTypeId(id)}
               hint="The channel's identity (schema.org TelevisionChannel). Its metadata is what the guide and now/next show when no programme is scheduled." />
-            <MetadataForm typeId={typeId} value={meta} onChange={setMeta} />
-            <div className="hintxt">The EPG name follows the channel name on Settings until you change it here.</div>
+            <MetadataForm typeId={typeId} value={meta} onChange={setMeta} entityName={{ value: name, where: 'channel' }} hide={['logo']} />
             <GuideIconField value={guideIcon} onChange={setGuideIcon} brandRef={brandRef} />
           </TabPane>
           <TabPane active={tab === 'access'}>
             <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Create the channel first; its publishing and access rules are set here afterwards, from the channel's Settings. Until then it inherits its content type's and the account's rules.</div>
           </TabPane>
           <TabPane active={tab === 'settings'}>
-          <div className="field"><label>Channel name</label>
+          <div className="field"><label>Channel name <span className="req">*</span></label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. RTM News 24" />
           </div>
           <ImageRefField label="Channel logo" hint="shown in lists, on the channel page and in the guide"

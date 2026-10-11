@@ -265,7 +265,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
             {/* THE EVENT'S KIND: a town hall, a match, a service. It decides
                 the fields under it and the EPG fields they fill. */}
             <TypePicker appliesTo="event" value={typeId} onChange={(id) => setTypeId(id)} />
-            <MetadataForm typeId={typeId} value={meta} onChange={setMeta} />
+            <MetadataForm typeId={typeId} value={meta} onChange={setMeta} entityName={{ value: name, where: 'event' }} />
           </TabPane>
           <TabPane active={tab === 'access'}>
             {isEdit
@@ -273,7 +273,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
               : <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Create the event first; its publishing and access rules are set here afterwards. Until then it inherits its content type's and the account's rules.</div>}
           </TabPane>
           <TabPane active={tab === 'settings'}>
-          <div className="field"><label>Event name</label>
+          <div className="field"><label>Event name <span className="req">*</span></label>
             <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Cup Final 2026" />
           </div>
 
