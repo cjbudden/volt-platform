@@ -1128,6 +1128,34 @@ export const api = {
   socialRetry: (id: string, post?: SocialPost) => req(`/social/publications/${id}/retry`, { method: 'POST', body: JSON.stringify(post ? { post } : {}) }),
   socialTakeDown: (id: string) => req(`/social/publications/${id}/remove`, { method: 'POST' }),
   socialSyncViews: (): Promise<{ synced: number }> => req('/social/sync-views', { method: 'POST' }),
+  // ---- workflows + add-ons (modules/workflows.ts, WORKFLOWS.md) ----
+  workflowMap: (): Promise<WorkflowMap> => req('/workflows/map'),
+  workflowRuns: (q: { state?: string; addonId?: string; subjectType?: string; subjectId?: string; open?: boolean; limit?: number } = {}): Promise<{ runs: AddonRun[] }> => {
+    const p = new URLSearchParams()
+    for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== '' && v !== false) p.set(k, String(v === true ? 1 : v))
+    return req('/workflows/runs' + (p.toString() ? `?${p}` : ''))
+  },
+  workflowRun: (id: string): Promise<AddonRunDetail> => req(`/workflows/runs/${id}`),
+  startAddonRun: (b: { addonId: string; subjectType: 'recording' | 'vod_asset'; subjectId: string; options?: Record<string, unknown> }): Promise<AddonRun> =>
+    req('/workflows/runs', { method: 'POST', body: JSON.stringify(b) }),
+  cancelAddonRun: (id: string): Promise<AddonRun> => req(`/workflows/runs/${id}/cancel`, { method: 'POST' }),
+  retryAddonRun: (id: string): Promise<AddonRun> => req(`/workflows/runs/${id}/retry`, { method: 'POST' }),
+  workflowTrace: (subjectType: string, subjectId: string): Promise<WorkflowTrace> =>
+    req(`/workflows/trace?subjectType=${encodeURIComponent(subjectType)}&subjectId=${encodeURIComponent(subjectId)}`),
+  workflowEvents: (limit = 40): Promise<{ events: WorkflowEvent[] }> => req(`/workflows/events?limit=${limit}`),
+  addons: (): Promise<{ addons: AddonService[] }> => req('/addons'),
+  createAddon: (b: AddonInput): Promise<AddonService & { signingSecret: string }> => req('/addons', { method: 'POST', body: JSON.stringify(b) }),
+  updateAddon: (id: string, b: Partial<AddonInput>): Promise<AddonService> => req(`/addons/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteAddon: (id: string) => req(`/addons/${id}`, { method: 'DELETE' }),
+  rotateAddonSecret: (id: string): Promise<{ id: string; signingSecret: string }> => req(`/addons/${id}/rotate-secret`, { method: 'POST' }),
+  testAddon: (id: string): Promise<{ ok: boolean; status: number | null; ms: number; message: string }> => req(`/addons/${id}/test`, { method: 'POST' }),
+  addonTriggers: (): Promise<{ triggers: AddonTrigger[] }> => req('/addons/triggers'),
+  createAddonTrigger: (b: { addonId: string; hook: string; filter?: { channelIds?: string[]; eventIds?: string[]; groupIds?: string[] }; options?: Record<string, unknown>; enabled?: boolean }): Promise<AddonTrigger> =>
+    req('/addons/triggers', { method: 'POST', body: JSON.stringify(b) }),
+  updateAddonTrigger: (id: string, b: { enabled?: boolean; filter?: any; options?: any }): Promise<AddonTrigger> =>
+    req(`/addons/triggers/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  deleteAddonTrigger: (id: string) => req(`/addons/triggers/${id}`, { method: 'DELETE' }),
+  engines: (): Promise<{ engines: EngineDescriptor[] }> => req('/engines'),
   // ---- notifications (modules/notifications.ts) ----
   inbox: (): Promise<{ recipient: string; unread: number; items: InboxItem[] }> => req('/notifications/inbox'),
   markRead: (id: string) => req(`/notifications/inbox/${id}/read`, { method: 'POST' }),
@@ -2484,4 +2512,49 @@ export interface AssetAvailability {
   override: RuleSettings
   plan: ResolvedRules
   publications: { id: string; platform: string; status: string; external_url: string | null; published_at: string | null; app_id: string | null; app_name: string | null; target_name: string | null }[]
+}
+
+// ---- workflows + add-ons ----------------------------------------------------
+export type AddonRunState = 'queued' | 'dispatched' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'
+export type AddonCategory = 'ai_agent' | 'transcription' | 'qc' | 'metadata' | 'distribution' | 'other'
+export interface WorkflowLane { id: string; label: string; description: string }
+export interface WorkflowStage { id: string; label: string; lane: string; col: number; description: string; impl: string }
+export interface WorkflowHookTrigger { id: string; hook: string; enabled: boolean; filter: any; addon_id: string; addon_name: string; category: AddonCategory; addon_enabled: boolean }
+export interface WorkflowHook {
+  id: string; label: string; stage: string; subject: string; live: boolean; description: string
+  fired24h: number; lastFiredAt: string | null
+  triggers: WorkflowHookTrigger[]
+  runs24h: Partial<Record<AddonRunState, number>>
+}
+export interface WorkflowMap {
+  lanes: WorkflowLane[]; stages: WorkflowStage[]; edges: [string, string][]; hooks: WorkflowHook[]
+  manualRuns24h: Partial<Record<AddonRunState, number>>
+}
+export interface AddonRun {
+  id: string; addon_id: string; addon_name: string; category: AddonCategory; addon_kind: 'webhook' | 'demo'
+  trigger_id: string | null; hook: string
+  subject_type: 'channel' | 'event' | 'recording' | 'vod_asset'; subject_id: string; subject_title: string | null
+  channel_id: string | null; event_id: string | null
+  state: AddonRunState; progress_pct: number; step: string | null; steps: string[]
+  external_ref: string | null; error: string | null; created_by: string | null
+  created_at: string; dispatched_at: string | null; updated_at: string; finished_at: string | null; deadline_at: string
+  job_id?: string
+}
+export interface AddonRunEvent { id: number; ts: string; type: string; state: string | null; progress_pct: number | null; step: string | null; message: string | null }
+export interface AddonRunDetail extends AddonRun { result: any; options: any; events: AddonRunEvent[] }
+export interface WorkflowEvent { id: number; hook: string; subject_type: string; subject_id: string; title: string | null; channel_id?: string | null; event_id?: string | null; data: any; created_at: string }
+export interface WorkflowTrace { subject: { type: string; id: string; title: string }; events: WorkflowEvent[]; runs: AddonRun[] }
+export interface AddonService {
+  id: string; name: string; description: string | null; category: AddonCategory; kind: 'webhook' | 'demo'
+  endpoint_url: string | null; accepts: string[]; steps: string[]; timeout_sec: number; max_attempts: number; enabled: boolean
+  created_at: string; updated_at: string; open_runs?: number; failed_24h?: number; last_run_at?: string | null
+}
+export interface AddonInput {
+  name: string; description?: string | null; category?: AddonCategory; kind?: 'webhook' | 'demo'
+  endpointUrl?: string | null; accepts?: string[]; steps?: string[]; timeoutSec?: number; maxAttempts?: number; enabled?: boolean
+}
+export interface AddonTrigger { id: string; addon_id: string; addon_name: string; hook: string; filter: any; options: any; enabled: boolean; created_at: string }
+export interface EngineDescriptor {
+  id: string; name: string; vendor: string; availability: 'installed' | 'planned'; defaultMode: 'encode_only' | 'full'
+  summary: string; costNote?: string; todo?: string[]; caps: Record<string, any>
 }

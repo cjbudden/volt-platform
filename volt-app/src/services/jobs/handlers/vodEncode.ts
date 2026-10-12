@@ -29,6 +29,7 @@ import { config } from '../../../config';
 import { fitToSource, describeFit, type SourceProbe } from '../../encode/ladder';
 import { loadLadder, resolveLadderFor, NoLadderError } from '../../encode/store';
 import { PermanentError, registerHandler, type JobContext } from '../worker';
+import { fireHook } from '../../workflows/hooks';
 
 export const VOD_ENCODE = 'vod.encode';
 
@@ -227,6 +228,8 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
      JSON.stringify(encodeResult),
      JSON.stringify({ hls: !!master, dash: !!mpd, progressive: false })]
   );
+
+  fireHook('vod.encoded', 'vod_asset', p.vodAssetId, { renditions: fit.kept.length });
 
   return {
     vodAssetId: p.vodAssetId,

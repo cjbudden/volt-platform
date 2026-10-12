@@ -77,113 +77,122 @@ async function resolveAccount(kind: 'channel' | 'event', id: string): Promise<st
   return row?.account_id ?? null;
 }
 
+/**
+ * Apply one status report (event and/or snapshot). The encoder's own POST lands
+ * here, and so do vendor engine webhooks once normalised (modules/engines.ts),
+ * so a MediaLive or Bitmovin alert drives the same event log, health gates and
+ * teardown as our own encoder's report.
+ */
+export async function applyReport(raw: unknown): Promise<void> {
+  const body = reportSchema.parse(raw);
+  const acct = await resolveAccount(body.kind, body.id);
+  if (!acct) throw notFound('Unknown stream');
+  const col = body.kind === 'channel' ? 'channel_id' : 'event_id';
+
+  if (body.event) {
+    const e = body.event;
+    await query(
+      `INSERT INTO stream_events(${col}, seq, type, detail, ts)
+       VALUES ($1,$2,$3,$4, COALESCE(to_timestamp($5::double precision / 1000.0), now()))`,
+      [body.id, e.seq ?? null, e.type, e.detail ?? {}, e.ts_ms ?? null]
+    );
+    // push every event to live admins too (not just status snapshots), so the UI
+    // refreshes on channel.start/stop, source.up/down, input.error, output.stalled…
+    publish(acct, 'event', { kind: body.kind, id: body.id, type: e.type });
+    // The encoder can DIE on its own (e.g. packager crash) without the control
+    // plane knowing. When it reports channel.stop while we still think it's live,
+    // run the real teardown so status stops lying (instances terminated, channel
+    // ended, recordings closed). Guarded on status='live' so a normal operator
+    // stop (which already set 'ended') is not double-processed.
+    // ----------------------------------------------------------------------
+    //  WHAT THE ENCODER ACTUALLY PRODUCED. Until this existed the event was
+    //  emitted and nobody listened, so the API kept advertising an MP3 URL
+    //  for an output the running station had dropped. Pressing Listen then
+    //  attached to a URL with no audio behind it and said nothing.
+    //
+    //  channel.start CLEARS the map. A run decides its own outputs at launch
+    //  (the relay probe runs per start), so inheriting the previous run's
+    //  verdict would hide an MP3 output that came back when Icecast did.
+    // ----------------------------------------------------------------------
+    if (e.type === 'channel.start') {
+      await query(
+        `UPDATE stream_status SET degraded_outputs = '{}'::jsonb WHERE ${col} = $1`,
+        [body.id]
+      ).catch((err) => console.error('[ingest] could not clear degraded outputs', body.id, err));
+    } else if (e.type === 'output.degraded') {
+      const d = (e.detail ?? {}) as any;
+      const output = String(d.output ?? '').trim();
+      if (output) {
+        await query(
+          `INSERT INTO stream_status(${col}, degraded_outputs)
+           VALUES ($1, jsonb_build_object($2::text, $3::text))
+           ON CONFLICT (${col}) DO UPDATE
+             SET degraded_outputs = stream_status.degraded_outputs
+                                  || jsonb_build_object($2::text, $3::text)`,
+          [body.id, output, String(d.reason ?? 'unavailable')]
+        ).catch((err) => console.error('[ingest] could not record a degraded output', body.id, err));
+      }
+    }
+
+    if (e.type === 'channel.stop') {
+      const tbl = body.kind === 'channel' ? 'channels' : 'events';
+      const owner = await one<{ status: string }>(`SELECT status FROM ${tbl} WHERE id = $1`, [body.id]);
+      if (owner?.status === 'live') {
+        const reason = String((e.detail as any)?.reason ?? 'stop');
+        try {
+          // A FAULT, NOT A STOP. The encoder died; nobody decided this stream should
+          // be off. Marking it stopped here would switch auto-connect off for the
+          // exact case it exists to handle.
+          await orchestrator.stopStream(body.kind, body.id, `encoder-reported: ${reason}`, 'fault');
+        } catch (err) {
+          console.error('[ingest] encoder-reported stop teardown failed', body.id, err);
+        }
+      }
+    }
+  }
+
+  if (body.status) {
+    const s = body.status;
+    // Upsert the single snapshot row; the WHERE guards against an older
+    // (out-of-order) report clobbering a newer one.
+    await query(
+      `INSERT INTO stream_status(${col}, output_available, active_source, fallback_in_use,
+                                 filler_in_use, packager_ok, sources, last_seq, boot_ms, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
+       ON CONFLICT (${col}) DO UPDATE SET
+         output_available = EXCLUDED.output_available,
+         active_source    = EXCLUDED.active_source,
+         fallback_in_use  = EXCLUDED.fallback_in_use,
+         filler_in_use    = EXCLUDED.filler_in_use,
+         packager_ok      = EXCLUDED.packager_ok,
+         sources          = EXCLUDED.sources,
+         last_seq         = EXCLUDED.last_seq,
+         boot_ms          = EXCLUDED.boot_ms,
+         updated_at       = now()
+       WHERE EXCLUDED.boot_ms > COALESCE(stream_status.boot_ms, 0)
+          OR (EXCLUDED.boot_ms = COALESCE(stream_status.boot_ms, 0)
+              AND stream_status.last_seq <= EXCLUDED.last_seq)`,
+      [
+        body.id,
+        s.output_available,
+        s.active_source,
+        s.fallback_in_use,
+        s.filler_in_use,
+        s.packager_ok,
+        s.sources,
+        s.seq,
+        s.boot_ms,
+      ]
+    );
+    // push the change to any live admin dashboards for this tenant
+    publish(acct, 'status', { kind: body.kind, id: body.id, ...s });
+  }
+}
+
 ingestRouter.post(
   '/:id/report',
   asyncHandler(async (req, res) => {
-    const body = reportSchema.parse({ ...req.body, id: req.params.id ?? req.body.id });
-    const acct = await resolveAccount(body.kind, body.id);
-    if (!acct) throw notFound('Unknown stream');
-    const col = body.kind === 'channel' ? 'channel_id' : 'event_id';
-
-    if (body.event) {
-      const e = body.event;
-      await query(
-        `INSERT INTO stream_events(${col}, seq, type, detail, ts)
-         VALUES ($1,$2,$3,$4, COALESCE(to_timestamp($5::double precision / 1000.0), now()))`,
-        [body.id, e.seq ?? null, e.type, e.detail ?? {}, e.ts_ms ?? null]
-      );
-      // push every event to live admins too (not just status snapshots), so the UI
-      // refreshes on channel.start/stop, source.up/down, input.error, output.stalled…
-      publish(acct, 'event', { kind: body.kind, id: body.id, type: e.type });
-      // The encoder can DIE on its own (e.g. packager crash) without the control
-      // plane knowing. When it reports channel.stop while we still think it's live,
-      // run the real teardown so status stops lying (instances terminated, channel
-      // ended, recordings closed). Guarded on status='live' so a normal operator
-      // stop (which already set 'ended') is not double-processed.
-      // ----------------------------------------------------------------------
-      //  WHAT THE ENCODER ACTUALLY PRODUCED. Until this existed the event was
-      //  emitted and nobody listened, so the API kept advertising an MP3 URL
-      //  for an output the running station had dropped. Pressing Listen then
-      //  attached to a URL with no audio behind it and said nothing.
-      //
-      //  channel.start CLEARS the map. A run decides its own outputs at launch
-      //  (the relay probe runs per start), so inheriting the previous run's
-      //  verdict would hide an MP3 output that came back when Icecast did.
-      // ----------------------------------------------------------------------
-      if (e.type === 'channel.start') {
-        await query(
-          `UPDATE stream_status SET degraded_outputs = '{}'::jsonb WHERE ${col} = $1`,
-          [body.id]
-        ).catch((err) => console.error('[ingest] could not clear degraded outputs', body.id, err));
-      } else if (e.type === 'output.degraded') {
-        const d = (e.detail ?? {}) as any;
-        const output = String(d.output ?? '').trim();
-        if (output) {
-          await query(
-            `INSERT INTO stream_status(${col}, degraded_outputs)
-             VALUES ($1, jsonb_build_object($2::text, $3::text))
-             ON CONFLICT (${col}) DO UPDATE
-               SET degraded_outputs = stream_status.degraded_outputs
-                                    || jsonb_build_object($2::text, $3::text)`,
-            [body.id, output, String(d.reason ?? 'unavailable')]
-          ).catch((err) => console.error('[ingest] could not record a degraded output', body.id, err));
-        }
-      }
-
-      if (e.type === 'channel.stop') {
-        const tbl = body.kind === 'channel' ? 'channels' : 'events';
-        const owner = await one<{ status: string }>(`SELECT status FROM ${tbl} WHERE id = $1`, [body.id]);
-        if (owner?.status === 'live') {
-          const reason = String((e.detail as any)?.reason ?? 'stop');
-          try {
-            // A FAULT, NOT A STOP. The encoder died; nobody decided this stream should
-            // be off. Marking it stopped here would switch auto-connect off for the
-            // exact case it exists to handle.
-            await orchestrator.stopStream(body.kind, body.id, `encoder-reported: ${reason}`, 'fault');
-          } catch (err) {
-            console.error('[ingest] encoder-reported stop teardown failed', body.id, err);
-          }
-        }
-      }
-    }
-
-    if (body.status) {
-      const s = body.status;
-      // Upsert the single snapshot row; the WHERE guards against an older
-      // (out-of-order) report clobbering a newer one.
-      await query(
-        `INSERT INTO stream_status(${col}, output_available, active_source, fallback_in_use,
-                                   filler_in_use, packager_ok, sources, last_seq, boot_ms, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
-         ON CONFLICT (${col}) DO UPDATE SET
-           output_available = EXCLUDED.output_available,
-           active_source    = EXCLUDED.active_source,
-           fallback_in_use  = EXCLUDED.fallback_in_use,
-           filler_in_use    = EXCLUDED.filler_in_use,
-           packager_ok      = EXCLUDED.packager_ok,
-           sources          = EXCLUDED.sources,
-           last_seq         = EXCLUDED.last_seq,
-           boot_ms          = EXCLUDED.boot_ms,
-           updated_at       = now()
-         WHERE EXCLUDED.boot_ms > COALESCE(stream_status.boot_ms, 0)
-            OR (EXCLUDED.boot_ms = COALESCE(stream_status.boot_ms, 0)
-                AND stream_status.last_seq <= EXCLUDED.last_seq)`,
-        [
-          body.id,
-          s.output_available,
-          s.active_source,
-          s.fallback_in_use,
-          s.filler_in_use,
-          s.packager_ok,
-          s.sources,
-          s.seq,
-          s.boot_ms,
-        ]
-      );
-      // push the change to any live admin dashboards for this tenant
-      publish(acct, 'status', { kind: body.kind, id: body.id, ...s });
-    }
-
+    await applyReport({ ...req.body, id: req.params.id ?? req.body.id });
     res.status(202).json({ ok: true });
   })
 );

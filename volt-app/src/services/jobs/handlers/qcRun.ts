@@ -12,6 +12,7 @@
 import { one } from '../../../db';
 import { runQc } from '../../qc';
 import { PermanentError, registerHandler, type JobContext } from '../worker';
+import { fireHook } from '../../workflows/hooks';
 
 export interface QcRunPayload {
   vodAssetId: string;
@@ -31,6 +32,7 @@ export async function handleQcRun(ctx: JobContext): Promise<Record<string, unkno
 
   await ctx.progress(5, 'measuring the clip');
   const result = await runQc(p.vodAssetId, { path: p.path });
+  fireHook('qc.completed', 'vod_asset', p.vodAssetId, { state: result.state, findings: result.findings.length });
   await ctx.progress(100, `${result.state}: ${result.findings.length} finding(s)`);
 
   return {

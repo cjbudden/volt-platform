@@ -139,6 +139,7 @@ boot().then(async () => {
   registerQcHandlers();
   registerVodEncodeHandlers();
   registerRemoteIngestHandlers();
+  (await import('./services/workflows/runs')).registerAddonHandlers();
   await registerFillerHandlers();
   await (await import('./services/social')).registerSocialHandlers();
   worker = startWorker();

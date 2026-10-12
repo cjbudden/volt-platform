@@ -260,6 +260,13 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
     };
   }
 
+  // ENCODE ENGINE (volt/ENGINES.md). Only written for a vendor engine, so the
+  // job our own encoder receives is byte-identical to before engines existed.
+  const engineId = (profile as any).encode_engine ?? 'builtin';
+  if (engineId !== 'builtin') {
+    cfg.engine = { id: engineId, mode: (profile as any).encode_engine_mode ?? null, stream_kind: ctx.kind };
+  }
+
   return cfg;
 }
 

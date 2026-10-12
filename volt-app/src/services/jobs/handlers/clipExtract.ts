@@ -20,6 +20,7 @@ import { recordProvenance } from '../../clips/provenance';
 import { enqueue } from '../queue';
 import { QC_RUN } from './qcRun';
 import { PermanentError, registerHandler, type JobContext } from '../worker';
+import { fireHook } from '../../workflows/hooks';
 
 export interface ClipExtractPayload {
   vodAssetId: string;
@@ -182,6 +183,8 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
   } catch (e) {
     console.error(`[clip.extract] ${p.vodAssetId}: provenance not recorded:`, e);
   }
+
+  fireHook('clip.ready', 'vod_asset', p.vodAssetId, { strategy: result.strategy });
 
   // QC runs on its own job, so every clip reaches the review queue with its
   // findings already attached. A reviewer who opens a clip and sees "not checked

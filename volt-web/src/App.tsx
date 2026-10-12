@@ -40,6 +40,7 @@ import { ErrorBoundary } from './ErrorBoundary'
 import NotificationBell from './NotificationBell'
 import NotificationsPage from './pages/Notifications'
 import SocialAccountsPage from './pages/SocialAccounts'
+import WorkflowsPage from './pages/Workflows'
 
 const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z" /></svg>
 
@@ -64,6 +65,8 @@ const I = {
   users: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" /></svg>,
   shield: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>,
   review: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>,
+  // Branching flow: the base path with an add-on stepping off it.
+  workflows: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="5" cy="6" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="19" cy="18" r="2" /><path d="M7 6h10M12 6v8a4 4 0 004 4h1" /></svg>,
   storage: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5" /><path d="M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6" /></svg>,
 }
 
@@ -85,6 +88,7 @@ const NAV: NavGroup[] = [
     { key: 'live', label: 'Live Streams', icon: I.live },
     { key: 'monitoring', label: 'Monitoring', icon: I.monitor },
     { key: 'fleet', label: 'Fleet & Usage', icon: I.fleet },
+    { key: 'workflows', label: 'Workflows', icon: I.workflows },
   ] },
   { group: 'Broadcast', items: [
     { key: 'channels', label: 'Channels', icon: I.channels },
@@ -341,6 +345,8 @@ export default function App() {
             ? <MonitoringPage />
             : section === 'fleet'
             ? <FleetPage />
+            : section === 'workflows'
+            ? <WorkflowsPage canManage={isAdmin} />
             : section === 'dashboard'
             ? <DashboardPage />
             : section === 'multiview'

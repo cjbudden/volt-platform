@@ -13,6 +13,7 @@
 //  one, and turning it on is a decision somebody makes for a reason.
 // ============================================================================
 import { one, query } from '../db';
+import { fireHook } from './workflows/hooks';
 
 export type ReviewState = 'draft' | 'in_review' | 'changes_requested' | 'approved' | 'rejected';
 
@@ -77,6 +78,7 @@ export async function decide(d: ReviewDecision): Promise<any> {
       RETURNING *`,
     [d.assetId, d.to, d.actorId ?? null]
   );
+  fireHook('review.decided', 'vod_asset', d.assetId, { from, to: d.to, overrodeQc: overrode });
   return updated;
 }
 

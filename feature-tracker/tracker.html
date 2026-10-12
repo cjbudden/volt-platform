@@ -27,10 +27,10 @@
 </style></head><body>
 <div class=wrap>
  <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
- <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-11.</div>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-12.</div>
  <div class=sub>Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>44</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>37</b> 📱 In app</span><span class=chip><b>12</b> 📱 Partial</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>45</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>1</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>38</b> 📱 In app</span><span class=chip><b>12</b> 📱 Partial</span><span class=chip><b>1</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="partial">
     <div class=top><div class=name>Frame-accurate scrub &amp; clip</div>
@@ -604,6 +604,19 @@
          <button class="btn warn" data-changes="XMLTV import (bring in a customer's guide, from a file or a hosted guide API)">Request changes</button>
        </div>
     
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Workflows: hooks, add-on services and the workflow dashboard</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>WHY: clients want to send recordings and assets to outside platforms (an AI agent, a transcription house, a QC vendor) without that becoming custom code, and operators need to see where any piece of work has got to. WHAT: Workflows page (Overview). The Map shows the base pipeline in three lanes with the hooks each stage fires and the add-ons attached to them, with live running and failed badges. Click a hook to attach an add-on (admins), optionally for chosen channels. Trace any recording or asset to see the stages it has been through and its add-on runs moving. Add-on services are webhooks (signed requests, per-run callback for progress, steps and result) or the built-in demo agent. Runs can be cancelled, retried and opened for their result and event log. Recordings have a Send to add-on button.</div>
+    <div class=meta>Built 12 Oct. test/workflows.check.ts 72/72 (hooks, filters, signing, state machine, demo agent, real webhook + HTTP callbacks, cancel, timeout, API). orchestrator.check 60/60 unchanged.</div>
+    <div class=how><b>How to test:</b> Workflows &gt; Add-ons and triggers &gt; New add-on &gt; Demo agent (simulated) &gt; Create. Map &gt; click Record &gt; Completed &gt; Attach the demo agent. Stop a recording channel (or wait for the day roll): the run appears under In flight and steps through five stages, then Done with a sample summary and chapters. Open a recording &gt; Send to add-on &gt; Demo agent &gt; Track it. Click Show on map: the recording's stages light up and the run shows on the Record chip. For a real endpoint: New add-on &gt; External service with your URL &gt; copy the secret &gt; Test (signed ping). Runs tab: open a run, Cancel or Run again.</div>
+    <div class=note>Test tool: open <b>“WORKFLOWS.md”</b> in your artifacts gallery.</div>
+    <div class=actions>
+         <button class="btn ok" data-approve="Workflows: hooks, add-on services and the workflow dashboard">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Workflows: hooks, add-on services and the workflow dashboard">Request changes</button>
+       </div>
+    
   </div><div class=card data-status="in_review" data-app="full">
     <div class=top><div class=name>Analytics &amp; reporting</div>
       <span class=pill style="background:#6366f1">👀 In review</span>
@@ -673,6 +686,16 @@
     
     <div class=approved-line>✅ Approved by you</div>
     <div class=fblog><div class=fb>• 2026-10-10: Approved by Christian as working.</div></div>
+  </div><div class=card data-status="building" data-app="none">
+    <div class=top><div class=name>Encode engines: hooks for external encoding vendors (MediaLive, Bitmovin, Wowza)</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
+    <div class=summary>WHY: some customers already run (or will insist on) a vendor encoder. WHAT: the seam is in place so a vendor adapter can be added later without touching the orchestrator. Profiles can name an engine; encode only mode keeps every Volt feature because our packager still cuts the segments; full mode is allowed with honest warnings. Capability sketches for MediaLive, Bitmovin and Wowza are listed in GET /api/engines. No vendor adapter is installed yet, so nothing changes for current channels.</div>
+    <div class=meta>Hooks built 12 Oct. Fake-vendor tests in test/workflows.check.ts (encode only, full, stop, liveness, rollback, webhook normalisation).</div>
+    <div class=how><b>How to test:</b> API only for now: GET /api/engines lists builtin (installed) and the three planned vendors with capabilities. POST /api/engines/medialive/validate with a profileId shows what would and would not work. Read ENGINES.md for adding an adapter.</div>
+    <div class=note>Test tool: open <b>“ENGINES.md”</b> in your artifacts gallery.</div>
+    
+    
   </div>
 </div>
 <div id=toast></div>

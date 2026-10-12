@@ -70,9 +70,11 @@ const ADMIN_PREFIXES = [
   '/api/notification-templates', '/api/publish-targets',
   // Money and audience identities: admin only, as the router itself also enforces.
   '/api/payments',
+  // Add-on services hold endpoints and signing secrets; engines choose what bills.
+  '/api/addons', '/api/engines',
 ];
 /** Admin surfaces where operators/viewers still need READ (forms use them). */
-const ADMIN_READ_OPEN = ['/api/groups', '/api/output-profiles', '/api/metadata-schemas'];
+const ADMIN_READ_OPEN = ['/api/groups', '/api/output-profiles', '/api/metadata-schemas', '/api/addons', '/api/engines'];
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 

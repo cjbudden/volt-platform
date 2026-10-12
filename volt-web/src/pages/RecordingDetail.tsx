@@ -5,6 +5,7 @@ import ClipTimeline, { gapsInRange, GAP_REASON } from '../ClipTimeline'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import type { Waveform } from '../api'
 import { pressable } from '../a11y'
+import { SendToAddon } from './Workflows'
 
 /* ============================================================================
    Recording detail — the review/trim/clip page, following the same structural
@@ -493,6 +494,9 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
           )}
         </div>
         <div className="spacer" />
+        {/* Send the recording to an add-on (AI agent, transcription, QC). Shows a
+            live run's step and progress, and links to it on the Workflows map. */}
+        <SendToAddon subjectType="recording" subjectId={id} />
         <button className="btn ghost" onClick={() => { loadTl(); loadRec() }}>Refresh</button>
       </div>
 

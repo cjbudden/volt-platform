@@ -16,6 +16,7 @@ import { storageDriver } from '../media/storage';
 import { reconcileAll } from '../media/reconcile';
 import { sweepAnalytics } from '../analyticsRetention';
 import { sweepUploads } from '../uploads';
+import { fireHook } from '../workflows/hooks';
 
 /**
  * The orchestrator turns channel/event lifecycle into real running tasks and
@@ -388,6 +389,9 @@ export class Orchestrator {
       }
       throw e;
     }
+    // WORKFLOW HOOK (WORKFLOWS.md). After the bookkeeping committed, so an add-on
+    // never hears about a start that was rolled back. Fire-and-forget.
+    fireHook('stream.started', kind, id, { taskArn: res.taskArn, engine: (job as any).engine?.id ?? 'builtin' });
     return { taskArn: res.taskArn };
   }
 
@@ -682,6 +686,7 @@ export class Orchestrator {
       `UPDATE ${kind === 'channel' ? 'channels' : 'events'} SET status=$2, updated_at=now() WHERE id=$1`,
       [id, kind === 'channel' ? 'ended' : 'ended']
     );
+    fireHook('stream.stopped', kind, id, { intent, origin });
   }
 
   // ---- recordings ----------------------------------------------------------
@@ -719,6 +724,8 @@ export class Orchestrator {
   /** Close recordings and enqueue a thumbnailer for each. rows: open recordings. */
   private async finalizeRecording(rec: any) {
     const dur = rec.duration_ms ?? 0;
+    // WORKFLOW HOOK: the usual place to send a finished recording to an AI agent.
+    fireHook('recording.completed', 'recording', rec.id, { durationMs: Number(dur) || 0, kind: rec.kind });
     // fire the CPU thumbnailer against the recorded hi-res source
     const job = buildThumbnailerJobConfig({
       id: rec.id,

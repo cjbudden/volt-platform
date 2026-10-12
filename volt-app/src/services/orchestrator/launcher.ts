@@ -391,7 +391,20 @@ export class EcsTaskLauncher implements TaskLauncher {
   }
 }
 
+/**
+ * The launcher the orchestrator uses, wrapped so a profile can name a vendor
+ * encode engine (services/engines, volt/ENGINES.md). With every profile on the
+ * default 'builtin' engine the wrapper passes straight through.
+ */
 export function makeLauncher(): TaskLauncher {
+  // Lazy require: engines import types from this file.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const engines = require('../engines') as typeof import('../engines');
+  engines.registerEngines();
+  return engines.withEngines(makeBaseLauncher());
+}
+
+function makeBaseLauncher(): TaskLauncher {
   switch (config.orchestrator.launcher) {
     case 'ecs':
       return new EcsTaskLauncher();

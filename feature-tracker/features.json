@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-11",
+  "updated": "2026-10-12",
   "features": [
     {
       "id": "live-stream-e2e",
@@ -689,6 +689,32 @@
         "artifact": "volt-app/docs/DESIGN_epg_xmltv.md"
       },
       "checks": "Built 10 Oct. xmltv-import-pure 42/42, xmltv-import 35/35, plus hosted guide API: xmltv-import-api-pure 38/38 (dates per zone, formats, DST, template mistakes) and xmltv-import-api 39/39 against a stand-in API (API key header, per-day runs, window cut, failed day left alone, continuous-coverage alert once, retry 15/30 min, ETag 304, tenancy). Channel lineup: xmltv-lineup-pure 20/20 (the real Sydney lineup) and xmltv-lineup 27/27, including a read of the real 9 MB Sydney feed. Not yet run against a provider API that needs a key. Time zone: xmltv-import-api-pure 38/38 and xmltv-timezone 16/16 (a correct feed, the source zone winning over the channel's, a mislabelled feed fixed and re-read, dates in UTC+14).",
+      "feedback": []
+    },
+    {
+      "id": "workflow-addons",
+      "name": "Workflows: hooks, add-on services and the workflow dashboard",
+      "summary": "WHY: clients want to send recordings and assets to outside platforms (an AI agent, a transcription house, a QC vendor) without that becoming custom code, and operators need to see where any piece of work has got to. WHAT: Workflows page (Overview). The Map shows the base pipeline in three lanes with the hooks each stage fires and the add-ons attached to them, with live running and failed badges. Click a hook to attach an add-on (admins), optionally for chosen channels. Trace any recording or asset to see the stages it has been through and its add-on runs moving. Add-on services are webhooks (signed requests, per-run callback for progress, steps and result) or the built-in demo agent. Runs can be cancelled, retried and opened for their result and event log. Recordings have a Send to add-on button.",
+      "status": "ready_to_test",
+      "app_surface": "full",
+      "test": {
+        "how": "Workflows > Add-ons and triggers > New add-on > Demo agent (simulated) > Create. Map > click Record > Completed > Attach the demo agent. Stop a recording channel (or wait for the day roll): the run appears under In flight and steps through five stages, then Done with a sample summary and chapters. Open a recording > Send to add-on > Demo agent > Track it. Click Show on map: the recording's stages light up and the run shows on the Record chip. For a real endpoint: New add-on > External service with your URL > copy the secret > Test (signed ping). Runs tab: open a run, Cancel or Run again.",
+        "artifact": "WORKFLOWS.md"
+      },
+      "checks": "Built 12 Oct. test/workflows.check.ts 72/72 (hooks, filters, signing, state machine, demo agent, real webhook + HTTP callbacks, cancel, timeout, API). orchestrator.check 60/60 unchanged.",
+      "feedback": []
+    },
+    {
+      "id": "encode-engines",
+      "name": "Encode engines: hooks for external encoding vendors (MediaLive, Bitmovin, Wowza)",
+      "summary": "WHY: some customers already run (or will insist on) a vendor encoder. WHAT: the seam is in place so a vendor adapter can be added later without touching the orchestrator. Profiles can name an engine; encode only mode keeps every Volt feature because our packager still cuts the segments; full mode is allowed with honest warnings. Capability sketches for MediaLive, Bitmovin and Wowza are listed in GET /api/engines. No vendor adapter is installed yet, so nothing changes for current channels.",
+      "status": "building",
+      "app_surface": "none",
+      "test": {
+        "how": "API only for now: GET /api/engines lists builtin (installed) and the three planned vendors with capabilities. POST /api/engines/medialive/validate with a profileId shows what would and would not work. Read ENGINES.md for adding an adapter.",
+        "artifact": "ENGINES.md"
+      },
+      "checks": "Hooks built 12 Oct. Fake-vendor tests in test/workflows.check.ts (encode only, full, stop, liveness, rollback, webhook normalisation).",
       "feedback": []
     }
   ],

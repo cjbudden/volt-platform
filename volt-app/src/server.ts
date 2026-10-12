@@ -55,6 +55,8 @@ import { INGEST_PROTOCOLS } from './services/ingestProtocols';
 import { mediaFilesRouter } from './modules/mediaFiles';
 import { watchfoldersRouter } from './modules/watchfolders';
 import { encodeProfilesRouter } from './modules/encodeProfiles';
+import { enginesRouter, engineHooksRouter } from './modules/engines';
+import { workflowsRouter, addonsRouter, addonCallbacksRouter } from './modules/workflows';
 import { imageStore } from './services/imageStore';
 import { parseSpec, resizeFromStore } from './services/imageResize';
 import { isBootReconciled } from './services/orchestrator';
@@ -72,7 +74,11 @@ export function createServer() {
   // tus resumable uploads: PATCH bodies are raw octets, so this too sits before
   // the JSON parser. Any tus client (iOS, Android, Uppy, tus-py) uploads here.
   app.use('/api/tus', tusRouter);
+  // Vendor encode-engine webhooks: the adapter verifies a signature over the raw bytes.
+  app.use('/api/engine-hooks', engineHooksRouter);
   app.use(express.json({ limit: '1mb' }));
+  // Add-on callbacks: public, authenticated by the per-run bearer token.
+  app.use('/api/addon-callbacks', addonCallbacksRouter);
 
   // ok = the process is up and can answer. reconciled = boot reconciliation has
   // settled, so stream statuses and instance rows are no longer going to be
@@ -252,6 +258,9 @@ export function createServer() {
   app.use('/api/files', mediaFilesRouter);   // image library (file manager)
   app.use('/api/watchfolders', watchfoldersRouter);  // ingest folders, rules, review queue
   app.use('/api/encode-profiles', encodeProfilesRouter);  // renditions + ladder groups
+  app.use('/api/engines', enginesRouter);           // encode engines: builtin + vendor adapters (ENGINES.md)
+  app.use('/api/workflows', workflowsRouter);       // base workflow map, add-on runs, traces (WORKFLOWS.md)
+  app.use('/api/addons', addonsRouter);             // add-on services + triggers (admin)
 
   // Resized preview derivatives (WebP), cached under the store's derived/ prefix.
   //   /img/<WxH>[,fit]/<store-key>   e.g. /img/320x200/library/<acct>/slates/x.png
