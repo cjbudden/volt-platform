@@ -18,9 +18,14 @@ import type { ProgrammeRow, ProgrammeVod, VodState } from '../api'
 
 const DAY_MS = 86_400_000
 const HOUR_MS = 3_600_000
-const SNAP_MIN = 15
 const MIN_GAP_MS = 5 * 60_000
-const ZOOMS = [40, 64, 110] as const
+/* Pixels per hour. The top levels are for short-form guides: at 360 a 5-minute
+   programme is 30 px (title and time on one line), at 720 it is 60 px (title,
+   time and duration). From 200 up the grid shows quarter hours and clicks snap
+   to 5 minutes; from 360 up it also draws 5-minute lines. */
+const ZOOMS = [40, 64, 110, 200, 360, 720] as const
+const FINE = 200
+const snapMinOf = (zoom: number) => (zoom >= FINE ? 5 : 15)
 
 const p2 = (n: number) => String(n).padStart(2, '0')
 const fmtT = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -118,18 +123,29 @@ export function EpgTimeline({ day, progs, vod, overlapsById, ownerWord, onEdit, 
   useLayoutEffect(() => {
     const el = body.current
     if (!el) return
-    const target = isToday ? now - HOUR_MS : firstStart
-    el.scrollTop = Math.max(0, y(target) - 8)
+    // A zoom keeps the time that was in the middle of the view in the middle.
+    const keep = zoomAnchor.current
+    zoomAnchor.current = null
+    if (keep != null) { el.scrollTop = Math.max(0, y(keep) - el.clientHeight / 2); return }
+    if (isToday) el.scrollTop = Math.max(0, y(now) - Math.min(el.clientHeight / 3, zoom))
+    else el.scrollTop = Math.max(0, y(firstStart) - 8)
     // eslint-disable-next-line
   }, [dayStart, zoom])
+  const zoomAnchor = useRef<number | null>(null)
+  const zoomTo = (z: number) => {
+    const el = body.current
+    if (el) zoomAnchor.current = dayStart + (el.scrollTop + el.clientHeight / 2) / pxPerMs
+    setZoom(z)
+  }
 
   /* Hover guide on empty time: where a click would add a programme. */
   const [hover, setHover] = useState<number | null>(null)
   const snapAt = (clientY: number, el: HTMLElement) => {
     const r = el.getBoundingClientRect()
     const ms = (clientY - r.top) / pxPerMs
-    const snapped = Math.round(ms / (SNAP_MIN * 60_000)) * SNAP_MIN * 60_000
-    return Math.min(Math.max(0, snapped), DAY_MS - SNAP_MIN * 60_000)
+    const step = snapMinOf(zoom) * 60_000
+    const snapped = Math.round(ms / step) * step
+    return Math.min(Math.max(0, snapped), DAY_MS - step)
   }
   const hhmmOf = (offsetMs: number) => { const d = new Date(dayStart + offsetMs); return `${p2(d.getHours())}:${p2(d.getMinutes())}` }
 
@@ -146,21 +162,27 @@ export function EpgTimeline({ day, progs, vod, overlapsById, ownerWord, onEdit, 
         </span>
         <span className="epg-tl-hint">Click empty time to add a programme there</span>
         <div className="epg-tl-zoom" role="group" aria-label="Zoom">
-          <button type="button" className="cal-arrow" disabled={zi <= 0} onClick={() => setZoom(ZOOMS[Math.max(0, zi - 1)])} aria-label="Zoom out">
+          <span className="epg-tl-zlabel" title="Zoom level">{zi + 1}/{ZOOMS.length}</span>
+          <button type="button" className="cal-arrow" disabled={zi <= 0} onClick={() => zoomTo(ZOOMS[Math.max(0, zi - 1)])} aria-label="Zoom out">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14" /></svg>
           </button>
-          <button type="button" className="cal-arrow" disabled={zi >= ZOOMS.length - 1} onClick={() => setZoom(ZOOMS[Math.min(ZOOMS.length - 1, zi + 1)])} aria-label="Zoom in">
+          <button type="button" className="cal-arrow" disabled={zi >= ZOOMS.length - 1} onClick={() => zoomTo(ZOOMS[Math.min(ZOOMS.length - 1, zi + 1)])} aria-label="Zoom in">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
           </button>
         </div>
       </div>
 
       <div className="epg-tl-body" ref={body}>
-        <div className="epg-tl-grid" style={{ height: 24 * zoom, ['--hour' as any]: `${zoom}px` }}>
+        <div className={`epg-tl-grid${zoom >= FINE ? ' fine' : ''}${zoom >= 360 ? ' finer' : ''}`}
+          style={{ height: 24 * zoom, ['--hour' as any]: `${zoom}px`, ['--quarter' as any]: `${zoom / 4}px`, ['--five' as any]: `${zoom / 12}px` }}>
           <div className="epg-tl-hours" aria-hidden>
             {Array.from({ length: 24 }, (_, h) => (
               <span key={h} style={{ top: h * zoom }}>{h === 0 ? '00:00' : `${p2(h)}:00`}</span>
             ))}
+            {zoom >= FINE && Array.from({ length: 24 * 3 }, (_, i) => {
+              const h = Math.floor(i / 3), m = (i % 3 + 1) * 15
+              return <span key={`q${i}`} className="q" style={{ top: (h + m / 60) * zoom }}>{p2(h)}:{p2(m)}</span>
+            })}
           </div>
 
           <div className="epg-tl-col"

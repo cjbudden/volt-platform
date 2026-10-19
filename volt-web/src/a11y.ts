@@ -60,6 +60,11 @@ export function pressable(onPress: (e?: any) => void, opts: PressableOptions = {
     // one being fixed.
     onClick: disabled ? undefined : (e: any) => onPress(e),
     onKeyDown: disabled ? undefined : (e: KeyboardEvent) => {
+      // ONLY KEYS PRESSED ON THIS ELEMENT. Key events bubble: without this, a
+      // pressable drawer or backdrop swallowed every Space and Enter typed into
+      // any field inside it (the create-stream form could not take a space).
+      // A button answers when IT has focus, never for its descendants.
+      if (e.target !== e.currentTarget) return
       if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return
       // Space scrolls the page by default, which is the single most common
       // reason a hand-rolled keyboard handler feels broken.

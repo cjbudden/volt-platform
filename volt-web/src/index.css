@@ -1118,6 +1118,10 @@ svg.spin{animation:vspin 1s linear infinite}
 .epg-tl-sum{color:var(--muted)}
 .epg-tl-hint{color:var(--faint);font-size:var(--fs-xs,11px);margin-left:auto}
 .epg-tl-zoom{display:flex;gap:2px}
+.epg-tl-zlabel{align-self:center;min-width:28px;text-align:center;font-size:var(--fs-xs,11px);color:var(--faint);font-family:ui-monospace,monospace}
+.epg-tl-grid.fine{background:repeating-linear-gradient(to bottom,var(--border) 0,var(--border) 1px,transparent 1px,transparent var(--hour)),repeating-linear-gradient(to bottom,color-mix(in srgb,var(--border) 55%,transparent) 0,color-mix(in srgb,var(--border) 55%,transparent) 1px,transparent 1px,transparent var(--quarter))}
+.epg-tl-grid.finer{background:repeating-linear-gradient(to bottom,var(--border) 0,var(--border) 1px,transparent 1px,transparent var(--hour)),repeating-linear-gradient(to bottom,color-mix(in srgb,var(--border) 55%,transparent) 0,color-mix(in srgb,var(--border) 55%,transparent) 1px,transparent 1px,transparent var(--quarter)),repeating-linear-gradient(to bottom,color-mix(in srgb,var(--border) 22%,transparent) 0,color-mix(in srgb,var(--border) 22%,transparent) 1px,transparent 1px,transparent var(--five))}
+.epg-tl-hours span.q{opacity:.6;font-size:var(--fs-micro,10px)}
 .epg-tl-zoom .cal-arrow:disabled{opacity:.35;cursor:default}
 .epg-tl-body{height:min(720px,calc(100vh - 290px));min-height:380px;overflow-y:auto;overscroll-behavior:contain}
 .epg-tl-grid{display:grid;grid-template-columns:60px 1fr;position:relative;background:repeating-linear-gradient(to bottom,var(--border) 0,var(--border) 1px,transparent 1px,transparent var(--hour))}
