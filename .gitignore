@@ -70,3 +70,6 @@ volt-app/.env.bak.*
 /outputs
 /_*.tgz
 /_to_delete/
+
+# Python virtual environments
+.venv/
