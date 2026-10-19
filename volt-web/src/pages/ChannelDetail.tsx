@@ -10,6 +10,7 @@ import { COUNTRIES, countryName } from '../lib/countries'
 import { useInputChecks, verdictOf, summaryOf, LevelDot, inputName, heightOf, type InputDef } from '../sourceInputs'
 import { PackageRenditions, pkgFromSources, pkgToSources, type PkgRow, type PkgFallback } from '../PackageRenditions'
 import { WatermarkFields } from '../WatermarkFields'
+import { GraphicsSettings, type GraphicsValue } from '../GraphicsSettings'
 import { ImagePicker } from '../ImagePicker'
 import { ImageRefField, GuideIconField } from '../ImageRefField'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
@@ -2253,6 +2254,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   const setRungs = lockSet(setRungsRaw)
   // programme guide (EPG) panel visibility
   const [epgOn, setEpgOn] = useState(d.epgEnabled !== false)
+  const [gfx, setGfx] = useState<GraphicsValue>(((d as any).graphics as GraphicsValue) ?? {})
   const [autoConn, setAutoConn] = useState(d.autoConnect !== false)
   // CONTENT TYPE + the base metadata entry (what the guide shows with no programme on).
   const [tab, setTab] = useState<DrawerTab>('settings')
@@ -2353,6 +2355,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     }
     // programme guide panel
     if (epgOn !== (d.epgEnabled !== false)) patch.epgEnabled = epgOn
+    if (JSON.stringify(gfx) !== JSON.stringify((d as any).graphics ?? {})) patch.graphics = gfx
     if (autoConn !== (d.autoConnect !== false)) patch.autoConnect = autoConn
     if (typeId && (typeId !== d.schemaId || JSON.stringify(meta) !== JSON.stringify(d.metadata ?? {}))) { patch.schemaId = typeId; patch.metadata = meta }
     // captions
@@ -2560,6 +2563,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             <div><div className="tt">Show programme guide panel</div><div className="td">Off hides the EPG / now-next panel for this channel.</div></div>
             <div className={`sw ${epgOn ? '' : 'off'}`} {...pressable((e: any) => { ((() => setEpgOn(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
           </div>
+
+          <GraphicsSettings value={gfx} onChange={setGfx} hasGuide={epgOn} />
 
           <div className={locked ? 'locked-zone' : undefined} aria-disabled={locked || undefined}>
           <div className="sec-label">Subtitles</div>

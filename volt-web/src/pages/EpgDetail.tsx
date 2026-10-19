@@ -428,7 +428,8 @@ function VodSummary({ vod }: { vod: Record<string, ProgrammeVod> }) {
 }
 
 /* ---------------------------------------------------- programme drawer */
-function ProgrammeDrawer({ owner, day, programme: p, initialStart, vod, converting, onConvert, onClose, onDone }: {
+/** Exported so the Live Streams timeline opens the same drawer for a future slot. */
+export function ProgrammeDrawer({ owner, day, programme: p, initialStart, vod, converting, onConvert, onClose, onDone }: {
   owner: EpgOwner; day: Date; programme: ProgrammeRow | null; initialStart?: string
   vod?: ProgrammeVod; converting?: boolean; onConvert?: () => void
   onClose: () => void; onDone: (msg?: string, batchId?: string | null) => void

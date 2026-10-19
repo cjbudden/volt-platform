@@ -1,0 +1,176 @@
+{
+ "tag": "file_tqs1",
+ "gfx": "file",
+ "faults": false,
+ "encoder_alive_at_end": true,
+ "frames": 694,
+ "main_latency_ms_median": 266.2,
+ "main_latency_ms_p95": 306.4,
+ "max_tap_gap_ms": 102.7,
+ "max_tap_gap_at_s": 8.3,
+ "repeated_main_frames": 0,
+ "main_latency_by_2s": {
+  "4": 984,
+  "6": 267,
+  "8": 267,
+  "10": 266,
+  "12": 265,
+  "14": 266,
+  "16": 267,
+  "18": 265,
+  "20": 267,
+  "22": 267,
+  "24": 265,
+  "26": 265,
+  "28": 265,
+  "30": 285
+ },
+ "gfx_change_latency": [
+  [
+   14.0,
+   230,
+   323.8,
+   [
+    0,
+    30,
+    231
+   ]
+  ],
+  [
+   15.0,
+   30,
+   305.2,
+   [
+    30,
+    160,
+    231
+   ]
+  ],
+  [
+   16.0,
+   160,
+   299.4,
+   [
+    30,
+    90,
+    160
+   ]
+  ],
+  [
+   17.0,
+   90,
+   300.8,
+   [
+    90,
+    160,
+    231
+   ]
+  ],
+  [
+   18.0,
+   230,
+   297.7,
+   [
+    30,
+    90,
+    231
+   ]
+  ],
+  [
+   19.0,
+   30,
+   300.1,
+   [
+    30,
+    160,
+    231
+   ]
+  ],
+  [
+   20.0,
+   160,
+   269.9,
+   [
+    30,
+    90,
+    160
+   ]
+  ],
+  [
+   21.0,
+   90,
+   256.5,
+   [
+    90,
+    160,
+    231
+   ]
+  ],
+  [
+   22.0,
+   230,
+   348.2,
+   [
+    30,
+    90,
+    231
+   ]
+  ],
+  [
+   23.0,
+   30,
+   309.3,
+   [
+    30,
+    160,
+    231
+   ]
+  ],
+  [
+   24.0,
+   160,
+   298.8,
+   [
+    30,
+    90,
+    160
+   ]
+  ],
+  [
+   25.0,
+   90,
+   305.8,
+   [
+    90,
+    160
+   ]
+  ]
+ ],
+ "gfx_latency_ms_after_restart": [],
+ "gfx_latency_ms_median_steady": 300.5,
+ "gfx_latency_ms_max_steady": 348.2,
+ "cpu": {
+  "sidecar_idle_cpu%": 2.2,
+  "encoder_cpu%_idle": 26.5,
+  "sidecar_rss_mb": 77,
+  "sidecar_busy_cpu%": 2.9,
+  "encoder_cpu%_busy": 26.2
+ },
+ "events": [
+  {
+   "pid": 11741,
+   "ev": "sidecar_start",
+   "t": 1.2
+  },
+  {
+   "ev": "sidecar_ready",
+   "t": 606.6
+  }
+ ],
+ "encoder_log_tail": [
+  "[in#1/image2 @ 0x556f902a4280] Thread message queue blocking; consider raising the thread_queue_size option (current value: 1)",
+  "[in#0/mpegts @ 0x556f90289b40] Thread message queue blocking; consider raising the thread_queue_size option (current value: 8)"
+ ],
+ "encoder_log_lines": 2,
+ "rung0_av_start_delta_ms": -1400.0
+}

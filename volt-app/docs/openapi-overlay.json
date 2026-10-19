@@ -194,6 +194,9 @@
       "displayName": "Recordings",
       "description": "Recordings are the raw captures of your live output: one per event run, and one per calendar day for each continuous channel.\n\n**Use it to:**\n- List and open recordings with `GET /api/recordings` and `GET /api/recordings/{id}`\n- Publish a whole recording as VOD with `POST /api/recordings/{id}/publish`, or clip a time range with `POST /api/recordings/{id}/clip`\n- Download an MP4 with `GET /api/recordings/{id}/download`\n- Read the timeline, waveform, transcript and programmes with `GET /api/recordings/{id}/timeline` and related requests\n\n**Credential:** admin session (Bearer) or account secret key, with `recordings: view` to read, `recordings: operate` to publish and `recordings: manage` to compose clips.\n\n**Good to know:** clips and downloads answer 409 `no_media`, with the gaps, when nothing was recorded in the range. Downloads answer 202 while exporting."
     },
+    "Reports": {
+      "description": "Operating reports say, for each channel, station and event, every time it ran, how long for, how long it was on air, why each run ended, and what the audience did. Built for SLA reviews and monthly client reporting.\n\n**Use it to:**\n- Read one stream's report with `GET /api/reports/stream/{id}?from=&to=`\n- Download it as a spreadsheet with `GET /api/reports/stream/{id}.csv`, one row per run plus a TOTAL row\n- Summarise every stream for a period with `GET /api/reports/streams`, filtered by `kind` and `q` and sorted with `sort=-hours_run`\n- Download the period summary with `GET /api/reports/streams.csv`\n\n**Credential:** admin session (Bearer) or account secret key, with `analytics: view`.\n\n**Good to know:** a null figure means \"not known\", never zero. An exact per-run peak exists only while raw viewing sessions are retained; older runs report `peak_basis: not_retained` with the day's peak beside it. Reports survive deleting the stream, and historical rows keep the name the stream ran under."
+    },
     "Scheduled Clips": {
       "displayName": "Scheduled clips",
       "description": "Scheduled clips are clipping windows set on a live timeline. When the window ends, Volt cuts it into a VOD asset.\n\n**Use it to:**\n- List clipping windows with `GET /api/scheduled-clips`\n- Schedule a clip, choosing a manifest, progressive or both, with `POST /api/scheduled-clips`\n- Cancel a clip that has not been cut yet with `DELETE /api/scheduled-clips/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `recordings: view` to read and `recordings: manage` to change.\n\n**Good to know:** a clip can only be cancelled while it is still scheduled."
@@ -281,6 +284,10 @@
     "XMLTV": {
       "displayName": "XMLTV partner feeds",
       "description": "XMLTV partner feeds publish your programme guide at a private URL for PVRs, IPTV middleware and guide aggregators to poll.\n\n**Use it to:**\n- Give a partner a feed URL of the form `GET /xmltv/{token}.xml` (or `.xml.gz`)\n- Create, rescope, rotate or revoke feeds with `POST /api/epg/xmltv/feeds` and related requests\n\n**Credential:** the feed token in the URL, no headers needed.\n\n**Good to know:** rotate a feed's token if its URL leaks. The old URL stops working."
+    },
+    "Timeline": {
+      "displayName": "Timeline",
+      "description": "Timeline gives the Live Streams page's Past, Now, Next view: every stream on one clock, in one request.\n\n**Use it to:**\n- Draw what aired, what is on now and what is next across all your streams with `GET /api/timeline/grid`\n\n**Credential:** admin session (Bearer) or account secret key, with `monitoring: view`, and `view` on channels, radio or events for those rows.\n\n**Good to know:** the window is capped at 48 hours and rows page at 50. For one stream in detail use `GET /api/channels/:id/timeline` and `/coverage`."
     }
   },
   "GET /api/vod": {
@@ -294,5 +301,9 @@
   "GET /api/jobs": {
     "summary": "List jobs",
     "description": "Background work (encodes, imports, conversions) with its state. Typical: `state=failed,cancelled&created_at[gte]=2026-10-17` to find what went wrong today."
+  },
+  "GET /api/timeline/grid": {
+    "summary": "Get the timeline grid (Past, Now, Next)",
+    "description": "Every stream the caller can see as one row on a shared clock, for the Live Streams Timeline view: programmes (as-run times preferred over scheduled), the media actually recorded with its gaps (past part of the window only, measured from disk), clip ticks, and the same five-gate status the Live board shows. One call for the whole grid instead of one per stream.\n\n`from` and `to` are ISO 8601 (epoch ms also accepted); the window is capped at 48 hours and a wider one is a 400. `kinds` narrows to `channel,radio,event,loop` (rows of a kind your role cannot view are absent, not empty). Rows page at 50 with the list standard's cursor: follow `next` in the body or the `Link: rel=\"next\"` header."
   }
 }

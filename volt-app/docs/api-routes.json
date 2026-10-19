@@ -1089,6 +1089,15 @@
   "group": "/api/epg"
  },
  {
+  "method": "POST",
+  "path": "/api/epg/batches/:id/undo",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
   "method": "GET",
   "path": "/api/epg/channels",
   "api": "admin",
@@ -1279,7 +1288,34 @@
  },
  {
   "method": "POST",
+  "path": "/api/epg/repeat",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
   "path": "/api/epg/series",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/series/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/series/:id/end",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "epg: manage",
@@ -3403,6 +3439,33 @@
  },
  {
   "method": "GET",
+  "path": "/api/reports/stream/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/reports"
+ },
+ {
+  "method": "GET",
+  "path": "/api/reports/streams",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/reports"
+ },
+ {
+  "method": "GET",
+  "path": "/api/reports/streams.csv",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/reports"
+ },
+ {
+  "method": "GET",
   "path": "/api/scheduled-clips",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -3780,6 +3843,15 @@
   "group": "/api/streams"
  },
  {
+  "method": "GET",
+  "path": "/api/streams/:id/timed-events",
+  "api": "machine",
+  "credential": "X-Volt-Ingest-Token",
+  "access": "encoder / thumbnailer report",
+  "viewerTier": false,
+  "group": "/api/streams"
+ },
+ {
   "method": "POST",
   "path": "/api/thumbnails/build",
   "api": "admin",
@@ -3859,6 +3931,15 @@
   "access": "any signed-in admin user",
   "viewerTier": false,
   "group": "/api/tickets"
+ },
+ {
+  "method": "GET",
+  "path": "/api/timeline/grid",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/timeline"
  },
  {
   "method": "OPTIONS",

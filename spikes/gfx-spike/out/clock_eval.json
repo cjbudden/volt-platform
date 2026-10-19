@@ -1,0 +1,65 @@
+[
+ {
+  "tpl": "scorebug",
+  "clock": "vclock",
+  "frames": 14,
+  "distinctFrames": 13,
+  "deterministic": true,
+  "jumpEqualsStep": true,
+  "perFrameMs": 9
+ },
+ {
+  "tpl": "scorebug",
+  "clock": "realtime",
+  "frames": 44,
+  "distinctFrames": 43,
+  "deterministic": false,
+  "jumpEqualsStep": null,
+  "perFrameMs": 9.2
+ },
+ {
+  "tpl": "lowerthird",
+  "clock": "vclock",
+  "frames": 20,
+  "distinctFrames": 19,
+  "deterministic": true,
+  "jumpEqualsStep": true,
+  "perFrameMs": 10.8
+ },
+ {
+  "tpl": "lowerthird",
+  "clock": "seek",
+  "frames": 20,
+  "distinctFrames": 19,
+  "deterministic": true,
+  "jumpEqualsStep": null,
+  "perFrameMs": 36.6
+ },
+ {
+  "tpl": "lowerthird",
+  "clock": "realtime",
+  "frames": 23,
+  "distinctFrames": 22,
+  "deterministic": false,
+  "jumpEqualsStep": null,
+  "perFrameMs": 36.5
+ },
+ {
+  "tpl": "ticker",
+  "clock": "vclock",
+  "frames": 25,
+  "distinctFrames": 25,
+  "deterministic": true,
+  "jumpEqualsStep": true,
+  "perFrameMs": 8.7
+ },
+ {
+  "tpl": "ticker",
+  "clock": "realtime",
+  "frames": 25,
+  "distinctFrames": 25,
+  "deterministic": false,
+  "jumpEqualsStep": null,
+  "perFrameMs": 8.7
+ }
+]

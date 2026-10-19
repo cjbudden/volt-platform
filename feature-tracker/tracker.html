@@ -27,10 +27,10 @@
 </style></head><body>
 <div class=wrap>
  <h1><svg class="vmark" viewBox="0 0 24 24" width="1em" height="1em" style="vertical-align:-0.12em" aria-hidden="true"><defs><linearGradient id="vmk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b8cff"/><stop offset="1" stop-color="#4f46e5"/></linearGradient></defs><path fill="url(#vmk)" d="M14 1 3.5 14H11zM10 23 20.5 10H13z"/></svg> Volt — Product Feature Tracker</h1>
- <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-12.</div>
+ <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-19.</div>
  <div class=sub>Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>46</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>1</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>38</b> 📱 In app</span><span class=chip><b>13</b> 📱 Partial</span><span class=chip><b>1</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>48</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>1</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>40</b> 📱 In app</span><span class=chip><b>13</b> 📱 Partial</span><span class=chip><b>1</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="partial">
     <div class=top><div class=name>Frame-accurate scrub &amp; clip</div>
@@ -628,6 +628,32 @@
     <div class=actions>
          <button class="btn ok" data-approve="Automatic stream sizing, placement and consolidation advice">✓ Approve as working</button>
          <button class="btn warn" data-changes="Automatic stream sizing, placement and consolidation advice">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Per-stream operating reports + CSV</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>WHY: a client with an SLA asks how long each stream ran, how long it was on air, why it stopped and what the audience did, and wants it in a spreadsheet. WHAT: Analytics → Operating lists every channel, station and event that ran in a period (hours run, hours on air, availability, faults, time to recover, peak, watch hours) with a CSV download; each stream opens a report with a run strip and one row per run. Figures that are no longer retained say 'not retained' instead of 0. Reports survive deleting the stream and keep the name each run had.</div>
+    <div class=meta></div>
+    <div class=how><b>How to test:</b> Analytics → Operating. Pick This month, then a stream. Check: runs listed with start, end, run time and on-air time; a fault shows FAULT with its reason; Download CSV opens in a spreadsheet with a TOTAL row. Stop a channel by hand and check that run reads OPERATOR. Delete a test channel and check its report is still there, marked Deleted. API: GET /api/reports/streams?from=&amp;to= and GET /api/reports/stream/&lt;id&gt;.csv. Suite: npx tsx test/stream-report.check.ts (77 checks).</div>
+    <div class=note>Test tool: open <b>“Analytics → Operating”</b> in your artifacts gallery.</div>
+    <div class=actions>
+         <button class="btn ok" data-approve="Per-stream operating reports + CSV">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Per-stream operating reports + CSV">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>In-stream graphics: Up next from the guide</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>WHY: viewers should see what is coming up without an app key or a guide fetch, in any player. WHAT: towards the end of each programme the stream itself carries an 'Up next' trigger (HLS EXT-X-DATERANGE and DASH EventStream, standard tags), built from the channel's guide. Players with 'Show graphics the stream asks for' on show the Up next card with the next title, subtitle, image and a countdown. Other players ignore it. Set per channel: on/off, how long before the end, how long it stays.</div>
+    <div class=meta></div>
+    <div class=how><b>How to test:</b> Give a running channel two back-to-back programmes in its guide, the first ending in about 3 minutes. Channel settings: Graphics in the stream, Up next on, 2 min. Watch the channel in the player: the Up next card appears about 2 minutes before the change, names the next programme and counts down. Player setup: turn off 'Show graphics the stream asks for' and check it no longer appears. Restart the channel after updating so the encoder writes the delivered playlists.</div>
+    <div class=note>Test tool: open <b>“Channel settings + Player setup”</b> in your artifacts gallery.</div>
+    <div class=actions>
+         <button class="btn ok" data-approve="In-stream graphics: Up next from the guide">✓ Approve as working</button>
+         <button class="btn warn" data-changes="In-stream graphics: Up next from the guide">Request changes</button>
        </div>
     
   </div><div class=card data-status="in_review" data-app="full">

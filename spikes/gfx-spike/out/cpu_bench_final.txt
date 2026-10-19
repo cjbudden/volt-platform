@@ -1,0 +1,54 @@
+run0 baseline           cpu=  45.5s wall= 24.3s rc=0
+[Parsed_drawtext_1 @ 0x5606ba3cf940] Stray % near '   *   Weather: fine in Auckland, 19C'
+    Last message repeated 749 times
+run0 ticker_drawtext    cpu=  45.1s wall= 23.7s rc=0
+run0 once_bbox          cpu=  44.0s wall= 23.1s rc=0
+run0 once_bbox_anim     cpu=  44.3s wall= 23.5s rc=0
+run0 once_full          cpu=  59.6s wall= 31.8s rc=0
+run0 per_rung_static    cpu=  42.9s wall= 22.4s rc=0
+run0 per_rung_dynamic   cpu=  46.0s wall= 24.4s rc=0
+run1 baseline           cpu=  44.5s wall= 23.1s rc=0
+[Parsed_drawtext_1 @ 0x5591b366e940] Stray % near '   *   Weather: fine in Auckland, 19C'
+    Last message repeated 749 times
+run1 ticker_drawtext    cpu=  43.4s wall= 22.7s rc=0
+run1 once_bbox          cpu=  43.8s wall= 22.9s rc=0
+run1 once_bbox_anim     cpu=  48.9s wall= 25.4s rc=0
+run1 once_full          cpu=  58.9s wall= 31.5s rc=0
+run1 per_rung_static    cpu=  47.4s wall= 24.7s rc=0
+run1 per_rung_dynamic   cpu=  46.6s wall= 24.4s rc=0
+run2 baseline           cpu=  43.7s wall= 22.8s rc=0
+[Parsed_drawtext_1 @ 0x558a4c568940] Stray % near '   *   Weather: fine in Auckland, 19C'
+    Last message repeated 749 times
+run2 ticker_drawtext    cpu=  42.8s wall= 22.5s rc=0
+run2 once_bbox          cpu=  46.9s wall= 24.5s rc=0
+run2 once_bbox_anim     cpu=  48.3s wall= 25.2s rc=0
+run2 once_full          cpu=  57.9s wall= 30.9s rc=0
+run2 per_rung_static    cpu=  42.2s wall= 22.1s rc=0
+run2 per_rung_dynamic   cpu=  43.1s wall= 22.8s rc=0
+run3 baseline           cpu=  42.6s wall= 22.4s rc=0
+[Parsed_drawtext_1 @ 0x557a1734b940] Stray % near '   *   Weather: fine in Auckland, 19C'
+    Last message repeated 749 times
+run3 ticker_drawtext    cpu=  43.0s wall= 22.6s rc=0
+run3 once_bbox          cpu=  45.3s wall= 23.7s rc=0
+run3 once_bbox_anim     cpu=  46.1s wall= 24.1s rc=0
+run3 once_full          cpu=  59.9s wall= 32.1s rc=0
+run3 per_rung_static    cpu=  46.1s wall= 24.1s rc=0
+run3 per_rung_dynamic   cpu=  47.8s wall= 25.1s rc=0
+run4 baseline           cpu=  46.1s wall= 24.0s rc=0
+[Parsed_drawtext_1 @ 0x55db555f8940] Stray % near '   *   Weather: fine in Auckland, 19C'
+    Last message repeated 749 times
+run4 ticker_drawtext    cpu=  45.6s wall= 23.8s rc=0
+run4 once_bbox          cpu=  49.2s wall= 25.6s rc=0
+run4 once_bbox_anim     cpu=  44.7s wall= 23.3s rc=0
+run4 once_full          cpu=  58.7s wall= 31.2s rc=0
+run4 per_rung_static    cpu=  46.3s wall= 24.1s rc=0
+run4 per_rung_dynamic   cpu=  48.1s wall= 25.1s rc=0
+
+variant              cpu_s(median)  wall_s  delta_vs_baseline  fps_equiv
+baseline                   44.5      23.1        +0.0%     32.4
+ticker_drawtext            43.4      22.7        -2.3%     33.0
+once_bbox                  45.3      23.7        +1.9%     31.7
+once_bbox_anim             46.1      24.1        +3.7%     31.1
+once_full                  58.9      31.5       +32.6%     23.8
+per_rung_static            46.1      24.1        +3.7%     31.2
+per_rung_dynamic           46.6      24.4        +4.7%     30.7

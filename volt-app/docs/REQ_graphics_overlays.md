@@ -1,6 +1,6 @@
 # Requirements: live graphics overlays
 
-**Status: specified, not built.** Companion to `DESIGN_html_graphics_overlays.md`,
+**Status: specified, not built. Live burn-in proven feasible 20 Oct 2026** (see `SPIKE_live_graphics_burnin.md`: +1.9 to 3.7 % encode cost, 300 ms state-to-output, channel unaffected by graphics failures; prototype in `spikes/gfx-spike/`). This reverses section 11's "live burn-in deferred": it is now the cheap path, not the risky one. Companion to `DESIGN_html_graphics_overlays.md`,
 which carries the cost analysis and the measured numbers. This document is the
 requirement set and the workflows, at the level someone could build from.
 
@@ -287,3 +287,11 @@ than aspirations.
   frequently confused with this feature, and a separate project.
 - Live burn-in. Specified here so the model accommodates it, sequenced after the
   player and offline paths ship.
+
+---
+
+## Decisions, 20 Oct 2026 (Christian)
+
+- **No graphics on package-only channels.** Their source encoder handles graphics. Advanced graphics (live HTML burn-in) are offered on the transcode workflow only. A burned binding on a package-only channel is not offered in the UI and is refused by the API.
+- **FAST / VOD-to-live channel branding: proposed, awaiting decision.** Keep VOD-to-live transcode-free by burning the channel brand into the asset renditions at ingest (the existing "encode on the live ladder" job, about +2 to 4 % on an encode that already runs), one branded variant per asset per brand version, created when an asset is first scheduled on a branded channel. Ads and the ad slate stay unbranded. A live-transcode FAST mode (dynamic graphics, tickers) would be a premium option priced per channel-hour.
+- **Player graphics via in-stream triggers: BUILT 20 Oct 2026** (first graphic: Up next). The standard trigger path for player-side graphics, see `DESIGN_stream_graphics_triggers.md`. Live HTML burn-in remains a separate, transcode-only path.

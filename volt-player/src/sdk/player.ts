@@ -11,7 +11,7 @@
 // ============================================================================
 import type {
   Commands, PlayerEventName, PlayerState, PlaylistItem, Programme, ResolvedTheme, Skin, SkinFactory,
-  Theme, VoltPlayerSdkOptions,
+  StreamGraphic, Theme, VoltPlayerSdkOptions,
 } from './types';
 import { Engine, isApple, readableError } from './engine';
 import { Beacons } from './beacons';
@@ -22,6 +22,8 @@ import { defaultApiBase, fetchEvent, fetchNowPlaying, fetchSchedule, fillUrl, Ga
 import { getSkin } from './skins';
 import { STRINGS, format } from './strings';
 import { injectBaseStyles } from './skins/kit';
+import { activeAt, fromDashRegion, fromHlsRegions, fromNativeCues, mergeGraphics, upNextFromGraphic } from './triggers';
+import type { TriggerReport } from './engine';
 
 const EPG_REFRESH_MS = 5 * 60_000;
 const NOW_PLAYING_MS = 15_000;
@@ -37,7 +39,7 @@ export function initialState(): PlayerState {
     programme: null, nextProgramme: null, schedule: [], canStartOver: false,
     volume: 1, muted: false, rate: 1,
     qualities: [], quality: 'auto', activeQuality: null, textTracks: [], textTrack: null, audioTracks: [], audioTrack: null,
-    items: [], index: -1, item: null, upNext: null,
+    items: [], index: -1, item: null, upNext: null, graphics: [],
     nowPlaying: null, history: [], nextTrack: null,
     cast: { available: false, state: 'none', device: null },
     airplay: { available: false, active: false },
@@ -67,6 +69,9 @@ export class VoltPlayer {
   private caster: Caster | null = null;
   private loadSeq = 0;
   private dismissedFor: string | null = null;
+  /** In-stream graphic triggers seen so far for this item, by id (sdk/triggers.ts). */
+  private streamGraphics = new Map<string, StreamGraphic>();
+  private activeGraphicIds = '';
   private lastProgrammeId: string | null = null;
   private analyser: AnalyserNode | null = null;
   private freq: Uint8Array | null = null;
@@ -118,6 +123,7 @@ export class VoltPlayer {
     this.engine = new Engine(this.media, { requestHeaders: o.requestHeaders, nativeHlsOnApple: o.airplay !== false, textContainer: this.stage });
     this.engine.onChange = () => this.pullEngine();
     this.engine.onError = (msg, code) => this.fail(msg, code);
+    this.engine.onTrigger = (r) => this.onTrigger(r);
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -258,6 +264,14 @@ export class VoltPlayer {
     if (e.activeQuality?.id !== prevQ) this.emit('qualitychange', e.activeQuality);
   }
 
+  /** In-stream triggers from the engine, as parsed (sdk/triggers.ts). */
+  private onTrigger(r: TriggerReport) {
+    const list = r.kind === 'hls' ? fromHlsRegions(r.regions)
+      : r.kind === 'dash' ? [fromDashRegion(r.region)].filter((g): g is StreamGraphic => !!g)
+      : fromNativeCues(r.cues);
+    if (list.length) mergeGraphics(this.streamGraphics, list, this.media.currentTime - 3600);
+  }
+
   /** Twice a second: the clock-driven parts (live position, programme, up next). */
   private derive() {
     if (this.destroyed) return;
@@ -268,20 +282,39 @@ export class VoltPlayer {
     const behindLive = e.live && e.seekable ? Math.max(0, e.seekable.end - currentTime) : 0;
     const wallClock = e.presentationStart != null ? e.presentationStart + currentTime * 1000 : (e.live ? Date.now() - behindLive * 1000 : null);
     const sched = this.s.schedule;
-    const programme = sched.length ? programmeAt(sched, wallClock ?? Date.now()) : null;
+    // IN-STREAM GRAPHICS (sdk/triggers.ts): what the manifest says is on screen at
+    // this media time. Only when graphics are on; the triggers are always parsed.
+    const graphicsOn = this.o.showGraphics ?? this.theme.showGraphics;
+    const graphics = graphicsOn ? activeAt(this.streamGraphics.values(), currentTime) : [];
+    // No guide loaded: the stream's own programme marker names what is on.
+    const inband = !sched.length && e.presentationStart != null ? graphics.find((g) => g.graphic === 'programme') : undefined;
+    const programme = sched.length ? programmeAt(sched, wallClock ?? Date.now())
+      : inband ? { id: inband.data.id || inband.id, title: inband.data.title || '', subtitle: inband.data.subtitle ?? null, description: null,
+          imageUrl: inband.data.image ?? null, startsAt: e.presentationStart! + inband.start * 1000,
+          endsAt: inband.end != null ? e.presentationStart! + inband.end * 1000 : Number.POSITIVE_INFINITY } : null;
     const nextProgramme = sched.length ? programmeAfter(sched, programme ? programme.endsAt - 1 : (wallClock ?? Date.now())) : null;
     const item = this.s.item;
     const dismissKey = programme ? `p:${programme.id}` : `i:${this.s.index}`;
-    const upNext = this.theme.controls.upNext ? upNextFor({
+    // The stream's own Up next wins over one worked out from a fetched guide: it is
+    // what the broadcaster's schedule said at airing time, and it needs no app key.
+    const upG = graphics.find((g) => g.graphic === 'up-next');
+    const upNext = this.theme.controls.upNext && upG && this.dismissedFor !== `g:${upG.id}` ? upNextFromGraphic(upG, currentTime, wallClock)
+      : this.theme.controls.upNext ? upNextFor({
       hasNextItem: this.s.index + 1 < this.s.items.length, nextItem: this.s.items[this.s.index + 1] ?? null,
       currentTime, duration: e.duration, live: e.live, programme, nextProgramme, playheadClock: wallClock,
       seconds: this.theme.upNextSeconds, autoAdvance: this.theme.autoAdvance, dismissed: this.dismissedFor === dismissKey,
     }) : null;
     if (programme?.id !== this.lastProgrammeId) { this.lastProgrammeId = programme?.id ?? null; if (programme) this.emit('programmechange', programme); }
     if (upNext && !this.s.upNext) this.emit('upnext', upNext);
+    const ids = graphics.map((g) => g.id).join('|');
+    if (ids !== this.activeGraphicIds) {
+      const before = new Set(this.activeGraphicIds.split('|'));
+      this.activeGraphicIds = ids;
+      for (const g of graphics) if (!before.has(g.id)) this.emit('graphic', g);
+    }
     this.set({
       currentTime, behindLive, atLiveEdge: !e.live || behindLive < 8, wallClock: e.live ? wallClock : null,
-      programme, nextProgramme, upNext,
+      programme, nextProgramme, upNext, graphics,
       canStartOver: this.theme.controls.startOver && canStartOver(programme, e.presentationStart, e.seekable, e.live),
       seekable: e.seekable,
       hasPicture: m.videoWidth > 0,
@@ -336,9 +369,11 @@ export class VoltPlayer {
     this.beacons?.destroy();
     this.beacons = null;
     this.dismissedFor = null;
+    this.streamGraphics.clear();
+    this.activeGraphicIds = '';
     let item = this.s.items[index];
     if (!item) return;
-    this.set({ index, item, status: 'loading', error: null, errorCode: null, upNext: null, hasPicture: false, audioOnly: false, qualities: [], textTracks: [], audioTracks: [],
+    this.set({ index, item, status: 'loading', error: null, errorCode: null, upNext: null, graphics: [], hasPicture: false, audioOnly: false, qualities: [], textTracks: [], audioTracks: [],
       access: { mode: null, message: null, products: [] } });
     this.emit('itemchange', { index, item });
     try {
@@ -565,7 +600,8 @@ export class VoltPlayer {
     },
     playItem: (i) => { if (i >= 0 && i < this.s.items.length) void this.load(i, true); },
     cancelUpNext: () => {
-      this.dismissedFor = this.s.programme ? `p:${this.s.programme.id}` : `i:${this.s.index}`;
+      const g = this.s.graphics.find((x) => x.graphic === 'up-next');
+      this.dismissedFor = g ? `g:${g.id}` : this.s.programme ? `p:${this.s.programme.id}` : `i:${this.s.index}`;
       this.set({ upNext: null });
     },
     toggleFullscreen: () => {

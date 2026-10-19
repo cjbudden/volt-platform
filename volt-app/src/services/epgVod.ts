@@ -297,3 +297,7 @@ export async function convertProgramme(
  * of its branches untested.
  */
 export const __testing = { shape };
+
+/** The same shaping, for callers that already hold the rows and the coverage
+ *  (the timeline grid batches both across a page of owners). */
+export const programmeVodShape = shape;

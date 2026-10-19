@@ -1,6 +1,7 @@
 # Requirements: per-stream operating reports
 
-**Status: specified, not built.** One report per channel, station and event,
+**Status: built 19 Oct 2026** (`services/streamReport.ts`, `modules/reports.ts`, console Analytics → Operating, `test/stream-report.check.ts`). The air ledger in section 2 was built earlier (migration 0023); run stop reasons and an FK-free run key were added in migration 0059. Section 4's quality block is not built yet.
+One report per channel, station and event,
 covering every time it ran, how long for, how long it was on air, and what the
 audience did.
 

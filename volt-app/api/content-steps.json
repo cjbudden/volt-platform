@@ -155,6 +155,16 @@
   "external": false
  },
  {
+  "folder": "Admin \u00b7 content: Live Timeline",
+  "name": "Timeline grid (Past, Now, Next)",
+  "method": "GET",
+  "path": "/api/timeline/grid?kinds=channel,radio,event",
+  "save": {},
+  "desc": "Every visible stream on one clock: programmes (as-run preferred), recorded media and gaps, clips and five-gate status. Window defaults to two hours back and four ahead, capped at 48 hours; 50 rows a page with a cursor.",
+  "auth": "admin",
+  "external": false
+ },
+ {
   "folder": "Admin \u00b7 content: Recordings",
   "name": "List recordings",
   "method": "GET",

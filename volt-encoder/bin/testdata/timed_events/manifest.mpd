@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--Generated with https://github.com/shaka-project/shaka-packager version v3.9.3-0a8ba4f-release-->
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:mpeg:dash:schema:mpd:2011 DASH-MPD.xsd" profiles="urn:mpeg:dash:profile:isoff-live:2011" minBufferTime="PT2S" type="dynamic" publishTime="2026-10-17T04:28:31Z" availabilityStartTime="2026-10-17T03:48:00Z" minimumUpdatePeriod="PT4S" timeShiftBufferDepth="PT300S">
+  <Period id="0" start="PT0S">
+    <AdaptationSet id="0" contentType="video" maxWidth="1920" maxHeight="1080" frameRate="90000/3600" par="16:9">
+      <SupplementalProperty schemeIdUri="urn:mpeg:mpegB:cicp:MatrixCoefficients" value="1"/>
+      <SupplementalProperty schemeIdUri="urn:mpeg:mpegB:cicp:ColourPrimaries" value="1"/>
+      <SupplementalProperty schemeIdUri="urn:mpeg:mpegB:cicp:TransferCharacteristics" value="1"/>
+      <Representation id="0" bandwidth="3219712" codecs="avc1.4d4028" mimeType="video/mp4" sar="1:1" width="1920" height="1080">
+        <SegmentTemplate timescale="90000" initialization="1080p/init.mp4" media="1080p/seg_$Number$.m4s" startNumber="530">
+          <SegmentTimeline>
+            <S t="183639341" d="324000"/>
+            <S t="183963341" d="648000"/>
+            <S t="184611341" d="324000" r="7"/>
+            <S t="187203341" d="648000"/>
+            <S t="187851341" d="324000" r="7"/>
+            <S t="190443341" d="648000"/>
+            <S t="191091341" d="324000" r="7"/>
+            <S t="193683341" d="648000"/>
+            <S t="194331341" d="324000" r="7"/>
+            <S t="196923341" d="648000"/>
+            <S t="197571341" d="324000" r="7"/>
+            <S t="200163341" d="648000"/>
+            <S t="200811341" d="324000" r="7"/>
+            <S t="203403341" d="648000"/>
+            <S t="204051341" d="324000" r="7"/>
+            <S t="206643341" d="648000"/>
+            <S t="207291341" d="324000" r="7"/>
+            <S t="209883341" d="648000"/>
+            <S t="210531341" d="324000" r="1"/>
+          </SegmentTimeline>
+        </SegmentTemplate>
+      </Representation>
+      <Representation id="2" bandwidth="1519372" codecs="avc1.4d401f" mimeType="video/mp4" sar="1:1" width="1280" height="720">
+        <SegmentTemplate timescale="90000" initialization="720/init.mp4" media="720/seg_$Number$.m4s" startNumber="529">
+          <SegmentTimeline>
+            <S t="183457529" d="324000" r="5"/>
+            <S t="185401529" d="648000"/>
+            <S t="186049529" d="324000" r="7"/>
+            <S t="188641529" d="648000"/>
+            <S t="189289529" d="324000" r="7"/>
+            <S t="191881529" d="648000"/>
+            <S t="192529529" d="324000" r="7"/>
+            <S t="195121529" d="648000"/>
+            <S t="195769529" d="324000" r="7"/>
+            <S t="198361529" d="648000"/>
+            <S t="199009529" d="324000" r="7"/>
+            <S t="201601529" d="648000"/>
+            <S t="202249529" d="324000" r="7"/>
+            <S t="204841529" d="648000"/>
+            <S t="205489529" d="324000" r="7"/>
+            <S t="208081529" d="648000"/>
+            <S t="208729529" d="324000" r="6"/>
+          </SegmentTimeline>
+        </SegmentTemplate>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet id="1" contentType="audio" startWithSAP="1" segmentAlignment="true">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="main"/>
+      <Representation id="1" bandwidth="128574" codecs="mp4a.40.2" mimeType="audio/mp4" audioSamplingRate="44100">
+        <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>
+        <SegmentTemplate timescale="90000" initialization="audio/init.mp4" media="audio/seg_$Number$.m4s" startNumber="530">
+          <SegmentTimeline>
+            <S t="183241666" d="359308"/>
+            <S t="183601110" d="359308"/>
+            <S t="183960556" d="359308"/>
+            <S t="184320000" d="361397"/>
+            <S t="184681535" d="359308"/>
+            <S t="185040979" d="359308"/>
+            <S t="185400423" d="361397"/>
+            <S t="185761960" d="359308"/>
+            <S t="186121405" d="359308"/>
+            <S t="186480850" d="359308"/>
+            <S t="186840294" d="361397"/>
+            <S t="187201829" d="359308"/>
+            <S t="187561273" d="359308"/>
+            <S t="187920719" d="359308"/>
+            <S t="188280164" d="361397"/>
+            <S t="188641698" d="359308"/>
+            <S t="189001142" d="359308"/>
+            <S t="189360588" d="359308"/>
+            <S t="189720033" d="361397"/>
+            <S t="190081567" d="359308"/>
+            <S t="190441012" d="359308"/>
+            <S t="190800457" d="361397"/>
+            <S t="191161992" d="359308"/>
+            <S t="191521438" d="359308"/>
+            <S t="191880882" d="359308"/>
+            <S t="192240327" d="361397"/>
+            <S t="192601862" d="359308"/>
+            <S t="192961306" d="359308"/>
+            <S t="193320751" d="359308"/>
+            <S t="193680197" d="361397"/>
+            <S t="194041730" d="359308"/>
+            <S t="194401176" d="359308"/>
+            <S t="194760620" d="359308"/>
+            <S t="195120066" d="361397"/>
+            <S t="195481601" d="359308"/>
+            <S t="195841046" d="359308"/>
+            <S t="196200490" d="361397"/>
+            <S t="196562024" d="359308"/>
+            <S t="196921470" d="359308"/>
+            <S t="197280914" d="359308"/>
+            <S t="197640359" d="361397"/>
+            <S t="198001893" d="359308"/>
+            <S t="198361339" d="359308"/>
+            <S t="198720783" d="359308"/>
+            <S t="199080228" d="361397"/>
+            <S t="199441763" d="359308"/>
+            <S t="199801208" d="359308"/>
+            <S t="200160653" d="359308"/>
+            <S t="200520098" d="361397"/>
+            <S t="200881632" d="359308"/>
+            <S t="201241078" d="359308"/>
+            <S t="201600523" d="361397"/>
+            <S t="201962058" d="359308"/>
+            <S t="202321502" d="359308"/>
+            <S t="202680947" d="359308"/>
+            <S t="203040392" d="361397"/>
+            <S t="203401926" d="359308"/>
+            <S t="203761372" d="359308"/>
+            <S t="204120816" d="359308"/>
+            <S t="204480262" d="361397"/>
+            <S t="204841797" d="359308"/>
+            <S t="205201241" d="359308"/>
+            <S t="205560687" d="359308"/>
+            <S t="205920130" d="361397"/>
+            <S t="206281665" d="359308"/>
+            <S t="206641111" d="359308"/>
+            <S t="207000555" d="359308"/>
+            <S t="207360000" d="361397"/>
+            <S t="207721535" d="359308"/>
+            <S t="208080980" d="359308"/>
+            <S t="208440424" d="361397"/>
+            <S t="208801960" d="359308"/>
+            <S t="209161405" d="359308"/>
+            <S t="209520849" d="359308"/>
+            <S t="209880294" d="361397"/>
+            <S t="210241828" d="359308"/>
+            <S t="210601274" d="359308"/>
+          </SegmentTimeline>
+        </SegmentTemplate>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>

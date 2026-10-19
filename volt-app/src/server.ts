@@ -22,6 +22,7 @@ import { mediaIngestRouter } from './modules/mediaIngest';
 import { recordingsRouter } from './modules/recordings';
 import { jobsRouter } from './modules/jobs';
 import { timelineRouter, daypartPresetsRouter } from './modules/timeline';
+import { timelineGridRouter } from './modules/timelineGrid';
 import { storageRouter } from './modules/storage';
 import { vodRouter } from './modules/vod';
 import { metadataSchemasRouter } from './modules/metadataSchemas';
@@ -66,6 +67,7 @@ import { imagesPublicRouter, imagesApiRouter, imageService } from './modules/ima
 import { thumbnailsRouter } from './modules/thumbnails';
 import { auditDeletes } from './services/deleteAudit';
 import { auditRouter } from './modules/audit';
+import { reportsRouter } from './modules/reports';
 import { planRouter } from './modules/plan';
 import { isBootReconciled } from './services/orchestrator';
 import { mountHealth, publicOnlyGuard } from './scale/health';
@@ -180,13 +182,17 @@ export function createServer() {
       // Never let a crafted path climb out of the origin directory.
       if (!file.startsWith(config.testStream.originDir)) return next();
       const text = await readFile(file, 'utf8');
-      const { annotatePlaylist, playlistWindow, scheduleFor } = await import('./services/timedMetadata');
+      const { playlistWindow, injectDateRanges } = await import('./services/timedMetadata');
       const win = playlistWindow(text);
       if (!win) return next();                       // master, or no wall clock
-      const sched = await scheduleFor(m[1], win.from, win.to);
-      if (!sched.length) return next();              // nothing to say
+      // The same triggers the encoder writes (programme boundaries and graphics
+      // such as Up next), from the cached schedule: no query per request.
+      const { triggersForStream, hlsTag } = await import('./services/graphicTriggers');
+      let trig = await triggersForStream('channel', m[1], win.from, win.to);
+      if (!trig.length) trig = await triggersForStream('event', m[1], win.from, win.to);
+      if (!trig.length) return next();               // nothing to say
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-      return res.end(annotatePlaylist(text, sched));
+      return res.end(injectDateRanges(text, trig.map(hlsTag)));
     } catch { return next(); }
   },
   express.static(config.testStream.originDir, {
@@ -327,6 +333,9 @@ export function createServer() {
   // channels prefix and after it — the channels router owns /:id itself.
   app.use('/api/channels', timelineRouter);
   app.use('/api/daypart-presets', daypartPresetsRouter);
+  // The Live Streams page's Timeline view: every visible stream on one clock,
+  // in one call (TIMELINE_MODE.md). Gated as monitoring, like /api/monitoring/live.
+  app.use('/api/timeline', timelineGridRouter);
   // Media lifecycle: what exists, where it lives, whether it can be read now,
   // and what retention will do to it next. NOT /api/media — that prefix is the
   // thumbnailer's ingest callback and belongs to a different concern entirely.
@@ -378,6 +387,7 @@ export function createServer() {
   app.use('/api/availability', availabilityRouter);      // public play-gate → mints playback token (publishable key)
   app.use('/api/access', accessRouter);                  // public check-access → booleans, no token (publishable key)
   app.use('/api/analytics/beacon', analyticsBeaconRouter); // public session beacon (playback-token)
+  app.use('/api/reports', reportsRouter);              // per-stream operating reports + CSV (docs/REQ_stream_reporting.md)
   app.use('/api/analytics', analyticsRouter);            // tenant reports (realtime/audience/usage)
   app.use('/api/tickets', ticketsRouter);                // client support tickets
   app.use('/api/docs', docsSessionRouter);              // signed pass to the customer docs site (modules/docsSession.ts)

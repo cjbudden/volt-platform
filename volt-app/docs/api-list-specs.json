@@ -4143,6 +4143,90 @@
  },
  {
   "method": "GET",
+  "path": "/api/timeline/grid",
+  "search": [
+   "name",
+   "group_name"
+  ],
+  "defaultSort": "group_name,name",
+  "defaultLimit": 50,
+  "maxLimit": 50,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {
+   "groupId": "group_id"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "kind": {
+    "type": "enum",
+    "values": [
+     "channel",
+     "radio",
+     "event",
+     "loop"
+    ],
+    "sort": true,
+    "filter": false,
+    "ops": [],
+    "doc": "Use kinds= instead"
+   },
+   "name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "group_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "Channel group (alias groupId)"
+   },
+   "group_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
   "path": "/api/users",
   "search": [
    "email",

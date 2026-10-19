@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-12",
+  "updated": "2026-10-19",
   "features": [
     {
       "id": "live-stream-e2e",
@@ -728,6 +728,45 @@
         "artifact": null
       },
       "checks": "A package-only channel reserves well under 1 vCPU, not the old 2 vCPU default; A full 1080p x264 ladder goes to a large server, not an undersized small one; A second channel lands on the same running server when it fits; A channel is never placed on Spot; an event prefers Spot; Nothing is moved by consolidation (advise only)",
+      "feedback": []
+    },
+    {
+      "id": "operating-report",
+      "name": "Per-stream operating reports + CSV",
+      "summary": "WHY: a client with an SLA asks how long each stream ran, how long it was on air, why it stopped and what the audience did, and wants it in a spreadsheet. WHAT: Analytics → Operating lists every channel, station and event that ran in a period (hours run, hours on air, availability, faults, time to recover, peak, watch hours) with a CSV download; each stream opens a report with a run strip and one row per run. Figures that are no longer retained say 'not retained' instead of 0. Reports survive deleting the stream and keep the name each run had.",
+      "status": "ready_to_test",
+      "app_surface": "full",
+      "test": {
+        "how": "Analytics → Operating. Pick This month, then a stream. Check: runs listed with start, end, run time and on-air time; a fault shows FAULT with its reason; Download CSV opens in a spreadsheet with a TOTAL row. Stop a channel by hand and check that run reads OPERATOR. Delete a test channel and check its report is still there, marked Deleted. API: GET /api/reports/streams?from=&to= and GET /api/reports/stream/<id>.csv. Suite: npx tsx test/stream-report.check.ts (77 checks).",
+        "artifact": "Analytics → Operating",
+        "checks": [
+          "Three runs show as three rows and the total is their sum",
+          "Deleting the channel keeps the report",
+          "Hours run and hours on air differ",
+          "An old run says not retained, never 0",
+          "A rename does not change historical rows",
+          "Fault vs operator stop is visible"
+        ]
+      },
+      "feedback": []
+    },
+    {
+      "id": "stream-graphics",
+      "name": "In-stream graphics: Up next from the guide",
+      "summary": "WHY: viewers should see what is coming up without an app key or a guide fetch, in any player. WHAT: towards the end of each programme the stream itself carries an 'Up next' trigger (HLS EXT-X-DATERANGE and DASH EventStream, standard tags), built from the channel's guide. Players with 'Show graphics the stream asks for' on show the Up next card with the next title, subtitle, image and a countdown. Other players ignore it. Set per channel: on/off, how long before the end, how long it stays.",
+      "status": "ready_to_test",
+      "app_surface": "full",
+      "test": {
+        "how": "Give a running channel two back-to-back programmes in its guide, the first ending in about 3 minutes. Channel settings: Graphics in the stream, Up next on, 2 min. Watch the channel in the player: the Up next card appears about 2 minutes before the change, names the next programme and counts down. Player setup: turn off 'Show graphics the stream asks for' and check it no longer appears. Restart the channel after updating so the encoder writes the delivered playlists.",
+        "artifact": "Channel settings + Player setup",
+        "checks": [
+          "Card appears at the set time before the end",
+          "Names the next programme with its subtitle and image",
+          "Works on HLS and DASH",
+          "Gone with graphics off",
+          "Renaming the next programme updates the card"
+        ]
+      },
       "feedback": []
     }
   ],

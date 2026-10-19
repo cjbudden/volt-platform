@@ -179,8 +179,10 @@ export async function resolveLiveManifest(id: string, file: 'master.m3u8' | 'man
     // the CDN path cannot be stat'ed from here, so decide from the channel: the
     // encoder writes master_cc whenever it splices (failover with a slate/loop) or
     // carries subtitles
-    const spliced = !!ch.input_failover_enabled && ['slate', 'vod_loop'].includes(ch.input_loss_behavior ?? '');
-    const useCc = ch.kind !== 'radio' && (file === 'master.m3u8' ? (!!ch.captions_enabled || spliced) : spliced);
+    // ...and, since in-stream graphic triggers (services/graphicTriggers.ts), on
+    // every video channel: the delivered copies are where the encoder writes the
+    // wall clock and the triggers, and the packager's own files carry neither.
+    const useCc = ch.kind !== 'radio';
     const out = useCc ? (file === 'master.m3u8' ? 'master_cc.m3u8' : 'manifest_cc.mpd') : file;
     return { ok: true, url: `${cdn.replace(/\/$/, '')}/channel/${id}/${out}` };
   }
@@ -215,7 +217,8 @@ export async function resolveEventManifest(id: string, file: 'master.m3u8' | 'ma
   const valid = existsSync(liveDirFor(id)) ? outputHasValidContent(id) : await reportedOutputLive(id);
   if (!valid) return { ok: false, status: 503, reason: 'no_valid_content' };
   const cdn = config.aws?.cdnBaseUrl;
-  if (cdn && config.env === 'production' && !/example\.com/.test(cdn)) return { ok: true, url: `${cdn.replace(/\/$/, '')}/event/${id}/${file}` };
+  // Delivered copies, as for channels: the encoder writes them for every video stream.
+  if (cdn && config.env === 'production' && !/example\.com/.test(cdn)) return { ok: true, url: `${cdn.replace(/\/$/, '')}/event/${id}/${file === 'master.m3u8' ? 'master_cc.m3u8' : 'manifest_cc.mpd'}` };
   const delivered = file === 'master.m3u8' ? 'master_cc.m3u8' : 'manifest_cc.mpd';
   return { ok: true, url: `${liveUrlBase(id)}/${existsSync(join(liveDirFor(id), delivered)) ? delivered : file}` };
 }

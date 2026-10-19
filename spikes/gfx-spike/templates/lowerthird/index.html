@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Lower third</title>
+<script type="application/json" id="volt-manifest">
+{
+  "name": "Lower third",
+  "contract": "casparcg-html/1 + volt-deterministic/1",
+  "canvas": [1920, 1080],
+  "fps": 25,
+  "bbox": [100, 820, 1000, 170],
+  "animation": "gsap",
+  "fields": [
+    {"id": "f0", "type": "text", "label": "Name"},
+    {"id": "f1", "type": "text", "label": "Title"}
+  ],
+  "sample": {"f0": "Christian Budden", "f1": "Solutions Architect, APAC"}
+}
+</script>
+<!-- the sidecar serves /lib/gsap.min.js from node_modules; a template may also bundle it -->
+<script src="/lib/gsap.min.js"></script>
+<style>
+  html, body { margin: 0; background: transparent; width: 1920px; height: 1080px; overflow: hidden; }
+  #lt { position: absolute; left: 120px; top: 840px; font-family: "DejaVu Sans", sans-serif; }
+  #bar { position: absolute; left: 0; top: 0; width: 940px; height: 78px; background: #0b1f4d; transform-origin: left; transform: scaleX(0); }
+  #sub { position: absolute; left: 0; top: 78px; width: 700px; height: 48px; background: #ffd400; transform-origin: left; transform: scaleX(0); }
+  #name { position: absolute; left: 28px; top: 0; line-height: 78px; font-size: 42px; font-weight: 700; color: #fff; white-space: nowrap; opacity: 0; }
+  #title { position: absolute; left: 28px; top: 78px; line-height: 48px; font-size: 28px; color: #0b1f4d; white-space: nowrap; opacity: 0; }
+</style>
+</head>
+<body>
+<div id="lt"><div id="bar"></div><div id="sub"></div><div id="name"></div><div id="title"></div></div>
+<script>
+  let tl = null;
+  function parse(d) { if (typeof d !== 'string') return d || {}; try { return JSON.parse(d); } catch (_) { return {}; } }
+  window.update = function (raw) {
+    const d = parse(raw);
+    if ('f0' in d) document.getElementById('name').textContent = d.f0;
+    if ('f1' in d) document.getElementById('title').textContent = d.f1;
+  };
+  // GSAP timeline: the in-animation. The deterministic hook is the timeline itself:
+  // a renderer may call window.seek(t) (seconds) instead of letting the ticker run.
+  function build() {
+    tl = gsap.timeline({ paused: true });
+    tl.to('#bar', { scaleX: 1, duration: 0.45, ease: 'power3.out' })
+      .to('#sub', { scaleX: 1, duration: 0.35, ease: 'power3.out' }, 0.15)
+      .to('#name', { opacity: 1, x: 10, duration: 0.3 }, 0.3)
+      .to('#title', { opacity: 1, x: 10, duration: 0.3 }, 0.4);
+  }
+  build();
+  window.play = function () { tl.play(0); };
+  window.stop = function () { tl.reverse(); };
+  window.next = function () {};
+  // volt-deterministic/1 (optional): the template can be seeked directly.
+  window.seek = function (t) { tl.pause(); tl.seek(t, false); };
+  window.duration = function () { return tl.duration(); };
+  if (location.search.includes('preview')) {
+    update(JSON.parse(document.getElementById('volt-manifest').textContent).sample); play();
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{
+ "chromium_ticker_cpu_pct": 82.8,
+ "rss_mb": 480,
+ "continuous_log": [
+  {
+   "t": 1792417567965,
+   "ev": "continuous",
+   "medFrameMs": 9,
+   "p95": 18
+  },
+  {
+   "t": 1792417577968,
+   "ev": "continuous",
+   "medFrameMs": 9.1,
+   "p95": 18.1
+  },
+  {
+   "t": 1792417587937,
+   "ev": "continuous",
+   "medFrameMs": 8.9,
+   "p95": 18.8
+  }
+ ],
+ "health": {
+  "fps": 25,
+  "framesOut": 828,
+  "fifoDrops": 0,
+  "queue": 3,
+  "lastRenderMs": 0,
+  "onAir": true,
+  "rssMB": 96
+ }
+}

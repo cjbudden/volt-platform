@@ -1311,13 +1311,13 @@ def _playout_pass(out_dir, src_lines, seg_dur):
         if txt is None:
             continue
         base = n[:-len(".m3u8")] if n.endswith(".m3u8") else n
-        _atomic_write(os.path.join(out_dir, f"{base}_cc.m3u8"), txt)
+        _atomic_write(os.path.join(out_dir, f"{base}_cc.m3u8"), _with_triggers(txt))
         out[n] = f"{base}_cc.m3u8"
     # DASH: the same delivered timeline as a multi-Period MPD (live / loop / live)
     try:
         mpd = _PLAYOUT.render_mpd(_iso, _mpd_reps(out_dir), seg_dur, time.time())
         if mpd:
-            _atomic_write(os.path.join(out_dir, "manifest_cc.mpd"), mpd)
+            _atomic_write(os.path.join(out_dir, "manifest_cc.mpd"), _with_trigger_events(mpd))
     except Exception as e:  # noqa: BLE001
         log(f"playout: DASH manifest not written this pass ({e})")
     return out
@@ -1454,7 +1454,7 @@ def _write_companion(out_dir, langs, default_lang, seg_dur):
                             and (vlines[-1].startswith("#") or vlines[-1].endswith((".m4s", ".mp4", ".ts"))))
                 if complete:
                     _atomic_write(os.path.join(out_dir, cc_name),
-                                  _pdt_companion_playlist(vtext, out_dir, seg_dur))
+                                  _with_triggers(_pdt_companion_playlist(vtext, out_dir, seg_dur)))
                 if complete or os.path.exists(os.path.join(out_dir, cc_name)):
                     out.append(cc_name)
                 else:
@@ -1487,8 +1487,9 @@ def _write_companion_mpd(out_dir, langs, chunk, first_idx):
             f'startNumber="{first_idx}" duration="{int(round(chunk))}" timescale="1"/>'
             f'</Representation></AdaptationSet>'
         )
-    mpd = mpd.replace("</Period>", "".join(blocks) + "</Period>")
-    _atomic_write(os.path.join(out_dir, "manifest_cc.mpd"), mpd)
+    if blocks:
+        mpd = mpd.replace("</Period>", "".join(blocks) + "</Period>")
+    _atomic_write(os.path.join(out_dir, "manifest_cc.mpd"), _with_trigger_events(mpd))
 
 
 def _subs_first_idx(out_dir, lang):
@@ -1504,6 +1505,38 @@ def _subs_first_idx(out_dir, lang):
 
 
 _COMPANION_STARTED = False
+
+# In-stream graphic triggers (timed_events.py). None until the job config asks for
+# them; every helper below is then a plain pass-through.
+_TRIGGERS = None
+
+
+def _with_triggers(text):
+    """A delivered media playlist with this stream's EXT-X-DATERANGE triggers."""
+    if _TRIGGERS is None:
+        return text
+    import timed_events
+    return timed_events.inject_hls(text, _TRIGGERS.current())
+
+
+def _with_trigger_events(mpd):
+    """A delivered MPD with this stream's triggers as EventStreams per Period."""
+    if _TRIGGERS is None:
+        return mpd
+    import timed_events
+    return timed_events.inject_mpd(mpd, _TRIGGERS.current())
+
+
+def start_trigger_feed(cfg):
+    """Poll the control plane for this stream's triggers (programme boundaries and
+    graphics such as Up next) so the companion refresher can write them."""
+    global _TRIGGERS
+    te = cfg.get("timed_events") or {}
+    if not te.get("url") or _TRIGGERS is not None:
+        return
+    import timed_events
+    _TRIGGERS = timed_events.TriggerFeed(te["url"], te.get("token"), te.get("poll_sec", 5), log=log).start()
+    log(f"timed events: polling every {_TRIGGERS.poll_sec}s")
 
 
 def start_companion_refresher(out_dir, langs, default_lang, chunk, seg_dur, interval=1.0):
@@ -1527,7 +1560,7 @@ def start_companion_refresher(out_dir, langs, default_lang, chunk, seg_dur, inte
             try:
                 if os.path.exists(os.path.join(out_dir, "master.m3u8")):
                     _write_companion(out_dir, langs, default_lang, seg_dur)
-                    if langs and _PLAYOUT is None:
+                    if (langs or _TRIGGERS is not None) and _PLAYOUT is None:
                         # with playout on, manifest_cc.mpd is the spliced multi-Period MPD
                         _write_companion_mpd(out_dir, langs, chunk, _subs_first_idx(out_dir, default_lang))
             except Exception as e:  # noqa: BLE001
@@ -2253,6 +2286,20 @@ def main():
             start_playout(cfg)
         except Exception as e:  # noqa: BLE001
             log(f"playout: failed to start ({e}); delivered playlists are a plain copy")
+
+    # IN-STREAM GRAPHIC TRIGGERS. The delivered copies (master_cc / *_cc / manifest_cc)
+    # are written for EVERY video stream now, not only captioned or spliced ones: they
+    # carry the wall clock and the triggers, and the packager's own files carry neither.
+    # Started after captions and playout on purpose: either of those has already
+    # started the companion refresher with its own settings, and this call is then a
+    # no-op apart from the feed.
+    if cfg.get("timed_events"):
+        try:
+            start_trigger_feed(cfg)
+            seg_s = float(cfg.get("segment_seconds") or 4)
+            start_companion_refresher(OUT_DIR, [], "en", seg_s, seg_s)
+        except Exception as e:  # noqa: BLE001
+            log(f"timed events: not started ({e}); manifests carry no triggers")
 
     # Supervise: if any critical child dies, tear the whole channel down so
     # ECS restarts a clean container (renditions must stay in lockstep).

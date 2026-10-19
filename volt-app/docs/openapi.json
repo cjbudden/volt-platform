@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "Volt API",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "The Volt API: the **Public API** for apps, players and their audience, and the **Admin API** for your own staff and servers.\n\nEvery route Volt serves to customers is listed here. Routes with a captured example show a real request and response from a test account.\n\nGuides: Using the API, Authentication and Errors in the docs sidebar."
  },
  "servers": [
@@ -229,6 +229,10 @@
    "description": "Recordings are the raw captures of your live output: one per event run, and one per calendar day for each continuous channel.\n\n**Use it to:**\n- List and open recordings with `GET /api/recordings` and `GET /api/recordings/{id}`\n- Publish a whole recording as VOD with `POST /api/recordings/{id}/publish`, or clip a time range with `POST /api/recordings/{id}/clip`\n- Download an MP4 with `GET /api/recordings/{id}/download`\n- Read the timeline, waveform, transcript and programmes with `GET /api/recordings/{id}/timeline` and related requests\n\n**Credential:** admin session (Bearer) or account secret key, with `recordings: view` to read, `recordings: operate` to publish and `recordings: manage` to compose clips.\n\n**Good to know:** clips and downloads answer 409 `no_media`, with the gaps, when nothing was recorded in the range. Downloads answer 202 while exporting."
   },
   {
+   "name": "Reports",
+   "description": "Operating reports say, for each channel, station and event, every time it ran, how long for, how long it was on air, why each run ended, and what the audience did. Built for SLA reviews and monthly client reporting.\n\n**Use it to:**\n- Read one stream's report with `GET /api/reports/stream/{id}?from=&to=`\n- Download it as a spreadsheet with `GET /api/reports/stream/{id}.csv`, one row per run plus a TOTAL row\n- Summarise every stream for a period with `GET /api/reports/streams`, filtered by `kind` and `q` and sorted with `sort=-hours_run`\n- Download the period summary with `GET /api/reports/streams.csv`\n\n**Credential:** admin session (Bearer) or account secret key, with `analytics: view`.\n\n**Good to know:** a null figure means \"not known\", never zero. An exact per-run peak exists only while raw viewing sessions are retained; older runs report `peak_basis: not_retained` with the day's peak beside it. Reports survive deleting the stream, and historical rows keep the name the stream ran under."
+  },
+  {
    "name": "Scheduled Clips",
    "x-displayName": "Scheduled clips",
    "description": "Scheduled clips are clipping windows set on a live timeline. When the window ends, Volt cuts it into a VOD asset.\n\n**Use it to:**\n- List clipping windows with `GET /api/scheduled-clips`\n- Schedule a clip, choosing a manifest, progressive or both, with `POST /api/scheduled-clips`\n- Cancel a clip that has not been cut yet with `DELETE /api/scheduled-clips/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `recordings: view` to read and `recordings: manage` to change.\n\n**Good to know:** a clip can only be cancelled while it is still scheduled."
@@ -277,6 +281,11 @@
    "name": "Tickets",
    "x-displayName": "Support tickets",
    "description": "Tickets let your team raise support requests with the Volt team and follow their progress.\n\n**Use it to:**\n- List your account's tickets with `GET /api/tickets`\n- Raise a ticket, with a priority, with `POST /api/tickets`\n- Follow one ticket with `GET /api/tickets/{id}`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, the operator tier or above is needed to raise one."
+  },
+  {
+   "name": "Timeline",
+   "x-displayName": "Timeline",
+   "description": "Timeline gives the Live Streams page's Past, Now, Next view: every stream on one clock, in one request.\n\n**Use it to:**\n- Draw what aired, what is on now and what is next across all your streams with `GET /api/timeline/grid`\n\n**Credential:** admin session (Bearer) or account secret key, with `monitoring: view`, and `view` on channels, radio or events for those rows.\n\n**Good to know:** the window is capped at 48 hours and rows page at 50. For one stream in detail use `GET /api/channels/:id/timeline` and `/coverage`."
   },
   {
    "name": "Uploads",
@@ -376,6 +385,7 @@
     "Publish Targets",
     "Publishing Rules",
     "Recordings",
+    "Reports",
     "Scheduled Clips",
     "Search",
     "Share Links",
@@ -385,6 +395,7 @@
     "Storage",
     "Thumbnails",
     "Tickets",
+    "Timeline",
     "Uploads",
     "Uploads (tus)",
     "User Groups",
@@ -8267,6 +8278,42 @@
     }
    }
   },
+  "/api/epg/batches/{id}/undo": {
+   "post": {
+    "operationId": "postEPGBatchesByIDUndo",
+    "summary": "Undo (batche)",
+    "tags": [
+     "EPG"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** epg: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/epg/channels": {
    "get": {
     "operationId": "getEPGChannels",
@@ -9058,6 +9105,32 @@
     }
    }
   },
+  "/api/epg/repeat": {
+   "post": {
+    "operationId": "postEPGRepeat",
+    "summary": "EPG: repeat",
+    "tags": [
+     "EPG"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** epg: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/epg/series": {
    "post": {
     "operationId": "postEPGSeries",
@@ -9069,6 +9142,78 @@
     "security": [
      {
       "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/epg/series/{id}": {
+   "get": {
+    "operationId": "getEPGSeriesByID",
+    "summary": "Get a sery",
+    "tags": [
+     "EPG"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** epg: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/epg/series/{id}/end": {
+   "post": {
+    "operationId": "postEPGSeriesByIDEnd",
+    "summary": "End (sery)",
+    "tags": [
+     "EPG"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** epg: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
      }
     ],
     "responses": {
@@ -21715,6 +21860,94 @@
     }
    }
   },
+  "/api/reports/stream/{id}": {
+   "get": {
+    "operationId": "getReportsStreamByID",
+    "summary": "Get a stream",
+    "tags": [
+     "Reports"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/reports/streams": {
+   "get": {
+    "operationId": "getReportsStreams",
+    "summary": "Get reports streams",
+    "tags": [
+     "Reports"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/reports/streams.csv": {
+   "get": {
+    "operationId": "getReportsStreamsCsv",
+    "summary": "Get reports streams csv",
+    "tags": [
+     "Reports"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/scheduled-clips": {
    "get": {
     "operationId": "getScheduledClips",
@@ -24347,6 +24580,443 @@
       "$ref": "#/components/responses/Forbidden"
      }
     }
+   }
+  },
+  "/api/timeline/grid": {
+   "get": {
+    "operationId": "getTimelineGrid",
+    "summary": "Get the timeline grid (Past, Now, Next)",
+    "tags": [
+     "Timeline"
+    ],
+    "description": "Every stream the caller can see as one row on a shared clock, for the Live Streams Timeline view: programmes (as-run times preferred over scheduled), the media actually recorded with its gaps (past part of the window only, measured from disk), clip ticks, and the same five-gate status the Live board shows. One call for the whole grid instead of one per stream.\n\n`from` and `to` are ISO 8601 (epoch ms also accepted); the window is capped at 48 hours and a wider one is a 400. `kinds` narrows to `channel,radio,event,loop` (rows of a kind your role cannot view are absent, not empty). Rows page at 50 with the list standard's cursor: follow `next` in the body or the `Link: rel=\"next\"` header.\n\nEvery visible stream on one clock: programmes (as-run preferred), recorded media and gaps, clips and five-gate status. Window defaults to two hours back and four ahead, capped at 48 hours; 50 rows a page with a cursor.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** monitoring: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `group_id`, `group_name`.",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Search name, group_name. Every word must match, case-insensitive."
+     },
+     {
+      "name": "id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "Filter: `id=value` (comma list = any of), or `id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "name",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Filter: `name=value` (comma list = any of), or `name[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "group_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "Channel group (alias groupId). Filter: `group_id=value` (comma list = any of), or `group_id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "group_name",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Filter: `group_name=value` (comma list = any of), or `group_name[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "sort",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "default": "group_name,name"
+      },
+      "description": "Comma list of: id, kind, name, group_id, group_name. Prefix `-` for descending. Default `group_name,name`; ties by id."
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 50,
+       "default": 50
+      }
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "The next page: copy it from the previous response (`Link: rel=\"next\"` or `X-Next-Cursor`). Only valid with the same q, filters and sort."
+     },
+     {
+      "name": "count",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Also return the total that match, in `X-Total-Count`."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "200",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "window": {
+           "type": "object",
+           "properties": {
+            "from": {
+             "type": "string",
+             "format": "date-time"
+            },
+            "to": {
+             "type": "string",
+             "format": "date-time"
+            },
+            "now": {
+             "type": "string",
+             "format": "date-time"
+            }
+           }
+          },
+          "kinds": {
+           "type": "array",
+           "items": {
+            "type": "string"
+           }
+          },
+          "rows": {
+           "type": "array",
+           "items": {
+            "type": "object",
+            "properties": {
+             "kind": {
+              "type": "string"
+             },
+             "id": {
+              "type": "string"
+             },
+             "name": {
+              "type": "string"
+             },
+             "groupId": {
+              "type": "string"
+             },
+             "groupName": {
+              "type": "string"
+             },
+             "status": {
+              "type": "object",
+              "properties": {
+               "state": {
+                "type": "string"
+               },
+               "label": {
+                "type": "string"
+               }
+              }
+             },
+             "onAir": {
+              "type": "boolean"
+             },
+             "programmes": {
+              "type": "array",
+              "items": {
+               "type": "object",
+               "properties": {
+                "id": {
+                 "type": "string"
+                },
+                "title": {
+                 "type": "string"
+                },
+                "start": {
+                 "type": "string",
+                 "format": "date-time"
+                },
+                "end": {
+                 "type": "string",
+                 "format": "date-time"
+                },
+                "scheduledStart": {
+                 "type": "string",
+                 "format": "date-time"
+                },
+                "scheduledEnd": {
+                 "type": "string",
+                 "format": "date-time"
+                },
+                "asRun": {
+                 "type": "boolean"
+                },
+                "status": {
+                 "type": "string"
+                },
+                "vodState": {
+                 "type": "string"
+                },
+                "source": {
+                 "type": "string"
+                }
+               }
+              }
+             },
+             "media": {
+              "type": "object",
+              "properties": {
+               "runs": {
+                "type": "array",
+                "items": {
+                 "type": "object",
+                 "properties": {
+                  "start": {
+                   "type": "string",
+                   "format": "date-time"
+                  },
+                  "end": {
+                   "type": "string",
+                   "format": "date-time"
+                  }
+                 }
+                }
+               },
+               "gaps": {
+                "type": "array",
+                "items": {
+                 "type": "object",
+                 "properties": {
+                  "start": {
+                   "type": "string",
+                   "format": "date-time"
+                  },
+                  "end": {
+                   "type": "string",
+                   "format": "date-time"
+                  },
+                  "reason": {
+                   "type": "string"
+                  }
+                 }
+                }
+               },
+               "coveragePct": {
+                "type": "number"
+               }
+              }
+             },
+             "clips": {
+              "type": "array",
+              "items": {}
+             },
+             "recordings": {
+              "type": "array",
+              "items": {
+               "type": "object",
+               "properties": {
+                "id": {
+                 "type": "string"
+                },
+                "start": {
+                 "type": "string",
+                 "format": "date-time"
+                },
+                "end": {}
+               }
+              }
+             },
+             "links": {
+              "type": "object",
+              "properties": {
+               "self": {
+                "type": "string"
+               },
+               "detail": {
+                "type": "string"
+               },
+               "workbench": {
+                "type": "string"
+               },
+               "epg": {
+                "type": "string"
+               },
+               "programmes": {
+                "type": "string"
+               },
+               "coverage": {
+                "type": "string"
+               },
+               "timeline": {
+                "type": "string"
+               }
+              }
+             }
+            }
+           }
+          },
+          "next": {},
+          "links": {
+           "type": "object",
+           "properties": {
+            "self": {
+             "type": "string"
+            },
+            "next": {},
+            "live": {
+             "type": "string"
+            },
+            "status": {
+             "type": "string"
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "window": {
+          "from": "2026-10-20T10:00:00.000Z",
+          "to": "2026-10-20T16:00:00.000Z",
+          "now": "2026-10-20T12:00:00.000Z"
+         },
+         "kinds": [
+          "channel",
+          "radio",
+          "event"
+         ],
+         "rows": [
+          {
+           "kind": "channel",
+           "id": "<channelId>",
+           "name": "Channel 2",
+           "groupId": "<groupId>",
+           "groupName": "News",
+           "status": {
+            "state": "onair",
+            "label": "On air"
+           },
+           "onAir": true,
+           "programmes": [
+            {
+             "id": "<programmeId>",
+             "title": "Midday news",
+             "start": "2026-10-20T11:58:30.000Z",
+             "end": "2026-10-20T12:30:00.000Z",
+             "scheduledStart": "2026-10-20T12:00:00.000Z",
+             "scheduledEnd": "2026-10-20T12:30:00.000Z",
+             "asRun": true,
+             "status": "live",
+             "vodState": "scheduled",
+             "source": "epg"
+            }
+           ],
+           "media": {
+            "runs": [
+             {
+              "start": "2026-10-20T10:00:00.000Z",
+              "end": "2026-10-20T11:20:00.000Z"
+             }
+            ],
+            "gaps": [
+             {
+              "start": "2026-10-20T11:20:00.000Z",
+              "end": "2026-10-20T12:00:00.000Z",
+              "reason": "no-recording"
+             }
+            ],
+            "coveragePct": 66.7
+           },
+           "clips": [],
+           "recordings": [
+            {
+             "id": "<recordingId>",
+             "start": "2026-10-20T00:00:00.000Z",
+             "end": null
+            }
+           ],
+           "links": {
+            "self": "/api/channels/<channelId>",
+            "detail": "/channels/<channelId>",
+            "workbench": "/recordings/source/<channelId>",
+            "epg": "/epg/channel/<channelId>",
+            "programmes": "/api/epg?channelId=<channelId>&from=…&to=…",
+            "coverage": "/api/channels/<channelId>/coverage?from=…&to=…",
+            "timeline": "/api/channels/<channelId>/timeline?from=…&to=…"
+           }
+          }
+         ],
+         "next": null,
+         "links": {
+          "self": "/api/timeline/grid?kinds=channel,radio,event",
+          "next": null,
+          "live": "/api/monitoring/live",
+          "status": "/api/status/stream"
+         }
+        }
+       }
+      },
+      "headers": {
+       "Link": {
+        "description": "RFC 8288. `rel=\"next\"` when there is another page.",
+        "schema": {
+         "type": "string"
+        }
+       },
+       "X-Next-Cursor": {
+        "description": "Cursor for the next page (absent on the last page).",
+        "schema": {
+         "type": "string"
+        }
+       },
+       "X-Total-Count": {
+        "description": "Total matching rows, only with count=true.",
+        "schema": {
+         "type": "integer"
+        }
+       },
+       "X-Page-Limit": {
+        "description": "The page size used.",
+        "schema": {
+         "type": "integer"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    },
+    "x-volt-list": true
    }
   },
   "/api/tus": {

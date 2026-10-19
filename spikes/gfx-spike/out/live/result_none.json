@@ -1,0 +1,38 @@
+{
+ "tag": "none",
+ "gfx": "none",
+ "faults": false,
+ "encoder_alive_at_end": true,
+ "frames": 745,
+ "main_latency_ms_median": 260.2,
+ "main_latency_ms_p95": 299.5,
+ "max_tap_gap_ms": 101.9,
+ "max_tap_gap_at_s": 20.9,
+ "repeated_main_frames": 0,
+ "main_latency_by_2s": {
+  "2": 719,
+  "4": 259,
+  "6": 259,
+  "8": 260,
+  "10": 259,
+  "12": 260,
+  "14": 260,
+  "16": 261,
+  "18": 261,
+  "20": 261,
+  "22": 261,
+  "24": 260,
+  "26": 261,
+  "28": 259,
+  "30": 260
+ },
+ "gfx_change_latency": [],
+ "gfx_latency_ms_after_restart": [],
+ "cpu": {
+  "encoder_cpu%": 22.9
+ },
+ "events": [],
+ "encoder_log_tail": [],
+ "encoder_log_lines": 0,
+ "rung0_av_start_delta_ms": -1400.0
+}

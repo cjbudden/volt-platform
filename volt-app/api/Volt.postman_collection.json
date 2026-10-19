@@ -8185,6 +8185,88 @@
               "body": ""
             }
           ]
+        },
+        {
+          "name": "Timeline grid (Past, Now, Next)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('answers 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/timeline/grid?kinds=channel,radio,event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "timeline",
+                "grid"
+              ],
+              "query": [
+                {
+                  "key": "kinds",
+                  "value": "channel,radio,event"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Every visible stream on one clock: programmes (as-run preferred), recorded media and gaps, clips and five-gate status. Window defaults to two hours back and four ahead, capped at 48 hours; 50 rows a page with a cursor.\n\n**API:** admin · **Credential:** admin session (Bearer {{adminToken}}) · **Access:** monitoring: view\n\n| `from` | query | ISO 8601 | no | Window start (default: two hours ago) |\n| `to` | query | ISO 8601 | no | Window end (default: six hours after `from`; at most 48 hours after it) |\n| `kinds` | query | string | no | Comma list of channel, radio, event, loop |\n| `groupId` | query | uuid | no | One channel group |\n| `cursor` | query | string | no | From the previous page's `next` |\n| `limit` | query | number | no | Rows per page, 1 to 50 |"
+          },
+          "response": [
+            {
+              "name": "200 example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/timeline/grid?kinds=channel,radio,event",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "timeline",
+                    "grid"
+                  ],
+                  "query": [
+                    {
+                      "key": "kinds",
+                      "value": "channel,radio,event"
+                    }
+                  ]
+                }
+              },
+              "status": "200",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"window\": {\n    \"from\": \"2026-10-20T10:00:00.000Z\",\n    \"to\": \"2026-10-20T16:00:00.000Z\",\n    \"now\": \"2026-10-20T12:00:00.000Z\"\n  },\n  \"kinds\": [\n    \"channel\",\n    \"radio\",\n    \"event\"\n  ],\n  \"rows\": [\n    {\n      \"kind\": \"channel\",\n      \"id\": \"<channelId>\",\n      \"name\": \"Channel 2\",\n      \"groupId\": \"<groupId>\",\n      \"groupName\": \"News\",\n      \"status\": {\n        \"state\": \"onair\",\n        \"label\": \"On air\"\n      },\n      \"onAir\": true,\n      \"programmes\": [\n        {\n          \"id\": \"<programmeId>\",\n          \"title\": \"Midday news\",\n          \"start\": \"2026-10-20T11:58:30.000Z\",\n          \"end\": \"2026-10-20T12:30:00.000Z\",\n          \"scheduledStart\": \"2026-10-20T12:00:00.000Z\",\n          \"scheduledEnd\": \"2026-10-20T12:30:00.000Z\",\n          \"asRun\": true,\n          \"status\": \"live\",\n          \"vodState\": \"scheduled\",\n          \"source\": \"epg\"\n        }\n      ],\n      \"media\": {\n        \"runs\": [\n          {\n            \"start\": \"2026-10-20T10:00:00.000Z\",\n            \"end\": \"2026-10-20T11:20:00.000Z\"\n          }\n        ],\n        \"gaps\": [\n          {\n            \"start\": \"2026-10-20T11:20:00.000Z\",\n            \"end\": \"2026-10-20T12:00:00.000Z\",\n            \"reason\": \"no-recording\"\n          }\n        ],\n        \"coveragePct\": 66.7\n      },\n      \"clips\": [],\n      \"recordings\": [\n        {\n          \"id\": \"<recordingId>\",\n          \"start\": \"2026-10-20T00:00:00.000Z\",\n          \"end\": null\n        }\n      ],\n      \"links\": {\n        \"self\": \"/api/channels/<channelId>\",\n        \"detail\": \"/channels/<channelId>\",\n        \"workbench\": \"/recordings/source/<channelId>\",\n        \"epg\": \"/epg/channel/<channelId>\",\n        \"programmes\": \"/api/epg?channelId=<channelId>&from=…&to=…\",\n        \"coverage\": \"/api/channels/<channelId>/coverage?from=…&to=…\",\n        \"timeline\": \"/api/channels/<channelId>/timeline?from=…&to=…\"\n      }\n    }\n  ],\n  \"next\": null,\n  \"links\": {\n    \"self\": \"/api/timeline/grid?kinds=channel,radio,event\",\n    \"next\": null,\n    \"live\": \"/api/monitoring/live\",\n    \"status\": \"/api/status/stream\"\n  }\n}"
+            }
+          ]
         }
       ]
     },

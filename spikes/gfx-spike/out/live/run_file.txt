@@ -1,0 +1,154 @@
+{"pid": 11537, "ev": "sidecar_start", "t": 12.3}
+{"ev": "sidecar_ready", "t": 567.6}
+{"ev": "encoder_start", "t": 2080.3}
+{"name": "steady", "ev": "phase", "t": 8000.2}
+{
+ "tag": "file",
+ "gfx": "file",
+ "faults": false,
+ "encoder_alive_at_end": true,
+ "frames": 695,
+ "main_latency_ms_median": 266.7,
+ "main_latency_ms_p95": 307.2,
+ "max_tap_gap_ms": 92.3,
+ "max_tap_gap_at_s": 6.9,
+ "repeated_main_frames": 0,
+ "gfx_change_latency": [
+  [
+   14.0,
+   230,
+   600.0,
+   [
+    0,
+    231
+   ]
+  ],
+  [
+   15.0,
+   30,
+   612.1,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   16.0,
+   160,
+   577.9,
+   [
+    30,
+    160
+   ]
+  ],
+  [
+   17.0,
+   90,
+   582.4,
+   [
+    90,
+    160
+   ]
+  ],
+  [
+   18.0,
+   230,
+   543.5,
+   [
+    90,
+    231
+   ]
+  ],
+  [
+   19.0,
+   30,
+   574.2,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   20.0,
+   160,
+   550.7,
+   [
+    30,
+    160
+   ]
+  ],
+  [
+   21.0,
+   90,
+   542.5,
+   [
+    90,
+    160
+   ]
+  ],
+  [
+   22.0,
+   230,
+   541.3,
+   [
+    90,
+    231
+   ]
+  ],
+  [
+   23.0,
+   30,
+   577.1,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   24.0,
+   160,
+   551.1,
+   [
+    30,
+    160
+   ]
+  ],
+  [
+   25.0,
+   90,
+   583.1,
+   [
+    90,
+    160
+   ]
+  ]
+ ],
+ "gfx_latency_ms_after_restart": [],
+ "gfx_latency_ms_median_steady": 575.7,
+ "gfx_latency_ms_max_steady": 612.1,
+ "cpu": {
+  "sidecar_idle_cpu%": 2.0,
+  "encoder_cpu%_idle": 27.7,
+  "sidecar_rss_mb": 77,
+  "sidecar_busy_cpu%": 3.1,
+  "encoder_cpu%_busy": 26.0
+ },
+ "events": [
+  {
+   "pid": 11537,
+   "ev": "sidecar_start",
+   "t": 12.3
+  },
+  {
+   "ev": "sidecar_ready",
+   "t": 567.6
+  }
+ ],
+ "encoder_log_tail": [
+  "[in#1/image2 @ 0x5622469582c0] Thread message queue blocking; consider raising the thread_queue_size option (current value: 8)",
+  "[in#0/mpegts @ 0x5622467efb00] Thread message queue blocking; consider raising the thread_queue_size option (current value: 8)"
+ ],
+ "encoder_log_lines": 2,
+ "rung0_av_start_delta_ms": -1400.0
+}
+main_latency_by_2s {4: 862, 6: 267, 8: 266, 10: 269, 12: 266, 14: 267, 16: 266, 18: 267, 20: 269, 22: 266, 24: 267, 26: 266, 28: 267, 30: 265}

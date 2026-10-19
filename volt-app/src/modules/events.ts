@@ -15,7 +15,7 @@ import { scheduleFillerPrep, FILLER_FIELDS, runFillerPrep, fillerStatus } from '
 export const eventsRouter = Router();
 eventsRouter.use(requireAuth);
 
-const EVENT_EDITABLE = ['name', 'scheduled_start', 'scheduled_end', 'server_start', 'server_stop',
+const EVENT_EDITABLE = ['graphics', 'name', 'scheduled_start', 'scheduled_end', 'server_start', 'server_stop',
   'public_start', 'public_end', 'recording_enabled', 'recording_retention_days', 'recording_retention_sec',
   'auto_vod', 'input_failover_enabled', 'auto_failback', 'input_loss_behavior', 'filler_slate_ref',
   'schema_id', 'metadata',
@@ -198,6 +198,14 @@ eventsRouter.post(
 /** Edit an event. PATCH = partial (null clears); PUT = alias. Versioned + audited;
  *  optimistic concurrency via If-Match (or a `version` field). */
 const editEventSchema = z.object({
+  // In-stream graphic triggers (services/graphicTriggers.ts): overrides only.
+  graphics: z.object({
+    upNext: z.object({
+      enabled: z.boolean().optional(),
+      leadSec: z.number().int().min(15).max(900).optional(),
+      durationSec: z.number().int().min(5).max(60).optional(),
+    }).optional(),
+  }).optional(),
   name: z.string().min(1).optional(),
   scheduledStart: z.string().datetime().optional(),
   scheduledEnd: z.string().datetime().optional(),
@@ -231,6 +239,12 @@ const editEvent = asyncHandler(async (req, res) => {
   if (!current) throw notFound('Event not found');
 
   const patch: Record<string, any> = {};
+  // Graphics: merged over what is stored, so a partial change keeps the rest.
+  // Not locked while running: the encoder re-reads triggers every few seconds.
+  if (has('graphics') && b.graphics) {
+    const cur = (current.graphics && typeof current.graphics === 'object') ? current.graphics : {};
+    patch.graphics = { ...cur, ...(b.graphics.upNext ? { upNext: { ...(cur.upNext ?? {}), ...b.graphics.upNext } } : {}) };
+  }
   if (has('name')) patch.name = b.name;
   if (has('scheduledStart')) patch.scheduled_start = b.scheduledStart;
   if (has('scheduledEnd')) patch.scheduled_end = b.scheduledEnd;

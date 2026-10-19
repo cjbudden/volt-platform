@@ -1188,3 +1188,57 @@ svg.spin{animation:vspin 1s linear infinite}
 .rp-scope .t{font-weight:600}
 .epg-toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:14px;background:var(--panel-3,#161b26);border:1px solid var(--border);padding:10px 12px 10px 16px;border-radius:10px;font-size:var(--fs-body);max-width:min(640px,92vw)}
 @media (max-width:640px){.rp-d{width:72px}.rp-modal{padding:16px}}
+
+/* ---------------- Timeline grid (Live Streams · Timeline view) ----------------
+   Past · Now · Next on one clock (TIMELINE_MODE.md). Blocks reuse the EPG
+   timeline's language: past on --panel-3, the programme on now a --brand-dim
+   fill with a 1px brand border, what is next outlined in dashed --border-2,
+   gaps in the recorded media hatched in --down, and the now line in --down as
+   on the EPG timeline. No coloured edge bars on rows or blocks. */
+.tlg{--tlg-label:248px;--tlg-block-r:7px;overflow:hidden;outline:none}
+.tlg-bar{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:10px 14px;border-bottom:1px solid var(--border);font-size:var(--fs-sm)}
+.tlg-check{display:inline-flex;align-items:center;gap:6px;color:var(--muted);cursor:pointer}
+.tlg-hint{color:var(--faint);font-size:var(--fs-xs);margin-left:auto}
+.tlg-status{color:var(--muted);font-variant-numeric:tabular-nums}
+.tlg-err{padding:10px 14px;color:var(--down);font-size:var(--fs-sm);display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)}
+.tlg-ruler{display:flex;height:30px;border-bottom:1px solid var(--border);background:var(--panel-2);user-select:none}
+.tlg-ruler-l{width:var(--tlg-label);flex:none;padding:0 14px;display:flex;align-items:center;font-size:var(--fs-micro);color:var(--faint);text-transform:uppercase;letter-spacing:var(--ls-label);border-right:1px solid var(--border)}
+.tlg-ruler-t{position:relative;flex:1;min-width:0;overflow:hidden;cursor:grab;touch-action:none;outline:none}
+.tlg-ruler-t:active{cursor:grabbing}
+.tlg-ruler-t:focus-visible{box-shadow:inset 0 0 0 2px var(--brand)}
+.tlg-tick{position:absolute;top:0;bottom:0;display:flex;align-items:center;padding-left:5px;border-left:1px solid var(--border-2);font-size:var(--fs-micro);color:var(--faint);font-family:ui-monospace,monospace;white-space:nowrap}
+.tlg-tick.day{color:var(--muted);font-weight:600}
+.tlg-now-flag{position:absolute;top:5px;transform:translateX(-50%);padding:1px 6px;border-radius:var(--tlg-block-r);background:var(--down);color:var(--bg);font-size:var(--fs-micro);font-weight:700;font-family:ui-monospace,monospace;pointer-events:none;z-index:2}
+.tlg-scroll{position:relative;height:min(720px,calc(100vh - 330px));min-height:320px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+.tlg-inner{position:relative}
+.tlg-item{position:absolute;left:0;right:0}
+.tlg-empty{padding:40px 16px;text-align:center;color:var(--muted);font-size:var(--fs-body)}
+.tlg-group{display:flex;align-items:center;gap:8px;width:100%;height:100%;padding:0 14px;border:0;border-bottom:1px solid var(--border);background:var(--panel);color:var(--text);font:inherit;font-size:var(--fs-label);font-weight:700;text-transform:uppercase;letter-spacing:var(--ls-label);cursor:pointer;text-align:left}
+.tlg-group:hover{background:var(--panel-2)}
+.tlg-group:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.tlg-caret{width:14px;height:14px;color:var(--faint);transition:transform .15s;transform:rotate(90deg)}
+.tlg-group[aria-expanded="false"] .tlg-caret{transform:none}
+.tlg-gcount{color:var(--faint);font-weight:600}
+.tlg-row{display:flex;height:100%;border-bottom:1px solid var(--border)}
+.tlg-row:hover{background:color-mix(in srgb,var(--panel-2) 50%,transparent)}
+.tlg-label{width:var(--tlg-label);flex:none;display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;align-items:center;column-gap:6px;padding:4px 6px 4px 14px;border-right:1px solid var(--border);min-width:0}
+.tlg-name{grid-column:1;grid-row:1;min-width:0;border:0;background:none;padding:0;color:var(--text);font:inherit;font-size:var(--fs-body);font-weight:600;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.tlg-name:hover{color:var(--brand)}
+.tlg-meta{grid-column:1;grid-row:2;display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden}
+.tlg-meta .tag{padding:1px 7px;font-size:var(--fs-micro)}
+.tlg-pin{grid-column:2;grid-row:1 / span 2;width:30px;height:30px;color:var(--faint)}
+.tlg-pin svg{width:15px;height:15px}
+.tlg-pin.on{color:var(--brand)}
+.tlg-track{position:relative;flex:1;min-width:0;overflow:hidden;cursor:pointer}
+.tlg-gap{position:absolute;bottom:3px;height:6px;border-radius:2px;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--down) 70%,transparent) 0 3px,transparent 3px 6px)}
+.tlg-run{position:absolute;bottom:3px;height:6px;border-radius:2px;background:var(--border-2)}
+.tlg-block{position:absolute;top:6px;height:28px;display:flex;align-items:center;gap:8px;padding:0 8px;overflow:hidden;border:1px solid;border-radius:var(--tlg-block-r);font:inherit;text-align:left;color:var(--text);cursor:pointer;min-width:0;z-index:1}
+.tlg-block:hover{filter:brightness(1.12);z-index:3}
+.tlg-block:focus-visible{outline:2px solid var(--brand);outline-offset:1px;z-index:3}
+.tlg-block.past{background:var(--panel-3);border-color:var(--border);color:var(--muted)}
+.tlg-block.now{background:var(--brand-dim);border-color:var(--brand)}
+.tlg-block.next{background:transparent;border-style:dashed;border-color:var(--border-2);color:var(--muted)}
+.tlg-bt{font-size:var(--fs-sm);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.tlg-bs{font-size:var(--fs-micro);color:var(--faint);font-family:ui-monospace,monospace;white-space:nowrap;margin-left:auto}
+.tlg-clip{position:absolute;top:2px;width:2px;height:6px;border-radius:1px;background:var(--brand);transform:translateX(-1px);pointer-events:auto}
+.tlg-now{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--down);z-index:4;pointer-events:none}

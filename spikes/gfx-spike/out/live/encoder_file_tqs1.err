@@ -1,0 +1,2 @@
+[in#1/image2 @ 0x556f902a4280] Thread message queue blocking; consider raising the thread_queue_size option (current value: 1)
+[in#0/mpegts @ 0x556f90289b40] Thread message queue blocking; consider raising the thread_queue_size option (current value: 8)

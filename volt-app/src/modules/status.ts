@@ -212,6 +212,30 @@ ingestRouter.post(
   })
 );
 
+/**
+ * The in-stream graphic triggers for a stream around now, for the ENCODER to
+ * write into the manifests it delivers (services/graphicTriggers.ts). Same ingest
+ * token as the report. The encoder polls every few seconds; the schedule behind
+ * it is cached per channel and invalidated on any EPG change, so this costs no
+ * query per call. `from`/`to` default to ten minutes either side of now.
+ */
+ingestRouter.get(
+  '/:id/timed-events',
+  asyncHandler(async (req, res) => {
+    const id = String(req.params.id);
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw badRequest('id must be a uuid');
+    const kind = req.query.kind === 'event' ? 'event' : 'channel';
+    const now = Date.now();
+    const at = (v: unknown, d: number) => { const t = v ? Date.parse(String(v)) : NaN; return new Date(Number.isFinite(t) ? t : d); };
+    const from = at(req.query.from, now - 10 * 60_000), to = at(req.query.to, now + 10 * 60_000);
+    if (to.getTime() - from.getTime() > 6 * 3600_000 || to <= from) throw badRequest('window must be positive and at most six hours');
+    const { triggersForStream, wireFormat } = await import('../services/graphicTriggers');
+    const list = await triggersForStream(kind, id, from, to);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ id, kind, from: from.toISOString(), to: to.toISOString(), generated_at: new Date(now).toISOString(), triggers: list.map(wireFormat) });
+  })
+);
+
 // ---------------------------------------------------------------------------
 // Admin reads — user JWT, tenant-scoped.
 // ---------------------------------------------------------------------------

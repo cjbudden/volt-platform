@@ -1,0 +1,301 @@
+{
+ "tag": "file_faults",
+ "gfx": "file",
+ "faults": true,
+ "encoder_alive_at_end": true,
+ "frames": 1420,
+ "main_latency_ms_median": 265.3,
+ "main_latency_ms_p95": 305.4,
+ "max_tap_gap_ms": 99.7,
+ "max_tap_gap_at_s": 20.1,
+ "repeated_main_frames": 0,
+ "main_latency_by_2s": {
+  "4": 786,
+  "6": 265,
+  "8": 266,
+  "10": 265,
+  "12": 264,
+  "14": 266,
+  "16": 265,
+  "18": 266,
+  "20": 266,
+  "22": 268,
+  "24": 264,
+  "26": 265,
+  "28": 265,
+  "30": 265,
+  "32": 265,
+  "34": 265,
+  "36": 266,
+  "38": 265,
+  "40": 266,
+  "42": 265,
+  "44": 266,
+  "46": 266,
+  "48": 266,
+  "50": 266,
+  "52": 267,
+  "54": 266,
+  "56": 266,
+  "58": 264
+ },
+ "gfx_change_latency": [
+  [
+   14.0,
+   230,
+   591.4,
+   [
+    0,
+    231
+   ]
+  ],
+  [
+   15.0,
+   30,
+   585.4,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   16.0,
+   160,
+   571.6,
+   [
+    30,
+    160
+   ]
+  ],
+  [
+   17.0,
+   90,
+   574.9,
+   [
+    90,
+    160
+   ]
+  ],
+  [
+   18.0,
+   230,
+   576.6,
+   [
+    90,
+    231
+   ]
+  ],
+  [
+   19.0,
+   30,
+   576.0,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   20.0,
+   160,
+   557.1,
+   [
+    30,
+    160
+   ]
+  ],
+  [
+   21.0,
+   90,
+   533.8,
+   [
+    90,
+    160
+   ]
+  ],
+  [
+   22.0,
+   230,
+   615.9,
+   [
+    90,
+    231
+   ]
+  ],
+  [
+   23.0,
+   30,
+   583.6,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   24.0,
+   160,
+   547.9,
+   [
+    30,
+    160
+   ]
+  ],
+  [
+   25.0,
+   90,
+   575.4,
+   [
+    90,
+    160
+   ]
+  ],
+  [
+   28.0,
+   230,
+   4542.0,
+   [
+    90
+   ]
+  ],
+  [
+   34.0,
+   30,
+   572.0,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   46.0,
+   160,
+   541.3,
+   [
+    35,
+    160
+   ]
+  ],
+  [
+   47.5,
+   90,
+   557.6,
+   [
+    90,
+    160
+   ]
+  ],
+  [
+   49.0,
+   230,
+   583.0,
+   [
+    90,
+    231
+   ]
+  ],
+  [
+   50.5,
+   30,
+   604.6,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   54.0,
+   160,
+   null,
+   [
+    30
+   ]
+  ],
+  [
+   56.0,
+   90,
+   null,
+   [
+    30
+   ]
+  ]
+ ],
+ "gfx_latency_ms_after_restart": [
+  541.3,
+  557.6,
+  583.0,
+  604.6
+ ],
+ "gfx_latency_ms_median_steady": 575.7,
+ "gfx_latency_ms_max_steady": 615.9,
+ "cpu": {
+  "sidecar_idle_cpu%": 2.0,
+  "encoder_cpu%_idle": 26.0,
+  "sidecar_rss_mb": 77,
+  "sidecar_busy_cpu%": 2.8,
+  "encoder_cpu%_busy": 26.1
+ },
+ "events": [
+  {
+   "pid": 12161,
+   "ev": "sidecar_start",
+   "t": 11.5
+  },
+  {
+   "ev": "sidecar_ready",
+   "t": 566.0
+  },
+  {
+   "name": "SIGSTOP sidecar (hung Chromium) 26-32s, change posted at 28s",
+   "ev": "fault",
+   "t": 26009.6
+  },
+  {
+   "err": "timed out",
+   "ev": "post_failed",
+   "t": 30000.8
+  },
+  {
+   "name": "SIGCONT sidecar",
+   "ev": "fault",
+   "t": 32000.4
+  },
+  {
+   "name": "SIGKILL sidecar + Chromium",
+   "ev": "fault",
+   "t": 36000.2
+  },
+  {
+   "name": "restart sidecar",
+   "ev": "fault",
+   "t": 40000.1
+  },
+  {
+   "pid": 12367,
+   "ev": "sidecar_start",
+   "t": 40000.9
+  },
+  {
+   "ok": true,
+   "ev": "sidecar_ready_again",
+   "t": 40001.0
+  },
+  {
+   "err": "[Errno 111] Connection refused",
+   "ev": "post_failed",
+   "t": 40001.1
+  },
+  {
+   "name": "DELETE gfx.png for 1 s, then a change",
+   "ev": "fault",
+   "t": 52000.1
+  }
+ ],
+ "encoder_log_tail": [
+  "[in#1/image2 @ 0x55e8df465240] Thread message queue blocking; consider raising the thread_queue_size option (current value: 8)",
+  "[in#0/mpegts @ 0x55e8df44ab00] Thread message queue blocking; consider raising the thread_queue_size option (current value: 8)",
+  "[image2 @ 0x55e8df5b3f40] Could not open file : /home/claude/gfx-spike/out/live/gfx.png",
+  "[in#1/image2 @ 0x55e8df465240] Error during demuxing: Input/output error",
+  "[in#1/image2 @ 0x55e8df465240] Error retrieving a packet from demuxer: Input/output error"
+ ],
+ "encoder_log_lines": 5,
+ "rung0_av_start_delta_ms": -1400.0
+}

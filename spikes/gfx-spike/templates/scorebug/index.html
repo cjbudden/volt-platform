@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Scorebug</title>
+<!-- Volt template manifest: canvas, capture bbox, fields, sample data.
+     The CasparCG/SPX functions below are the runtime contract. -->
+<script type="application/json" id="volt-manifest">
+{
+  "name": "Scorebug",
+  "contract": "casparcg-html/1 + volt-deterministic/1",
+  "canvas": [1920, 1080],
+  "fps": 25,
+  "bbox": [64, 44, 672, 112],
+  "animation": "css",
+  "fields": [
+    {"id": "home", "type": "text", "label": "Home team"},
+    {"id": "away", "type": "text", "label": "Away team"},
+    {"id": "homeScore", "type": "number", "label": "Home score"},
+    {"id": "awayScore", "type": "number", "label": "Away score"},
+    {"id": "clock", "type": "text", "label": "Clock"},
+    {"id": "marker", "type": "number", "label": "Test marker (0-255)", "hidden": true}
+  ],
+  "sample": {"home": "AUK", "away": "WLG", "homeScore": 0, "awayScore": 0, "clock": "00:00"}
+}
+</script>
+<style>
+  html, body { margin: 0; background: transparent; width: 1920px; height: 1080px; overflow: hidden; }
+  #bug { position: absolute; left: 80px; top: 60px; height: 72px; display: flex; align-items: stretch;
+         font: 700 34px/72px "DejaVu Sans", sans-serif; color: #fff;
+         clip-path: inset(0 100% 0 0); transition: clip-path 480ms cubic-bezier(.2,.8,.2,1); }
+  #bug.on { clip-path: inset(0 0 0 0); }
+  .team { background: #0b1f4d; padding: 0 22px; min-width: 110px; text-align: center; }
+  .score { background: #f2f4f8; color: #0b1f4d; width: 64px; text-align: center; }
+  .score.flash { animation: flash 800ms ease-out; }
+  @keyframes flash { 0% { background: #ffd400; transform: scale(1.25); } 100% { background: #f2f4f8; transform: scale(1); } }
+  .clock { background: #1d3a7a; padding: 0 20px; font-weight: 400; }
+  #marker { position: absolute; left: 64px; top: 44px; width: 16px; height: 16px; display: none; }
+</style>
+</head>
+<body>
+<div id="bug">
+  <div class="team" id="home">HOME</div><div class="score" id="homeScore">0</div>
+  <div class="score" id="awayScore">0</div><div class="team" id="away">AWAY</div>
+  <div class="clock" id="clock">00:00</div>
+</div>
+<div id="marker"></div>
+<script>
+  // ---- CasparCG HTML template API (also used by SPX Graphics, Loopic, etc.) ----
+  let data = {};
+  function parse(d) {
+    if (typeof d !== 'string') return d || {};
+    try { return JSON.parse(d); } catch (_) {}
+    // CasparCG XML: <templateData><componentData id="f0"><data id="text" value="..."/></componentData>
+    const out = {}; const x = new DOMParser().parseFromString(d, 'text/xml');
+    x.querySelectorAll('componentData').forEach(c => { const v = c.querySelector('data'); if (v) out[c.id] = v.getAttribute('value'); });
+    return out;
+  }
+  function setScore(id, v) {
+    const el = document.getElementById(id);
+    if (String(el.textContent) !== String(v)) {
+      el.textContent = v;
+      el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+    }
+  }
+  window.update = function (raw) {
+    const d = parse(raw); Object.assign(data, d);
+    if ('home' in d) document.getElementById('home').textContent = d.home;
+    if ('away' in d) document.getElementById('away').textContent = d.away;
+    if ('homeScore' in d) setScore('homeScore', d.homeScore);
+    if ('awayScore' in d) setScore('awayScore', d.awayScore);
+    if ('clock' in d) document.getElementById('clock').textContent = d.clock;
+    if ('marker' in d) { const m = d.marker | 0; document.getElementById('marker').style.background = `rgb(${m},${m},${m})`; document.getElementById('marker').style.display = 'block'; }
+  };
+  window.play = function () { document.getElementById('bug').classList.add('on'); };
+  window.stop = function () { document.getElementById('bug').classList.remove('on'); };
+  window.next = function () {};
+  window.remove = window.stop;
+  // Preview convenience: ?preview loads sample data and plays.
+  if (location.search.includes('preview')) {
+    update(JSON.parse(document.getElementById('volt-manifest').textContent).sample); play();
+  }
+</script>
+</body>
+</html>

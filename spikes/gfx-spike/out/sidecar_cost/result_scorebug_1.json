@@ -1,0 +1,27 @@
+{
+ "sidecars": 1,
+ "template": "scorebug",
+ "startup_s_all": 0.7,
+ "procs_per_sidecar": 7,
+ "phases": [
+  {
+   "phase": "idle",
+   "cpu_pct": 1.1,
+   "rss_mb": 448,
+   "pss_mb": 207
+  },
+  {
+   "phase": "updates_1Hz",
+   "cpu_pct": 6.2,
+   "rss_mb": 454,
+   "pss_mb": 212
+  },
+  {
+   "phase": "flash_1Hz",
+   "cpu_pct": 35.9,
+   "rss_mb": 470,
+   "pss_mb": 226
+  }
+ ],
+ "render_ms_per_frame_median": 9.9
+}

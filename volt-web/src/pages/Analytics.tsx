@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type AnalyticsOverview } from '../api'
 import { PageError, usePageNotice } from '../notices'
+import { useRoute } from '../router'
+import OperatingReports, { AnalyticsViewSwitch } from './OperatingReports'
 
 /* ============================================================================
    ANALYTICS
@@ -252,7 +254,14 @@ function BarList({ title, data, empty, format = fmtInt }: {
 /** Hours: whole numbers once there are some, decimals below ten, so a short test is not shown as 0. */
 const fmtHours = (h: number) => h >= 10 ? Math.round(h).toLocaleString() : h > 0 ? h.toFixed(h < 1 ? 2 : 1) : '0'
 
+/** Two views of one question family: Audience (who watched) and Operating
+ *  (what ran, how long on air, why it stopped). /analytics/operating[/:id]. */
 export default function AnalyticsPage() {
+  const route = useRoute()
+  return route.path.startsWith('/analytics/operating') ? <OperatingReports /> : <AudienceAnalytics />
+}
+
+function AudienceAnalytics() {
   const [d, setD] = useState<AnalyticsOverview | null>(null)
   const [days, setDays] = useState(30)
   const [err, setErr] = useState('')
@@ -308,6 +317,7 @@ export default function AnalyticsPage() {
         </div>
         <div className="spacer" />
         <div className="flex items-center gap-2">
+          <AnalyticsViewSwitch view="audience" />
           {[7, 30, 90].map(n => (
             <button key={n} className={`btn ${days === n ? 'primary' : 'ghost'}`}
               style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }}

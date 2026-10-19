@@ -1,0 +1,6 @@
+{"t":1792417558004,"ev":"ready","url":"http://127.0.0.1:8097/templates/ticker/","bbox":[0,1010,1920,56],"clock":"vclock","continuous":true,"chromePid":null}
+{"t":1792417558028,"ev":"cmd_rx","fn":"update"}
+{"t":1792417558028,"ev":"cmd_rx","fn":"play"}
+{"t":1792417567965,"ev":"continuous","medFrameMs":9,"p95":18}
+{"t":1792417577968,"ev":"continuous","medFrameMs":9.1,"p95":18.1}
+{"t":1792417587937,"ev":"continuous","medFrameMs":8.9,"p95":18.8}

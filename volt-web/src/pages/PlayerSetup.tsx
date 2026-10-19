@@ -204,6 +204,14 @@ function ThemeEditor({ cfg, setCfg, onBrand }: { cfg: PlayerConfig; setCfg: (c: 
           Play the next item in a playlist automatically
         </label>
       )}
+      {kind === 'video' && (
+        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 'var(--fs-sm)', margin: '0 0 10px' }}>
+          <input type="checkbox" checked={theme.showGraphics !== false} onChange={e => set({ showGraphics: e.target.checked })} style={{ marginTop: 3 }} />
+          <span>Show graphics the stream asks for
+            <span className="hintxt" style={{ display: 'block' }}>Up next and other on-screen graphics carried in the stream itself, timed by the channel's guide. Turn off to keep the picture clean.</span>
+          </span>
+        </label>
+      )}
       <div className="sec-label" style={{ marginTop: 8 }}>Controls</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: '4px 12px' }}>
         {CONTROL_LABELS.filter(([, , k]) => k === 'both' || k === kind).map(([key, label]) => (

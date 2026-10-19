@@ -35,6 +35,8 @@ const CHANNEL_EDITABLE = [
   // AUTO CONNECT. Whether a reboot puts this channel back on air if it was
   // running and nobody recorded a stop. Default true; see migration 0017.
   'auto_connect',
+  // In-stream graphics settings (migration 0060).
+  'graphics',
 ];
 
 // Watermark / channel brand overlay. `ref` is a library image URL (like filler_slate_ref);
@@ -408,6 +410,14 @@ channelsRouter.post(
  * changed underneath you. Every change is versioned + written to the audit log.
  */
 const editSchema = z.object({
+  // In-stream graphic triggers (services/graphicTriggers.ts): overrides only.
+  graphics: z.object({
+    upNext: z.object({
+      enabled: z.boolean().optional(),
+      leadSec: z.number().int().min(15).max(900).optional(),
+      durationSec: z.number().int().min(5).max(60).optional(),
+    }).optional(),
+  }).optional(),
   name: z.string().min(1).optional(),
   enabled: z.boolean().optional(),
   // Put this channel back on air after a control-plane reboot, if it was
@@ -501,6 +511,12 @@ const editChannel = asyncHandler(async (req, res) => {
     if (w.offsetY !== undefined) patch.watermark_offset_y = w.offsetY;
     if (w.opacity !== undefined) patch.watermark_opacity = w.opacity;
     if (w.scale !== undefined) patch.watermark_scale = w.scale;
+  }
+  // Graphics: merged over what is stored, so a partial change keeps the rest.
+  // Not locked while running: the encoder re-reads triggers every few seconds.
+  if (has('graphics') && body.graphics) {
+    const cur = (current.graphics && typeof current.graphics === 'object') ? current.graphics : {};
+    patch.graphics = { ...cur, ...(body.graphics.upNext ? { upNext: { ...(cur.upNext ?? {}), ...body.graphics.upNext } } : {}) };
   }
   if (has('brandRef')) patch.brand_ref = body.brandRef ?? null;
   if (has('guideIconRef')) patch.guide_icon_ref = body.guideIconRef?.trim() || null;

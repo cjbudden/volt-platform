@@ -699,6 +699,11 @@ export class Orchestrator {
         }
       }
       await query(`UPDATE instances SET state='terminated', terminated_at=now() WHERE id=$1`, [inst.id]);
+      // WHY THIS RUN ENDED, kept where it outlives the channel (migration 0059).
+      // The operating report separates planned from unplanned stops with it.
+      // Best effort: losing this row costs the report one "unknown", never a stop.
+      await recordRunStop(kind, id, inst.id, intent, origin).catch((e) =>
+        console.warn('[orchestrator] could not record why run', inst.id, 'ended', e));
       // SETTLE THE METER NOW, not on the next fleet pass.
       //
       // The pass would find it: the meter accrues to terminated_at whenever it
@@ -1432,6 +1437,17 @@ export class Orchestrator {
 
 
 /** One row in the stream's event log for an operator or scheduled command. */
+/** One row per run that ended, with the intent behind it. See migration 0059. */
+export async function recordRunStop(kind: 'channel' | 'event', id: string, instanceId: string, intent: StopIntent, origin: string): Promise<void> {
+  await query(
+    `INSERT INTO run_stops (instance_id, account_id, stream_kind, stream_id, stream_name, intent, origin, stopped_at)
+     SELECT $3, g.account_id, $1, s.id, s.name, $4, $5, now()
+       FROM ${kind === 'channel' ? 'channels' : 'events'} s JOIN groups g ON g.id = s.group_id
+      WHERE s.id = $2
+     ON CONFLICT (instance_id) DO NOTHING`,
+    [kind, id, instanceId, intent, String(origin || '').slice(0, 300)]);
+}
+
 async function logCommand(kind: 'channel' | 'event', id: string, type: 'start.requested' | 'stop.requested', by: string): Promise<void> {
   const who = String(by || '').replace(/^(operator|schedule):\s*/, '');
   await query(

@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**511 routes.** Public API: 59 · Sign-in (no session yet): 7 · Admin API: 398 · Platform API: 21 · Machine-to-machine: 9 · Delivery and previews (outside /api): 9 · Health and discovery: 8
+**520 routes.** Public API: 59 · Sign-in (no session yet): 7 · Admin API: 406 · Platform API: 21 · Machine-to-machine: 10 · Delivery and previews (outside /api): 9 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -337,6 +337,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | DELETE | `/api/epg/:id` | admin session (Bearer) or account secret key | epg: manage |  |
 | PATCH | `/api/epg/:id` | admin session (Bearer) or account secret key | epg: manage |  |
 | POST | `/api/epg/:id/convert` | admin session (Bearer) or account secret key | epg: manage |  |
+| POST | `/api/epg/batches/:id/undo` | admin session (Bearer) or account secret key | epg: manage |  |
 | GET | `/api/epg/channels` | admin session (Bearer) or account secret key | epg: view |  |
 | PUT | `/api/epg/channels/:id/guide-icon` | admin session (Bearer) or account secret key | epg: manage |  |
 | PUT | `/api/epg/channels/:id/xmltv-id` | admin session (Bearer) or account secret key | epg: manage |  |
@@ -358,7 +359,10 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/epg/now-next` | admin session (Bearer) or account secret key | epg: view |  |
 | GET | `/api/epg/owner-defaults` | admin session (Bearer) or account secret key | epg: view |  |
 | GET | `/api/epg/owners` | admin session (Bearer) or account secret key | epg: view |  |
+| POST | `/api/epg/repeat` | admin session (Bearer) or account secret key | epg: manage |  |
 | POST | `/api/epg/series` | admin session (Bearer) or account secret key | epg: manage |  |
+| GET | `/api/epg/series/:id` | admin session (Bearer) or account secret key | epg: view |  |
+| POST | `/api/epg/series/:id/end` | admin session (Bearer) or account secret key | epg: manage |  |
 | GET | `/api/epg/vod-status` | admin session (Bearer) or account secret key | epg: view |  |
 | GET | `/api/epg/xmltv` | admin session (Bearer) or account secret key | epg: view |  |
 | GET | `/api/epg/xmltv/feeds` | admin session (Bearer) or account secret key | epg: view |  |
@@ -622,6 +626,14 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | POST | `/api/recordings/compose-clip` | admin session (Bearer) or account secret key | recordings: manage |  |
 | GET | `/api/recordings/sources` | admin session (Bearer) or account secret key | recordings: view |  |
 
+### `/api/reports`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/reports/stream/:id` | admin session (Bearer) or account secret key | analytics: view |  |
+| GET | `/api/reports/streams` | admin session (Bearer) or account secret key | analytics: view |  |
+| GET | `/api/reports/streams.csv` | admin session (Bearer) or account secret key | analytics: view |  |
+
 ### `/api/scheduled-clips`
 
 | Method | Path | Credential | Access | Viewer tier |
@@ -709,6 +721,12 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/tickets` | admin session (Bearer) or account secret key | any signed-in admin user |  |
 | POST | `/api/tickets` | admin session (Bearer) or account secret key | operator tier or above |  |
 | GET | `/api/tickets/:id` | admin session (Bearer) or account secret key | any signed-in admin user |  |
+
+### `/api/timeline`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/timeline/grid` | admin session (Bearer) or account secret key | monitoring: view |  |
 
 ### `/api/tus`
 
@@ -937,6 +955,7 @@ Encoders, engines, add-ons, payment providers. Each has its own secret.
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | POST | `/api/streams/:id/report` | X-Volt-Ingest-Token | encoder / thumbnailer report |  |
+| GET | `/api/streams/:id/timed-events` | X-Volt-Ingest-Token | encoder / thumbnailer report |  |
 
 ## Delivery and previews (outside /api)
 

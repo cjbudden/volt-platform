@@ -4,6 +4,8 @@ import { navigate } from '../router'
 import { PipelineStrip, StatusPill } from '../scaffold'
 import { pressable } from '../a11y'
 import { PageError, useNotify, usePageNotice } from '../notices'
+import { Segmented } from '../listFilters'
+import TimelineGrid from '../TimelineGrid'
 
 /* ============================================================================
    LIVE STREAMS — what is running, right now, across the whole fleet.
@@ -190,6 +192,40 @@ function StreamCard({ s, onOpen, busy, onStop }: {
 }
 
 // ---------------------------------------------------------------------------
+//  The plain List view: every stream, one line each, in the server's order
+//  (trouble first). No gates: it is for scanning a large fleet, not diagnosing.
+// ---------------------------------------------------------------------------
+function StreamList({ streams, onOpen }: { streams: LiveStream[]; onOpen: (s: LiveStream) => void }) {
+  if (streams.length === 0) {
+    return <div className="empty"><h3>No streams</h3><p>There are no channels, stations or events you can see.</p></div>
+  }
+  return (
+    <div className="card">
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Kind</th><th>State</th><th>Up</th><th>Watching</th><th>Group</th></tr>
+        </thead>
+        <tbody>
+          {streams.map(s => (
+            <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => onOpen(s)}>
+              <td><b>{s.name}</b></td>
+              <td style={{ color: 'var(--muted)' }}>{KIND_LABEL[s.kind] ?? s.kind}</td>
+              <td><StatusPill state={s.overall} /></td>
+              <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUptime(s.uptimeMs) ?? <span style={{ color: 'var(--faint)' }}>not running</span>}</td>
+              <td style={{ fontVariantNumeric: 'tabular-nums' }}>{s.concurrent.toLocaleString()}</td>
+              <td style={{ color: 'var(--faint)' }}>{s.groupName ?? 'No group'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+type LiveView = 'board' | 'list' | 'timeline'
+const VIEW_KEY = 'volt.live.view'
+
+// ---------------------------------------------------------------------------
 export default function LivePage() {
   const [b, setB] = useState<LiveBoard | null>(null)
   const [err, setErr] = useState('')
@@ -197,6 +233,13 @@ export default function LivePage() {
   const [showIdle, setShowIdle] = useState(false)
   const [at, setAt] = useState<number>(0)
   const dead = useRef(false)
+  // Board, List or Timeline: three readings of the same fleet. Board stays the
+  // default; the choice is remembered per viewer (a user preference field is a
+  // follow-up, see TIMELINE_MODE.md).
+  const [view, setView] = useState<LiveView>(() => {
+    try { const v = localStorage.getItem(VIEW_KEY); return v === 'list' || v === 'timeline' ? v : 'board' } catch { return 'board' }
+  })
+  useEffect(() => { try { localStorage.setItem(VIEW_KEY, view) } catch { /* per-viewer nicety only */ } }, [view])
 
   async function load() {
     try { setB(await api.liveBoard()); setErr(''); setAt(Date.now()) }
@@ -260,6 +303,11 @@ export default function LivePage() {
           <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)' }}>
             {at ? `updated ${new Date(at).toLocaleTimeString()}` : ''}
           </span>
+          <Segmented label="View" value={view} onChange={setView} options={[
+            { value: 'board', label: 'Board', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="7" rx="1.5" /><rect x="3" y="13" width="18" height="7" rx="1.5" /></svg> },
+            { value: 'list', label: 'List', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> },
+            { value: 'timeline', label: 'Timeline', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h7M13 6h8M3 12h11M17 12h4M3 18h5M11 18h10M12 3v18" /></svg> },
+          ]} />
           <button className="btn ghost" onClick={load}>Refresh</button>
         </div>
       </div>
@@ -289,7 +337,11 @@ export default function LivePage() {
         </div>
       </div>
 
-      {active.length === 0 ? (
+      {view === 'timeline' ? (
+        <TimelineGrid />
+      ) : view === 'list' ? (
+        <StreamList streams={b.streams} onOpen={open} />
+      ) : active.length === 0 ? (
         <div className="empty">
           <h3>Nothing is running</h3>
           <p>No channel, station or event has a pipeline up. Start one from its page and it appears here within ten seconds.</p>
@@ -303,7 +355,7 @@ export default function LivePage() {
 
       {/* Idle is the normal state for most of a fleet, so it is folded away
           rather than allowed to fill the board with grey rows. */}
-      {quiet.length > 0 && (
+      {view === 'board' && quiet.length > 0 && (
         <div style={{ marginTop: 18 }}>
           <button className="btn ghost" onClick={() => setShowIdle(v => !v)}>
             {showIdle ? 'Hide' : 'Show'} {quiet.length} not running

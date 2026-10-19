@@ -81,7 +81,7 @@ export interface FeatureDef {
 
 const ID = '[^/]+';
 export const CATALOGUE: FeatureDef[] = [
-  { key: 'monitoring', label: 'Live & monitoring', area: 'content', prefixes: ['/api/status', '/api/monitoring'] },
+  { key: 'monitoring', label: 'Live & monitoring', area: 'content', prefixes: ['/api/status', '/api/monitoring', '/api/timeline'] },
   { key: 'channels', label: 'TV channels', area: 'content', prefixes: ['/api/channels', '/api/daypart-presets'],
     operate: [new RegExp(`^/api/channels/${ID}/(start|stop|air|auto-connect|test-stream|failover-test|reset-health)$`)],
     operateMeans: 'Start/stop, on/off air, auto connect, test streams, clear QC' },
@@ -108,7 +108,7 @@ export const CATALOGUE: FeatureDef[] = [
     operate: [new RegExp(`^/api/jobs/${ID}/(retry|cancel)$`), new RegExp(`^/api/watchfolders/${ID}/dry-run$`)],
     operateMeans: 'Retry/cancel jobs, watchfolder dry runs' },
   { key: 'sharing', label: 'Share links', area: 'content', prefixes: ['/api/share-links'] },
-  { key: 'analytics', label: 'Analytics & reports', area: 'insight', prefixes: ['/api/analytics'] },
+  { key: 'analytics', label: 'Analytics & reports', area: 'insight', prefixes: ['/api/analytics', '/api/reports'] },
   { key: 'fleet', label: 'Fleet & usage', area: 'insight', prefixes: ['/api/fleet'] },
   { key: 'users', label: 'Admin users', area: 'admin', prefixes: ['/api/users'] },
   { key: 'access', label: 'Roles & access', area: 'admin', prefixes: ['/api/user-groups', '/api/access-roles'] },

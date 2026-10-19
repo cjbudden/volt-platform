@@ -146,6 +146,22 @@ export interface UpNext {
   totalMs: number;
 }
 
+/**
+ * A graphic the stream asked for, from an in-stream trigger (EXT-X-DATERANGE or
+ * a DASH EventStream; see sdk/triggers.ts). Times are media times, the clock of
+ * `currentTime`.
+ */
+export interface StreamGraphic {
+  id: string;
+  /** 'up-next', 'programme', 'ad', or any graphic a later server sends. */
+  graphic: string;
+  start: number;
+  /** Null when open-ended. */
+  end: number | null;
+  /** The trigger's data, keys lower case: title, subtitle, image, starts... */
+  data: Record<string, string>;
+}
+
 export interface PlayerState {
   status: PlayerStatus;
   playing: boolean;
@@ -194,6 +210,8 @@ export interface PlayerState {
   index: number;
   item: PlaylistItem | null;
   upNext: UpNext | null;
+  /** In-stream graphics on screen now. Empty unless graphics are on (theme.showGraphics / options.showGraphics). */
+  graphics: StreamGraphic[];
 
   /** Audio services. */
   nowPlaying: TrackInfo | null;
@@ -296,6 +314,12 @@ export interface Theme {
   logoPosition?: 'top-left' | 'top-right' | 'bottom-right' | 'none';
   /** Seconds before the end that the up-next card appears. */
   upNextSeconds?: number;
+  /**
+   * Draw graphics the STREAM asks for (in-stream triggers: Up next and whatever
+   * follows). The triggers are always in the manifest; this decides whether this
+   * player acts on them. Default on.
+   */
+  showGraphics?: boolean;
   autoAdvance?: boolean;
   controls?: Partial<ControlToggles>;
 }
@@ -337,7 +361,7 @@ export type SkinFactory = () => Skin;
 export type PlayerEventName =
   | 'state' | 'ready' | 'play' | 'pause' | 'ended' | 'error'
   | 'itemchange' | 'programmechange' | 'upnext' | 'qualitychange' | 'castchange'
-  | 'presentationchange' | 'purchase' | 'signin' | 'locked';
+  | 'presentationchange' | 'purchase' | 'signin' | 'locked' | 'graphic';
 
 export interface VoltPlayerSdkOptions {
   el: string | HTMLElement;
@@ -381,6 +405,8 @@ export interface VoltPlayerSdkOptions {
   media?: HTMLVideoElement;
   /** Strings, for translation. */
   strings?: Record<string, string>;
+  /** Override the saved player setup: act on in-stream graphic triggers or not. */
+  showGraphics?: boolean;
   /**
    * DEMO: render this state and play nothing. For a skin preview (the
    * console's Player setup) and for a skin author's test page: every built-in

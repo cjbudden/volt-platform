@@ -31,6 +31,7 @@ export const DEFAULT_THEME: Theme = {
   logoPosition: 'top-right',
   upNextSeconds: 15,
   autoAdvance: true,
+  showGraphics: true,
 };
 
 const HEX = /^#([0-9a-f]{6})$/i;
@@ -99,6 +100,8 @@ export function resolveTheme(...layers: Array<Partial<Theme> | null | undefined>
     logoPosition: (['top-left', 'top-right', 'bottom-right', 'none'] as const).includes(t.logoPosition as any) ? t.logoPosition! : 'top-right',
     upNextSeconds,
     autoAdvance: t.autoAdvance !== false,
+    // In-stream graphics: on unless the saved setup turns them off.
+    showGraphics: t.showGraphics !== false,
     controls,
   };
 }

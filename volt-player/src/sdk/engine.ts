@@ -45,6 +45,12 @@ export interface EngineOptions {
   textContainer?: HTMLElement;
 }
 
+/** Raw in-stream triggers as the engine received them; sdk/triggers.ts turns them into graphics. */
+export type TriggerReport =
+  | { kind: 'hls'; regions: Array<{ startTime: number; endTime: number; metadataType: string; payload: any }> }
+  | { kind: 'dash'; region: any }
+  | { kind: 'native'; cues: Array<{ id?: string; type?: string; startTime: number; endTime: number; value?: any }> };
+
 export function isApple(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent;
@@ -77,6 +83,8 @@ function langName(code: string): string {
 }
 
 export class Engine {
+  /** In-stream triggers (graphics), reported as they are parsed, before they are due. */
+  onTrigger: ((r: TriggerReport) => void) | null = null;
   readonly media: HTMLVideoElement;
   mode: EngineMode | null = null;
   private sp: any = null;
@@ -134,6 +142,7 @@ export class Engine {
           });
         }
         this.mode = p.mode;
+        if (p.mode === 'native' && p.kind === 'hls') this.watchNativeCues();
         this.onChange();
         return p;
       } catch (e) { last = e; }
@@ -172,6 +181,18 @@ export class Engine {
     const changed = () => this.onChange();
     for (const ev of ['trackschanged', 'variantchanged', 'adaptation', 'textchanged', 'texttrackvisibility', 'abrstatuschanged', 'loaded'])
       sp.addEventListener(ev, changed);
+    // IN-STREAM TRIGGERS. Reported when PARSED (`...added`), not when entered:
+    // the player decides what is on screen from currentTime, which also covers a
+    // viewer who joined inside a window or scrubbed into one. Shaka splits an HLS
+    // DATERANGE into one region per attribute; they arrive together, so they are
+    // batched for a tick and regrouped in sdk/triggers.ts.
+    let batch: any[] = [];
+    let flush: ReturnType<typeof setTimeout> | null = null;
+    sp.addEventListener('metadataadded', (ev: any) => {
+      batch.push({ startTime: ev.startTime, endTime: ev.endTime, metadataType: ev.metadataType, payload: ev.payload });
+      if (!flush) flush = setTimeout(() => { const b = batch; batch = []; flush = null; this.onTrigger?.({ kind: 'hls', regions: b }); }, 0);
+    });
+    sp.addEventListener('timelineregionadded', (ev: any) => { if (ev?.detail) this.onTrigger?.({ kind: 'dash', region: ev.detail }); });
     sp.addEventListener('error', (ev: any) => {
       const d = ev?.detail;
       if (d?.severity === 2 /* CRITICAL */) this.onError(readableError(d), d?.code ?? null);
@@ -181,7 +202,35 @@ export class Engine {
     sp.setTextTrackVisibility(this.textOn);
   }
 
+  private stopCues: (() => void) | null = null;
+
+  /**
+   * Safari's own HLS turns each DATERANGE attribute into a DataCue on a metadata
+   * text track. The track must be 'hidden' (not 'disabled') for cues to load.
+   * Scanned on add and every two seconds: cuechange only fires as cues become
+   * ACTIVE, and the player wants them as soon as they are known.
+   */
+  private watchNativeCues() {
+    const tracks = this.media.textTracks;
+    if (!tracks) return;
+    const scan = () => {
+      const cues: any[] = [];
+      for (const t of Array.from(tracks)) {
+        if (t.kind !== 'metadata') continue;
+        if (t.mode === 'disabled') t.mode = 'hidden';
+        for (const c of Array.from(t.cues ?? [])) cues.push({ id: c.id, type: (c as any).type, startTime: c.startTime, endTime: c.endTime, value: (c as any).value });
+      }
+      if (cues.length) this.onTrigger?.({ kind: 'native', cues });
+    };
+    const onAdd = () => scan();
+    tracks.addEventListener?.('addtrack', onAdd);
+    const iv = setInterval(scan, 2000);
+    this.stopCues = () => { clearInterval(iv); tracks.removeEventListener?.('addtrack', onAdd); };
+  }
+
   async unload(): Promise<void> {
+    this.stopCues?.();
+    this.stopCues = null;
     const sp = this.sp;
     this.sp = null;
     this.mode = null;

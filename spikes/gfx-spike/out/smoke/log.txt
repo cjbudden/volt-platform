@@ -1,0 +1,10 @@
+{"t":1792414516325,"ev":"ready","url":"http://127.0.0.1:8095/templates/scorebug/","bbox":[64,44,672,112],"clock":"vclock","continuous":false,"chromePid":null}
+{"t":1792414516369,"ev":"cmd_rx","fn":"update"}
+{"t":1792414516400,"ev":"cmd_rx","fn":"play"}
+{"t":1792414516464,"ev":"frame_out","fn":"update","rx":1792414516369,"firstReady":1792414516427}
+{"t":1792414517109,"ev":"rendered","fn":"update","frames":21,"ms":726,"medFrameMs":31.4}
+{"t":1792414517302,"ev":"frame_out","fn":"play","rx":1792414516400,"firstReady":1792414517141}
+{"t":1792414517581,"ev":"rendered","fn":"play","frames":14,"ms":468,"medFrameMs":33.3}
+{"t":1792414519416,"ev":"cmd_rx","fn":"update"}
+{"t":1792414519461,"ev":"frame_out","fn":"update","rx":1792414519416,"firstReady":1792414519458}
+{"t":1792414520160,"ev":"rendered","fn":"update","frames":22,"ms":736,"medFrameMs":33.2}

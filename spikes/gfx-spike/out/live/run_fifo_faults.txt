@@ -1,0 +1,265 @@
+{"pid": 12818, "ev": "sidecar_start", "t": 13.4}
+{"ev": "sidecar_ready", "t": 569.6}
+{"ev": "encoder_start", "t": 2101.4}
+{"name": "steady", "ev": "phase", "t": 8000.2}
+{"name": "SIGSTOP sidecar (hung Chromium) 26-32s, change posted at 28s", "ev": "fault", "t": 26018.4}
+{"err": "timed out", "ev": "post_failed", "t": 30002.8}
+{"name": "SIGCONT sidecar", "ev": "fault", "t": 32000.2}
+{"name": "SIGKILL sidecar + Chromium", "ev": "fault", "t": 36000.2}
+{"name": "restart sidecar", "ev": "fault", "t": 40000.1}
+{"pid": 13016, "ev": "sidecar_start", "t": 40001.1}
+{"ok": true, "ev": "sidecar_ready_again", "t": 40001.2}
+{"err": "[Errno 111] Connection refused", "ev": "post_failed", "t": 40001.4}
+{
+ "tag": "fifo_faults",
+ "gfx": "fifo",
+ "faults": true,
+ "encoder_alive_at_end": true,
+ "frames": 1419,
+ "main_latency_ms_median": 2152.8,
+ "main_latency_ms_p95": 2166.8,
+ "max_tap_gap_ms": 6009.0,
+ "max_tap_gap_at_s": 32.0,
+ "repeated_main_frames": 0,
+ "gfx_change_latency": [
+  [
+   14.0,
+   230,
+   112.9,
+   [
+    0,
+    30,
+    231
+   ]
+  ],
+  [
+   15.0,
+   30,
+   92.6,
+   [
+    30,
+    160,
+    231
+   ]
+  ],
+  [
+   16.0,
+   160,
+   87.9,
+   [
+    30,
+    90,
+    160
+   ]
+  ],
+  [
+   17.0,
+   90,
+   143.0,
+   [
+    90,
+    160,
+    231
+   ]
+  ],
+  [
+   18.0,
+   230,
+   85.5,
+   [
+    30,
+    90,
+    231
+   ]
+  ],
+  [
+   19.0,
+   30,
+   84.5,
+   [
+    30,
+    160,
+    231
+   ]
+  ],
+  [
+   20.0,
+   160,
+   96.3,
+   [
+    30,
+    90,
+    160
+   ]
+  ],
+  [
+   21.0,
+   90,
+   87.4,
+   [
+    90,
+    160,
+    231
+   ]
+  ],
+  [
+   22.0,
+   230,
+   86.2,
+   [
+    30,
+    90,
+    231
+   ]
+  ],
+  [
+   23.0,
+   30,
+   100.1,
+   [
+    30,
+    160,
+    231
+   ]
+  ],
+  [
+   24.0,
+   160,
+   89.5,
+   [
+    30,
+    90,
+    160
+   ]
+  ],
+  [
+   25.0,
+   90,
+   93.1,
+   [
+    90,
+    160
+   ]
+  ],
+  [
+   28.0,
+   230,
+   4136.0,
+   []
+  ],
+  [
+   34.0,
+   30,
+   84.2,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   46.0,
+   160,
+   null,
+   [
+    30
+   ]
+  ],
+  [
+   47.5,
+   90,
+   null,
+   [
+    30
+   ]
+  ],
+  [
+   49.0,
+   230,
+   null,
+   [
+    30
+   ]
+  ],
+  [
+   50.5,
+   30,
+   27.8,
+   [
+    30
+   ]
+  ]
+ ],
+ "gfx_latency_ms_after_restart": [
+  null,
+  null,
+  null,
+  27.8
+ ],
+ "gfx_latency_ms_median_steady": 91.0,
+ "gfx_latency_ms_max_steady": 143.0,
+ "cpu": {
+  "sidecar_idle_cpu%": 3.0,
+  "encoder_cpu%_idle": 26.8,
+  "sidecar_rss_mb": 98,
+  "sidecar_busy_cpu%": 7.9,
+  "encoder_cpu%_busy": 26.1
+ },
+ "events": [
+  {
+   "pid": 12818,
+   "ev": "sidecar_start",
+   "t": 13.4
+  },
+  {
+   "ev": "sidecar_ready",
+   "t": 569.6
+  },
+  {
+   "name": "SIGSTOP sidecar (hung Chromium) 26-32s, change posted at 28s",
+   "ev": "fault",
+   "t": 26018.4
+  },
+  {
+   "err": "timed out",
+   "ev": "post_failed",
+   "t": 30002.8
+  },
+  {
+   "name": "SIGCONT sidecar",
+   "ev": "fault",
+   "t": 32000.2
+  },
+  {
+   "name": "SIGKILL sidecar + Chromium",
+   "ev": "fault",
+   "t": 36000.2
+  },
+  {
+   "name": "restart sidecar",
+   "ev": "fault",
+   "t": 40000.1
+  },
+  {
+   "pid": 13016,
+   "ev": "sidecar_start",
+   "t": 40001.1
+  },
+  {
+   "ok": true,
+   "ev": "sidecar_ready_again",
+   "t": 40001.2
+  },
+  {
+   "err": "[Errno 111] Connection refused",
+   "ev": "post_failed",
+   "t": 40001.4
+  }
+ ],
+ "encoder_log_tail": [
+  "[in#0/mpegts @ 0x55c88de81b40] Thread message queue blocking; consider raising the thread_queue_size option (current value: 8)",
+  "[in#1/rawvideo @ 0x55c88de84f00] Thread message queue blocking; consider raising the thread_queue_size option (current value: 8)"
+ ],
+ "encoder_log_lines": 2,
+ "rung0_av_start_delta_ms": -1400.0
+}
+main_latency_by_2s {4: 2154, 6: 2152, 8: 2154, 10: 2153, 12: 2152, 14: 2154, 16: 2152, 18: 2153, 20: 2153, 22: 2153, 24: 2152, 26: 2155, 32: 6917, 34: 6911, 36: 3294, 38: 266, 40: 267, 42: 266, 44: 264, 46: 265, 48: 266, 50: 265, 52: 267, 54: 267, 56: 266, 58: 265}

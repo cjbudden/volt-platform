@@ -1,0 +1,165 @@
+{"pid": 11957, "ev": "sidecar_start", "t": 1.0}
+{"ev": "sidecar_ready", "t": 562.7}
+{"ev": "encoder_start", "t": 2071.6}
+{"name": "steady", "ev": "phase", "t": 8000.1}
+{
+ "tag": "file_re",
+ "gfx": "file",
+ "faults": false,
+ "encoder_alive_at_end": true,
+ "frames": 666,
+ "main_latency_ms_median": 1853.6,
+ "main_latency_ms_p95": 1860.9,
+ "max_tap_gap_ms": 98.8,
+ "max_tap_gap_at_s": 27.1,
+ "repeated_main_frames": 0,
+ "gfx_change_latency": [
+  [
+   14.0,
+   230,
+   219.4,
+   [
+    0,
+    30,
+    231
+   ]
+  ],
+  [
+   15.0,
+   30,
+   200.9,
+   [
+    30,
+    160,
+    231
+   ]
+  ],
+  [
+   16.0,
+   160,
+   203.5,
+   [
+    30,
+    90,
+    160
+   ]
+  ],
+  [
+   17.0,
+   90,
+   214.1,
+   [
+    90,
+    160,
+    231
+   ]
+  ],
+  [
+   18.0,
+   230,
+   210.8,
+   [
+    30,
+    90,
+    231
+   ]
+  ],
+  [
+   19.0,
+   30,
+   247.3,
+   [
+    30,
+    160,
+    231
+   ]
+  ],
+  [
+   20.0,
+   160,
+   224.1,
+   [
+    30,
+    90,
+    160
+   ]
+  ],
+  [
+   21.0,
+   90,
+   203.7,
+   [
+    90,
+    160,
+    231
+   ]
+  ],
+  [
+   22.0,
+   230,
+   241.1,
+   [
+    30,
+    90,
+    231
+   ]
+  ],
+  [
+   23.0,
+   30,
+   244.2,
+   [
+    30,
+    160,
+    231
+   ]
+  ],
+  [
+   24.0,
+   160,
+   241.3,
+   [
+    30,
+    90,
+    160
+   ]
+  ],
+  [
+   25.0,
+   90,
+   199.3,
+   [
+    90,
+    160
+   ]
+  ]
+ ],
+ "gfx_latency_ms_after_restart": [],
+ "gfx_latency_ms_median_steady": 216.8,
+ "gfx_latency_ms_max_steady": 247.3,
+ "cpu": {
+  "sidecar_idle_cpu%": 1.8,
+  "encoder_cpu%_idle": 25.2,
+  "sidecar_rss_mb": 77,
+  "sidecar_busy_cpu%": 2.8,
+  "encoder_cpu%_busy": 26.1
+ },
+ "events": [
+  {
+   "pid": 11957,
+   "ev": "sidecar_start",
+   "t": 1.0
+  },
+  {
+   "ev": "sidecar_ready",
+   "t": 562.7
+  }
+ ],
+ "encoder_log_tail": [
+  "[in#1/image2 @ 0x556540736f00] Thread message queue blocking; consider raising the thread_queue_size option (current value: 8)",
+  "[in#0/mpegts @ 0x556540733b40] Thread message queue blocking; consider raising the thread_queue_size option (current value: 8)"
+ ],
+ "encoder_log_lines": 2,
+ "rung0_av_start_delta_ms": -1400.0
+}
+main_latency_by_2s {4: 1855, 6: 1852, 8: 1853, 10: 1852, 12: 1852, 14: 1853, 16: 1855, 18: 1853, 20: 1855, 22: 1855, 24: 1853, 26: 1854, 28: 1853, 30: 1852}

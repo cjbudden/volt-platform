@@ -209,10 +209,12 @@ async function accrueInstance(o: Owed, now: Date): Promise<{ windows: number; se
         const usd = costOf(secs, rate.usdPerHour);
         await client.query(
           `INSERT INTO usage_accruals
-             (account_id, instance_id, channel_id, event_id, stream_id, stream_name,
+             (account_id, instance_id, instance_ref, channel_id, event_id, stream_id, stream_name,
               host_id, task_kind, instance_type, lifecycle, from_at, to_at, seconds,
               usd_per_hour, est_usd, indicative)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+           VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+          // instance_ref repeats instance_id with no foreign key, so the run
+          // survives the channel's deletion (migration 0059).
           // stream_id duplicates channel_id/event_id deliberately: it has no
           // foreign key, so deleting the channel cannot take its billing
           // history with it. See the column comment in migration 0016.

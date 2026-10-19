@@ -1,0 +1,162 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graphics Preview</title>
+<style>
+  :root { --bg: #f4f5f7; --panel: #ffffff; --ink: #14171f; --muted: #5d6474; --line: #d9dce3; --accent: #1d4ed8; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0f1115; --panel: #171a21; --ink: #e8eaf0; --muted: #9aa1b2; --line: #2a2f3a; --accent: #6b8cff; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header select { width: auto; }
+  header label { color: var(--muted); }
+  main { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 16px; padding: 16px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); padding: 12px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+  .field { display: grid; grid-template-columns: 110px 1fr; gap: 6px; align-items: center; margin-bottom: 6px; }
+  input, textarea, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); padding: 5px 7px; width: 100%; }
+  textarea { font-family: ui-monospace, monospace; font-size: 12px; height: 150px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button svg { width: 14px; height: 14px; }
+  .stage { position: relative; width: 100%; aspect-ratio: 16/9; overflow: hidden; border: 1px solid var(--line);
+           background: repeating-conic-gradient(#8884 0 25%, transparent 0 50%) 0 0/24px 24px, #444; }
+  .stage iframe { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; border: 0; transform-origin: 0 0; background: transparent; }
+  .burn { margin-top: 12px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+  .burn img { max-width: 100%; background: repeating-conic-gradient(#8884 0 25%, transparent 0 50%) 0 0/16px 16px; border: 1px solid var(--line); }
+  .log { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); max-height: 140px; overflow: auto; white-space: pre-wrap; }
+  .pill { font-size: 12px; padding: 2px 8px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.on { color: #fff; background: #c81e1e; border-color: #c81e1e; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Graphics preview</h1>
+  <select id="tpl"><option>scorebug</option><option>lowerthird</option><option>ticker</option></select>
+  <label><input type="checkbox" id="drive" checked style="width:auto"> drive sidecar (burned output)</label>
+  <span id="air" class="pill">OFF AIR</span>
+</header>
+<main>
+  <div>
+    <section>
+      <h2>Fields</h2>
+      <div id="fields"></div>
+      <div class="row">
+        <button class="primary" id="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>Update</button>
+        <button id="play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg>Play</button>
+        <button id="stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>Stop</button>
+        <button id="next"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4v16l10-8zM18 4h2v16h-2z"/></svg>Next</button>
+      </div>
+    </section>
+    <section style="margin-top:12px">
+      <h2>State JSON</h2>
+      <textarea id="json"></textarea>
+      <div class="row"><button id="sendjson">Send JSON</button></div>
+    </section>
+    <section style="margin-top:12px">
+      <h2>Activity</h2>
+      <div class="log" id="log"></div>
+    </section>
+  </div>
+  <div>
+    <section>
+      <h2>Browser preview (same HTML as the burn renderer)</h2>
+      <div class="stage" id="stage"><iframe id="frame"></iframe></div>
+      <div class="burn">
+        <div><h2>Sidecar render, what gets burned</h2><img id="burn" alt="sidecar frame"></div>
+      </div>
+    </section>
+  </div>
+</main>
+<script>
+  const qs = new URLSearchParams(location.search);
+  const $ = (id) => document.getElementById(id);
+  const SIDECAR = qs.get('sidecar') || location.origin;   // the sidecar serves this page
+  let manifest = null, state = {};
+  const log = (s) => { $('log').textContent = new Date().toISOString().slice(11, 23) + '  ' + s + '\n' + $('log').textContent; };
+
+  function fit() { const s = $('stage').clientWidth / 1920; $('frame').style.transform = `scale(${s})`; }
+  addEventListener('resize', fit);
+
+  async function load(tpl) {
+    $('tpl').value = tpl;
+    const html = await (await fetch(`/templates/${tpl}/`)).text();
+    const m = html.match(/<script type="application\/json" id="volt-manifest">([\s\S]*?)<\/script>/);
+    manifest = m ? JSON.parse(m[1]) : { fields: [], sample: {} };
+    state = { ...manifest.sample };
+    let live = null;
+    try { live = await (await fetch(SIDECAR + '/state')).json(); } catch (_) {}
+    if (live && live.template === tpl && Object.keys(live.state || {}).length) state = { ...state, ...live.state };
+    $('frame').onload = () => { call('update', state); if (live && live.onAir) call('play'); fit(); };
+    $('frame').src = `/templates/${tpl}/`;
+    renderFields(); $('json').value = JSON.stringify(state, null, 2);
+  }
+  function renderFields() {
+    $('fields').innerHTML = '';
+    for (const f of manifest.fields.filter(f => !f.hidden)) {
+      const d = document.createElement('div'); d.className = 'field';
+      const v = state[f.id];
+      d.innerHTML = `<label for="f_${f.id}">${f.label || f.id}</label>` +
+        (f.type === 'number'
+          ? `<div style="display:flex;gap:4px"><button data-d="-1" data-f="${f.id}">-</button><input id="f_${f.id}" type="number" value="${v ?? 0}"><button data-d="1" data-f="${f.id}">+</button></div>`
+          : `<input id="f_${f.id}" value="${Array.isArray(v) ? v.join(' | ') : (v ?? '')}">`);
+      $('fields').appendChild(d);
+    }
+    $('fields').querySelectorAll('button[data-d]').forEach(b => b.onclick = () => {
+      const i = $('f_' + b.dataset.f); i.value = (+i.value || 0) + (+b.dataset.d); send();
+    });
+  }
+  function collect() {
+    const out = {};
+    for (const f of manifest.fields.filter(f => !f.hidden)) {
+      const v = $('f_' + f.id).value;
+      out[f.id] = f.type === 'number' ? +v : f.type === 'list' ? v.split('|').map(s => s.trim()).filter(Boolean) : v;
+    }
+    return out;
+  }
+  // Local preview: call the CasparCG API on the iframe. Burned output: POST to the sidecar.
+  function call(fn, arg) {
+    const w = $('frame').contentWindow;
+    if (w && typeof w[fn] === 'function') w[fn](arg === undefined ? undefined : JSON.stringify(arg));
+  }
+  async function remote(path, body) {
+    if (!$('drive').checked) return;
+    try { await fetch(SIDECAR + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) }); }
+    catch (e) { log('sidecar unreachable: ' + e.message); }
+  }
+  function send(obj) {
+    const d = obj || collect(); Object.assign(state, d);
+    $('json').value = JSON.stringify(state, null, 2);
+    call('update', d); remote('/state', d); log('update ' + JSON.stringify(d));
+  }
+  $('send').onclick = () => send();
+  $('sendjson').onclick = () => { try { send(JSON.parse($('json').value)); renderFields(); } catch (e) { log('bad JSON: ' + e.message); } };
+  // with the sidecar driven, play/stop come back over SSE and are applied once
+  for (const fn of ['play', 'stop', 'next']) $(fn).onclick = () => { if (!$('drive').checked) call(fn); remote('/' + fn); log(fn); };
+  $('tpl').onchange = () => { const u = new URL(location); u.searchParams.set('template', $('tpl').value); history.replaceState(null, '', u); load($('tpl').value); };
+
+  // Mirror changes made by OTHER writers (sports feed, API, another operator).
+  try {
+    const es = new EventSource(SIDECAR + '/events');
+    es.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      $('air').textContent = m.onAir ? 'ON AIR' : 'OFF AIR'; $('air').classList.toggle('on', !!m.onAir);
+      if (m.init) return;
+      if (m.fn === 'play' || m.fn === 'stop' || m.fn === 'next') call(m.fn);
+      if (m.fn === 'update' && m.arg && JSON.stringify(m.arg) !== JSON.stringify(collectSafe())) {
+        Object.assign(state, m.arg); call('update', m.arg); renderFields(); $('json').value = JSON.stringify(state, null, 2); log('remote update ' + JSON.stringify(m.arg));
+      }
+    };
+  } catch (_) {}
+  function collectSafe() { try { return collect(); } catch (_) { return {}; } }
+  // Burned-output view: the sidecar's current frame, refreshed.
+  setInterval(() => { if ($('drive').checked) $('burn').src = SIDECAR + '/frame.png?' + Date.now(); }, 500);
+  load(qs.get('template') || 'scorebug');
+</script>
+</body>
+</html>

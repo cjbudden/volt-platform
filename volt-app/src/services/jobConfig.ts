@@ -150,6 +150,15 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
       url: `${config.internalApiBaseUrl}/api/streams/${owner.id}/report`,
       token: config.ingestToken,
     },
+    // In-stream graphic triggers (services/graphicTriggers.ts): the encoder polls
+    // this and writes EXT-X-DATERANGE / DASH EventStream into the manifests it
+    // delivers. Always on for video: viewers never pass the control plane, so the
+    // manifest is the only way the schedule reaches a player.
+    timed_events: {
+      url: `${config.internalApiBaseUrl}/api/streams/${owner.id}/timed-events?kind=${ctx.kind}`,
+      token: config.ingestToken,
+      poll_sec: 5,
+    },
   };
 
   if (profile.workflow_type === 'transcode') {

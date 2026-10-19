@@ -1,0 +1,26 @@
+run0 baseline           cpu=  41.7s wall= 22.5s rc=0
+run0 once_bbox          cpu=  44.4s wall= 25.4s rc=0
+run0 once_bbox_anim     cpu=  44.8s wall= 30.1s rc=0
+run0 once_full          cpu=  59.5s wall= 44.6s rc=0
+run0 once_full_anim     cpu=  58.3s wall= 34.1s rc=0
+run0 per_rung_dynamic   cpu=  44.7s wall= 24.3s rc=0
+run1 baseline           cpu=  40.5s wall= 21.6s rc=0
+run1 once_bbox          cpu=  42.5s wall= 26.4s rc=0
+run1 once_bbox_anim     cpu=  43.9s wall= 35.9s rc=0
+run1 once_full          cpu=  57.6s wall= 31.6s rc=0
+run1 once_full_anim     cpu=  57.2s wall= 30.9s rc=0
+run1 per_rung_dynamic   cpu=  46.1s wall= 24.4s rc=0
+run2 baseline           cpu=  43.9s wall= 23.3s rc=0
+run2 once_bbox          cpu=  45.0s wall= 23.6s rc=0
+run2 once_bbox_anim     cpu=  42.2s wall= 22.0s rc=0
+run2 once_full          cpu=  56.4s wall= 30.1s rc=0
+run2 once_full_anim     cpu=  57.6s wall= 30.7s rc=0
+run2 per_rung_dynamic   cpu=  44.3s wall= 23.4s rc=0
+
+variant              cpu_s(median)  wall_s  delta_vs_baseline  fps_equiv
+baseline                   41.7      22.5        +0.0%     33.4
+once_bbox                  44.4      25.4        +6.5%     29.5
+once_bbox_anim             43.9      30.1        +5.3%     24.9
+once_full                  57.6      31.6       +38.0%     23.7
+once_full_anim             57.6      30.9       +37.9%     24.3
+per_rung_dynamic           44.7      24.3        +7.0%     30.8

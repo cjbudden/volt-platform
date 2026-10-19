@@ -1,0 +1,5 @@
+[in#1/image2 @ 0x55e8df465240] Thread message queue blocking; consider raising the thread_queue_size option (current value: 8)
+[in#0/mpegts @ 0x55e8df44ab00] Thread message queue blocking; consider raising the thread_queue_size option (current value: 8)
+[image2 @ 0x55e8df5b3f40] Could not open file : /home/claude/gfx-spike/out/live/gfx.png
+[in#1/image2 @ 0x55e8df465240] Error during demuxing: Input/output error
+[in#1/image2 @ 0x55e8df465240] Error retrieving a packet from demuxer: Input/output error

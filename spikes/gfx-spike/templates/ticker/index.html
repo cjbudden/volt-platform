@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ticker</title>
+<script type="application/json" id="volt-manifest">
+{
+  "name": "Ticker",
+  "contract": "casparcg-html/1 + volt-deterministic/1",
+  "canvas": [1920, 1080],
+  "fps": 25,
+  "bbox": [0, 1010, 1920, 56],
+  "animation": "continuous",
+  "fields": [{"id": "items", "type": "list", "label": "Headlines"}],
+  "sample": {"items": ["Breaking: Volt ships HTML graphics", "Markets: NZX up 0.4%", "Weather: fine in Auckland, 19C"]}
+}
+</script>
+<style>
+  html, body { margin: 0; background: transparent; width: 1920px; height: 1080px; overflow: hidden; }
+  #band { position: absolute; left: 0; top: 1010px; width: 1920px; height: 56px; background: rgba(11,31,77,.92); overflow: hidden; }
+  #crawl { position: absolute; top: 0; left: 0; white-space: nowrap; line-height: 56px; font: 400 30px "DejaVu Sans", sans-serif; color: #fff; will-change: transform; }
+</style>
+</head>
+<body>
+<div id="band"><div id="crawl"></div></div>
+<script>
+  // rAF-driven continuous crawl, 120 px/s. Deterministic through the sidecar's
+  // virtual clock (it virtualises performance.now / rAF), so it also renders offline.
+  const SPEED = 120; let t0 = null, playing = false;
+  const crawl = document.getElementById('crawl');
+  window.update = function (raw) { const d = typeof raw === 'string' ? JSON.parse(raw) : raw; if (d.items) crawl.textContent = d.items.join('   •   '); };
+  function frame(now) {
+    if (playing) { if (t0 === null) t0 = now; const w = crawl.offsetWidth + 1920; const x = 1920 - ((now - t0) / 1000 * SPEED) % w; crawl.style.transform = `translateX(${x}px)`; }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  window.play = function () { playing = true; t0 = null; };
+  window.stop = function () { playing = false; crawl.style.transform = 'translateX(1920px)'; };
+  window.next = function () {};
+  if (location.search.includes('preview')) { update(JSON.parse(document.getElementById('volt-manifest').textContent).sample); play(); }
+</script>
+</body>
+</html>

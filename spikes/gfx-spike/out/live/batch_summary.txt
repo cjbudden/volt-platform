@@ -1,0 +1,125 @@
+=== --gfx none --secs 30 --tag none
+=== --gfx file --secs 30 --tag file
+=== --gfx file --secs 30 --tqs 1 --tag file_tqs1
+=== --gfx file --secs 30 --gfx-re --tag file_re
+=== --gfx file --faults --no-corrupt --tag file_faults
+=== --gfx file --faults --tag file_faults_corrupt
+=== --gfx fifo --faults --tag fifo_faults
+=== --gfx movie --faults --no-corrupt --tag movie_faults
+
+## fifo_faults  frames=1419 alive=True main_lat_med=2152.8 p95=2166.8 max_gap=6009.0ms@32.0s repeated=0 gfx_lat_med=91.0 max=143.0 after_restart=[None, None, None, 27.8] av_delta=-1400.0 cpu={'sidecar_idle_cpu%': 3.0, 'encoder_cpu%_idle': 26.8, 'sidecar_rss_mb': 98, 'sidecar_busy_cpu%': 7.9, 'encoder_cpu%_busy': 26.1} enc_log_lines=2
+   main latency spikes (2 s buckets >400 ms): {'6': 2152, '8': 2154, '10': 2153, '12': 2152, '14': 2154, '16': 2152, '18': 2153, '20': 2153, '22': 2153, '24': 2152, '26': 2155, '32': 6917, '34': 6911, '36': 3294}
+   change [14.0, 230, 112.9, [0, 30, 231]]
+   change [15.0, 30, 92.6, [30, 160, 231]]
+   change [16.0, 160, 87.9, [30, 90, 160]]
+   change [17.0, 90, 143.0, [90, 160, 231]]
+   change [18.0, 230, 85.5, [30, 90, 231]]
+   change [19.0, 30, 84.5, [30, 160, 231]]
+   change [20.0, 160, 96.3, [30, 90, 160]]
+   change [21.0, 90, 87.4, [90, 160, 231]]
+   change [22.0, 230, 86.2, [30, 90, 231]]
+   change [23.0, 30, 100.1, [30, 160, 231]]
+   change [24.0, 160, 89.5, [30, 90, 160]]
+   change [25.0, 90, 93.1, [90, 160]]
+   change [28.0, 230, 4136.0, []]
+   change [34.0, 30, 84.2, [30, 231]]
+   change [46.0, 160, None, [30]]
+   change [47.5, 90, None, [30]]
+   change [49.0, 230, None, [30]]
+   change [50.5, 30, 27.8, [30]]
+   fault @26.0s SIGSTOP sidecar (hung Chromium) 26-32s, change posted at 28s
+   fault @32.0s SIGCONT sidecar
+   fault @36.0s SIGKILL sidecar + Chromium
+   fault @40.0s restart sidecar
+
+## file  frames=695 alive=True main_lat_med=266.7 p95=307.2 max_gap=92.3ms@6.9s repeated=0 gfx_lat_med=575.7 max=612.1 after_restart=[] av_delta=-1400.0 cpu={'sidecar_idle_cpu%': 2.0, 'encoder_cpu%_idle': 27.7, 'sidecar_rss_mb': 77, 'sidecar_busy_cpu%': 3.1, 'encoder_cpu%_busy': 26.0} enc_log_lines=2
+
+## file_faults  frames=1420 alive=True main_lat_med=265.3 p95=305.4 max_gap=99.7ms@20.1s repeated=0 gfx_lat_med=575.7 max=615.9 after_restart=[541.3, 557.6, 583.0, 604.6] av_delta=-1400.0 cpu={'sidecar_idle_cpu%': 2.0, 'encoder_cpu%_idle': 26.0, 'sidecar_rss_mb': 77, 'sidecar_busy_cpu%': 2.8, 'encoder_cpu%_busy': 26.1} enc_log_lines=5
+   change [14.0, 230, 591.4, [0, 231]]
+   change [15.0, 30, 585.4, [30, 231]]
+   change [16.0, 160, 571.6, [30, 160]]
+   change [17.0, 90, 574.9, [90, 160]]
+   change [18.0, 230, 576.6, [90, 231]]
+   change [19.0, 30, 576.0, [30, 231]]
+   change [20.0, 160, 557.1, [30, 160]]
+   change [21.0, 90, 533.8, [90, 160]]
+   change [22.0, 230, 615.9, [90, 231]]
+   change [23.0, 30, 583.6, [30, 231]]
+   change [24.0, 160, 547.9, [30, 160]]
+   change [25.0, 90, 575.4, [90, 160]]
+   change [28.0, 230, 4542.0, [90]]
+   change [34.0, 30, 572.0, [30, 231]]
+   change [46.0, 160, 541.3, [35, 160]]
+   change [47.5, 90, 557.6, [90, 160]]
+   change [49.0, 230, 583.0, [90, 231]]
+   change [50.5, 30, 604.6, [30, 231]]
+   change [54.0, 160, None, [30]]
+   change [56.0, 90, None, [30]]
+   fault @26.0s SIGSTOP sidecar (hung Chromium) 26-32s, change posted at 28s
+   fault @32.0s SIGCONT sidecar
+   fault @36.0s SIGKILL sidecar + Chromium
+   fault @40.0s restart sidecar
+   fault @52.0s DELETE gfx.png for 1 s, then a change
+
+## file_faults_corrupt  frames=1417 alive=True main_lat_med=267.1 p95=306.5 max_gap=2535.2ms@41.0s repeated=0 gfx_lat_med=565.1 max=611.4 after_restart=[None, None, None, 72.8] av_delta=-1400.0 cpu={'sidecar_idle_cpu%': 0.7, 'encoder_cpu%_idle': 26.7, 'sidecar_rss_mb': 88, 'sidecar_busy_cpu%': 3.6, 'encoder_cpu%_busy': 26.0} enc_log_lines=125372
+   main latency spikes (2 s buckets >400 ms): {'40': 1323}
+   change [14.0, 230, 532.3, [0, 30, 231]]
+   change [15.0, 30, 527.3, [30, 231]]
+   change [16.0, 160, 565.9, [30, 160]]
+   change [17.0, 90, 611.4, [90, 160]]
+   change [18.0, 230, 579.0, [90, 231]]
+   change [19.0, 30, 564.1, [30, 231]]
+   change [20.0, 160, 566.3, [30, 160]]
+   change [21.0, 90, 565.5, [90, 160]]
+   change [22.0, 230, 564.7, [90, 231]]
+   change [23.0, 30, 531.4, [30, 231]]
+   change [24.0, 160, 559.5, [30, 160]]
+   change [25.0, 90, 606.9, [90, 160]]
+   change [28.0, 230, 4533.0, [90]]
+   change [34.0, 30, 576.8, [30, 231]]
+   change [46.0, 160, None, [30]]
+   change [47.5, 90, None, [30]]
+   change [49.0, 230, None, [30]]
+   change [50.5, 30, 72.8, [30]]
+   change [54.0, 160, None, [30]]
+   change [56.0, 90, None, [30]]
+   fault @26.0s SIGSTOP sidecar (hung Chromium) 26-32s, change posted at 28s
+   fault @32.0s SIGCONT sidecar
+   fault @36.0s SIGKILL sidecar + Chromium
+   fault @38.0s corrupt gfx.png in place (non-atomic garbage write)
+   fault @40.0s restart sidecar
+   fault @52.0s DELETE gfx.png for 1 s, then a change
+
+## file_re  frames=666 alive=True main_lat_med=1853.6 p95=1860.9 max_gap=98.8ms@27.1s repeated=0 gfx_lat_med=216.8 max=247.3 after_restart=[] av_delta=-1400.0 cpu={'sidecar_idle_cpu%': 1.8, 'encoder_cpu%_idle': 25.2, 'sidecar_rss_mb': 77, 'sidecar_busy_cpu%': 2.8, 'encoder_cpu%_busy': 26.1} enc_log_lines=2
+   main latency spikes (2 s buckets >400 ms): {'6': 1852, '8': 1853, '10': 1852, '12': 1852, '14': 1853, '16': 1855, '18': 1853, '20': 1855, '22': 1855, '24': 1853, '26': 1854, '28': 1853, '30': 1852}
+
+## file_tqs1  frames=694 alive=True main_lat_med=266.2 p95=306.4 max_gap=102.7ms@8.3s repeated=0 gfx_lat_med=300.5 max=348.2 after_restart=[] av_delta=-1400.0 cpu={'sidecar_idle_cpu%': 2.2, 'encoder_cpu%_idle': 26.5, 'sidecar_rss_mb': 77, 'sidecar_busy_cpu%': 2.9, 'encoder_cpu%_busy': 26.2} enc_log_lines=2
+
+## movie_faults  frames=1420 alive=True main_lat_med=260.7 p95=299.0 max_gap=102.3ms@36.0s repeated=0 gfx_lat_med=None max=None after_restart=[None, None, None, None] av_delta=-1400.0 cpu={'sidecar_idle_cpu%': 2.0, 'encoder_cpu%_idle': 24.7, 'sidecar_rss_mb': 77, 'sidecar_busy_cpu%': 2.8, 'encoder_cpu%_busy': 25.0} enc_log_lines=0
+   change [14.0, 230, None, [0]]
+   change [15.0, 30, None, [0]]
+   change [16.0, 160, None, [0]]
+   change [17.0, 90, None, [0]]
+   change [18.0, 230, None, [0]]
+   change [19.0, 30, None, [0]]
+   change [20.0, 160, None, [0]]
+   change [21.0, 90, None, [0]]
+   change [22.0, 230, None, [0]]
+   change [23.0, 30, None, [0]]
+   change [24.0, 160, None, [0]]
+   change [25.0, 90, None, [0]]
+   change [28.0, 230, None, [0]]
+   change [34.0, 30, None, [0]]
+   change [46.0, 160, None, [0]]
+   change [47.5, 90, None, [0]]
+   change [49.0, 230, None, [0]]
+   change [50.5, 30, None, [0]]
+   change [54.0, 160, None, [0]]
+   change [56.0, 90, None, [0]]
+   fault @26.0s SIGSTOP sidecar (hung Chromium) 26-32s, change posted at 28s
+   fault @32.0s SIGCONT sidecar
+   fault @36.0s SIGKILL sidecar + Chromium
+   fault @40.0s restart sidecar
+   fault @52.0s DELETE gfx.png for 1 s, then a change
+
+## none  frames=745 alive=True main_lat_med=260.2 p95=299.5 max_gap=101.9ms@20.9s repeated=0 gfx_lat_med=None max=None after_restart=[] av_delta=-1400.0 cpu={'encoder_cpu%': 22.9} enc_log_lines=0

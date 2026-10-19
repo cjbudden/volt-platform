@@ -1,0 +1,276 @@
+{
+ "tag": "movie_faults",
+ "gfx": "movie",
+ "faults": true,
+ "encoder_alive_at_end": true,
+ "frames": 1420,
+ "main_latency_ms_median": 260.7,
+ "main_latency_ms_p95": 299.0,
+ "max_tap_gap_ms": 102.3,
+ "max_tap_gap_at_s": 36.0,
+ "repeated_main_frames": 0,
+ "main_latency_by_2s": {
+  "4": 804,
+  "6": 260,
+  "8": 259,
+  "10": 260,
+  "12": 261,
+  "14": 262,
+  "16": 260,
+  "18": 261,
+  "20": 261,
+  "22": 261,
+  "24": 259,
+  "26": 260,
+  "28": 259,
+  "30": 260,
+  "32": 260,
+  "34": 259,
+  "36": 260,
+  "38": 260,
+  "40": 259,
+  "42": 259,
+  "44": 259,
+  "46": 260,
+  "48": 260,
+  "50": 261,
+  "52": 261,
+  "54": 260,
+  "56": 261,
+  "58": 262
+ },
+ "gfx_change_latency": [
+  [
+   14.0,
+   230,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   15.0,
+   30,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   16.0,
+   160,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   17.0,
+   90,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   18.0,
+   230,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   19.0,
+   30,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   20.0,
+   160,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   21.0,
+   90,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   22.0,
+   230,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   23.0,
+   30,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   24.0,
+   160,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   25.0,
+   90,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   28.0,
+   230,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   34.0,
+   30,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   46.0,
+   160,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   47.5,
+   90,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   49.0,
+   230,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   50.5,
+   30,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   54.0,
+   160,
+   null,
+   [
+    0
+   ]
+  ],
+  [
+   56.0,
+   90,
+   null,
+   [
+    0
+   ]
+  ]
+ ],
+ "gfx_latency_ms_after_restart": [
+  null,
+  null,
+  null,
+  null
+ ],
+ "cpu": {
+  "sidecar_idle_cpu%": 2.0,
+  "encoder_cpu%_idle": 24.7,
+  "sidecar_rss_mb": 77,
+  "sidecar_busy_cpu%": 2.8,
+  "encoder_cpu%_busy": 25.0
+ },
+ "events": [
+  {
+   "pid": 13136,
+   "ev": "sidecar_start",
+   "t": 9.8
+  },
+  {
+   "ev": "sidecar_ready",
+   "t": 513.2
+  },
+  {
+   "name": "SIGSTOP sidecar (hung Chromium) 26-32s, change posted at 28s",
+   "ev": "fault",
+   "t": 26016.0
+  },
+  {
+   "err": "timed out",
+   "ev": "post_failed",
+   "t": 30001.8
+  },
+  {
+   "name": "SIGCONT sidecar",
+   "ev": "fault",
+   "t": 32000.2
+  },
+  {
+   "name": "SIGKILL sidecar + Chromium",
+   "ev": "fault",
+   "t": 36000.2
+  },
+  {
+   "name": "restart sidecar",
+   "ev": "fault",
+   "t": 40000.2
+  },
+  {
+   "pid": 13345,
+   "ev": "sidecar_start",
+   "t": 40001.5
+  },
+  {
+   "ok": true,
+   "ev": "sidecar_ready_again",
+   "t": 40001.7
+  },
+  {
+   "err": "[Errno 111] Connection refused",
+   "ev": "post_failed",
+   "t": 40001.9
+  },
+  {
+   "name": "DELETE gfx.png for 1 s, then a change",
+   "ev": "fault",
+   "t": 52000.1
+  }
+ ],
+ "encoder_log_tail": [],
+ "encoder_log_lines": 0,
+ "rung0_av_start_delta_ms": -1400.0
+}

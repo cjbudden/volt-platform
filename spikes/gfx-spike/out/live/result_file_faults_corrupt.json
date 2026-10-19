@@ -1,0 +1,306 @@
+{
+ "tag": "file_faults_corrupt",
+ "gfx": "file",
+ "faults": true,
+ "encoder_alive_at_end": true,
+ "frames": 1417,
+ "main_latency_ms_median": 267.1,
+ "main_latency_ms_p95": 306.5,
+ "max_tap_gap_ms": 2535.2,
+ "max_tap_gap_at_s": 41.0,
+ "repeated_main_frames": 0,
+ "main_latency_by_2s": {
+  "4": 852,
+  "6": 266,
+  "8": 268,
+  "10": 267,
+  "12": 267,
+  "14": 267,
+  "16": 269,
+  "18": 266,
+  "20": 267,
+  "22": 268,
+  "24": 265,
+  "26": 265,
+  "28": 265,
+  "30": 265,
+  "32": 265,
+  "34": 265,
+  "36": 266,
+  "38": 264,
+  "40": 1323,
+  "42": 266,
+  "44": 267,
+  "46": 266,
+  "48": 264,
+  "50": 265,
+  "52": 265,
+  "54": 265,
+  "56": 266,
+  "58": 266
+ },
+ "gfx_change_latency": [
+  [
+   14.0,
+   230,
+   532.3,
+   [
+    0,
+    30,
+    231
+   ]
+  ],
+  [
+   15.0,
+   30,
+   527.3,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   16.0,
+   160,
+   565.9,
+   [
+    30,
+    160
+   ]
+  ],
+  [
+   17.0,
+   90,
+   611.4,
+   [
+    90,
+    160
+   ]
+  ],
+  [
+   18.0,
+   230,
+   579.0,
+   [
+    90,
+    231
+   ]
+  ],
+  [
+   19.0,
+   30,
+   564.1,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   20.0,
+   160,
+   566.3,
+   [
+    30,
+    160
+   ]
+  ],
+  [
+   21.0,
+   90,
+   565.5,
+   [
+    90,
+    160
+   ]
+  ],
+  [
+   22.0,
+   230,
+   564.7,
+   [
+    90,
+    231
+   ]
+  ],
+  [
+   23.0,
+   30,
+   531.4,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   24.0,
+   160,
+   559.5,
+   [
+    30,
+    160
+   ]
+  ],
+  [
+   25.0,
+   90,
+   606.9,
+   [
+    90,
+    160
+   ]
+  ],
+  [
+   28.0,
+   230,
+   4533.0,
+   [
+    90
+   ]
+  ],
+  [
+   34.0,
+   30,
+   576.8,
+   [
+    30,
+    231
+   ]
+  ],
+  [
+   46.0,
+   160,
+   null,
+   [
+    30
+   ]
+  ],
+  [
+   47.5,
+   90,
+   null,
+   [
+    30
+   ]
+  ],
+  [
+   49.0,
+   230,
+   null,
+   [
+    30
+   ]
+  ],
+  [
+   50.5,
+   30,
+   72.8,
+   [
+    30
+   ]
+  ],
+  [
+   54.0,
+   160,
+   null,
+   [
+    30
+   ]
+  ],
+  [
+   56.0,
+   90,
+   null,
+   [
+    30
+   ]
+  ]
+ ],
+ "gfx_latency_ms_after_restart": [
+  null,
+  null,
+  null,
+  72.8
+ ],
+ "gfx_latency_ms_median_steady": 565.1,
+ "gfx_latency_ms_max_steady": 611.4,
+ "cpu": {
+  "sidecar_idle_cpu%": 0.7,
+  "encoder_cpu%_idle": 26.7,
+  "sidecar_rss_mb": 88,
+  "sidecar_busy_cpu%": 3.6,
+  "encoder_cpu%_busy": 26.0
+ },
+ "events": [
+  {
+   "pid": 12486,
+   "ev": "sidecar_start",
+   "t": 11.0
+  },
+  {
+   "ev": "sidecar_ready",
+   "t": 665.6
+  },
+  {
+   "name": "SIGSTOP sidecar (hung Chromium) 26-32s, change posted at 28s",
+   "ev": "fault",
+   "t": 26010.7
+  },
+  {
+   "err": "timed out",
+   "ev": "post_failed",
+   "t": 30003.1
+  },
+  {
+   "name": "SIGCONT sidecar",
+   "ev": "fault",
+   "t": 32000.2
+  },
+  {
+   "name": "SIGKILL sidecar + Chromium",
+   "ev": "fault",
+   "t": 36000.1
+  },
+  {
+   "name": "corrupt gfx.png in place (non-atomic garbage write)",
+   "ev": "fault",
+   "t": 38000.1
+  },
+  {
+   "name": "restart sidecar",
+   "ev": "fault",
+   "t": 40000.2
+  },
+  {
+   "pid": 12691,
+   "ev": "sidecar_start",
+   "t": 40002.4
+  },
+  {
+   "ok": true,
+   "ev": "sidecar_ready_again",
+   "t": 40003.3
+  },
+  {
+   "err": "[Errno 111] Connection refused",
+   "ev": "post_failed",
+   "t": 40004.0
+  },
+  {
+   "name": "DELETE gfx.png for 1 s, then a change",
+   "ev": "fault",
+   "t": 52000.1
+  }
+ ],
+ "encoder_log_tail": [
+  "[png @ 0x557b0f571ec0] chunk too big",
+  "[vist#1:0/png @ 0x557b0f6aa940] Error submitting packet to decoder: Invalid data found when processing input",
+  "[png @ 0x557b0f572ac0] chunk too big",
+  "[vist#1:0/png @ 0x557b0f6aa940] Error submitting packet to decoder: Invalid data found when processing input",
+  "Last message repeated 1 times",
+  "[png @ 0x557b0f584a40] chunk too big",
+  "[vist#1:0/png @ 0x557b0f6aa940] Error submitting packet to decoder: Invalid data found when processing input",
+  "Last message repeated 1 times"
+ ],
+ "encoder_log_lines": 125372,
+ "rung0_av_start_delta_ms": -1400.0
+}

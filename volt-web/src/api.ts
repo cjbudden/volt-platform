@@ -443,6 +443,8 @@ export interface AccountSettings {
 }
 export interface ChannelSettingsPatch {
   name?: string
+  /** In-stream graphics overrides (Up next). See GraphicsSettings.tsx. */
+  graphics?: { upNext?: { enabled?: boolean; leadSec?: number; durationSec?: number } }
   autoConnect?: boolean
   schemaId?: string
   metadata?: Record<string, any>
@@ -970,6 +972,54 @@ async function textReq(path: string): Promise<string> {
   return r.text()
 }
 
+
+// ---- Operating reports (modules/reports.ts, docs/REQ_stream_reporting.md) ----
+// NULL MEANS NOT KNOWN, never zero: a peak outside the raw analytics window is
+// null with peak_basis 'not_retained', and the page must say so.
+export type OpStreamKind = 'channel' | 'radio' | 'event'
+export type OpStop = 'operator' | 'schedule' | 'fault' | 'internal' | 'unknown'
+export interface OpRun {
+  instance_id: string; name_at_run: string; started_at: string; ended_at: string | null; running: boolean
+  duration_seconds: number; seconds_in_period: number; on_air_seconds: number
+  stop: OpStop | null; planned_stop: boolean | null; stop_detail: string | null
+  task_kind: string | null; instance_type: string | null; lifecycle: string | null
+  audience: { peak_concurrent: number | null; peak_at: string | null; peak_basis: 'exact' | 'not_retained' | 'no_viewers_recorded'
+    day_peak_concurrent: number | null; views: number | null; unique_viewers: number | null; watch_seconds: number | null }
+  listeners?: { sessions: number; listen_seconds: number; bytes: number; peak_concurrent: number; peak_at: string | null } | null
+  cost_basis_usd?: number | null
+}
+export interface OpReport {
+  stream: { id: string; kind: OpStreamKind; name: string; deleted: boolean }
+  period: { from: string; to: string }
+  air_basis: 'ledger' | 'public_window' | 'none'
+  air_windows: { from: string; to: string }[]
+  notes: string[]
+  totals: {
+    runs: number; run_seconds: number; on_air_seconds: number
+    availability_pct: number | null; availability_window: 'period' | 'public_window' | 'scheduled_window' | null
+    stops: { planned: number; unplanned: number; internal: number; unknown: number }
+    mttr_seconds: number | null; unrecovered_faults: number
+    peak_concurrent: number | null; peak_at: string | null; peak_basis: 'exact' | 'daily' | 'none'
+    views: number | null; unique_viewers_daily_sum: number | null; watch_seconds: number | null
+    cost_basis_usd?: number | null
+  }
+  runs: OpRun[]
+}
+export interface OpSummaryRow {
+  stream_id: string; name: string; kind: OpStreamKind; deleted: boolean
+  runs: number; hours_run: number; hours_on_air: number; availability_pct: number | null
+  planned_stops: number; unplanned_stops: number; unknown_stops: number; mttr_seconds: number | null
+  peak_concurrent: number | null; peak_basis: string; views: number | null; watch_hours: number | null
+  cost_basis_usd?: number | null
+}
+export interface OpSummary {
+  period: { from: string; to: string }
+  totals: { streams: number; hours_run: number; hours_on_air: number; unplanned_stops: number; cost_basis_usd?: number }
+  items: OpSummaryRow[]
+}
+export interface OpQuery { from: string; to: string; kind?: OpStreamKind | ''; q?: string; sort?: string }
+const opQs = (f: OpQuery) => '?' + new URLSearchParams(Object.entries(f).filter(([, v]) => v != null && v !== '') as [string, string][]).toString()
+
 export const api = {
   /** Either a session, or (two-step sign-in) a challenge to finish with mfaVerify / the setup calls. */
   login: (email: string, password: string): Promise<LoginResult> =>
@@ -1200,6 +1250,26 @@ export const api = {
   audit: (f: AuditQuery = {}): Promise<{ total: number; limit: number; offset: number; items: AuditRow[] }> =>
     req(`/audit${auditQs(f)}`),
   auditFacets: (): Promise<AuditFacets> => req('/audit/facets'),
+  // ---- Operating reports ----
+  operatingSummary: (f: OpQuery): Promise<OpSummary> => req(`/reports/streams${opQs(f)}`),
+  operatingReport: (id: string, f: OpQuery): Promise<OpReport> => req(`/reports/stream/${encodeURIComponent(id)}${opQs({ from: f.from, to: f.to })}`),
+  /** Download a report as CSV: the per-stream one when `id` is given, otherwise the period summary. */
+  downloadOperatingCsv: async (f: OpQuery, id?: string): Promise<void> => {
+    await refreshIfDueSoon()
+    const path = id ? `/api/reports/stream/${encodeURIComponent(id)}.csv${opQs({ from: f.from, to: f.to })}` : `/api/reports/streams.csv${opQs(f)}`
+    const r = await fetch(path, { headers: { authorization: `Bearer ${getToken()}` } })
+    if (!r.ok) {
+      let msg = `${r.status}`
+      try { const b = await r.json(); msg = b.error || msg } catch { /* not json */ }
+      throw new ApiError(r.status, msg, null)
+    }
+    const blob = await r.blob()
+    const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || 'operating-report.csv'
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = name
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  },
   /** Download the filtered audit log as CSV (same filters as the table). */
   downloadAuditCsv: async (f: AuditQuery = {}): Promise<void> => {
     await refreshIfDueSoon()
@@ -1610,6 +1680,16 @@ export const api = {
   // ---- monitoring ----
   /** The whole live board in one request: the fan-out lives on the server. */
   liveBoard: (): Promise<LiveBoard> => req('/monitoring/live'),
+  /** The Live Streams Timeline view: every visible stream on one clock, one
+   *  page of up to 50 rows per call (TIMELINE_MODE.md). Follow `next` for more. */
+  timelineGrid: (p: TimelineGridQuery): Promise<TimelineGrid> => {
+    const q = new URLSearchParams({ from: p.from, to: p.to })
+    if (p.kinds?.length) q.set('kinds', p.kinds.join(','))
+    if (p.groupId) q.set('groupId', p.groupId)
+    if (p.cursor) q.set('cursor', p.cursor)
+    if (p.limit) q.set('limit', String(p.limit))
+    return req(`/timeline/grid?${q.toString()}`)
+  },
   /** Problems, ranked, across every subsystem that can quietly go wrong. */
   monitoringOverview: (): Promise<MonitoringOverview> => req('/monitoring/overview'),
 
@@ -2963,4 +3043,38 @@ export interface AddonTrigger { id: string; addon_id: string; addon_name: string
 export interface EngineDescriptor {
   id: string; name: string; vendor: string; availability: 'installed' | 'planned'; defaultMode: 'encode_only' | 'full'
   summary: string; costNote?: string; todo?: string[]; caps: Record<string, any>
+}
+
+// ---- timeline grid (GET /api/timeline/grid, TIMELINE_MODE.md) ----
+export type TimelineGridKind = 'channel' | 'radio' | 'event' | 'loop'
+export interface TimelineGridQuery { from: string; to: string; kinds?: TimelineGridKind[]; groupId?: string; cursor?: string; limit?: number }
+export interface TimelineGridBlock {
+  id: string; title: string
+  /** As-run when known, scheduled otherwise. */
+  start: string; end: string
+  scheduledStart: string; scheduledEnd: string
+  asRun: boolean; status: string | null; vodState: VodState | null
+  /** 'event' is the event's own window drawn as one block. */
+  source: 'epg' | 'event'
+}
+export interface TimelineGridSpan { start: string; end: string }
+export interface TimelineGridRow {
+  kind: TimelineGridKind; id: string; name: string
+  groupId: string; groupName: string
+  /** The server's five-gate roll-up. Never computed in the console. */
+  status: { state: string; label: string }
+  onAir: boolean
+  programmes: TimelineGridBlock[]
+  /** Past part of the window only, measured from disk. */
+  media: { runs: TimelineGridSpan[]; gaps: (TimelineGridSpan & { reason: string })[]; coveragePct: number | null }
+  clips: (TimelineGridSpan & { id: string; title: string | null })[]
+  recordings: { id: string; start: string; end: string | null }[]
+  links: { self: string; detail: string; workbench: string; epg: string; programmes: string; coverage?: string; timeline?: string }
+}
+export interface TimelineGrid {
+  window: { from: string; to: string; now: string }
+  kinds: TimelineGridKind[]
+  rows: TimelineGridRow[]
+  next: string | null
+  links: { self: string; next: string | null; live: string; status: string }
 }
