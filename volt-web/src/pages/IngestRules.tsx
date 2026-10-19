@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react'
 import { api, type IngestRule, type IngestThen, type IngestWhen, type IngestWebhook, type ContentType, type Watchfolder } from '../api'
 import { PageHead } from '../scaffold'
+import { Notice, useNotify, usePageNotice } from '../notices'
 
 const RUNG_LABEL = { account: 'Account default', type: 'Content type', source: 'Source or folder' } as const
 const NAMING = { honour: 'Keep the name (sanitised)', guid: 'GUID', guid_prefixed: 'GUID + name', template: 'Template' }
@@ -95,7 +96,7 @@ function RuleForm({ rule, types, folders, hooks, baseline, onSaved, onCancel }: 
           <select multiple value={then.webhooks ?? []} onChange={e => setThen({ webhooks: [...e.target.selectedOptions].map(o => o.value) })} style={{ minHeight: 60 }}>{hooks.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}</select></label>
         <label style={{ display: 'grid', gap: 3, fontSize: 'var(--fs-xs)' }}><span style={{ color: 'var(--muted)' }}>Refuse with reason (instead of ingesting)</span><input value={then.reject ?? ''} onChange={e => setThen({ reject: e.target.value || null })} placeholder="project files are never wanted here" /></label>
       </div>
-      {err && <div className="err">{err}</div>}
+      {err && <Notice kind="error" variant="compact" message={err} />}
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="btn primary" onClick={save}>Save rule</button>
         <button className="btn ghost" onClick={onCancel}>Cancel</button>
@@ -116,20 +117,24 @@ export default function IngestRulesPage() {
   const [providers, setProviders] = useState<{ linked: { id: string; provider: string; label: string }[]; available: { provider: string; configured: boolean }[] } | null>(null)
   const [accel, setAccel] = useState<{ provider: 'aspera' | 'masv' | 'signiant'; label: string; config: string }>({ provider: 'aspera', label: '', config: '{"nodeUrl":"https://node.example.com:9092","user":"","password":"","destinationRoot":"/volt/inbox"}' })
   const [err, setErr] = useState('')
+  const notify = useNotify()
+  const fail = (e: any) => notify({ kind: 'error', message: e.message })
 
   async function load() {
     try {
       const [r, t, f, h, b] = await Promise.all([api.ingestRules(), api.contentTypes('vod'), api.watchfolders().catch(() => [] as Watchfolder[]), api.ingestWebhooks(), api.ingestBaseline()])
       setRules(r); setTypes(t); setFolders(f); setHooks(h); setBaseline(b.baseline)
       api.ingestProviders().then(setProviders).catch(() => {})
+      setErr('')
     } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() }, [])
   useEffect(() => { const h = (e: MessageEvent) => { if (e.data?.voltProviderLinked) load() }; window.addEventListener('message', h); return () => window.removeEventListener('message', h) }, [])
 
   async function linkProvider(provider: string) {
-    try { const { url } = await api.ingestProviderAuthorize(provider); window.open(url, 'volt-link', 'width=560,height=720') } catch (e: any) { setErr(e.message) }
+    try { const { url } = await api.ingestProviderAuthorize(provider); window.open(url, 'volt-link', 'width=560,height=720') } catch (e: any) { fail(e) }
   }
+  usePageNotice('load', err ? { kind: 'error', title: "Couldn't load ingest rules.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
   const scopeName = (r: IngestRule) => r.rung === 'account' ? '' : r.rung === 'type' ? (types.find(t => t.id === r.scopeId)?.name ?? (r.scopeId ? r.scopeId : 'any type')) : (folders.find(f => f.id === r.scopeId)?.name ?? (r.scopeId ?? 'any source'))
   const thenSummary = (t: IngestThen) => Object.entries(t).filter(([, v]) => v !== undefined && v !== null && !(Array.isArray(v) && !v.length)).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.length : String(v)}`).join(' · ') || 'inherits everything'
@@ -137,7 +142,6 @@ export default function IngestRulesPage() {
   return (
     <>
       <PageHead title="Ingest Rules" sub="What happens to a file when it arrives, from any door: the name it gets, where it is filed, what counts as a duplicate, whether metadata is required first, where the sidecar and webhooks go. The account default applies to everything; a content type or a source can override any part of it." action={<button className="btn primary" onClick={() => setEditing({ rung: 'account', then: {} })}>Add rule</button>} />
-      {err && <div className="err">{err}</div>}
       {baseline && (
         <div className="card" style={{ padding: 14, marginBottom: 14, fontSize: 'var(--fs-xs)', color: 'var(--muted)' }}>
           <div className="sec-label">Platform baseline (what "inherit" means when nothing else says)</div>
@@ -184,7 +188,7 @@ export default function IngestRulesPage() {
           <div style={{ display: 'grid', gap: 6 }}>
             <input placeholder="Label (e.g. Sydney Aspera node)" value={accel.label} onChange={e => setAccel({ ...accel, label: e.target.value })} />
             <textarea rows={3} value={accel.config} onChange={e => setAccel({ ...accel, config: e.target.value })} style={{ fontFamily: 'var(--mono, monospace)', fontSize: 'var(--fs-xs)' }} />
-            <button className="btn" style={{ justifySelf: 'start' }} disabled={!accel.label} onClick={async () => { try { await api.addIngestProvider({ provider: accel.provider, label: accel.label, config: JSON.parse(accel.config) }); setAccel({ ...accel, label: '' }); api.ingestProviders().then(setProviders) } catch (e: any) { setErr(e.message) } }}>Add provider</button>
+            <button className="btn" style={{ justifySelf: 'start' }} disabled={!accel.label} onClick={async () => { try { await api.addIngestProvider({ provider: accel.provider, label: accel.label, config: JSON.parse(accel.config) }); setAccel({ ...accel, label: '' }); api.ingestProviders().then(setProviders) } catch (e: any) { fail(e) } }}>Add provider</button>
           </div>
         </div>
       </div>
@@ -203,7 +207,7 @@ export default function IngestRulesPage() {
         <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
           <input placeholder="Name" value={newHook.name} onChange={e => setNewHook({ ...newHook, name: e.target.value })} />
           <input placeholder="https://your-system/ingest" value={newHook.url} onChange={e => setNewHook({ ...newHook, url: e.target.value })} style={{ flex: 1, minWidth: 220 }} />
-          <button className="btn" disabled={!newHook.name || !newHook.url} onClick={async () => { try { const h = await api.createIngestWebhook(newHook); setShownSecret(h.secret ?? null); setNewHook({ name: '', url: '' }); load() } catch (e: any) { setErr(e.message) } }}>Add webhook</button>
+          <button className="btn" disabled={!newHook.name || !newHook.url} onClick={async () => { try { const h = await api.createIngestWebhook(newHook); setShownSecret(h.secret ?? null); setNewHook({ name: '', url: '' }); load() } catch (e: any) { fail(e) } }}>Add webhook</button>
         </div>
       </div>
     </>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, thumbUrl, type GuideChannel, type XmltvFeed } from '../api'
 import { ImagePicker } from '../ImagePicker'
 import { pressable } from '../a11y'
+import { FormStatus, Notice } from '../notices'
 
 /* ============================================================================
    XMLTV EXPORT drawer, opened from the EPG list.
@@ -47,6 +48,7 @@ export default function XmltvDrawer({ onClose }: { onClose: () => void }) {
   }
   const [feeds, setFeeds] = useState<XmltvFeed[] | null>(null)
   const [err, setErr] = useState('')
+  const [feedErr, setFeedErr] = useState('')
 
   // download
   const [pastDays, setPastDays] = useState(1)
@@ -91,9 +93,9 @@ export default function XmltvDrawer({ onClose }: { onClose: () => void }) {
   }
 
   async function createFeed() {
-    setErr('')
-    if (!fName.trim()) { setErr('Name the feed after the partner who will poll it'); return }
-    if (!fAll && fPick.length === 0) { setErr('Pick at least one channel, or choose all channels'); return }
+    setFeedErr('')
+    if (!fName.trim()) { setFeedErr('Name the feed after the partner who will poll it'); return }
+    if (!fAll && fPick.length === 0) { setFeedErr('Pick at least one channel, or choose all channels'); return }
     try {
       const f = await api.createXmltvFeed({
         name: fName.trim(), channelIds: fAll ? null : fPick, includeEvents: fEvents,
@@ -102,7 +104,7 @@ export default function XmltvDrawer({ onClose }: { onClose: () => void }) {
       setRevealed({ name: f.name, url: f.url, gzipUrl: f.gzipUrl })
       setNewOpen(false); setFName(''); setFAll(true); setFPick([])
       load()
-    } catch (e: any) { setErr(e.message) }
+    } catch (e: any) { setFeedErr(e.message) }
   }
 
   async function toggleFeed(f: XmltvFeed) {
@@ -137,7 +139,7 @@ export default function XmltvDrawer({ onClose }: { onClose: () => void }) {
       <div className="drawer" style={{ width: 640, maxWidth: '100vw' }} {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">XMLTV export</div><button className="xbtn" onClick={onClose} aria-label="Close">✕</button></div>
         <div className="drawer-b">
-          {err && <div className="err">{err}</div>}
+          {err && <Notice kind="error" variant="compact" message={err} />}
 
           {/* ---------------------------------------------------- download */}
           <div className="sec-label">Download the guide</div>
@@ -239,8 +241,9 @@ export default function XmltvDrawer({ onClose }: { onClose: () => void }) {
               <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
                 <input type="checkbox" checked={fEvents} onChange={e => setFEvents(e.target.checked)} /> Include event schedules
               </label>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-                <button className="btn ghost" onClick={() => setNewOpen(false)}>Cancel</button>
+              <div className="modal-f">
+                <FormStatus error={feedErr} />
+                <button className="btn ghost" onClick={() => { setNewOpen(false); setFeedErr('') }}>Cancel</button>
                 <button className="btn primary" onClick={createFeed}>Create feed</button>
               </div>
             </div>

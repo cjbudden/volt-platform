@@ -26,6 +26,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, badRequest, notFound, unauthorized } from '../util/http';
 import { LANES, STAGES, EDGES, HOOKS, HOOK_IDS, MANUAL_SUBJECTS } from '../services/workflows/map';
 import { resolveSubject } from '../services/workflows/subjects';
+import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { createRun, applyUpdate, authoriseCallback, cancelRun, pingAddon, newSecret } from '../services/workflows/runs';
 
 const subjectType = z.enum(['channel', 'event', 'recording', 'vod_asset']);
@@ -58,33 +59,65 @@ workflowsRouter.get('/map', asyncHandler(async (req, res) => {
   });
 }));
 
-const runsQuery = z.object({
-  state: z.string().optional(),
-  addonId: z.string().uuid().optional(),
-  subjectType: subjectType.optional(),
-  subjectId: z.string().uuid().optional(),
-  open: z.enum(['1', 'true']).optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
-});
-
 const RUN_COLS = `r.id, r.addon_id, a.name AS addon_name, a.category, a.kind AS addon_kind, r.trigger_id, r.hook,
   r.subject_type, r.subject_id, r.subject_title, r.channel_id, r.event_id, r.state, r.progress_pct, r.step, r.steps,
   r.external_ref, r.error, r.created_by, r.created_at, r.dispatched_at, r.updated_at, r.finished_at, r.deadline_at`;
 
+// THE LIST STANDARD (util/listQuery.ts). `open=1` stays as a shorthand for
+// "still in flight"; the console's camelCase parameters are aliases.
+const runsList = defineList({
+  path: '/api/workflows/runs',
+  fields: {
+    id: { sql: 'r.id', type: 'uuid' },
+    addon_id: { sql: 'r.addon_id', type: 'uuid' },
+    addon_name: { sql: 'a.name', type: 'string' },
+    category: { sql: 'a.category', type: 'string' },
+    addon_kind: { sql: 'a.kind', type: 'string' },
+    trigger_id: { sql: 'r.trigger_id', type: 'uuid' },
+    hook: { sql: 'r.hook', type: 'string', doc: "The hook that started it ('manual' for a hand run)" },
+    subject_type: { sql: 'r.subject_type', type: 'enum', values: ['channel', 'event', 'recording', 'vod_asset'] },
+    subject_id: { sql: 'r.subject_id', type: 'uuid' },
+    subject_title: { sql: 'r.subject_title', type: 'string' },
+    channel_id: { sql: 'r.channel_id', type: 'uuid' },
+    event_id: { sql: 'r.event_id', type: 'uuid' },
+    state: { sql: 'r.state', type: 'enum', values: ['queued', 'dispatched', 'running', 'succeeded', 'failed', 'cancelled', 'timed_out'] },
+    progress_pct: { sql: 'r.progress_pct', type: 'number' },
+    step: { sql: 'r.step', type: 'string' },
+    external_ref: { sql: 'r.external_ref', type: 'string' },
+    error: { sql: 'r.error', type: 'string', sort: false },
+    created_by: { sql: 'r.created_by', type: 'string' },
+    created_at: { sql: 'r.created_at', type: 'timestamp', notNull: true },
+    dispatched_at: { sql: 'r.dispatched_at', type: 'timestamp' },
+    updated_at: { sql: 'r.updated_at', type: 'timestamp' },
+    finished_at: { sql: 'r.finished_at', type: 'timestamp' },
+    deadline_at: { sql: 'r.deadline_at', type: 'timestamp' },
+  },
+  search: ['addon_name', 'subject_title', 'hook', 'step', 'error'],
+  defaultSort: '-created_at',
+  defaultLimit: 50,
+  maxLimit: 200,
+  aliases: { addonId: 'addon_id', subjectType: 'subject_type', subjectId: 'subject_id' },
+  extraParams: ['open'],
+});
+
 workflowsRouter.get('/runs', asyncHandler(async (req, res) => {
-  const q = runsQuery.parse(req.query);
+  const open = z.enum(['1', 'true']).optional().parse(req.query.open);
+  const build = (q: Record<string, unknown>, params: unknown[]) => {
+    const pl = parseList(runsList, q as any, params);
+    return { pl, where: `r.account_id = $1${open ? ` AND r.state IN ('queued','dispatched','running')` : ''}${whereSql(pl)}` };
+  };
+  const params: unknown[] = [accountId(req)];
+  const { pl, where } = build(req.query, params);
   const rows = await query(
     `SELECT ${RUN_COLS} FROM addon_runs r JOIN addon_services a ON a.id = r.addon_id
-      WHERE r.account_id = $1
-        AND ($2::text IS NULL OR r.state = $2)
-        AND ($3::uuid IS NULL OR r.addon_id = $3)
-        AND ($4::text IS NULL OR r.subject_type = $4)
-        AND ($5::uuid IS NULL OR r.subject_id = $5)
-        AND ($6::boolean IS NOT TRUE OR r.state IN ('queued','dispatched','running'))
-      ORDER BY r.created_at DESC LIMIT $7`,
-    [accountId(req), q.state ?? null, q.addonId ?? null, q.subjectType ?? null, q.subjectId ?? null, q.open ? true : null, q.limit]
-  );
-  res.json({ runs: rows });
+      WHERE ${where} ${pageSql(pl)}`, params);
+  let total: number | undefined;
+  if (pl.count) {
+    const cp: unknown[] = [accountId(req)];
+    const c = build({ ...req.query, cursor: undefined, offset: undefined }, cp);
+    total = Number((await one<any>(`SELECT count(*)::int AS n FROM addon_runs r JOIN addon_services a ON a.id = r.addon_id WHERE ${c.where}`, cp))?.n ?? 0);
+  }
+  res.json({ runs: finishPage(req, res, pl, rows, total) });
 }));
 
 workflowsRouter.get('/runs/:id', asyncHandler(async (req, res) => {
@@ -168,12 +201,38 @@ workflowsRouter.get('/trace', asyncHandler(async (req, res) => {
   res.json({ subject: { type: s.type, id: s.id, title: s.title }, events, runs });
 }));
 
+const workflowEventsList = defineList({
+  path: '/api/workflows/events',
+  fields: {
+    id: { sql: 'id', type: 'number', notNull: true },
+    hook: { sql: 'hook', type: 'string' },
+    subject_type: { sql: 'subject_type', type: 'enum', values: ['channel', 'event', 'recording', 'vod_asset'] },
+    subject_id: { sql: 'subject_id', type: 'uuid' },
+    title: { sql: 'title', type: 'string' },
+    channel_id: { sql: 'channel_id', type: 'uuid' },
+    event_id: { sql: 'event_id', type: 'uuid' },
+    created_at: { sql: 'created_at', type: 'timestamp' },
+  },
+  search: ['hook', 'title'],
+  defaultSort: '-id',
+  defaultLimit: 50,
+  maxLimit: 200,
+  aliases: { subjectType: 'subject_type', subjectId: 'subject_id' },
+});
+
 workflowsRouter.get('/events', asyncHandler(async (req, res) => {
-  const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+  const params: unknown[] = [accountId(req)];
+  const pl = parseList(workflowEventsList, req.query, params);
   const rows = await query(
     `SELECT id, hook, subject_type, subject_id, title, channel_id, event_id, data, created_at
-       FROM workflow_events WHERE account_id = $1 ORDER BY id DESC LIMIT $2`, [accountId(req), limit]);
-  res.json({ events: rows });
+       FROM workflow_events WHERE account_id = $1${whereSql(pl)} ${pageSql(pl)}`, params);
+  let total: number | undefined;
+  if (pl.count) {
+    const cp: unknown[] = [accountId(req)];
+    const cpl = parseList(workflowEventsList, { ...req.query, cursor: undefined, offset: undefined }, cp);
+    total = Number((await one<any>(`SELECT count(*)::int AS n FROM workflow_events WHERE account_id = $1${whereSql(cpl)}`, cp))?.n ?? 0);
+  }
+  res.json({ events: finishPage(req, res, pl, rows, total) });
 }));
 
 // ===========================================================================

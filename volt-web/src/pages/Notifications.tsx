@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type NotificationConfig, type NotificationRow, type DeliveryRow, type NotificationTemplate } from '../api'
 import { PageHead } from '../scaffold'
+import { FormStatus, useNotify, usePageNotice } from '../notices'
 
 /* ============================================================================
    NOTIFICATIONS (Admin). What can be delivered here, what was sent and what
@@ -31,6 +32,9 @@ export default function NotificationsPage() {
   const [devices, setDevices] = useState<Awaited<ReturnType<typeof api.myDevices>> | null>(null)
   const [testMsg, setTestMsg] = useState<Record<string, string>>({})
   const [err, setErr] = useState('')
+  const [tplErr, setTplErr] = useState('')
+  const notify = useNotify()
+  const fail = (e: any) => notify({ kind: 'error', message: e.message })
   const [tplEdit, setTplEdit] = useState<{ id?: string; key: string; subject: string; body: string } | null>(null)
 
   const load = () => {
@@ -45,14 +49,14 @@ export default function NotificationsPage() {
     if (open[id]) { setOpen(o => { const n = { ...o }; delete n[id]; return n }); return }
     setOpen(o => ({ ...o, [id]: 'loading' }))
     try { const n = await api.notification(id); setOpen(o => ({ ...o, [id]: n.deliveries })) }
-    catch (e: any) { setErr(e.message) }
+    catch (e: any) { fail(e) }
   }
   async function retry(nid: string, d: DeliveryRow) {
     try {
       await api.retryDelivery(d.id)
       const n = await api.notification(nid); setOpen(o => ({ ...o, [nid]: n.deliveries }))
       api.notifications().then(setRows)
-    } catch (e: any) { setErr(e.message) }
+    } catch (e: any) { fail(e) }
   }
   async function test(ch: 'email' | 'in_app' | 'push') {
     setTestMsg(m => ({ ...m, [ch]: 'Sending…' }))
@@ -64,17 +68,18 @@ export default function NotificationsPage() {
   }
   async function saveTpl() {
     if (!tplEdit) return
+    setTplErr('')
     try {
       if (tplEdit.id) await api.updateNotificationTemplate(tplEdit.id, { subject: tplEdit.subject, body: tplEdit.body })
       else await api.createNotificationTemplate({ key: tplEdit.key.trim(), subject: tplEdit.subject, body: tplEdit.body })
       setTplEdit(null); api.notificationTemplates().then(setTemplates)
-    } catch (e: any) { setErr(e.message) }
+    } catch (e: any) { setTplErr(e.message) }
   }
+  usePageNotice('load', err ? { kind: 'error', title: "Couldn't load notifications.", message: err, actions: [{ label: 'Retry', onClick: () => { setErr(''); load() } }] } : null)
 
   return (
     <>
       <PageHead title="Notifications" sub="Alerts Volt sends to the people who run this account: when auto connect gives up, an EPG import fails or a post cannot be published. Every message goes to the console inbox, and by email and device push where those are set up." />
-      {err && <div className="err">{err}</div>}
 
       <div className="sec-label">Delivery channels</div>
       <div className="card" style={{ padding: 0 }}>
@@ -154,8 +159,9 @@ export default function NotificationsPage() {
           </div>
           <div className="field"><label>Subject</label><input className="inp" value={tplEdit.subject} onChange={e => setTplEdit({ ...tplEdit, subject: e.target.value })} placeholder="Reminder: {{name}} starts at {{time}}" /></div>
           <div className="field"><label>Body</label><textarea className="inp" rows={4} value={tplEdit.body} onChange={e => setTplEdit({ ...tplEdit, body: e.target.value })} /></div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <button className="btn ghost" onClick={() => setTplEdit(null)}>Cancel</button>
+          <div className="modal-f">
+            <FormStatus error={tplErr} />
+            <button className="btn ghost" onClick={() => { setTplEdit(null); setTplErr('') }}>Cancel</button>
             <button className="btn primary" disabled={!tplEdit.key.trim() || !tplEdit.subject.trim() || !tplEdit.body.trim()} onClick={saveTpl}>Save template</button>
           </div>
         </div>
@@ -170,7 +176,7 @@ export default function NotificationsPage() {
               <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject}</div>
             </div>
             <button className="btn ghost" onClick={() => setTplEdit({ id: t.id, key: t.key, subject: t.subject, body: t.body })}>Edit</button>
-            <button className="btn ghost" onClick={() => { if (window.confirm(`Delete the template "${t.key}"?`)) api.deleteNotificationTemplate(t.id).then(() => api.notificationTemplates().then(setTemplates)).catch(e => setErr(e.message)) }}>Delete</button>
+            <button className="btn ghost" onClick={() => { if (window.confirm(`Delete the template "${t.key}"?`)) api.deleteNotificationTemplate(t.id).then(() => api.notificationTemplates().then(setTemplates)).catch(fail) }}>Delete</button>
           </div>
         ))}
       </div>

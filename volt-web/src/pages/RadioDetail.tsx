@@ -4,6 +4,9 @@ import { navigate } from '../router'
 import { thumbUrl } from '../api'
 import AudioVisualizer, { VERDICT_UI } from '../AudioVisualizer'
 import { SEC, PageIdentity, StatusPill, TypeTag, PipelineStrip, GATE_COLOR, RecoveryNote, DiagnosisBlock } from '../scaffold'
+import DeleteChannelDialog from '../DeleteChannelDialog'
+import { usePageNotice, PageError } from '../notices'
+import { useAccess, ReadOnlyBadge } from '../access'
 import { RadioDrawer, ClassChip } from './Radio'
 import { ShareDrawer } from '../ShareDrawer'
 import { pressable } from '../a11y'
@@ -28,6 +31,12 @@ const isImg = (u?: string | null) => !!u && /\.(png|jpe?g|gif|webp|avif)(\?|$)/i
 const toDayInput = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 export default function RadioDetail({ id, onBack }: { id: string; onBack: () => void }) {
+  // ACCESS (access.tsx): view opens this page; operate = start/stop, on/off
+  // air, auto connect, clear recovery; manage = settings and clearing the log.
+  const { can, isAdminTier } = useAccess()
+  const [delOpen, setDelOpen] = useState(false)
+  const canRun = can('radio', 'operate')
+  const canManage = can('radio', 'manage')
   const [st, setSt] = useState<RadioStationDetail | null>(null)
   const [np, setNp] = useState<RadioNowPlaying | null>(null)
   const [levels, setLevels] = useState<RadioLevelsFeed | null>(null)
@@ -52,7 +61,12 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
     return { from: new Date(Date.now() - ms).toISOString(), to: new Date(Date.now() + 60_000).toISOString() }
   }
   const [groups, setGroups] = useState<Group[]>([])
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // "Edit settings" from a list row opens the page with ?settings: open the
+  // drawer straight away, then drop the flag so a reload does not reopen it.
+  const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(window.location.search).has('settings'))
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('settings')) window.history.replaceState(window.history.state, '', window.location.pathname)
+  }, [])
   const [qcOpen, setQcOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [err, setErr] = useState('')
@@ -131,6 +145,8 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
     } catch { /* log is best-effort */ }
   }
   useEffect(() => { load(); api.groups().then(setGroups).catch(() => {}) /* eslint-disable-next-line */ }, [id])
+  // An action's failure while the station is on screen: page notice region (notices.tsx).
+  usePageNotice('action', err && st ? { kind: 'error', message: err, onDismiss: () => setErr('') } : null)
   useEffect(() => {
     const t = setInterval(() => { api.radioNowPlaying(id).then(setNp).catch(() => {}) }, 5000)
     api.radioNowPlaying(id).then(setNp).catch(() => {})
@@ -287,7 +303,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
     try { await navigator.clipboard.writeText(new URL(text, window.location.origin).toString()) } catch { /* */ }
   }
 
-  if (!st) return <div className="loading">{err || 'Loading station…'}</div>
+  if (!st) return err ? <PageError title="Couldn't load this station." message={err} onRetry={() => { setErr(''); load() }} /> : <div className="loading">Loading station…</div>
 
   // WHAT THE SOURCE CAN AND CANNOT TELL US, decided once.
   //
@@ -342,22 +358,36 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           style={st.health?.primaryError ? { color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' } : undefined}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>QC
         </button>
+        {can('sharing', 'manage') && (
         <button className="btn ghost" onClick={() => setShareOpen(true)} title="Create a private, time-boxed preview link for a client or reviewer (does not go on air)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v14" /></svg>Share
         </button>
+        )}
         {/* The embed lives on its own page rather than in the settings drawer:
             it has a preview, a snippet to copy and its own reporting, none of
             which fit a drawer, and it is a thing you send to a web developer
             rather than a station setting. */}
+        {can('apps', 'view') && (
         <button className="btn ghost" onClick={() => navigate(`/radio/${id}/player`)}
           title="Style the embeddable player and copy the snippet for a website or app">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 5v14l11-7z" /></svg>Player
         </button>
+        )}
+        {canManage && (
         <button className="btn ghost" onClick={() => setSettingsOpen(true)}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>Settings
         </button>
+        )}
+        {/* ADMINISTRATORS REMOVE (DeleteChannelDialog): stop it first. */}
+        {isAdminTier && (
+        <button className="btn ghost" disabled={live} onClick={() => setDelOpen(true)}
+          title={live ? 'Stop the station before removing it' : 'Remove this station (administrators)'}
+          style={live ? undefined : { color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>Remove
+        </button>
+        )}
         {/* TWO STEPS, same as channels: run the station (private), then publish. */}
-        {!live ? (
+        {!canRun ? <ReadOnlyBadge feature="radio" /> : !live ? (
           <button className="btn primary" disabled={busy || !srcUrl} onClick={() => startStop('start')}
             title={srcUrl ? 'Brings the audio pipeline up and starts receiving the source' : noSourceTitle}>
             {busy ? 'Starting…' : srcUrl ? 'Start station' : 'Start station (no source)'}
@@ -383,14 +413,13 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           </>
         )}
       </div>
-      {err && <div className="err">{err}</div>}
 
       {/* WHAT AUTO-CONNECT IS DOING, on the page rather than in a drawer. A
           station that is being retried used to say nothing at all, which is
           indistinguishable from a platform that is not trying. */}
       <RecoveryNote row={st} state={st.pipelineState ?? st.health?.overall}
-        onDismiss={dismissRecovery} dismissing={dismissing}
-        onAutoConnect={async (on) => { setBusy(true); try { await api.setAutoConnect('radio', id, on); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } }}
+        onDismiss={canRun ? dismissRecovery : undefined} dismissing={dismissing}
+        onAutoConnect={canRun ? async (on) => { setBusy(true); try { await api.setAutoConnect('radio', id, on); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } } : undefined}
         togglingAuto={busy} />
 
       {/* PRIMARY ERROR banner — the first failed/degraded gate, same as channels */}
@@ -514,7 +543,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
                radio, so it gets the same affordance rather than a flat caption.
                One primary start button on the page: this and the header button
                call the same startStop('start'). */
-            idleOverlay={
+            idleOverlay={!canRun ? undefined :
               <div>
                 <button className="btn primary" disabled={busy || !srcUrl} onClick={() => startStop('start')}
                   style={{ transform: 'scale(1.05)' }}
@@ -663,7 +692,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           <div className="flex items-center" style={{ gap: 8 }}>
             <div className="sec-label" style={{ margin: 0 }}>Event log</div>
             <div style={{ flex: 1 }} />
-            {!!st.log?.length && (
+            {!!st.log?.length && canManage && (
               <button className="btn ghost" disabled={clearingLog} onClick={clearLog}
                 title="Remove this station's log entries. Other streams are untouched, and one entry recording the clear is kept."
                 style={{ padding: '3px 9px', fontSize: 'var(--fs-xs)' }}>
@@ -728,11 +757,11 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
               <input className="inp" type="date" style={{ width: 150, padding: '3px 8px', fontSize: 'var(--fs-sm)' }} value={toDay} min={fromDay} onChange={e => setToDay(e.target.value)} />
             </>}
             <span style={{ color: 'var(--faint)', marginLeft: 8 }}>Hide shorter than</span>
-            <select className="inp" style={{ width: 110, padding: '3px 8px', fontSize: 'var(--fs-sm)' }} value={minSec} onChange={e => setMinSec(Number(e.target.value) as any)}>
+            <select className="inp sel-sm" style={{ width: 120 }} value={minSec} onChange={e => setMinSec(Number(e.target.value) as any)}>
               <option value={0}>nothing</option><option value={30}>30s</option><option value={60}>1 min</option><option value={120}>2 min</option>
             </select>
             <span style={{ color: 'var(--faint)', marginLeft: 8 }}>Sort</span>
-            <select className="inp" style={{ width: 130, padding: '3px 8px', fontSize: 'var(--fs-sm)' }} value={sort} onChange={e => setSort(e.target.value as any)}>
+            <select className="inp sel-sm" style={{ width: 140 }} value={sort} onChange={e => setSort(e.target.value as any)}>
               <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="longest">Longest first</option><option value="title">Title A to Z</option>
             </select>
           </div>
@@ -791,6 +820,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
       )}
 
       {shareOpen && <ShareDrawer target={{ kind: 'radio', id: st.id, name: st.name }} onClose={() => setShareOpen(false)} />}
+      {delOpen && <DeleteChannelDialog id={st.id} onClose={() => setDelOpen(false)} onDeleted={() => { setDelOpen(false); onBack() }} />}
 
       {qcOpen && <RadioQcPanel st={st} verdict={verdict} levels={levels}
         onClose={() => setQcOpen(false)} onRefresh={load} />}

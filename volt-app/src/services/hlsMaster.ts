@@ -51,7 +51,10 @@ export interface HlsInspection {
   /** Media playlist facts. */
   live?: boolean;
   targetDuration?: number | null;
+  /** Media playlist: the last few segments (address, seconds, byte range), for measuring the bitrate. */
+  recentSegments?: HlsSegment[];
 }
+export interface HlsSegment { uri: string; duration: number; length: number | null }
 
 const CODEC_NAMES: [RegExp, string][] = [
   [/^mp4a\.40\.2$/i, 'AAC-LC'], [/^mp4a\.40\.5$/i, 'HE-AAC'], [/^mp4a\.40\.29$/i, 'HE-AAC v2'], [/^mp4a\.40\.34$/i, 'MP3'],
@@ -104,7 +107,17 @@ export function parsePlaylist(text: string, baseUrl: string): HlsInspection {
   const td = lines.find((l) => l.startsWith('#EXT-X-TARGETDURATION:'));
   const isMedia = !!td || lines.some((l) => l.startsWith('#EXTINF'));
   if (!isMedia) return { ok: false, error: 'The playlist lists neither variants nor segments.' };
-  return { ok: true, kind: 'media', live: !lines.includes('#EXT-X-ENDLIST'), targetDuration: td ? num(td.split(':')[1]) : null };
+  const segs: HlsSegment[] = [];
+  let dur: number | null = null; let len: number | null = null;
+  for (const l of lines) {
+    if (l.startsWith('#EXTINF:')) { dur = num(l.slice(8).split(',')[0]); continue }
+    if (l.startsWith('#EXT-X-BYTERANGE:')) { len = num(l.slice(17).split('@')[0]); continue }
+    if (l.startsWith('#')) continue;
+    if (dur && dur > 0) segs.push({ uri: abs(l, baseUrl), duration: dur, length: len });
+    dur = null; len = null;
+  }
+  return { ok: true, kind: 'media', live: !lines.includes('#EXT-X-ENDLIST'), targetDuration: td ? num(td.split(':')[1]) : null,
+    recentSegments: segs.slice(-3) };
 }
 
 /** Does this source look like HLS worth reading as a playlist? */
@@ -153,4 +166,43 @@ export async function inspectHls(url: string, timeoutMs = 8000): Promise<HlsInsp
   } finally {
     clearTimeout(t);
   }
+}
+
+// ----------------------------------------------------------------------------
+//  MEASURED BITRATE of a media playlist: the size of its latest segments over
+//  their duration. A playlist declares no bitrate of its own (only a master
+//  does, per variant, and that is what the encoder SAID), and ffprobe rarely
+//  reports one for HLS, so this is what the source actually sends. Reads at
+//  most three segments, sizes from HEAD (or the byte range), and only falls
+//  back to reading a segment, capped, when the server gives no length.
+// ----------------------------------------------------------------------------
+const MAX_SEGMENT_BYTES = 40 * 1024 * 1024;
+export async function measureHlsBitrate(segs: HlsSegment[], timeoutMs = 8000): Promise<{ kbps: number; seconds: number; segments: number } | null> {
+  if (!segs.length) return null;
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), timeoutMs);
+  let bytes = 0; let seconds = 0; let n = 0;
+  try {
+    for (const s of segs) {
+      let size = s.length;
+      const u = new URL(s.uri);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') continue;
+      if (size == null) {
+        const h = await fetch(u, { method: 'HEAD', signal: ac.signal, headers: { 'user-agent': 'Volt-Source-Check/1.0' } }).catch(() => null);
+        const cl = h?.ok ? Number(h.headers.get('content-length')) : NaN;
+        if (Number.isFinite(cl) && cl > 0) size = cl;
+      }
+      if (size == null) {
+        const r = await fetch(u, { signal: ac.signal, headers: { 'user-agent': 'Volt-Source-Check/1.0' } }).catch(() => null);
+        if (!r?.ok || !r.body) continue;
+        const reader = r.body.getReader(); let got = 0;
+        for (;;) { const { done, value } = await reader.read(); if (done) break; got += value.length; if (got > MAX_SEGMENT_BYTES) { await reader.cancel(); break } }
+        size = got;
+      }
+      if (!size) continue;
+      bytes += size; seconds += s.duration; n++;
+    }
+  } catch { /* timed out: use what was measured */ } finally { clearTimeout(t) }
+  if (!n || seconds <= 0) return null;
+  return { kbps: Math.round((bytes * 8) / seconds / 1000), seconds: Math.round(seconds * 10) / 10, segments: n };
 }

@@ -184,6 +184,17 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
     console.error(`[clip.extract] ${p.vodAssetId}: provenance not recorded:`, e);
   }
 
+  // ITS THUMBNAIL VTT: the stream's hourly storyboard cues for the clip's
+  // source ranges, re-timed to the clip and pointing at the same sprite sheets
+  // (services/thumbnails/clips.ts). Nothing is re-rendered. Best effort: the API
+  // serves a fresh VTT on request either way.
+  try {
+    const t = await (await import('../../thumbnails/clips')).writeClipThumbnails(p.vodAssetId);
+    if (t.cues) await ctx.progress(100, `thumbnail VTT written (${t.cues} cues)`);
+  } catch (e) {
+    console.warn(`[clip.extract] ${p.vodAssetId}: thumbnail VTT not written:`, e);
+  }
+
   fireHook('clip.ready', 'vod_asset', p.vodAssetId, { strategy: result.strategy });
 
   // QC runs on its own job, so every clip reaches the review queue with its

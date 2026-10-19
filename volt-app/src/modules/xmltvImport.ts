@@ -33,6 +33,7 @@ import { suggest, duplicateNames, otherFeeders, aliasOf } from '../services/xmlt
 import { validateEntityMetadata } from './metadataSchemas';
 import { defaultTypeId } from '../services/contentTypes';
 import { actor, writeAudit } from '../services/audit';
+import { planUsage } from '../services/plan';
 import { resolveAccess } from '../auth/roles';
 import { XMLTV_ID_RX } from '../services/xmltv';
 
@@ -330,6 +331,11 @@ xmltvImportRouter.post('/sources/:id/channels/bulk', asyncHandler(async (req, re
     if (!group) throw notFound('Group not found');
     const todo = rows.filter((a) => !a.channel_id);
     for (const a of rows.filter((x) => x.channel_id)) skipped.push({ id: a.id, reason: 'already in use' });
+    // THE PLAN as well as the group's share (services/plan.ts).
+    const plan = await planUsage(account);
+    if (plan.used.total + rows.filter((x) => !x.channel_id).length > plan.maxChannels) {
+      throw conflict(`Your plan allows ${plan.maxChannels} channels and stations and has ${plan.used.total}: ${rows.filter((x) => !x.channel_id).length} more will not fit`);
+    }
     const have = (await one<any>('SELECT count(*)::int AS n FROM channels WHERE group_id = $1', [b.groupId])).n;
     if (have + todo.length > group.max_channels) throw conflict(`That group allows ${group.max_channels} channels and has ${have}: ${todo.length} more will not fit`);
     const who = actor(req);

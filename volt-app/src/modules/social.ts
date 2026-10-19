@@ -19,7 +19,7 @@ import { query, one } from '../db';
 import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, badRequest, notFound, conflict, forbidden } from '../util/http';
-import { ROLE_RANK, rankOf } from '../auth/roles';
+import { can } from '../auth/roles';
 import { actorLabel } from '../util/actor';
 import {
   PLATFORMS, PLATFORM_IDS, SocialError, platformStatus, startConnect, finishConnect, addSandbox,
@@ -78,7 +78,8 @@ socialRouter.use(requireAuth);
 
 /** Linking and unlinking accounts is an admin's job, as publish targets always were. */
 function requireAdmin(req: any) {
-  if (rankOf(req.auth?.role) < ROLE_RANK.admin) throw forbidden('Only an admin can link social accounts');
+  // Linking accounts holds publishing credentials: account settings, manage.
+  if (!can(req, 'settings', 'manage')) throw forbidden('Linking social accounts needs manage on account settings');
 }
 
 socialRouter.get('/platforms', asyncHandler(async (_req, res) => { res.json(platformStatus()); }));
@@ -112,7 +113,7 @@ socialRouter.post('/sandbox/:platform', asyncHandler(async (req, res) => {
 async function ownedAsset(assetId: string, acct: string) {
   return one<any>(
     `SELECT v.* FROM vod_assets v LEFT JOIN channels c ON c.id=v.channel_id LEFT JOIN events e ON e.id=v.event_id
-       JOIN groups g ON g.id=COALESCE(c.group_id,e.group_id) WHERE v.id=$1 AND g.account_id=$2`, [assetId, acct]);
+       LEFT JOIN groups g ON g.id=COALESCE(c.group_id,e.group_id) WHERE v.id=$1 AND COALESCE(g.account_id, v.account_id)=$2`, [assetId, acct]);
 }
 
 const postSchema = z.object({

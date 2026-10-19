@@ -3,6 +3,7 @@ import { api, type RecordingRow, type RecordingSource } from '../api'
 import { PageIdentity, StatusPill, TypeTag } from '../scaffold'
 import { navigate } from '../router'
 import { SourceTimeline, type TimelineSelection } from '../SourceTimeline'
+import { useNotify } from '../notices'
 
 /* ============================================================================
    RECORDINGS — TIER 2: one source, everything it has recorded.
@@ -48,6 +49,7 @@ export default function RecordingSourceView({ id, onBack }: { id: string; onBack
   const [src, setSrc] = useState<RecordingSource | null>(null)
   const [rows, setRows] = useState<RecordingRow[] | null>(null)
   const [err, setErr] = useState('')
+  const notify = useNotify()
   const [jump, setJump] = useState('')
   const [sel, setSel] = useState<TimelineSelection | null>(null)
   // The channel's clock, so every time on this page reads in the SAME zone
@@ -93,8 +95,7 @@ export default function RecordingSourceView({ id, onBack }: { id: string; onBack
     const ms = fromLocalInput(jump)
     if (!Number.isFinite(ms)) return
     const hit = captureAt(ms)
-    if (!hit) { setErr(`Nothing was recorded at ${fmtDate(ms)} ${fmtClock(ms)}.`); return }
-    setErr('')
+    if (!hit) { notify({ kind: 'error', message: `Nothing was recorded at ${fmtDate(ms)} ${fmtClock(ms)}.` }); return }
     navigate(`/recordings/${hit.id}?t=${ms}`)
   }
 
@@ -117,7 +118,6 @@ export default function RecordingSourceView({ id, onBack }: { id: string; onBack
         />
         <div className="spacer" />
       </div>
-      {err && <div className="err">{err}</div>}
 
       {/* THE TIMELINE. Three lanes on one wall-clock axis, spanning every
           capture this source holds, so a programme that crosses a boundary
@@ -141,7 +141,7 @@ export default function RecordingSourceView({ id, onBack }: { id: string; onBack
             <div className="flex-1" />
             <button className="btn primary" onClick={() => {
               const hit = captureAt(sel.fromMs)
-              if (!hit) { setErr('Nothing was recorded at the start of that range.'); return }
+              if (!hit) { notify({ kind: 'error', message: 'Nothing was recorded at the start of that range.' }); return }
               navigate(`/recordings/${hit.id}?from=${Math.round(sel.fromMs)}&to=${Math.round(sel.toMs)}`)
             }}>Open in the clipper</button>
           </div>

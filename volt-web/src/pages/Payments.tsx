@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react'
 import { api, type PaymentProviderRow, type ProductRow } from '../api'
 import { PageHead } from '../scaffold'
+import { usePageNotice } from '../notices'
 
 const PROVIDERS: { key: 'stripe' | 'appstore' | 'googleplay' | 'manual'; name: string; fields: { key: string; label: string; hint?: string }[]; secretHint: string }[] = [
   { key: 'stripe', name: 'Stripe', secretHint: 'webhook signing secret (whsec_…) and the secret key, in the secrets store', fields: [
@@ -29,13 +30,13 @@ export default function PaymentsPage() {
   const [products, setProducts] = useState<ProductRow[] | null>(null)
   const [err, setErr] = useState('')
   async function load() {
-    try { const [p, pr] = await Promise.all([api.paymentProviders(), api.products()]); setProv(p); setProducts(pr) } catch (e: any) { setErr(e.message) }
+    try { const [p, pr] = await Promise.all([api.paymentProviders(), api.products()]); setProv(p); setProducts(pr); setErr('') } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() }, [])
+  usePageNotice('load', err ? { kind: 'error', title: "Couldn't load payments.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
   return (
     <>
       <PageHead title="Payments" sub="Providers take the payment; the access rules decide what it buys and for how long. Connect the providers this account uses, map each product to the provider's own id, and look up what a viewer holds." />
-      {err && <div className="err">{err}</div>}
 
       <div className="card" style={{ padding: 18, marginBottom: 16 }}>
         <div className="sec-label">Providers</div>

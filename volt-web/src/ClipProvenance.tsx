@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type ClipProvenance, type ProvenanceBlock } from './api'
+import { Notice } from './notices'
 
 /* ============================================================================
    WHERE THIS CLIP CAME FROM.
@@ -110,7 +111,7 @@ export function ClipProvenancePanel({ assetId }: { assetId: string }) {
   // on this page, so an unconditional guard let one rejected action replace
   // the working page — including the controls needed to retry — with a line
   // of red text and no way back except navigating away.
-  if (err && !p) return <div className="err">{err}</div>
+  if (err && !p) return <Notice kind="error" variant="compact" title="Couldn't load where this clip came from." message={err} />
   if (!p) return <div className="loading">Reading the chain…</div>
 
   if (!p.recorded) {

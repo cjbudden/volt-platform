@@ -9,6 +9,7 @@ import { requirePlatform } from '../auth/platform';
 import { asyncHandler, notFound, badRequest } from '../util/http';
 import { signAccess } from '../auth/jwt';
 import { hashPassword } from '../auth/password';
+import { planUsage, assertAllocationFits } from '../services/plan';
 
 export const platformRouter = Router();
 
@@ -127,8 +128,8 @@ platformRouter.post(
         [acc.id]
       )).rows[0];
       await c.query(
-        `INSERT INTO groups(account_id, name, output_profile_id, max_channels, max_concurrent)
-         VALUES ($1,'Default',$2,COALESCE($3,5),COALESCE($4,3))`,
+        `INSERT INTO groups(account_id, name, output_profile_id, max_channels, max_concurrent, is_default)
+         VALUES ($1,'Default',$2,COALESCE($3,5),COALESCE($4,3), true)`,
         [acc.id, profile.id, b.maxChannels ?? null, b.maxConcurrentSources ?? null]
       );
       await c.query(
@@ -166,6 +167,13 @@ platformRouter.patch(
   ...requirePlatform('saas_admin'),
   asyncHandler(async (req, res) => {
     const b = patchAccountSchema.parse(req.body);
+    // THE PLAN COVERS WHAT EXISTS AND WHAT THE GROUPS ARE GIVEN (services/plan.ts).
+    if (b.maxChannels != null) {
+      const u = await planUsage(req.params.id).catch(() => null);
+      if (u && b.maxChannels < Math.max(u.used.total, u.allocated)) {
+        throw badRequest(`This account has ${u.used.total} channels and stations and its groups are given ${u.allocated}; the plan needs at least ${Math.max(u.used.total, u.allocated)}`);
+      }
+    }
     const row = await one<any>(
       `UPDATE accounts SET
          name=COALESCE($2,name),
@@ -235,6 +243,7 @@ platformRouter.post(
     if (!acc) throw notFound('account not found');
     const clash = await one<any>('SELECT 1 FROM groups WHERE account_id = $1 AND lower(name) = lower($2)', [acc.id, b.name]);
     if (clash) throw badRequest(`This account already has a group called "${b.name}"`);
+    await assertAllocationFits(acc.id, null, b.maxChannels, b.maxConcurrent);
     const out = await tx(async (c) => {
       // The group's own profile: its ladder is the default for the group's
       // channels (each channel can still set its own ladder).
@@ -242,8 +251,9 @@ platformRouter.post(
         `INSERT INTO output_profiles(account_id, name, rungs, workflow_type) VALUES ($1,$2,$3::jsonb,$4) RETURNING id, name, workflow_type, rungs`,
         [acc.id, `${b.name} (${b.workflowType === 'transcode' ? 'transcode' : 'packaging'})`, JSON.stringify(b.rungs ?? DEFAULT_LADDER), b.workflowType])).rows[0];
       const group = (await c.query(
-        `INSERT INTO groups(account_id, name, output_profile_id, max_channels, max_concurrent) VALUES ($1,$2,$3,$4,$5)
-         RETURNING id, name, max_channels, max_concurrent`,
+        `INSERT INTO groups(account_id, name, output_profile_id, max_channels, max_concurrent, is_default)
+         VALUES ($1,$2,$3,$4,$5, NOT EXISTS (SELECT 1 FROM groups x WHERE x.account_id = $1 AND x.is_default))
+         RETURNING id, name, max_channels, max_concurrent, is_default`,
         [acc.id, b.name, profile.id, b.maxChannels, b.maxConcurrent])).rows[0];
       await c.query(
         `INSERT INTO audit_log(account_id, user_id, action, entity_type, entity_id, detail)
@@ -252,6 +262,59 @@ platformRouter.post(
       return { ...group, profile_name: profile.name, workflow_type: profile.workflow_type, rungs: profile.rungs, channel_count: 0 };
     });
     res.status(201).json(out);
+  })
+);
+
+const editGroupSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  maxChannels: z.number().int().min(1).max(1000).optional(),
+  maxConcurrent: z.number().int().min(1).max(500).optional(),
+});
+
+/** Rename a group or change its caps (entitlements). Caps cannot go below what is in use. */
+platformRouter.patch(
+  '/accounts/:id/groups/:gid',
+  ...requirePlatform('saas_admin'),
+  asyncHandler(async (req, res) => {
+    const b = editGroupSchema.parse(req.body ?? {});
+    const g = await one<any>(
+      `SELECT g.*, (SELECT count(*)::int FROM channels c WHERE c.group_id=g.id) AS channel_count
+         FROM groups g WHERE g.id=$1 AND g.account_id=$2`, [req.params.gid, req.params.id]);
+    if (!g) throw notFound('group not found');
+    if (b.name && b.name.toLowerCase() !== g.name.toLowerCase()
+      && await one('SELECT 1 FROM groups WHERE account_id=$1 AND lower(name)=lower($2) AND id<>$3', [g.account_id, b.name, g.id])) {
+      throw badRequest(`This account already has a group called "${b.name}"`);
+    }
+    if (b.maxChannels != null && b.maxChannels < g.channel_count) throw badRequest(`The group has ${g.channel_count} channels; the cap cannot be lower`);
+    if (b.maxChannels != null || b.maxConcurrent != null) await assertAllocationFits(g.account_id, g.id, b.maxChannels ?? g.max_channels, b.maxConcurrent ?? null);
+    await query(
+      `UPDATE groups SET name=COALESCE($2,name), max_channels=COALESCE($3,max_channels), max_concurrent=COALESCE($4,max_concurrent) WHERE id=$1`,
+      [g.id, b.name ?? null, b.maxChannels ?? null, b.maxConcurrent ?? null]);
+    await query(
+      `INSERT INTO audit_log(account_id, user_id, action, entity_type, entity_id, detail)
+       VALUES ($1,$2,'platform.group_update','group',$3,$4::jsonb)`,
+      [g.account_id, req.auth!.sub, g.id, JSON.stringify(b)]);
+    res.json(await one('SELECT id, name, max_channels, max_concurrent FROM groups WHERE id=$1', [g.id]));
+  })
+);
+
+/** Delete an EMPTY group (no channels, stations or events: those would cascade). */
+platformRouter.delete(
+  '/accounts/:id/groups/:gid',
+  ...requirePlatform('saas_admin'),
+  asyncHandler(async (req, res) => {
+    const g = await one<any>(
+      `SELECT g.id, g.account_id, g.is_default,
+              (SELECT count(*)::int FROM channels c WHERE c.group_id=g.id) + (SELECT count(*)::int FROM events e WHERE e.group_id=g.id) AS used
+         FROM groups g WHERE g.id=$1 AND g.account_id=$2`, [req.params.gid, req.params.id]);
+    if (!g) throw notFound('group not found');
+    if (g.is_default) throw badRequest('This is the account\'s default group. Make another group the default first');
+    if (g.used > 0) throw badRequest('Move or delete the channels, stations and events in this group first');
+    await query('DELETE FROM groups WHERE id=$1', [g.id]);
+    await query(
+      `INSERT INTO audit_log(account_id, user_id, action, entity_type, entity_id, detail)
+       VALUES ($1,$2,'platform.group_delete','group',$3,'{}'::jsonb)`, [g.account_id, req.auth!.sub, g.id]);
+    res.status(204).end();
   })
 );
 

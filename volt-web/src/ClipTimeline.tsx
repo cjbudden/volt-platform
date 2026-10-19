@@ -20,6 +20,7 @@
 //  or zoomed with the wheel / buttons / +- keys.
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { StoryTile, useStoryboard } from './storyboard'
 import type { RecordingProgramme, Waveform, RecordingGap, RecordingFallback } from './api'
 import { pressable } from './a11y'
 
@@ -119,7 +120,7 @@ const onAirNote = (gp: RecordingGap) => gp.onAir
 
 export default function ClipTimeline({
   domain, spans, gaps = [], fallbacks = [], view, setView, programmes, waveform, waveLoading,
-  from, to, loaded, playheadMs, flash, onChange, onSeek, onPickProgramme,
+  from, to, loaded, playheadMs, flash, onChange, onSeek, onPickProgramme, streamId,
 }: {
   domain: { start: number; end: number }
   spans: Span[]
@@ -139,6 +140,8 @@ export default function ClipTimeline({
   onChange: (from: number, to: number) => void
   onSeek: (ms: number) => void
   onPickProgramme: (p: RecordingProgramme) => void
+  /** The channel or event, for hover previews from its sprite sheets. */
+  streamId?: string | null
 }) {
   const barRef = useRef<HTMLDivElement | null>(null)
   const waveRef = useRef<HTMLCanvasElement | null>(null)
@@ -155,6 +158,9 @@ export default function ClipTimeline({
   })
   const setFocusMode = (m: FocusMode) => { setFocusModeRaw(m); try { localStorage.setItem('volt.clip.zoomFocus', m) } catch { /* no storage */ } }
   const [hoverMs, setHoverMs] = useState<number | null>(null)
+  // HOVER PREVIEWS: the frame under the pointer, from the stream's sprite sheets.
+  const { tileAt } = useStoryboard(streamId, view.start, view.end)
+  const hoverTile = tileAt(hoverMs)
 
   const VW = Math.max(1000, view.end - view.start)
   const DW = Math.max(1, domain.end - domain.start)
@@ -476,6 +482,11 @@ export default function ClipTimeline({
         })()}
         {hoverMs != null && inView(hoverMs) && (
           <div className="zoom-hover-line" style={{ left: pct(hoverMs) }}><span>{clockOf(hoverMs, VW < 3600_000)}</span></div>
+        )}
+        {hoverMs != null && inView(hoverMs) && hoverTile && (
+          <div style={{ position: 'absolute', top: 3, left: `clamp(0px, calc(${pct(hoverMs)} - 80px), calc(100% - 160px))`, pointerEvents: 'none', zIndex: 3 }}>
+            <StoryTile tile={hoverTile} width={160} style={{ height: 90 }} />
+          </div>
         )}
         {(!waveform || (waveform.coverage && waveform.coverage.measured === 0 && waveform.coverage.total > 0)) && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontSize: 'var(--fs-xs)', color: 'var(--faint)', pointerEvents: 'none' }}>

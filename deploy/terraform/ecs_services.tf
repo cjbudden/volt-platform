@@ -24,27 +24,22 @@ resource "aws_ecs_task_definition" "control_plane" {
     image        = "${aws_ecr_repository.repo["volt-control-plane"].repository_url}:${var.control_plane_image_tag}"
     essential    = true
     portMappings = [{ containerPort = 8080, protocol = "tcp" }]
-    environment = [
-      { name = "PORT", value = "8080" },
-      { name = "S3_BUCKET", value = aws_s3_bucket.origin.id },
-      { name = "CDN_BASE_URL", value = "https://${aws_cloudfront_distribution.cdn.domain_name}" },
-      { name = "AWS_REGION", value = var.region },
-      { name = "ECS_CLUSTER", value = aws_ecs_cluster.main.name },
-      { name = "ORCH_LAUNCHER", value = "ecs" },
-      { name = "ENCODER_TASK_DEF", value = "${local.name}-encoder" },
-      { name = "THUMBNAILER_TASK_DEF", value = "${local.name}-thumbnailer" },
-      { name = "ECS_SPOT_PROVIDER", value = aws_ecs_capacity_provider.spot.name },
-      { name = "ECS_ONDEMAND_PROVIDER", value = aws_ecs_capacity_provider.ondemand.name },
-      { name = "ECS_SUBNETS", value = join(",", aws_subnet.private[*].id) },
-      { name = "ECS_SECURITY_GROUPS", value = aws_security_group.encoder.id },
-      { name = "INTERNAL_API_BASE_URL", value = "http://${aws_lb.cp.dns_name}" },
-    ]
-    secrets = [
-      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
-      { name = "JWT_ACCESS_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:JWT_ACCESS_SECRET::" },
-      { name = "JWT_REFRESH_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:JWT_REFRESH_SECRET::" },
-      { name = "INGEST_TOKEN", valueFrom = "${aws_secretsmanager_secret.app.arn}:INGEST_TOKEN::" },
-    ]
+    # The env list lives in local.control_plane_env (bottom of this file) so the
+    # role services in scaling_services.tf run with exactly the same settings.
+    environment = concat(local.control_plane_env, local.scale_env, local.image_env, local.docs_env, [
+      { name = "ROLE", value = var.enable_role_split ? "api-admin" : "all" },
+      { name = "PREWARM_ECS_RESOURCE_IDS", value = local.prewarm_target },
+    ])
+    secrets = concat(local.control_plane_secrets, local.scale_secrets, local.image_secrets, local.docs_secrets)
+    # Liveness only (no database): a database blip must not restart every task.
+    healthCheck = {
+      command     = ["CMD-SHELL", "node -e \"fetch('http://localhost:8080/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval    = 15
+      timeout     = 5
+      retries     = 3
+      startPeriod = 90
+    }
+    stopTimeout = 30
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -72,6 +67,20 @@ resource "aws_ecs_service" "control_plane" {
     target_group_arn = aws_lb_target_group.cp.arn
     container_name   = "control-plane"
     container_port   = 8080
+  }
+
+  # A deploy whose tasks never turn healthy rolls itself back.
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+  health_check_grace_period_seconds  = 120
+
+  # Autoscaling owns the running count (scaling_services.tf).
+  lifecycle {
+    ignore_changes = [desired_count]
   }
 
   depends_on = [aws_lb_listener.http]
@@ -135,4 +144,35 @@ resource "aws_ecs_task_definition" "thumbnailer" {
       }
     }
   }])
+}
+
+# ---- Control-plane settings shared by every role ------------------------------
+locals {
+  control_plane_env = [
+    { name = "PORT", value = "8080" },
+    { name = "S3_BUCKET", value = aws_s3_bucket.origin.id },
+    { name = "CDN_BASE_URL", value = "https://${aws_cloudfront_distribution.cdn.domain_name}" },
+    { name = "AWS_REGION", value = var.region },
+    { name = "ECS_CLUSTER", value = aws_ecs_cluster.main.name },
+    { name = "ORCH_LAUNCHER", value = "ecs" },
+    { name = "ENCODER_TASK_DEF", value = "${local.name}-encoder" },
+    { name = "THUMBNAILER_TASK_DEF", value = "${local.name}-thumbnailer" },
+    { name = "ECS_SPOT_PROVIDER", value = aws_ecs_capacity_provider.spot.name },
+    { name = "ECS_ONDEMAND_PROVIDER", value = aws_ecs_capacity_provider.ondemand.name },
+    # Placement (services/fleet): small and large pools, chosen per stream from its load.
+    { name = "ECS_SPOT_LARGE_PROVIDER", value = aws_ecs_capacity_provider.spot_large.name },
+    { name = "ECS_ONDEMAND_LARGE_PROVIDER", value = aws_ecs_capacity_provider.ondemand_large.name },
+    { name = "FLEET_SMALL_TYPES", value = join(",", var.encoder_instance_types) },
+    { name = "FLEET_LARGE_TYPES", value = join(",", var.encoder_large_instance_types) },
+    { name = "ECS_SUBNETS", value = join(",", aws_subnet.private[*].id) },
+    { name = "ECS_SECURITY_GROUPS", value = aws_security_group.encoder.id },
+    { name = "INTERNAL_API_BASE_URL", value = "http://${aws_lb.cp.dns_name}" },
+  ]
+
+  control_plane_secrets = [
+    { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
+    { name = "JWT_ACCESS_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:JWT_ACCESS_SECRET::" },
+    { name = "JWT_REFRESH_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:JWT_REFRESH_SECRET::" },
+    { name = "INGEST_TOKEN", valueFrom = "${aws_secretsmanager_secret.app.arn}:INGEST_TOKEN::" },
+  ]
 }

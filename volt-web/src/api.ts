@@ -1,4 +1,6 @@
 // Typed client for the Volt control-plane API (same-origin via the Vite proxy).
+import { setImageSigning, imageSigning, signImage } from './imageSigning'
+import { showGlobal, dismissGlobal } from './notices'
 
 /* ============================================================================
  *  THE SESSION, AND WHY IT USED TO END EVERY FIFTEEN MINUTES.
@@ -65,7 +67,7 @@ export function setSession(s: { access: string; refresh?: string; expiresIn?: nu
   lastInputAt = Date.now()
 }
 
-export function clearSession() { token = ''; refreshToken = ''; accessExpiresAt = 0 }
+export function clearSession() { token = ''; refreshToken = ''; accessExpiresAt = 0; platformToken = ''; platformExpiresAt = 0; setImageSigning(null); signingLoad = null }
 
 /** The refresh token, for the logout call that revokes it server-side. */
 export function getRefreshToken() { return refreshToken }
@@ -162,14 +164,41 @@ export class ApiError extends Error {
 let onUnauthorized: (() => void) | null = null
 export function setUnauthorizedHandler(fn: (() => void) | null) { onUnauthorized = fn }
 
-const send = (path: string, opts: RequestInit) => fetch('/api' + path, {
-  ...opts,
-  headers: {
-    'content-type': 'application/json',
-    ...(token ? { authorization: `Bearer ${token}` } : {}),
-    ...(opts.headers || {}),
-  },
-})
+/**
+ * PLATFORM SESSION. /api/platform accepts only a session verified with the
+ * authenticator code (ACCESS_CONTROL.md). System Admin obtains one by step-up
+ * and it is sent for /platform/* calls only; it is never stored.
+ */
+let platformToken = ''
+let platformExpiresAt = 0
+export function setPlatformSession(t: string, expiresIn = 3600) { platformToken = t; platformExpiresAt = Date.now() + expiresIn * 1000 }
+export function hasPlatformSession() { return !!platformToken && Date.now() < platformExpiresAt - 30_000 }
+const bearerFor = (path: string) =>
+  path.startsWith('/platform/') && !path.startsWith('/platform/auth/') && hasPlatformSession() ? platformToken : token
+
+// CAN'T REACH THE SERVER is an app-wide state, not one page's error: it goes
+// in the global notice region (notices.tsx) and clears on the next answer.
+const send = async (path: string, opts: RequestInit) => {
+  try {
+    const r = await fetch('/api' + path, {
+      ...opts,
+      headers: {
+        'content-type': 'application/json',
+        ...(bearerFor(path) ? { authorization: `Bearer ${bearerFor(path)}` } : {}),
+        ...(opts.headers || {}),
+      },
+    })
+    if (r.status === 502 || r.status === 503 || r.status === 504) {
+      showGlobal('offline', { kind: 'warn', title: 'The server is not answering.', message: 'Changes may not save. This clears by itself when it is back.' })
+    } else dismissGlobal('offline')
+    return r
+  } catch (e) {
+    if ((e as any)?.name !== 'AbortError') {
+      showGlobal('offline', { kind: 'error', title: "Can't reach the server.", message: 'Check the connection. This clears by itself when it is back.' })
+    }
+    throw e
+  }
+}
 
 async function req(path: string, opts: RequestInit = {}) {
   // The token is about to lapse and somebody is working: renew first, so this
@@ -202,12 +231,55 @@ async function req(path: string, opts: RequestInit = {}) {
   return r.json()
 }
 
+export interface DeleteImpact {
+  id: string; name: string; kind: 'tv' | 'radio'; group: string; status: string
+  /** why the delete would be refused right now (live, encoder running), else null */
+  blocker: string | null
+  counts: { recordings: number; clips: number; published_clips: number; programmes: number; scheduled_clips: number; sources: number }
+}
+export interface AuditRow {
+  id: string; created_at: string; action: string; entity_type: string | null; entity_id: string | null
+  user_id: string | null; user_email: string | null; actor: string | null; name: string | null
+  detail: Record<string, any> | null
+}
+export interface AuditQuery {
+  action?: string; entityType?: string; userId?: string; q?: string; from?: string; to?: string; limit?: number; offset?: number
+}
+export interface AuditFacets {
+  actions: { action: string; n: number }[]; entityTypes: { entity_type: string; n: number }[]
+  users: { user_id: string; email: string; n: number }[]
+}
+function auditQs(f: AuditQuery): string {
+  const p = new URLSearchParams()
+  for (const [k, v] of Object.entries(f)) if (v !== undefined && v !== null && v !== '') p.set(k, String(v))
+  const s = p.toString()
+  return s ? `?${s}` : ''
+}
+export interface PlanView {
+  accountId: string; accountName: string; planTier: string
+  maxChannels: number; maxConcurrent: number
+  used: { total: number; tv: number; radio: number; events: number; running: number }
+  allocated: number; unallocated: number
+  deployment: 'single' | 'saas'
+  canEdit: boolean; editReason: string | null; canManageGroups: boolean
+  groups: { id: string; name: string; is_default: boolean; max_channels: number; max_concurrent: number; used: number; radio: number }[]
+}
+export interface GroupUse {
+  id: string; name: string; isDefault: boolean; inUse: boolean; blocker: string | null
+  counts: { channels: number; stations: number; events: number; eventsUpcoming: number }
+}
 export interface Group {
   id: string; name: string; profile_name: string | null
   workflow_type: 'transcode' | 'package_only' | null
   packaging: string | null; rungs: { height: number; bitrate_kbps: number }[] | null
   codec_backend: string | null; captions_provider: 'none' | 'whisper' | 'gladia'
   max_channels: number; channel_count: number
+  /** of channel_count, how many are radio stations (the limit counts both) */
+  radio_count?: number
+  /** new channels, stations and events start here; it cannot be removed */
+  is_default?: boolean
+  event_count?: number
+  max_concurrent?: number; output_profile_id?: string | null
 }
 export interface Channel {
   id: string; name: string; status: string; group_id: string
@@ -268,13 +340,23 @@ export interface ChannelDetail extends Channel {
   captions: { enabled: boolean; targets: string[]; source_lang: string; offset_sec?: number }
   epgEnabled: boolean
   ladder: { height: number; bitrate_kbps: number }[]
-  sources: { id: string; role: string; protocol: string; ingest_url: string | null; status: string }[]
+  /** CPU and bytes received for the run in progress (null when not running). */
+  metrics?: {
+    cpu: { pct: number; cores: number | null; source: 'encoder' | 'host'; tasksOnHost?: number | null; atMs: number } | null
+    ingest: { key: string; role: string | null; label: string | null; bytes: number | null; bps: number | null }[]
+    ingestAtMs: number | null
+  } | null
+  sources: { id: string; role: string; protocol: string; ingest_url: string | null; stream_key?: string | null; status: string; rendition_label?: string | null; rendition_bitrate_kbps?: number | null; params?: Record<string, string | number> | null }[]
+  /** Packaging: the single fallback source is transcoded up to every rendition. */
+  fallback_transcode?: boolean
   viewers: { current: number; peak: number; peakAt: string; trendPct: number; series: { t: number; v: number }[] }
   epg: { now: any; next: { name: string; start: string } | null; lane: any[] }
   statusBoard: { output: string; activeSource: string; fallback: string; packager: string; inputs: any[] }
   log: { ts: string; level: string; title: string; detail: string }[]
   health: PipelineHealth
   billing: Billing
+  /** Is there a server for it, and if anything is wrong, what to do. Sized and placed automatically. */
+  server?: { state: 'running' | 'starting' | 'stopped'; headline: string; detail: string; sizedFrom: string; issue: { what: string; fix: string; ours: boolean } | null }
   testStream: TestStreamStatus
   onAir: boolean
   public: { url: string; dashUrl: string; available: boolean }
@@ -344,6 +426,21 @@ export interface TestStreamStatus {
   sourceNote: string | null
 }
 
+export interface AccessCheck {
+  country: string; viewer: string; allowed: boolean
+  layer: 'account' | 'on_demand' | 'channel' | 'rules' | 'programme' | 'none'
+  reason: string | null; via: string | null; ruleId: string | null
+  products: { name: string; priceCents?: number; currency?: string }[]
+  replacement: { id: string; title: string } | null
+}
+export interface AccountSettings {
+  name: string; logo: string | null; primary: string; secondary: string
+  custom: { primary: boolean; secondary: boolean }
+  defaults: { primary: string; secondary: string }
+  /** Where anything of the account may be watched; null = anywhere. */
+  geoAccess: { mode: 'block' | 'allow'; countries: string[] } | null
+  canEdit: boolean; editReason: string | null
+}
 export interface ChannelSettingsPatch {
   name?: string
   autoConnect?: boolean
@@ -363,7 +460,9 @@ export interface ChannelSettingsPatch {
   geoMode?: 'worldwide' | 'allow' | 'block'
   geoCountries?: string[]
   epgEnabled?: boolean
-  sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string }[]
+  sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string; renditionLabel?: string; renditionBitrateKbps?: number; params?: Record<string, string | number> }[]
+  /** Packaging: the single fallback source is transcoded up to every rendition. */
+  fallbackTranscode?: boolean
   captions?: { enabled?: boolean; sourceLang?: string; targets?: string[]; offsetSec?: number }
   inputFailoverEnabled?: boolean
   autoFailback?: boolean
@@ -598,7 +697,8 @@ export interface FleetUsage {
 export interface PlayerConfig {
   id: string | null
   name: string
-  layout: 'card' | 'bar' | 'hero'
+  /** A station layout (card, bar, hero, stage) or a player SDK skin (video, audio_square, audio_wave, audio_nowplaying). */
+  layout: string
   primaryColor: string
   secondaryColor: string
   options: Record<string, any>
@@ -609,7 +709,7 @@ export interface PlayerConfig {
   source: 'channel' | 'account' | 'default'
 }
 
-export interface PlayerLayout { id: string; name: string; detail: string }
+export interface PlayerLayout { id: string; name: string; detail: string; sdk?: boolean }
 
 export interface PlayerConfigResponse {
   channel: { id: string; name: string }
@@ -843,14 +943,93 @@ export interface IngestTransfer {
 }
 export interface IngestWebhook { id: string; name: string; url: string; enabled: boolean; events: string[]; lastStatus: number | null; lastAt: string | null; lastError: string | null; secret?: string }
 
+function libraryQs(p: LibraryQuery): string {
+  const qs = new URLSearchParams()
+  if (p.folder !== undefined) qs.set('folder', p.folder)
+  if (p.kind) qs.set('kind', p.kind)
+  if (p.q) qs.set('q', p.q)
+  if (p.recursive) qs.set('recursive', '1')
+  if (p.source) qs.set('source', p.source)
+  if (p.channel) qs.set('channel', p.channel)
+  if (p.from) qs.set('from', p.from)
+  if (p.to) qs.set('to', p.to)
+  if (p.hasLocation) qs.set('hasLocation', '1')
+  if (p.near) qs.set('near', p.near)
+  if (p.sort) qs.set('sort', p.sort)
+  if (p.limit) qs.set('limit', String(p.limit))
+  if (p.offset) qs.set('offset', String(p.offset))
+  const t = qs.toString()
+  return t ? '?' + t : ''
+}
+
+/** A text answer (WebVTT), with the session's credential. */
+async function textReq(path: string): Promise<string> {
+  await refreshIfDueSoon()
+  const r = await fetch('/api' + path, { headers: { authorization: `Bearer ${getToken()}` } })
+  if (!r.ok) throw new Error(String(r.status))
+  return r.text()
+}
+
 export const api = {
-  login: (email: string, password: string): Promise<{ access: string; refresh?: string; expiresIn?: number }> =>
+  /** Either a session, or (two-step sign-in) a challenge to finish with mfaVerify / the setup calls. */
+  login: (email: string, password: string): Promise<LoginResult> =>
     req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  mfaSend: (challenge: string, method: 'email' | 'sms'): Promise<CodeSent> =>
+    req('/auth/mfa/challenge/send', { method: 'POST', body: JSON.stringify({ challenge, method }) }),
+  mfaVerify: (challenge: string, method: MfaMethod, code: string): Promise<Session & { backupCodesRemaining?: number }> =>
+    req('/auth/mfa/challenge/verify', { method: 'POST', body: JSON.stringify({ challenge, method, code }) }),
+  /** Set up a method. Signed in: pass the password. During sign-in setup: pass the challenge. */
+  mfaStart: (method: 'totp' | 'email' | 'sms', b: { password?: string; challenge?: string; phone?: string }): Promise<CodeSent & { secret?: string; otpauthUri?: string }> =>
+    req(`/auth/mfa/${method}/start`, { method: 'POST', body: JSON.stringify(b) }),
+  mfaConfirm: (method: 'totp' | 'email' | 'sms', b: { code: string; challenge?: string }): Promise<{ ok: true; methods: MfaMethod[]; backupCodes?: string[] } & Partial<Session>> =>
+    req(`/auth/mfa/${method}/confirm`, { method: 'POST', body: JSON.stringify(b) }),
+  mfaRemove: (method: 'totp' | 'email' | 'sms', password: string): Promise<{ ok: true; methods: MfaMethod[] }> =>
+    req(`/auth/mfa/${method}`, { method: 'DELETE', body: JSON.stringify({ password }) }),
+  mfaBackupCodes: (password: string): Promise<{ backupCodes: string[] }> =>
+    req('/auth/mfa/backup-codes', { method: 'POST', body: JSON.stringify({ password }) }),
+  security: (): Promise<SecuritySummary> => req('/auth/security'),
+  emailChange: (newEmail: string, password: string): Promise<CodeSent> =>
+    req('/auth/email/change', { method: 'POST', body: JSON.stringify({ newEmail, password }) }),
+  emailChangeConfirm: (code: string): Promise<{ ok: true; email: string }> =>
+    req('/auth/email/change/confirm', { method: 'POST', body: JSON.stringify({ code }) }),
+  emailVerify: (): Promise<CodeSent & { alreadyVerified?: boolean }> => req('/auth/email/verify', { method: 'POST', body: '{}' }),
+  emailVerifyConfirm: (code: string): Promise<{ ok: true }> =>
+    req('/auth/email/verify/confirm', { method: 'POST', body: JSON.stringify({ code }) }),
+  phoneSet: (phone: string, password: string): Promise<CodeSent> =>
+    req('/auth/phone', { method: 'POST', body: JSON.stringify({ phone, password }) }),
+  phoneConfirm: (code: string): Promise<{ ok: true; phone: string }> =>
+    req('/auth/phone/confirm', { method: 'POST', body: JSON.stringify({ code }) }),
+  phoneRemove: (password: string): Promise<null> =>
+    req('/auth/phone', { method: 'DELETE', body: JSON.stringify({ password }) }),
+  patchMe: (b: { displayName: string | null }): Promise<{ ok: true }> =>
+    req('/auth/me', { method: 'PATCH', body: JSON.stringify(b) }),
+  securityPolicy: (): Promise<{ requireAdminMfa: boolean; activeUsers: number; usersWithMfa: number }> => req('/users/security-policy'),
+  setSecurityPolicy: (requireAdminMfa: boolean): Promise<{ requireAdminMfa: boolean }> =>
+    req('/users/security-policy', { method: 'PUT', body: JSON.stringify({ requireAdminMfa }) }),
+  resetUserMfa: (id: string): Promise<null> => req(`/users/${id}/mfa/reset`, { method: 'POST', body: '{}' }),
+  resetViewerMfa: (id: string): Promise<null> => req(`/viewers/${id}/mfa/reset`, { method: 'POST', body: '{}' }),
+  outputProfiles: (): Promise<{ id: string; name: string; workflow_type?: string }[]> => req('/output-profiles'),
+  // ---- plan and groups (docs/PLAN_AND_GROUPS.md) ----
+  plan: (): Promise<PlanView> => req('/plan'),
+  /** The account's logo and colours (Admin > Account settings; used by the share page). */
+  accountSettings: (): Promise<AccountSettings> => req('/account-settings'),
+  patchAccountSettings: (b: { logo?: string | null; primary?: string | null; secondary?: string | null; geoAccess?: { mode: 'block' | 'allow'; countries: string[] } | null }): Promise<AccountSettings> =>
+    req('/account-settings', { method: 'PATCH', body: JSON.stringify(b) }),
+  patchPlan: (b: { planTier?: string; maxChannels?: number; maxConcurrent?: number }): Promise<PlanView> =>
+    req('/plan', { method: 'PATCH', body: JSON.stringify(b) }),
+  createGroup: (b: { name: string; workflowType: 'transcode' | 'package_only'; outputProfileId?: string; maxChannels: number; maxConcurrent: number; makeDefault?: boolean }): Promise<Group> =>
+    req('/groups', { method: 'POST', body: JSON.stringify(b) }),
+  groupUsage: (id: string): Promise<GroupUse> => req(`/groups/${id}/usage`),
+  deleteGroup: (id: string): Promise<void> => req(`/groups/${id}`, { method: 'DELETE' }),
+  patchGroup: (id: string, b: { name?: string; outputProfileId?: string; maxChannels?: number; maxConcurrent?: number; isDefault?: true }): Promise<Group> =>
+    req(`/groups/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
   /** Revoke the refresh token server-side. Signing out without this leaves a
    *  fourteen-day credential live for a session the operator believes is over. */
   logout: () =>
     req('/auth/logout', { method: 'POST', body: JSON.stringify({ refresh: getRefreshToken() }) }),
   groups: (): Promise<Group[]> => req('/groups'),
+  /** A signed pass to the customer docs site (separate static site; see docsLink.tsx). */
+  docsSession: (): Promise<{ url: string; signed: boolean; expiresAt: string | null }> => req('/docs/session'),
   // caption OUTPUT languages the pipeline can deliver (single source of truth for pickers)
   captionLanguages: (): Promise<{ languages: { code: string; label: string }[] }> => req('/caption-languages'),
   channels: (kind?: 'tv' | 'radio'): Promise<Channel[]> => req('/channels' + (kind ? `?kind=${kind}` : '')),
@@ -860,7 +1039,7 @@ export const api = {
     recordingRetentionDays?: number | null; recordingRetentionSec?: number | null
     dvrWindowSec?: number | null; dvrMode?: 'sliding' | 'event_start'
     outputLadder?: { height: number; bitrateKbps: number }[]
-    sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string; renditionLabel?: string; renditionBitrateKbps?: number }[]
+    sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string; renditionLabel?: string; renditionBitrateKbps?: number; params?: Record<string, string | number> }[]
     inputFailoverEnabled?: boolean; autoFailback?: boolean
     inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
     fillerSlateRef?: string | null; fillerAssetId?: string | null
@@ -972,6 +1151,14 @@ export const api = {
   revokeShareLink: (id: string): Promise<{ id: string; revoked: boolean }> =>
     req(`/share-links/${id}/revoke`, { method: 'POST' }),
   channel: (id: string): Promise<ChannelDetail> => req(`/channels/${id}`),
+  /** What a viewer in `country` would get for this channel now: the play gate's decision and the layer that made it. */
+  channelAccessCheck: (id: string, country: string, viewer: 'anonymous' | 'member' | 'entitled' = 'anonymous'): Promise<AccessCheck> =>
+    req(`/channels/${id}/access-check?country=${encodeURIComponent(country)}&viewer=${viewer}`),
+  /** Clear QC: a clean slate for the channel's health; earlier faults stay in the event log. */
+  resetChannelHealth: (id: string): Promise<{ id: string; was: string | null; overall: string | null; primaryError: { gate: string; label: string; message: string } | null }> =>
+    req(`/channels/${id}/reset-health`, { method: 'POST' }),
+  /** A relayed preview address for one HLS input (for sources that block playback from other sites). */
+  channelInputPreview: (id: string, inputId: string): Promise<{ url: string; expiresInSec: number }> => req(`/channels/${id}/inputs/${inputId}/preview`),
   updateChannel: (id: string, patch: ChannelSettingsPatch): Promise<any> =>
     req(`/channels/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   testStreamStart: (id: string, opts: { langs?: string[]; dvrSec?: number; dash?: boolean } = {}): Promise<TestStreamStatus> =>
@@ -981,14 +1168,23 @@ export const api = {
   ingestProtocols: (): Promise<{ protocols: IngestProtocol[] }> => req('/ingest-protocols'),
 
   // image library (file manager)
-  files: (p: { folder?: string; kind?: string; q?: string; recursive?: boolean } = {}): Promise<MediaFile[]> => {
-    const qs = new URLSearchParams()
-    if (p.folder !== undefined) qs.set('folder', p.folder)
-    if (p.kind) qs.set('kind', p.kind)
-    if (p.q) qs.set('q', p.q)
-    if (p.recursive) qs.set('recursive', '1')
-    return req('/files' + (qs.toString() ? '?' + qs : ''))
-  },
+  files: (p: LibraryQuery = {}): Promise<MediaFile[]> => req('/files' + libraryQs(p)),
+  /** One search box: matching folders and files. */
+  searchLibrary: (p: LibraryQuery): Promise<{ folders: LibraryFolder[]; files: MediaFile[]; total: number }> =>
+    req('/files/search' + libraryQs(p)),
+  /** Children of one folder ('' = top level), for the lazy folder tree. */
+  folderChildren: (parent: string): Promise<{ folders: LibraryFolder[] }> =>
+    req('/files/folders?parent=' + encodeURIComponent(parent)),
+  refreshFileMetadata: (id: string): Promise<MediaFile> => req(`/files/${id}/metadata/refresh`, { method: 'POST' }),
+  backfillFileMetadata: (): Promise<{ refreshed: number; missing: number; remaining: number }> =>
+    req('/files/metadata/backfill', { method: 'POST' }),
+  // encoder thumbnails: sprite sheets for hover previews, and VTTs
+  storyboard: (stream: string, from: number, to: number, prime = true): Promise<Storyboard> =>
+    req(`/thumbnails/storyboard?stream=${stream}&from=${Math.floor(from)}&to=${Math.ceil(to)}${prime ? '&prime=1' : ''}`),
+  vodThumbnailsVtt: (id: string): Promise<string> => textReq(`/thumbnails/vod/${id}.vtt`),
+  recordingThumbnailsVtt: (id: string): Promise<string> => textReq(`/thumbnails/recordings/${id}.vtt`),
+  buildThumbnails: (stream: string, from: number, to: number): Promise<{ started: boolean }> =>
+    req('/thumbnails/build', { method: 'POST', body: JSON.stringify({ stream, from, to }) }),
   // events — same core workflow as channels plus the scheduled window
   events: (): Promise<EventRow[]> => req('/events'),
   event: (id: string): Promise<EventRow> => req(`/events/${id}`),
@@ -998,10 +1194,31 @@ export const api = {
     req(`/events/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   eventStartStop: (id: string, action: 'start' | 'stop'): Promise<EventRow> =>
     req(`/events/${id}/${action}`, { method: 'POST' }),
-  deleteEvent: async (id: string): Promise<void> => {
-    const r = await fetch('/api/events/' + id, { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
-    if (!r.ok && r.status !== 204) throw new Error(String(r.status))
+  // ---- channel delete (administrators) and the audit log (modules/audit.ts) ----
+  channelDeleteImpact: (id: string): Promise<DeleteImpact> => req(`/channels/${id}/delete-impact`),
+  deleteChannel: (id: string): Promise<void> => req(`/channels/${id}`, { method: 'DELETE' }),
+  audit: (f: AuditQuery = {}): Promise<{ total: number; limit: number; offset: number; items: AuditRow[] }> =>
+    req(`/audit${auditQs(f)}`),
+  auditFacets: (): Promise<AuditFacets> => req('/audit/facets'),
+  /** Download the filtered audit log as CSV (same filters as the table). */
+  downloadAuditCsv: async (f: AuditQuery = {}): Promise<void> => {
+    await refreshIfDueSoon()
+    const { limit: _l, offset: _o, ...rest } = f
+    const r = await fetch(`/api/audit/export.csv${auditQs(rest)}`, { headers: { authorization: `Bearer ${getToken()}` } })
+    if (!r.ok) {
+      let msg = `${r.status}`
+      try { const b = await r.json(); msg = b.error || msg } catch { /* not json */ }
+      throw new ApiError(r.status, msg, null)
+    }
+    const blob = await r.blob()
+    const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || 'audit-log.csv'
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = name
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
   },
+  // Through req(), so a refusal reads as the server's reason, not a bare status.
+  deleteEvent: (id: string): Promise<void> => req(`/events/${id}`, { method: 'DELETE' }),
 
   // EPG — programme guides for channels and event-day schedules
   epgOwners: (): Promise<EpgOwnerRow[]> => req('/epg/owners'),
@@ -1059,13 +1276,31 @@ export const api = {
     req('/epg', { method: 'POST', body: JSON.stringify({ ...(owner.kind === 'event' ? { eventId: owner.id } : { channelId: owner.id }), ...b }) }),
   patchProgramme: (id: string, b: Partial<ProgrammeBody>): Promise<ProgrammeRow> =>
     req(`/epg/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
-  deleteProgramme: async (id: string): Promise<void> => {
-    const r = await fetch('/api/epg/' + id, { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
-    if (!r.ok && r.status !== 204) throw new Error(String(r.status))
+  /** scope applies to a repeat occurrence: this one (default), this and following, or every repeat. */
+  deleteProgramme: async (id: string, scope: EpgScope = 'this'): Promise<void> => {
+    const r = await fetch('/api/epg/' + id + (scope !== 'this' ? `?scope=${scope}` : ''), { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
+    if (!r.ok && r.status !== 204) {
+      let m = String(r.status)
+      try { m = (await r.json()).error ?? m } catch { /* status only */ }
+      throw new Error(m)
+    }
   },
   epgCopyDay: (owner: EpgOwner, fromStart: string, fromEnd: string, dayOffsets: number[]): Promise<{ copied: number; created: number }> =>
     req('/epg/copy-day', { method: 'POST', body: JSON.stringify({ ...(owner.kind === 'event' ? { eventId: owner.id } : { channelId: owner.id }), fromStart, fromEnd, dayOffsets }) }),
-  epgClearDay: (owner: EpgOwner, fromStart: string, fromEnd: string): Promise<{ deleted: number }> =>
+  /** Copy a day onto dates, or repeat it on a rule. dryRun = the preview; nothing is written. */
+  epgCopyDayV2: (owner: EpgOwner, b: { sourceDate: string; tz: string; dates?: string[]; repeat?: { rule: RepeatRule; until: string | null }; policy: RepeatPolicy; dryRun?: boolean }): Promise<PlaceResult> =>
+    req('/epg/copy-day', { method: 'POST', body: JSON.stringify({ ...(owner.kind === 'event' ? { eventId: owner.id } : { channelId: owner.id }), ...b }) }),
+  /** Repeat one programme (by id), or preview a repeat of one not yet saved (fields + dryRun). */
+  epgRepeat: (b: { programmeId?: string; owner?: EpgOwner; title?: string; startsAt?: string; endsAt?: string; rule: RepeatRule; until: string | null; policy: RepeatPolicy; tz: string; dryRun?: boolean }): Promise<PlaceResult> => {
+    const { owner, ...rest } = b
+    return req('/epg/repeat', { method: 'POST', body: JSON.stringify({ ...rest, ...(owner ? (owner.kind === 'event' ? { eventId: owner.id } : { channelId: owner.id }) : {}) }) })
+  },
+  epgSeries: (id: string): Promise<EpgSeriesInfo> => req(`/epg/series/${encodeURIComponent(id)}`),
+  epgEndSeries: (id: string, from: string): Promise<{ deleted: number }> =>
+    req(`/epg/series/${encodeURIComponent(id)}/end`, { method: 'POST', body: JSON.stringify({ from }) }),
+  epgUndo: (batchId: string): Promise<{ removed: number; restored: number; keptStarted: number }> =>
+    req(`/epg/batches/${encodeURIComponent(batchId)}/undo`, { method: 'POST' }),
+  epgClearDay: (owner: EpgOwner, fromStart: string, fromEnd: string): Promise<{ deleted: number; batchId?: string | null }> =>
     req('/epg/clear-day', { method: 'POST', body: JSON.stringify({ ...(owner.kind === 'event' ? { eventId: owner.id } : { channelId: owner.id }), fromStart, fromEnd }) }),
 
   // recordings library + range playback + clip/VOD creation
@@ -1479,16 +1714,39 @@ export const api = {
 
   // ---- admin: user management (admin+ only) ----
   users: (): Promise<UserRow[]> => req('/users'),
-  createUser: (b: { email: string; password: string; role: TenantRole; userGroupId?: string | null }): Promise<UserRow> =>
+  user: (id: string): Promise<UserRow & { access: Record<string, AccessLevel>; manageable: boolean; security?: SecurityBrief | null }> => req(`/users/${id}`),
+  createUser: (b: { email: string; password: string; role?: TenantRole; roleIds?: string[]; displayName?: string; userGroupId?: string | null }): Promise<UserRow> =>
     req('/users', { method: 'POST', body: JSON.stringify(b) }),
-  patchUser: (id: string, b: { role?: TenantRole; status?: 'active' | 'disabled'; userGroupId?: string | null }): Promise<UserRow> =>
+  patchUser: (id: string, b: { role?: TenantRole; status?: 'active' | 'disabled'; roleIds?: string[]; displayName?: string | null; userGroupId?: string | null }): Promise<UserRow> =>
     req(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  setUserPassword: (id: string, password: string): Promise<null> =>
+    req(`/users/${id}/password`, { method: 'POST', body: JSON.stringify({ password }) }),
+  deleteUser: (id: string): Promise<null> => req(`/users/${id}`, { method: 'DELETE' }),
+  changeMyPassword: (current: string, next: string): Promise<null> =>
+    req('/auth/password', { method: 'POST', body: JSON.stringify({ current, next }) }),
+  copyAccessRole: (id: string, name?: string): Promise<UserGroupRow> =>
+    req(`/access-roles/${id}/copy`, { method: 'POST', body: JSON.stringify({ name }) }),
+
+  // ---- admin: public users (viewers) ----
+  viewers: (q = '', status = ''): Promise<{ total: number; items: ViewerRow[] }> =>
+    req(`/viewers?limit=100${q ? '&q=' + encodeURIComponent(q) : ''}${status ? '&status=' + status : ''}`),
+  viewer: (id: string): Promise<ViewerDetail> => req(`/viewers/${id}`),
+  patchViewer: (id: string, b: { status?: 'active' | 'disabled'; groups?: string[]; displayName?: string | null }): Promise<ViewerRow> =>
+    req(`/viewers/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  signOutViewer: (id: string): Promise<null> => req(`/viewers/${id}/sign-out`, { method: 'POST' }),
+  deleteViewer: (id: string): Promise<null> => req(`/viewers/${id}`, { method: 'DELETE' }),
+
+  // ---- platform step-up (authenticator code) ----
+  platformStepUp: (code?: string): Promise<{ enroll?: boolean; secret?: string; otpauthUri?: string; mfa_required?: boolean; accessToken?: string; expiresIn?: number }> =>
+    req('/platform/auth/step-up', { method: 'POST', body: JSON.stringify(code ? { code } : {}) }),
 
   // ---- admin: user groups (per-feature access none/view/manage) ----
   userGroups: (): Promise<UserGroupRow[]> => req('/user-groups'),
-  createUserGroup: (b: { name: string; description?: string; permissions: Record<string, AccessLevel> }): Promise<UserGroupRow> =>
+  accessCatalogue: (): Promise<{ levels: AccessLevel[]; notes: string[]; catalogue: { key: string; label: string; area: 'content' | 'insight' | 'admin'; operate: string | null }[] }> =>
+    req('/user-groups/catalogue'),
+  createUserGroup: (b: { name: string; description?: string; tier?: 'operator' | 'viewer'; permissions: Record<string, AccessLevel> }): Promise<UserGroupRow> =>
     req('/user-groups', { method: 'POST', body: JSON.stringify(b) }),
-  patchUserGroup: (id: string, b: { name?: string; description?: string | null; permissions?: Record<string, AccessLevel> }): Promise<UserGroupRow> =>
+  patchUserGroup: (id: string, b: { name?: string; description?: string | null; tier?: 'operator' | 'viewer'; permissions?: Record<string, AccessLevel> }): Promise<UserGroupRow> =>
     req(`/user-groups/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
   deleteUserGroup: async (id: string): Promise<void> => {
     const r = await fetch('/api/user-groups/' + id, { method: 'DELETE', headers: { authorization: `Bearer ${getToken()}` } })
@@ -1526,6 +1784,10 @@ export const api = {
   platformAccountGroups: (id: string): Promise<PlatformGroupRow[]> => req(`/platform/accounts/${id}/groups`),
   platformAddGroup: (id: string, b: { name: string; workflowType: 'transcode' | 'package_only'; maxChannels?: number; maxConcurrent?: number }): Promise<PlatformGroupRow> =>
     req(`/platform/accounts/${id}/groups`, { method: 'POST', body: JSON.stringify(b) }),
+  platformEditGroup: (id: string, gid: string, b: { name?: string; maxChannels?: number; maxConcurrent?: number }): Promise<PlatformGroupRow> =>
+    req(`/platform/accounts/${id}/groups/${gid}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  platformDeleteGroup: (id: string, gid: string): Promise<null> =>
+    req(`/platform/accounts/${id}/groups/${gid}`, { method: 'DELETE' }),
 
   deleteFile: async (id: string, opts: { confirm?: boolean; force?: boolean } = {}): Promise<{ ok: boolean; status: number; body?: any }> => {
     const qs = new URLSearchParams()
@@ -1656,29 +1918,79 @@ export interface RadioLog {
 
 // ---- admin / access model types --------------------------------------------
 export type TenantRole = 'viewer' | 'operator' | 'admin' | 'owner'
-export type AccessLevel = 'none' | 'view' | 'manage'
+export type AccessLevel = 'none' | 'view' | 'operate' | 'manage'
+
+export interface AccessFeature { key: string; label: string; area: 'content' | 'insight' | 'admin'; operate: string | null }
+export interface AccessModel { tiers: TenantRole[]; levels: AccessLevel[]; features: AccessFeature[]; notes: string[] }
+
+export type MfaMethod = 'totp' | 'email' | 'sms' | 'backup'
+export interface Session { access: string; refresh?: string; expiresIn?: number; amr?: string[] }
+/** What sign-in answers when a second step is due (ACCESS_CONTROL.md section 12). */
+export interface MfaStep {
+  mfaRequired?: true; mfaSetupRequired?: true; challenge: string
+  /** methods set up (mfaRequired) */ methods?: MfaMethod[]
+  /** methods that can be set up (mfaSetupRequired) */ available?: MfaMethod[]
+  email?: string | null; phone?: string | null
+}
+export type LoginResult = Session | MfaStep
+export const isMfaStep = (r: LoginResult): r is MfaStep => 'challenge' in r
+export interface CodeSent { ok?: true; sentTo?: string; devCode?: string }
+export interface SecuritySummary {
+  email: string | null; emailVerified: boolean; phone: string | null; phoneVerified: boolean
+  methods: MfaMethod[]; totp: { enabled: boolean }
+  emailCodes: { enabled: boolean; available: boolean }; smsCodes: { enabled: boolean; available: boolean }
+  backupCodesRemaining: number; required: boolean
+}
 
 export interface Me {
-  id: string; email?: string; role: string; status?: string
+  kind?: 'admin'
+  id: string; email?: string; displayName?: string | null
+  emailVerified?: boolean
+  mfa?: { methods: MfaMethod[]; required: boolean }
+  /** The tier (owner > admin > operator > viewer). */
+  role: string; tier?: string; status?: string
   platformRole?: string | null
+  roles?: { id: string; name: string; key: string | null }[]
   userGroupId?: string | null; userGroupName?: string | null
   account?: { id: string; name: string; plan: string; status: string }
+  /** Effective level per feature: the contract the console gates on. */
+  permissions?: Record<string, AccessLevel>
+  /** Same map, original name. */
   features: Record<string, AccessLevel>
-  model: { roles: string[]; features: string[]; levels: AccessLevel[]; notes: string[] }
+  model: AccessModel
 }
 
 export interface UserRow {
-  id: string; email: string; role: TenantRole; status: 'active' | 'disabled' | 'invited'
-  is_platform?: boolean
+  id: string; email: string; displayName?: string | null
+  role: TenantRole; tier?: TenantRole; status: 'active' | 'disabled' | 'invited'
+  is_platform?: boolean; isPlatform?: boolean
+  /** two-step sign-in on (list rows) */ mfa?: boolean; emailVerified?: boolean
+  roles?: { id: string; name: string; key: string | null }[]
   user_group_id: string | null; user_group_name?: string | null
   created_at: string
 }
 
 export interface UserGroupRow {
   id: string; name: string; description: string | null
+  key?: string | null; system?: boolean; tier?: TenantRole
   permissions: Record<string, AccessLevel>
-  member_count?: number
+  member_count?: number; memberCount?: number
   created_at: string
+}
+
+export interface ViewerRow {
+  id: string; email: string | null; displayName: string | null; externalId: string
+  source: 'hosted' | 'external'; status: 'active' | 'disabled' | 'deleted'
+  groups: string[]; emailVerified: boolean; createdAt: string; lastSeenAt: string | null
+  mfa?: boolean
+}
+/** Another person's sign-in security, as an admin sees it (numbers masked). */
+export interface SecurityBrief { emailVerified: boolean; phone: string | null; phoneVerified: boolean; methods: MfaMethod[]; backupCodesRemaining: number }
+export interface ViewerDetail extends ViewerRow {
+  security?: SecurityBrief | null
+  entitlements: { grants: any; validUntil: string | null; productKey: string | null }[]
+  purchases: { id: string; status: string; amount_cents: number | null; currency: string | null; purchased_at: string; product: string | null }[]
+  activeSessions: number
 }
 
 export type AppType = 'web' | 'ios' | 'android' | 'tv' | 'roku' | 'server'
@@ -1717,6 +2029,8 @@ export interface PlatformAccountRow {
 export interface EventSourceRow {
   id?: string; role: 'primary' | 'backup'; protocol: string
   ingest_url: string | null; stream_key: string | null; status?: string
+  rendition_label?: string | null; rendition_bitrate_kbps?: number | null
+  params?: Record<string, string | number> | null
 }
 export interface EventRow {
   id: string; group_id: string; name: string; status: string
@@ -1743,7 +2057,7 @@ export interface EventCreateBody {
   autoVod?: boolean
   /** Put this back on air after a control-plane restart. Default true. */
   autoConnect?: boolean
-  sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string }[]
+  sources?: { role: 'primary' | 'backup'; protocol: string; ingestUrl?: string; streamKey?: string; renditionLabel?: string; renditionBitrateKbps?: number; params?: Record<string, string | number> }[]
   inputFailoverEnabled?: boolean; autoFailback?: boolean
   inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
   fillerSlateRef?: string | null
@@ -1801,9 +2115,34 @@ export interface ProgrammeRow {
   replacement_kind: 'none' | 'slate' | 'loop' | 'vod'; replacement_ref: string | null
   clip_status: 'none' | 'firing' | 'created' | 'error'; clip_asset_id: string | null; clip_error: string | null
   metadata: Record<string, any>; series_id: string | null
+  series_key?: string | null; series_date?: string | null; series_detached?: boolean
+  source_ref?: string | null
+}
+/* ---- EPG repeats, copy rules and undo (volt-app services/epgPlace.ts) ---- */
+export type EpgScope = 'this' | 'following' | 'series'
+export type RepeatPolicy = 'replace' | 'skip' | 'keep'
+export type RepeatWeekday = 'MO' | 'TU' | 'WE' | 'TH' | 'FR' | 'SA' | 'SU'
+export interface RepeatRule { freq: 'daily' | 'weekdays' | 'weekly'; interval?: number; byDay?: RepeatWeekday[] }
+export interface PlaceOutcome {
+  date: string; title: string; startsAt: string; endsAt: string
+  result: 'add' | 'replace' | 'skip' | 'exists'
+  replaces?: { id: string; title: string; startsAt: string; fromRepeat: boolean; same?: boolean }[]
+  overlaps?: string[]; reason?: string
+}
+export interface PlaceResult {
+  summary: { added: number; replaced: number; takenOver?: number; skipped: number; existing: number; overlapsKept: number; dates: number; firstDate: string | null; lastDate: string | null }
+  outcomes: PlaceOutcome[]; batchId: string | null
+  seriesId?: string; describe?: string; openEnded?: boolean; tz?: string; sourceCount?: number
+}
+export interface EpgSeriesInfo {
+  id: string; kind: 'programme' | 'day'; title: string; rule: RepeatRule; tz: string
+  startDate: string; untilDate: string | null; policy: RepeatPolicy; sourceDate: string | null
+  items: number; exdates: number; description: string; openEnded: boolean; upcoming: number; lastScheduled: string | null
 }
 export interface ProgrammeBody {
   title: string; startsAt: string; endsAt?: string
+  /** For a repeat occurrence: which occurrences the change applies to. */
+  scope?: EpgScope
   autoVod?: boolean
   geoMode?: 'worldwide' | 'allow' | 'block'; geoCountries?: string[]
   replacementKind?: 'none' | 'slate' | 'loop' | 'vod'; replacementRef?: string | null
@@ -2299,6 +2638,32 @@ export interface MediaFile {
   id: string; account_id: string; kind: string; path: string; folder: string; name: string
   content_type: string | null; size_bytes: number | null; width: number | null; height: number | null
   tags: string[]; store_key: string; status: string; version: number; created_at: string; url: string
+  /** Where it came from: an upload, a watchfolder, or the encoder (thumbnails). */
+  source?: 'upload' | 'watchfolder' | 'encoder'
+  channel_id?: string | null; captured_at?: string | null
+  /** What the file says about itself (EXIF / GPS / IPTC / XMP), read at upload. */
+  taken_at?: string | null; gps_lat?: number | null; gps_lng?: number | null; gps_alt?: number | null
+  location?: string | null; camera?: string | null; title?: string | null; description?: string | null
+  keywords?: string[]; creator?: string | null; copyright?: string | null; checksum?: string | null
+  metadata?: Record<string, any>
+  duplicateOf?: { id: string; path: string }[]
+}
+
+export interface LibraryFolder { path: string; name: string; count: number; total?: number; hasChildren?: boolean }
+export interface LibraryQuery {
+  folder?: string; kind?: string; q?: string; recursive?: boolean
+  source?: string; channel?: string; from?: string; to?: string; hasLocation?: boolean
+  near?: string; sort?: 'name' | 'newest' | 'oldest' | 'taken' | 'relevance'; limit?: number; offset?: number
+}
+
+/** Sprite sheets covering a span, for hover previews (GET /api/thumbnails/storyboard). */
+export interface StoryboardSheet {
+  url: string; startMs: number; endMs: number; intervalMs: number; cols: number; tileW: number; tileH: number; filled: number[]
+}
+export interface Storyboard {
+  stream: string; from: number; to: number; tileW: number; tileH: number; intervalMs: number; priming: boolean
+  units: { start: number; end: number; status: string; folder: string }[]
+  sheets: StoryboardSheet[]
 }
 
 export interface ImportSourceBody {
@@ -2397,6 +2762,8 @@ export interface SourceProbe {
   note?: string; error?: string
   /** For an HLS address: the playlist (master with variants, or media) and any redirect. */
   hls?: HlsInspection
+  /** measured: segment sizes over time (HLS media playlist); stream: reported by the stream; declared: what an HLS master says (min..max). */
+  bitrate?: { kbps: number | null; maxKbps?: number | null; how: 'measured' | 'stream' | 'declared'; note?: string }
 }
 export interface HlsVariant {
   uri: string; bandwidth: number | null; averageBandwidth: number | null; codecs: string[]; codecNames: string[]
@@ -2409,23 +2776,62 @@ export interface HlsInspection {
   ok: boolean; error?: string; redirectedTo?: string | null; kind?: 'master' | 'media'
   variants?: HlsVariant[]; renditions?: HlsRendition[]; live?: boolean; targetDuration?: number | null
 }
+export interface ProtocolField {
+  key: string; label: string; type: 'url' | 'string' | 'number' | 'password' | 'select' | 'text'
+  required?: boolean; placeholder?: string; hint?: string; default?: string | number
+  options?: { value: string; label: string }[]
+  /** Shown only when another setting has one of these values ('*' = any value). */
+  when?: { key: string; in: string[] }
+  min?: number; max?: number
+  /** Under "More settings". */
+  advanced?: boolean
+}
 export interface IngestProtocol {
   id: string; label: string; ingest: 'push' | 'pull'
   urlLabel: string; urlPlaceholder: string; urlExample: string; urlPattern?: string
-  streamKey: { show: boolean; label?: string; placeholder?: string }
-  extraFields?: { key: string; label: string; type: string; required?: boolean; placeholder?: string; hint?: string }[]
-  hint: string; packageFriendly: boolean
+  streamKey: { show: boolean; label?: string; placeholder?: string; required?: boolean }
+  fields?: ProtocolField[]
+  hint: string
+  /** video = channels and events; radio = stations. Icecast is radio only. */
+  scopes?: ('video' | 'radio')[]
+  packageFriendly: boolean
+  /** Packaging copies the stream (remux) or encodes it once (NDI, ST 2110). */
+  packaging?: 'remux' | 'encode'
+  /** Can Check source reach it from the control plane? */
+  checkable?: boolean
 }
 
 // origin URLs are same-origin under /origin (proxied by Vite to the API in dev)
 export function originUrl(path: string) { return path.startsWith('/origin') ? path : `/origin${path}` }
 
-// Resized preview via the image service: /img/<WxH>[,fit]/<store-key>. `url` is a
-// library URL like '/library/<acct>/<path>'; the store key is that without the slash.
+// Resized preview via the image service: /img/<sig>/<WxH>,<fit>/<store-key>.
+// `url` is a library URL like '/library/<acct>/<path>'; the store key is that
+// without the slash. The image service renders SIGNED URLs only, so this signs
+// with the account key (imageSigning.ts). Before the key has loaded, or for
+// another account's image, it falls back to the original bytes.
 export function thumbUrl(libraryUrl: string, w: number, h: number, fit: 'cover' | 'inside' = 'cover') {
   const key = libraryUrl.replace(/^\//, '')
   if (!key.startsWith('library/')) return libraryUrl
-  return `/img/${w}x${h},${fit}/${key}`
+  const signed = signImage(`${w}x${h},${fit}`, key)
+  if (signed) return signed
+  void ensureImageSigning()
+  return libraryUrl
+}
+
+export interface ImageSigningKey {
+  accountId: string; key: string; baseUrl: string; consoleBaseUrl: string; algorithm: string; keyPrefixes: string[]
+}
+
+// One fetch per session, shared by every caller.
+let signingLoad: Promise<void> | null = null
+export function ensureImageSigning(): Promise<void> {
+  if (imageSigning() || !token) return Promise.resolve()
+  if (!signingLoad) {
+    signingLoad = (req('/images/signing-key') as Promise<ImageSigningKey>)
+      .then((k) => setImageSigning({ accountId: k.accountId, key: k.key, baseUrl: k.baseUrl, consoleBaseUrl: k.consoleBaseUrl ?? '' }))
+      .catch(() => { signingLoad = null })   // previews keep the original; next call retries
+  }
+  return signingLoad
 }
 
 // ---- content types ---------------------------------------------------------

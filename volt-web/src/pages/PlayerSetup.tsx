@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api, type PlayerConfigResponse, type PlayerConfig, type PlayerReport, type AppReg } from '../api'
 import { pressable } from '../a11y'
+import { PageError, useNotify } from '../notices'
+import VoltPlayerView from '../VoltPlayerView'
+import { DEFAULT_CONTROLS } from '@volt/player/theme'
+import type { ControlToggles, PlayerState, Theme } from '@volt/player'
 
 /* ============================================================================
    PLAYER SETUP — configure a station's embeddable player and copy the snippet.
@@ -102,6 +106,120 @@ function Preview({ cfg }: { cfg: PlayerConfig }) {
   )
 }
 
+/* ---------------------------------------------------------------------------
+   PLAYER SDK SKINS: the theme (options.theme) and a live preview drawn by the
+   real player in demo mode, so what is shown is exactly what embeds render.
+   ------------------------------------------------------------------------- */
+
+const CONTROL_LABELS: Array<[keyof ControlToggles, string, 'video' | 'audio' | 'both']> = [
+  ['title', 'Title', 'video'], ['seekButtons', '10 s back / forward', 'video'], ['volume', 'Volume', 'both'],
+  ['quality', 'Quality menu', 'video'], ['subtitles', 'Subtitles menu', 'video'], ['audioTracks', 'Audio language', 'video'],
+  ['startOver', 'Start over', 'video'], ['schedule', 'Schedule / playlist', 'video'], ['upNext', 'Up next', 'both'],
+  ['history', 'Recently played', 'audio'], ['pip', 'Picture in picture', 'video'], ['fullscreen', 'Full screen', 'video'],
+  ['cast', 'Chromecast', 'video'], ['airplay', 'AirPlay', 'video'],
+]
+
+function sampleState(layout: string, cfg: PlayerConfig, station: string): Partial<PlayerState> {
+  const now = Date.now()
+  const art = cfg.fallbackArtworkUrl || null
+  const schedule = [
+    { id: 'p1', title: cfg.fallbackTitle || station, subtitle: cfg.fallbackText || 'Live now', startsAt: now - 20 * 60_000, endsAt: now + 40 * 60_000 },
+    { id: 'p2', title: 'The Late Show', subtitle: 'Music and conversation', startsAt: now + 40 * 60_000, endsAt: now + 160 * 60_000 },
+    { id: 'p3', title: 'Overnight', startsAt: now + 160 * 60_000, endsAt: now + 400 * 60_000 },
+  ]
+  if (layout === 'video') {
+    return {
+      status: 'ready', live: true, atLiveEdge: true, dvr: true, seekable: { start: 0, end: 3600 }, currentTime: 3600,
+      item: { id: 'demo', title: station, live: true },
+      programme: schedule[0], nextProgramme: schedule[1], schedule, canStartOver: true,
+      qualities: [{ id: '1', height: 1080, width: 1920, bitrate: 6e6, label: '1080p' }, { id: '2', height: 720, width: 1280, bitrate: 3e6, label: '720p' }],
+      textTracks: [{ id: 't', lang: 'en', label: 'English', kind: 'subtitle' }],
+      cast: { available: true, state: 'none', device: null },
+    }
+  }
+  return {
+    status: 'ready', live: true, atLiveEdge: true,
+    item: { id: 'demo', title: station, artworkUrl: art, live: true },
+    nowPlaying: { title: 'Dreams', artist: 'Fleetwood Mac', album: 'Rumours', year: 1977, artworkUrl: art },
+    history: [
+      { title: 'Running Up That Hill', artist: 'Kate Bush', startedAt: now - 5 * 60_000, artworkUrl: art },
+      { title: 'Heroes', artist: 'David Bowie', startedAt: now - 9 * 60_000, artworkUrl: art },
+      { title: 'Kiss', artist: 'Prince', startedAt: now - 13 * 60_000, artworkUrl: art },
+      { title: 'Blue Monday', artist: 'New Order', startedAt: now - 20 * 60_000, artworkUrl: art },
+      { title: 'Teardrop', artist: 'Massive Attack', startedAt: now - 26 * 60_000, artworkUrl: art },
+    ],
+    schedule, programme: schedule[0], nextProgramme: schedule[1],
+  }
+}
+
+function sdkTheme(cfg: PlayerConfig): Partial<Theme> {
+  return { primary: cfg.primaryColor, secondary: cfg.secondaryColor, ...((cfg.options?.theme as Partial<Theme>) ?? {}) }
+}
+
+function SdkPreview({ cfg, station }: { cfg: PlayerConfig; station: string }) {
+  const demo = sampleState(cfg.layout, cfg, station)
+  return (
+    <div style={{ maxWidth: cfg.layout === 'audio_square' ? 320 : 560 }}>
+      <VoltPlayerView key={cfg.layout === 'video' ? 'v' : 'a'} skin={cfg.layout} theme={sdkTheme(cfg)} demo={demo} />
+    </div>
+  )
+}
+
+function ThemeEditor({ cfg, setCfg, onBrand }: { cfg: PlayerConfig; setCfg: (c: PlayerConfig) => void; onBrand: () => void }) {
+  const theme = (cfg.options?.theme ?? {}) as Partial<Theme>
+  const set = (p: Partial<Theme>) => setCfg({ ...cfg, options: { ...cfg.options, theme: { ...theme, ...p } } })
+  const controls = { ...DEFAULT_CONTROLS, ...(theme.controls ?? {}) }
+  const kind = cfg.layout === 'video' ? 'video' : 'audio'
+  return (
+    <>
+      <div className="sec-label" style={{ marginTop: 16, display: 'flex', alignItems: 'center' }}>
+        <span>Skin</span><span className="spacer" style={{ flex: 1 }} />
+        <button className="btn ghost sm" type="button" {...pressable(onBrand)}>Use account branding</button>
+      </div>
+      <div className="field"><label>Logo URL <span style={{ color: 'var(--faint)' }}>— https, shown on the player</span></label>
+        <input className="inp" value={theme.logoUrl ?? ''} placeholder="https://…" onChange={e => set({ logoUrl: e.target.value || null })} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div className="field"><label>Logo position</label>
+          <select className="inp" value={theme.logoPosition ?? 'top-right'} onChange={e => set({ logoPosition: e.target.value as Theme['logoPosition'] })}>
+            <option value="top-right">Top right</option><option value="top-left">Top left</option>
+            <option value="bottom-right">Bottom right</option><option value="none">Hidden</option>
+          </select>
+        </div>
+        <div className="field"><label>Corner radius: {theme.radius ?? 12}px</label>
+          <input type="range" min={0} max={28} value={theme.radius ?? 12} onChange={e => set({ radius: Number(e.target.value) })} style={{ width: '100%' }} />
+        </div>
+        <div className="field"><label>Font <span style={{ color: 'var(--faint)' }}>— loaded by your page</span></label>
+          <input className="inp" value={theme.font ?? ''} placeholder="System font" onChange={e => set({ font: e.target.value || null })} />
+        </div>
+        <div className="field"><label>Up next appears</label>
+          <select className="inp" value={theme.upNextSeconds ?? 15} onChange={e => set({ upNextSeconds: Number(e.target.value) })}>
+            {[10, 15, 20, 30, 60].map(n => <option key={n} value={n}>{n} s before the end</option>)}
+          </select>
+        </div>
+      </div>
+      {kind === 'video' && (
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-sm)', margin: '4px 0 10px' }}>
+          <input type="checkbox" checked={theme.autoAdvance !== false} onChange={e => set({ autoAdvance: e.target.checked })} />
+          Play the next item in a playlist automatically
+        </label>
+      )}
+      <div className="sec-label" style={{ marginTop: 8 }}>Controls</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: '4px 12px' }}>
+        {CONTROL_LABELS.filter(([, , k]) => k === 'both' || k === kind).map(([key, label]) => (
+          <label key={key} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-sm)' }}>
+            <input type="checkbox" checked={controls[key]} onChange={e => set({ controls: { ...(theme.controls ?? {}), [key]: e.target.checked } })} />
+            {label}
+          </label>
+        ))}
+      </div>
+      <div className="hintxt" style={{ marginTop: 8 }}>
+        Menus only appear when there is something to choose: no subtitles menu on a stream without subtitles, no quality menu with one quality.
+      </div>
+    </>
+  )
+}
+
 export default function PlayerSetup({ id, onBack }: { id: string; onBack: () => void }) {
   const [d, setD] = useState<PlayerConfigResponse | null>(null)
   const [cfg, setCfg] = useState<PlayerConfig | null>(null)
@@ -137,9 +255,20 @@ export default function PlayerSetup({ id, onBack }: { id: string; onBack: () => 
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(''), 2200) }
 
+  async function applyBrand() {
+    if (!cfg) return
+    try {
+      const b = await api.accountSettings()
+      const theme = { ...(cfg.options?.theme ?? {}), logoUrl: b.logo ?? (cfg.options?.theme?.logoUrl ?? null) }
+      setCfg({ ...cfg, primaryColor: b.primary, secondaryColor: b.secondary, options: { ...cfg.options, theme } })
+      flash('Account logo and colours applied. Save to keep them.')
+    } catch (e: any) { flash(e.message) }
+  }
+  const notify = useNotify()
+
   async function save() {
     if (!cfg) return
-    setBusy(true); setErr('')
+    setBusy(true)
     try {
       const saved = await api.savePlayerConfig(id, {
         layout: cfg.layout,
@@ -152,10 +281,10 @@ export default function PlayerSetup({ id, onBack }: { id: string; onBack: () => 
       })
       setCfg(saved)
       flash('Saved. Players already embedded will pick this up on their next load.')
-    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+    } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy(false) }
   }
 
-  if (err && !d) return <div className="card p-4"><div className="err">{err}</div></div>
+  if (err && !d) return <PageError message={err} />
   if (!d || !cfg) return <div className="card p-4"><div className="loading">Loading player setup…</div></div>
 
   const chosen = apps.find(a => a.id === appId)
@@ -186,7 +315,6 @@ export default function PlayerSetup({ id, onBack }: { id: string; onBack: () => 
         </button>
       </div>
 
-      {err && <div className="err">{err}</div>}
       {cfg.source !== 'channel' && (
         <div className="hintxt" style={{ marginBottom: 10 }}>
           This station has no player of its own yet, so it is using {cfg.source === 'account' ? 'your account default' : 'the built-in defaults'}. Saving creates one for {d.channel.name}.
@@ -196,9 +324,14 @@ export default function PlayerSetup({ id, onBack }: { id: string; onBack: () => 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 16, alignItems: 'start' }}>
         <div className="card p-4">
           <div className="sec-label">Layout</div>
-          {d.layouts.map(l => (
+          {d.layouts.map((l, i) => (<div key={l.id}>
+            {(i === 0 || !!d.layouts[i - 1].sdk !== !!l.sdk) && (
+              <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.06em', margin: i ? '12px 0 6px' : '0 0 6px' }}>
+                {l.sdk ? 'Player SDK skins: same on web, apps and TVs' : 'Station embeds'}
+              </div>
+            )}
             <div key={l.id}
-                 {...pressable(() => setCfg({ ...cfg, layout: l.id as PlayerConfig['layout'] }))}
+                 {...pressable(() => setCfg({ ...cfg, layout: l.id }))}
                  data-a11y-click=""
                  style={{
                    display: 'flex', gap: 11, alignItems: 'flex-start', padding: '10px 12px',
@@ -216,12 +349,11 @@ export default function PlayerSetup({ id, onBack }: { id: string; onBack: () => 
               <span style={{ minWidth: 0 }}>
                 <span style={{ display: 'block', fontWeight: 600 }}>
                   {l.name}
-                  {l.id !== 'card' && <span className="chip" style={{ marginLeft: 8, fontSize: 'var(--fs-micro)' }}>coming next</span>}
                 </span>
                 <span style={{ display: 'block', fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>{l.detail}</span>
               </span>
             </div>
-          ))}
+          </div>))}
 
           <div className="sec-label" style={{ marginTop: 16 }}>Colours</div>
           <ColorField label="Primary" value={cfg.primaryColor}
@@ -230,6 +362,7 @@ export default function PlayerSetup({ id, onBack }: { id: string; onBack: () => 
           <ColorField label="Background" value={cfg.secondaryColor}
                       onChange={v => setCfg({ ...cfg, secondaryColor: v })}
                       hint="text contrast is chosen automatically" />
+          {d.layouts.find(l => l.id === cfg.layout)?.sdk && <ThemeEditor cfg={cfg} setCfg={setCfg} onBrand={applyBrand} />}
 
           <div className="sec-label" style={{ marginTop: 16 }}>
             When there is no track information
@@ -258,7 +391,9 @@ export default function PlayerSetup({ id, onBack }: { id: string; onBack: () => 
         <div>
           <div className="card p-4" style={{ marginBottom: 16 }}>
             <div className="sec-label">Preview</div>
-            <Preview cfg={cfg} />
+            {d.layouts.find(l => l.id === cfg.layout)?.sdk
+              ? <SdkPreview cfg={cfg} station={d.channel.name} />
+              : <Preview cfg={cfg} />}
             <div className="hintxt" style={{ marginTop: 10 }}>
               Track, artist and album come from the station's own metadata, enriched with MusicBrainz and the Cover Art Archive.
             </div>

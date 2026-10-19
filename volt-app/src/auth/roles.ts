@@ -1,28 +1,46 @@
 /**
- * ACCESS MODEL — roles + user groups.
+ * ACCESS MODEL FOR ADMIN USERS (client staff). See ACCESS_CONTROL.md.
  *
- * Two layers, matching how the product is operated:
+ * Three kinds of principal exist in Volt and never mix:
  *
- * 1. ROLE (rank): owner > admin > operator > viewer. Owners/admins always have
- *    full tenant access (someone must be able to fix a bad group). The role
- *    also draws hard lines the groups can never cross: user management, apps &
- *    API keys and account config are admin+ regardless of any group.
+ *   platform  SaaS staff, cross-tenant, /api/platform/*  (auth/platform.ts)
+ *   admin     a client's staff, one account, /api/*      (THIS FILE)
+ *   viewer    a client's audience, /api/public/*         (auth/viewerTokens.ts)
  *
- * 2. USER GROUP (feature access): every non-admin user can be assigned to a
- *    user group; the group sets a LEVEL PER FEATURE — none / view / manage —
- *    and that decides which sections and functions the member can use. A user
- *    without a group falls back to their role's default (viewer = view
- *    content, operator = manage content).
+ * An admin user's access is:
  *
- * Enforcement is CENTRAL: requireAuth resolves the caller's effective feature
- * map (cached ~20s) and checks it against the requested path + method, so new
- * endpoints are covered by default and the rules live in one place. The same
- * map is served via /api/auth/me so the UI gates nav items and buttons
- * consistently with the API.
+ *   TIER (users.role)  owner > admin > operator > viewer
+ *     owner / admin    full access to everything in the account
+ *     operator         access comes from the user's ROLES (below)
+ *     viewer           as operator, but capped at `view`
+ *
+ *   ROLES (user_groups, many per user)  a level per FEATURE:
+ *     none < view < operate < manage
+ *       view     see lists and detail pages
+ *       operate  run things: start/stop, on/off air, auto connect, publish,
+ *                retry jobs (the OPERATE actions listed per feature below)
+ *       manage   create, edit, delete, plus everything operate allows
+ *     A user's effective level for a feature is the highest any of their
+ *     roles grants. Default system roles: auth/defaultRoles.ts.
+ *
+ * ENFORCEMENT is central and default-on: requireAuth calls enforceAccess for
+ * every admin request, which maps method + path to (feature, level). A new
+ * router under a mapped prefix is covered without doing anything. The same
+ * catalogue is served by /api/auth/me, so the console hides what the API
+ * would refuse; the API remains the authority.
+ *
+ * NO ESCALATION: a user can only grant (to a user or to a role) access they
+ * hold themselves, and can only change users whose access they cover
+ * (assertCovers / assertCanManageUser).
+ *
+ * COST: effective access is cached per user and dropped by database triggers
+ * the moment a user, role or membership changes (migration 0047), so a check
+ * is a map lookup on every request and still takes effect at once.
  */
 import { Request, Response, NextFunction } from 'express';
-import { one } from '../db';
-import { forbidden } from '../util/http';
+import { one, query } from '../db';
+import { forbidden, unauthorized } from '../util/http';
+import { cached } from '../scale/cache';
 
 export type Role = 'viewer' | 'operator' | 'admin' | 'owner';
 export const ROLE_RANK: Record<string, number> = { viewer: 1, operator: 2, admin: 3, owner: 4 };
@@ -40,139 +58,333 @@ export function rankOf(role: unknown): number {
   return ROLE_RANK[String(role)] ?? 0;
 }
 
-export type Level = 'none' | 'view' | 'manage';
-const LEVEL_RANK: Record<Level, number> = { none: 0, view: 1, manage: 2 };
+export const LEVELS = ['none', 'view', 'operate', 'manage'] as const;
+export type Level = (typeof LEVELS)[number];
+export const LEVEL_RANK: Record<Level, number> = { none: 0, view: 1, operate: 2, manage: 3 };
+export const levelRank = (l: unknown): number => LEVEL_RANK[l as Level] ?? 0;
 
-/** The manageable FEATURES and the API surfaces they cover. */
-export const FEATURES = ['channels', 'radio', 'events', 'epg', 'recordings', 'vod', 'media', 'sharing', 'analytics'] as const;
-export type Feature = (typeof FEATURES)[number];
+// ---- the catalogue ------------------------------------------------------------
 
-const FEATURE_PREFIXES: Record<Feature, string[]> = {
-  channels: ['/api/channels', '/api/sources', '/api/streams'],
-  radio: ['/api/radio'],
-  events: ['/api/events'],
-  epg: ['/api/epg'],
-  recordings: ['/api/recordings', '/api/scheduled-clips'],
-  vod: ['/api/vod', '/api/publications', '/api/publishing-rules', '/api/social'],
-  // /api/uploads belongs here: an upload session creates a filler_asset, so
-  // leaving it off the map put it on the unmapped surface, where writes need
-  // only operator and reads are open to any authenticated user — bypassing a
-  // group that sets media to 'none' entirely.
-  media: ['/api/files', '/api/filler-assets', '/api/uploads'],
-  sharing: ['/api/share-links'],
-  analytics: ['/api/analytics'],
-};
+export interface FeatureDef {
+  key: string;
+  label: string;
+  area: 'content' | 'insight' | 'admin';
+  /** API prefixes this feature owns. Longest match wins. */
+  prefixes: string[];
+  /** Writes that are OPERATE rather than MANAGE (path regexes, lower-case, no query). */
+  operate?: RegExp[];
+  /** What operate means here, for the role editor. */
+  operateMeans?: string;
+  /** Prefixes any signed-in user may READ (lookups the forms of other features need). */
+  readOpen?: string[];
+}
 
-/** Admin-only surfaces: NEVER delegated to a user group. */
-const ADMIN_PREFIXES = [
-  '/api/users', '/api/user-groups', '/api/apps',
-  '/api/groups', '/api/output-profiles', '/api/metadata-schemas',
-  '/api/notification-templates', '/api/publish-targets',
-  // Money and audience identities: admin only, as the router itself also enforces.
-  '/api/payments',
-  // Add-on services hold endpoints and signing secrets; engines choose what bills.
-  '/api/addons', '/api/engines',
+const ID = '[^/]+';
+export const CATALOGUE: FeatureDef[] = [
+  { key: 'monitoring', label: 'Live & monitoring', area: 'content', prefixes: ['/api/status', '/api/monitoring'] },
+  { key: 'channels', label: 'TV channels', area: 'content', prefixes: ['/api/channels', '/api/daypart-presets'],
+    operate: [new RegExp(`^/api/channels/${ID}/(start|stop|air|auto-connect|test-stream|failover-test|reset-health)$`)],
+    operateMeans: 'Start/stop, on/off air, auto connect, test streams, clear QC' },
+  { key: 'radio', label: 'Radio stations', area: 'content', prefixes: ['/api/radio'],
+    operate: [new RegExp(`^/api/radio/${ID}/(start|stop|air|auto-connect|clear-recovery)$`), /^\/api\/radio\/probe$/],
+    operateMeans: 'Start/stop, on/off air, auto connect, clear recovery' },
+  { key: 'events', label: 'Events', area: 'content', prefixes: ['/api/events'],
+    operate: [new RegExp(`^/api/events/${ID}/(start|stop|auto-connect)$`)],
+    operateMeans: 'Start/stop, auto connect' },
+  { key: 'epg', label: 'EPG & schedules', area: 'content', prefixes: ['/api/epg'],
+    operate: [new RegExp(`^/api/epg/import/sources/${ID}/(run|test)$`)],
+    operateMeans: 'Run and test XMLTV imports' },
+  { key: 'recordings', label: 'Recordings & clips', area: 'content', prefixes: ['/api/recordings', '/api/scheduled-clips'],
+    operate: [new RegExp(`^/api/recordings/${ID}/publish$`)], operateMeans: 'Publish recordings' },
+  { key: 'vod', label: 'Media library & publishing', area: 'content', prefixes: ['/api/vod', '/api/publications', '/api/social'],
+    operate: [new RegExp(`^/api/vod/${ID}/(publish|withdraw)$`), new RegExp(`^/api/publications/vod/${ID}/publish$`),
+      new RegExp(`^/api/social/publish/${ID}$`), new RegExp(`^/api/social/publications/${ID}/retry$`)],
+    operateMeans: 'Publish and withdraw' },
+  { key: 'media', label: 'Files, uploads & storage', area: 'content',
+    prefixes: ['/api/files', '/api/filler-assets', '/api/uploads', '/api/tus', '/api/watchfolders', '/api/storage', '/api/jobs'],
+    // Image pickers in other features' forms (guide icons, logos, slates) browse
+    // the library; reading it is open, changing it is still `media`.
+    readOpen: ['/api/files'],
+    operate: [new RegExp(`^/api/jobs/${ID}/(retry|cancel)$`), new RegExp(`^/api/watchfolders/${ID}/dry-run$`)],
+    operateMeans: 'Retry/cancel jobs, watchfolder dry runs' },
+  { key: 'sharing', label: 'Share links', area: 'content', prefixes: ['/api/share-links'] },
+  { key: 'analytics', label: 'Analytics & reports', area: 'insight', prefixes: ['/api/analytics'] },
+  { key: 'fleet', label: 'Fleet & usage', area: 'insight', prefixes: ['/api/fleet'] },
+  { key: 'users', label: 'Admin users', area: 'admin', prefixes: ['/api/users'] },
+  { key: 'access', label: 'Roles & access', area: 'admin', prefixes: ['/api/user-groups', '/api/access-roles'] },
+  { key: 'viewers', label: 'Public users', area: 'admin', prefixes: ['/api/viewers'],
+    operate: [new RegExp(`^/api/viewers/${ID}/sign-out$`)], operateMeans: 'Sign a viewer out everywhere' },
+  { key: 'apps', label: 'Apps, API keys & players', area: 'admin', prefixes: ['/api/apps', '/api/player-config'] },
+  { key: 'payments', label: 'Payments & products', area: 'admin', prefixes: ['/api/payments'] },
+  { key: 'settings', label: 'Account settings', area: 'admin',
+    prefixes: ['/api/groups', '/api/plan', '/api/account-settings', '/api/output-profiles', '/api/metadata-schemas', '/api/notification-templates',
+      '/api/publish-targets', '/api/engines', '/api/addons', '/api/workflows', '/api/encode-profiles',
+      '/api/ingest', '/api/publishing-rules'],
+    // The channel, event and station forms read these to fill their pickers.
+    readOpen: ['/api/groups', '/api/plan', '/api/account-settings', '/api/output-profiles', '/api/metadata-schemas', '/api/engines', '/api/addons', '/api/encode-profiles'],
+    operate: [/^\/api\/workflows\/runs(\/[^/]+\/(cancel|retry))?$/], operateMeans: 'Start, cancel and retry workflow runs' },
 ];
-/** Admin surfaces where operators/viewers still need READ (forms use them). */
-const ADMIN_READ_OPEN = ['/api/groups', '/api/output-profiles', '/api/metadata-schemas', '/api/addons', '/api/engines'];
 
-const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+export const FEATURES = CATALOGUE.map((f) => f.key);
+export type Feature = string;
+export type Perms = Record<string, Level>;
+const BY_KEY = new Map(CATALOGUE.map((f) => [f.key, f]));
 
-export function featureOf(path: string): Feature | null {
-  for (const f of FEATURES) if (FEATURE_PREFIXES[f].some((p) => path.startsWith(p))) return f;
-  return null;
+/** Prefixes shared by several features: allowed if ANY of them grants the level. */
+const SHARED_PREFIXES: { prefix: string; anyOf: string[] }[] = [
+  { prefix: '/api/sources', anyOf: ['channels', 'radio', 'events'] },
+];
+
+/** The features legacy (pre-0047) tiers got when the user had no role. */
+const LEGACY_CONTENT = ['channels', 'radio', 'events', 'epg', 'recordings', 'vod', 'media', 'sharing', 'analytics', 'monitoring', 'fleet'];
+
+export function allPerms(level: Level): Perms {
+  return Object.fromEntries(FEATURES.map((f) => [f, level])) as Perms;
 }
 
-/** Role default feature map (used when the user has no group). */
-export function roleDefaultPerms(role: string): Record<Feature, Level> {
-  const lvl: Level = rankOf(role) >= ROLE_RANK.operator ? 'manage' : 'view';
-  return Object.fromEntries(FEATURES.map((f) => [f, lvl])) as Record<Feature, Level>;
-}
-
-/** Effective per-feature map for a user: admins full; group wins when set. */
-export function effectivePerms(role: string, groupPerms: Record<string, string> | null): Record<Feature, Level> {
-  if (rankOf(role) >= ROLE_RANK.admin) {
-    return Object.fromEntries(FEATURES.map((f) => [f, 'manage'])) as Record<Feature, Level>;
-  }
-  if (!groupPerms) return roleDefaultPerms(role);
-  const out = {} as Record<Feature, Level>;
+/** Normalise a stored permission map: known features only, known levels only. */
+export function cleanPerms(p: Record<string, unknown> | null | undefined): Perms {
+  const out = allPerms('none');
   for (const f of FEATURES) {
-    const v = groupPerms[f];
-    out[f] = v === 'manage' || v === 'view' ? (v as Level) : 'none';
-    // a viewer's group can grant at most view (role rank still caps writes)
-    if (out[f] === 'manage' && rankOf(role) < ROLE_RANK.operator) out[f] = 'view';
+    const v = p?.[f];
+    if (typeof v === 'string' && (LEVELS as readonly string[]).includes(v)) out[f] = v as Level;
   }
   return out;
 }
 
-// ---- per-request resolution (cached) ---------------------------------------
-const cache = new Map<string, { role: string; perms: Record<Feature, Level>; at: number }>();
-const TTL = 20_000;
+/** Tier default when a member has no roles at all (keeps pre-0047 accounts working). */
+export function roleDefaultPerms(role: string): Perms {
+  const out = allPerms('none');
+  const lvl: Level = rankOf(role) >= ROLE_RANK.operator ? 'manage' : 'view';
+  for (const f of LEGACY_CONTENT) out[f] = f === 'monitoring' || f === 'fleet' ? 'view' : lvl;
+  return out;
+}
+
+/**
+ * Effective access: owners and admins hold everything; members hold the
+ * highest level any of their roles grants; a viewer-tier member is capped at
+ * view.
+ */
+export function effectivePerms(role: string, rolePerms: (Record<string, unknown> | null)[] | Record<string, unknown> | null): Perms {
+  if (rankOf(role) >= ROLE_RANK.admin) return allPerms('manage');
+  const list = Array.isArray(rolePerms) ? rolePerms.filter(Boolean) : rolePerms ? [rolePerms] : [];
+  if (!list.length) return roleDefaultPerms(role);
+  const out = allPerms('none');
+  for (const p of list) {
+    const c = cleanPerms(p as any);
+    for (const f of FEATURES) if (LEVEL_RANK[c[f]] > LEVEL_RANK[out[f]]) out[f] = c[f];
+  }
+  if (rankOf(role) < ROLE_RANK.operator) {
+    for (const f of FEATURES) if (LEVEL_RANK[out[f]] > LEVEL_RANK.view) out[f] = 'view';
+  }
+  return out;
+}
+
+// ---- resolving a request ----------------------------------------------------------
 
 /** A token subject is only a user id when it is shaped like one. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function resolveAccess(userId: string, tokenRole: string): Promise<{ role: string; perms: Record<Feature, Level> }> {
-  const hit = cache.get(userId);
-  if (hit && Date.now() - hit.at < TTL) return hit;
-  let role = tokenRole;
-  let groupPerms: Record<string, string> | null = null;
-  // `users.id` is a uuid column, so a subject that is not a uuid cannot match
-  // a row — and handing one to Postgres anyway raises 22P02, which surfaces as
-  // a 500 instead of falling through to the token's own role. The old guard
-  // listed the one exception it knew about ('apikey:'), so every OTHER
-  // non-uuid subject took the request down with it. Ask the real question.
-  if (UUID_RE.test(userId)) {
-    const row = await one<any>(
-      `SELECT u.role, g.permissions FROM users u
-         LEFT JOIN user_groups g ON g.id = u.user_group_id
-        WHERE u.id=$1 AND u.status='active'`, [userId]);
-    if (row) { role = row.role; groupPerms = row.permissions ?? null; }
-  }
-  const entry = { role, perms: effectivePerms(role, groupPerms), at: Date.now() };
-  cache.set(userId, entry);
-  return entry;
-}
-export function invalidateAccess(userId?: string) {
-  if (userId) cache.delete(userId); else cache.clear();
+export interface ResolvedAccess {
+  role: string;
+  perms: Perms;
+  /** Role (group) ids the user holds. */
+  roleIds: string[];
+  accountId: string | null;
+  platformRole: string | null;
 }
 
-/** Central gate: throws 403 when the caller's effective access is short. */
+/**
+ * The caller's current access, cached until something about it changes.
+ * Tagged user:<id>, ugroup:<each role>, acct:<account> (migration 0047 triggers).
+ *
+ * A user that no longer exists or is not active resolves to NULL, and the
+ * request is refused: a disabled user's unexpired token stops working at once
+ * instead of falling back to the role written inside the token.
+ */
+export async function resolveAccess(userId: string, tokenRole: string): Promise<ResolvedAccess> {
+  if (userId.startsWith('apikey:')) {
+    // Account secret key: full tenant admin, as the key model has always meant.
+    return { role: 'admin', perms: allPerms('manage'), roleIds: [], accountId: null, platformRole: null };
+  }
+  // A token whose subject is not a user at all. Production refuses it. Local
+  // development and the shell suites sign tokens by hand for made-up subjects,
+  // so outside production they fall back to the tier written in the token,
+  // as before. (A user who exists but is disabled is refused everywhere.)
+  const legacy = (): ResolvedAccess => {
+    if (process.env.NODE_ENV === 'production' || process.env.ACCESS_STRICT_SUBJECT === 'true') {
+      throw unauthorized('Unknown principal');
+    }
+    return { role: tokenRole, perms: effectivePerms(tokenRole, []), roleIds: [], accountId: null, platformRole: null };
+  };
+  if (!UUID_RE.test(userId)) return legacy();
+  const r = await cached<ResolvedAccess | null | 'missing'>(
+    `access:${userId}`,
+    {
+      ttlSec: 300,
+      tags: (v) => v && v !== 'missing' ? [`user:${userId}`, ...v.roleIds.map((g) => `ugroup:${g}`), ...(v.accountId ? [`acct:${v.accountId}`] : [])] : [`user:${userId}`],
+    },
+    async () => {
+      const u = await one<any>(
+        `SELECT u.role, u.account_id, u.platform_role, u.status, a.status AS account_status
+           FROM users u JOIN accounts a ON a.id = u.account_id
+          WHERE u.id=$1`, [userId]);
+      if (!u) return 'missing';
+      if (u.status !== 'active' || u.account_status === 'suspended') return null;
+      const groups = await query<any>(
+        `SELECT g.id, g.permissions FROM user_group_members m JOIN user_groups g ON g.id = m.group_id
+          WHERE m.user_id = $1 AND g.account_id = $2`, [userId, u.account_id]);
+      return {
+        role: u.role,
+        perms: effectivePerms(u.role, groups.map((g) => g.permissions)),
+        roleIds: groups.map((g) => g.id),
+        accountId: u.account_id,
+        platformRole: u.platform_role ?? null,
+      };
+    }
+  );
+  if (r === 'missing') return legacy();
+  if (!r) throw unauthorized('This user is disabled or no longer exists');
+  return r;
+}
+
+/** Kept for callers that used to clear the per-process map; the triggers do it now. */
+export function invalidateAccess(_userId?: string) { /* cache invalidation is trigger-driven */ }
+
+/** What a channel id is (tv or radio), cached. Radio stations live in `channels`. */
+function channelKind(id: string): Promise<string | null> {
+  return cached<string | null>(`chkind:${id}`, { ttlSec: 300, tags: [`asset:${id}`] }, async () => {
+    if (!UUID_RE.test(id)) return null;
+    const r = await one<any>(`SELECT kind FROM channels WHERE id = $1`, [id]);
+    return r?.kind ?? null;
+  });
+}
+
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+export interface Requirement { features: string[]; level: Level; reason: string }
+
+/**
+ * Map one request to what it needs. Exported so tests and the docs generator
+ * can ask "what does this endpoint require?" without making the request.
+ * Returns null for surfaces outside the catalogue (see enforceAccess).
+ */
+export async function requirementFor(method: string, rawPath: string, body?: any,
+  /** How to tell a station from a TV channel. The docs generator passes its own, so it needs no database. */
+  kindOf: (id: string) => Promise<string | null> = channelKind): Promise<Requirement | null> {
+  const path = rawPath.split('?')[0].toLowerCase().replace(/\/+$/, '') || '/';
+  const write = WRITE_METHODS.has(method.toUpperCase());
+
+  for (const s of SHARED_PREFIXES) {
+    if (path === s.prefix || path.startsWith(s.prefix + '/')) {
+      return { features: s.anyOf, level: write ? 'manage' : 'view', reason: s.prefix };
+    }
+  }
+
+  // Longest owning prefix wins (/api/epg/import before /api/epg, etc.).
+  let best: FeatureDef | null = null;
+  let bestLen = -1;
+  for (const f of CATALOGUE) for (const p of f.prefixes) {
+    if ((path === p || path.startsWith(p + '/')) && p.length > bestLen) { best = f; bestLen = p.length; }
+  }
+  if (!best) return null;
+
+  let feature = best.key;
+  // RADIO LIVES IN THE CHANNELS TABLE. A station is created with
+  // POST /api/channels {kind:'radio'} and many station routes are channel
+  // routes, so the feature is decided by what the request is about, not only
+  // by the path: a Radio Manager can run stations and still cannot touch TV.
+  if (feature === 'channels' && path.startsWith('/api/channels')) {
+    const m = path.match(/^\/api\/channels\/([^/]+)/);
+    if (m) {
+      if ((await kindOf(m[1])) === 'radio') feature = 'radio';
+    } else if (write && body && body.kind === 'radio') {
+      feature = 'radio';
+    }
+  }
+  const def = BY_KEY.get(feature)!;
+
+  if (!write) {
+    // Listing roles is also needed to ASSIGN them: user managers may read it.
+    if (feature === 'access') return { features: ['access', 'users'], level: 'view', reason: 'access' };
+    const open = (BY_KEY.get(best.key)?.readOpen ?? []).some((p) => path === p || path.startsWith(p + '/'));
+    return { features: [feature], level: open ? 'none' : 'view', reason: open ? 'read-open lookup' : feature };
+  }
+  // Operate patterns are checked on the feature that OWNS the path (channels'
+  // patterns for a radio station reached through /api/channels/:id/start).
+  const ops = [...(best.operate ?? []), ...(def.operate ?? [])];
+  const generic = path.replace(/^\/api\/channels\//, '/api/radio/');
+  const isOperate = ops.some((rx) => rx.test(path) || (feature === 'radio' && rx.test(generic)));
+  return { features: [feature], level: isOperate ? 'operate' : 'manage', reason: feature };
+}
+
+/** True when `perms` meet the requirement. */
+export function meets(perms: Perms, need: Requirement): boolean {
+  if (need.level === 'none') return true;
+  return need.features.some((f) => LEVEL_RANK[perms[f] ?? 'none'] >= LEVEL_RANK[need.level]);
+}
+
+/**
+ * Central gate, run by requireAuth for every admin request. Throws 403 with
+ * the feature and level that were missing, so the console can say exactly
+ * why.
+ *
+ * Surfaces outside the catalogue (the signed-in user's own notifications,
+ * support tickets, search, discovery documents) are open to read for any
+ * signed-in admin user; writing to them needs the operator tier. Add a new
+ * admin router under a catalogue prefix, or add its prefix to a feature, and
+ * it is gated with no further work. ACCESS_CONTROL.md has the checklist.
+ */
 export async function enforceAccess(req: Request): Promise<void> {
   // LOWER-CASED, because Express routes case-insensitively by default while
-  // startsWith does not. `/API/apps/secret-keys` reached the apps router but
-  // matched no ADMIN_PREFIX and no FEATURE_PREFIX, so it fell through to the
-  // unmapped branch — writes at operator, reads at any authenticated user.
-  // That let an operator mint a management-scoped account key and become a
-  // tenant admin, and it bypassed every per-feature group restriction the same
-  // way. Matching is on the normalised path; nothing else about the request is
-  // rewritten, so the router still sees exactly what the client sent.
+  // startsWith does not: `/API/apps/secret-keys` must not slip past the map.
   const path = (req.originalUrl || req.url || '').split('?')[0].toLowerCase();
-  const isWrite = WRITE_METHODS.has(req.method.toUpperCase());
-  const { role, perms } = await resolveAccess(String(req.auth!.sub), String(req.auth!.role));
-  (req.auth as any).role = role;   // keep downstream checks honest after role changes
+  const access = await resolveAccess(String(req.auth!.sub), String(req.auth!.role));
+  (req.auth as any).role = access.role;   // keep downstream checks honest after role changes
+  req.access = access;
 
-  // hard admin lines first
-  if (ADMIN_PREFIXES.some((p) => path.startsWith(p))) {
-    const readOpen = !isWrite && ADMIN_READ_OPEN.some((p) => path.startsWith(p));
-    if (!readOpen && rankOf(role) < ROLE_RANK.admin) {
-      throw forbidden('This area requires the admin role');
+  const need = await requirementFor(req.method, path, req.body);
+  if (!need) {
+    if (WRITE_METHODS.has(req.method.toUpperCase()) && rankOf(access.role) < ROLE_RANK.operator) {
+      throw forbidden('This action requires the operator role');
     }
     return;
   }
-  const feature = featureOf(path);
-  if (!feature) {
-    // unmapped surfaces: writes need operator+, reads any authenticated user
-    if (isWrite && rankOf(role) < ROLE_RANK.operator) throw forbidden('This action requires the operator role');
-    return;
-  }
-  const need: Level = isWrite ? 'manage' : 'view';
-  if (LEVEL_RANK[perms[feature]] < LEVEL_RANK[need]) {
-    throw forbidden(`Your user group does not allow ${need === 'manage' ? 'changes to' : 'access to'} ${feature}`);
+  if (!meets(access.perms, need)) {
+    const label = need.features.map((f) => BY_KEY.get(f)?.label ?? f).join(' or ');
+    throw Object.assign(forbidden(`Your role does not allow ${need.level} on ${label}`),
+      { code: 'forbidden_feature', feature: need.features[0], level: need.level });
   }
 }
 
-/** Router-level guard for surfaces with an explicit role floor. */
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      access?: ResolvedAccess;
+    }
+  }
+}
+
+/** True when the request's user holds `level` on `feature`. For in-handler decisions. */
+export function can(req: Request, feature: string, level: Level): boolean {
+  const p = req.access?.perms;
+  if (!p) return false;
+  return LEVEL_RANK[p[feature] ?? 'none'] >= LEVEL_RANK[level];
+}
+
+/** Router guard: require a level on a feature (the central gate already ran; this is explicit intent). */
+export function requirePermission(feature: string, level: Level) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    if (!can(req, feature, level)) {
+      return next(Object.assign(forbidden(`Your role does not allow ${level} on ${BY_KEY.get(feature)?.label ?? feature}`),
+        { code: 'forbidden_feature', feature, level }));
+    }
+    next();
+  };
+}
+
+/** Router-level guard for surfaces with an explicit tier floor (kept for owner-only actions). */
 export function requireMinRole(min: Role) {
   return (req: Request, _res: Response, next: NextFunction) => {
     const role = String(req.auth?.role ?? 'viewer');
@@ -181,16 +393,47 @@ export function requireMinRole(min: Role) {
   };
 }
 
-/** The model as data for /api/auth/me → consistent UI gating. */
+// ---- no escalation ---------------------------------------------------------------
+
+/** Features where `wanted` exceeds `actor`. Empty = covered. */
+export function exceeds(actor: Perms, wanted: Perms): string[] {
+  return FEATURES.filter((f) => LEVEL_RANK[wanted[f] ?? 'none'] > LEVEL_RANK[actor[f] ?? 'none']);
+}
+
+/** Refuse unless the actor holds at least everything in `wanted`. */
+export function assertCovers(actor: Perms, wanted: Perms, what: string): void {
+  const over = exceeds(actor, wanted);
+  if (over.length) {
+    throw Object.assign(
+      forbidden(`You cannot ${what} with more access than you have yourself (${over.map((f) => `${BY_KEY.get(f)?.label ?? f}: ${wanted[f]}`).join(', ')})`),
+      { code: 'escalation', features: over });
+  }
+}
+
+/**
+ * May `actor` change `target` (edit, disable, delete, reassign)? Only if the
+ * actor's tier is at least the target's and the actor's access covers the
+ * target's current access: nobody manages someone more powerful than they are.
+ */
+export function assertCanManageUser(actor: ResolvedAccess, actorId: string, target: { id: string; role: string; perms: Perms }): void {
+  if (target.id === actorId) throw forbidden('Use your own profile to change your account; you cannot change your own access');
+  if (target.role === 'owner' && actor.role !== 'owner') throw forbidden('Only an owner can change an owner');
+  if (rankOf(target.role) > rankOf(actor.role)) throw forbidden('You cannot change a user with a higher tier than yours');
+  assertCovers(actor.perms, target.perms, 'manage this user, who has');
+}
+
+// ---- the model as data (/api/auth/me, the role editor) ---------------------------
+
 export function accessDescription() {
   return {
-    roles: ['viewer', 'operator', 'admin', 'owner'],
-    features: FEATURES,
-    levels: ['none', 'view', 'manage'],
+    tiers: ['viewer', 'operator', 'admin', 'owner'],
+    levels: LEVELS,
+    features: CATALOGUE.map((f) => ({ key: f.key, label: f.label, area: f.area, operate: f.operateMeans ?? null })),
     notes: [
-      'Owners and admins always have full access; groups apply to operators and viewers.',
-      'User management, apps & API keys and account config are admin-only, never delegated to a group.',
-      "A viewer's group can grant at most view access.",
+      'Owners and admins have full access. Operators and viewers get access from their roles.',
+      'A user holds the highest level any of their roles grants. Viewer-tier users are capped at view.',
+      'view: see. operate: run (start/stop, on air, publish). manage: create, edit, delete.',
+      'You can only grant access you hold, and only change users whose access you cover.',
     ],
   };
 }

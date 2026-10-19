@@ -1,4 +1,9 @@
-# Design — On-the-fly image service (resize / crop / filter, cached)
+# Design: on-the-fly image service (resize / crop / filter, cached)
+
+> **Status: in production** (`src/modules/images.ts`, `src/services/images/`).
+> This page is the original design record. The user and operator guide, with
+> every option, limit, setting and the deployment, is **[IMAGES.md](IMAGES.md)**.
+> Where this page and IMAGES.md differ, IMAGES.md describes what runs.
 
 ## Goal
 A high-performance image endpoint in the Volt API library: request any source image
@@ -66,17 +71,27 @@ restrict `format`/filters per plan.
 - Feeds: channel/portal logos, VOD posters/thumbnails, watermark previews, slate
   previews, and the file-manager thumbnails.
 
-## Prototype (built + proven)
-`volt-image-proto/` — a runnable sharp service. 14/14 assertions (`test.mjs`):
-parses the two example URLs; `fit-in 1920x0` → 1920×1080 and `0x600` → 1067×600
-(aspect kept); `stretch 600x600` exact/distorted; `fill 600x600` exact box;
-`focus:top-right` keeps the focal badge (2.2% red vs 0.2% centre); `format:webp`
-converts; `sharpen` changes output; HMAC sign/verify incl. unsafe dev/prod. A
-gallery (screenshot delivered) shows fit-in / fill+focus(center/top-right/smart) /
-stretch / grayscale+webp / blur over one 2400×1350 source, each tagged cache
-HIT/MISS + render ms.
-
-## To productionise
-Resolve `{path}` from S3 (per-account prefix) instead of local; put the derivative
-cache on S3 + CloudFront; require signatures (drop `unsafe`); add max-dimension and
-format guards; wire a URL-signing helper into the console + SDK.
+## What shipped (15 Oct 2026)
+- **Grammar.** The compact form the console already used is primary:
+  `/img/{sig}/{W}x{H},{fit}[,options]/{key}`. The path-style form above is still
+  accepted behind a signature, for URLs in the older shape.
+- **Signing.** Required everywhere, no `unsafe`. Keys are per account,
+  derived from one master secret, and the account id in the image path decides
+  which key verifies, so a key cannot reach another account's images. Rotation
+  through a previous-secret slot.
+- **Sources.** `library/{account}/...` and `derived/{account}/...` in the image
+  store: a local directory, or the `{project}-{env}-images` S3 bucket.
+- **Cache.** Memory LRU, then the S3 derivative cache at
+  `img-cache/img/{sig}/{spec}/{key}`, then CloudFront with an origin group that
+  reads S3 first and asks the API only on a miss. Each derivative renders once.
+- **Guards.** Max side, max area, max source bytes and pixels, enabled
+  formats, render timeout, concurrency limiter with a bounded queue (503 when
+  saturated), single-flight per URL. Out-of-range requests are refused, not
+  clamped.
+- **Signing helpers.** `POST /api/images/sign` (single and batch),
+  `GET /api/images/signing-key`, the dependency-free `@volt/image-url` SDK
+  (`packages/image-url`), used by the console.
+- **Added since the prototype:** AVIF output and `smart` / `entropy` focus came
+  back, plus `contain` with a background, `up` (allow enlargement), `v=`
+  cache-busting, SVG rasterised at the needed density.
+- **Prototype:** `volt-image-proto/` is superseded and kept for reference only.

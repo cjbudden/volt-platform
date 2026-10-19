@@ -11,6 +11,7 @@
 //    output  — the live audio playlist mtime is advancing right now
 //    public  — on_air AND valid content (what /live/:id/* would actually serve)
 // ============================================================================
+import { fleetContext } from '../fleetContext';
 import { one, query } from '../../db';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -94,6 +95,7 @@ export async function loadRadioHealth(station: any, nowMs = Date.now()): Promise
     outputAgeMs,
     onAirPublished: station.on_air === true,
     recovery: recoveryOf(station),
+    fleet: await fleetContext(),
   });
 }
 

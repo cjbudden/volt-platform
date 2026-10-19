@@ -3,11 +3,16 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, one, tx } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
-import { asyncHandler, notFound, conflict, badRequest } from '../util/http';
+import { asyncHandler, notFound, conflict, badRequest, ApiError } from '../util/http';
+import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
+import { validateSource, cleanParams } from '../services/ingestProtocols';
+import { requireMinRole } from '../auth/roles';
+import { assertPlanRoom } from '../services/plan';
 import { orchestrator } from '../services/orchestrator';
 import { validateEntityMetadata } from './metadataSchemas';
 import { defaultTypeId } from '../services/contentTypes';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
+import { mintPreviewToken } from './sourcePreview';
 import { buildChannelDetail, loadChannelHealthLite, DVR_MAX_SEC } from '../services/channelDetail';
 import { startTestStream, stopTestStream, testStreamStatus, isTestStreamAvailable } from '../services/testStream';
 import { outputHasValidContent } from './publicLive';
@@ -45,19 +50,56 @@ const WATERMARK = z.object({
 }).optional();
 
 /** List channels for the tenant (scoped via group -> account). */
+// The list standard (util/listQuery.ts): search, filter, sort and page. kind
+// keeps its old meaning (tv = no kind or tv). Everything used to come back in
+// one go; without a limit it still returns up to 1000, so the console's lists
+// are unchanged until they page on the server.
+const channelList = defineList({
+  path: '/api/channels',
+  fields: {
+    id: { sql: 'c.id', type: 'uuid' },
+    name: { sql: 'c.name', type: 'string' },
+    kind: { sql: "COALESCE(c.kind,'tv')", type: 'enum', values: ['tv', 'radio'], doc: 'tv or radio' },
+    status: { sql: 'c.status', type: 'enum', values: ['scheduled', 'provisioning', 'testing', 'live', 'stopping', 'ended', 'error'] },
+    group_id: { sql: 'c.group_id', type: 'uuid' },
+    group_name: { sql: 'g.name', type: 'string' },
+    enabled: { sql: 'c.enabled', type: 'boolean' },
+    on_air: { sql: 'c.on_air', type: 'boolean' },
+    recording_enabled: { sql: 'c.recording_enabled', type: 'boolean' },
+    auto_connect: { sql: 'c.auto_connect', type: 'boolean' },
+    resilience_tier: { sql: 'c.resilience_tier', type: 'enum', values: ['standard', 'resilient_input', 'full_redundancy'] },
+    desired_state: { sql: 'c.desired_state', type: 'string' },
+    xmltv_id: { sql: 'c.xmltv_id', type: 'string' },
+    tz: { sql: 'c.tz', type: 'string' },
+    created_at: { sql: 'c.created_at', type: 'timestamp', notNull: true },
+    updated_at: { sql: 'c.updated_at', type: 'timestamp' },
+  },
+  search: ['name', 'group_name', 'xmltv_id'],
+  defaultSort: '-created_at',
+  unpagedLimit: 1000,
+  aliases: { groupId: 'group_id', createdAt: 'created_at', updatedAt: 'updated_at', onAir: 'on_air' },
+});
+
 channelsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     // ?kind=tv|radio scopes the list (Channels page = tv, Radio page = radio);
     // no param returns everything (back-compat for scripts and search).
-    const kindFilter = req.query.kind === 'radio' ? 'radio' : req.query.kind === 'tv' ? 'tv' : null;
-    const rows = await query<any>(
+    const base: unknown[] = [accountId(req)];
+    const params = [...base];
+    const pl = parseList(channelList, req.query, params);
+    const fetched = await query<any>(
       `SELECT c.*, g.name AS group_name
          FROM channels c JOIN groups g ON g.id = c.group_id
-        WHERE g.account_id = $1 AND ($2::text IS NULL OR COALESCE(c.kind,'tv') = $2)
-        ORDER BY c.created_at DESC`,
-      [accountId(req), kindFilter]
+        WHERE g.account_id = $1${whereSql(pl)}
+        ${pageSql(pl)}`,
+      params
     );
+    const cParams = [...base];
+    const cWhere = pl.count ? whereSql(parseList(channelList, { ...req.query, cursor: undefined, offset: undefined }, cParams)) : '';
+    const total = pl.count ? (await one<any>(`SELECT count(*)::int AS n FROM channels c JOIN groups g ON g.id = c.group_id WHERE g.account_id = $1${cWhere}`, cParams))?.n : undefined;
+    // Health is per row, so it runs for this page only.
+    const rows = finishPage(req, res, pl, fetched, total);
     // ONE consistent status: the LIST uses the SAME five-gate health as the detail page
     // (via the ground-truth manifest + events), rolled up to `overall`, so a channel is
     // never "Starting" in the list while it's actually READY on the detail.
@@ -80,6 +122,96 @@ channelsRouter.get(
     res.json(enriched);
   })
 );
+
+/**
+ * CLEAR QC: reset a channel's health to a clean slate.
+ *
+ * A crash or a source fault from an earlier run keeps the channel red ("SERVER
+ * ERROR") until it runs cleanly again, which is right while nobody has looked
+ * and wrong once somebody has. This records a `qc.reset` event, the boundary
+ * the health model judges from (pipelineHealth.ts), and clears the auto
+ * connect give-up. Nothing is deleted: the faults stay in the event log, with
+ * this entry after them saying who cleared them. A fault that is still real
+ * comes straight back from its next event or the output ground truth.
+ * A stopped channel is also stood down (desired stopped), so clearing a
+ * give-up never starts a retry loop by itself.
+ */
+channelsRouter.post('/:id/reset-health', asyncHandler(async (req, res) => {
+  const c = await one<any>(
+    `SELECT c.* FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1 AND g.account_id = $2`,
+    [req.params.id, accountId(req)]);
+  if (!c) throw notFound('Channel not found');
+  const before = await buildChannelDetail(c, Date.now());
+  const who = actor(req);
+  const name = who.userId ? (await one<{ email: string }>('SELECT email FROM users WHERE id = $1', [who.userId]))?.email ?? who.label : who.label;
+  const { clearGiveUp } = await import('../services/orchestrator/resume');
+  if (c.status !== 'live') await query(`UPDATE channels SET desired_state = 'stopped', updated_at = now() WHERE id = $1`, [c.id]);
+  await clearGiveUp('channel', c.id);
+  await query(
+    `INSERT INTO stream_events(channel_id, type, detail, ts) VALUES ($1,'qc.reset',$2::jsonb, now())`,
+    [c.id, JSON.stringify({
+      message: before.health?.primaryError ? `QC cleared by ${name}: was ${before.health.primaryError.label} error (${before.health.primaryError.message})` : `QC cleared by ${name}`,
+      actor: name, was: before.health?.overall ?? null, error: before.health?.primaryError ?? null,
+      gave_up_at: c.resume_gave_up_at ?? null, last_error: c.resume_last_error ?? null,
+    })]);
+  await writeAudit(null, {
+    accountId: accountId(req), userId: who.userId, label: who.label,
+    action: 'update', entityType: 'channel', entityId: c.id,
+    changes: { health: { from: before.health?.overall ?? null, to: 'reset' } },
+  });
+  const after = await one<any>(`SELECT * FROM channels WHERE id = $1`, [c.id]);
+  const detail = await buildChannelDetail(after, Date.now());
+  res.json({ id: c.id, was: before.health?.overall ?? null, overall: detail.health?.overall ?? null, primaryError: detail.health?.primaryError ?? null });
+}));
+
+/**
+ * VIEW AS A VIEWER ELSEWHERE: what would someone in this country get from the
+ * play gate for this channel right now? The same decision the apps and the
+ * public URL make (services/rights.ts), with the layer that made it, so the
+ * operator can check the account's geo, the channel's geo, the access rules
+ * and the programme blackout without travelling. viewer: anonymous (default),
+ * member (signed in to the client's app), entitled (has bought access).
+ */
+channelsRouter.get('/:id/access-check', asyncHandler(async (req, res) => {
+  const c = await one<any>(
+    `SELECT c.id, c.name, c.geo_mode, c.geo_countries, g.account_id FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1 AND g.account_id = $2`,
+    [req.params.id, accountId(req)]);
+  if (!c) throw notFound('Channel not found');
+  const country = String(req.query.country ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(country)) throw badRequest('country must be a two-letter code');
+  const kind = String(req.query.viewer ?? 'anonymous');
+  const { evaluateAccess } = await import('../services/rights');
+  const viewerCtx = {
+    country,
+    viewerId: kind === 'anonymous' ? null : 'preview-viewer',
+    groups: [] as string[],
+    entitlements: kind === 'entitled' ? [{ grants: { ownerIds: [c.id], scopes: ['this', 'live', 'ondemand'] as any } }] : [],
+  };
+  const d: any = await evaluateAccess(c.id, country, { accountId: c.account_id, entitled: kind === 'entitled', viewerCtx });
+  let replacement: { id: string; title: string } | null = null;
+  if (d.replacementAssetId) {
+    const r = await one<any>(`SELECT id, title FROM vod_assets WHERE id = $1`, [d.replacementAssetId]);
+    replacement = r ? { id: r.id, title: r.title } : { id: d.replacementAssetId, title: 'replacement' };
+  }
+  res.json({
+    country, viewer: kind, allowed: !!d.allowed, layer: d.layer ?? 'none', reason: d.reason ?? null,
+    via: d.rule?.via ?? null, ruleId: d.rule?.ruleId ?? null,
+    products: (d.products ?? []).map((p: any) => ({ name: p.name ?? p.productKey, priceCents: p.priceCents, currency: p.currency })),
+    replacement,
+  });
+}));
+
+// A preview address for one of the channel's HLS inputs, relayed by the
+// control plane for sources that refuse playback from other sites
+// (modules/sourcePreview.ts). Viewing the channel is enough.
+channelsRouter.get('/:id/inputs/:inputId/preview', asyncHandler(async (req, res) => {
+  const row = await one<{ protocol: string; ingest_url: string | null }>(
+    `SELECT si.protocol, si.ingest_url FROM stream_inputs si JOIN channels c ON c.id = si.channel_id JOIN groups g ON g.id = c.group_id
+      WHERE si.id = $1 AND c.id = $2 AND g.account_id = $3`, [req.params.inputId, req.params.id, accountId(req)]);
+  if (!row) throw notFound('Input not found');
+  if (!/^https?:\/\//i.test(row.ingest_url ?? '')) { res.status(400).json({ error: 'Only an http or https input can be previewed through Volt' }); return; }
+  res.json({ url: `/api/source-preview/${mintPreviewToken(accountId(req), req.params.id, req.params.inputId)}/index.m3u8`, expiresInSec: 7200 });
+}));
 
 channelsRouter.get(
   '/:id',
@@ -118,7 +250,24 @@ const SOURCE = z.object({
   streamKey: z.string().optional(),
   renditionLabel: z.string().optional(),        // package_only: which rung this input carries
   renditionBitrateKbps: z.number().int().optional(),
+  // per-protocol settings (SRT mode/latency/passphrase, NDI discovery, 2110 SDP…), docs/SOURCES.md
+  params: z.record(z.union([z.string(), z.number()])).optional(),
 });
+
+/**
+ * Every source of a TV channel must be complete for its protocol, and a TV
+ * channel never takes Icecast. Refused with the reason (422) before anything
+ * is saved. Radio stations keep their own looser rules (radio module).
+ */
+export function checkVideoSources(sources: Array<{ role?: string; protocol: string; ingestUrl?: string; streamKey?: string; renditionLabel?: string; params?: Record<string, unknown> }> | undefined): void {
+  for (const s of sources ?? []) {
+    const why = validateSource({ protocol: s.protocol, ingestUrl: s.ingestUrl, streamKey: s.streamKey, params: s.params }, 'video');
+    if (why) {
+      const which = s.renditionLabel ? `${s.role === 'backup' ? 'Backup ' : ''}${s.renditionLabel}` : s.role === 'backup' ? 'Backup source' : 'Primary source';
+      throw new ApiError(422, `${which}: ${why}`);
+    }
+  }
+}
 // filler-on-total-loss + input-failover (backup source) config shared by create/edit.
 const FILLER = {
   inputFailoverEnabled: z.boolean().optional(),
@@ -160,13 +309,28 @@ channelsRouter.post(
   '/',
   asyncHandler(async (req, res) => {
     const body = createSchema.parse(req.body);
+    if (body.kind !== 'radio') checkVideoSources(body.sources);
     const group = await one<any>('SELECT id, max_channels FROM groups WHERE id = $1 AND account_id = $2', [
       body.groupId,
       accountId(req),
     ]);
     if (!group) throw notFound('Group not found');
-    const count = await one<any>('SELECT count(*)::int AS n FROM channels WHERE group_id = $1', [body.groupId]);
-    if (count.n >= group.max_channels) throw conflict(`Channel limit reached (${group.max_channels})`);
+    // THE PLAN FIRST: the account's allowance of channels and stations in all
+    // (services/plan.ts), then the group's share of it below.
+    await assertPlanRoom(accountId(req));
+    // THE GROUP'S LIMIT COUNTS TV CHANNELS AND RADIO STATIONS TOGETHER. Say so,
+    // with the numbers: "limit reached (10)" alone left people looking for ten
+    // TV channels when the group held two and eight stations.
+    const count = await one<any>(
+      `SELECT count(*)::int AS n, count(*) FILTER (WHERE kind = 'radio')::int AS radio
+         FROM channels WHERE group_id = $1`, [body.groupId]);
+    if (count.n >= group.max_channels) {
+      const tv = count.n - count.radio;
+      const parts = [`${tv} TV channel${tv === 1 ? '' : 's'}`];
+      if (count.radio) parts.push(`${count.radio} radio station${count.radio === 1 ? '' : 's'}`);
+      throw conflict(`This group is full: it is given ${group.max_channels} channels and stations of the plan and has ${parts.join(' and ')}. ` +
+        'Remove one, choose another group, or give this group a bigger share of the plan.');
+    }
 
     const who = actor(req);
     const ladder = body.outputLadder?.length
@@ -201,10 +365,10 @@ channelsRouter.post(
         [ch.id, md.schemaId, JSON.stringify(md.metadata)]);
       for (const s of body.sources ?? []) {
         await c.query(
-          `INSERT INTO stream_inputs(channel_id, role, protocol, ingest_url, stream_key, rendition_label, rendition_bitrate_kbps)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          `INSERT INTO stream_inputs(channel_id, role, protocol, ingest_url, stream_key, rendition_label, rendition_bitrate_kbps, params)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
           [ch.id, s.role ?? 'primary', s.protocol, s.ingestUrl ?? null, s.streamKey ?? null,
-           s.renditionLabel ?? null, s.renditionBitrateKbps ?? null]
+           s.renditionLabel ?? null, s.renditionBitrateKbps ?? null, JSON.stringify(cleanParams(s.protocol, s.params))]
         );
       }
       return ch;
@@ -297,6 +461,7 @@ const editChannel = asyncHandler(async (req, res) => {
     [req.params.id, accountId(req)]
   );
   if (!current) throw notFound('Channel not found');
+  if (has('sources') && current.kind !== 'radio') checkVideoSources(body.sources);
 
   const patch: Record<string, any> = {};
   if (has('name')) patch.name = body.name;
@@ -386,10 +551,10 @@ const editChannel = asyncHandler(async (req, res) => {
         await c.query('DELETE FROM stream_inputs WHERE channel_id = $1', [req.params.id]);
         for (const s of body.sources!) {
           await c.query(
-            `INSERT INTO stream_inputs(channel_id, role, protocol, ingest_url, stream_key, rendition_label, rendition_bitrate_kbps)
-             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            `INSERT INTO stream_inputs(channel_id, role, protocol, ingest_url, stream_key, rendition_label, rendition_bitrate_kbps, params)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
             [req.params.id, s.role ?? 'primary', s.protocol, s.ingestUrl ?? null, s.streamKey ?? null,
-             s.renditionLabel ?? null, s.renditionBitrateKbps ?? null]
+             s.renditionLabel ?? null, s.renditionBitrateKbps ?? null, JSON.stringify(cleanParams(s.protocol, s.params))]
           );
         }
       });
@@ -445,8 +610,40 @@ channelsRouter.get(
   })
 );
 
+/**
+ * WHAT A DELETE WOULD TAKE WITH IT. The console shows this before an
+ * administrator confirms: deleting a channel removes its recordings, clips,
+ * guide and schedules with it (all ON DELETE CASCADE).
+ */
+channelsRouter.get(
+  '/:id/delete-impact',
+  asyncHandler(async (req, res) => {
+    res.json(await deleteImpact(req.params.id, accountId(req)));
+  })
+);
+
+async function deleteImpact(id: string, acc: string) {
+  const ch = await one<any>(
+    `SELECT c.id, c.name, c.kind, c.status, g.name AS group_name,
+            EXISTS (SELECT 1 FROM instances i WHERE i.channel_id = c.id AND i.terminated_at IS NULL) AS running
+       FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1 AND g.account_id = $2`, [id, acc]);
+  if (!ch) throw notFound('Channel not found');
+  const n = await one<any>(
+    `SELECT (SELECT count(*)::int FROM recordings WHERE channel_id = $1) AS recordings,
+            (SELECT count(*)::int FROM vod_assets WHERE channel_id = $1) AS clips,
+            (SELECT count(*)::int FROM vod_assets WHERE channel_id = $1 AND availability_state IN ('available','scheduled')) AS published_clips,
+            (SELECT count(*)::int FROM programmes WHERE channel_id = $1) AS programmes,
+            (SELECT count(*)::int FROM scheduled_clips WHERE channel_id = $1) AS scheduled_clips,
+            (SELECT count(*)::int FROM stream_inputs WHERE channel_id = $1) AS sources`, [id]);
+  const blocker = ch.status === 'live' ? 'Stop the channel before deleting it'
+    : ch.running ? 'This channel still has a running encoder. Stop it before deleting.' : null;
+  return { id: ch.id, name: ch.name, kind: ch.kind, group: ch.group_name, status: ch.status, blocker, counts: n };
+}
+
+/** Delete a channel or station. ADMINISTRATORS ONLY; every attempt is in the audit log. */
 channelsRouter.delete(
   '/:id',
+  requireMinRole('admin'),
   asyncHandler(async (req, res) => {
     // STOP IT FIRST. The comment here used to say "in production: terminate any
     // running encoder first" and then delete anyway.
@@ -475,6 +672,7 @@ channelsRouter.delete(
     );
     if (running) throw badRequest('This channel still has a running encoder. Stop it before deleting.');
 
+    const impact = await deleteImpact(req.params.id, accountId(req));
     const row = await one<any>(
       `DELETE FROM channels c USING groups g
         WHERE c.group_id = g.id AND c.id = $1 AND g.account_id = $2 RETURNING c.id, c.name`,
@@ -483,7 +681,8 @@ channelsRouter.delete(
     if (!row) throw notFound('Channel not found');
     const who = actor(req);
     await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
-      action: 'delete', entityType: 'channel', entityId: row.id, snapshot: { name: row.name } });
+      action: 'delete', entityType: 'channel', entityId: row.id,
+      snapshot: { name: row.name, kind: impact.kind, group: impact.group, removed: impact.counts } });
     res.status(204).end();
   })
 );

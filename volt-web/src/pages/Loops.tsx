@@ -5,6 +5,7 @@ import {
   resumeWithFile, startUpload, subscribe, type UploadItem,
 } from '../uploadManager'
 import { pressable } from '../a11y'
+import { PageError, useNotify, usePageNotice } from '../notices'
 
 /* ============================================================================
    LOOPS & FILLERS
@@ -198,6 +199,8 @@ export default function LoopsPage() {
   const [kind, setKind] = useState<'slate' | 'loop' | 'auto'>('auto')
   const [background, setBackground] = useState(false)
   const [err, setErr] = useState('')
+  const notify = useNotify()
+  const fail = (m: string) => notify({ kind: 'error', message: m })
   const [filter, setFilter] = useState<'all' | 'slate' | 'loop'>('all')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [rename, setRename] = useState('')
@@ -223,13 +226,15 @@ export default function LoopsPage() {
   const onFiles = useCallback((files: File[]) => {
     for (const f of files) {
       startUpload(f, { kind: kind === 'auto' ? guessKind(f) : kind })
-        .catch((e: any) => setErr(e.message))
+        .catch((e: any) => fail(e.message))
     }
   }, [kind])
 
   const shown = (assets ?? []).filter(a => filter === 'all' || a.kind === filter)
 
-  if (err && !assets) return <div className="err">{err}</div>
+  usePageNotice('load', err && assets ? { kind: 'error', title: "Couldn't load loops and fillers.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
+
+  if (err && !assets) return <PageError message={err} onRetry={load} />
   if (!assets) return <div className="loading">Loading loops and fillers…</div>
 
   return (
@@ -242,7 +247,6 @@ export default function LoopsPage() {
         <div className="spacer" />
         <button className="btn ghost" onClick={load}>Refresh</button>
       </div>
-      {err && <div className="err">{err}</div>}
 
       <div style={{ marginBottom: 16 }}>
         <DropZone onFiles={onFiles} kind={kind} setKind={setKind} background={background} />
@@ -269,7 +273,7 @@ export default function LoopsPage() {
               try {
                 await resumeWithFile(sid, f)
                 setResumable(r => r.filter(x => x.sessionId !== sid))
-              } catch (ex: any) { setErr(ex.message) }
+              } catch (ex: any) { fail(ex.message) }
             }} />
           <table>
             <thead><tr><th>Name</th><th>File</th><th>Progress</th><th /></tr></thead>
@@ -349,7 +353,7 @@ export default function LoopsPage() {
                           if (e.key === 'Escape') setRenaming(null)
                           if (e.key === 'Enter' && rename.trim()) {
                             try { await api.patchFillerAsset(a.id, { name: rename.trim() }); setRenaming(null); load() }
-                            catch (ex: any) { setErr(ex.message) }
+                            catch (ex: any) { fail(ex.message) }
                           }
                         }} />
                       <button className="btn ghost" onClick={() => setRenaming(null)}>Cancel</button>
@@ -376,7 +380,7 @@ export default function LoopsPage() {
                   <button className="btn ghost" style={{ marginLeft: 6 }}
                     onClick={async () => {
                       if (!confirm(`Delete "${a.name}"? Any channel using it falls back to black.`)) return
-                      try { await api.deleteFillerAsset(a.id); load() } catch (ex: any) { setErr(ex.message) }
+                      try { await api.deleteFillerAsset(a.id); load() } catch (ex: any) { fail(ex.message) }
                     }}>Delete</button>
                 </td>
               </tr>

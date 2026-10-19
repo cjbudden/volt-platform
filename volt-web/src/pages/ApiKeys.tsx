@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type AppReg, type AppType, type ApiKeyRow, type MintedKey, type AccountKeyRow } from '../api'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 import { pressable } from '../a11y'
+import { FormStatus, useNotify, usePageNotice } from '../notices'
 
 /* ============================================================================
    API Keys & Apps — the admin surface for frontend application access.
@@ -30,10 +31,12 @@ export default function ApiKeys() {
   async function load() {
     try {
       const [a, k] = await Promise.all([api.apps(), api.allKeys()])
-      setApps(a); setKeys(k)
+      setApps(a); setKeys(k); setErr('')
     } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() }, [])
+  const notify = useNotify()
+  usePageNotice('load', err ? { kind: 'error', title: "Couldn't load apps and keys.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
   const counts = useMemo(() => {
     const c = apps || []
@@ -49,24 +52,22 @@ export default function ApiKeys() {
   const secretKeys = keys.filter(k => k.kind === 'secret' && !k.app_id)
 
   async function mintSecret() {
-    setBusySecret(true); setErr('')
+    setBusySecret(true)
     try {
       const k = await api.createSecretKey()
       setMinted({ title: 'Account secret key created', k })
       await load()
-    } catch (e: any) { setErr(e.message) } finally { setBusySecret(false) }
+    } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusySecret(false) }
   }
   async function revoke(id: string) {
     if (!window.confirm('Revoke this key? Applications using it stop working immediately.')) return
-    setErr('')
-    try { await api.revokeApiKey(id); await load() } catch (e: any) { setErr(e.message) }
+    try { await api.revokeApiKey(id); await load() } catch (e: any) { notify({ kind: 'error', message: e.message }) }
   }
 
   return (
     <>
       <PageHead title="API Keys & Apps" sub="Register frontend applications, view client keys, and manage the account's server-to-server secret keys."
         action={<NewButton label="Register app" onClick={() => setCreateOpen(true)} />} />
-      {err && <div className="err">{err}</div>}
       {apps === null ? (
         <div className="loading">Loading apps…</div>
       ) : (
@@ -528,10 +529,9 @@ function AppDrawer({ app, onClose, onDone }: { app?: AppReg; onClose: () => void
               )}
             </>
           )}
-
-          {err && <div className="err">{err}</div>}
         </div>
         <div className="drawer-f">
+          <FormStatus error={err} />
           <button className="btn ghost" onClick={onClose}>Cancel</button>
           {/* The button states the OUTCOME. "Register app" does not tell you a
               key is about to be minted and shown once; this does. */}

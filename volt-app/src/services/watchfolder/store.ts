@@ -49,6 +49,8 @@ export async function mirrorQuarantines(id: string, quarantined: { objectKey: st
   if (!f || !s3api || !quarantined.length) return;
   for (const q of quarantined) if (q.quarantineKey) await quarantineInS3(f, s3api, q.objectKey, q.quarantineKey).catch((e) => console.warn('[s3 watch] quarantine mirror failed', e));
 }
+import { readImageFacts } from '../images/metadata';
+import { insertMediaRow } from '../mediaLibrary';
 import { imageStore } from '../imageStore';
 import { scanFolder, type ItemStore, type RecordedItem, type ScanFolder, type ScanResult } from './scanner';
 import type { WatchRule, FolderPolicy } from './rules';
@@ -212,15 +214,15 @@ export const pgIngestStore: IngestStore = {
   },
 
   async createMediaFile(m) {
-    const row = await one<any>(
-      `INSERT INTO media_files
-         (account_id, kind, path, folder, name, content_type, size_bytes,
-          width, height, tags, store_key, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
-       RETURNING id`,
-      [m.accountId, m.kind, m.path, m.folder, m.name, m.contentType, m.sizeBytes,
-       m.width, m.height, m.tags, m.storeKey, m.userId ?? null]
-    );
+    // Same row shape as an upload: dimensions, checksum and the file's own
+    // metadata (EXIF, GPS, IPTC, XMP), searchable in the library.
+    const facts = m.body ? await readImageFacts(m.body) : undefined;
+    const row = await insertMediaRow({
+      accountId: m.accountId, kind: m.kind, path: m.path, folder: m.folder, name: m.name,
+      storeKey: m.storeKey, sizeBytes: m.sizeBytes, contentType: m.contentType, tags: m.tags,
+      userId: m.userId ?? null, source: 'watchfolder',
+      facts: { ...(facts ?? {}), width: facts?.width ?? m.width, height: facts?.height ?? m.height, contentType: m.contentType },
+    });
     return { id: row.id };
   },
 

@@ -20,6 +20,7 @@ import { publishGate } from './review';
 import { resolveForAsset, windowFor, type Target, type Resolved } from './publishingRules';
 import { evaluateAccessRules, type ViewerCtx, type AccessOutcome } from './accessRules';
 import { upsertViewer, viewerEntitlements } from './entitlements';
+import { touchViewer, cachedEntitlements, vodAvailabilityRow } from './viewerPath';
 
 export interface PublishOutcome {
   asset: any;
@@ -177,15 +178,18 @@ export interface ViewerInput { externalId?: string | null; groups?: string[]; em
 /** Build the evaluator's view of the viewer: identity, groups, live entitlements. */
 export async function viewerContext(accountId: string, geo: string | undefined, viewer: ViewerInput | undefined): Promise<ViewerCtx> {
   if (!viewer?.externalId) return { country: geo ?? null, viewerId: null, groups: [], entitlements: [] };
-  const v = await upsertViewer(accountId, viewer.externalId, { email: viewer.email ?? null, groups: viewer.groups });
-  return { country: geo ?? null, viewerId: v.id, groups: v.groups ?? [], entitlements: await viewerEntitlements(v.id) };
+  // Written at most once per CACHE_VIEWER_TOUCH_SEC per viewer (a changed
+  // email or group list writes at once), entitlements cached and dropped on
+  // any purchase or grant. See services/viewerPath.ts.
+  const opts = { email: viewer.email ?? null, groups: viewer.groups };
+  const externalId = viewer.externalId;
+  const v = await touchViewer(accountId, externalId, opts, () => upsertViewer(accountId, externalId, opts));
+  return { country: geo ?? null, viewerId: v.id, groups: v.groups ?? [], entitlements: await cachedEntitlements(v.id, () => viewerEntitlements(v.id)) };
 }
 
 export async function onDemandAccess(assetId: string, geo?: string, appId?: string | null, entitled = false, viewer?: ViewerCtx | null):
   Promise<{ allowed: boolean; reason?: string; paywall?: any; rule?: AccessOutcome } | null> {
-  const a = await one<any>(
-    `SELECT availability_state, availability, availability_sources, available_from, available_until, published, schema_id, channel_id, event_id
-       FROM vod_assets WHERE id = $1`, [assetId]);
+  const a = await vodAvailabilityRow(assetId);   // cached; edits and the availability clock invalidate it
   if (!a) return null;
   const st = a.availability_state ?? 'draft';
   if (st === 'withdrawn') return { allowed: false, reason: 'this content is no longer available' };

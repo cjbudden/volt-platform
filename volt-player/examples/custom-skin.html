@@ -1,0 +1,58 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Volt player: a custom skin</title>
+<!--
+  A CLIENT'S OWN SKIN, in about forty lines (docs/PLAYER_SDK.md, "Custom skins").
+
+  The skin gets the player's STATE and COMMANDS and draws whatever it likes.
+  It never touches the stream: quality, subtitles, casting, beacons and the
+  guide keep working because the player does them, not the skin. The theme's
+  colours arrive as CSS variables (--vp-primary and friends), so the console's
+  Player setup still restyles it.
+
+  Open with ?key=pk_…&asset=<asset id>&api=http://localhost:8080
+-->
+<body style="font:15px system-ui;background:#f4f4f5;padding:40px">
+<div id="player" style="max-width:720px"></div>
+<script src="http://localhost:8080/player/volt-player.js"></script>
+<script>
+VoltPlayer.registerSkin('acme', () => {
+  let s = null, ui = {}
+  return {
+    mount(ctx) {
+      const { el, fmtTime } = VoltPlayer.kit
+      ui.play = el('button', null, { type: 'button' }, 'Play')
+      ui.play.onclick = () => ctx.commands.toggle()
+      ui.live = el('button', null, { type: 'button' }, 'Go live')
+      ui.live.onclick = () => ctx.commands.goLive()
+      ui.quality = el('select')
+      ui.quality.onchange = () => ctx.commands.setQuality(ui.quality.value)
+      ui.title = el('strong'); ui.time = el('span')
+      ui.fmt = fmtTime
+      const bar = el('div', null, { style: 'display:flex;gap:10px;align-items:center;padding:10px;background:var(--vp-primary);color:var(--vp-primary-ink)' },
+        ui.play, ui.title, ui.time, ui.live, ui.quality)
+      ctx.stage.style.aspectRatio = '16/9'
+      ctx.root.append(ctx.stage, bar)
+    },
+    update(state) {
+      s = state
+      ui.play.textContent = state.playing ? 'Pause' : 'Play'
+      ui.title.textContent = state.programme?.title ?? state.item?.title ?? ''
+      ui.time.textContent = state.live ? (state.atLiveEdge ? 'LIVE' : '-' + ui.fmt(state.behindLive)) : ui.fmt(state.currentTime)
+      ui.live.hidden = !state.live || state.atLiveEdge
+      const opts = [['auto', 'Auto'], ...state.qualities.map(q => [q.id, q.label])]
+      if (ui.quality.options.length !== opts.length) ui.quality.replaceChildren(...opts.map(([v, l]) => new Option(l, v)))
+      ui.quality.value = state.quality
+      ui.quality.hidden = state.qualities.length < 2
+    },
+  }
+})
+
+const q = new URLSearchParams(location.search)
+VoltPlayer.VoltPlayer.create({
+  el: '#player', skin: 'acme',
+  apiBase: q.get('api') || 'http://localhost:8080',
+  appKey: q.get('key'), assetId: q.get('asset'),
+  theme: { primary: '#7c3aed' },
+})
+</script>

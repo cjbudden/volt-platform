@@ -72,5 +72,15 @@ def audio_track_args(index):
 
     The `?` on the map makes the track optional: a source that claims three
     tracks and delivers two must not take the whole encode down.
+
+    48 kHz, ALWAYS. The packager writes audio on a 90 kHz clock. At 48 kHz one
+    1024-sample AAC frame is exactly 1920 ticks. At 44.1 kHz it is 2089.796, which
+    Shaka must round down to 2089, so every 4 s segment ends ~137 ticks (~1.5 ms)
+    before the next one starts and the packager logs "Found a gap" once per
+    segment. Inaudible and non-accumulating, but it buries real warnings.
+    Resampling here removes it for every transcoded source, whatever rate the
+    client sends, and 48 kHz is the broadcast norm anyway. (package_only passes
+    source audio through untouched; packager_log.py handles the warning there.)
     """
-    return ["-map", f"0:a:{index}?", "-c:a", "aac", "-b:a", "128k", "-ac", "2"]
+    return ["-map", f"0:a:{index}?", "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+            "-ar", "48000"]

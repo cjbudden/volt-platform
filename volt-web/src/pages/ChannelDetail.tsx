@@ -1,20 +1,27 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import { api, originUrl, thumbUrl, type ChannelDetail as CD, type ChannelSettingsPatch, type WatermarkCfg, type FailoverMode, type FailoverTestState } from '../api'
+import { api, originUrl, thumbUrl, type AccessCheck, type ChannelDetail as CD, type ChannelSettingsPatch, type WatermarkCfg, type FailoverMode, type FailoverTestState } from '../api'
 import { navigate } from '../router'
 import { TypePicker, MetadataForm } from '../ContentTypeFields'
 import { RuleEditor } from '../RuleEditor'
 import { subscribeLive } from '../liveStatus'
 import { useRecordWatch, LiveEditNotice } from '../liveRecord'
-import { useProtocols, SourceInput, hlsChoicePending, type SourceValue } from '../protocols'
+import { useProtocols, SourceInput, hlsChoicePending, sourceFromRow, sourceProblem, sourceToApi, type SourceValue } from '../protocols'
+import { COUNTRIES, countryName } from '../lib/countries'
+import { useInputChecks, verdictOf, summaryOf, LevelDot, inputName, heightOf, type InputDef } from '../sourceInputs'
+import { PackageRenditions, pkgFromSources, pkgToSources, type PkgRow, type PkgFallback } from '../PackageRenditions'
 import { WatermarkFields } from '../WatermarkFields'
 import { ImagePicker } from '../ImagePicker'
 import { ImageRefField, GuideIconField } from '../ImageRefField'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
-import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, GATE_COLOR, RecoveryNote, DiagnosisBlock, DrawerTabs, TabPane, type DrawerTab, type RetUnit } from '../scaffold'
+import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, type StripGate, GATE_COLOR, RecoveryNote, DiagnosisBlock, DrawerTabs, TabPane, type DrawerTab, type RetUnit } from '../scaffold'
+import DeleteChannelDialog from '../DeleteChannelDialog'
+import { usePageNotice, useNotify, PageError, FormStatus, Notice } from '../notices'
+import { useAccess, ReadOnlyBadge } from '../access'
 // The meter reads the SAME quantity as the radio waveform and the clipping
 // workbench: linear peak amplitude. See audioLevel.ts.
 import { analyserPeak } from '../audioLevel'
 import { ShareDrawer } from '../ShareDrawer'
+import { EmbedDrawer } from '../EmbedDrawer'
 import { pressable } from '../a11y'
 function fmtOffset(sec: number) {
   if (sec <= 0) return 'LIVE'
@@ -27,12 +34,24 @@ function fmtWindow(sec: number) {
 }
 
 export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: string; onBack: () => void; onOpenSettings?: () => void }) {
+  // ACCESS (access.tsx): view opens the page; operate = start/stop, on/off
+  // air, auto connect, failover switching; manage = settings.
+  const { can, isAdminTier } = useAccess()
+  const [delOpen, setDelOpen] = useState(false)
+  const canRun = can('channels', 'operate')
+  const canManage = can('channels', 'manage')
   const [d, setD] = useState<CD | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // "Edit settings" from a list row opens the page with ?settings: open the
+  // drawer straight away, then drop the flag so a reload does not reopen it.
+  const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(window.location.search).has('settings'))
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('settings')) window.history.replaceState(window.history.state, '', window.location.pathname)
+  }, [])
   const [qcOpen, setQcOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [embedOpen, setEmbedOpen] = useState(false)
   const [confirmStart, setConfirmStart] = useState(false)
   const [nowMs, setNowMs] = useState(Date.now())
 
@@ -42,6 +61,9 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
     try { setD(await api.channel(id)); setErr('') } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id])
+  // A failure while the channel is on screen: in the page notice region
+  // (notices.tsx), over the working page, never instead of it.
+  usePageNotice('action', err && d ? { kind: 'error', message: err, onDismiss: () => setErr('') } : null)
   // LIVE STATUS via SSE (production path): the shared client pushes a change for this
   // channel (or a resync on (re)connect); we refetch the detail so gates/output/actions
   // reflect reality (Starting -> Available, Stop appears, errors surface). One socket
@@ -93,6 +115,20 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
       for (let i = 0; i < 4; i++) { await new Promise(r => setTimeout(r, 1500)); await load() }
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
+  // CLEAR QC: a clean slate for the health model (POST /channels/:id/reset-health).
+  const notify = useNotify()
+  const [resetBusy, setResetBusy] = useState(false)
+  async function resetQc() {
+    if (!d) return
+    setResetBusy(true)
+    try {
+      const r = await api.resetChannelHealth(d.id)
+      await load()
+      notify(r.primaryError
+        ? { kind: 'warn', message: `QC cleared, but ${r.primaryError.label.toLowerCase()} is still failing now: ${r.primaryError.message}` }
+        : { kind: 'ok', message: r.was === 'error' || r.was === 'degraded' ? 'QC cleared: the earlier errors are in the event log.' : 'QC cleared.' })
+    } catch (e: any) { setErr(e.message) } finally { setResetBusy(false) }
+  }
   async function dropSource() {
     if (!d) return
     setBusy(true)
@@ -107,7 +143,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
   // included, with one line of red text, mid-broadcast, with no way back
   // except navigating away. A failure that happened while we already have the
   // channel loaded is shown as a banner over the working page instead.
-  if (err && !d) return <div className="err" style={{ margin: 20 }}>Couldn’t load channel: {err}</div>
+  if (err && !d) return <PageError title="Couldn't load this channel." message={err} onRetry={() => { setErr(''); load() }} />
   if (!d) return <div className="loading">Loading channel…</div>
 
   const live = published && sourceUp
@@ -148,14 +184,6 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
 
   return (
     <>
-      {/* A failure that arrived while the channel is already on screen: shown
-          as a dismissable banner OVER the working page, never instead of it. */}
-      {err && (
-        <div className="err" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ flex: 1 }}>{err}</span>
-          <button className="btn ghost" onClick={() => setErr('')}>Dismiss</button>
-        </div>
-      )}
       <div className="page-head">
         <div>
           <div className="crumb" style={{ marginBottom: 6 }}>
@@ -171,7 +199,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
             <span className={`tag type ${wt === 'transcode' ? 'chan' : 'event'}`}>{wt === 'transcode' ? 'Transcode' : 'Packaging'}</span>
             <span className={`tag ${stateCls}`}><span className={`dot-s ${stateCls}`} />{stateLabel}</span>
             {d.billing?.billable && (
-              <span title={`Encoder up (${d.billing.instance}) — live time metering`}
+              <span title="Server up, live time metering"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-sm)', padding: '3px 9px', borderRadius: 999, background: 'rgba(251,191,36,.14)', border: '1px solid rgba(251,191,36,.4)', color: '#fbbf24' }}>
                 ● billable · {fmtDur(billingElapsed)}
               </span>
@@ -187,17 +215,37 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
           </p>
         </div>
         <div className="spacer" />
-        <button className="btn ghost" onClick={() => setQcOpen(true)} title="Diagnose the pipeline (server → input → encoder → output)"
-          style={errored ? { color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' } : undefined}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>QC
-        </button>
-        <button className="btn ghost" onClick={() => setShareOpen(true)} title="Create a private, PIN/expiry-secured preview link for a client or reviewer (not on air)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v14" /></svg>Share
-        </button>
-        <button className="btn ghost" onClick={() => { setSettingsOpen(true); onOpenSettings?.() }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>Settings
-        </button>
-        {!serverUp ? (
+        {/* SECONDARY ACTIONS AS ICONS, named on hover (data-tip) and to screen
+            readers (aria-label). Remove is not here: it is at the foot of the
+            page, away from the buttons people press every day. */}
+        <div className="icon-actions">
+          <button className={`btn ghost icon-btn${errored ? ' alert' : ''}`} onClick={() => setQcOpen(true)}
+            data-tip={errored ? 'QC: something failed, diagnose it' : 'QC: diagnose the pipeline'} aria-label="QC">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.4-7.5 9.5-4.3-1.1-7.5-4.9-7.5-9.5V6L12 3z" /><path d="M8.8 12.2l2.2 2.2 4.3-4.6" /></svg>
+          </button>
+          {canRun && (
+            <button className="btn ghost icon-btn" onClick={resetQc} disabled={resetBusy}
+              data-tip={resetBusy ? 'Clearing…' : 'Clear QC: reset errors and judge the channel afresh'} aria-label="Clear QC">
+              <svg className={resetBusy ? 'spin' : undefined} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8" /><path d="M3 3v5h5" /></svg>
+            </button>
+          )}
+          {can('sharing', 'manage') && (
+            <button className="btn ghost icon-btn" onClick={() => setShareOpen(true)} data-tip="Share a private preview link" aria-label="Share">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v14" /></svg>
+            </button>
+          )}
+          {can('apps', 'view') && (
+            <button className="btn ghost icon-btn" onClick={() => setEmbedOpen(true)} data-tip="Embed player: a tag to put this channel on a website" aria-label="Embed player">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5" /><path d="M10 9.2v5.6l4.6-2.8z" fill="currentColor" stroke="none" /></svg>
+            </button>
+          )}
+          {canManage && (
+            <button className="btn ghost icon-btn" onClick={() => { setSettingsOpen(true); onOpenSettings?.() }} data-tip="Settings" aria-label="Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+            </button>
+          )}
+        </div>
+        {!canRun ? <ReadOnlyBadge feature="channels" /> : !serverUp ? (
           <button className="btn primary" disabled={busy || !hasSource} onClick={() => setConfirmStart(true)}
             title={hasSource ? 'Brings the encoder up and begins ingesting the configured source' : noSourceTitle}>
             {busy ? 'Starting…' : hasSource ? 'Start channel' : 'Start channel (no source)'}
@@ -233,7 +281,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
           failure banners it sits beside, and a notice floating above the page's
           own title reads as if it were about something else. */}
       <RecoveryNote row={d} state={d.health?.overall}
-        onAutoConnect={async (on) => { setBusy(true); try { await api.setAutoConnect('channel', d.id, on); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } }}
+        onAutoConnect={canRun ? async (on) => { setBusy(true); try { await api.setAutoConnect('channel', d.id, on); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } } : undefined}
         togglingAuto={busy} />
 
       {perr && (
@@ -251,7 +299,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         </div>
       )}
 
-      <PipelineStrip gates={d.health?.gates || []} />
+      <PipelineStrip gates={withMeters(d)} />
 
       {published && d.public?.url && (
         <div style={{
@@ -273,7 +321,10 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
       <FailoverTestPanel d={d} sourceUp={sourceUp} />
 
       <EpgStrip d={d}
-        onAddEpg={() => navigate('events')}
+        // ABSOLUTE path. navigate('events') was relative, so the browser resolved it
+        // against /channels/<id> and landed on /channels/events, a channel called
+        // "events" that does not exist. The guide for THIS channel lives here.
+        onAddEpg={() => navigate(`/epg/channel/${encodeURIComponent(d.id)}`)}
         onHideEpg={async () => { try { await api.updateChannel(d.id, { epgEnabled: false }); await load() } catch (e: any) { setErr(e.message) } }} />
 
       <ViewersCard d={d} live={live} />
@@ -283,6 +334,22 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         <EventLog d={d} />
       </div>
 
+      {/* REMOVE, at the foot of the page: never next to Start, QC or Settings,
+          so it cannot be hit by accident. The dialog still shows what goes with
+          the channel and asks for its name. */}
+      {isAdminTier && (
+        <div className="danger-zone">
+          <div>
+            <div className="dz-t">Remove this channel</div>
+            <div className="dz-d">{serverUp ? 'Stop the channel first. ' : ''}Removes the channel with its recordings, clips and guide. You will see exactly what goes and type the name to confirm.</div>
+          </div>
+          <button className="btn ghost danger" disabled={serverUp} onClick={() => setDelOpen(true)}
+            title={serverUp ? 'Stop the channel before removing it' : undefined}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>Remove channel
+          </button>
+        </div>
+      )}
+
       {settingsOpen && (
         <SettingsDrawer d={d} onClose={() => setSettingsOpen(false)}
           onSaved={() => { setSettingsOpen(false); load() }} />
@@ -291,6 +358,8 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
       {qcOpen && <QcPanel d={d} onClose={() => setQcOpen(false)} onRefresh={load} />}
 
       {shareOpen && <ShareDrawer target={{ kind: 'channel', id: d.id, name: d.name }} onClose={() => setShareOpen(false)} />}
+      {embedOpen && <EmbedDrawer target={{ kind: 'channel', id: d.id, name: d.name }} onClose={() => setEmbedOpen(false)} />}
+      {delOpen && <DeleteChannelDialog id={d.id} onClose={() => setDelOpen(false)} onDeleted={() => { setDelOpen(false); onBack() }} />}
 
       {confirmStart && (
         <StartConfirm d={d} onCancel={() => setConfirmStart(false)}
@@ -298,6 +367,41 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
       )}
     </>
   )
+}
+
+/* ------------------------------------------- live readings on the gate strip */
+export const fmtBps = (b: number) => b >= 1e6 ? `${(b / 1e6).toFixed(1)} Mbps` : b >= 1e3 ? `${Math.round(b / 1e3)} kbps` : `${b} bps`
+export const fmtBytes = (n: number) => n >= 1e12 ? `${(n / 1e12).toFixed(2)} TB` : n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} kB` : `${n} B`
+/**
+ * The CPU reading on the Server box and the data received on the Input box,
+ * only while the run is up and only when there is a real reading (absent is
+ * shown as nothing, never as 0). See services/channelDetail.ts streamMetrics.
+ */
+function withMeters(d: CD): StripGate[] {
+  const gates: StripGate[] = (d.health?.gates || []).map(g => ({ ...g }))
+  const m = d.metrics
+  if (!m || d.status !== 'live') return gates
+  const srv = gates.find(g => g.gate === 'server')
+  if (srv && m.cpu) {
+    const pct = Math.round(m.cpu.pct)
+    srv.meter = m.cpu.source === 'encoder'
+      ? { text: `CPU ${pct}%`, warn: pct >= 85, title: `This encoder's CPU: ${m.cpu.pct}% of the ${m.cpu.cores ?? '?'} core${m.cpu.cores === 1 ? '' : 's'} it may use (its own processes, read every 10 s).` }
+      : { text: `host CPU ${pct}%`, warn: pct >= 85, title: `The whole server's CPU, sampled ${Math.max(0, Math.round((Date.now() - m.cpu.atMs) / 1000))} s ago${m.cpu.tasksOnHost ? `; ${m.cpu.tasksOnHost} stream${m.cpu.tasksOnHost === 1 ? '' : 's'} on it` : ''}. This encoder cannot measure itself here.` }
+  }
+  const inp = gates.find(g => g.gate === 'input')
+  if (inp && m.ingest.length) {
+    const rate = m.ingest.reduce((a, x) => a + (x.bps ?? 0), 0)
+    const total = m.ingest.reduce((a, x) => a + (x.bytes ?? 0), 0)
+    const hasRate = m.ingest.some(x => x.bps != null)
+    const whole = m.ingest.length === 1 && m.ingest[0].key === 'network'
+    inp.meter = {
+      text: `${hasRate ? fmtBps(rate) : '…'} · ${fmtBytes(total)}`,
+      title: (whole ? 'Received over the network by the whole encoder (all inputs together)' : 'Received per input')
+        + ', the rate over the last 10 s and the total since the run started:\n'
+        + m.ingest.map(x => `${x.key === 'network' ? 'network in' : `${x.label ?? ''} ${x.role === 'backup' ? 'backup' : ''}`.trim()}: ${x.bps != null ? fmtBps(x.bps) : '…'}, ${x.bytes != null ? fmtBytes(x.bytes) : '…'}`).join('\n'),
+    }
+  }
+  return gates
 }
 
 /* --------------------------------------------------------- billing helpers */
@@ -376,7 +480,16 @@ function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefr
           <div style={{ margin: '4px 0 14px', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 'var(--fs-body)' }}>
             <span><span style={{ color: 'var(--faint)' }}>Billing </span>{d.billing.billable ? <b style={{ color: '#fbbf24' }}>● metering</b> : <b style={{ color: 'var(--muted)' }}>idle</b>}</span>
             <span><span style={{ color: 'var(--faint)' }}>Live time this run </span>{fmtDur(d.billing.elapsedSec)}</span>
-            <span><span style={{ color: 'var(--faint)' }}>Instance </span>{d.billing.instance}</span>
+            {d.server
+              ? <span title={`${d.server.detail} Sized from ${d.server.sizedFrom}.`}><span style={{ color: 'var(--faint)' }}>Server </span>{d.server.headline}</span>
+              : <span><span style={{ color: 'var(--faint)' }}>Server </span>assigned automatically</span>}
+          </div>
+        )}
+        {/* capacity problems, in words, with the fix (services/fleet/serverStatus.ts) */}
+        {d.server?.issue && (
+          <div style={{ margin: '0 0 14px', padding: '12px 14px', borderRadius: 10, background: 'rgba(251,191,36,.10)', border: '1px solid rgba(251,191,36,.4)' }}>
+            <div style={{ fontWeight: 700, color: '#fbbf24' }}>{d.server.issue.what}</div>
+            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)', marginTop: 2 }}>{d.server.issue.ours ? '' : 'How to fix: '}{d.server.issue.fix}</div>
           </div>
         )}
 
@@ -499,9 +612,22 @@ function OutputError({ d }: { d: CD }) {
 // not old content. If `fallbackSrc` is given and the primary source can't be
 // played (e.g. the contribution CDN blocks cross-origin playback), it switches to
 // the fallback so the pane is never dead.
-function HlsVideo({ src, fallbackSrc, hostRef }: { src: string; fallbackSrc?: string; hostRef: { current: HTMLElement | null } }) {
+type PreviewState = { s: 'loading' | 'playing' | 'fallback' | 'error'; detail?: string; /** which address is playing: 0 = src, 1.. = fallbacks in order */ via?: number }
+function HlsVideo({ src, fallbackSrc, hostRef, kind = 'hls', preferHeight, onState }: {
+  src: string
+  /** Tried in order when the one before cannot play (always HLS). */
+  fallbackSrc?: string | string[]
+  hostRef: { current: HTMLElement | null }
+  /** The source's own format: a DASH source plays through dash.js. The fallback is always our HLS origin. */
+  kind?: 'hls' | 'dash'
+  /** Pick the level of this height (a packaging rendition seen through the packaged origin). */
+  preferHeight?: number
+  /** What the player is doing, so the pane can say it honestly. */
+  onState?: (st: PreviewState) => void
+}) {
   const ref = useRef<HTMLVideoElement | null>(null)
   const hlsRef = useRef<any>(null)
+  const onStateRef = useRef(onState); onStateRef.current = onState
   const eng = useAudioEngine(ref)
   const controlsShown = useControlsVisible(hostRef)
   const [audioTracks, setAudioTracks] = useState<AudioTrackOpt[]>([])
@@ -510,9 +636,16 @@ function HlsVideo({ src, fallbackSrc, hostRef }: { src: string; fallbackSrc?: st
   // carries audibility on its gain node, so we never re-mute after arming.
   const softMute = (v: HTMLVideoElement) => { if (!v.dataset.audioArmed) v.muted = true }
   useEffect(() => {
-    let cancelled = false; let hls: any; let usingFallback = false; let fails = 0
+    let cancelled = false; let hls: any; let dash: any; let usingFallback = false; let fails = 0; let via = 0
+    let start: (s: string) => void = () => {}
+    const fallbacks = (Array.isArray(fallbackSrc) ? fallbackSrc : fallbackSrc ? [fallbackSrc] : []).filter(Boolean)
+    const nextFallback = () => { if (via >= fallbacks.length) return false; via++; usingFallback = true; fails = 0; start(fallbacks[via - 1]); return true }
     const v = ref.current; if (!v || !src) return
-    const resolve = (s: string) => /^https?:\/\//i.test(s) ? s : originUrl(s)
+    const report = (st: PreviewState) => { if (!cancelled) onStateRef.current?.(st) }
+    report({ s: 'loading' })
+    const onPlaying = () => report({ s: usingFallback ? 'fallback' : 'playing', via })
+    v.addEventListener('playing', onPlaying)
+    const resolve = (s: string) => /^https?:\/\//i.test(s) || s.startsWith('/api/') ? s : originUrl(s)
     // keep the preview near the live edge; if it falls >20s behind, jump forward to
     // hls.js's own live sync point (three segments back). It used to jump to 0.5s
     // behind the newest data, which ran the buffer dry at once: the preview stalled,
@@ -522,16 +655,25 @@ function HlsVideo({ src, fallbackSrc, hostRef }: { src: string; fallbackSrc?: st
     ;(async () => {
       const Hls = (await import('hls.js')).default
       if (cancelled) return
-      const start = (s: string) => {
+      start = (s: string) => {
         const url = resolve(s)
         if (Hls.isSupported()) {
           try { hls?.destroy() } catch {}
           // liveSyncDurationCount:3 keeps us ~3 segments off the edge (normal live
           // latency); NOT lowLatency because the origin is a standard LIVE playlist.
-          hls = new Hls({ lowLatencyMode: false, liveSyncDurationCount: 3, backBufferLength: 30, manifestLoadingMaxRetry: 8, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 8 })
+          // Our origin can be warming up, so keep retrying it; a source address
+          // that refuses us will not change its mind, so move on quickly.
+          const patient = url.includes('/origin/')
+          hls = new Hls({ lowLatencyMode: false, liveSyncDurationCount: 3, backBufferLength: 30, manifestLoadingMaxRetry: patient ? 8 : 1, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: patient ? 8 : 2 })
           hlsRef.current = hls
           hls.loadSource(url); hls.attachMedia(v)
-          hls.on(Hls.Events.MANIFEST_PARSED, () => { softMute(v); v.play().catch(() => {}); setTimeout(snapLive, 400) })
+          hls.on(Hls.Events.MANIFEST_PARSED, (_e: any, data: any) => {
+            if (preferHeight && usingFallback) {
+              const i = (data?.levels ?? []).findIndex((l: any) => l.height === preferHeight)
+              if (i >= 0) { hls.currentLevel = i; hls.loadLevel = i }
+            }
+            softMute(v); v.play().catch(() => {}); setTimeout(snapLive, 400)
+          })
           hls.on(Hls.Events.LEVEL_LOADED, snapLive)
           // surface the audio tracks the encoder put in the manifest so the operator
           // can switch between them (single track hides the selector).
@@ -545,15 +687,32 @@ function HlsVideo({ src, fallbackSrc, hostRef }: { src: string; fallbackSrc?: st
             if (!data.fatal) return
             if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError() } catch {}; return }
             fails++
-            if (!usingFallback && fallbackSrc && fails >= 2) { usingFallback = true; fails = 0; start(fallbackSrc); return }
+            const limit = url.includes('/origin/') ? 2 : 1
+            if (fails >= limit && nextFallback()) return
+            if (fails >= limit) report({ s: 'error', detail: data.response?.code ? `HTTP ${data.response.code}` : String(data.details || data.type || 'cannot play') })
             setTimeout(() => { try { hls.loadSource(url); hls.startLoad() } catch {} }, 1500) // not ready yet -> reload
           })
         } else if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = url; softMute(v); v.play().catch(() => {}); v.addEventListener('loadeddata', snapLive, { once: true }) }
       }
+      if (kind === 'dash') {
+        // A DASH source: play it with dash.js; if it cannot, go to the HLS fallback.
+        const dashjs: any = (await import('dashjs')).default
+        if (cancelled) return
+        dash = dashjs.MediaPlayer().create()
+        dash.updateSettings({ streaming: { retryAttempts: { MPD: 3 } } })
+        dash.on(dashjs.MediaPlayer.events.ERROR, (e: any) => {
+          try { dash.reset() } catch {}
+          dash = null
+          if (nextFallback()) return
+          report({ s: 'error', detail: e?.error?.message || 'cannot play' })
+        })
+        dash.initialize(v, src, true); softMute(v)
+        return
+      }
       start(src)
     })()
-    return () => { cancelled = true; try { hls?.destroy() } catch {}; hlsRef.current = null }
-  }, [src, fallbackSrc])
+    return () => { cancelled = true; v.removeEventListener('playing', onPlaying); try { hls?.destroy() } catch {}; try { dash?.reset() } catch {}; hlsRef.current = null }
+  }, [src, JSON.stringify(fallbackSrc ?? null), kind, preferHeight])
   const selectAudio = (i: number) => { setAudioTrackState(i); try { if (hlsRef.current) hlsRef.current.audioTrack = i } catch { /* ignore */ } }
   return (
     <>
@@ -579,6 +738,9 @@ function hostOf(url?: string | null) { try { return url ? new URL(url).host : ''
 // is whether audio is actually arriving. Audio is muted by default on this page.
 type AudioTrackOpt = { id: number; label: string }
 const AUDIO_BARS = 14      // analysis bands (drive the fallback motion)
+const METER_MAX_CH = 8   // channel meter: up to 7.1
+// speaker body for the muted-channel mark (24x24 box)
+const SPK_PATH = typeof Path2D !== 'undefined' ? new Path2D('M2 9v6h4l5 5V4L6 9H2z') : (null as any)
 const HIST_COLS = 16       // scrolling meter: 16 BARS x 250ms = ~4s of history
 const SPK_HI = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z" /></svg>
 const SPK_LO = <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z" /></svg>
@@ -607,20 +769,106 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
   const dispRef = useRef<number[]>(new Array(AUDIO_BARS).fill(0))  // smoothed bar heights
   const rafRef = useRef<number | null>(null)
   const triedRef = useRef(false)   // captureStream attempted (and failed) — stop retrying
+  // CHANNEL METER: one analyser per audio channel behind a splitter (up to 8:
+  // mono, stereo, 5.1, 7.1). levelsRef holds each channel's current linear
+  // peak; the meter animates from it on its own frame loop, so it never
+  // re-renders React. `channels` is how many carry sound: the highest channel
+  // heard in the last few seconds, and two identical channels count as one
+  // (a mono programme sent as stereo).
+  const chRef = useRef<{ an: AnalyserNode[]; buf: Uint8Array[] } | null>(null)
+  const levelsRef = useRef<number[]>([0])
+  const heardRef = useRef<number[]>(new Array(METER_MAX_CH).fill(0))
+  const sameRef = useRef({ same: 0, diff: 0 })
+  const [channels, setChannels] = useState(2)
+  const channelsRef = useRef(2)
   const lastTimeRef = useRef(-1)
 
-  // AUDIBILITY is the native element only (reliable). We never route the element
-  // through Web Audio, so unmuting simply un-mutes the element and it plays.
+  // EVERY CHANNEL, NOT A DOWNMIX. captureStream() hands Web Audio a STEREO
+  // downmix (a 5.1 source arrives as two channels), so it can only ever meter
+  // two. The element's own audio (createMediaElementSource) carries every
+  // channel, but it is silent while the element is muted, and the page starts
+  // muted so the preview can autoplay. So the meter starts on the capture and,
+  // at the first click or tap on the page (when the browser allows sound),
+  // moves to the element: the element is unmuted and its sound goes through a
+  // gain node that does the muting from then on, with a splitter beside it
+  // for the meter. Only for MSE playback (a blob: source), which is never
+  // cross-origin tainted; a native-HLS element keeps the capture.
+  const gainRef = useRef<GainNode | null>(null)
+  const elemTriedRef = useRef(false)
+  // per-channel mute (click a meter bar), and the routing it acts on
+  const [chanMute, setChanMute] = useState<boolean[]>(() => new Array(METER_MAX_CH).fill(false))
+  const chanMuteRef = useRef(chanMute); chanMuteRef.current = chanMute
+  const chanGainRef = useRef<GainNode[]>([])
+  const mergerRef = useRef<ChannelMergerNode | null>(null)
+  const pendingOutRef = useRef<GainNode | null>(null)
+  const routedRef = useRef(0)
+  const routeRef = useRef<(n: number) => void>(() => {})
+  const rawChRef = useRef(2)
+  const [isoReady, setIsoReady] = useState(false)
+  useEffect(() => { chanGainRef.current.forEach((g, i) => { g.gain.value = chanMute[i] ? 0 : 1 }) }, [chanMute])
+  const mutedRef = useRef(true); mutedRef.current = muted
+  const volRef = useRef(1); volRef.current = volume
   useEffect(() => {
     const v = videoRef.current
-    if (v) { v.dataset.audioArmed = '1'; v.muted = muted; v.volume = volume }
+    if (!v) return
+    v.dataset.audioArmed = '1'
+    if (gainRef.current) { v.muted = false; v.volume = 1; gainRef.current.gain.value = muted ? 0 : volume }
+    else { v.muted = muted; v.volume = volume }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [muted, volume])
 
   useEffect(() => {
     let stopped = false
     const resume = () => { try { if (ctxRef.current && ctxRef.current.state === 'suspended') ctxRef.current.resume() } catch { /* ignore */ } }
-    const onGesture = () => resume()
+    const toElement = () => {
+      const v = videoRef.current, ctx = ctxRef.current
+      if (!v || !ctx || gainRef.current || elemTriedRef.current || !/^blob:/.test(v.currentSrc || '')) return
+      elemTriedRef.current = true
+      try {
+        const src = ctx.createMediaElementSource(v)
+        const gain = ctx.createGain()
+        gain.gain.value = mutedRef.current ? 0 : volRef.current
+        gain.connect(ctx.destination)
+        if (anRef.current) src.connect(anRef.current)
+        // element -> splitter -> one gain per channel (mute a channel to
+        // isolate the others) -> merger -> master gain -> speakers. The meter
+        // taps the splitter BEFORE the channel gains, so a muted channel still
+        // shows its level.
+        const split = ctx.createChannelSplitter(METER_MAX_CH)
+        src.connect(split)
+        const an: AnalyserNode[] = [], buf: Uint8Array[] = [], cg: GainNode[] = []
+        for (let c = 0; c < METER_MAX_CH; c++) {
+          const a = ctx.createAnalyser(); a.fftSize = 1024
+          split.connect(a, c); an.push(a); buf.push(new Uint8Array(a.fftSize))
+          const g = ctx.createGain(); g.gain.value = chanMuteRef.current[c] ? 0 : 1
+          split.connect(g, c); cg.push(g)
+        }
+        chanGainRef.current = cg
+        pendingOutRef.current = gain
+        route(ctx, 2)
+        chRef.current = { an, buf }
+        heardRef.current.fill(0); sameRef.current = { same: 0, diff: 0 }
+        gainRef.current = gain
+        v.muted = false; v.volume = 1
+        setIsoReady(true)
+      } catch { /* keep the capture meter */ }
+    }
+    // The merger is sized to the channels the source carries, so the browser
+    // downmixes it to the speakers the standard way (5.1 to stereo and so on).
+    const route = (ctx: AudioContext, n: number) => {
+      const cg = chanGainRef.current, out = gainRef.current ?? null
+      if (!cg.length) return
+      try { mergerRef.current?.disconnect() } catch { /* ignore */ }
+      cg.forEach(g => { try { g.disconnect() } catch { /* ignore */ } })
+      const size = n <= 1 ? 1 : n <= 2 ? 2 : n <= 4 ? 4 : n <= 6 ? 6 : 8
+      const m = ctx.createChannelMerger(size)
+      m.channelInterpretation = 'speakers'
+      for (let c = 0; c < size; c++) cg[c].connect(m, 0, c)
+      m.connect(out ?? pendingOutRef.current!)
+      mergerRef.current = m; routedRef.current = size
+    }
+    routeRef.current = (n: number) => { if (ctxRef.current && n !== routedRef.current) route(ctxRef.current, n) }
+    const onGesture = () => { resume(); toElement() }
     window.addEventListener('pointerdown', onGesture)
 
     const build = () => {
@@ -636,7 +884,18 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
         // 256-point FFT (128 bins) gives enough resolution to spread energy across the
         // bars; moderate smoothing keeps it lively but not jittery.
         analyser.fftSize = 256; analyser.smoothingTimeConstant = 0.35  // low = snappy, tracks transients
-        ctx.createMediaStreamSource(cap).connect(analyser)  // analysis only — no destination
+        const srcNode = ctx.createMediaStreamSource(cap)
+        srcNode.connect(analyser)  // analysis only — no destination
+        try {
+          const split = ctx.createChannelSplitter(METER_MAX_CH)
+          srcNode.connect(split)
+          const an: AnalyserNode[] = [], buf: Uint8Array[] = []
+          for (let c = 0; c < METER_MAX_CH; c++) {
+            const a = ctx.createAnalyser(); a.fftSize = 1024
+            split.connect(a, c); an.push(a); buf.push(new Uint8Array(a.fftSize))
+          }
+          chRef.current = { an, buf }
+        } catch { chRef.current = null }
         ctxRef.current = ctx; anRef.current = analyser
         dataRef.current = new Uint8Array(analyser.frequencyBinCount)
         pcmRef.current = new Uint8Array(analyser.fftSize)
@@ -650,6 +909,9 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
       const v = videoRef.current
       if (v) {
         build()
+        // the page has already had a click or tap (sticky activation): a newly
+        // opened player can go straight to the full-channel meter
+        if (!gainRef.current && ctxRef.current?.state === 'running' && (navigator as any).userActivation?.hasBeenActive) toElement()
         lastTimeRef.current = v.currentTime
         const an = anRef.current, data = dataRef.current
         const disp = dispRef.current
@@ -704,6 +966,28 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
           lvl = Math.max(0, (h[h.length - 1] || 0) * 0.7)
         }
         measuringRef.current = real
+        // per-channel peaks for the meter
+        const ch = chRef.current
+        if (real && ch) {
+          const now = performance.now()
+          const lv = ch.an.map((a, i) => analyserPeak(a, ch.buf[i]))
+          lv.forEach((v, i) => { if (v > 0.003) heardRef.current[i] = now })
+          let n = 0
+          heardRef.current.forEach((t, i) => { if (now - t < 4000) n = i + 1 })
+          // two channels carrying the same signal are one (mono sent as stereo)
+          if (n === 2 && Math.max(lv[0], lv[1]) > 0.02) {
+            const m = sameRef.current
+            if (Math.abs(lv[0] - lv[1]) < 0.004) m.same++; else m.diff++
+            if (m.same + m.diff > 240) { m.same = Math.round(m.same / 2); m.diff = Math.round(m.diff / 2) }
+          }
+          const m = sameRef.current
+          const count = n === 2 && m.same + m.diff > 60 && m.same > m.diff * 9 ? 1 : Math.max(1, n)
+          levelsRef.current = count === 1 && n === 2 ? [Math.max(lv[0], lv[1])] : lv.slice(0, count)
+          if (count !== channelsRef.current) { channelsRef.current = count; setChannels(count) }
+          if (n !== rawChRef.current && n > 0) { rawChRef.current = n; routeRef.current(n) }
+        } else {
+          levelsRef.current = new Array(channelsRef.current).fill(real ? lvl : 0)
+        }
         const nowMs = performance.now()
         if (nowMs - lastPushRef.current >= 250) {   // one bar per 250ms
           lastPushRef.current = nowMs
@@ -728,7 +1012,19 @@ function useAudioEngine(videoRef: { current: HTMLVideoElement | null }) {
 
   const toggleMute = () => { try { ctxRef.current?.resume() } catch { /* ignore */ }; setMuted(m => !m) }
   const setVol = (val: number) => { try { ctxRef.current?.resume() } catch { /* ignore */ }; setVolume(val); setMuted(val <= 0) }
-  return { muted, volume, history, measuring, toggleMute, setVol }
+  // A meter bar stands for one channel, or for both when a mono programme is
+  // sent as stereo (two identical channels shown as one bar).
+  const barChannels = (bar: number) => channels === 1 && rawChRef.current === 2 ? [0, 1] : [bar]
+  const barMuted = (bar: number) => barChannels(bar).every(c => chanMute[c])
+  /** Click: mute or unmute that channel. */
+  const toggleChannel = (bar: number) => setChanMute(m => { const n = m.slice(); const on = !barChannels(bar).every(c => m[c]); barChannels(bar).forEach(c => { n[c] = on }); return n })
+  /** Double-click: hear only that channel; again (or when it is already alone) to hear them all. */
+  const soloChannel = (bar: number) => setChanMute(m => {
+    const mine = barChannels(bar)
+    const alone = mine.every(c => !m[c]) && m.every((x, c) => mine.includes(c) || c >= rawChRef.current || x)
+    return m.map((_, c) => alone ? false : !mine.includes(c))
+  })
+  return { muted, volume, history, measuring, toggleMute, setVol, levelsRef, channels, barMuted, toggleChannel, soloChannel, canIsolate: isoReady }
 }
 
 type AudioEngine = ReturnType<typeof useAudioEngine>
@@ -783,144 +1079,271 @@ function AudioDock({ eng, tracks, currentTrack, onSelectTrack, controlsShown }: 
           </select>
         )}
       </div>
-      <div title={eng.measuring
-        ? 'Audio level, peak amplitude (last ~4 seconds, newest on the right)'
-        : 'No local audio measurement: this browser will not let the page tap the stream'}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 32, padding: '5px 8px', borderRadius: 9, background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(2px)' }}>
-        <ScrollMeter history={eng.history} active={active && eng.measuring} />
+      <div className="vu-wrap" title={!eng.measuring
+        ? 'No local audio measurement: this browser will not let the page tap the stream'
+        : `Audio level, ${eng.channels === 1 ? 'mono' : eng.channels === 2 ? 'stereo' : `${eng.channels} channels`}. ${eng.canIsolate ? 'Click a bar to mute that channel; double-click to hear only it.' : 'Click to enable muting single channels.'}`}>
+        <ChannelMeter levelsRef={eng.levelsRef} channels={eng.channels} active={active && eng.measuring}
+          isMuted={eng.barMuted} onToggle={eng.canIsolate ? eng.toggleChannel : undefined} onSolo={eng.canIsolate ? eng.soloChannel : undefined} />
       </div>
     </div>
   )
 }
 
-// Right-to-left scrolling BAR meter: each bar is 250ms of overall level, the newest
-// enters on the RIGHT and the history steps LEFT (~4s across the strip). Discrete
-// rounded bars, not a filled area: quiet is short, loud is tall, and the level is
-// linear PEAK AMPLITUDE (audioLevel.ts), so it is never pinned at 100%.
-function ScrollMeter({ history, active }: { history: number[]; active: boolean }) {
+// CHANNEL LEVEL METER: one bar of lit segments per audio channel, bouncing
+// with the audio: one for mono, two for stereo, six for 5.1, up to eight. No
+// channel letters: with more than two channels they would be guesses about
+// the layout. The scale is dBFS, as on a desk meter: -48 at the bottom, 0 at
+// the top; green to -18, then yellow, amber from -9 and red from -3. Instant
+// rise, a steady fall (about 26 dB a second) and a peak marker that holds for
+// a second and a half, so a transient is readable. It draws on its own frame
+// loop from levelsRef, so the bounce costs no React renders. Flat and grey
+// when nothing is measured.
+const VU_SEG = 16, VU_FLOOR = -48
+function ChannelMeter({ levelsRef, channels, active, isMuted, onToggle, onSolo }: {
+  levelsRef: { current: number[] }; channels: number; active: boolean
+  /** Is this bar's channel muted (click a bar to mute it, double-click to hear only it). */
+  isMuted?: (bar: number) => boolean
+  onToggle?: (bar: number) => void
+  onSolo?: (bar: number) => void
+}) {
   const ref = useRef<HTMLCanvasElement | null>(null)
-  const BAR = 4, GAP = 2
-  const W = HIST_COLS * (BAR + GAP) - GAP, H = 22
+  const activeRef = useRef(active); activeRef.current = active
+  const mutedRef = useRef(isMuted); mutedRef.current = isMuted
+  const bars = Math.max(1, Math.min(METER_MAX_CH, channels))
+  const BW = bars > 4 ? 9 : 11, GAP = bars > 4 ? 3 : 4, H = 62
+  const W = bars * BW + (bars - 1) * GAP
   useEffect(() => {
-    const cv = ref.current
-    if (!cv) return
+    const cv = ref.current; if (!cv) return
     const dpr = window.devicePixelRatio || 1
-    if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr }
-    const g = cv.getContext('2d')
-    if (!g) return
+    cv.width = W * dpr; cv.height = H * dpr
+    const g = cv.getContext('2d'); if (!g) return
     g.setTransform(dpr, 0, 0, dpr, 0, 0)
-    g.clearRect(0, 0, W, H)
-    for (let i = 0; i < history.length; i++) {
-      const lvl = history[i]
-      const h = Math.max(2, lvl * H)
-      const x = i * (BAR + GAP)
-      const y = (H - h) / 2
-      // ONE colour: green, brightness follows loudness; the history fades slightly as
-      // it steps left. Idle/no-audio renders neutral slate.
-      const age = (history.length - 1 - i) / history.length
-      const a = (active ? 0.45 + lvl * 0.5 : 0.4) * (1 - age * 0.45)
-      g.fillStyle = active ? `rgba(74,222,128,${a})` : `rgba(148,163,184,${a})`
-      if (typeof (g as any).roundRect === 'function') {
-        g.beginPath(); (g as any).roundRect(x, y, BAR, h, 2); g.fill()
-      } else {
-        g.fillRect(x, y, BAR, h)
+    const disp = new Array(bars).fill(VU_FLOOR), peak = new Array(bars).fill(VU_FLOOR), peakAt = new Array(bars).fill(0)
+    let last = performance.now(); let raf = 0
+    const toDb = (a: number) => a > 0 ? Math.max(VU_FLOOR, 20 * Math.log10(a)) : VU_FLOOR
+    const colour = (db: number) => db >= -3 ? '#ef4444' : db >= -9 ? '#f59e0b' : db >= -18 ? '#d9f99d' : '#22c55e'
+    const segH = (H - (VU_SEG - 1) * 2) / VU_SEG
+    const draw = (now: number) => {
+      const dt = Math.min(0.1, (now - last) / 1000); last = now
+      const on = activeRef.current
+      const lv = levelsRef.current
+      g.clearRect(0, 0, W, H)
+      for (let c = 0; c < bars; c++) {
+        const x0 = c * (BW + GAP)
+        if (mutedRef.current?.(c)) {
+          // A MUTED CHANNEL: a plain panel with a muted-speaker mark, no level.
+          g.fillStyle = 'rgba(148,163,184,.28)'
+          g.beginPath(); (g as any).roundRect ? (g as any).roundRect(x0, 0, BW, H, 2) : g.rect(x0, 0, BW, H); g.fill()
+          const sc = (BW - 2) / 24, ix = x0 + 1, iy = H / 2 - 12 * sc
+          g.save(); g.translate(ix, iy); g.scale(sc, sc)
+          g.fillStyle = 'rgba(226,232,240,.75)'; g.fill(SPK_PATH)
+          g.strokeStyle = 'rgba(226,232,240,.75)'; g.lineWidth = 2.2; g.lineCap = 'round'
+          g.beginPath(); g.moveTo(16, 9); g.lineTo(22, 15); g.moveTo(22, 9); g.lineTo(16, 15); g.stroke()
+          g.restore()
+          disp[c] = VU_FLOOR; peak[c] = VU_FLOOR
+          continue
+        }
+        const db = on ? toDb(lv[c] ?? 0) : VU_FLOOR
+        disp[c] = db > disp[c] ? db : Math.max(db, disp[c] - 26 * dt)
+        if (disp[c] >= peak[c]) { peak[c] = disp[c]; peakAt[c] = now }
+        else if (now - peakAt[c] > 1500) peak[c] = Math.max(disp[c], peak[c] - 20 * dt)
+        const x = c * (BW + GAP)
+        const lit = Math.round(((disp[c] - VU_FLOOR) / -VU_FLOOR) * VU_SEG)
+        const pk = Math.min(VU_SEG - 1, Math.round(((peak[c] - VU_FLOOR) / -VU_FLOOR) * VU_SEG) - 1)
+        for (let i = 0; i < VU_SEG; i++) {
+          const segDb = VU_FLOOR + ((i + 1) / VU_SEG) * -VU_FLOOR
+          const y = H - (i + 1) * segH - i * 2
+          const show = on && (i < lit || (i === pk && pk > 0 && pk >= lit))
+          g.fillStyle = show ? colour(segDb) : 'rgba(255,255,255,.09)'
+          g.fillRect(x, y, BW, segH)
+        }
       }
+      raf = requestAnimationFrame(draw)
     }
-  }, [history, active])
-  return <canvas ref={ref} style={{ width: W, height: H, display: 'block' }} aria-label="Audio level history" />
+    raf = requestAnimationFrame(draw)
+    return () => cancelAnimationFrame(raf)
+  }, [bars, W, BW, GAP, levelsRef])
+  const barAt = (e: React.MouseEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    return Math.max(0, Math.min(bars - 1, Math.floor((e.clientX - r.left) / (BW + GAP))))
+  }
+  return <canvas ref={ref} style={{ width: W, height: H, display: 'block', cursor: onToggle ? 'pointer' : undefined }}
+    role={onToggle ? 'group' : 'img'}
+    aria-label={`Audio level, ${bars === 1 ? 'mono' : bars === 2 ? 'stereo' : `${bars} channels`}`}
+    onClick={onToggle ? (e) => onToggle(barAt(e)) : undefined}
+    onDoubleClick={onSolo ? (e) => { e.preventDefault(); onSolo(barAt(e)) } : undefined} />
 }
 
+
 function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: boolean; onSendSource: () => void; busy: boolean }) {
+  const canRun = useAccess().can('channels', 'operate')
   const videoBoxRef = useRef<HTMLDivElement | null>(null)
-  const configured = d.sources.find(s => s.role === 'primary' && s.ingest_url) || d.sources.find(s => s.ingest_url)
-  const proto = (configured?.protocol || d.sources[0]?.protocol || 'SRT').toUpperCase()
   const ts = d.testStream
-  const srcHost = hostOf(ts.sourceUrl || configured?.ingest_url)
-  // The button says WHAT it starts, not HOW. The protocol is already on the
-  // identity line, the source badge and the gate strip; repeating it inside the
-  // primary action only makes the action harder to read.
-  const sendLabel = configured ? 'Start channel' : 'Start with test source'
-  // Reflect the pipeline: the source can only be previewed via the encoder output,
-  // so if the input gate failed, or the source is valid but the ENCODER failed, we
-  // must NOT show a green RECEIVING. Show the real error instead.
+  const isPkg = d.profile?.workflow_type === 'package_only'
+  // EVERY INPUT, in the order an operator reads them: primary renditions
+  // highest first, then their backups. A transcode channel has a primary and
+  // perhaps a backup; a packaging channel one of each per rendition.
+  const inputs: InputDef[] = useMemo(() => {
+    const live = (d.statusBoard?.inputs ?? []) as any[]
+    const rows = d.sources.filter(s => s.ingest_url).map((s, i) => ({
+      key: s.id || String(i), role: s.role, label: s.rendition_label ?? null, protocol: (s.protocol || '').toUpperCase(),
+      url: s.ingest_url || '', kbps: s.rendition_bitrate_kbps ?? null,
+      live: live.find(x => x.id === s.id) ?? live.find(x => x.role === s.role && (x.label ?? null) === (s.rendition_label ?? null)) ?? null,
+    }))
+    return rows.sort((a, b) => (a.role === b.role ? 0 : a.role === 'primary' ? -1 : 1) || (b.kbps ?? 0) - (a.kbps ?? 0))
+  }, [d.sources, d.statusBoard])
+  const { checks, checkOne, checkAll } = useInputChecks(inputs)
+  const verdicts = inputs.map(i => verdictOf(i, checks[i.key], sourceUp))
+  const summary = summaryOf(inputs, verdicts)
+  const [selKey, setSelKey] = useState<string | null>(null)
+  const sel = inputs.find(i => i.key === selKey) ?? inputs[0]
+  const [showAll, setShowAll] = useState(false)
+
+  const proto = (sel?.protocol || d.sources[0]?.protocol || 'SRT').toUpperCase()
+  const srcHost = hostOf(ts.sourceUrl || sel?.url)
+  const sendLabel = sel ? 'Start channel' : 'Start with test source'
+  // Reflect the pipeline: when the channel runs, the input gate is the
+  // observation of whether bytes arrive, so it decides RECEIVING (see the
+  // note in git history: `sourceUp` alone is a claim, not an observation).
   const h = d.health
   const inGate = h?.gates.find(g => g.gate === 'input')
-  const inputFailed = inGate?.status === 'failed'
+  const inputFailed = sourceUp && inGate?.status === 'failed'
   const encFailed = !!h?.primaryError && (h.primaryError.gate === 'encoder' || h.primaryError.gate === 'output')
-  // RECEIVING IS A CLAIM ABOUT THE WORLD, SO IT NEEDS EVIDENCE.
-  //
-  // `sourceUp` is `d.status === 'live'`, which says only that somebody pressed
-  // Start and the row was updated. It is the same mistake as trusting the
-  // instance row: a claim, not an observation. A channel that had been started
-  // with no source at all showed a green RECEIVING and "Ingesting SRT" while
-  // the gate strip six inches above it said "connecting to source" — the same
-  // page contradicting itself, with the confident half being the wrong one.
-  //
-  // The input gate is the observation, so it decides. 'healthy' and 'degraded'
-  // both mean bytes are arriving (degraded is arriving-but-imperfect, which is
-  // still receiving); 'starting' means we are waiting and must say so.
-  const inputArriving = inGate?.status === 'healthy' || inGate?.status === 'degraded';
+  const inputArriving = inGate?.status === 'healthy' || inGate?.status === 'degraded'
   const receiving = sourceUp && inputArriving
-  const srcErrored = inputFailed || (receiving && encFailed)
-  const badgeText = inputFailed ? 'SOURCE ERROR'
-    : (receiving && encFailed) ? 'ENCODER FAILED'
-    : receiving ? 'RECEIVING'
-    : sourceUp ? 'CONNECTING' : proto
-  const badgeBg = srcErrored ? 'rgba(248,113,113,.85)'
-    : receiving ? 'rgba(74,222,128,.85)'
-    : sourceUp ? 'rgba(250,204,21,.85)' : 'rgba(99,102,241,.85)'
-  const canPreview = receiving && !srcErrored
-  // If the contribution feed is a browser-playable HLS URL, preview the REAL source
-  // directly (so this pane is the true source, not our packaged output) and fall back
-  // to the packaged origin if the CDN blocks cross-origin playback. For SRT/RTMP the
-  // raw feed can't play in a browser, so we show the packaged origin as a proxy.
-  const directHls = (configured?.protocol || '').toLowerCase() === 'hls' && configured?.ingest_url ? configured.ingest_url : undefined
-  const srcVideoSrc = directHls ?? `/origin/${d.id}/live/master.m3u8`
-  const srcFallback = directHls ? `/origin/${d.id}/live/master.m3u8` : undefined
+  const viaOrigin = `/origin/${d.id}/live/master.m3u8`
+
+  // WHAT THE PANE PLAYS. An HLS or DASH source is played DIRECTLY from its own
+  // address, whether or not the channel runs: it is the exact input, and the
+  // first thing to confirm before starting. If the browser cannot play it
+  // (the source's CDN refuses cross-origin playback) and the channel is
+  // receiving, it falls back to what our ingest received, and says so. SRT,
+  // RTMP and the rest cannot play in a browser at all: once the channel is
+  // receiving they are shown through our ingest (the packaged output before
+  // it is public), labelled as such; before that there is nothing to show.
+  const p = (sel?.protocol || '').toLowerCase()
+  const direct = sel && /^https?:\/\//i.test(sel.url) && (p === 'hls' || p === 'dash') ? sel.url : null
+  const throughIngest = !direct && receiving && !encFailed
+  const playSrc = direct ?? (throughIngest ? viaOrigin : null)
+  // The relay (HLS only): what to fall back to when the browser may not play
+  // the source's own address. Asked for per input; the address is a token.
+  const [relay, setRelay] = useState<{ key: string; url: string } | null>(null)
+  useEffect(() => {
+    if (!direct || p !== 'hls' || !sel) return
+    let live = true
+    api.channelInputPreview(d.id, sel.key).then(r => { if (live) setRelay({ key: sel.key, url: r.url }) }).catch(() => {})
+    return () => { live = false }
+  }, [direct, p, sel?.key, d.id])
+  const relayUrl = relay && sel && relay.key === sel.key ? relay.url : null
+  const fallbacks = direct ? [relayUrl, receiving ? viaOrigin : null].filter((x): x is string => !!x) : []
+  const [pv, setPv] = useState<PreviewState>({ s: 'loading' })
+  useEffect(() => { setPv({ s: 'loading' }) }, [playSrc])
+  const showGateError = inputFailed || (receiving && encFailed)
+  const playing = pv.s === 'playing' || pv.s === 'fallback'
+  const previewFailed = !!playSrc && pv.s === 'error'
+
+  const selVerdict = sel ? verdicts[inputs.indexOf(sel)] : null
+  const badge = showGateError ? { t: inputFailed ? 'SOURCE ERROR' : 'ENCODER FAILED', bg: 'rgba(248,113,113,.85)' }
+    : previewFailed ? (selVerdict?.level === 'bad' ? { t: 'NOT REACHABLE', bg: 'rgba(248,113,113,.85)' } : { t: 'CANNOT PLAY HERE', bg: 'rgba(251,191,36,.85)' })
+    : receiving ? { t: 'RECEIVING', bg: 'rgba(74,222,128,.85)' }
+    : sourceUp ? { t: 'CONNECTING', bg: 'rgba(250,204,21,.85)' }
+    : playing ? { t: 'SOURCE PREVIEW', bg: 'rgba(99,102,241,.85)' }
+    : { t: proto, bg: 'rgba(99,102,241,.85)' }
+  const viaUrl = pv.s === 'fallback' && pv.via ? fallbacks[pv.via - 1] : null
+  const how = !playSrc ? null
+    : pv.s === 'error' ? 'could not play'
+    : pv.s === 'loading' ? 'connecting…'
+    : !direct ? 'via Volt ingest'
+    : pv.s !== 'fallback' ? 'direct from the source'
+    : viaUrl === relayUrl ? 'relayed by Volt: the source blocks browser playback'
+    : 'via Volt ingest: direct playback blocked'
+
   return (
     <div className="player">
       <div className="video" ref={videoBoxRef}>
-        {canPreview ? <HlsVideo src={srcVideoSrc} fallbackSrc={srcFallback} hostRef={videoBoxRef} /> : <div className="grad" style={srcErrored ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
-        <div className="plabel"><span className="pt" style={{ color: srcErrored ? '#fca5a5' : '#a5b4fc' }}>SOURCE · {proto}</span></div>
-        {/* No DOM watermark here: on transcode the logo is BURNED INTO the encoded
-            picture by the encoder, so it is already in the video pixels. Painting a
-            second overlay would double it up and hide whether the burn-in works. */}
-        <div className="badge-live" style={{ background: badgeBg }}><span className="d" />{badgeText}</div>
-        {srcErrored && (
-          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
-            <div style={{ maxWidth: 360 }}>
-              <div style={{ fontWeight: 700, color: '#fca5a5', marginBottom: 6 }}>
-                {inputFailed ? 'Source error' : 'Source is valid, but the encoder has failed'}
-              </div>
-              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', wordBreak: 'break-word' }}>
-                {inputFailed ? (inGate?.detail || 'no signal') : 'nothing can be previewed until the encoder recovers'}
-              </div>
-            </div>
+        {playSrc && !showGateError
+          ? <HlsVideo key={playSrc} src={playSrc} kind={direct && p === 'dash' ? 'dash' : 'hls'} hostRef={videoBoxRef}
+              fallbackSrc={fallbacks}
+              preferHeight={heightOf(sel?.label) || undefined} onState={setPv} />
+          : <div className="grad" style={showGateError ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
+        <div className="plabel"><span className="pt" style={{ color: showGateError ? '#fca5a5' : '#a5b4fc' }}>
+          SOURCE · {proto}{sel?.label ? ` · ${sel.label}` : ''}{sel?.role === 'backup' ? ' · backup' : ''}
+        </span></div>
+        <div className="badge-live" style={{ background: badge.bg }}><span className="d" />{badge.t}</div>
+        {showGateError && (
+          <div className="src-overlay">
+            <div className="t" style={{ color: '#fca5a5' }}>{inputFailed ? 'Source error' : 'Source is valid, but the encoder has failed'}</div>
+            <div className="d">{inputFailed ? (inGate?.detail || 'no signal') : 'nothing can be previewed until the encoder recovers'}</div>
           </div>
         )}
-        {!sourceUp && (
-          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center' }}>
-            <div>
+        {!showGateError && previewFailed && (
+          <div className="src-overlay">
+            {selVerdict?.level === 'bad' ? <>
+              <div className="t" style={{ color: '#fca5a5' }}>The source is not reachable</div>
+              <div className="d">{selVerdict.text.replace(/\.$/, '')}. Neither this browser nor Volt can read it: check the address with whoever sends it.</div>
+            </> : <>
+              <div className="t" style={{ color: '#fbbf24' }}>This browser cannot play the source</div>
+              <div className="d">{pv.detail ? `${pv.detail}. ` : ''}It could not be played directly or relayed through Volt. {selVerdict ? <>Volt's check: <b>{selVerdict.text.replace(/\.$/, '')}</b>.</> : null}</div>
+            </>}
+          </div>
+        )}
+        {!showGateError && !playSrc && !sourceUp && (
+          <div className="src-overlay">
+            {canRun && (
               <button className="btn primary" onClick={onSendSource} disabled={busy} style={{ transform: 'scale(1.05)' }}>
                 {busy ? 'Starting…' : `▶  ${sendLabel}`}
               </button>
-              {configured?.ingest_url && <div style={{ marginTop: 10, fontSize: 'var(--fs-label)', color: 'var(--faint)', maxWidth: 340, wordBreak: 'break-all' }}>{configured.ingest_url}</div>}
-            </div>
+            )}
+            {sel && !direct && <div className="d" style={{ marginTop: 10 }}>{proto} cannot play in a browser. Once the channel is receiving, this pane shows it through Volt's ingest.</div>}
           </div>
         )}
-        <div className="ptime">{srcErrored ? '— error —' : sourceUp ? `${srcHost || 'source'} · live` : '— no signal —'}</div>
+        {!showGateError && !playSrc && sourceUp && !receiving && (
+          <div className="src-overlay"><div className="d">{inGate?.detail || `Waiting for ${proto}: nothing arriving yet`}</div></div>
+        )}
+        <div className="ptime">{showGateError ? '— error —' : how ?? (sourceUp ? `${srcHost || 'source'} · live` : '— no signal —')}</div>
       </div>
+
+      {inputs.length > 1 && (
+        <div className="src-pick" role="tablist" aria-label="Preview input">
+          {inputs.map((i, k) => (
+            <button key={i.key} type="button" role="tab" aria-selected={i === sel} className={`src-chip${i === sel ? ' sel' : ''}`}
+              onClick={() => setSelKey(i.key)} title={`${inputName(i)} · ${verdicts[k].text}`}>
+              <LevelDot level={verdicts[k].level} />
+              <span>{i.label ?? (i.role === 'backup' ? 'Backup' : 'Primary')}{i.role === 'backup' && i.label ? <span className="src-chip-b"> backup</span> : null}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="pfoot">
-        <span className={`dot-s ${srcErrored ? 'down' : receiving ? 'live' : sourceUp ? 'warn' : 'idle'}`} /> {
-          srcErrored ? (inputFailed ? 'Source not arriving' : 'Source OK · encoder failed downstream')
-          : receiving ? `Ingesting ${srcHost || proto} · repackaging`
-          // Started, but the input gate has not seen anything yet. Say what is
-          // actually happening rather than claiming an ingest that is not
-          // happening: the gate's own detail line is the honest wording.
-          : sourceUp ? (inGate?.detail || `Waiting for ${proto} · nothing arriving yet`)
-          : configured ? `Source configured · ${proto} · ${srcHost || 'ingest'}`
-          : 'No source — send one to enable output'}
+        <LevelDot level={inputs.length ? summary.level : 'pending'} />
+        <span style={{ flex: 1, minWidth: 0 }}>
+          {!inputs.length ? 'No source: send one to enable output'
+            : inputs.length === 1 ? (selVerdict?.text ?? '')
+            : summary.text}
+        </span>
+        {inputs.length > 0 && <button type="button" className="btn ghost sm" onClick={() => setShowAll(v => !v)}>{showAll ? 'Hide inputs' : (isPkg || inputs.length > 1 ? 'All inputs' : 'Details')}</button>}
+        {inputs.length > 0 && <button type="button" className="btn ghost sm" onClick={() => void checkAll()} disabled={Object.values(checks).some(c => c.busy)}>Check all</button>}
+        {!sourceUp && playing && canRun && <button className="btn primary sm" onClick={onSendSource} disabled={busy}>{busy ? 'Starting…' : '▶ Start'}</button>}
       </div>
+
+      {(showAll || summary.level === 'bad' || summary.level === 'warn') && inputs.length > 0 && (
+        <div className="src-inputs">
+          {inputs.map((i, k) => {
+            const v = verdicts[k]
+            if (!showAll && v.level !== 'bad' && v.level !== 'warn') return null
+            return (
+              <div className={`src-in ${v.level}`} key={i.key}>
+                <LevelDot level={v.level} />
+                <button type="button" className="nm" onClick={() => setSelKey(i.key)} title="Preview this input">{inputName(i)}</button>
+                <span className="pr">{i.protocol}{i.kbps ? ` · ${(i.kbps / 1000).toFixed(1)} Mbps` : ''}</span>
+                <span className="st">{v.text}<span className="host"> · {hostOf(i.url) || i.url}</span></span>
+                <button type="button" className="btn ghost sm" onClick={() => void checkOne(i)} disabled={checks[i.key]?.busy}>{checks[i.key]?.busy ? 'Checking…' : 'Check'}</button>
+              </div>
+            )
+          })}
+        </div>
+      )}
       {sourceUp && ts.sourceNote && (
         <div style={{ padding: '9px 12px', borderTop: '1px solid var(--border)', fontSize: 'var(--fs-sm)', color: 'var(--warn)', display: 'flex', gap: 8 }}>
           <span>⚠</span><span>{ts.sourceNote}</span>
@@ -933,6 +1356,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
 function IdleOutput({ sourceUp, onGoLive, warming, sinceMs, captionsOn }: {
   sourceUp: boolean; onGoLive: () => void; warming?: boolean; sinceMs?: number | null; captionsOn?: boolean
 }) {
+  const canRun = useAccess().can('channels', 'operate')
   // Warm-up counter: while the encoder is up but the output is not yet packaged, show
   // how long the warm-up has been running and what wait is NORMAL, so the operator does
   // not read a healthy start as a fault. Live captions (whisper) add a transcription
@@ -971,9 +1395,11 @@ function IdleOutput({ sourceUp, onGoLive, warming, sinceMs, captionsOn }: {
             </div>
           ) : sourceUp ? (
             <div>
+              {canRun && (
               <button className="btn primary" onClick={onGoLive} style={{ transform: 'scale(1.05)' }}>
                 <span className="dot-s live" style={{ marginRight: 6 }} />Go live
               </button>
+              )}
               <div style={{ marginTop: 12, fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>Source is receiving. Take the output live.</div>
             </div>
           ) : (
@@ -1032,6 +1458,22 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   const [winSec, setWinSec] = useState(0)          // available DVR depth NOW (grows as it fills, capped at the window)
   const [cue, setCue] = useState('')
   const [subTracks, setSubTracks] = useState(0)   // subtitle tracks discovered in the manifest
+  const [subLangs, setSubLangs] = useState<string[]>([])  // their languages
+  // VIEW AS A VIEWER ELSEWHERE: pick a country (and who the viewer is) and the
+  // play gate is asked what they would get (GET /channels/:id/access-check).
+  const [geoAs, setGeoAs] = useState('')
+  const [geoViewer, setGeoViewer] = useState<'anonymous' | 'member' | 'entitled'>('anonymous')
+  const [geoRes, setGeoRes] = useState<AccessCheck | null>(null)
+  const [geoErr, setGeoErr] = useState('')
+  useEffect(() => {
+    setGeoRes(null); setGeoErr('')
+    if (!geoAs) return
+    let live = true
+    api.channelAccessCheck(d.id, geoAs, geoViewer).then(r => { if (live) setGeoRes(r) }).catch((e: any) => { if (live) setGeoErr(e?.message || 'Could not check') })
+    return () => { live = false }
+  }, [geoAs, geoViewer, d.id, d.version])
+  const geoBlocked = !!geoRes && !geoRes.allowed
+  useEffect(() => { const v = videoRef.current; if (v && geoBlocked) v.pause(); else if (v && geoRes && v.paused) v.play().catch(() => {}) }, [geoBlocked, geoRes])
   // INPUT->OUTPUT LATENCY estimate. Exact when the manifest carries PDT (the caption
   // companion stamps every segment with its real encoder write time): latency =
   // now - playingDate = encoder write to glass. Without PDT we fall back to a rough
@@ -1138,7 +1580,11 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           setLevels(hls.levels.map((l: any) => ({ height: l.height, bitrate: l.bitrate })))
           softMute(video!); video!.play().catch(() => {}); snapSoon()
         })
-        hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => setSubTracks((hls.subtitleTracks || []).length))
+        hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+          const tr = hls.subtitleTracks || []
+          setSubTracks(tr.length)
+          setSubLangs([...new Set(tr.map((t: any) => String(t.lang || t.name || '').toLowerCase()).filter(Boolean))] as string[])
+        })
         // audio tracks the encoder assigned to the manifest (transcode makes a
         // separate audio track; multi-track sources expose one entry per language).
         const readAudio = () => {
@@ -1174,6 +1620,11 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
         try {
           const bs = player.getBitrateInfoListFor('video') || []
           setLevels(bs.map((b: any) => ({ height: b.height, bitrate: b.bitrate })))
+        } catch { /* ignore */ }
+        try {
+          const tt = player.getTracksFor('text') || []
+          setSubTracks(tt.length)
+          setSubLangs([...new Set(tt.map((t: any) => String(t.lang || '').toLowerCase()).filter(Boolean))] as string[])
         } catch { /* ignore */ }
         try {
           const at = player.getTracksFor('audio') || []
@@ -1344,10 +1795,24 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   const sliderMax = Math.max(1, winSec)
   const sliderVal = liveNow ? sliderMax : Math.min(sliderMax, Math.max(0, winSec - behind))
 
+  // the test stream's side captions exist only while it runs
+  const sideSubs = !d.captions?.enabled && ts.running ? Object.keys(ts.subtitles ?? {}) : []
+  const ccLangs = subTracks > 0
+    ? (subLangs.length ? subLangs.map(l => captionLangs.find(c => l.startsWith(c.toLowerCase())) ?? l) : captionLangs)
+    : sideSubs
+  const layerName: Record<string, string> = { account: 'the account-wide geo rule (Account settings)', channel: "the channel's own geo setting", rules: 'an access rule', programme: 'the programme on air (blackout)', on_demand: 'on-demand availability', none: '' }
   return (
     <div className="player">
       <div className="video" ref={videoBoxRef}>
-        <video ref={videoRef} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
+        <video ref={videoRef} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000', visibility: geoBlocked ? 'hidden' : undefined }} />
+        {geoRes && (geoBlocked || geoRes.replacement) && (
+          <div className="geo-overlay">
+            <div className="t">{geoBlocked ? `Blocked for a viewer in ${countryName(geoRes.country)}` : `Viewers in ${countryName(geoRes.country)} see a replacement`}</div>
+            <div className="d">{geoBlocked
+              ? <>{geoRes.reason || 'Not available'}. Decided by {layerName[geoRes.layer] || 'the access rules'}.{geoRes.products.length ? <> They are offered: {geoRes.products.map(p => p.name).join(', ')}.</> : null}</>
+              : <>The programme on air is blacked out there; they get “{geoRes.replacement!.title}” instead.</>}</div>
+          </div>
+        )}
         <div className="plabel"><span className="pt" style={{ color: liveNow ? '#4ade80' : '#fbbf24' }}>OUTPUT · {fmt.toUpperCase()}{liveNow ? '' : ' · DVR'}</span></div>
         {/* On-air state: green ON AIR when published to the public, blue PREVIEW when the
             packaged output is playing but held private (verify DASH/HLS before going on air).
@@ -1443,17 +1908,45 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
           {capStatus && capStatus.kind === 'starting' && (
             <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>captions starting…</span>
           )}
-          <button className={`chip ${subOn ? 'active' : ''}`} style={{ padding: '5px 10px' }} onClick={() => setSubOn(!subOn)}>CC</button>
-          {subOn && (
-            <select value={subLang} onChange={e => setSubLang(e.target.value)}>
-              {captionLangs.map(c => <option key={c} value={c}>{langOpts.find(l => l.code === c)?.label || c.toUpperCase()}</option>)}
-            </select>
-          )}
+          {/* CC ONLY WHEN THERE IS A TRANSCRIPTION: subtitle tracks in the
+              manifest (or the test stream's side captions). No button that
+              switches nothing on. The languages are the ones actually there. */}
+          {ccLangs.length > 0 && <>
+            <button className={`chip ${subOn ? 'active' : ''}`} style={{ padding: '5px 10px' }} onClick={() => setSubOn(!subOn)} title="Subtitles from the live transcription">CC</button>
+            {subOn && ccLangs.length > 1 && (
+              <select value={subLang} onChange={e => setSubLang(e.target.value)}>
+                {ccLangs.map(c => <option key={c} value={c}>{langOpts.find(l => l.code === c)?.label || c.toUpperCase()}</option>)}
+              </select>
+            )}
+          </>}
           <select value={level} onChange={e => setLevel(Number(e.target.value))}>
             <option value={-1}>Auto (ABR)</option>
             {levels.map((l, i) => <option key={i} value={i}>{l.height}p · {(l.bitrate / 1e6).toFixed(1)} Mbps</option>)}
           </select>
         </span>
+      </div>
+      <div className="geo-check">
+        <span className="gl">View as a viewer in</span>
+        <select className="inp sel-sm" value={geoAs} onChange={e => setGeoAs(e.target.value)} aria-label="Country to check">
+          <option value="">Choose a country…</option>
+          {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}
+        </select>
+        {geoAs && (
+          <select className="inp sel-sm" value={geoViewer} onChange={e => setGeoViewer(e.target.value as any)} aria-label="Who the viewer is">
+            <option value="anonymous">Not signed in</option>
+            <option value="member">Signed in</option>
+            <option value="entitled">Has paid for it</option>
+          </select>
+        )}
+        {geoAs && (geoErr
+          ? <span className="gv bad">{geoErr}</span>
+          : !geoRes ? <span className="gv">Checking…</span>
+          : geoRes.allowed && !geoRes.replacement
+            ? <span className="gv ok"><span className="dot-s ok" />Can watch{geoRes.layer === 'rules' ? ' (an access rule allows it)' : ''}</span>
+            : geoRes.allowed
+              ? <span className="gv warn"><span className="dot-s warn" />Sees a replacement</span>
+              : <span className="gv bad"><span className="dot-s down" />Blocked: {layerName[geoRes.layer] || 'access rules'}</span>)}
+        {geoAs && <button type="button" className="chip" onClick={() => setGeoAs('')}>Clear</button>}
       </div>
     </div>
   )
@@ -1472,6 +1965,7 @@ const FAILOVER_STEPS: { m: FailoverMode; label: string; hue: string; note: strin
   { m: 'backup', label: 'Backup source', hue: '#4ade80', note: 'Switch to the backup input' },
 ]
 function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
+  const canRun = useAccess().can('channels', 'operate')
   const [cap, setCap] = useState<FailoverTestState | null>(null)
   const [mode, setMode] = useState<FailoverMode>('auto')
   const [busy, setBusy] = useState(false)
@@ -1532,13 +2026,13 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {FAILOVER_STEPS.map(s => (
-              <button key={s.m} className={`btn ${mode === s.m ? 'primary' : 'ghost'}`} disabled={busy || !running}
+              <button key={s.m} className={`btn ${mode === s.m ? 'primary' : 'ghost'}`} disabled={busy || !running || !canRun}
                 title={running ? s.note : 'Start the channel first: failover acts on the running encoder'}
                 onClick={() => apply(s.m)} style={{ padding: '7px 12px' }}>
                 <span className="dot-s" style={{ background: s.hue, marginRight: 6 }} />{s.label}
               </button>
             ))}
-            <button className={`btn ${mode === 'auto' ? 'primary' : 'ghost'}`} disabled={busy || !running}
+            <button className={`btn ${mode === 'auto' ? 'primary' : 'ghost'}`} disabled={busy || !running || !canRun}
               onClick={() => apply('auto')} style={{ padding: '7px 12px', marginLeft: 'auto' }}>
               Resume normal
             </button>
@@ -1551,7 +2045,7 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
           {mode !== 'auto' && sourceUp && (
             <div className="td" style={{ color: 'var(--muted)', marginTop: 10 }}>Watch the OUTPUT player above. Press Resume normal to return to health-driven behaviour.</div>
           )}
-          {err && <div className="err" style={{ marginTop: 10 }}>{err}</div>}
+          {err && <div style={{ marginTop: 10 }}><Notice kind="error" variant="compact" message={err} /></div>}
         </>
       ) : (
         <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
@@ -1665,7 +2159,10 @@ function StatusBoard({ d, live }: { d: CD; live: boolean }) {
         <div style={{ fontSize: 'var(--fs-label)', letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 }}>Inputs</div>
         <div className="src-lights" style={{ marginBottom: 16 }}>
           {d.statusBoard.inputs.map((s: any, i: number) => (
-            <div className="src" key={i}><span className={`dot-s ${s.state}`} /><span className="nm">{s.role[0].toUpperCase() + s.role.slice(1)} · {s.protocol}</span><span className="st">{s.detail}</span></div>
+            <div className="src" key={i}><span className={`dot-s ${s.state}`} /><span className="nm">{s.label ? `${s.label} ` : ''}{s.role[0].toUpperCase() + s.role.slice(1)} · {s.protocol}</span><span className="st">{s.detail}{(() => {
+              const r = d.metrics?.ingest.find(x => x.role === s.role && (x.label ?? null) === (s.label ?? null)) ?? (d.metrics?.ingest.length === 1 && s.role === 'primary' ? d.metrics.ingest[0] : undefined)
+              return r && r.bps != null ? ` · ${fmtBps(r.bps)}, ${fmtBytes(r.bytes ?? 0)} so far` : ''
+            })()}</span></div>
           ))}
         </div>
         {ladder.length > 0 && <>
@@ -1730,13 +2227,23 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   const [dvrMin, setDvrMinRaw] = useState<string>(String(Math.round((d.dvr_window_sec ?? d.dvr.effective_sec) / 60)))
   const setDvrMin = lockSet(setDvrMinRaw)
   // source (protocol-aware, per input)
-  const protocols = useProtocols()
+  const protocols = useProtocols('video')
   const src0 = d.sources.find(s => s.role === 'primary') || d.sources[0]
   const src1 = d.sources.find(s => s.role === 'backup')
-  const [primary, setPrimaryRaw] = useState<SourceValue>({ protocol: (src0?.protocol || 'srt').toLowerCase(), url: src0?.ingest_url || '' })
+  // the stream key and the protocol's settings come back too (they were dropped before)
+  const [primary, setPrimaryRaw] = useState<SourceValue>(sourceFromRow(src0))
   const setPrimary = lockSet(setPrimaryRaw)
-  const [backup, setBackupRaw] = useState<SourceValue>({ protocol: (src1?.protocol || src0?.protocol || 'srt').toLowerCase(), url: src1?.ingest_url || '' })
+  const [backup, setBackupRaw] = useState<SourceValue>(src1 ? sourceFromRow(src1) : { protocol: (src0?.protocol || 'srt').toLowerCase(), url: '' })
   const setBackup = lockSet(setBackupRaw)
+  // PACKAGING: the sent ladder, one input per rendition (same form as New channel).
+  const isPkg = d.profile?.workflow_type === 'package_only'
+  const pkgInit = useMemo(() => pkgFromSources(d.sources, d.ladder || [], !!d.fallback_transcode), [d.id, d.version])
+  const [pkgRows, setPkgRowsRaw] = useState<PkgRow[]>(pkgInit.rows)
+  const setPkgRows = lockSet(setPkgRowsRaw)
+  const [pkgMode, setPkgModeRaw] = useState<PkgFallback>(pkgInit.mode)
+  const setPkgMode = lockSet(setPkgModeRaw)
+  const [pkgFb, setPkgFbRaw] = useState<SourceValue>(pkgInit.fb)
+  const setPkgFb = lockSet(setPkgFbRaw)
   // geo
   const [geoMode, setGeoMode] = useState(d.geo_mode)
   const [geoCountries, setGeoCountries] = useState(d.geo_countries.join(', '))
@@ -1799,7 +2306,20 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   async function save() {
     setErr('')
     if (!name.trim()) { setTab('settings'); setErr('Give the channel a name'); return }
-    const hlsWait = await hlsChoicePending([{ url: primary.url, protocol: primary.protocol, original: src0?.ingest_url }, { url: backup.url, protocol: backup.protocol, original: src1?.ingest_url }]); if (hlsWait) { setErr(hlsWait); return }
+    let pkgOut: ReturnType<typeof pkgToSources> | null = null
+    if (isPkg) {
+      pkgOut = pkgToSources(pkgRows, pkgMode, pkgFb, protocols)
+      if ('error' in pkgOut && !locked) { setTab('settings'); setErr(pkgOut.error); return }
+      const orig = (u: string) => d.sources.some(x => (x.ingest_url ?? '') === u.trim()) ? u : null
+      const hlsWait = await hlsChoicePending([
+        ...pkgRows.map(r => ({ url: r.url, protocol: r.protocol, original: orig(r.url) })),
+        ...(pkgMode === 'matching' ? pkgRows.map(r => ({ url: r.backupUrl, protocol: r.protocol, original: orig(r.backupUrl) })) : []),
+        ...(pkgMode === 'single' ? [{ url: pkgFb.url, protocol: pkgFb.protocol, original: pkgInit.fb.url }] : []),
+      ])
+      if (hlsWait) { setErr(hlsWait); return }
+    } else {
+      const hlsWait = await hlsChoicePending([{ url: primary.url, protocol: primary.protocol, original: src0?.ingest_url }, { url: backup.url, protocol: backup.protocol, original: src1?.ingest_url }]); if (hlsWait) { setErr(hlsWait); return }
+    }
     const patch: ChannelSettingsPatch = { version: d.version }
     if (name.trim() && name.trim() !== d.name) patch.name = name.trim()
     patch.dvrMode = dvrMode
@@ -1814,14 +2334,23 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     if (geoMode !== 'worldwide') patch.geoCountries = geoCountries.split(',').map(s => s.trim().toUpperCase()).filter(s => s.length === 2)
     else patch.geoCountries = []
     // sources
-    const sources: ChannelSettingsPatch['sources'] = []
-    if (primary.url.trim()) sources.push({ role: 'primary', protocol: primary.protocol, ingestUrl: primary.url.trim(), streamKey: primary.streamKey?.trim() || undefined })
-    if (backup.url.trim()) sources.push({ role: 'backup', protocol: backup.protocol, ingestUrl: backup.url.trim(), streamKey: backup.streamKey?.trim() || undefined })
-    if (sources.length) patch.sources = sources
-    // output ladder (transcode): only send when changed
     const origLadder = JSON.stringify((d.ladder || []).map(r => ({ height: r.height, bitrateKbps: r.bitrate_kbps })))
-    const cleanRungs = rungs.filter(r => r.height > 0 && r.bitrateKbps > 0).sort((a, b) => b.height - a.height)
-    if (JSON.stringify(cleanRungs) !== origLadder) patch.outputLadder = cleanRungs
+    if (isPkg && pkgOut && !('error' in pkgOut)) {
+      // packaging: every rendition input, its backup, and the ladder that mirrors them
+      patch.sources = pkgOut.sources
+      if (JSON.stringify(pkgOut.outputLadder) !== origLadder) patch.outputLadder = pkgOut.outputLadder
+      if (pkgOut.fallbackTranscode !== !!d.fallback_transcode) patch.fallbackTranscode = pkgOut.fallbackTranscode
+    } else if (!isPkg) {
+      const sources: ChannelSettingsPatch['sources'] = []
+      const why = (primary.url.trim() ? sourceProblem(protocols, primary) : null) ?? (backup.url.trim() ? sourceProblem(protocols, backup) : null)
+      if (why) { setErr(`${primary.url.trim() && sourceProblem(protocols, primary) ? 'Primary' : 'Backup'} source: ${why}`); return }
+      if (primary.url.trim()) sources.push({ role: 'primary', ...sourceToApi(primary, protocols) })
+      if (backup.url.trim()) sources.push({ role: 'backup', ...sourceToApi(backup, protocols) })
+      if (sources.length) patch.sources = sources
+      // output ladder (transcode): only send when changed
+      const cleanRungs = rungs.filter(r => r.height > 0 && r.bitrateKbps > 0).sort((a, b) => b.height - a.height)
+      if (JSON.stringify(cleanRungs) !== origLadder) patch.outputLadder = cleanRungs
+    }
     // programme guide panel
     if (epgOn !== (d.epgEnabled !== false)) patch.epgEnabled = epgOn
     if (autoConn !== (d.autoConnect !== false)) patch.autoConnect = autoConn
@@ -1888,9 +2417,14 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
             </div>
           )}
           <div className={locked ? 'locked-zone' : undefined} aria-disabled={locked || undefined}>
-          <div className="sec-label">Source</div>
-          <SourceInput protocols={protocols} value={primary} onChange={setPrimary} label="Primary source" ladderTop={d.profile?.workflow_type === 'transcode' && rungs.length ? Math.max(...rungs.map(r => r.height)) : undefined} />
-          <SourceInput protocols={protocols} value={backup} onChange={setBackup} label="Backup source (optional)" ladderTop={d.profile?.workflow_type === 'transcode' && rungs.length ? Math.max(...rungs.map(r => r.height)) : undefined} />
+          {isPkg ? (
+            <PackageRenditions protocols={protocols} rows={pkgRows} onRows={setPkgRows} locked={locked}
+              mode={pkgMode} onMode={(m) => { setPkgMode(m); if (m !== 'none') setFailover(true) }} fb={pkgFb} onFb={setPkgFb} />
+          ) : (<>
+            <div className="sec-label">Source</div>
+            <SourceInput protocols={protocols} value={primary} onChange={setPrimary} label="Primary source" ladderTop={rungs.length ? Math.max(...rungs.map(r => r.height)) : undefined} />
+            <SourceInput protocols={protocols} value={backup} onChange={setBackup} label="Backup source (optional)" ladderTop={rungs.length ? Math.max(...rungs.map(r => r.height)) : undefined} />
+          </>)}
 
           <div className="sec-label">Failover</div>
           <div className="toggle-row">
@@ -2017,10 +2551,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
               that has happened the operator has to be told, or the channel is
               simply off with no explanation anywhere. Pressing Start clears it. */}
           {d.resumeGaveUpAt && (
-            <div className="err" style={{ marginTop: 6 }}>
-              Auto reconnect gave up on {new Date(d.resumeGaveUpAt).toLocaleString()} after repeated failures
-              {d.resumeLastError ? `: ${d.resumeLastError}` : '.'} Starting the channel clears this.
-            </div>
+            <div style={{ marginTop: 6 }}><Notice kind="warn" variant="compact"
+              message={`Auto reconnect gave up on ${new Date(d.resumeGaveUpAt).toLocaleString()} after repeated failures${d.resumeLastError ? `: ${d.resumeLastError}` : '.'} Starting the channel clears this.`} /></div>
           )}
 
           <div className="sec-label">Programme guide (EPG)</div>
@@ -2072,9 +2604,9 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           </div>
           </TabPane>
 
-          {err && <div className="err">{err}</div>}
         </div>
         <div className="drawer-f">
+          <FormStatus error={err} />
           <button className="btn ghost" onClick={onClose}>Cancel</button>
           <button className="btn primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save changes'}</button>
         </div>

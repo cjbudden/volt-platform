@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import { onNotify, listenerConnected, notify } from '../scale/notify';
 
 /**
  * In-process Server-Sent-Events hub for live stream status.
@@ -31,7 +32,41 @@ export function subscribe(accountId: string, res: Response): () => void {
   };
 }
 
+/**
+ * CROSS-PROCESS FAN-OUT (scale). With more than one admin API process, a
+ * browser's SSE stream is held by one of them while the status update may be
+ * produced by another (an encoder report, the scheduler). publish() therefore
+ * sends the frame through Postgres NOTIFY on `volt_status` and every process
+ * delivers it to its own subscribers, exactly as the note above planned. With
+ * no listener connected (single process, or the listener is reconnecting) it
+ * delivers locally as before. Frames too big for NOTIFY (~8 kB) go local only.
+ */
+let fanout = false;
+// NOTIFYs go out one at a time so frames keep their order (two pool
+// connections could otherwise deliver 'ended' before 'live').
+let chain: Promise<void> = Promise.resolve();
+
+export function wireStatusFanout(): void {
+  if (fanout) return;
+  fanout = true;
+  onNotify('volt_status', (payload) => {
+    try {
+      const m = JSON.parse(payload);
+      publishLocal(m.a, m.e, m.d);
+    } catch { /* malformed frame: ignore */ }
+  });
+}
+
 export function publish(accountId: string, event: string, data: unknown): void {
+  const payload = fanout && listenerConnected() ? JSON.stringify({ a: accountId, e: event, d: data }) : null;
+  if (!payload || Buffer.byteLength(payload) >= 7900) {
+    publishLocal(accountId, event, data);
+    return;
+  }
+  chain = chain.then(() => notify('volt_status', payload)).catch(() => publishLocal(accountId, event, data));
+}
+
+function publishLocal(accountId: string, event: string, data: unknown): void {
   const set = byAccount.get(accountId);
   if (!set || set.size === 0) return;
   const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;

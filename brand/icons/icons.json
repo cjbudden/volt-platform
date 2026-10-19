@@ -1,0 +1,257 @@
+[
+ {
+  "name": "live",
+  "group": "Broadcast",
+  "label": "Live / on air"
+ },
+ {
+  "name": "channel",
+  "group": "Broadcast",
+  "label": "Live channel"
+ },
+ {
+  "name": "event",
+  "group": "Broadcast",
+  "label": "Live event"
+ },
+ {
+  "name": "radio",
+  "group": "Broadcast",
+  "label": "Radio station"
+ },
+ {
+  "name": "fast",
+  "group": "Broadcast",
+  "label": "FAST / scheduled playout"
+ },
+ {
+  "name": "loop",
+  "group": "Broadcast",
+  "label": "Loop"
+ },
+ {
+  "name": "epg",
+  "group": "Broadcast",
+  "label": "EPG / programme guide"
+ },
+ {
+  "name": "schedule",
+  "group": "Broadcast",
+  "label": "Schedule"
+ },
+ {
+  "name": "failover",
+  "group": "Broadcast",
+  "label": "Failover / redundant input"
+ },
+ {
+  "name": "overlay",
+  "group": "Broadcast",
+  "label": "Overlay graphics"
+ },
+ {
+  "name": "multiview",
+  "group": "Broadcast",
+  "label": "Multiview"
+ },
+ {
+  "name": "monitoring",
+  "group": "Broadcast",
+  "label": "Monitoring"
+ },
+ {
+  "name": "live-to-vod",
+  "group": "Media",
+  "label": "Live to VOD"
+ },
+ {
+  "name": "vod-to-live",
+  "group": "Media",
+  "label": "VOD to live"
+ },
+ {
+  "name": "recording",
+  "group": "Media",
+  "label": "Recording"
+ },
+ {
+  "name": "clip",
+  "group": "Media",
+  "label": "Clip (in and out)"
+ },
+ {
+  "name": "media",
+  "group": "Media",
+  "label": "Media library / VOD"
+ },
+ {
+  "name": "image",
+  "group": "Media",
+  "label": "Image"
+ },
+ {
+  "name": "captions",
+  "group": "Media",
+  "label": "Captions"
+ },
+ {
+  "name": "translate",
+  "group": "Media",
+  "label": "Translation"
+ },
+ {
+  "name": "audio",
+  "group": "Media",
+  "label": "Audio"
+ },
+ {
+  "name": "review",
+  "group": "Media",
+  "label": "Review / approve"
+ },
+ {
+  "name": "source",
+  "group": "Pipeline",
+  "label": "Source / camera"
+ },
+ {
+  "name": "ingest",
+  "group": "Pipeline",
+  "label": "Ingest"
+ },
+ {
+  "name": "upload",
+  "group": "Pipeline",
+  "label": "Upload"
+ },
+ {
+  "name": "encoder",
+  "group": "Pipeline",
+  "label": "Encoder"
+ },
+ {
+  "name": "packager",
+  "group": "Pipeline",
+  "label": "Packager"
+ },
+ {
+  "name": "server",
+  "group": "Pipeline",
+  "label": "Server / origin"
+ },
+ {
+  "name": "cdn",
+  "group": "Pipeline",
+  "label": "CDN / edge"
+ },
+ {
+  "name": "cloud",
+  "group": "Pipeline",
+  "label": "Cloud"
+ },
+ {
+  "name": "storage",
+  "group": "Pipeline",
+  "label": "Storage"
+ },
+ {
+  "name": "watchfolder",
+  "group": "Pipeline",
+  "label": "Watchfolder"
+ },
+ {
+  "name": "player",
+  "group": "Pipeline",
+  "label": "Player"
+ },
+ {
+  "name": "drm",
+  "group": "Pipeline",
+  "label": "DRM / encryption"
+ },
+ {
+  "name": "rights",
+  "group": "Pipeline",
+  "label": "Rights / access rules"
+ },
+ {
+  "name": "geo",
+  "group": "Pipeline",
+  "label": "Geo / location"
+ },
+ {
+  "name": "globe",
+  "group": "Pipeline",
+  "label": "Global delivery"
+ },
+ {
+  "name": "tv",
+  "group": "Audience",
+  "label": "TV / connected TV"
+ },
+ {
+  "name": "desktop",
+  "group": "Audience",
+  "label": "Desktop / web"
+ },
+ {
+  "name": "mobile",
+  "group": "Audience",
+  "label": "Mobile"
+ },
+ {
+  "name": "viewers",
+  "group": "Audience",
+  "label": "Viewers"
+ },
+ {
+  "name": "analytics",
+  "group": "Audience",
+  "label": "Analytics"
+ },
+ {
+  "name": "dashboard",
+  "group": "Platform",
+  "label": "Dashboard"
+ },
+ {
+  "name": "tenant",
+  "group": "Platform",
+  "label": "Tenant / organisation"
+ },
+ {
+  "name": "users",
+  "group": "Platform",
+  "label": "Users"
+ },
+ {
+  "name": "key",
+  "group": "Platform",
+  "label": "API key / app"
+ },
+ {
+  "name": "api",
+  "group": "Platform",
+  "label": "API"
+ },
+ {
+  "name": "webhook",
+  "group": "Platform",
+  "label": "Webhook / notify out"
+ },
+ {
+  "name": "bell",
+  "group": "Platform",
+  "label": "Notifications"
+ },
+ {
+  "name": "alert",
+  "group": "Platform",
+  "label": "Alert"
+ },
+ {
+  "name": "settings",
+  "group": "Platform",
+  "label": "Settings"
+ }
+]

@@ -1,0 +1,7 @@
+env                 = "prod"
+region              = "ap-southeast-2"
+docs_domain         = "docs.volt.example"
+cookie_domain       = ".volt.example"
+app_url             = "https://app.volt.example"
+acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx" # us-east-1
+route53_zone_id     = ""                                                          # optional

@@ -4,6 +4,15 @@ resource "aws_lb" "cp" {
   security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
   tags               = { Name = "${local.name}-cp" }
+
+  # Reserved capacity for a known big event (scaling_variables.tf). An ALB
+  # otherwise scales up over minutes; a kick-off arrives in seconds.
+  dynamic "minimum_load_balancer_capacity" {
+    for_each = var.alb_lcu_reservation == null ? [] : [var.alb_lcu_reservation]
+    content {
+      capacity_units = minimum_load_balancer_capacity.value
+    }
+  }
 }
 
 resource "aws_lb_target_group" "cp" {
@@ -13,14 +22,17 @@ resource "aws_lb_target_group" "cp" {
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
 
+  # /health/ready: in rotation only once migrations ran and the database
+  # answers (src/scale/health.ts). /health still exists for humans.
   health_check {
-    path                = "/health"
+    path                = "/health/ready"
     healthy_threshold   = 2
     unhealthy_threshold = 3
     interval            = 15
     timeout             = 5
     matcher             = "200"
   }
+  deregistration_delay = 30
 }
 
 # HTTP listener. Add an HTTPS (443) listener + ACM cert for prod, and redirect

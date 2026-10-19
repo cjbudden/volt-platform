@@ -70,8 +70,19 @@ services:
       ICECAST_SOURCE_PASSWORD: hackme
       ICECAST_PUBLIC_BASE: http://localhost:8000
       ICECAST_AUTH_SECRET: dev-relay-secret
+      # Image service (docs/IMAGES.md). The image runs with NODE_ENV=production,
+      # which refuses the built-in dev secret, so compose sets a local one.
+      # Never reuse this value anywhere real.
+      IMAGE_SIGNING_SECRET: local-compose-image-signing-secret-not-for-production
+      PUBLIC_BASE_URL: http://localhost:8080
+      # Library + derivative cache on the container disk (the images volume).
+      # To run the cloud S3 code path locally instead, add the S3 override:
+      #   docker compose -f docker-compose.yml -f docker-compose.s3.yml up --build
+    volumes:
+      - images:/app/image-store
     ports:
       - "8080:8080"
 
 volumes:
   dbdata:
+  images:

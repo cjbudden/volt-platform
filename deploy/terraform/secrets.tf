@@ -26,7 +26,10 @@ locals {
   jwt_refresh = coalesce(var.jwt_refresh_secret, random_password.jwt_refresh.result)
   ingest      = coalesce(var.ingest_token, random_password.ingest.result)
   db_password = random_password.db.result
-  db_url      = "postgres://${var.db_username}:${local.db_password}@${aws_db_instance.pg.address}:5432/${var.db_name}"
+  # Queries go through RDS Proxy when enabled (scaling_rds_proxy.tf); the
+  # LISTEN / leader-lock / migration connection always goes direct.
+  db_url        = "postgres://${var.db_username}:${local.db_password}@${local.db_app_host}:5432/${var.db_name}"
+  db_listen_url = "postgres://${var.db_username}:${local.db_password}@${local.db_direct_host}:5432/${var.db_name}"
 }
 
 resource "aws_secretsmanager_secret" "app" {
@@ -42,6 +45,13 @@ resource "aws_secretsmanager_secret_version" "app" {
     JWT_ACCESS_SECRET  = local.jwt_access
     JWT_REFRESH_SECRET = local.jwt_refresh
     INGEST_TOKEN       = local.ingest
+    # Scale (SCALING.md)
+    DATABASE_LISTEN_URL   = local.db_listen_url
+    EDGE_SHARED_SECRET    = random_password.edge_shared.result
+    PLAYBACK_TOKEN_SECRET = random_password.playback_token.result
+    VIEWER_JWT_SECRET     = random_password.viewer_jwt.result
+    # Seals authenticator-app seeds at rest (ACCESS_CONTROL.md section 12).
+    MFA_ENCRYPTION_KEY = random_id.mfa_key.b64_std
   })
 }
 
@@ -51,4 +61,29 @@ resource "aws_secretsmanager_secret" "integrations" {
   name                    = "${local.name}/integrations"
   description             = "Axinom DRM management key + social OAuth tokens (populate out-of-band)"
   recovery_window_in_days = 0
+}
+
+# Scale: proves a request came through CloudFront (trusted viewer country), and
+# signs playback tokens with a key separate from operator sessions.
+resource "random_password" "edge_shared" {
+  length  = 40
+  special = false
+}
+
+resource "random_password" "playback_token" {
+  length  = 40
+  special = false
+}
+
+# Signs public-user (viewer) sessions: never the key that signs admin sessions.
+resource "random_password" "viewer_jwt" {
+  length  = 48
+  special = false
+}
+
+# 32 random bytes: the AES-256-GCM key for authenticator-app seeds. Rotating it
+# makes existing authenticator set-ups unreadable (people set them up again),
+# so it is created once and kept.
+resource "random_id" "mfa_key" {
+  byte_length = 32
 }

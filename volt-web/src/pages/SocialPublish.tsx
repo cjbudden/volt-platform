@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type SocialAccount, type SocialPlatformsStatus, type SocialPost, type SocialPublication, type SocialPlatformId } from '../api'
 import { navigate } from '../router'
 import { pressable } from '../a11y'
+import { FormStatus, Notice, useNotify, usePageNotice } from '../notices'
 
 /* ============================================================================
    PUBLISH A CLIP TO SOCIAL: the composer and the status of what went out.
@@ -155,12 +156,11 @@ export function SocialComposer({ assetId, onClose, onPublished }: { assetId: str
                 </select>
                 {!editing && <div className="hintxt">A platform without that option uses its nearest: Facebook and X posts are public. TikTok posts privately until TikTok has audited the app.</div>}
               </div>
-              {problems.length > 0 && <div className="err">{problems.join('. ')}.</div>}
             </>
           )}
-          {err && <div className="err">{err}</div>}
         </div>
         <div className="drawer-f">
+          <FormStatus error={err} blocked={problems.length > 0 ? `${problems.join('. ')}.` : undefined} />
           <button className="btn ghost" onClick={onClose}>Cancel</button>
           <button className="btn primary" disabled={busy || !picked.length || problems.length > 0} onClick={submit}>{busy ? 'Publishing…' : `Publish to ${picked.length || ''} account${picked.length === 1 ? '' : 's'}`}</button>
         </div>
@@ -178,7 +178,9 @@ const ST: Record<string, { label: string; cls: string }> = {
 export function SocialPanel({ assetId, refreshKey }: { assetId: string; refreshKey: number }) {
   const [rows, setRows] = useState<SocialPublication[] | null>(null)
   const [err, setErr] = useState('')
-  const load = () => api.socialPublications(assetId).then(setRows).catch(e => setErr(e.message))
+  const notify = useNotify()
+  const fail = (e: any) => notify({ kind: 'error', message: e.message })
+  const load = () => api.socialPublications(assetId).then(r => { setRows(r); setErr('') }).catch(e => setErr(e.message))
   useEffect(() => { load() }, [assetId, refreshKey])
   const active = (rows ?? []).some(r => r.status === 'pending')
   useEffect(() => {
@@ -187,13 +189,15 @@ export function SocialPanel({ assetId, refreshKey }: { assetId: string; refreshK
     return () => clearInterval(t)
   }, [active, assetId])
 
-  if (!rows) return err ? <div className="err">{err}</div> : null
+  usePageNotice('social-load', err && rows ? { kind: 'error', title: "Couldn't refresh the social posts.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
+
+  if (!rows) return err ? <Notice kind="error" variant="compact" title="Couldn't load the social posts." message={err} actions={[{ label: 'Retry', onClick: () => { load() } }]} /> : null
   if (!rows.length) return null
   return (
     <div style={{ marginTop: 16 }}>
       <div className="sec-label" style={{ display: 'flex', alignItems: 'center' }}>
         <span>Social</span><div style={{ flex: 1 }} />
-        <button className="btn ghost" onClick={() => api.socialSyncViews().then(load).catch(e => setErr(e.message))}>Refresh views</button>
+        <button className="btn ghost" onClick={() => api.socialSyncViews().then(load).catch(fail)}>Refresh views</button>
       </div>
       <div className="card" style={{ padding: 0 }}>
         {rows.map((r, i) => {
@@ -214,15 +218,14 @@ export function SocialPanel({ assetId, refreshKey }: { assetId: string; refreshK
                 {r.status === 'published' && <div className="hintxt" style={{ marginTop: 2 }}>{r.views} views{r.last_synced_at ? ` (checked ${new Date(r.last_synced_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}{r.published_at ? ` · ${new Date(r.published_at).toLocaleString()}` : ''}</div>}
               </div>
               {r.external_url && r.status === 'published' && <a className="btn ghost" href={r.external_url} target="_blank" rel="noreferrer">Open</a>}
-              {r.status === 'failed' && <button className="btn" onClick={() => api.socialRetry(r.id).then(load).catch(e => setErr(e.message))}>Retry</button>}
+              {r.status === 'failed' && <button className="btn" onClick={() => api.socialRetry(r.id).then(load).catch(fail)}>Retry</button>}
               {r.status === 'published' && <button className="btn ghost" onClick={() => {
-                if (window.confirm(`Take this down from ${LABEL[r.platform]}? It is deleted there; the clip stays in Volt.`)) api.socialTakeDown(r.id).then(load).catch(e => setErr(e.message))
+                if (window.confirm(`Take this down from ${LABEL[r.platform]}? It is deleted there; the clip stays in Volt.`)) api.socialTakeDown(r.id).then(load).catch(fail)
               }}>Take down</button>}
             </div>
           )
         })}
       </div>
-      {err && <div className="err">{err}</div>}
     </div>
   )
 }

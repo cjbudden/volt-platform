@@ -1,49 +1,20 @@
 #!/usr/bin/env bash
-# One-command API verification — NO frontend needed. Boots the control plane,
-# seeds a tenant, mints a token, and runs the Postman collection via Newman.
+# ONE-COMMAND API CHECK, no console needed: a throwaway database, the API on
+# it, the seeded test users, then the Postman collection run end to end with
+# Newman (public, admin and platform folders, in order).
 #
-# Requires: node, psql, newman (npm i -g newman), and DATABASE_URL pointing at an
-# EMPTY Postgres database (the script applies the schema + a seed into it).
+#   DATABASE_URL=postgres://user:pass@localhost:5432/volt_verify ./api/verify.sh
 #
-#   DATABASE_URL=postgres://user:pass@host/volt_verify ./api/verify.sh
+# Needs node, psql and newman (npm i -g newman, or npx newman is used).
+# DATABASE_URL is DROPPED and recreated: point it at a throwaway database.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-: "${DATABASE_URL:?set DATABASE_URL to an empty Postgres database}"
-export JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:-devsecret}
-export JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-devrefresh}
-export INGEST_TOKEN=${INGEST_TOKEN:-dev-ingest}
-export PORT=${PORT:-8080}
-export S3_BUCKET=${S3_BUCKET:-volt-origin}
-export CDN_BASE_URL=${CDN_BASE_URL:-https://cdn.example.com}
-export INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://localhost:$PORT}
-export ORCH_LAUNCHER=mock
+source api/lib-setup.sh
 
-A=00000000-0000-0000-0000-0000000000a1
-G=00000000-0000-0000-0000-0000000000b1
-D=00000000-0000-0000-0000-0000000000d1
-C=00000000-0000-0000-0000-0000000000c1
-R=00000000-0000-0000-0000-0000000000e1
-
-echo "== applying schema + seed =="
-psql "$DATABASE_URL" -q -f migrations/0001_init.sql
-psql "$DATABASE_URL" -q <<SQL
-INSERT INTO accounts(id,name) VALUES ('$A','RTM') ON CONFLICT DO NOTHING;
-INSERT INTO output_profiles(id,account_id,name,rungs,workflow_type) VALUES ('$D','$A','p','[{"height":1080,"bitrate_kbps":5000}]','package_only') ON CONFLICT DO NOTHING;
-INSERT INTO groups(id,account_id,name,output_profile_id,max_channels,max_concurrent) VALUES ('$G','$A','g','$D',10,5) ON CONFLICT DO NOTHING;
-INSERT INTO channels(id,group_id,name,status) VALUES ('$C','$G','api-news','scheduled') ON CONFLICT DO NOTHING;
-INSERT INTO recordings(id,kind,channel_id,day_utc,status,start_epoch_ms,master_key,hi_res_rendition) VALUES ('$R','channel_day','$C','2026-07-30','recording',0,'channel/$C','1080p') ON CONFLICT DO NOTHING;
-SQL
-
-echo "== starting API on :$PORT =="
-fuser -k "$PORT"/tcp 2>/dev/null || true; sleep 1
-npx tsx src/index.ts >/tmp/volt-verify.log 2>&1 &
-SRV=$!
-trap 'kill $SRV 2>/dev/null || true' EXIT
-for i in $(seq 1 30); do curl -fsS "localhost:$PORT/health" >/dev/null 2>&1 && break || sleep 1; done
-
-TOKEN=$(node -e "console.log(require('jsonwebtoken').sign({sub:'u',account_id:'$A',role:'owner'},process.env.JWT_ACCESS_SECRET,{expiresIn:3600}))")
-
-echo "== running Postman collection (Newman) =="
-newman run api/Volt.postman_collection.json -e api/Volt.postman_environment.json \
-  --env-var "baseUrl=http://localhost:$PORT" --env-var "token=$TOKEN" --env-var "ingestToken=$INGEST_TOKEN" \
-  --env-var "groupId=$G" --env-var "channelId=$C" --env-var "recordingId=$R"
+NEWMAN=$(command -v newman || echo "npx --yes newman@6")
+echo "== running the Postman collection =="
+$NEWMAN run api/Volt.postman_collection.json -e api/Volt.postman_environment.json \
+  --env-var "baseUrl=http://localhost:$PORT" --env-var "domain=$SEED_DOMAIN" --env-var "password=$SEED_PASSWORD" \
+  --env-var "adminEmail=admin@$SEED_DOMAIN" --env-var "radioEmail=radio@$SEED_DOMAIN" --env-var "sysViewerEmail=viewer@$SEED_DOMAIN" \
+  --env-var "viewerEmail=fan@$SEED_DOMAIN" --env-var "staffEmail=staff@$SEED_DOMAIN" --env-var "ingestToken=$INGEST_TOKEN" \
+  --env-var "accountId=$ACCOUNT_ID" --env-var "groupId=$G" --env-var "channelId=$C" --env-var "recordingId=$R" --env-var "vodId=$V"

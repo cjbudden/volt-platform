@@ -139,6 +139,11 @@ export class VoltPlayerCore {
     try {
       this.session = await this.openSession();
       cfg = { ...this.session.config, ...(this.opts.config ?? {}) } as PlayerConfig;
+      if (this.opts.handoff?.(this.session, cfg)) {
+        this.audio.remove();
+        this.destroyed = true;
+        return;
+      }
     } catch (e: any) {
       // A failed handshake is the one error that must render, because it is
       // the one an embedder will hit while setting up: a wrong key, or a domain

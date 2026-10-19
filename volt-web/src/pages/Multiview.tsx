@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type LiveStream } from '../api'
 import { navigate } from '../router'
 import { pressable } from '../a11y'
+import { PageError, usePageNotice } from '../notices'
 
 /* ============================================================================
    MULTIVIEW — the wall of confidence monitors.
@@ -313,7 +314,9 @@ export default function MultiviewPage() {
     })
   }
 
-  if (err && !streams) return <div className="card p-4"><div className="err">{err}</div></div>
+  usePageNotice('load', err && streams ? { kind: 'error', title: "Couldn't load the streams.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
+
+  if (err && !streams) return <PageError message={err} onRetry={load} />
   if (!streams) return <div className="card p-4"><div className="loading">Loading the wall…</div></div>
 
   return (
@@ -340,8 +343,6 @@ export default function MultiviewPage() {
           </button>
         </div>
       </div>
-
-      {err && <div className="err" style={{ marginBottom: 12 }}>{err}</div>}
 
       {tiles.length === 0 ? (
         <div className="empty">

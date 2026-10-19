@@ -43,11 +43,12 @@ tenant isolation (each only sees its own data).
 - **Hydra entrypoint** (navigate the whole API graph):
   `curl http://localhost:8080/api` and follow the links; add
   `-H 'Accept: application/ld+json'` on any GET for the JSON-LD + Hydra form.
-- **Full API suite** (34 endpoints, headless): point it at an *empty* DB —
-  `DATABASE_URL=postgres://…/volt_verify ./api/verify.sh` → 34 req / 38 assert / 0 fail.
-- **Postman**: import `api/Volt.postman_collection.json` (+ environment); every
-  request ships a saved example response. `docs/api-playground.html` is the same
-  as a searchable page. New endpoint groups are in `docs/API-additions.md`.
+- **Full API suite** (headless): point it at a throwaway DB (it is recreated):
+  `DATABASE_URL=postgres://…/volt_verify ./api/verify.sh` → 128 requests / 128 assertions / 0 fail,
+  across the public, admin and platform APIs.
+- **Postman**: import `api/Volt.postman_collection.json` (+ environment) and run the folders in
+  order; every request ships a saved example response. How to use the API: `docs/API_GUIDE.md`.
+  Every route with its access: `docs/API_ROUTES.md`. Searchable page: `docs/api-playground.html`.
 
 ## 4. Test the media pipeline (optional, real encode)
 ```bash

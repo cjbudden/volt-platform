@@ -716,6 +716,19 @@
       },
       "checks": "Hooks built 12 Oct. Fake-vendor tests in test/workflows.check.ts (encode only, full, stop, liveness, rollback, webhook normalisation).",
       "feedback": []
+    },
+    {
+      "id": "stream-placement",
+      "name": "Automatic stream sizing, placement and consolidation advice",
+      "summary": "WHY: running cost is set by how many servers are up, and customers should never have to understand load. WHAT: every start works out the stream's CPU, GPU, memory and bandwidth from its output settings (transcode or packaging, ladder, fps, watermark, captions, backup source, DRM), reserves exactly that plus headroom, and puts it on the fullest running server that can take it without its existing streams noticing, or starts the smallest server that holds it. 24/7 channels stay on on-demand servers, events can use Spot. Measured runs with the same settings replace the estimate over time. Consolidation of under-used servers is planned on every fleet pass and shown, but nothing is moved until the no-interruption handoff is built. Customers see only 'Running' or 'Starting a server', and a plain fix when something is wrong.",
+      "status": "ready_to_test",
+      "app_surface": "partial",
+      "test": {
+        "how": "Start a package-only channel and a full 1080p transcode channel. Channel page: the billing strip says 'Server Running' (no instance type). Platform: GET /api/platform/fleet-plan/stream/<id> shows the estimate, the reservation and why that server was chosen; GET /api/platform/fleet-plan/hosts shows every server's measured and planned load; GET /api/platform/fleet-plan shows the latest consolidation advice. Checks: npx tsx test/stream-load.check.ts, placement-planner, consolidation-plan, server-status, placement-e2e (needs DATABASE_URL).",
+        "artifact": null
+      },
+      "checks": "A package-only channel reserves well under 1 vCPU, not the old 2 vCPU default; A full 1080p x264 ladder goes to a large server, not an undersized small one; A second channel lands on the same running server when it fits; A channel is never placed on Spot; an event prefers Spot; Nothing is moved by consolidation (advise only)",
+      "feedback": []
     }
   ],
   "note": "Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set."

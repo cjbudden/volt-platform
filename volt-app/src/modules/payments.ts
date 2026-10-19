@@ -23,7 +23,6 @@ import { Router, raw as rawBody } from 'express';
 import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
-import { requireMinRole } from '../auth/roles';
 import { asyncHandler, notFound, badRequest, ApiError } from '../util/http';
 import { actor, writeAudit } from '../services/audit';
 import { verifyKey } from '../services/apiKeys';
@@ -54,7 +53,7 @@ async function applyEvents(account: string, parsed: { events: any[]; verified: b
 // ---- management ------------------------------------------------------------------
 export const paymentsRouter = Router();
 paymentsRouter.use(requireAuth);
-paymentsRouter.use(requireMinRole('admin'));
+// Feature `payments` (view / manage) is enforced by the central gate in requireAuth.
 
 paymentsRouter.get('/providers', asyncHandler(async (req, res) => {
   const rows = await query<any>(`SELECT id, provider, config, enabled, secret_ref IS NOT NULL AS has_secret, updated_at FROM payment_providers WHERE account_id = $1 ORDER BY provider`, [accountId(req)]);

@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, thumbUrl, type MediaFile } from './api'
 import { pressable } from './a11y'
+import { Notice } from './notices'
 
 function fileToDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -80,7 +81,7 @@ export function ImagePicker({ open, onClose, onPick, kinds, title, allowUpload =
           ) : null}
           <button className="xbtn" onClick={onClose} style={{ marginLeft: 8 }}>✕</button>
         </div>
-        {err && <div className="err" style={{ margin: '0 14px' }}>{err}</div>}
+        {err && <div style={{ margin: '0 14px' }}><Notice kind="error" variant="compact" message={err} /></div>}
         <div className="card-b" style={{ overflow: 'auto' }}>
           {files === null ? <div className="loading">Loading…</div>
             : shown.length === 0 ? (

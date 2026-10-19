@@ -1,8 +1,8 @@
 {
   "name": "volt-player",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "VOLT Stream embeddable audio player. Shaka-based, MP3/HLS/DASH, skinnable, key-gated.",
+  "description": "VOLT player SDK for the web: video and audio, playlists, guide, up next, start over, quality and subtitles, Chromecast and AirPlay, themeable skins. Shaka-based, key-gated.",
   "type": "module",
   "scripts": {
     "build": "tsc -b && vite build",

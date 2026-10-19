@@ -47,7 +47,12 @@ check('a variant whose audio is in a separate playlist is marked (it cannot be u
 check('subtitles are a rendition too', a.renditions!.filter((x) => x.type === 'SUBTITLES').length, 1);
 
 const MEDIA = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:1\n#EXTINF:6.0,\nseg1.aac\n#EXTINF:6.0,\nseg2.aac`;
-check('a live media playlist', parsePlaylist(MEDIA, 'https://x.example/v0-221.m3u8'), { ok: true, kind: 'media', live: true, targetDuration: 6 });
+check('a live media playlist', parsePlaylist(MEDIA, 'https://x.example/v0-221.m3u8'), { ok: true, kind: 'media', live: true, targetDuration: 6,
+  recentSegments: [{ uri: 'https://x.example/seg1.aac', duration: 6, length: null }, { uri: 'https://x.example/seg2.aac', duration: 6, length: null }] });
+const LONG = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n' + [1, 2, 3, 4, 5].map((n) => `#EXTINF:4.0,\ns${n}.ts`).join('\n');
+check('measuring the bitrate uses the last three segments', parsePlaylist(LONG, 'https://x.example/v/i.m3u8').recentSegments!.map((x) => x.uri.split('/').pop()), ['s3.ts', 's4.ts', 's5.ts']);
+const BR = '#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2.0,\n#EXT-X-BYTERANGE:250000@0\nall.ts\n#EXTINF:2.0,\n#EXT-X-BYTERANGE:260000\nall.ts';
+check('a byte-range segment carries its length', parsePlaylist(BR, 'https://x.example/i.m3u8').recentSegments!.map((x) => x.length), [250000, 260000]);
 check('a VOD media playlist', parsePlaylist(MEDIA + '\n#EXT-X-ENDLIST', 'https://x.example/a.m3u8').live, false);
 check('not a playlist', parsePlaylist('<html>nope</html>', 'https://x.example/').ok, false);
 check('a BOM and CRLF line ends are fine', parsePlaylist('﻿#EXTM3U\r\n#EXT-X-STREAM-INF:BANDWIDTH=1\r\na.m3u8\r\n', 'https://x.example/m.m3u8').variants?.length, 1);

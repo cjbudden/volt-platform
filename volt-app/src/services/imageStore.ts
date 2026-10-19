@@ -25,6 +25,8 @@ export interface ImageStore {
   exists(key: string): Promise<boolean>;
   list(prefix: string): Promise<StoredObject[]>;
   move(from: string, to: string): Promise<void>;
+  /** Size of an object, or null when it does not exist (the image service's size guard). */
+  stat(key: string): Promise<{ size: number } | null>;
 }
 
 /** Reject path traversal / absolute keys; normalise separators to '/'. */
@@ -55,6 +57,9 @@ class LocalImageStore implements ImageStore {
   }
   async delete(key: string) { try { await fs.unlink(this.abs(key)); } catch { /* already gone */ } }
   async exists(key: string) { try { await fs.access(this.abs(key)); return true; } catch { return false; } }
+  async stat(key: string) {
+    try { const st = await fs.stat(this.abs(key)); return st.isFile() ? { size: st.size } : null; } catch { return null; }
+  }
   async move(from: string, to: string) {
     const a = this.abs(from), b = this.abs(to);
     await fs.mkdir(dirname(b), { recursive: true });
@@ -85,7 +90,8 @@ class S3ImageStore implements ImageStore {
   private async cli() {
     if (!this.client) {
       const { S3Client } = await import('@aws-sdk/client-s3');
-      this.client = new S3Client({ region: config.aws.region });
+      // S3_FORCE_PATH_STYLE=1 + AWS_ENDPOINT_URL point this at MinIO / LocalStack locally.
+      this.client = new S3Client({ region: config.aws.region, forcePathStyle: process.env.S3_FORCE_PATH_STYLE === '1' });
     }
     return this.client;
   }
@@ -117,6 +123,13 @@ class S3ImageStore implements ImageStore {
   async exists(key: string) {
     const { HeadObjectCommand } = await import('@aws-sdk/client-s3');
     try { await (await this.cli()).send(new HeadObjectCommand({ Bucket: this.bucket, Key: this.full(key) })); return true; } catch { return false; }
+  }
+  async stat(key: string) {
+    const { HeadObjectCommand } = await import('@aws-sdk/client-s3');
+    try {
+      const r = await (await this.cli()).send(new HeadObjectCommand({ Bucket: this.bucket, Key: this.full(key) }));
+      return { size: Number(r.ContentLength ?? 0) };
+    } catch { return null; }
   }
   async move(from: string, to: string) {
     const { CopyObjectCommand } = await import('@aws-sdk/client-s3');

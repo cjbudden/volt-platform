@@ -1,0 +1,4601 @@
+[
+ {
+  "method": "GET",
+  "path": "/api",
+  "api": "discovery",
+  "credential": "none",
+  "access": "Hydra service document",
+  "viewerTier": false,
+  "group": "/api"
+ },
+ {
+  "method": "GET",
+  "path": "/api/access-roles",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "access or users: view",
+  "viewerTier": false,
+  "group": "/api/access-roles"
+ },
+ {
+  "method": "POST",
+  "path": "/api/access-roles",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "access: manage",
+  "viewerTier": false,
+  "group": "/api/access-roles"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/access-roles/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "access: manage",
+  "viewerTier": false,
+  "group": "/api/access-roles"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/access-roles/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "access: manage",
+  "viewerTier": false,
+  "group": "/api/access-roles"
+ },
+ {
+  "method": "POST",
+  "path": "/api/access-roles/:id/copy",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "access: manage",
+  "viewerTier": false,
+  "group": "/api/access-roles"
+ },
+ {
+  "method": "GET",
+  "path": "/api/access-roles/catalogue",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "access or users: view",
+  "viewerTier": false,
+  "group": "/api/access-roles"
+ },
+ {
+  "method": "POST",
+  "path": "/api/access/check",
+  "api": "public",
+  "credential": "publishable key",
+  "access": "public (legacy alias of /api/public/access/check)",
+  "viewerTier": true,
+  "group": "/api/access"
+ },
+ {
+  "method": "GET",
+  "path": "/api/account-settings",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/account-settings"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/account-settings",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/account-settings"
+ },
+ {
+  "method": "POST",
+  "path": "/api/addon-callbacks/runs/:id",
+  "api": "machine",
+  "credential": "add-on run token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/addon-callbacks"
+ },
+ {
+  "method": "GET",
+  "path": "/api/addons",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/addons"
+ },
+ {
+  "method": "POST",
+  "path": "/api/addons",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/addons"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/addons/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/addons"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/addons/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/addons"
+ },
+ {
+  "method": "POST",
+  "path": "/api/addons/:id/rotate-secret",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/addons"
+ },
+ {
+  "method": "POST",
+  "path": "/api/addons/:id/test",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/addons"
+ },
+ {
+  "method": "GET",
+  "path": "/api/addons/triggers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/addons"
+ },
+ {
+  "method": "POST",
+  "path": "/api/addons/triggers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/addons"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/addons/triggers/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/addons"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/addons/triggers/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/addons"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/asset",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/audience",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/analytics/beacon",
+  "api": "public",
+  "credential": "playback token",
+  "access": "public (legacy alias of /api/public/analytics/beacon)",
+  "viewerTier": true,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/overview",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/realtime",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/retention",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/analytics/retention",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: manage",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/analytics/retention/sweep",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: manage",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/usage",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/apps",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "apps: view",
+  "viewerTier": false,
+  "group": "/api/apps"
+ },
+ {
+  "method": "POST",
+  "path": "/api/apps",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "apps: manage",
+  "viewerTier": false,
+  "group": "/api/apps"
+ },
+ {
+  "method": "GET",
+  "path": "/api/apps/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "apps: view",
+  "viewerTier": false,
+  "group": "/api/apps"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/apps/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "apps: manage",
+  "viewerTier": false,
+  "group": "/api/apps"
+ },
+ {
+  "method": "POST",
+  "path": "/api/apps/:id/keys",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "apps: manage",
+  "viewerTier": false,
+  "group": "/api/apps"
+ },
+ {
+  "method": "GET",
+  "path": "/api/apps/keys",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "apps: view",
+  "viewerTier": false,
+  "group": "/api/apps"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/apps/keys/:keyId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "apps: manage",
+  "viewerTier": false,
+  "group": "/api/apps"
+ },
+ {
+  "method": "POST",
+  "path": "/api/apps/secret-keys",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "apps: manage + admin tier",
+  "viewerTier": false,
+  "group": "/api/apps"
+ },
+ {
+  "method": "GET",
+  "path": "/api/audit",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/audit"
+ },
+ {
+  "method": "GET",
+  "path": "/api/audit/export.csv",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/audit"
+ },
+ {
+  "method": "GET",
+  "path": "/api/audit/facets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/audit"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/email/change",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/email/change/confirm",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/email/verify",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/email/verify/confirm",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/login",
+  "api": "sign-in",
+  "credential": "email + password",
+  "access": "no session",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/logout",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "GET",
+  "path": "/api/auth/me",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/auth/me",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/auth/mfa/:method",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/mfa/backup-codes",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/mfa/challenge/send",
+  "api": "sign-in",
+  "credential": "sign-in challenge (body)",
+  "access": "no session",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/mfa/challenge/verify",
+  "api": "sign-in",
+  "credential": "sign-in challenge (body)",
+  "access": "no session",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/mfa/email/confirm",
+  "api": "admin",
+  "credential": "admin session, or the setup challenge during sign-in",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/mfa/email/start",
+  "api": "admin",
+  "credential": "admin session, or the setup challenge during sign-in",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/mfa/sms/confirm",
+  "api": "admin",
+  "credential": "admin session, or the setup challenge during sign-in",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/mfa/sms/start",
+  "api": "admin",
+  "credential": "admin session, or the setup challenge during sign-in",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/mfa/totp/confirm",
+  "api": "admin",
+  "credential": "admin session, or the setup challenge during sign-in",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/mfa/totp/start",
+  "api": "admin",
+  "credential": "admin session, or the setup challenge during sign-in",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/password",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/auth/phone",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/phone",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/phone/confirm",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/refresh",
+  "api": "sign-in",
+  "credential": "refresh token (body)",
+  "access": "no session",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/register",
+  "api": "sign-in",
+  "credential": "email + password",
+  "access": "no session",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "GET",
+  "path": "/api/auth/security",
+  "api": "admin",
+  "credential": "admin session (Bearer)",
+  "access": "own account (any admin user)",
+  "viewerTier": false,
+  "group": "/api/auth"
+ },
+ {
+  "method": "GET",
+  "path": "/api/availability",
+  "api": "public",
+  "credential": "publishable key; viewer session optional",
+  "access": "public (legacy alias of /api/public/availability)",
+  "viewerTier": true,
+  "group": "/api/availability"
+ },
+ {
+  "method": "POST",
+  "path": "/api/availability",
+  "api": "public",
+  "credential": "publishable key; viewer session optional",
+  "access": "public (legacy alias of /api/public/availability)",
+  "viewerTier": true,
+  "group": "/api/availability"
+ },
+ {
+  "method": "GET",
+  "path": "/api/caption-languages",
+  "api": "discovery",
+  "credential": "none",
+  "access": "reference data for forms",
+  "viewerTier": false,
+  "group": "/api/caption-languages"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "POST",
+  "path": "/api/channels",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: manage",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/channels/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: manage (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/channels/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: manage (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/channels/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: manage (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "POST",
+  "path": "/api/channels/:id/:action(start|stop)",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: operate (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/access-check",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "POST",
+  "path": "/api/channels/:id/air",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: operate (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "POST",
+  "path": "/api/channels/:id/auto-connect",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: operate (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/coverage",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/dayparts",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/channels/:id/dayparts",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: manage (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/delete-impact",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/failover-test",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "POST",
+  "path": "/api/channels/:id/failover-test",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: operate (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/filler",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "POST",
+  "path": "/api/channels/:id/filler",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: manage (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/history",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/inputs/:inputId/preview",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "POST",
+  "path": "/api/channels/:id/reset-health",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: operate (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/test-stream",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "POST",
+  "path": "/api/channels/:id/test-stream",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: operate (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/thumbs",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/timeline",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/waveform",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/context.jsonld",
+  "api": "discovery",
+  "credential": "none",
+  "access": "Hydra service document",
+  "viewerTier": false,
+  "group": "/api/context.jsonld"
+ },
+ {
+  "method": "GET",
+  "path": "/api/daypart-presets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view",
+  "viewerTier": false,
+  "group": "/api/daypart-presets"
+ },
+ {
+  "method": "GET",
+  "path": "/api/doc",
+  "api": "discovery",
+  "credential": "none",
+  "access": "Hydra service document",
+  "viewerTier": false,
+  "group": "/api/doc"
+ },
+ {
+  "method": "GET",
+  "path": "/api/docs/session",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/docs"
+ },
+ {
+  "method": "GET",
+  "path": "/api/encode-profiles",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/encode-profiles"
+ },
+ {
+  "method": "POST",
+  "path": "/api/encode-profiles",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/encode-profiles"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/encode-profiles/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/encode-profiles"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/encode-profiles/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/encode-profiles"
+ },
+ {
+  "method": "GET",
+  "path": "/api/encode-profiles/ladders",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/encode-profiles"
+ },
+ {
+  "method": "POST",
+  "path": "/api/encode-profiles/ladders",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/encode-profiles"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/encode-profiles/ladders/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/encode-profiles"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/encode-profiles/ladders/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/encode-profiles"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/encode-profiles/ladders/:id/members",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/encode-profiles"
+ },
+ {
+  "method": "GET",
+  "path": "/api/encode-profiles/ladders/:id/preview",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/encode-profiles"
+ },
+ {
+  "method": "POST",
+  "path": "/api/encode-profiles/ladders/mirror",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/encode-profiles"
+ },
+ {
+  "method": "GET",
+  "path": "/api/encode-profiles/live-profiles",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/encode-profiles"
+ },
+ {
+  "method": "POST",
+  "path": "/api/engine-hooks/:engineId",
+  "api": "machine",
+  "credential": "engine callback signature",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/engine-hooks"
+ },
+ {
+  "method": "GET",
+  "path": "/api/engines",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/engines"
+ },
+ {
+  "method": "GET",
+  "path": "/api/engines/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/engines"
+ },
+ {
+  "method": "POST",
+  "path": "/api/engines/:id/validate",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/engines"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/engines/profiles/:profileId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/engines"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/epg/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/epg/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/:id/convert",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/channels",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/epg/channels/:id/guide-icon",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/epg/channels/:id/xmltv-id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/clear-day",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/conflicts",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/copy-day",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/epg/import/aliases/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/import/sources",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/import/sources",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/epg/import/sources/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/epg/import/sources/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/import/sources/:id/channels",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/import/sources/:id/channels/:aliasId/use-icon",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/import/sources/:id/channels/bulk",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/import/sources/:id/run",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: operate",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/import/sources/:id/runs",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/import/sources/:id/test",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: operate",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/import/sources/:id/upload",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/now-next",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/owner-defaults",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/owners",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/series",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/vod-status",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/xmltv",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/xmltv/feeds",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/xmltv/feeds",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/epg/xmltv/feeds/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/epg/xmltv/feeds/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "POST",
+  "path": "/api/epg/xmltv/feeds/:id/rotate",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: manage",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
+  "method": "GET",
+  "path": "/api/events",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: view",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "POST",
+  "path": "/api/events",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: manage",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/events/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: manage",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "GET",
+  "path": "/api/events/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: view",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/events/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: manage",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/events/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: manage",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "POST",
+  "path": "/api/events/:id/:action(start|stop)",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: operate",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "POST",
+  "path": "/api/events/:id/auto-connect",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: operate",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "GET",
+  "path": "/api/events/:id/filler",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: view",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "POST",
+  "path": "/api/events/:id/filler",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: manage",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "GET",
+  "path": "/api/events/:id/history",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: view",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "GET",
+  "path": "/api/files",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/files"
+ },
+ {
+  "method": "POST",
+  "path": "/api/files",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/files"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/files/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/files"
+ },
+ {
+  "method": "GET",
+  "path": "/api/files/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/files"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/files/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/files"
+ },
+ {
+  "method": "POST",
+  "path": "/api/files/:id/metadata/refresh",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/files"
+ },
+ {
+  "method": "GET",
+  "path": "/api/files/folders",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/files"
+ },
+ {
+  "method": "POST",
+  "path": "/api/files/folders",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/files"
+ },
+ {
+  "method": "POST",
+  "path": "/api/files/metadata/backfill",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/files"
+ },
+ {
+  "method": "GET",
+  "path": "/api/files/search",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/files"
+ },
+ {
+  "method": "GET",
+  "path": "/api/filler-assets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "POST",
+  "path": "/api/filler-assets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/filler-assets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/filler-assets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fleet/hosts",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "fleet: view",
+  "viewerTier": false,
+  "group": "/api/fleet"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fleet/hosts/:id/samples",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "fleet: view",
+  "viewerTier": false,
+  "group": "/api/fleet"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fleet/usage",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "fleet: view",
+  "viewerTier": false,
+  "group": "/api/fleet"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fleet/usage/stream/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "fleet: view",
+  "viewerTier": false,
+  "group": "/api/fleet"
+ },
+ {
+  "method": "GET",
+  "path": "/api/groups",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/groups"
+ },
+ {
+  "method": "POST",
+  "path": "/api/groups",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/groups"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/groups/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/groups"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/groups/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/groups"
+ },
+ {
+  "method": "GET",
+  "path": "/api/groups/:id/usage",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/groups"
+ },
+ {
+  "method": "GET",
+  "path": "/api/images/config",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/images"
+ },
+ {
+  "method": "POST",
+  "path": "/api/images/sign",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/images"
+ },
+ {
+  "method": "GET",
+  "path": "/api/images/signing-key",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/images"
+ },
+ {
+  "method": "GET",
+  "path": "/api/images/stats",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/images"
+ },
+ {
+  "method": "GET",
+  "path": "/api/ingest-protocols",
+  "api": "discovery",
+  "credential": "none",
+  "access": "reference data for forms",
+  "viewerTier": false,
+  "group": "/api/ingest-protocols"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/assets/:id/duplicate",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/assets/:id/metadata",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "GET",
+  "path": "/api/ingest/baseline",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "GET",
+  "path": "/api/ingest/held",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/locate",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/preview",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "GET",
+  "path": "/api/ingest/providers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/providers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/ingest/providers/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "GET",
+  "path": "/api/ingest/providers/:provider/authorize",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "GET",
+  "path": "/api/ingest/providers/:provider/callback",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/remote",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "GET",
+  "path": "/api/ingest/rules",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/rules",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/ingest/rules/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/ingest/rules/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/sanitise",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "GET",
+  "path": "/api/ingest/transfers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/transfers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/transfers/:id/events",
+  "api": "machine",
+  "credential": "transfer provider callback (checked per provider)",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "GET",
+  "path": "/api/ingest/webhooks",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/webhooks",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/ingest/webhooks/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/ingest/webhooks/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "GET",
+  "path": "/api/jobs",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/jobs"
+ },
+ {
+  "method": "GET",
+  "path": "/api/jobs/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/jobs"
+ },
+ {
+  "method": "POST",
+  "path": "/api/jobs/:id/cancel",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: operate",
+  "viewerTier": false,
+  "group": "/api/jobs"
+ },
+ {
+  "method": "POST",
+  "path": "/api/jobs/:id/retry",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: operate",
+  "viewerTier": false,
+  "group": "/api/jobs"
+ },
+ {
+  "method": "POST",
+  "path": "/api/media/thumbnails",
+  "api": "machine",
+  "credential": "X-Volt-Ingest-Token",
+  "access": "encoder / thumbnailer report",
+  "viewerTier": false,
+  "group": "/api/media"
+ },
+ {
+  "method": "GET",
+  "path": "/api/metadata-schemas",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/metadata-schemas"
+ },
+ {
+  "method": "POST",
+  "path": "/api/metadata-schemas",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/metadata-schemas"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/metadata-schemas/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/metadata-schemas"
+ },
+ {
+  "method": "GET",
+  "path": "/api/metadata-schemas/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/metadata-schemas"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/metadata-schemas/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/metadata-schemas"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/metadata-schemas/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/metadata-schemas"
+ },
+ {
+  "method": "GET",
+  "path": "/api/metadata-schemas/:id/effective-fields",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/metadata-schemas"
+ },
+ {
+  "method": "GET",
+  "path": "/api/metadata-schemas/:id/history",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/metadata-schemas"
+ },
+ {
+  "method": "GET",
+  "path": "/api/monitoring/feed",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/monitoring"
+ },
+ {
+  "method": "GET",
+  "path": "/api/monitoring/live",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/monitoring"
+ },
+ {
+  "method": "GET",
+  "path": "/api/monitoring/overview",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/monitoring"
+ },
+ {
+  "method": "GET",
+  "path": "/api/notification-templates",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/notification-templates"
+ },
+ {
+  "method": "POST",
+  "path": "/api/notification-templates",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/notification-templates"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/notification-templates/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/notification-templates"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/notification-templates/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/notification-templates"
+ },
+ {
+  "method": "GET",
+  "path": "/api/notifications",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "POST",
+  "path": "/api/notifications",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "GET",
+  "path": "/api/notifications/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "GET",
+  "path": "/api/notifications/config",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "POST",
+  "path": "/api/notifications/deliveries/:id/retry",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "GET",
+  "path": "/api/notifications/devices",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "POST",
+  "path": "/api/notifications/devices",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/notifications/devices/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "GET",
+  "path": "/api/notifications/inbox",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "POST",
+  "path": "/api/notifications/inbox/:id/read",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "POST",
+  "path": "/api/notifications/inbox/read-all",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "POST",
+  "path": "/api/notifications/retry",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "POST",
+  "path": "/api/notifications/test",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/notifications"
+ },
+ {
+  "method": "GET",
+  "path": "/api/output-profiles",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/output-profiles"
+ },
+ {
+  "method": "POST",
+  "path": "/api/output-profiles",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/output-profiles"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/output-profiles/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/output-profiles"
+ },
+ {
+  "method": "POST",
+  "path": "/api/payments/grants",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "payments: manage",
+  "viewerTier": false,
+  "group": "/api/payments"
+ },
+ {
+  "method": "POST",
+  "path": "/api/payments/manual",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "payments: manage",
+  "viewerTier": false,
+  "group": "/api/payments"
+ },
+ {
+  "method": "GET",
+  "path": "/api/payments/products",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "payments: view",
+  "viewerTier": false,
+  "group": "/api/payments"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/payments/products/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "payments: manage",
+  "viewerTier": false,
+  "group": "/api/payments"
+ },
+ {
+  "method": "GET",
+  "path": "/api/payments/providers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "payments: view",
+  "viewerTier": false,
+  "group": "/api/payments"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/payments/providers/:provider",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "payments: manage",
+  "viewerTier": false,
+  "group": "/api/payments"
+ },
+ {
+  "method": "POST",
+  "path": "/api/payments/verify",
+  "api": "public",
+  "credential": "publishable key + viewer",
+  "access": "public (legacy alias of /api/public/payments/verify)",
+  "viewerTier": true,
+  "group": "/api/payments"
+ },
+ {
+  "method": "GET",
+  "path": "/api/payments/viewers/:externalId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "payments: view",
+  "viewerTier": false,
+  "group": "/api/payments"
+ },
+ {
+  "method": "POST",
+  "path": "/api/payments/webhooks/:provider/:accountId",
+  "api": "machine",
+  "credential": "payment provider signature",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/payments"
+ },
+ {
+  "method": "GET",
+  "path": "/api/plan",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/plan"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/plan",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/plan"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/accounts",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/accounts"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/accounts",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/accounts"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/platform/accounts/:id",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/accounts"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/accounts/:id/groups",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/accounts"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/accounts/:id/groups",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/accounts"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/platform/accounts/:id/groups/:gid",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/accounts"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/platform/accounts/:id/groups/:gid",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/accounts"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/auth/login",
+  "api": "sign-in",
+  "credential": "email + password",
+  "access": "no session",
+  "viewerTier": false,
+  "group": "/api/platform/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/auth/mfa",
+  "api": "sign-in",
+  "credential": "sign-in challenge (body)",
+  "access": "no session",
+  "viewerTier": false,
+  "group": "/api/platform/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/auth/step-up",
+  "api": "platform",
+  "credential": "admin session (Bearer)",
+  "access": "platform staff",
+  "viewerTier": false,
+  "group": "/api/platform/auth"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/platform/costs/actuals",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/costs"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/costs/comparison",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/costs"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/fleet-plan",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/fleet-plan"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/fleet-plan/hosts",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/fleet-plan"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/fleet-plan/stream/:id",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/fleet-plan"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/impersonate/:accountId",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/impersonate"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/overview",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/overview"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/relays",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/relays"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/relays",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/relays"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/platform/relays/:id",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/relays"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/relays/:id/stations",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/relays"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/tickets",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/tickets"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/platform/tickets/:id",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/tickets"
+ },
+ {
+  "method": "GET",
+  "path": "/api/player-config/:channelId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "apps: view",
+  "viewerTier": false,
+  "group": "/api/player-config"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/player-config/:channelId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "apps: manage",
+  "viewerTier": false,
+  "group": "/api/player-config"
+ },
+ {
+  "method": "GET",
+  "path": "/api/player-config/:channelId/report",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "apps: view",
+  "viewerTier": false,
+  "group": "/api/player-config"
+ },
+ {
+  "method": "GET",
+  "path": "/api/player/epg",
+  "api": "public",
+  "credential": "publishable key or player token",
+  "access": "public (legacy alias of /api/public/player/epg)",
+  "viewerTier": true,
+  "group": "/api/player"
+ },
+ {
+  "method": "GET",
+  "path": "/api/player/event",
+  "api": "public",
+  "credential": "publishable key or player token",
+  "access": "public (legacy alias of /api/public/player/event)",
+  "viewerTier": true,
+  "group": "/api/player"
+ },
+ {
+  "method": "POST",
+  "path": "/api/player/events",
+  "api": "public",
+  "credential": "publishable key or player token",
+  "access": "public (legacy alias of /api/public/player/events)",
+  "viewerTier": true,
+  "group": "/api/player"
+ },
+ {
+  "method": "POST",
+  "path": "/api/player/now-playing",
+  "api": "public",
+  "credential": "publishable key or player token",
+  "access": "public (legacy alias of /api/public/player/now-playing)",
+  "viewerTier": true,
+  "group": "/api/player"
+ },
+ {
+  "method": "POST",
+  "path": "/api/player/session",
+  "api": "public",
+  "credential": "publishable key or player token",
+  "access": "public (legacy alias of /api/public/player/session)",
+  "viewerTier": true,
+  "group": "/api/player"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/access/check",
+  "api": "public",
+  "credential": "publishable key",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/access"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/analytics/beacon",
+  "api": "public",
+  "credential": "playback token",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/analytics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/auth/login",
+  "api": "public",
+  "credential": "publishable key (appKey in body)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/auth/logout",
+  "api": "public",
+  "credential": "viewer refresh token (body)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/auth/mfa/challenge/send",
+  "api": "public",
+  "credential": "sign-in challenge (body)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/auth/mfa/challenge/verify",
+  "api": "public",
+  "credential": "sign-in challenge (body)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/auth/password-reset",
+  "api": "public",
+  "credential": "publishable key (appKey in body)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/auth/password-reset/confirm",
+  "api": "public",
+  "credential": "publishable key (appKey in body)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/auth/refresh",
+  "api": "public",
+  "credential": "viewer refresh token (body)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/auth/register",
+  "api": "public",
+  "credential": "publishable key (appKey in body)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/auth"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/auth/token-exchange",
+  "api": "public",
+  "credential": "account secret key (sk_live_…)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/auth"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/availability",
+  "api": "public",
+  "credential": "publishable key; viewer session optional",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/availability"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/availability",
+  "api": "public",
+  "credential": "publishable key; viewer session optional",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/availability"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/public/me",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/me",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/public/me",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/email/change",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/email/change/confirm",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/email/verify",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/email/verify/confirm",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/me/entitlements",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/public/me/mfa/:method",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/mfa/backup-codes",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/mfa/email/confirm",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/mfa/email/start",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/mfa/sms/confirm",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/mfa/sms/start",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/mfa/totp/confirm",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/mfa/totp/start",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/password",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/public/me/phone",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/phone",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/phone/confirm",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/me/purchases",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/me/security",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/me/sessions",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/me/sign-out-everywhere",
+  "api": "public",
+  "credential": "viewer session (Bearer)",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/me"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/payments/verify",
+  "api": "public",
+  "credential": "publishable key + viewer",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/payments"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/player/epg",
+  "api": "public",
+  "credential": "publishable key or player token",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/player"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/player/event",
+  "api": "public",
+  "credential": "publishable key or player token",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/player"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/player/events",
+  "api": "public",
+  "credential": "publishable key or player token",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/player"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/player/now-playing",
+  "api": "public",
+  "credential": "publishable key or player token",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/player"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/player/session",
+  "api": "public",
+  "credential": "publishable key or player token",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/player"
+ },
+ {
+  "method": "GET",
+  "path": "/api/publications",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/publications"
+ },
+ {
+  "method": "POST",
+  "path": "/api/publications/sync-views",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/publications"
+ },
+ {
+  "method": "POST",
+  "path": "/api/publications/vod/:id/publish",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: operate",
+  "viewerTier": false,
+  "group": "/api/publications"
+ },
+ {
+  "method": "GET",
+  "path": "/api/publish-targets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/publish-targets"
+ },
+ {
+  "method": "POST",
+  "path": "/api/publish-targets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/publish-targets"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/publish-targets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/publish-targets"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/publish-targets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/publish-targets"
+ },
+ {
+  "method": "GET",
+  "path": "/api/publishing-rules",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/publishing-rules/:scopeKind/:scopeId?",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "GET",
+  "path": "/api/publishing-rules/:scopeKind/:scopeId?",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/publishing-rules/:scopeKind/:scopeId?",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "GET",
+  "path": "/api/publishing-rules/points",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "GET",
+  "path": "/api/publishing-rules/resolve",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "GET",
+  "path": "/api/radio",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: view",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "GET",
+  "path": "/api/radio/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: view",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "POST",
+  "path": "/api/radio/:id/air",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: operate",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "POST",
+  "path": "/api/radio/:id/auto-connect",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: operate",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "POST",
+  "path": "/api/radio/:id/clear-recovery",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: operate",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/radio/:id/events",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: manage",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "GET",
+  "path": "/api/radio/:id/events",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: view",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "GET",
+  "path": "/api/radio/:id/levels",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: view",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "GET",
+  "path": "/api/radio/:id/log",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: view",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "GET",
+  "path": "/api/radio/:id/nowplaying",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: view",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "GET",
+  "path": "/api/radio/:id/qc",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: view",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "POST",
+  "path": "/api/radio/:id/start",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: operate",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "POST",
+  "path": "/api/radio/:id/stop",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: operate",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "POST",
+  "path": "/api/radio/icecast/listener-auth",
+  "api": "machine",
+  "credential": "Icecast auth callback secret",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "POST",
+  "path": "/api/radio/icecast/listener-remove",
+  "api": "machine",
+  "credential": "Icecast auth callback secret",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "POST",
+  "path": "/api/radio/probe",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: operate",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "POST",
+  "path": "/api/recordings/:id/clip",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: manage",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings/:id/derived",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings/:id/download",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings/:id/programmes",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "POST",
+  "path": "/api/recordings/:id/publish",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: operate",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings/:id/range/:kind(video|audio).m3u8",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings/:id/range/master.m3u8",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings/:id/timeline",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings/:id/transcript",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings/:id/waveform",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings/channels",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "POST",
+  "path": "/api/recordings/compose-clip",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: manage",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings/sources",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/scheduled-clips",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/scheduled-clips"
+ },
+ {
+  "method": "POST",
+  "path": "/api/scheduled-clips",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: manage",
+  "viewerTier": false,
+  "group": "/api/scheduled-clips"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/scheduled-clips/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: manage",
+  "viewerTier": false,
+  "group": "/api/scheduled-clips"
+ },
+ {
+  "method": "GET",
+  "path": "/api/search",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/search"
+ },
+ {
+  "method": "GET",
+  "path": "/api/share-links",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "sharing: view",
+  "viewerTier": false,
+  "group": "/api/share-links"
+ },
+ {
+  "method": "POST",
+  "path": "/api/share-links",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "sharing: manage",
+  "viewerTier": false,
+  "group": "/api/share-links"
+ },
+ {
+  "method": "GET",
+  "path": "/api/share-links/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "sharing: view",
+  "viewerTier": false,
+  "group": "/api/share-links"
+ },
+ {
+  "method": "POST",
+  "path": "/api/share-links/:id/revoke",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "sharing: manage",
+  "viewerTier": false,
+  "group": "/api/share-links"
+ },
+ {
+  "method": "GET",
+  "path": "/api/share/:token/download/:element",
+  "api": "public",
+  "credential": "share link token (path), plus PIN or emailed code when the link has one",
+  "access": "public (legacy alias of /api/public/share/:token/download/:element)",
+  "viewerTier": true,
+  "group": "/api/share"
+ },
+ {
+  "method": "POST",
+  "path": "/api/share/:token/request-code",
+  "api": "public",
+  "credential": "share link token (path), plus PIN or emailed code when the link has one",
+  "access": "public (legacy alias of /api/public/share/:token/request-code)",
+  "viewerTier": true,
+  "group": "/api/share"
+ },
+ {
+  "method": "POST",
+  "path": "/api/share/:token/resolve",
+  "api": "public",
+  "credential": "share link token (path), plus PIN or emailed code when the link has one",
+  "access": "public (legacy alias of /api/public/share/:token/resolve)",
+  "viewerTier": true,
+  "group": "/api/share"
+ },
+ {
+  "method": "GET",
+  "path": "/api/social/accounts",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "GET",
+  "path": "/api/social/callback/:platform",
+  "api": "machine",
+  "credential": "OAuth redirect (state parameter)",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "POST",
+  "path": "/api/social/connect/:platform",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "GET",
+  "path": "/api/social/platforms",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "GET",
+  "path": "/api/social/publications",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "POST",
+  "path": "/api/social/publications/:id/remove",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "POST",
+  "path": "/api/social/publications/:id/retry",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: operate",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "POST",
+  "path": "/api/social/publish/:assetId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: operate",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "GET",
+  "path": "/api/social/publish/:assetId/defaults",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "POST",
+  "path": "/api/social/sandbox/:platform",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "POST",
+  "path": "/api/social/sync-views",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "GET",
+  "path": "/api/source-preview/:token/index.m3u8",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/source-preview"
+ },
+ {
+  "method": "GET",
+  "path": "/api/source-preview/:token/pl",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/source-preview"
+ },
+ {
+  "method": "GET",
+  "path": "/api/source-preview/:token/seg",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/source-preview"
+ },
+ {
+  "method": "POST",
+  "path": "/api/sources/hls",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels or radio or events: manage",
+  "viewerTier": false,
+  "group": "/api/sources"
+ },
+ {
+  "method": "POST",
+  "path": "/api/sources/probe",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels or radio or events: manage",
+  "viewerTier": false,
+  "group": "/api/sources"
+ },
+ {
+  "method": "GET",
+  "path": "/api/status",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/status"
+ },
+ {
+  "method": "GET",
+  "path": "/api/status/:kind/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/status"
+ },
+ {
+  "method": "GET",
+  "path": "/api/status/:kind/:id/events",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/status"
+ },
+ {
+  "method": "GET",
+  "path": "/api/status/stream",
+  "api": "admin",
+  "credential": "admin session (Bearer, or ?ticket= for EventSource)",
+  "access": "live status push, filtered by the features the user holds",
+  "viewerTier": false,
+  "group": "/api/status"
+ },
+ {
+  "method": "GET",
+  "path": "/api/storage/capabilities",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "GET",
+  "path": "/api/storage/objects",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "GET",
+  "path": "/api/storage/objects/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "POST",
+  "path": "/api/storage/objects/:id/hold",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "POST",
+  "path": "/api/storage/objects/:id/restore",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "POST",
+  "path": "/api/storage/reconcile",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "GET",
+  "path": "/api/storage/retention",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/storage/retention",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "GET",
+  "path": "/api/storage/retention/effective",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "POST",
+  "path": "/api/storage/retention/preview",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "POST",
+  "path": "/api/streams/:id/report",
+  "api": "machine",
+  "credential": "X-Volt-Ingest-Token",
+  "access": "encoder / thumbnailer report",
+  "viewerTier": false,
+  "group": "/api/streams"
+ },
+ {
+  "method": "POST",
+  "path": "/api/thumbnails/build",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/thumbnails"
+ },
+ {
+  "method": "GET",
+  "path": "/api/thumbnails/recordings/:id.vtt",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/thumbnails"
+ },
+ {
+  "method": "GET",
+  "path": "/api/thumbnails/status",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/thumbnails"
+ },
+ {
+  "method": "GET",
+  "path": "/api/thumbnails/storyboard",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/thumbnails"
+ },
+ {
+  "method": "GET",
+  "path": "/api/thumbnails/vod/:id.vtt",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/thumbnails"
+ },
+ {
+  "method": "GET",
+  "path": "/api/thumbnails/vtt",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/thumbnails"
+ },
+ {
+  "method": "GET",
+  "path": "/api/tickets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/tickets"
+ },
+ {
+  "method": "POST",
+  "path": "/api/tickets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/tickets"
+ },
+ {
+  "method": "GET",
+  "path": "/api/tickets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/tickets"
+ },
+ {
+  "method": "OPTIONS",
+  "path": "/api/tus",
+  "api": "admin",
+  "credential": "admin session (Bearer), checked per request",
+  "access": "media: manage (resumable upload, tus protocol)",
+  "viewerTier": false,
+  "group": "/api/tus"
+ },
+ {
+  "method": "POST",
+  "path": "/api/tus",
+  "api": "admin",
+  "credential": "admin session (Bearer), checked per request",
+  "access": "media: manage (resumable upload, tus protocol)",
+  "viewerTier": false,
+  "group": "/api/tus"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/tus/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer), checked per request",
+  "access": "media: manage (resumable upload, tus protocol)",
+  "viewerTier": false,
+  "group": "/api/tus"
+ },
+ {
+  "method": "HEAD",
+  "path": "/api/tus/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer), checked per request",
+  "access": "media: manage (resumable upload, tus protocol)",
+  "viewerTier": false,
+  "group": "/api/tus"
+ },
+ {
+  "method": "OPTIONS",
+  "path": "/api/tus/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer), checked per request",
+  "access": "media: manage (resumable upload, tus protocol)",
+  "viewerTier": false,
+  "group": "/api/tus"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/tus/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer), checked per request",
+  "access": "media: manage (resumable upload, tus protocol)",
+  "viewerTier": false,
+  "group": "/api/tus"
+ },
+ {
+  "method": "GET",
+  "path": "/api/uploads",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/uploads"
+ },
+ {
+  "method": "POST",
+  "path": "/api/uploads",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/uploads"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/uploads/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/uploads"
+ },
+ {
+  "method": "GET",
+  "path": "/api/uploads/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/uploads"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/uploads/:id/chunks/:index",
+  "api": "admin",
+  "credential": "upload session token (Bearer)",
+  "access": "the upload the token was issued for",
+  "viewerTier": false,
+  "group": "/api/uploads"
+ },
+ {
+  "method": "POST",
+  "path": "/api/uploads/:id/finish",
+  "api": "admin",
+  "credential": "upload session token (Bearer)",
+  "access": "the upload the token was issued for",
+  "viewerTier": false,
+  "group": "/api/uploads"
+ },
+ {
+  "method": "GET",
+  "path": "/api/uploads/:id/state",
+  "api": "admin",
+  "credential": "upload session token (Bearer)",
+  "access": "the upload the token was issued for",
+  "viewerTier": false,
+  "group": "/api/uploads"
+ },
+ {
+  "method": "GET",
+  "path": "/api/user-groups",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "access or users: view",
+  "viewerTier": false,
+  "group": "/api/user-groups"
+ },
+ {
+  "method": "POST",
+  "path": "/api/user-groups",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "access: manage",
+  "viewerTier": false,
+  "group": "/api/user-groups"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/user-groups/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "access: manage",
+  "viewerTier": false,
+  "group": "/api/user-groups"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/user-groups/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "access: manage",
+  "viewerTier": false,
+  "group": "/api/user-groups"
+ },
+ {
+  "method": "POST",
+  "path": "/api/user-groups/:id/copy",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "access: manage",
+  "viewerTier": false,
+  "group": "/api/user-groups"
+ },
+ {
+  "method": "GET",
+  "path": "/api/user-groups/catalogue",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "access or users: view",
+  "viewerTier": false,
+  "group": "/api/user-groups"
+ },
+ {
+  "method": "GET",
+  "path": "/api/users",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "users: view",
+  "viewerTier": false,
+  "group": "/api/users"
+ },
+ {
+  "method": "POST",
+  "path": "/api/users",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "users: manage",
+  "viewerTier": false,
+  "group": "/api/users"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/users/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "users: manage",
+  "viewerTier": false,
+  "group": "/api/users"
+ },
+ {
+  "method": "GET",
+  "path": "/api/users/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "users: view",
+  "viewerTier": false,
+  "group": "/api/users"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/users/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "users: manage",
+  "viewerTier": false,
+  "group": "/api/users"
+ },
+ {
+  "method": "POST",
+  "path": "/api/users/:id/mfa/reset",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "users: manage",
+  "viewerTier": false,
+  "group": "/api/users"
+ },
+ {
+  "method": "POST",
+  "path": "/api/users/:id/password",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "users: manage",
+  "viewerTier": false,
+  "group": "/api/users"
+ },
+ {
+  "method": "GET",
+  "path": "/api/users/security-policy",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "users: view",
+  "viewerTier": false,
+  "group": "/api/users"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/users/security-policy",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "users: manage + admin tier",
+  "viewerTier": false,
+  "group": "/api/users"
+ },
+ {
+  "method": "GET",
+  "path": "/api/viewers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "viewers: view",
+  "viewerTier": false,
+  "group": "/api/viewers"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/viewers/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "viewers: manage",
+  "viewerTier": false,
+  "group": "/api/viewers"
+ },
+ {
+  "method": "GET",
+  "path": "/api/viewers/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "viewers: view",
+  "viewerTier": false,
+  "group": "/api/viewers"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/viewers/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "viewers: manage",
+  "viewerTier": false,
+  "group": "/api/viewers"
+ },
+ {
+  "method": "POST",
+  "path": "/api/viewers/:id/mfa/reset",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "viewers: manage",
+  "viewerTier": false,
+  "group": "/api/viewers"
+ },
+ {
+  "method": "POST",
+  "path": "/api/viewers/:id/sign-out",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "viewers: operate",
+  "viewerTier": false,
+  "group": "/api/viewers"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/vod/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/vod/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/:id/availability",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/vod/:id/availability",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/:id/provenance",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/publish",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: operate",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/qc",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/:id/review",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/review",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/:id/schema.org",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/vod/:id/trim",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/withdraw",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: operate",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/review/queue",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/watchfolders",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "POST",
+  "path": "/api/watchfolders",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/watchfolders/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "GET",
+  "path": "/api/watchfolders/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/watchfolders/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "POST",
+  "path": "/api/watchfolders/:id/dry-run",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: operate",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "GET",
+  "path": "/api/watchfolders/:id/items",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "POST",
+  "path": "/api/watchfolders/:id/items/:itemId/resolve",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "GET",
+  "path": "/api/watchfolders/:id/rules",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "POST",
+  "path": "/api/watchfolders/:id/rules",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/watchfolders/:id/rules/:ruleId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/watchfolders/:id/rules/:ruleId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "POST",
+  "path": "/api/watchfolders/:id/scan",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "GET",
+  "path": "/api/workflows/events",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/workflows"
+ },
+ {
+  "method": "GET",
+  "path": "/api/workflows/map",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/workflows"
+ },
+ {
+  "method": "GET",
+  "path": "/api/workflows/runs",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/workflows"
+ },
+ {
+  "method": "POST",
+  "path": "/api/workflows/runs",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: operate",
+  "viewerTier": false,
+  "group": "/api/workflows"
+ },
+ {
+  "method": "GET",
+  "path": "/api/workflows/runs/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/workflows"
+ },
+ {
+  "method": "POST",
+  "path": "/api/workflows/runs/:id/cancel",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: operate",
+  "viewerTier": false,
+  "group": "/api/workflows"
+ },
+ {
+  "method": "POST",
+  "path": "/api/workflows/runs/:id/retry",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: operate",
+  "viewerTier": false,
+  "group": "/api/workflows"
+ },
+ {
+  "method": "GET",
+  "path": "/api/workflows/trace",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/workflows"
+ },
+ {
+  "method": "GET",
+  "path": "/health",
+  "api": "discovery",
+  "credential": "none",
+  "access": "liveness / readiness",
+  "viewerTier": true,
+  "group": "/health"
+ },
+ {
+  "method": "GET",
+  "path": "/health/live",
+  "api": "discovery",
+  "credential": "none",
+  "access": "liveness / readiness",
+  "viewerTier": true,
+  "group": "/health"
+ },
+ {
+  "method": "GET",
+  "path": "/health/ready",
+  "api": "discovery",
+  "credential": "none",
+  "access": "liveness / readiness",
+  "viewerTier": true,
+  "group": "/health"
+ },
+ {
+  "method": "GET",
+  "path": "/img/*",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/img"
+ },
+ {
+  "method": "HEAD",
+  "path": "/img/*",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/img"
+ },
+ {
+  "method": "GET",
+  "path": "/library/*",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/library"
+ },
+ {
+  "method": "GET",
+  "path": "/live/:id/:file(master.m3u8|manifest.mpd)",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/live"
+ },
+ {
+  "method": "GET",
+  "path": "/live/:id/stream.mp3",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/live"
+ },
+ {
+  "method": "GET",
+  "path": "/radio/:id/stream.mp3",
+  "api": "delivery",
+  "credential": "admin session or internal",
+  "access": "preview / internal",
+  "viewerTier": false,
+  "group": "/radio"
+ },
+ {
+  "method": "GET",
+  "path": "/share/:token",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/share"
+ },
+ {
+  "method": "GET",
+  "path": "/social-sandbox/:id",
+  "api": "delivery",
+  "credential": "admin session or internal",
+  "access": "preview / internal",
+  "viewerTier": false,
+  "group": "/social-sandbox"
+ },
+ {
+  "method": "GET",
+  "path": "/xmltv/:file",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/xmltv"
+ }
+]

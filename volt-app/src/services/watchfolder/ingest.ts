@@ -113,6 +113,8 @@ export interface NewMediaFile {
   tags: string[];
   storeKey: string;
   userId?: string | null;
+  /** The bytes, so the store can read the image's metadata (EXIF, GPS, IPTC, XMP). */
+  body?: Buffer;
 }
 
 /** Everything this needs from the store and the database, and nothing more. */
@@ -298,6 +300,7 @@ export async function ingestItem(
         tags: ['watchfolder', ...(item.workflow ? [item.workflow] : [])],
         storeKey,
         userId: f.userId ?? null,
+        body: buf,
       });
     } catch (e: any) {
       await store.removeObject(storeKey).catch(() => { /* an orphan is the cheap failure */ });

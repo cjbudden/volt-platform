@@ -23,7 +23,7 @@
 //  propagates, for the same reason the orchestrator does it: a running
 //  encoder nobody has a record of is a bill nobody can stop.
 // ============================================================================
-import type { LaunchResult, Liveness, TaskLauncher } from '../orchestrator/launcher';
+import type { LaunchHints, LaunchResult, Liveness, TaskLauncher } from '../orchestrator/launcher';
 import type { Placement } from '../fleet/placement';
 import { getEngine, validateForEngine } from './registry';
 import type { EngineHandle, EngineMode } from './types';
@@ -81,10 +81,10 @@ export class EngineAwareLauncher implements TaskLauncher {
     }
   }
 
-  async launchEncoder(streamId: string, job: Record<string, any>): Promise<LaunchResult> {
+  async launchEncoder(streamId: string, job: Record<string, any>, hints?: LaunchHints): Promise<LaunchResult> {
     const sel = job.engine as { id?: string; mode?: EngineMode | null; stream_kind?: 'channel' | 'event' } | undefined;
     const engineId = sel?.id ?? 'builtin';
-    if (engineId === 'builtin') return this.base.launchEncoder(streamId, job);
+    if (engineId === 'builtin') return this.base.launchEncoder(streamId, job, hints);
 
     const engine = getEngine(engineId);
     if (!engine) throw new Error(`Encode engine "${engineId}" is not installed on this deployment.`);
@@ -99,7 +99,7 @@ export class EngineAwareLauncher implements TaskLauncher {
     try {
       if (mode === 'encode_only') {
         if (!engine.packagerJob) throw new Error(`${engine.descriptor.name} declares encode_only but has no packagerJob()`);
-        res = await this.base.launchEncoder(streamId, engine.packagerJob(neutral));
+        res = await this.base.launchEncoder(streamId, engine.packagerJob(neutral), hints);
       } else {
         res = { taskArn: `${ENGINE_ARN_PREFIX}${engineId}:${handle.externalRef}`, lifecycle: 'on_demand' };
       }
@@ -135,9 +135,9 @@ export class EngineAwareLauncher implements TaskLauncher {
   }
 
   // Everything else is ours, not the engine's.
-  launchRadio(id: string, job: Record<string, any>) { return this.base.launchRadio(id, job); }
+  launchRadio(id: string, job: Record<string, any>, hints?: LaunchHints) { return this.base.launchRadio(id, job, hints); }
   launchThumbnailer(job: Record<string, any>) { return this.base.launchThumbnailer(job); }
-  launchCaptions(id: string, job: Record<string, any>) { return this.base.launchCaptions(id, job); }
+  launchCaptions(id: string, job: Record<string, any>, hints?: LaunchHints) { return this.base.launchCaptions(id, job, hints); }
 }
 
 export function withEngines(base: TaskLauncher): TaskLauncher {

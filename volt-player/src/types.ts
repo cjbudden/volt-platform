@@ -32,6 +32,12 @@ export interface VoltPlayerOptions {
   autoplay?: boolean;
   /** Called for every reportable event, before it is batched and sent. */
   onEvent?: (e: PlayerEvent) => void;
+  /**
+   * INTERNAL: offered the session before a layout mounts. Returns true when
+   * the SDK player takes over (a config saved with an SDK skin), so the old
+   * embed hands a station to the new player without a second handshake.
+   */
+  handoff?: (session: SessionResponse, config: PlayerConfig) => boolean;
 }
 
 export interface PlayerConfig {

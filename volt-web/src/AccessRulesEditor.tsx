@@ -47,7 +47,7 @@ export function AccessRulesEditor({ value, onChange, scopeKind }: {
               </label>
             ))}
             <div style={{ marginTop: 6 }}>
-              <select {...inp} value="" onChange={e => { const id = e.target.value; if (id && !(r.for.schemaIds ?? []).includes(id)) set(i, { ...r, for: { ...r.for, schemaIds: [...(r.for.schemaIds ?? []), id] } }) }}>
+              <select className="inp sel-sm" value="" onChange={e => { const id = e.target.value; if (id && !(r.for.schemaIds ?? []).includes(id)) set(i, { ...r, for: { ...r.for, schemaIds: [...(r.for.schemaIds ?? []), id] } }) }}>
                 <option value="">+ Add content type</option>
                 {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
@@ -79,7 +79,7 @@ export function AccessRulesEditor({ value, onChange, scopeKind }: {
           <div>
             <div className="sec-label" style={{ margin: '0 0 6px' }}>Then</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <select {...inp} value={r.then.access} onChange={e => set(i, { ...r, then: { ...r.then, access: e.target.value as any, terms: e.target.value === 'premium' ? (r.then.terms?.length ? r.then.terms : [defaultTerm()]) : r.then.terms } })}
+              <select className="inp sel-sm" value={r.then.access} onChange={e => set(i, { ...r, then: { ...r.then, access: e.target.value as any, terms: e.target.value === 'premium' ? (r.then.terms?.length ? r.then.terms : [defaultTerm()]) : r.then.terms } })}
                 style={{ ...inp.style, fontWeight: 600, color: r.then.access === 'free' ? 'var(--ok,#4ade80)' : r.then.access === 'members' ? '#7dd3fc' : 'var(--brand,#3f7bff)' }}>
                 <option value="free">Access is free</option>
                 <option value="members">Access for members only</option>
@@ -121,12 +121,12 @@ function defaultTerm(): AccessTerm {
 function TermRow({ t, onChange, onRemove }: { t: AccessTerm; onChange: (t: AccessTerm) => void; onRemove: () => void }) {
   return (
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '6px 8px', borderRadius: 999, background: 'rgba(63,123,255,.10)', border: '1px solid rgba(63,123,255,.35)', marginBottom: 4 }}>
-      <select {...inp} value={t.kind} onChange={e => onChange({ ...t, kind: e.target.value as any })}>
+      <select className="inp sel-sm" value={t.kind} onChange={e => onChange({ ...t, kind: e.target.value as any })}>
         <option value="period">Period</option><option value="published_dates">Published dates</option>
       </select>
       {t.kind === 'period' && <>
         <input {...inp} type="number" min={1} style={{ ...inp.style, width: 60 }} value={t.count ?? 1} onChange={e => onChange({ ...t, count: Math.max(1, Number(e.target.value) || 1) })} />
-        <select {...inp} value={t.unit ?? 'month'} onChange={e => onChange({ ...t, unit: e.target.value as any })}>
+        <select className="inp sel-sm" value={t.unit ?? 'month'} onChange={e => onChange({ ...t, unit: e.target.value as any })}>
           <option value="day">day/s</option><option value="week">week/s</option><option value="month">month/s</option><option value="year">year/s</option>
         </select>
       </>}

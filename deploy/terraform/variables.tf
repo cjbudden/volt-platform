@@ -33,6 +33,22 @@ variable "encoder_instance_types" {
   description = "CPU packaging/transcode nodes. For GPU transcode density use a g-family type (e.g. g4dn.xlarge) and a GPU-enabled ECS AMI."
 }
 
+variable "encoder_large_instance_types" {
+  type        = list(string)
+  default     = ["c7i.2xlarge", "c6i.2xlarge", "c5.2xlarge"]
+  description = "Large CPU nodes for ladders that need more than a 4-vCPU server can give within the sizing ceiling (e.g. a full 1080p x264 ladder). Placement picks small or large per stream from its output settings."
+}
+
+variable "large_spot_max" {
+  type    = number
+  default = 4
+}
+
+variable "large_ondemand_max" {
+  type    = number
+  default = 4
+}
+
 variable "spot_min" {
   type    = number
   default = 0

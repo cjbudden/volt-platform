@@ -15,9 +15,21 @@
 # `docker compose up` produce something you can actually log into. It is also
 # what volt-web's router has always documented as the production arrangement.
 
+# --- the player SDK -----------------------------------------------------------
+# Built first: the API serves its bundle (/player/volt-player.js) and the
+# console imports its source (@volt/player -> ../volt-player/src/sdk), so the
+# console stage needs it beside it with its node_modules (Shaka).
+FROM node:20-slim AS player
+WORKDIR /w/volt-player
+COPY volt-player/package.json volt-player/package-lock.json* ./
+RUN npm install
+COPY volt-player/ ./
+RUN npm run build
+
 # --- the console ------------------------------------------------------------
 FROM node:20-slim AS web
-WORKDIR /web
+COPY --from=player /w/volt-player /w/volt-player
+WORKDIR /w/volt-web
 COPY volt-web/package.json volt-web/package-lock.json* ./
 RUN npm install
 COPY volt-web/ ./
@@ -45,6 +57,8 @@ COPY volt-app/migrations ./migrations
 COPY volt-app/scripts ./scripts
 COPY volt-app/public ./public
 # The console, where config.webDistDir looks for it by default.
-COPY --from=web /web/dist ./web
+COPY --from=web /w/volt-web/dist ./web
+# the embed bundle, found by config.player.bundleDir at <cwd>/player
+COPY --from=player /w/volt-player/dist ./player
 EXPOSE 8080
 CMD ["node", "dist/index.js"]

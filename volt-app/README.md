@@ -42,6 +42,29 @@ npm run dev        # tsx watch, hot reload
 
 Every non-auth route is scoped by `account_id` from the JWT (multi-tenant isolation).
 
+## Image service
+
+Resize, crop and filter library images by URL: `GET /img/{sig}/{W}x{H},{fit}[,options]/{key}`,
+signed per account, cached in memory, S3 and CloudFront. Sign with `POST /api/images/sign`
+or the account key from `GET /api/images/signing-key` and `@volt/image-url`. Runs locally with
+no settings. Guide, options, limits and deployment: [docs/IMAGES.md](docs/IMAGES.md).
+Tests: `npm run test:images` (no database), `npm run test:images:api`, `npm run test:images:s3`.
+
+Uploads capture EXIF / GPS / IPTC / XMP metadata and the library search covers it (`GET /api/files`,
+`/api/files/search`, lazy `/api/files/folders?parent=`). Encoder stills, sprite sheets and VTTs per
+channel hour, hover previews and clip VTTs: [docs/THUMBNAILS.md](docs/THUMBNAILS.md) (`/api/thumbnails/*`).
+Tests: `npx tsx test/thumbnails.check.ts`, `bash test/media-library.check.sh`.
+
+Audit log and channel deletes: every DELETE is logged (refusals too, with the reason), administrators
+review it under Insight > Audit log or `/api/audit` (CSV export), and only administrators delete channels.
+Group limits count TV and radio together and the console disables Create with the reason when full:
+[docs/AUDIT_LOG.md](docs/AUDIT_LOG.md). Test: `bash test/channel-admin.check.sh`.
+
+Plan & limits at the account (`/api/plan`), channel groups sharing it out with a default group and safe removal
+(`/api/groups`): [docs/PLAN_AND_GROUPS.md](docs/PLAN_AND_GROUPS.md). `VOLT_DEPLOYMENT=single|saas` decides whether
+the owner may change the plan. Who can do what: [docs/PERMISSIONS_MAP.md](docs/PERMISSIONS_MAP.md).
+Test: `bash test/plan-groups.check.sh`.
+
 ## Live stream status & events
 
 The encoder container reports to `POST /api/streams/:id/report` on every change —

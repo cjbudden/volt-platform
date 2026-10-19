@@ -1,3 +1,4 @@
+import { viewerGeo, noStore } from '../scale/edge';
 /**
  * Public live delivery.
  *
@@ -22,6 +23,9 @@ import { one } from '../db';
 import { config } from '../config';
 import { liveDirFor, liveUrlBase } from '../services/liveOrigin';
 import { asyncHandler } from '../util/http';
+import { channelDelivery, reportedOutputLive } from '../services/viewerPath';
+import { edgeCache } from '../scale/edge';
+import { scaleConfig } from '../scale/config';
 import { existsSync, statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -49,6 +53,16 @@ export function publicPlaybackUrl(channelId: string, file: 'master.m3u8' | 'mani
 
 export const publicLiveRouter = Router();
 
+/** The account's and the channel's geo restriction for the public live URL. */
+async function publicGeoGate(id: string, country: string | undefined): Promise<{ varies: boolean; blocked: string | null }> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return { varies: false, blocked: null };
+  const { accountGeo, channelGeo, geoBlocks } = await import('../services/geoAccess');
+  const row = await one<any>(`SELECT g.account_id, c.geo_mode, c.geo_countries FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1`, [id]);
+  if (!row) return { varies: false, blocked: null };
+  const acct = await accountGeo(row.account_id); const ch = channelGeo(row);
+  return { varies: !!(acct || ch), blocked: geoBlocks(acct, country, 'This content') ?? geoBlocks(ch, country, 'This channel') };
+}
+
 /**
  * PUBLIC RADIO delivery. Same contract as the video surface: nothing is public
  * until the operator takes the station ON AIR, and then only while the output
@@ -59,6 +73,10 @@ publicLiveRouter.get(
   '/live/:id/stream.mp3',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
+    // the account's and the station's geo restriction, as for TV
+    const gate = await publicGeoGate(id, viewerGeo(req));
+    if (gate.varies) res.setHeader('Vary', 'CloudFront-Viewer-Country');
+    if (gate.blocked) { noStore(res); res.status(451).json({ available: false, reason: 'geo', message: gate.blocked }); return; }
     const ch = await one<any>(`SELECT id, name, status, on_air, kind FROM channels WHERE id=$1 AND kind='radio'`, [id]);
     if (!ch || !ch.on_air) { res.status(404).json({ available: false, reason: 'not_on_air' }); return; }
     const { radioHasValidContent } = await import('../services/radio/detail');
@@ -128,55 +146,99 @@ publicLiveRouter.get(
   })
 );
 
+/**
+ * Where the public manifest for a channel is, or why there is none.
+ *
+ * One function so the /live redirect and the play gate's `delivery` URLs can
+ * never disagree. Reads only cached state (services/viewerPath.ts): an on-air
+ * change invalidates at once, the output check is at most 2 s old.
+ */
+export async function resolveLiveManifest(id: string, file: 'master.m3u8' | 'manifest.mpd'):
+  Promise<{ ok: true; url: string } | { ok: false; status: 404 | 503; reason: string }> {
+  const ch = await channelDelivery(id);
+  // Off air: the public URL exposes nothing. This is the whole point of "On means
+  // available to the public" — private previews never leak here.
+  if (!ch || !ch.on_air) return { ok: false, status: 404, reason: 'not_on_air' };
+  // On air but the encoder isn't producing valid content -> the public stream is
+  // broken; say so honestly rather than 302 to a dead manifest.
+  // Radio writes its master ONCE and advances audio/index.m3u8, so it has its own
+  // freshness probe; TV rewrites the master every segment.
+  //
+  // WHEN THIS BOX CANNOT SEE THE ORIGIN (every cloud deployment: the encoder
+  // writes to S3 from another machine) the directory probe would always say
+  // "no content" and the public URL would always answer 503. The encoder's own
+  // status reports are the ground truth there.
+  const valid = ch.kind === 'radio'
+    ? (await import('../services/radio/detail')).radioHasValidContent(id)
+    : existsSync(liveDirFor(id)) ? outputHasValidContent(id) : await reportedOutputLive(id);
+  if (ch.status !== 'live' || !valid) return { ok: false, status: 503, reason: 'no_valid_content' };
+  // Production: the CloudFront distribution in front of S3. Local/dev: the origin
+  // this control plane already serves at /origin.
+  const cdn = config.aws?.cdnBaseUrl;
+  if (cdn && config.env === 'production' && !/example\.com/.test(cdn)) {
+    // the CDN path cannot be stat'ed from here, so decide from the channel: the
+    // encoder writes master_cc whenever it splices (failover with a slate/loop) or
+    // carries subtitles
+    const spliced = !!ch.input_failover_enabled && ['slate', 'vod_loop'].includes(ch.input_loss_behavior ?? '');
+    const useCc = ch.kind !== 'radio' && (file === 'master.m3u8' ? (!!ch.captions_enabled || spliced) : spliced);
+    const out = useCc ? (file === 'master.m3u8' ? 'master_cc.m3u8' : 'manifest_cc.mpd') : file;
+    return { ok: true, url: `${cdn.replace(/\/$/, '')}/channel/${id}/${out}` };
+  }
+  // Radio packages DASH under the run's dash/ dir; HLS master sits at the run root.
+  let path = ch.kind === 'radio' && file === 'manifest.mpd' ? 'dash/manifest.mpd' : file;
+  // THE DELIVERED MASTER. When the encoder writes master_cc.m3u8 (subtitles, and/or
+  // the playout splice that covers a lost source with the channel's loop), that is
+  // what a viewer must get: the packager's own master has neither, and a viewer
+  // given it stalls when the source drops.
+  if (ch.kind !== 'radio') {
+    const delivered = file === 'master.m3u8' ? 'master_cc.m3u8' : 'manifest_cc.mpd';
+    if (existsSync(join(liveDirFor(id), delivered))) path = delivered;
+  }
+  return { ok: true, url: `${liveUrlBase(id)}/${path}` };
+}
+
+/**
+ * The public manifest for an EVENT, or why there is none.
+ *
+ * An event is public while it is live inside its public window (public_start
+ * to public_end when set) and producing valid output. Same rules as a channel
+ * otherwise: nothing leaks before it starts, a broken output says so.
+ */
+export async function resolveEventManifest(id: string, file: 'master.m3u8' | 'manifest.mpd'):
+  Promise<{ ok: true; url: string } | { ok: false; status: 404 | 503; reason: string }> {
+  const ev = await one<any>(`SELECT status, public_start, public_end FROM events WHERE id = $1`, [id]);
+  if (!ev) return { ok: false, status: 404, reason: 'not_found' };
+  const now = Date.now();
+  const opened = !ev.public_start || new Date(ev.public_start).getTime() <= now;
+  const closed = !!ev.public_end && new Date(ev.public_end).getTime() < now;
+  if (ev.status !== 'live' || !opened || closed) return { ok: false, status: 404, reason: 'not_on_air' };
+  const valid = existsSync(liveDirFor(id)) ? outputHasValidContent(id) : await reportedOutputLive(id);
+  if (!valid) return { ok: false, status: 503, reason: 'no_valid_content' };
+  const cdn = config.aws?.cdnBaseUrl;
+  if (cdn && config.env === 'production' && !/example\.com/.test(cdn)) return { ok: true, url: `${cdn.replace(/\/$/, '')}/event/${id}/${file}` };
+  const delivered = file === 'master.m3u8' ? 'master_cc.m3u8' : 'manifest_cc.mpd';
+  return { ok: true, url: `${liveUrlBase(id)}/${existsSync(join(liveDirFor(id), delivered)) ? delivered : file}` };
+}
+
 publicLiveRouter.get(
   '/live/:id/:file(master.m3u8|manifest.mpd)',
   asyncHandler(async (req, res) => {
     const { id, file } = req.params;
-    const ch = await one<any>('SELECT id, status, on_air, kind FROM channels WHERE id = $1', [id]);
-    // Off air: the public URL exposes nothing. This is the whole point of "On means
-    // available to the public" — private previews never leak here.
-    if (!ch || !ch.on_air) {
-      res.status(404).json({ available: false, reason: 'not_on_air' });
+    // GEO ABOVE THE RULES (services/geoAccess.ts): the account's restriction and
+    // the channel's own. Only a channel with one varies by viewer country, so
+    // everything else keeps its single shared edge entry.
+    const gate = await publicGeoGate(id, viewerGeo(req));
+    if (gate.varies) res.setHeader('Vary', 'CloudFront-Viewer-Country');
+    if (gate.blocked) { noStore(res); res.status(451).json({ available: false, reason: 'geo', message: gate.blocked }); return; }
+    const r = await resolveLiveManifest(id, file as 'master.m3u8' | 'manifest.mpd');
+    // The answer is the same for every viewer of the channel, so the edge may
+    // hold it for a couple of seconds: a million viewers then cost the API a
+    // request per edge location every 2 s, not a request each.
+    edgeCache(res, scaleConfig.edge.liveRedirectMaxAgeSec);
+    if (!r.ok) {
+      res.status(r.status).json({ available: false, reason: r.reason });
       return;
     }
-    // On air but the encoder isn't producing valid content -> the public stream is
-    // broken; say so honestly rather than 302 to a dead manifest.
-    // Radio writes its master ONCE and advances audio/index.m3u8, so it has its own
-    // freshness probe; TV rewrites the master every segment.
-    const valid = ch.kind === 'radio'
-      ? (await import('../services/radio/detail')).radioHasValidContent(id)
-      : outputHasValidContent(id);
-    if (ch.status !== 'live' || !valid) {
-      res.status(503).json({ available: false, reason: 'no_valid_content' });
-      return;
-    }
-    // Production: the CloudFront distribution in front of S3. Local/dev: the origin
-    // this control plane already serves at /origin.
-    const cdn = config.aws?.cdnBaseUrl;
-    if (cdn && config.env === 'production' && !/example\.com/.test(cdn)) {
-      // the CDN path cannot be stat'ed from here, so decide from the channel: the
-      // encoder writes master_cc whenever it splices (failover with a slate/loop) or
-      // carries subtitles
-      const d = await one<any>(
-        `SELECT c.input_failover_enabled, c.input_loss_behavior, p.captions_enabled
-           FROM channels c JOIN groups g ON g.id = c.group_id
-           LEFT JOIN output_profiles p ON p.id = g.output_profile_id WHERE c.id = $1`, [id]);
-      const spliced = !!d && d.input_failover_enabled && ['slate', 'vod_loop'].includes(d.input_loss_behavior);
-      const useCc = ch.kind !== 'radio' && !!d && (file === 'master.m3u8' ? (d.captions_enabled || spliced) : spliced);
-      const out = useCc ? (file === 'master.m3u8' ? 'master_cc.m3u8' : 'manifest_cc.mpd') : file;
-      res.redirect(302, `${cdn.replace(/\/$/, '')}/channel/${id}/${out}`);
-      return;
-    }
-    // Radio packages DASH under the run's dash/ dir; HLS master sits at the run root.
-    let path = ch.kind === 'radio' && file === 'manifest.mpd' ? 'dash/manifest.mpd' : file;
-    // THE DELIVERED MASTER. When the encoder writes master_cc.m3u8 (subtitles, and/or
-    // the playout splice that covers a lost source with the channel's loop), that is
-    // what a viewer must get: the packager's own master has neither, and a viewer
-    // given it stalls when the source drops.
-    if (ch.kind !== 'radio') {
-      const delivered = file === 'master.m3u8' ? 'master_cc.m3u8' : 'manifest_cc.mpd';
-      if (existsSync(join(liveDirFor(id), delivered))) path = delivered;
-    }
-    res.redirect(302, `${liveUrlBase(id)}/${path}`);
+    res.redirect(302, r.url);
   })
 );

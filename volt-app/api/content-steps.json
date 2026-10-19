@@ -1,0 +1,623 @@
+[
+ {
+  "folder": "Admin \u00b7 content: Metadata Schemas",
+  "name": "List schemas",
+  "method": "GET",
+  "path": "/api/metadata-schemas",
+  "save": {},
+  "desc": "Named, typed metadata field sets for VOD assets.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Metadata Schemas",
+  "name": "Create schema",
+  "method": "POST",
+  "path": "/api/metadata-schemas",
+  "body": {
+   "name": "Match {{$timestamp}}",
+   "fields": [
+    {
+     "key": "competition",
+     "type": "string",
+     "required": true
+    },
+    {
+     "key": "sport",
+     "type": "string"
+    },
+    {
+     "key": "rating",
+     "type": "enum",
+     "options": [
+      "G",
+      "PG",
+      "M"
+     ]
+    }
+   ]
+  },
+  "save": {
+   "schemaId": "id"
+  },
+  "desc": "Create a metadata schema. Fields: string|text|number|boolean|date|enum|url|tags.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Channels",
+  "name": "List channels",
+  "method": "GET",
+  "path": "/api/channels",
+  "save": {},
+  "desc": "Channels for the tenant.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Channels",
+  "name": "Get channel",
+  "method": "GET",
+  "path": "/api/channels/{{channelId}}",
+  "save": {},
+  "desc": "One channel + its inputs & instances.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Channels",
+  "name": "Start channel",
+  "method": "POST",
+  "path": "/api/channels/{{channelId}}/start",
+  "body": {},
+  "save": {},
+  "desc": "Orchestrator launches the encoder task + opens a recording. The channel needs a primary source with an address or stream key, or the answer is 400 saying what to add.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Channels",
+  "name": "Stop channel",
+  "method": "POST",
+  "path": "/api/channels/{{channelId}}/stop",
+  "body": {},
+  "save": {},
+  "desc": "Terminates the task, closes the recording, fires the thumbnailer.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Events",
+  "name": "List events",
+  "method": "GET",
+  "path": "/api/events",
+  "save": {},
+  "desc": "Events for the tenant.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Events",
+  "name": "Create event",
+  "method": "POST",
+  "path": "/api/events",
+  "body": {
+   "groupId": "{{groupId}}",
+   "name": "Test Event",
+   "scheduledStart": "2027-01-01T10:00:00Z",
+   "scheduledEnd": "2027-01-01T12:00:00Z",
+   "recordingRetentionDays": 14
+  },
+  "save": {
+   "eventId": "id"
+  },
+  "desc": "Schedule an event; the orchestrator provisions it at server_start.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Live Timeline",
+  "name": "List scheduled clips",
+  "method": "GET",
+  "path": "/api/scheduled-clips?channelId={{channelId}}",
+  "save": {},
+  "desc": "Clipping windows on the live timeline.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Live Timeline",
+  "name": "Schedule a clip",
+  "method": "POST",
+  "path": "/api/scheduled-clips",
+  "body": {
+   "channelId": "{{channelId}}",
+   "title": "Scheduled highlight",
+   "startMs": 1000,
+   "endMs": 6000,
+   "outputKind": "both"
+  },
+  "save": {
+   "scheduledClipId": "id"
+  },
+  "desc": "When end_epoch_ms is reached the orchestrator cuts a VOD asset. outputKind: manifest|progressive|both.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Live Timeline",
+  "name": "Cancel scheduled clip",
+  "method": "DELETE",
+  "path": "/api/scheduled-clips/{{scheduledClipId}}",
+  "save": {},
+  "desc": "Cancel while still scheduled.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Recordings",
+  "name": "List recordings",
+  "method": "GET",
+  "path": "/api/recordings",
+  "save": {},
+  "desc": "Filter by ?kind=channel_day|event & ?channelId=.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Recordings",
+  "name": "Channel roll-up",
+  "method": "GET",
+  "path": "/api/recordings/channels",
+  "save": {},
+  "desc": "Channels with recording counts + next expiry.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Recordings",
+  "name": "Get recording",
+  "method": "GET",
+  "path": "/api/recordings/{{recordingId}}",
+  "save": {},
+  "desc": "One recording + its derived VOD assets.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Recordings",
+  "name": "Clip a recording",
+  "method": "POST",
+  "path": "/api/recordings/{{recordingId}}/clip",
+  "body": {
+   "title": "Manual clip",
+   "startMs": 1000,
+   "endMs": 9000,
+   "outputKind": "both"
+  },
+  "save": {
+   "vodId": "id"
+  },
+  "desc": "Create a VOD from a time range. outputKind sets HLS/DASH and/or progressive MP4. Answers 409 no_media, with the gaps, when nothing is recorded in the range (as in the capture, which has no media).",
+  "auth": "admin",
+  "external": false,
+  "expect": [
+   201,
+   409
+  ]
+ },
+ {
+  "folder": "Admin \u00b7 content: Recordings",
+  "name": "Download recording",
+  "method": "GET",
+  "path": "/api/recordings/{{recordingId}}/download",
+  "save": {},
+  "desc": "Presigned MP4 URL (202 while exporting). 409 no_media, with the gaps, when the range holds no recorded media (as in the capture).",
+  "auth": "admin",
+  "external": false,
+  "expect": [
+   200,
+   202,
+   409
+  ]
+ },
+ {
+  "folder": "Admin \u00b7 content: VOD",
+  "name": "List VOD",
+  "method": "GET",
+  "path": "/api/vod",
+  "save": {},
+  "desc": "Derived assets. ?published=true|false.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: VOD",
+  "name": "Get VOD (+ schema.org)",
+  "method": "GET",
+  "path": "/api/vod/{{vodId}}",
+  "save": {},
+  "desc": "Asset + assigned schema + publications + schema.org JSON-LD.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: VOD",
+  "name": "Update VOD metadata",
+  "method": "PUT",
+  "path": "/api/vod/{{vodId}}",
+  "body": {
+   "title": "Manual clip (tagged)",
+   "schemaId": "{{schemaId}}",
+   "metadata": {
+    "competition": "Grand Final",
+    "rating": "PG"
+   }
+  },
+  "save": {},
+  "desc": "Set title/metadata (validated vs the assigned schema) & published.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: VOD",
+  "name": "schema.org VideoObject",
+  "method": "GET",
+  "path": "/api/vod/{{vodId}}/schema.org",
+  "save": {},
+  "desc": "JSON-LD for the portal / SEO / social metadata.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Slates & Loops",
+  "name": "List filler",
+  "method": "GET",
+  "path": "/api/filler-assets",
+  "save": {},
+  "desc": "Uploaded slate/loop assets.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Slates & Loops",
+  "name": "Register filler",
+  "method": "POST",
+  "path": "/api/filler-assets",
+  "body": {
+   "kind": "slate",
+   "name": "Test slate"
+  },
+  "save": {
+   "fillerId": "id"
+  },
+  "desc": "Register + get a presigned upload URL.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Slates & Loops",
+  "name": "Delete filler",
+  "method": "DELETE",
+  "path": "/api/filler-assets/{{fillerId}}",
+  "save": {},
+  "desc": "Remove a filler asset.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Upload an image to the library",
+  "method": "POST",
+  "path": "/api/files",
+  "body": {
+   "folder": "posters",
+   "name": "grand-final.png",
+   "kind": "poster",
+   "dataBase64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAkCAIAAAC2bqvFAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAaElEQVRYhe2SQQkAQRDD6qSOTllEr4f7hIFCBKSh6cdpoht0A9ArdhfiLtENugHoFbsLcZfoBt0A9IrdhbhLdINuAHrF7kLcJbpBNwC9Ynch7hLdoBuAXrG7EHeJbtANQK/YXQg95G8eTjbBedwt5iEAAAAASUVORK5CYII="
+  },
+  "save": {
+   "imgFileId": "id"
+  },
+  "expect": [
+   201,
+   409
+  ],
+  "desc": "Put an image in the account's library (store key library/{accountId}/posters/grand-final.png). The image service renders from here. 409 when it is already there.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Search the library (files and folders)",
+  "method": "GET",
+  "path": "/api/files/search?q=grand&sort=relevance",
+  "save": {},
+  "desc": "One search box for the Image Library. Words match as prefixes against names, tags, keywords, titles, place names, programme and channel names, descriptions and cameras; folders whose path contains every word come back too. Same filters as GET /api/files: folder, recursive, kind, tag, source (upload | watchfolder | encoder | library), channel, from/to, hasLocation=1, near=lat,lng,km, sort, limit, offset. See docs/IMAGES.md section 17.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Folder children (lazy tree)",
+  "method": "GET",
+  "path": "/api/files/folders?parent=posters",
+  "save": {},
+  "desc": "Children of one folder ('' = top level) with count, total (everything below) and hasChildren. ?q=words finds folders anywhere.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Re-read an image's metadata",
+  "method": "POST",
+  "path": "/api/files/{{imgFileId}}/metadata/refresh",
+  "save": {},
+  "desc": "Read EXIF / GPS / IPTC / XMP from the stored bytes again (taken_at, gps_lat/lng/alt, location, camera, title, description, keywords, creator, copyright, checksum, metadata).",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Image service config",
+  "method": "GET",
+  "path": "/api/images/config",
+  "save": {},
+  "desc": "Where signed URLs point (the image CDN in the cloud), the size and source limits, and the enabled output formats. See docs/IMAGES.md.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Account signing key",
+  "method": "GET",
+  "path": "/api/images/signing-key",
+  "save": {
+   "imgAccountKey": "key"
+  },
+  "desc": "This account's image signing key, for building URLs locally with the SDK (packages/image-url) as the console does. It signs only this account's images: the server derives it from the account id in the image path. Never cached (Cache-Control: private, no-store).",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Sign image URL",
+  "method": "POST",
+  "path": "/api/images/sign",
+  "body": {
+   "path": "posters/grand-final.png",
+   "width": 1280,
+   "height": 720,
+   "fit": "inside",
+   "sharpen": 1.1,
+   "format": "webp",
+   "quality": 82
+  },
+  "save": {
+   "imgSignedUrl": "url",
+   "imgSig": "signature",
+   "imgSpec": "spec",
+   "imgKey": "key"
+  },
+  "desc": "Options to one signed render URL. path is relative to the account's library (or a full library/{accountId}/... key). Options: width, height (0 = auto), fit (cover | inside | contain | fill; fit-in and stretch accepted), crop {x,y,w,h} %, focus {x,y} % or a gravity (center, top, ..., smart, entropy), grayscale, blur, brightness, saturation, sharpen, background, quality, format (webp | avif | jpeg | png), enlarge, version. The upload time is added as v= so a replaced image gets a fresh URL. The same guards as rendering apply (400 when outside them). URLs do not expire: expiresIn is accepted and ignored.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Sign several URLs",
+  "method": "POST",
+  "path": "/api/images/sign",
+  "body": {
+   "items": [
+    {
+     "path": "posters/grand-final.png",
+     "width": 320,
+     "height": 180
+    },
+    {
+     "path": "posters/grand-final.png",
+     "width": 64,
+     "height": 64,
+     "focus": "smart",
+     "grayscale": true,
+     "format": "jpeg"
+    }
+   ]
+  },
+  "save": {},
+  "desc": "Up to 100 items in one call; the answer keeps their order.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Render (signed)",
+  "method": "GET",
+  "path": "/img/{{imgSig}}/{{imgSpec}}/{{imgKey}}",
+  "save": {},
+  "desc": "The public render URL: no session, the signature is the authorisation. First request renders (X-Image-Cache: MISS) and stores the derivative; repeats come from memory, the derivative cache, or the CDN. Cache-Control: public, max-age=31536000, immutable.",
+  "auth": "none",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Render without a signature (refused)",
+  "method": "GET",
+  "path": "/img/640x360,cover/library/{{accountId}}/posters/grand-final.png",
+  "save": {},
+  "expect": [
+   403
+  ],
+  "desc": "The pre-production unsigned shape. Every render URL must be signed; there is no unsafe mode.",
+  "auth": "none",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Thumbnail storyboard (hover previews)",
+  "method": "GET",
+  "path": "/api/thumbnails/storyboard?stream={{channelId}}",
+  "save": {},
+  "desc": "Sprite sheets of a channel or event for a wall-clock span (from/to epoch ms, at most 48 h; default the last hour): {tileW, tileH, intervalMs, units, sheets: [{url, startMs, endMs, cols, filled}]}. Tile i of a sheet is at x = (i % cols) * tileW, y = floor(i / cols) * tileH. prime=1 builds missing hours in the background. See docs/THUMBNAILS.md.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Thumbnail hours (status)",
+  "method": "GET",
+  "path": "/api/thumbnails/status?stream={{channelId}}",
+  "save": {},
+  "desc": "Hours of thumbnails for a channel or event (default: the last 24 h): status (building | complete | empty), tiles, gaps, sheets, and the library folder thumbnails/<channel>/<date>/<hour>.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Image Service",
+  "name": "Clip thumbnail VTT",
+  "method": "GET",
+  "path": "/api/thumbnails/vod/{{vodId}}.vtt",
+  "save": {},
+  "desc": "WebVTT thumbnails for a clip: the channel's hourly cues for the clip's source ranges, re-timed to the clip, pointing at the existing sprite sheets. Also /api/thumbnails/recordings/{id}.vtt and /api/thumbnails/vtt?stream&from&to.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Distribution",
+  "name": "List publish targets",
+  "method": "GET",
+  "path": "/api/publish-targets",
+  "save": {},
+  "desc": "Configured social accounts.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Distribution",
+  "name": "Link account",
+  "method": "POST",
+  "path": "/api/publish-targets",
+  "body": {
+   "platform": "youtube",
+   "name": "RTM YouTube",
+   "externalAccount": "UC_rtm"
+  },
+  "save": {
+   "targetId": "id"
+  },
+  "desc": "platform: youtube|facebook|x|tiktok|dailymotion|portal.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Distribution",
+  "name": "Publish to portal",
+  "method": "POST",
+  "path": "/api/publications/vod/{{vodId}}/publish",
+  "body": {
+   "platform": "portal"
+  },
+  "save": {},
+  "desc": "Make portal-visible + create a publication record.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Distribution",
+  "name": "Publish to social",
+  "method": "POST",
+  "path": "/api/publications/vod/{{vodId}}/publish",
+  "body": {
+   "platform": "youtube",
+   "targetId": "{{targetId}}"
+  },
+  "save": {},
+  "desc": "Push to a linked social account (adapter). Tracks external id/url + views.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Distribution",
+  "name": "List publications",
+  "method": "GET",
+  "path": "/api/publications?assetId={{vodId}}",
+  "save": {},
+  "desc": "Per-asset publications + synced view counts.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Distribution",
+  "name": "Sync view counts",
+  "method": "POST",
+  "path": "/api/publications/sync-views",
+  "body": {},
+  "save": {},
+  "desc": "Pull latest view counts from platforms (adapter).",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Status",
+  "name": "Encoder report (ingest)",
+  "method": "POST",
+  "path": "/api/streams/{{channelId}}/report",
+  "body": {
+   "kind": "channel",
+   "event": {
+    "ts_ms": 1730000000000,
+    "seq": 1,
+    "type": "channel.start",
+    "detail": {}
+   },
+   "status": {
+    "output_available": true,
+    "active_source": "primary",
+    "fallback_in_use": false,
+    "filler_in_use": false,
+    "packager_ok": true,
+    "sources": {
+     "primary": {
+      "state": "up"
+     }
+    },
+    "seq": 1
+   }
+  },
+  "save": {},
+  "desc": "The encoder posts events + status snapshots (ingest-token auth).",
+  "auth": "ingest",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Status",
+  "name": "All stream status",
+  "method": "GET",
+  "path": "/api/status",
+  "save": {},
+  "desc": "Latest status per stream (dashboard poll).",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Status",
+  "name": "Channel status",
+  "method": "GET",
+  "path": "/api/status/channel/{{channelId}}",
+  "save": {},
+  "desc": "One stream snapshot.",
+  "auth": "admin",
+  "external": false
+ },
+ {
+  "folder": "Admin \u00b7 content: Status",
+  "name": "Channel events",
+  "method": "GET",
+  "path": "/api/status/channel/{{channelId}}/events",
+  "save": {},
+  "desc": "Per-stream event log.",
+  "auth": "admin",
+  "external": false
+ }
+]

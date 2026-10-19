@@ -4,7 +4,7 @@
 // Push protocols (SRT/RTMP) cannot be probed on demand; their details appear once a feed
 // is actually being received (surfaced live from the ingest instead).
 import { execFile } from 'node:child_process';
-import { inspectHls, looksLikeHls, type HlsInspection } from './hlsMaster';
+import { inspectHls, looksLikeHls, measureHlsBitrate, type HlsInspection } from './hlsMaster';
 
 export interface SourceProbe {
   ok: boolean;
@@ -17,6 +17,13 @@ export interface SourceProbe {
   error?: string;
   /** For an HLS address: the playlist itself (master with its variants, or media), and any redirect. */
   hls?: HlsInspection;
+  /**
+   * The source's bitrate, and where the number comes from:
+   *   measured  segment sizes over their duration (an HLS media playlist);
+   *   stream    what ffprobe read from the stream itself;
+   *   declared  what an HLS master says for its variants (min..max).
+   */
+  bitrate?: { kbps: number | null; maxKbps?: number | null; how: 'measured' | 'stream' | 'declared'; note?: string };
 }
 
 function fps(r?: string): number | null {
@@ -65,8 +72,26 @@ export async function probeSource(url: string, protocol?: string, timeoutMs = 20
     // flattens a master's variants into one list of tracks, the playlist says
     // which variant each belongs to and lets one be chosen.
     const [probe, hls] = await Promise.all([runProbe(url, timeoutMs), looksLikeHls(url, proto) ? inspectHls(url) : Promise.resolve(undefined)]);
-    return hls ? { ...probe, hls } : probe;
+    const out: SourceProbe = hls ? { ...probe, hls } : probe;
+    out.bitrate = await bitrateOf(out, hls);
+    if (hls) delete hls.recentSegments; // used here only
+    return out;
   } finally { inFlight--; }
+}
+
+async function bitrateOf(p: SourceProbe, hls?: HlsInspection): Promise<SourceProbe['bitrate']> {
+  if (hls?.ok && hls.kind === 'media' && hls.recentSegments?.length) {
+    const m = await measureHlsBitrate(hls.recentSegments);
+    if (m) return { kbps: m.kbps, how: 'measured', note: `${m.segments} latest segment${m.segments === 1 ? '' : 's'}, ${m.seconds} s` };
+  }
+  if (hls?.ok && hls.kind === 'master') {
+    const bws = (hls.variants ?? []).map((v) => v.averageBandwidth ?? v.bandwidth).filter((b): b is number => !!b).map((b) => Math.round(b / 1000));
+    if (bws.length) return { kbps: Math.min(...bws), maxKbps: Math.max(...bws), how: 'declared', note: `${bws.length} variant${bws.length === 1 ? '' : 's'}` };
+  }
+  const fromStream = p.container?.bitrate_kbps
+    ?? ((p.video?.bitrate_kbps ?? 0) + (p.audio ?? []).reduce((a, x) => a + (x.bitrate_kbps ?? 0), 0) || null);
+  if (fromStream) return { kbps: fromStream, how: 'stream' };
+  return p.reachable ? { kbps: null, how: 'stream', note: 'The stream does not report its bitrate.' } : undefined;
 }
 
 async function runProbe(url: string, timeoutMs: number): Promise<SourceProbe> {

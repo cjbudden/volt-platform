@@ -14,7 +14,10 @@ model, a React admin app, and runnable prototypes.
 - `volt-encoder/` - encoder/packager: ingest relay + x264/Shaka transcode/package,
   source failover, thumbnailer, status events, captions sidecar. Local run + test
   tooling: `run-local.sh`, `validate.sh`, `validate-docker.sh` (see `RUN_LOCAL.md`).
-- `volt-frame-proto/`, `volt-image-proto/` - prototypes (frame-accurate media; image service).
+- `packages/image-url/` - `@volt/image-url`, the dependency-free SDK that builds and signs image
+  service URLs (copied from `volt-app/src/services/images/sdk.ts`).
+- `volt-frame-proto/` - prototype (frame-accurate media). `volt-image-proto/` - the superseded
+  image service prototype, kept for reference only: the app does not use it.
 - `feature-tracker/` - product feature tracker (test + approve workflow).
 - `deploy/terraform/` - Tier-2 cloud stack (VPC/ECS/RDS/S3/CloudFront/ECR/ALB) + its own README.
 - `e2e/` - end-to-end media pipeline harness.
@@ -71,6 +74,33 @@ the demo snapshot: `RESET_DB=1 bash run-on-mac.sh`.
 Encoder output is written under `volt-encoder/_local_out` (standalone) or the control
 plane's origin dir; nothing is faked.
 
+### Images (resize, crop and filters by URL)
+Nothing to set up: `run-on-mac.sh` serves the image service from the API on :8080, keeps
+originals in `volt-app/image-store/library/` and rendered sizes in `volt-app/image-store/cache/`.
+Upload in **Media > Image Library**, then use the **URL builder** to set size, focus, crop,
+filters and format, and copy a signed URL. Every option, the signing API and SDK, limits,
+caching and cloud setup: `volt-app/docs/IMAGES.md`.
+Uploads record the file's own metadata (GPS, place, camera, date taken, title, keywords) and the
+library search finds images and folders by any of it. While a channel runs, the encoder's pictures
+land in the library too: a still a minute under `thumbnails/<channel>/<date>/<hour>/`, plus 10-minute
+sprite sheets and an hourly VTT that drive hover previews on the recording timelines and the VOD player
+(`volt-app/docs/THUMBNAILS.md`).
+
+Every delete is in the audit log, including deletes that were refused and why, and administrators
+review it under Insight > Audit log (filters, detail, CSV). Only administrators delete channels and
+stations, after seeing what goes with them; a full group disables Create and says why
+(`volt-app/docs/AUDIT_LOG.md`).
+
+Lists share one toolbar and one feedback standard: Channels, Radio and Events filter by status and group and
+sort (names A to Z by default, events by date), rows have one primary action and a "⋯" menu, rows can be
+ticked for bulk Start, Stop and Remove, and Events has a calendar (day, week, month, year). Errors, warnings
+and results always appear in the same places (`volt-app/docs/UI_FEEDBACK.md`).
+
+The plan (how many channels and stations, and how many run at once) belongs to the account and is set by the
+owner in a single-client deployment or by a system administrator; administrators share it out between channel
+groups, one of which is the default (`volt-app/docs/PLAN_AND_GROUPS.md`). Who can do what, for every default
+user type: `volt-app/docs/PERMISSIONS_MAP.md`, and Admin > Permissions map in the console.
+
 ## Test cases
 Encoder pipeline (no cloud):
 ```bash
@@ -89,7 +119,14 @@ End-to-end media pipeline (Docker):
 ```bash
 cd e2e && bash run-e2e.sh   # source -> encoder -> HLS/DASH/CMAF asserted
 ```
-Prototypes: `cd volt-frame-proto && node test.mjs`; `cd volt-image-proto && node test.mjs`.
+Image service (resize, crop, filters by signed URL; full guide in `volt-app/docs/IMAGES.md`):
+```bash
+cd volt-app
+npm run test:images                                                    # no database needed
+DATABASE_URL=postgres://volt:volt@localhost:5432/volt npm run test:images:api   # through the real API
+cd ../packages/image-url && npm test                                   # the published SDK
+```
+Prototype: `cd volt-frame-proto && node test.mjs`.
 
 ## Local builds
 ```bash
@@ -111,6 +148,11 @@ terraform apply                                  # VPC, ECS + capacity providers
 #   volt-control-plane, volt-encoder, volt-thumbnailer  (encoder image also tagged thumbnailer)
 # then apply DB migrations and put the integrations secret; see the deploy README.
 ```
+The stack also creates the image service's S3 bucket, its CloudFront distribution
+(S3 derivative cache first, render on a miss) and its signing secret (`images.tf`). The
+`image_cdn_base_url` output is where signed image URLs point. See `volt-app/docs/IMAGES.md`
+section 14.
+
 The control plane runs with `ORCH_LAUNCHER=ecs`, launching encoder/thumbnailer tasks on
 Spot with on-demand fallback. GPU transcode: set `encoder_instance_types` to g4dn and switch
 the AMI SSM param (see deploy README). `terraform destroy` tears it all down.

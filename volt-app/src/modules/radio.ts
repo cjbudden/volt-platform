@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
+import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { orchestrator } from '../services/orchestrator';
 import { radioRunState, radioRunStates } from '../services/radio/state';
 import { icyState, probeIcySource } from '../services/radio/icyMeta';
@@ -101,15 +102,42 @@ radioRouter.post('/probe', asyncHandler(async (req, res) => {
   res.json(await probeIcySource(url));
 }));
 
+// The list standard (util/listQuery.ts). The live state, listeners and now
+// playing below are per station, so they are worked out for the page only.
+const stationList = defineList({
+  path: '/api/radio',
+  fields: {
+    id: { sql: 'c.id', type: 'uuid' },
+    name: { sql: 'c.name', type: 'string' },
+    status: { sql: 'c.status', type: 'enum', values: ['scheduled', 'provisioning', 'testing', 'live', 'stopping', 'ended', 'error'] },
+    group_id: { sql: 'c.group_id', type: 'uuid' },
+    group_name: { sql: 'g.name', type: 'string' },
+    recording_enabled: { sql: 'c.recording_enabled', type: 'boolean' },
+    on_air: { sql: 'c.on_air', type: 'boolean' },
+    created_at: { sql: 'c.created_at', type: 'timestamp', notNull: true },
+  },
+  search: ['name', 'group_name'],
+  defaultSort: '-created_at',
+  unpagedLimit: 1000,
+  aliases: { groupId: 'group_id', createdAt: 'created_at', onAir: 'on_air' },
+});
+
 radioRouter.get('/', asyncHandler(async (req, res) => {
-  const rows = await query<any>(
+  const base: unknown[] = [accountId(req)];
+  const params = [...base];
+  const pl = parseList(stationList, req.query, params);
+  const from = `FROM channels c JOIN groups g ON g.id=c.group_id WHERE g.account_id=$1 AND c.kind='radio'${whereSql(pl)}`;
+  const fetched = await query<any>(
     `SELECT c.id, c.name, c.status, c.group_id, g.name AS group_name, c.kind,
             c.radio_config, c.recording_enabled, c.recording_retention_sec, c.brand_ref, c.guide_icon_ref,
             c.on_air, c.created_at, c.version
-       FROM channels c JOIN groups g ON g.id=c.group_id
-      WHERE g.account_id=$1 AND c.kind='radio' ORDER BY c.created_at DESC`,
-    [accountId(req)]
+       ${from} ${pageSql(pl)}`,
+    params
   );
+  const cParams = [...base];
+  const cWhere = pl.count ? whereSql(parseList(stationList, { ...req.query, cursor: undefined, offset: undefined }, cParams)) : '';
+  const total = pl.count ? (await one<any>(`SELECT count(*)::int AS n FROM channels c JOIN groups g ON g.id=c.group_id WHERE g.account_id=$1 AND c.kind='radio'${cWhere}`, cParams))?.n : undefined;
+  const rows = finishPage(req, res, pl, fetched, total);
   // ONE query for the whole list. This used to be a Map lookup per row, which
   // was free; against the database it would be a query per station, so the
   // batch form exists for exactly this caller.

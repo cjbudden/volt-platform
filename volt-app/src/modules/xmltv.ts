@@ -35,6 +35,8 @@ import { query, one } from '../db';
 import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, badRequest, notFound, conflict } from '../util/http';
+import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
+import { signedImageUrl } from './images';
 import { ownerBaseEntry } from './epg';
 import { pickGuideIcon, feedIconsFor } from '../services/guideIcon';
 import {
@@ -59,13 +61,15 @@ export interface GuideScope {
 // --------------------------------------------------------------- helpers
 
 const publicBase = () => config.publicBaseUrl.replace(/\/$/, '');
+/** Signed image URLs point at the image CDN when one is configured. */
+const publicImageBase = () => config.images.publicBaseUrl;
 
 /** A store reference or URL as an absolute URL a partner can fetch. */
 export function absoluteImage(ref: string | null | undefined, w = 256, h = 256): string | null {
   if (!ref) return null;
   if (/^https?:\/\//i.test(ref)) return ref;
   const key = ref.replace(/^\//, '');
-  if (key.startsWith('library/')) return `${publicBase()}/img/${w}x${h},inside/${key}`;
+  if (key.startsWith('library/')) return signedImageUrl(key, { width: w, height: h, fit: 'inside' }, publicImageBase());
   return null;
 }
 
@@ -303,19 +307,43 @@ xmltvAdminRouter.get(
 );
 
 /** Guide channels as JSON: what XMLTV <channel> carries, for JSON clients. */
+// The list standard (util/listQuery.ts). Field names are the response's; key
+// is the column the cursor reads before the row is reshaped.
+const guideChannelList = defineList({
+  path: '/api/epg/channels',
+  fields: {
+    id: { sql: 'c.id', type: 'uuid' },
+    name: { sql: 'c.name', type: 'string' },
+    xmltvId: { sql: 'c.xmltv_id', type: 'string', key: 'xmltv_id', doc: 'The id set on the channel (unset channels use their Volt id)' },
+    medium: { sql: "COALESCE(c.kind,'tv')", type: 'enum', values: ['tv', 'radio'], key: 'medium' },
+    tz: { sql: 'c.tz', type: 'string' },
+    epgEnabled: { sql: 'COALESCE(c.epg_enabled, true)', type: 'boolean', key: 'epg_enabled' },
+    updatedAt: { sql: 'c.updated_at', type: 'timestamp', key: 'updated_at' },
+  },
+  search: ['name', 'xmltvId'],
+  defaultSort: 'name',
+  unpagedLimit: 1000,
+});
+
 xmltvAdminRouter.get(
   '/channels',
   requireAuth,
   asyncHandler(async (req, res) => {
     const account = accountId(req);
-    const rows = await query<any>(
-      `SELECT c.id, c.kind, c.name, c.xmltv_id, c.brand_ref, c.guide_icon_ref, c.tz, c.metadata, c.updated_at,
+    const base: unknown[] = [account];
+    const params = [...base];
+    const pl = parseList(guideChannelList, req.query, params);
+    const from = `FROM channels c JOIN groups g ON g.id = c.group_id WHERE g.account_id = $1${whereSql(pl)}`;
+    const fetched = await query<any>(
+      `SELECT c.id, c.kind, COALESCE(c.kind,'tv') AS medium, c.name, c.xmltv_id, c.brand_ref, c.guide_icon_ref, c.tz, c.metadata, c.updated_at,
               COALESCE(c.epg_enabled, true) AS epg_enabled
-         FROM channels c JOIN groups g ON g.id = c.group_id
-        WHERE g.account_id = $1
-        ORDER BY lower(c.name), c.id`,
-      [account],
+         ${from} ${pageSql(pl)}`,
+      params,
     );
+    const cParams = [...base];
+    const cWhere = pl.count ? whereSql(parseList(guideChannelList, { ...req.query, cursor: undefined, offset: undefined }, cParams)) : '';
+    const total = pl.count ? (await one<any>(`SELECT count(*)::int AS n FROM channels c JOIN groups g ON g.id = c.group_id WHERE g.account_id = $1${cWhere}`, cParams))?.n : undefined;
+    const rows = finishPage(req, res, pl, fetched, total);
     const feed = await feedIconsFor(rows.map((r) => r.id));
     const out = [];
     for (const r of rows) {
@@ -435,12 +463,41 @@ async function assertOwnChannels(ids: string[] | null | undefined, account: stri
   if (got.length !== new Set(ids).size) throw badRequest('channelIds includes a channel that is not in this account');
 }
 
+const feedList = defineList({
+  path: '/api/epg/xmltv/feeds',
+  fields: {
+    id: { sql: 'f.id', type: 'uuid' },
+    name: { sql: 'f.name', type: 'string' },
+    enabled: { sql: 'f.enabled', type: 'boolean' },
+    includeEvents: { sql: 'f.include_events', type: 'boolean', key: 'include_events' },
+    timeBasis: { sql: 'f.time_basis', type: 'enum', values: ['scheduled', 'asrun'], key: 'time_basis' },
+    tzMode: { sql: 'f.tz_mode', type: 'enum', values: ['local', 'utc'], key: 'tz_mode' },
+    lang: { sql: 'f.lang', type: 'string' },
+    pastDays: { sql: 'f.past_days', type: 'number', key: 'past_days' },
+    futureDays: { sql: 'f.future_days', type: 'number', key: 'future_days' },
+    pollCount: { sql: 'f.poll_count', type: 'number', key: 'poll_count' },
+    lastPolledAt: { sql: 'f.last_polled_at', type: 'timestamp', key: 'last_polled_at' },
+    createdAt: { sql: 'f.created_at', type: 'timestamp', key: 'created_at', notNull: true },
+    updatedAt: { sql: 'f.updated_at', type: 'timestamp', key: 'updated_at' },
+  },
+  search: ['name'],
+  defaultSort: '-createdAt',
+  unpagedLimit: 1000,
+});
+
 xmltvAdminRouter.get(
   '/xmltv/feeds',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const rows = await query<any>(`SELECT * FROM epg_feeds WHERE account_id = $1 ORDER BY created_at DESC`, [accountId(req)]);
-    res.json(rows.map(feedOut));
+    const base: unknown[] = [accountId(req)];
+    const params = [...base];
+    const pl = parseList(feedList, req.query, params);
+    const from = `FROM epg_feeds f WHERE f.account_id = $1${whereSql(pl)}`;
+    const rows = await query<any>(`SELECT f.* ${from} ${pageSql(pl)}`, params);
+    const cParams = [...base];
+    const cWhere = pl.count ? whereSql(parseList(feedList, { ...req.query, cursor: undefined, offset: undefined }, cParams)) : '';
+    const total = pl.count ? (await one<any>(`SELECT count(*)::int AS n FROM epg_feeds f WHERE f.account_id = $1${cWhere}`, cParams))?.n : undefined;
+    res.json(finishPage(req, res, pl, rows, total).map(feedOut));
   }),
 );
 

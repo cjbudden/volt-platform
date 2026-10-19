@@ -1,12 +1,24 @@
 /**
  * Platform (SaaS-provider) authorization — a scope ABOVE tenant admins.
- * requirePlatform gates the /api/platform surface: the caller must be an
- * authenticated user whose `platform_role` is set. Roles: saas_admin (full),
- * support (read + tickets), read_only. Distinct from a tenant's own user roles.
+ *
+ * requirePlatform gates the /api/platform surface. The caller must present a
+ * PLATFORM session: a token with audience volt:platform, which is only minted
+ * after the TOTP step (POST /api/platform/auth/mfa, or /step-up from a signed-in
+ * admin session). An ordinary admin session is refused with
+ * code platform_mfa_required, even for a user who has a platform_role: before
+ * this, a password-only login reached the cross-tenant surface and MFA could
+ * be skipped entirely.
+ *
+ * Roles: saas_admin (full), support (read + tickets), read_only. The role is
+ * read from the cached access record (auth/roles.ts), so it is current
+ * without a database query per request.
+ *
+ * PLATFORM_REQUIRE_MFA=false accepts ordinary admin sessions (local dev only).
  */
 import { Request, Response, NextFunction } from 'express';
-import { one } from '../db';
-import { requireAuth, accountId } from './middleware';
+import { verifyAccess, AUD_PLATFORM, AUD_ADMIN } from './jwt';
+import { resolveAccess } from './roles';
+import { accountId } from './middleware';
 import { forbidden, unauthorized } from '../util/http';
 
 declare global {
@@ -18,17 +30,34 @@ declare global {
   }
 }
 
+const RANK: Record<string, number> = { read_only: 1, support: 2, saas_admin: 3 };
+
+export function platformMfaRequired(): boolean {
+  return !/^(0|false|no|off)$/i.test(process.env.PLATFORM_REQUIRE_MFA ?? 'true');
+}
+
 export function requirePlatform(minRole: 'saas_admin' | 'support' | 'read_only' = 'read_only') {
-  const rank: Record<string, number> = { read_only: 1, support: 2, saas_admin: 3 };
   return [
-    requireAuth,
     async (req: Request, _res: Response, next: NextFunction) => {
       try {
-        if (!req.auth) return next(unauthorized());
-        const u = await one<any>(`SELECT platform_role FROM users WHERE id=$1`, [req.auth.sub]);
-        if (!u?.platform_role) return next(forbidden('platform access required'));
-        if (rank[u.platform_role] < rank[minRole]) return next(forbidden(`requires ${minRole}`));
-        req.platformRole = u.platform_role;
+        const [scheme, token] = (req.headers.authorization ?? '').split(' ');
+        if (scheme !== 'Bearer' || !token) return next(unauthorized('Missing bearer token'));
+        const audiences = platformMfaRequired() ? [AUD_PLATFORM] : [AUD_PLATFORM, AUD_ADMIN];
+        try {
+          req.auth = verifyAccess(token, audiences);
+          req.authVia = 'session';
+        } catch (e: any) {
+          if (/not this API/.test(String(e?.message))) {
+            return next(Object.assign(forbidden('Platform access needs a verified platform session (authenticator code)'),
+              { code: 'platform_mfa_required' }));
+          }
+          return next(unauthorized('Invalid or expired token'));
+        }
+        const access = await resolveAccess(String(req.auth.sub), String(req.auth.role));
+        req.access = access;
+        if (!access.platformRole) return next(forbidden('platform access required'));
+        if ((RANK[access.platformRole] ?? 0) < RANK[minRole]) return next(forbidden(`requires ${minRole}`));
+        req.platformRole = access.platformRole;
         next();
       } catch (e) {
         next(e);

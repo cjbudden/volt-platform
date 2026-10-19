@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { cpus } from 'node:os';
 
 function req(name: string, fallback?: string): string {
   const v = process.env[name] ?? fallback;
@@ -91,6 +92,11 @@ function resolvePlayerBundle(): string {
 
 export const config = {
   env: process.env.NODE_ENV ?? 'development',
+  // DEPLOYMENT SHAPE (docs/PLAN_AND_GROUPS.md). `single`: one client runs its
+  // own Volt, so the account owner is the super user and sets the plan.
+  // `saas`: many clients on one platform; the plan is what the client pays
+  // for, so only platform (System Admin) staff change it.
+  deployment: (process.env.VOLT_DEPLOYMENT === 'saas' ? 'saas' : 'single') as 'single' | 'saas',
   port: Number(process.env.PORT ?? 8080),
   databaseUrl: req('DATABASE_URL', 'postgres://volt:volt@localhost:5432/volt'),
   jwt: {
@@ -350,4 +356,90 @@ export const config = {
     s3Bucket: process.env.IMAGE_S3_BUCKET ?? (process.env.S3_BUCKET ?? 'volt-origin-dev'),
     s3Prefix: process.env.IMAGE_S3_PREFIX ?? '',
   },
+  // On-the-fly image service (src/modules/images.ts, docs/IMAGES.md). Every
+  // default is safe for production; local runs only need nothing set.
+  images: imageServiceConfig(),
+  // Encoder thumbnails: library stills, sprite sheets and WebVTT per stream
+  // hour (services/thumbnails, docs/THUMBNAILS.md).
+  thumbnails: thumbnailsConfig(),
 };
+
+/** Encoder thumbnail settings. Exported for the tests. */
+export function thumbnailsConfig(env: NodeJS.ProcessEnv = process.env) {
+  const num = (k: string, d: number, min = 0) => {
+    const v = Number(env[k]);
+    return Number.isFinite(v) && v >= min ? v : d;
+  };
+  return {
+    enabled: (env.THUMBS_ENABLED ?? '1') !== '0',
+    // How often the scheduler fills in the current hour (seconds).
+    passSeconds: num('THUMBS_PASS_SEC', 120, 15),
+    // How far back each pass looks for hours to finish (older: POST /api/thumbnails/build).
+    lookbackMinutes: num('THUMBS_LOOKBACK_MIN', 120, 5),
+    // Never build tiles for the last few seconds: the segment may still be written.
+    lagSeconds: num('THUMBS_LAG_SEC', 20, 0),
+    // Wall-clock budget for one pass; what is left is picked up by the next.
+    passBudgetSeconds: num('THUMBS_PASS_BUDGET_SEC', 90, 5),
+    concurrency: num('THUMBS_CONCURRENCY', 3, 1),
+    // Sprite sheets: one tile every tileIntervalSec, cols x rows tiles per sheet
+    // (10 x 6 at 10 s = one sheet per 10 minutes, six per hour).
+    tileIntervalSec: num('THUMBS_TILE_INTERVAL_SEC', 10, 1),
+    tileWidth: num('THUMBS_TILE_WIDTH', 160, 32),
+    tileHeight: num('THUMBS_TILE_HEIGHT', 90, 18),
+    cols: num('THUMBS_SHEET_COLS', 10, 1),
+    rows: num('THUMBS_SHEET_ROWS', 6, 1),
+    sheetQuality: num('THUMBS_SHEET_QUALITY', 70, 1),
+    // Library stills: one every frameIntervalSec (0 = none), frameHeight tall.
+    frameIntervalSec: num('THUMBS_FRAME_INTERVAL_SEC', 60, 0),
+    frameHeight: num('THUMBS_FRAME_HEIGHT', 360, 90),
+    frameQuality: num('THUMBS_FRAME_QUALITY', 82, 1),
+    // Delete stills, sheets and VTTs older than this (0 = keep forever).
+    retentionDays: num('THUMBS_RETENTION_DAYS', 30, 0),
+    // Time zone for event folders (channels use their own).
+    defaultTz: env.THUMBS_DEFAULT_TZ ?? 'UTC',
+  };
+}
+export type ThumbnailsConfig = ReturnType<typeof thumbnailsConfig>;
+
+/** Image service settings. Exported for the tests, which build their own. */
+export function imageServiceConfig(env: NodeJS.ProcessEnv = process.env) {
+  const num = (k: string, d: number) => {
+    const v = Number(env[k]);
+    return Number.isFinite(v) && v > 0 ? v : d;
+  };
+  const production = env.NODE_ENV === 'production';
+  const secret = env.IMAGE_SIGNING_SECRET ?? (production ? '' : 'dev-image-signing-secret');
+  return {
+    // Master secret; per-account keys are derived from it (services/images/signing.ts).
+    // Required in production: the service refuses to start without one.
+    signingSecret: secret,
+    // Accepted for verification only, during a rotation.
+    previousSigningSecret: env.IMAGE_SIGNING_SECRET_PREVIOUS ?? '',
+    // Where signed URLs point. The image CDN in the cloud; this API locally.
+    publicBaseUrl: (env.IMAGE_PUBLIC_BASE_URL ?? env.PUBLIC_BASE_URL ?? 'http://localhost:8080').replace(/\/+$/, ''),
+    // The console loads previews same-origin unless an image CDN is configured.
+    consoleBaseUrl: (env.IMAGE_PUBLIC_BASE_URL ?? '').replace(/\/+$/, ''),
+    // Guards. A request outside them is refused, never clamped.
+    maxDimension: num('IMAGE_MAX_DIMENSION', 4096),          // px, either side of the output
+    maxOutputPixels: num('IMAGE_MAX_OUTPUT_PIXELS', 16_777_216), // 4096 x 4096
+    maxInputPixels: num('IMAGE_MAX_INPUT_PIXELS', 100_000_000), // decompression-bomb guard
+    maxSourceBytes: num('IMAGE_MAX_SOURCE_BYTES', 40 * 1024 * 1024),
+    formats: (env.IMAGE_FORMATS ?? 'webp,avif,jpeg,png').split(',').map((s) => s.trim()).filter(Boolean),
+    renderTimeoutSeconds: num('IMAGE_RENDER_TIMEOUT_S', 20),
+    // Throughput. Renders above `maxConcurrent` queue; above `maxQueue` they get 503.
+    maxConcurrent: num('IMAGE_MAX_CONCURRENT', Math.max(2, cpus().length)),
+    maxQueue: num('IMAGE_MAX_QUEUE', 200),
+    memoryCacheBytes: num('IMAGE_MEMORY_CACHE_MB', 64) * 1024 * 1024,
+    sourceCacheBytes: num('IMAGE_SOURCE_CACHE_MB', 128) * 1024 * 1024,
+    // Derivative cache. local = a directory; s3 = the bucket CloudFront reads
+    // first (deploy/terraform/images.tf), so a rendered size is made once.
+    cacheDriver: (env.IMAGE_CACHE_DRIVER ?? env.IMAGE_STORE_DRIVER ?? 'local') as 'local' | 's3' | 'none',
+    cacheDir: env.IMAGE_CACHE_DIR ?? `${env.IMAGE_STORE_DIR ?? `${process.cwd()}/image-store`}/cache`,
+    cacheBucket: env.IMAGE_CACHE_S3_BUCKET ?? env.IMAGE_S3_BUCKET ?? env.S3_BUCKET ?? 'volt-origin-dev',
+    cachePrefix: (env.IMAGE_CACHE_S3_PREFIX ?? 'img-cache').replace(/^\/+|\/+$/g, ''),
+    // Cache-Control on a rendered image. URLs are content-addressed by their
+    // signature, so they never change meaning: a year, immutable.
+    cacheControl: env.IMAGE_CACHE_CONTROL ?? 'public, max-age=31536000, immutable',
+  };
+}
+export type ImageServiceConfig = ReturnType<typeof imageServiceConfig>;

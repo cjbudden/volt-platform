@@ -18,3 +18,39 @@ db_multi_az       = false   # true for prod
 
 control_plane_desired   = 2
 control_plane_image_tag = "latest"
+
+# ---- Scaling (SCALING.md) -------------------------------------------------------
+# Staging: the defaults below are fine. For a 1M-viewer event use the
+# "large event" values in the comments, applied a day ahead.
+
+enable_role_split = true          # api-public / api-admin / scheduler / worker services
+api_public_min    = 2             # large event: raised automatically by pre-warm
+api_public_max    = 60            # large event: 80-120
+api_public_cpu    = 1024
+api_public_memory = 2048
+
+enable_valkey    = true
+valkey_node_type = "cache.t4g.small"   # large event: "cache.r7g.large"
+valkey_replicas  = 1
+
+enable_rds_proxy = false          # large event: true
+# db_instance_class = "db.r7g.xlarge"   # large event
+# db_multi_az       = true              # prod
+
+enable_api_edge = true            # CloudFront + WAF in front of the ALB
+# api_edge_aliases         = ["api.example.com"]
+# api_edge_certificate_arn = "arn:aws:acm:us-east-1:…"   # must be us-east-1
+# alb_lcu_reservation      = 200  # set the day before a big event, unset after (billed while set)
+
+analytics_sessions        = "postgres"   # large event: "none" (+ enable_analytics_firehose = true)
+enable_analytics_firehose = false
+
+prewarm_mode            = "aws"
+prewarm_starts_per_task = 1500    # from your load test (deploy/loadtest)
+prewarm_origin_fraction = 0.1
+
+# Customer docs (optional; from deploy/terraform-docs outputs)
+# docs_url                    = "https://docs.volt.example"
+# docs_cookie_domain          = ".volt.example"
+# docs_key_pair_id            = "K2XXXXXXXXXXXX"
+# docs_signing_key_secret_arn = "arn:aws:secretsmanager:...:secret:volt-prod-docs/signing-key-xxxx"

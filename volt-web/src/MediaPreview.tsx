@@ -21,9 +21,12 @@
 //  loading the media and looking. The element's own metadata is still used as
 //  a tie-breaker for an old asset that predates the flag.
 // ============================================================================
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import AudioVisualizer from './AudioVisualizer'
 import { getToken } from './api'
+import { parseThumbVtt, ThumbScrubStrip } from './storyboard'
+import { Notice } from './notices'
+import VoltPlayerView from './VoltPlayerView'
 
 export interface PreviewSources {
   /** HLS master/index manifest path. */
@@ -95,32 +98,50 @@ const fmt = (s: number) => {
   return h ? `${h}:${String(m % 60).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${m}:${String(ss).padStart(2, '0')}`
 }
 
-export default function MediaPreview({ sources, audioOnly, title }: {
+export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt }: {
   sources: PreviewSources
   audioOnly: boolean
   title?: string | null
+  /** WebVTT thumbnails for this media (a clip's or a recording's): a scrub
+   *  strip under the player shows the frame under the pointer. */
+  thumbnailsVtt?: string | null
 }) {
   const [err, setErr] = useState('')
   const hasAny = !!(sources.file || sources.hls)
   if (!hasAny) return null
   return audioOnly
     ? <AudioPreview sources={sources} title={title} err={err} setErr={setErr} />
-    : <VideoPreview sources={sources} err={err} setErr={setErr} />
+    : <VideoPreview sources={sources} err={err} setErr={setErr} thumbnailsVtt={thumbnailsVtt} />
 }
 
-function VideoPreview({ sources, err, setErr }: { sources: PreviewSources; err: string; setErr: (m: string) => void }) {
+/** Video: the Volt player SDK with the admin skin (the same player customers embed). */
+function VideoPreview({ sources, err, setErr, thumbnailsVtt }: { sources: PreviewSources; err: string; setErr: (m: string) => void; thumbnailsVtt?: string | null }) {
   const ref = useRef<HTMLVideoElement | null>(null)
   const [noPicture, setNoPicture] = useState(false)
-  useAttach(ref, sources, setErr)
+  const [t, setT] = useState(0)
+  const [dur, setDur] = useState(NaN)
+  const cues = useMemo(() => (thumbnailsVtt ? parseThumbVtt(thumbnailsVtt) : []), [thumbnailsVtt])
+  const src = assetUrl(sources.file) ?? assetUrl(sources.hls)
+  useEffect(() => {
+    const v = ref.current
+    if (!v) return
+    const onT = () => setT(v.currentTime)
+    const onD = () => setDur(v.duration)
+    const onM = () => setNoPicture(v.videoHeight === 0)
+    v.addEventListener('timeupdate', onT); v.addEventListener('durationchange', onD); v.addEventListener('loadedmetadata', onM)
+    return () => { v.removeEventListener('timeupdate', onT); v.removeEventListener('durationchange', onD); v.removeEventListener('loadedmetadata', onM) }
+  }, [])
   return (
     <div>
-      <video ref={ref} controls playsInline preload="metadata"
-        onLoadedMetadata={e => setNoPicture((e.currentTarget as HTMLVideoElement).videoHeight === 0)}
-        style={noPicture
-          ? { width: '100%', height: 44, background: '#000', borderRadius: 8, border: '1px solid var(--border)' }
-          : { width: '100%', maxHeight: 380, background: '#000', borderRadius: 8, border: '1px solid var(--border)' }} />
+      <VoltPlayerView src={src} mediaRef={ref} skin="admin" autoplay={false}
+        onError={m => setErr(m ? 'Playback failed: ' + m : '')}
+        style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)', ['--vp-admin-max' as any]: '380px' }} />
+      {!noPicture && cues.length > 0 && (
+        <ThumbScrubStrip cues={cues} duration={Number.isFinite(dur) ? dur : cues[cues.length - 1].end} current={t}
+          onSeek={(sec) => { const v = ref.current; if (v) v.currentTime = sec }} />
+      )}
       {noPicture && <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', marginTop: 8 }}>This file carries no picture: audio only.</div>}
-      {err && <div className="err" style={{ marginTop: 8 }}>{err}</div>}
+      {err && <div style={{ marginTop: 8 }}><Notice kind="error" variant="compact" message={err} /></div>}
     </div>
   )
 }
@@ -168,7 +189,7 @@ function AudioPreview({ sources, title, err, setErr }: { sources: PreviewSources
           style={{ flex: 1 }} aria-label="Seek" />
         {title && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>}
       </div>
-      {err && <div className="err" style={{ marginTop: 8 }}>{err}</div>}
+      {err && <div style={{ marginTop: 8 }}><Notice kind="error" variant="compact" message={err} /></div>}
     </div>
   )
 }

@@ -345,7 +345,7 @@ export default function EncodingProfiles() {
         <h3 style={{ margin: '0 0 10px', fontSize: 'var(--fs-body)' }}>New ladder</h3>
         <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1fr auto', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <select style={box} value={mirrorId} onChange={e => setMirrorId(e.target.value)}>
+            <select className="inp sel-sm" style={{ width: 'auto' }} value={mirrorId} onChange={e => setMirrorId(e.target.value)}>
               <option value="">Mirror a live output profile…</option>
               {live.map(o => (
                 <option key={o.id} value={o.id}>

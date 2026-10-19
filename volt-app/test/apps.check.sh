@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${DATABASE_URL:?set DATABASE_URL}"
 export JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:-devsecret} JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-devrefresh} INGEST_TOKEN=${INGEST_TOKEN:-dev-ingest}
-export PORT=${PORT:-8093} ORCH_LAUNCHER=mock
+export PORT=${PORT:-8093} ORCH_LAUNCHER=mock KEY_USAGE_FLUSH_SEC=1
 A=00000000-0000-0000-0000-0000000000a1
 G=00000000-0000-0000-0000-0000000000b1; D=00000000-0000-0000-0000-0000000000d1
 C=00000000-0000-0000-0000-0000000000c1
@@ -61,7 +61,9 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$JS" -H "Origin: https
 echo "== secret key + metering =="
 SK=$(curl -fsS -X POST -H "$AUTH" -H "$JS" "$BASE/api/apps/secret-keys" -d '{}')
 echo "$SK" | grep -q 'sk_live_' && ok "secret (management) key issued" || no "no secret key: $SK"
-# metering: after 1 successful availability, request_count >= 1
+# metering: after 1 successful availability, request_count >= 1. Usage is
+# counted in memory and written every KEY_USAGE_FLUSH_SEC (set to 1 above).
+sleep 2
 RC=$(psql "$DATABASE_URL" -tAc "SELECT request_count FROM api_keys WHERE app_id='$APPID' AND kind='publishable'")
 [ "${RC:-0}" -ge 1 ] && ok "per-key metering incremented ($RC)" || no "metering not counted ($RC)"
 

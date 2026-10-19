@@ -27,7 +27,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
+import { can } from '../auth/roles';
 import { asyncHandler } from '../util/http';
+import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { loadChannelHealthLite } from '../services/channelDetail';
 import { liveConcurrency } from '../services/analytics';
 import type { PipelineHealth } from '../services/pipelineHealth';
@@ -211,7 +213,9 @@ async function liveBoard(acct: string): Promise<LiveRow[]> {
 monitoringRouter.get(
   '/live',
   asyncHandler(async (req, res) => {
-    const rows = await liveBoard(accountId(req));
+    // Only the kinds the caller may see (a Radio Manager's board is stations).
+    const featureOf = (k: string) => (k === 'radio' ? 'radio' : k === 'event' ? 'events' : 'channels');
+    const rows = (await liveBoard(accountId(req))).filter((r: any) => can(req, featureOf(r.kind), 'view'));
     const counts = rows.reduce<Record<string, number>>((a, r) => {
       a[r.overall] = (a[r.overall] ?? 0) + 1;
       return a;
@@ -434,8 +438,8 @@ monitoringRouter.get(
       `SELECT count(*)::int AS n FROM vod_assets v
          LEFT JOIN channels c ON c.id = v.channel_id
          LEFT JOIN events   e ON e.id = v.event_id
-         JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
-        WHERE g.account_id = $1 AND v.qc_state = 'failed'`,
+         LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
+        WHERE COALESCE(g.account_id, v.account_id) = $1 AND v.qc_state = 'failed'`,
       [acct]
     );
     if ((qcFailed?.n ?? 0) > 0) {
@@ -450,8 +454,8 @@ monitoringRouter.get(
       `SELECT count(*)::int AS n FROM vod_assets v
          LEFT JOIN channels c ON c.id = v.channel_id
          LEFT JOIN events   e ON e.id = v.event_id
-         JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
-        WHERE g.account_id = $1 AND v.review_state IN ('in_review', 'changes_requested')`,
+         LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
+        WHERE COALESCE(g.account_id, v.account_id) = $1 AND v.review_state IN ('in_review', 'changes_requested')`,
       [acct]
     );
     if ((awaiting?.n ?? 0) > 0) {
@@ -586,20 +590,43 @@ monitoringRouter.get(
 );
 
 /** The fleet event feed on its own, for polling without recomputing health. */
+// THE LIST STANDARD (util/listQuery.ts): filter by event type or stream, search
+// the names, page back through history with the cursor.
+const feedList = defineList({
+  path: '/api/monitoring/feed',
+  fields: {
+    id: { sql: 'ev.id', type: 'number' },
+    type: { sql: 'ev.type', type: 'string', doc: 'e.g. source.down, failover.switch' },
+    ts: { sql: 'ev.ts', type: 'timestamp', notNull: true },
+    name: { sql: 'COALESCE(c.name, e.name)', type: 'string', doc: 'Channel or event name' },
+    channel_id: { sql: 'ev.channel_id', type: 'uuid', sort: false },
+    event_id: { sql: 'ev.event_id', type: 'uuid', sort: false },
+  },
+  search: ['type', 'name'],
+  defaultSort: '-ts',
+  defaultLimit: 60,
+  maxLimit: 200,
+  aliases: { channelId: 'channel_id', eventId: 'event_id' },
+});
+
 monitoringRouter.get(
   '/feed',
   asyncHandler(async (req, res) => {
-    const limit = z.coerce.number().int().min(1).max(200).default(60).parse(req.query.limit ?? 60);
-    const rows = await query<any>(
-      `SELECT ev.id, ev.type, ev.detail, ev.ts, COALESCE(c.name, e.name) AS name
-         FROM stream_events ev
+    const from = `FROM stream_events ev
          LEFT JOIN channels c ON c.id = ev.channel_id
          LEFT JOIN events   e ON e.id = ev.event_id
          JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
-        WHERE g.account_id = $1
-        ORDER BY ev.ts DESC LIMIT $2`,
-      [accountId(req), limit]
-    );
-    res.json(rows);
+        WHERE g.account_id = $1`;
+    const params: unknown[] = [accountId(req)];
+    const pl = parseList(feedList, req.query, params);
+    const rows = await query<any>(
+      `SELECT ev.id, ev.type, ev.detail, ev.ts, COALESCE(c.name, e.name) AS name ${from}${whereSql(pl)} ${pageSql(pl)}`, params);
+    let total: number | undefined;
+    if (pl.count) {
+      const cp: unknown[] = [accountId(req)];
+      const cpl = parseList(feedList, { ...req.query, cursor: undefined, offset: undefined }, cp);
+      total = Number((await one<any>(`SELECT count(*)::int AS n ${from}${whereSql(cpl)}`, cp))?.n ?? 0);
+    }
+    res.json(finishPage(req, res, pl, rows, total));
   })
 );

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type AnalyticsOverview } from '../api'
+import { PageError, usePageNotice } from '../notices'
 
 /* ============================================================================
    ANALYTICS
@@ -248,6 +249,9 @@ function BarList({ title, data, empty, format = fmtInt }: {
 }
 
 // ---------------------------------------------------------------------------
+/** Hours: whole numbers once there are some, decimals below ten, so a short test is not shown as 0. */
+const fmtHours = (h: number) => h >= 10 ? Math.round(h).toLocaleString() : h > 0 ? h.toFixed(h < 1 ? 2 : 1) : '0'
+
 export default function AnalyticsPage() {
   const [d, setD] = useState<AnalyticsOverview | null>(null)
   const [days, setDays] = useState(30)
@@ -288,7 +292,9 @@ export default function AnalyticsPage() {
     }
   }, [d])
 
-  if (err && !d) return <div className="err">{err}</div>
+  usePageNotice('load', err && d ? { kind: 'error', title: "Couldn't load analytics.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
+
+  if (err && !d) return <PageError message={err} onRetry={() => load()} />
   if (!d || !chart) return <div className="loading">Loading analytics…</div>
 
   const nothing = d.totals.views === 0 && d.daily.length === 0
@@ -310,7 +316,6 @@ export default function AnalyticsPage() {
           <button className="btn ghost" onClick={() => load()}>Refresh</button>
         </div>
       </div>
-      {err && <div className="err">{err}</div>}
 
       <div className="card p-4" style={{ marginBottom: 16 }}>
         <div className="flex flex-wrap gap-6">
@@ -319,7 +324,7 @@ export default function AnalyticsPage() {
             tone={(live ?? d.liveConcurrent) > 0 ? 'var(--ok,#4ade80)' : undefined} />
           <Stat label={`Views · ${days}d`} value={fmtInt(d.totals.views)} />
           <Stat label="Unique viewers" value={fmtInt(d.totals.uniques)} />
-          <Stat label="Watch hours" value={fmtInt(d.totals.watchHours)} />
+          <Stat label="Watch hours" value={fmtHours(d.totals.watchHours)} />
           <Stat label="Peak concurrent" value={fmtInt(d.totals.peakConcurrent)} />
           {d.totals.blocked > 0 && (
             <Stat label="Blocked" value={fmtInt(d.totals.blocked)}
@@ -384,7 +389,7 @@ export default function AnalyticsPage() {
                     <td><b>{t.name}</b></td>
                     <td style={{ color: 'var(--muted)' }}>{t.kind}</td>
                     <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtInt(t.views)}</td>
-                    <td style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--muted)' }}>{fmtInt(t.watchHours)}</td>
+                    <td style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--muted)' }}>{fmtHours(t.watchHours)}</td>
                     <td style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--muted)' }}>{fmtInt(t.peakConcurrent)}</td>
                   </tr>
                 ))}

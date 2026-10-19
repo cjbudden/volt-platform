@@ -3,6 +3,7 @@ import { api, type LiveBoard, type LiveStream } from '../api'
 import { navigate } from '../router'
 import { PipelineStrip, StatusPill } from '../scaffold'
 import { pressable } from '../a11y'
+import { PageError, useNotify, usePageNotice } from '../notices'
 
 /* ============================================================================
    LIVE STREAMS — what is running, right now, across the whole fleet.
@@ -212,6 +213,7 @@ export default function LivePage() {
     /* eslint-disable-next-line */
   }, [])
 
+  const notify = useNotify()
   async function stop(s: LiveStream) {
     setBusy(s.id)
     try {
@@ -219,7 +221,7 @@ export default function LivePage() {
       else if (s.kind === 'event') await api.eventStartStop(s.id, 'stop')
       else await api.startStop(s.id, 'stop')
       await load()
-    } catch (e: any) { setErr(e.message) }
+    } catch (e: any) { notify({ kind: 'error', message: e.message }) }
     finally { setBusy(null) }
   }
 
@@ -227,7 +229,9 @@ export default function LivePage() {
     navigate(s.href)
   }
 
-  if (err && !b) return <div className="card p-4"><div className="err">{err}</div></div>
+  usePageNotice('load', err && b ? { kind: 'error', title: "Couldn't refresh the live board.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
+
+  if (err && !b) return <PageError message={err} onRetry={load} />
   if (!b) return <div className="card p-4"><div className="loading">Loading the fleet…</div></div>
 
   const active = b.streams.filter(s => ACTIVE.has(s.overall))
@@ -260,7 +264,6 @@ export default function LivePage() {
         </div>
       </div>
 
-      {err && <div className="err" style={{ marginBottom: 12 }}>{err}</div>}
 
       <div className="card p-4" style={{ marginBottom: 16 }}>
         <div className="flex" style={{ gap: 34, flexWrap: 'wrap' }}>

@@ -37,6 +37,7 @@ import { join, sep } from 'node:path';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
+import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { writeAudit, actor, patchEntity } from '../services/audit';
 import { classify, type WatchRule, type FolderPolicy } from '../services/watchfolder/rules';
 import { loadFolder, pgItemStore, ingestFolder, syncS3, mirrorQuarantines } from '../services/watchfolder/store';
@@ -288,20 +289,43 @@ watchfoldersRouter.post('/:id/scan', asyncHandler(async (req, res) => {
 
 /* -------------------------------------------------------------- items ---- */
 
+// The list standard (util/listQuery.ts). status keeps working as before
+// (status=quarantined), and now also takes a comma list.
+const itemList = defineList({
+  path: '/api/watchfolders/:id/items',
+  fields: {
+    id: { sql: 'i.id', type: 'number' },
+    object_key: { sql: 'i.object_key', type: 'string', doc: 'The file path in the folder' },
+    status: { sql: 'i.status', type: 'string', doc: 'seen, ingested, quarantined, failed, reprocessed or removed' },
+    size_bytes: { sql: 'i.size_bytes', type: 'number' },
+    target_kind: { sql: 'i.target_kind', type: 'string' },
+    workflow: { sql: 'i.workflow', type: 'string' },
+    matched_rule_id: { sql: 'i.matched_rule_id', type: 'uuid' },
+    rule_name: { sql: 'r.name', type: 'string' },
+    media_file_id: { sql: 'i.media_file_id', type: 'uuid' },
+    reason: { sql: 'i.reason', type: 'string', sort: false },
+    seen_at: { sql: 'i.seen_at', type: 'timestamp', notNull: true },
+    resolved_at: { sql: 'i.resolved_at', type: 'timestamp' },
+  },
+  search: ['object_key', 'reason', 'rule_name'],
+  defaultSort: '-seen_at',
+  defaultLimit: 200,
+  maxLimit: 500,
+});
+
 watchfoldersRouter.get('/:id/items', asyncHandler(async (req, res) => {
   const f = await ownedFolder(req);
-  const status = String(req.query.status ?? '').trim();
-  const params: any[] = [f.id];
-  let where = 'watchfolder_id = $1';
-  if (status) { params.push(status); where += ` AND status = $${params.length}`; }
-  const limit = Math.min(500, Math.max(1, Number(req.query.limit ?? 200)));
-  params.push(limit);
-  const items = await query<any>(
-    `SELECT i.*, r.name AS rule_name
-       FROM watchfolder_items i
+  const base: unknown[] = [f.id];
+  const params = [...base];
+  const pl = parseList(itemList, req.query, params);
+  const from = `FROM watchfolder_items i
        LEFT JOIN watchfolder_rules r ON r.id = i.matched_rule_id
-      WHERE ${where} ORDER BY i.seen_at DESC LIMIT $${params.length}`, params);
-  res.json({ items });
+      WHERE i.watchfolder_id = $1${whereSql(pl)}`;
+  const rows = await query<any>(`SELECT i.*, r.name AS rule_name ${from} ${pageSql(pl)}`, params);
+  const cParams = [...base];
+  const cWhere = pl.count ? whereSql(parseList(itemList, { ...req.query, cursor: undefined, offset: undefined }, cParams)) : '';
+  const total = pl.count ? (await one<any>(`SELECT count(*)::int AS n FROM watchfolder_items i LEFT JOIN watchfolder_rules r ON r.id = i.matched_rule_id WHERE i.watchfolder_id = $1${cWhere}`, cParams))?.n : undefined;
+  res.json({ items: finishPage(req, res, pl, rows, total) });
 }));
 
 const resolveSchema = z.object({

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, type PlatformAccountRow, type PlatformGroupRow } from '../api'
+import { api, setPlatformSession, type PlatformAccountRow, type PlatformGroupRow } from '../api'
 import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 import { pressable } from '../a11y'
+import { FormStatus, Notice, usePageNotice } from '../notices'
 
 /* ============================================================================
    System Admin — SaaS-provider controls, visible ONLY to platform staff
@@ -28,14 +29,33 @@ export default function SystemAdmin() {
   const [editing, setEditing] = useState<PlatformAccountRow | null>(null)
   const [creds, setCreds] = useState<{ account: string; email: string; password: string } | null>(null)
 
+  // PLATFORM STEP-UP. /api/platform only accepts a session verified with the
+  // authenticator code (ACCESS_CONTROL.md), so a signed-in admin session gets
+  // 403 platform_mfa_required here and is asked for the code.
+  const [needCode, setNeedCode] = useState(false)
+  const [enroll, setEnroll] = useState<{ secret: string; otpauthUri: string } | null>(null)
+  const [code, setCode] = useState('')
+  const [verifyErr, setVerifyErr] = useState('')
+
   async function load() {
-    try { setRows(await api.platformAccounts()); setDenied(false) }
+    try { setRows(await api.platformAccounts()); setDenied(false); setNeedCode(false); setErr('') }
     catch (e: any) {
-      if (/403|platform access/i.test(String(e.message))) setDenied(true)
+      if (e?.body?.code === 'platform_mfa_required') {
+        setNeedCode(true)
+        try { const r = await api.platformStepUp(); if (r.enroll && r.secret) setEnroll({ secret: r.secret, otpauthUri: r.otpauthUri ?? '' }) } catch { /* shown below */ }
+      } else if (/403|platform access/i.test(String(e.message))) setDenied(true)
       else setErr(e.message)
     }
   }
   useEffect(() => { load() }, [])
+
+  async function verify() {
+    setVerifyErr('')
+    try {
+      const r = await api.platformStepUp(code.trim())
+      if (r.accessToken) { setPlatformSession(r.accessToken, r.expiresIn ?? 3600); setCode(''); setEnroll(null); await load() }
+    } catch (e: any) { setVerifyErr(e.message) }
+  }
 
   const counts = useMemo(() => {
     const c = rows || []
@@ -46,6 +66,29 @@ export default function SystemAdmin() {
     if (filter === 'all') return rows
     return rows.filter(r => (filter === 'suspended' ? r.status === 'suspended' : r.status !== 'suspended'))
   }, [rows, filter])
+  usePageNotice('load', err ? { kind: 'error', title: "Couldn't load client accounts.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
+
+  if (needCode && !denied) {
+    return (
+      <>
+        <PageHead title="System Admin" sub="SaaS-provider controls for client accounts." />
+        <div className="card" style={{ padding: 22, maxWidth: 520 }}>
+          <h3 style={{ marginTop: 0 }}>Verify it is you</h3>
+          {enroll ? (
+            <p style={{ color: 'var(--muted)' }}>Platform access needs an authenticator app. Add this key to Google Authenticator, 1Password or similar, then enter the 6-digit code.<br />
+              <code style={{ wordBreak: 'break-all' }}>{enroll.secret}</code></p>
+          ) : (
+            <p style={{ color: 'var(--muted)' }}>Enter the 6-digit code from your authenticator app to open the platform controls for the next hour.</p>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input className="inp" inputMode="numeric" autoComplete="one-time-code" maxLength={8} value={code} onChange={e => setCode(e.target.value)} placeholder="123456" />
+            <button className="btn primary" disabled={code.trim().length < 6} onClick={verify}>Verify</button>
+          </div>
+          {verifyErr && <div style={{ marginTop: 10 }}><Notice kind="error" variant="compact" message={verifyErr} /></div>}
+        </div>
+      </>
+    )
+  }
 
   if (denied) {
     return (
@@ -64,7 +107,6 @@ export default function SystemAdmin() {
     <>
       <PageHead title="System Admin" sub="Client accounts across the whole platform: create accounts with their primary admin user, set plans and quotas, suspend access."
         action={<NewButton label="New client account" onClick={() => setCreateOpen(true)} />} />
-      {err && <div className="err">{err}</div>}
       {rows === null ? (
         <div className="loading">Loading accounts…</div>
       ) : (
@@ -109,7 +151,7 @@ export default function SystemAdmin() {
 /* --------------------------------------------- credentials shown once modal */
 function CredsOnceModal({ creds, onClose }: { creds: { account: string; email: string; password: string }; onClose: () => void }) {
   const [copied, setCopied] = useState(false)
-  const text = `VOLT Stream account: ${creds.account}\nSign-in email: ${creds.email}\nTemporary password: ${creds.password}`
+  const text = `Volt Streaming account: ${creds.account}\nSign-in email: ${creds.email}\nTemporary password: ${creds.password}`
   return (
     <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="" style={{ display: 'grid', placeItems: 'center' }}>
       <div className="card" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 520, padding: 22 }}>
@@ -245,9 +287,9 @@ function AccountDrawer({ account, onClose, onDone }: {
             </>
           )}
 
-          {err && <div className="err">{err}</div>}
         </div>
         <div className="drawer-f">
+          <FormStatus error={err} />
           <button className="btn ghost" onClick={onClose}>Cancel</button>
           <button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save changes' : 'Create account'}</button>
         </div>
@@ -269,6 +311,20 @@ function AccountGroups({ accountId }: { accountId: string }) {
   const load = () => api.platformAccountGroups(accountId).then(setGroups).catch(e => setErr(e.message))
   useEffect(() => { load() }, [accountId])
   const has = (t: string) => (groups ?? []).some(g => g.workflow_type === t)
+  const [edit, setEdit] = useState<{ id: string; name: string; maxCh: string; maxConc: string } | null>(null)
+  async function saveEdit() {
+    if (!edit) return
+    setBusy(true); setErr('')
+    try {
+      await api.platformEditGroup(accountId, edit.id, { name: edit.name.trim(), maxChannels: Number(edit.maxCh) || undefined, maxConcurrent: Number(edit.maxConc) || undefined })
+      setEdit(null); load()
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  async function removeGroup(id: string) {
+    if (!window.confirm('Delete this empty group?')) return
+    setBusy(true); setErr('')
+    try { await api.platformDeleteGroup(accountId, id); setEdit(null); load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
   async function add() {
     if (!form) return
     if (!form.name.trim()) { setErr('Name the group'); return }
@@ -287,13 +343,31 @@ function AccountGroups({ accountId }: { accountId: string }) {
       <div className="hintxt" style={{ marginTop: -4, marginBottom: 8 }}>A new channel goes into a group; the group decides whether it is transcode or packaging.</div>
       {groups === null ? <div className="loading">Loading…</div> : (
         <div style={{ display: 'grid', gap: 6 }}>
-          {groups.map(g => (
+          {groups.map(g => edit?.id === g.id ? (
+            <div key={g.id} className="card" style={{ padding: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10 }}>
+                <div className="field"><label>Group name</label>
+                  <input className="inp" value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></div>
+                <div className="field"><label>Max channels</label>
+                  <input className="inp" inputMode="numeric" value={edit.maxCh} onChange={e => setEdit({ ...edit, maxCh: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+                <div className="field"><label>Max concurrent</label>
+                  <input className="inp" inputMode="numeric" value={edit.maxConc} onChange={e => setEdit({ ...edit, maxConc: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <button type="button" className="btn ghost" style={{ color: 'var(--down,#f87171)', marginRight: 'auto' }} disabled={busy || g.channel_count > 0}
+                  title={g.channel_count > 0 ? 'Only an empty group can be deleted' : ''} onClick={() => removeGroup(g.id)}>Delete</button>
+                <button type="button" className="btn ghost" onClick={() => setEdit(null)}>Cancel</button>
+                <button type="button" className="btn primary" disabled={busy || !edit.name.trim()} onClick={saveEdit}>Save</button>
+              </div>
+            </div>
+          ) : (
             <div key={g.id} className="toggle-row" style={{ padding: '8px 12px' }}>
               <div style={{ minWidth: 0 }}>
                 <div className="tt">{g.name}</div>
                 <div className="td">{g.workflow_type === 'transcode' ? 'Transcode' : g.workflow_type === 'package_only' ? 'Packaging' : 'No profile'}
                   {g.rungs?.length ? ` · ladder ${g.rungs.map(r => `${r.height}p`).join(', ')}` : ''} · {g.channel_count}/{g.max_channels} channels · {g.max_concurrent} concurrent</div>
               </div>
+              <button type="button" className="btn ghost" onClick={() => setEdit({ id: g.id, name: g.name, maxCh: String(g.max_channels), maxConc: String(g.max_concurrent) })}>Edit</button>
             </div>
           ))}
           {!has('transcode') && <div className="hintxt" style={{ color: 'var(--warn)' }}>No transcode group: this client cannot create transcode channels (watermark, captions, our ladder).</div>}
@@ -328,7 +402,7 @@ function AccountGroups({ accountId }: { accountId: string }) {
           </div>
         </div>
       )}
-      {err && <div className="err">{err}</div>}
+      {err && <Notice kind="error" variant="compact" message={err} />}
     </>
   )
 }

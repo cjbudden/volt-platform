@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, thumbUrl, type ImportAlias, type ImportSource, type GuideChannel, type Group } from '../api'
+import { useAccess } from '../access'
 
 /* ============================================================================
    CHANNEL LINEUP of one XMLTV import source: which of the feed's channels are
@@ -29,6 +30,7 @@ const MAPPED_BY: Record<string, string> = {
 const day = (iso: string | null) => iso ? new Date(iso).toLocaleDateString([], { weekday: 'short', day: '2-digit', month: 'short' }) : ''
 
 export default function XmltvLineup({ source, channels, onChanged }: { source: ImportSource; channels: GuideChannel[]; onChanged: () => void }) {
+  const canMakeChannels = useAccess().can('channels', 'manage')
   const [rows, setRows] = useState<ImportAlias[] | null>(null)
   const [filter, setFilter] = useState<Filter | null>(null)
   const [search, setSearch] = useState('')
@@ -126,7 +128,10 @@ export default function XmltvLineup({ source, channels, onChanged }: { source: I
           <button type="button" className="btn ghost" disabled={busy} onClick={() => bulk('not_used')}>Don't use</button>
           <button type="button" className="btn ghost" disabled={busy} onClick={() => bulk('waiting')}>Back to waiting</button>
           {!create ? (
-            <button type="button" className="btn ghost" disabled={busy} onClick={() => setCreate({ groupId: groups[0]?.id ?? '', kind: 'tv' })}>Create Volt channels…</button>
+            /* Creating channels is channel work, not EPG work: an EPG-only role sees why it cannot. */
+            <button type="button" className="btn ghost" disabled={busy || !canMakeChannels}
+              title={canMakeChannels ? undefined : 'Creating channels needs permission to manage channels'}
+              onClick={() => setCreate({ groupId: (groups.find(g => g.is_default) ?? groups[0])?.id ?? '', kind: 'tv' })}>Create Volt channels…</button>
           ) : (
             <span className="lineup-create">
               <select className="inp" value={create.groupId} onChange={e => setCreate({ ...create, groupId: e.target.value })} aria-label="Group for the new channels">

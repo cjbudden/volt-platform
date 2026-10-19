@@ -14,6 +14,12 @@ import { reconcileAll } from './services/media/reconcile';
 import { reapAllEncoders } from './services/orchestrator/encoderCleanup';
 import { stopAllRadio } from './services/radio/pipeline';
 import { stopAllFeeds } from './services/radio/mp3Gateway';
+import { scaleConfig, runsScheduler, runsWorker } from './scale/config';
+import { runAsLeader, type Leadership } from './scale/leader';
+import { startScale, stopScale, runsSchemaWork, waitForSchema, withBootLock } from './scale/boot';
+import { markBooted, setLeaderCheck } from './scale/health';
+import { startPrewarm } from './scale/prewarm';
+import { startMetrics } from './scale/metrics';
 
 const app = createServer();
 
@@ -104,8 +110,22 @@ async function ensureSchema(): Promise<void> {
 // than logged, because a half-migrated database serving traffic is worse than a
 // process that refuses to start.
 async function boot(): Promise<void> {
-  await migrate();
-  await ensureSchema();
+  // ONLY THE SCHEMA-OWNING ROLES MIGRATE. Every ALTER in ensureSchema takes an
+  // exclusive lock on its table even when there is nothing to add, so thirty
+  // viewer tasks starting together at kick-off would each lock `channels` in
+  // turn, in front of the viewers. api-public and worker wait for the schema
+  // instead (scale/boot.ts). RUN_MIGRATIONS=true|false overrides.
+  if (!runsSchemaWork()) {
+    await waitForSchema();
+    return;
+  }
+  await withBootLock(async () => {
+    await migrate();
+    await ensureSchema();
+    // Default admin roles for every account (auth/defaultRoles.ts). Idempotent.
+    const n = await (await import('./auth/defaultRoles')).ensureDefaultRoles();
+    if (n) console.log(`[access] default roles created or refreshed: ${n}`);
+  });
   // Give existing recordings their broadcast-day container. Additive and
   // idempotent: it only fills container_id where it is NULL, and no row's
   // day_utc or unique index is touched, so the old roll logic keeps working.
@@ -117,32 +137,56 @@ async function boot(): Promise<void> {
 }
 
 const server = app.listen(config.port, () => {
-  console.log(`Volt control plane listening on :${config.port} (${config.env})`);
-  // BOOT CLEANUP: a control-plane (re)start reaps any orphaned encoder/ffmpeg/
-  // packager from a previous run so nothing is left holding the bus ports. Only
-  // meaningful for the local/docker launcher; a no-op with mock/ecs.
+  console.log(`Volt control plane listening on :${config.port} (${config.env}, role ${scaleConfig.role})`);
+});
+
+// BOOT CLEANUP: a control-plane (re)start reaps any orphaned encoder/ffmpeg/
+// packager from a previous run so nothing is left holding the bus ports. Only
+// meaningful for the local/docker launcher; a no-op with mock/ecs.
+//
+// Done by the SCHEDULER LEADER, not by every process at listen: with several
+// processes, a viewer task restarting would otherwise kill every encoder the
+// others had started. In a single process (ROLE=all) the leader is this
+// process, a moment after boot, which is the old behaviour.
+function bootReap(): void {
   if (config.orchestrator.launcher === 'local' || config.orchestrator.launcher === 'docker') {
     try { reapAllEncoders(config.testStream.encoderBin, config.testStream.originDir); }
     catch (e) { console.error('[encoder-cleanup] boot reap failed', e); }
   }
-});
+}
 
 // orchestrator background scheduler (event provisioning, recording roll, retention
 // sweep) and the job worker, both started only once the schema is in place.
-let stopScheduler: () => void = () => {};
+let leadership: Leadership | null = null;
 let worker: { stop: () => Promise<void> } | null = null;
 boot().then(async () => {
-  stopScheduler = startScheduler();
-  // Handlers are registered BEFORE the worker starts polling: the worker only
-  // claims types it can handle, so an unregistered type would sit queued.
-  registerClipHandlers();
-  registerQcHandlers();
-  registerVodEncodeHandlers();
-  registerRemoteIngestHandlers();
-  (await import('./services/workflows/runs')).registerAddonHandlers();
-  await registerFillerHandlers();
-  await (await import('./services/social')).registerSocialHandlers();
-  worker = startWorker();
+  await startScale();
+  markBooted();
+  // THE SCHEDULER RUNS IN ONE PROCESS. Every process whose role allows it
+  // competes for the leader lock; the winner reaps, reconciles and schedules,
+  // the rest stand by and take over if it dies (scale/leader.ts).
+  if (runsScheduler()) {
+    leadership = runAsLeader('scheduler', 1, () => {
+      bootReap();
+      const stopSched = startScheduler();
+      const stopPrewarm = startPrewarm();
+      const stopMetrics = startMetrics();
+      return () => { stopSched(); stopPrewarm(); stopMetrics(); };
+    });
+    setLeaderCheck(() => !!leadership?.isLeader());
+  }
+  if (runsWorker()) {
+    // Handlers are registered BEFORE the worker starts polling: the worker only
+    // claims types it can handle, so an unregistered type would sit queued.
+    registerClipHandlers();
+    registerQcHandlers();
+    registerVodEncodeHandlers();
+    registerRemoteIngestHandlers();
+    (await import('./services/workflows/runs')).registerAddonHandlers();
+    await registerFillerHandlers();
+    await (await import('./services/social')).registerSocialHandlers();
+    worker = startWorker({ concurrency: Number(process.env.WORKER_CONCURRENCY ?? 2) });
+  }
 }).catch((e) => {
   console.error('[boot] schema preparation failed — refusing to serve', e);
   process.exit(1);
@@ -150,8 +194,11 @@ boot().then(async () => {
 
 async function shutdown(signal: string) {
   console.log(`\n${signal} received — shutting down`);
-  stopScheduler();
+  // Leave the load balancer first (readiness goes 503 as the server closes),
+  // then hand leadership on and flush what is buffered in memory.
+  if (leadership) await leadership.stop();
   if (worker) await worker.stop();   // let in-flight jobs unwind; the reaper covers the rest
+  await stopScale();
   stopAllRadio();   // detached ffmpeg trees would otherwise outlive the control plane
   // On-demand MP3 transcodes are our children too, and a listener holding an
   // open socket would keep the server from closing. Ending them lets the

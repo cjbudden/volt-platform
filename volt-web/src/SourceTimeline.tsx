@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type TimelineFeed, type DaypartStrip, type TimelineProgramme, type ChannelWaveform, type ThumbStrip } from './api'
+import { StoryTile, useStoryboard } from './storyboard'
+import { Notice } from './notices'
 
 /* ============================================================================
    THE THREE-LANE TIMELINE
@@ -76,6 +78,8 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
   const [hover, setHover] = useState<number | null>(null)
   const [wave, setWave] = useState<ChannelWaveform | null>(null)
   const [strip, setStrip] = useState<ThumbStrip | null>(null)
+  // HOVER PREVIEWS from the channel's sprite sheets (the scheduler builds them per hour).
+  const { tileAt } = useStoryboard(channelId, win?.from ?? null, win?.to ?? null)
   const waveRef = useRef<HTMLCanvasElement | null>(null)
   const railRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ mode: 'select' | 'pan'; x: number; from: number; to: number } | null>(null)
@@ -354,7 +358,7 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
   const isAudio = feed?.kind === 'audio'
   const isVideo = feed?.kind === 'video'
 
-  if (err) return <div className="err">{err}</div>
+  if (err) return <Notice kind="error" variant="compact" title="Couldn't load the timeline." message={err} actions={win ? [{ label: 'Retry', onClick: () => { load(win) } }] : undefined} />
   if (!feed || !win) return <div className="loading">Loading timeline…</div>
 
   const dur = sel ? sel.toMs - sel.fromMs : 0
@@ -508,6 +512,16 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
             borderLeft: '1px solid rgba(226,232,240,.55)', pointerEvents: 'none',
           }} />
         )}
+        {atCursor != null && isVideo && (() => {
+          const t = tileAt(atCursor)
+          if (!t) return null
+          return (
+            <div style={{ position: 'absolute', bottom: '100%', marginBottom: 6, zIndex: 4, pointerEvents: 'none',
+              left: `clamp(0px, calc(${msToPct(atCursor)}% - 88px), calc(100% - 176px))` }}>
+              <StoryTile tile={t} width={176} label={fmtFull.format(atCursor)} />
+            </div>
+          )
+        })()}
       </div>
 
       {/* ---- readout ---- */}

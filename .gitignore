@@ -64,6 +64,7 @@ volt-app/clips/
 volt-app/filler/
 volt-app/image-store/derived/
 volt-app/image-store/library/
+volt-app/image-store/cache/
 volt-app/.env.bak.*
 *.timestamp-*.mjs
 /outputs

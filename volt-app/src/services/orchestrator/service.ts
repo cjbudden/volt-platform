@@ -3,6 +3,8 @@ import { config } from '../../config';
 import { buildEncoderJobConfig, buildThumbnailerJobConfig, JobConfigCtx } from '../jobConfig';
 import { buildRadioJobConfig } from '../radio/jobConfig';
 import { resolveCaptionsPlan, buildCaptionsJobConfig } from '../captionsPlan';
+import { estimateEncoderLoad, estimateRadioLoad, estimateWhisperLoad } from '../fleet/streamLoad';
+import { assignStream, recordAssignment, type Assignment } from '../fleet/assign';
 import { createClipVod, deriveEventVod, enqueueClipBuild } from '../clips';
 import { convertProgramme } from '../epgVod';
 import { clearGiveUp, clearArmed } from './resume';
@@ -68,6 +70,7 @@ export type StopIntent = 'operator' | 'schedule' | 'fault' | 'internal';
 export type StartIntent = 'operator' | 'resume' | 'schedule';
 
 let xmltvImportBusy = false;
+let epgTopUpBusy = false;
 
 export class Orchestrator {
   constructor(private launcher: TaskLauncher = makeLauncher()) {}
@@ -254,6 +257,9 @@ export class Orchestrator {
     // a start that fails is left where it fell, not relaunched.
     if (intent === 'operator' || intent === 'schedule') {
       await clearArmed(kind, id).catch(() => { /* never block a start on this */ });
+      // THE LOG SAYS A START WAS ASKED FOR, as it does for a stop: the two
+      // bracket the period in which a stopped stream raises no errors.
+      await logCommand(kind, id, 'start.requested', intent).catch(() => {});
     }
     return this.withStartLock(id, () => this.startStreamLocked(kind, id));
   }
@@ -284,7 +290,18 @@ export class Orchestrator {
     // why the check has to be here rather than in whatever notices later.
     assertStartable(ctx.inputs, kind === 'event' ? 'This event' : 'This channel');
     const job = buildEncoderJobConfig(ctx);
-    const res = await this.launcher.launchEncoder(id, job);
+    // SIZE AND PLACE (services/fleet/assign.ts): the load is worked out from
+    // this exact job, and the stream goes on the fullest running server that
+    // can take it without its neighbours noticing. Never blocks the start: on
+    // any failure it launches the way it always did. A vendor engine that does
+    // the whole job runs on the vendor's fleet, so there is nothing to place.
+    const vendorRunsIt = !!(job as any).engine?.id && (job as any).engine.mode !== 'encode_only';
+    const probe = (ctx.inputs as any[]).find((i) => i.role === 'primary')?.probe ?? null;
+    const assignment: Assignment | null = vendorRunsIt ? null : await assignStream({
+      streamId: id, streamClass: kind, accountId: (ctx.owner as any).account_id ?? null,
+      estimate: estimateEncoderLoad(job, probe),
+    }).catch((e) => { console.error('[orchestrator] assign failed; default sizing', e); return null; });
+    const res = await this.launcher.launchEncoder(id, job, assignment?.hints);
     const col = kind === 'channel' ? 'channel_id' : 'event_id';
     const isGpu = ctx.profile.workflow_type === 'transcode' && ctx.profile.codec_backend === 'nvenc';
 
@@ -301,6 +318,7 @@ export class Orchestrator {
       modelSize: (ctx.profile as any).caption_model_size,
     });
     let capRes: { taskArn: string; lifecycle: 'spot' | 'on_demand' } | null = null;
+    let capAssignment: Assignment | null = null;
     if (plan.runsSeparateTask) {
       const capJob = buildCaptionsJobConfig(
         id, plan,
@@ -309,7 +327,11 @@ export class Orchestrator {
         `${ctx.kind}/${id}/subtitles`
       );
       try {
-        capRes = await this.launcher.launchCaptions(id, capJob);
+        capAssignment = await assignStream({
+          streamId: id, streamClass: 'captions', accountId: (ctx.owner as any).account_id ?? null,
+          estimate: estimateWhisperLoad(plan),
+        }).catch(() => null);
+        capRes = await this.launcher.launchCaptions(id, capJob, capAssignment?.hints);
       } catch (e) {
         // captions are best-effort: a failed add-on must not down the stream
         console.error('captions task launch failed for', id, e);
@@ -389,6 +411,10 @@ export class Orchestrator {
       }
       throw e;
     }
+    // Record the size and the server choice on the instance rows, so the next
+    // placement sees this load at once (before telemetry does). Best effort.
+    if (assignment) await recordAssignment(res.taskArn, assignment).catch((e) => console.error('[orchestrator] could not record placement', e));
+    if (capRes && capAssignment) await recordAssignment(capRes.taskArn, capAssignment).catch(() => {});
     // WORKFLOW HOOK (WORKFLOWS.md). After the bookkeeping committed, so an add-on
     // never hears about a start that was rolled back. Fire-and-forget.
     fireHook('stream.started', kind, id, { taskArn: res.taskArn, engine: (job as any).engine?.id ?? 'builtin' });
@@ -482,7 +508,11 @@ export class Orchestrator {
       channelId: id, channelName: ch?.name ?? null,
       protocol: src.protocol, url: src.ingest_url, radioConfig,
     });
-    const res = await this.launcher.launchRadio(id, job);
+    const acct = await one<{ account_id: string }>(`SELECT g.account_id FROM channels c JOIN groups g ON g.id=c.group_id WHERE c.id=$1`, [id]).catch(() => null);
+    const radioAssignment = await assignStream({
+      streamId: id, streamClass: 'radio', accountId: acct?.account_id ?? null, estimate: estimateRadioLoad(job),
+    }).catch(() => null);
+    const res = await this.launcher.launchRadio(id, job, radioAssignment?.hints);
 
     try {
       await tx(async (c) => {
@@ -541,6 +571,7 @@ export class Orchestrator {
       catch (stopErr) { console.error('[orchestrator] could not stop orphan', res.taskArn, stopErr); }
       throw e;
     }
+    if (radioAssignment) await recordAssignment(res.taskArn, radioAssignment).catch(() => {});
     return { taskArn: res.taskArn };
   }
 
@@ -580,6 +611,9 @@ export class Orchestrator {
           WHERE id = $1`,
         [id, `${intent}: ${origin}`.slice(0, 200)]
       ).catch((e) => console.error('[orchestrator] could not record the stop intent for', kind, id, e));
+      // The log says a stop was asked for, and by whom. From here until the
+      // next start the teardown's own noise is not an error (pipelineHealth.ts).
+      await logCommand(kind, id, 'stop.requested', `${intent}: ${origin}`).catch(() => {});
     }
 
     // ---- THE CRASH-LOOP BRAKE -------------------------------------------
@@ -808,6 +842,14 @@ export class Orchestrator {
       import('../xmltvImport').then((m) => m.runDueImports())
         .catch((e) => console.error('[orchestrator] xmltv import failed', e))
         .finally(() => { xmltvImportBusy = false; });
+    }
+    // 3c2) EPG repeats: keep open-ended repeats filled HORIZON_DAYS ahead.
+    //      Idempotent (source_ref) and fired, not awaited, like the import.
+    if (!epgTopUpBusy) {
+      epgTopUpBusy = true;
+      import('../epgPlace').then((m) => m.topUpSeries())
+        .catch((e) => console.error('[orchestrator] epg repeat top-up failed', e))
+        .finally(() => { epgTopUpBusy = false; });
     }
     // 3d) social view counts, hourly per publication, a small batch per tick.
     try {
@@ -1386,4 +1428,13 @@ export class Orchestrator {
 
     return result.deleted + legacyDone;
   }
+}
+
+
+/** One row in the stream's event log for an operator or scheduled command. */
+async function logCommand(kind: 'channel' | 'event', id: string, type: 'start.requested' | 'stop.requested', by: string): Promise<void> {
+  const who = String(by || '').replace(/^(operator|schedule):\s*/, '');
+  await query(
+    `INSERT INTO stream_events(${kind === 'channel' ? 'channel_id' : 'event_id'}, type, detail, ts) VALUES ($1, $2, $3::jsonb, now())`,
+    [id, type, JSON.stringify({ message: `${type === 'stop.requested' ? 'Stop' : 'Start'} command issued${who ? ` (${who})` : ''}`, by: String(by || '').slice(0, 200) })]);
 }

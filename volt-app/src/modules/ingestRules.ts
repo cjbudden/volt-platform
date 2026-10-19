@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound } from '../util/http';
+import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { actor, writeAudit } from '../services/audit';
 import { BASELINE, INGEST_KEYS } from '../services/ingest/rules';
 import { preview, completeMetadata, resolveDuplicate } from '../services/ingest/pipeline';
@@ -21,7 +22,7 @@ import { providerAccounts, accessTokenFor, authorizeUrl, linkOAuth, OAUTH, type 
 import { actorId } from '../util/actor';
 import { config } from '../config';
 import { createHmac } from 'node:crypto';
-import { createTransfer, applyTransferEvent, listTransfers } from '../services/ingest/transfers';
+import { createTransfer, applyTransferEvent } from '../services/ingest/transfers';
 
 export const ingestRouter = Router();
 
@@ -201,11 +202,39 @@ ingestRouter.delete('/webhooks/:id', asyncHandler(async (req, res) => {
 // ---------------------------------------------------------------------------
 //  Assets the pipeline is holding: the metadata gate and duplicates.
 // ---------------------------------------------------------------------------
+// The list standard (util/listQuery.ts). Names are the response's; key is the
+// column the cursor reads before the row is reshaped.
+const heldList = defineList({
+  path: '/api/ingest/held',
+  fields: {
+    id: { sql: 'v.id', type: 'uuid' },
+    title: { sql: 'v.title', type: 'string' },
+    originalFilename: { sql: 'v.original_filename', type: 'string', key: 'original_filename' },
+    bytes: { sql: 'v.source_bytes', type: 'number', key: 'source_bytes' },
+    mime: { sql: 'v.mime', type: 'string' },
+    schemaId: { sql: 'v.schema_id', type: 'uuid', key: 'schema_id' },
+    status: { sql: "v.ingest->>'status'", type: 'enum', values: ['awaiting_metadata', 'duplicate', 'rejected'], key: 'held_status' },
+    createdAt: { sql: 'v.created_at', type: 'timestamp', key: 'created_at', notNull: true },
+  },
+  search: ['title', 'originalFilename'],
+  defaultSort: '-createdAt',
+  defaultLimit: 200,
+  maxLimit: 200,
+});
+
 ingestRouter.get('/held', asyncHandler(async (req, res) => {
-  const rows = await query<any>(
-    `SELECT id, title, original_filename, source_bytes, mime, schema_id, awaiting_metadata, ingest, created_at
-       FROM vod_assets WHERE account_id = $1 AND ingest->>'status' IN ('awaiting_metadata', 'duplicate', 'rejected')
-      ORDER BY created_at DESC LIMIT 200`, [accountId(req)]);
+  const base: unknown[] = [accountId(req)];
+  const params = [...base];
+  const pl = parseList(heldList, req.query, params);
+  const from = `FROM vod_assets v WHERE v.account_id = $1 AND v.ingest->>'status' IN ('awaiting_metadata', 'duplicate', 'rejected')${whereSql(pl)}`;
+  const fetched = await query<any>(
+    `SELECT v.id, v.title, v.original_filename, v.source_bytes, v.mime, v.schema_id, v.awaiting_metadata, v.ingest, v.created_at,
+            v.ingest->>'status' AS held_status
+       ${from} ${pageSql(pl)}`, params);
+  const cParams = [...base];
+  const cWhere = pl.count ? whereSql(parseList(heldList, { ...req.query, cursor: undefined, offset: undefined }, cParams)) : '';
+  const total = pl.count ? (await one<any>(`SELECT count(*)::int AS n FROM vod_assets v WHERE v.account_id = $1 AND v.ingest->>'status' IN ('awaiting_metadata', 'duplicate', 'rejected')${cWhere}`, cParams))?.n : undefined;
+  const rows = finishPage(req, res, pl, fetched, total);
   res.json(rows.map((r: any) => ({ id: r.id, title: r.title, originalFilename: r.original_filename, bytes: r.source_bytes != null ? Number(r.source_bytes) : null, mime: r.mime,
     schemaId: r.schema_id, status: r.ingest?.status, awaitingMetadata: r.awaiting_metadata, duplicate: r.ingest?.duplicate ?? null, rules: r.ingest?.rules?.matched ?? [], createdAt: r.created_at })));
 }));
@@ -335,8 +364,35 @@ ingestRouter.delete('/providers/:id', asyncHandler(async (req, res) => {
 // ---------------------------------------------------------------------------
 //  Accelerated transfers: Aspera, MASV, Signiant, S3 acceleration.
 // ---------------------------------------------------------------------------
+// The list standard (util/listQuery.ts). Same rows as listTransfers(), which
+// the rest of the pipeline keeps using; this one searches, filters and pages.
+const transferList = defineList({
+  path: '/api/ingest/transfers',
+  fields: {
+    id: { sql: 't.id', type: 'uuid' },
+    provider: { sql: 't.provider', type: 'enum', values: ['aspera', 'masv', 'signiant', 's3accel'] },
+    state: { sql: 't.state', type: 'string', doc: 'created, running, landed, failed...' },
+    externalId: { sql: 't.external_id', type: 'string', key: 'external_id' },
+    error: { sql: 't.error', type: 'string', sort: false },
+    createdAt: { sql: 't.created_at', type: 'timestamp', key: 'created_at', notNull: true },
+    updatedAt: { sql: 't.updated_at', type: 'timestamp', key: 'updated_at' },
+  },
+  search: ['externalId', 'error', "t.files::text"],
+  defaultSort: '-createdAt',
+  defaultLimit: 100,
+  maxLimit: 100,
+});
+
 ingestRouter.get('/transfers', asyncHandler(async (req, res) => {
-  res.json((await listTransfers(accountId(req))).map(viewTransfer));
+  const base: unknown[] = [accountId(req)];
+  const params = [...base];
+  const pl = parseList(transferList, req.query, params);
+  const from = `FROM ingest_transfers t WHERE t.account_id = $1${whereSql(pl)}`;
+  const rows = await query<any>(`SELECT t.* ${from} ${pageSql(pl)}`, params);
+  const cParams = [...base];
+  const cWhere = pl.count ? whereSql(parseList(transferList, { ...req.query, cursor: undefined, offset: undefined }, cParams)) : '';
+  const total = pl.count ? (await one<any>(`SELECT count(*)::int AS n FROM ingest_transfers t WHERE t.account_id = $1${cWhere}`, cParams))?.n : undefined;
+  res.json(finishPage(req, res, pl, rows, total).map(viewTransfer));
 }));
 ingestRouter.post('/transfers', asyncHandler(async (req, res) => {
   const b = z.object({

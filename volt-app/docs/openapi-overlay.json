@@ -1,0 +1,298 @@
+{
+  "_comment": "Hand-written wording for the API reference, layered over the generated spec (scripts/openapi.mjs). Key: \"METHOD /path\" exactly as in api-routes.json. Fields: summary, description (shown above the generated text), tag. A key for a route that no longer exists fails npm run docs:openapi -- --check.",
+  "GET /api/epg": {
+    "summary": "List programmes",
+    "description": "The programmes of one guide in a time window. Pass `channelId` or `eventId`, plus `from` and `to` (ISO 8601)."
+  },
+  "POST /api/epg": {
+    "summary": "Add a programme"
+  },
+  "POST /api/epg/:id/convert": {
+    "summary": "Convert an aired programme to VOD",
+    "description": "Runs the same conversion the scheduler runs after a programme airs. Answers 409 if it is already converted or in progress."
+  },
+  "POST /api/epg/copy-day": {
+    "summary": "Copy a day's schedule to other days"
+  },
+  "POST /api/epg/clear-day": {
+    "summary": "Clear a day's schedule"
+  },
+  "GET /api/epg/conflicts": {
+    "summary": "List overlapping programmes"
+  },
+  "GET /api/docs/session": {
+    "summary": "Open the documentation",
+    "description": "Issues a short-lived pass to this documentation site for the signed-in user. Used by the Documentation button in Volt."
+  },
+  "tags": {
+    "_comment": "Usage statement per API service (tag): what it is for, key tasks, credential. Required for every service; npm run docs:openapi -- --check fails without one. hidden: true leaves the service out of the customer reference.",
+    "Access": {
+      "displayName": "Access check",
+      "description": "A light check that tells your app whether a viewer may play an asset, without issuing a playback token.\n\n**Use it to:**\n- Grey out or badge items on catalogue and browse screens with `POST /api/public/access/check`\n- Decide whether to show a sign-in or purchase prompt before the viewer presses play\n\n**Credential:** publishable key.\n\n**Good to know:** this endpoint answers yes or no only. To actually start playback, call `POST /api/public/availability`, which returns the playback token. `POST /api/access/check` is an older alias of the same check."
+    },
+    "Access Roles": {
+      "displayName": "Access roles",
+      "description": "Access roles are named sets of access levels per feature (view, operate, manage) that your admin users inherit.\n\n**Use it to:**\n- List default and custom roles with `GET /api/access-roles`\n- Build a role editor from the feature list in `GET /api/access-roles/catalogue`\n- Create, edit or delete custom roles with `POST /api/access-roles` and `PATCH /api/access-roles/{id}`\n- Start from a default role with `POST /api/access-roles/{id}/copy`\n\n**Credential:** admin session (Bearer) or account secret key, with `access: view` (or `users: view`) to read and `access: manage` to change.\n\n**Good to know:** default roles cannot be edited, copy them instead. You can only grant levels you hold yourself, and members get the new access on their next request."
+    },
+    "Account Settings": {
+      "displayName": "Account settings",
+      "description": "Account settings hold your account's own branding: a logo and a primary and secondary colour shown on outward-facing pages such as share pages.\n\n**Use it to:**\n- Read the current branding with `GET /api/account-settings`\n- Change the logo or colours with `PATCH /api/account-settings`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `settings: manage` is needed to change.\n\n**Good to know:** the logo must be an image-library path or an https address. Every change is recorded in the audit log."
+    },
+    "Addons": {
+      "displayName": "Add-ons",
+      "description": "Add-ons are the external services you connect to Volt workflows, and the triggers that decide when Volt sends work to them.\n\n**Use it to:**\n- Register, update or remove an add-on with `POST /api/addons` and `PATCH /api/addons/{id}`\n- Rotate an add-on's secret with `POST /api/addons/{id}/rotate-secret` and check it with `POST /api/addons/{id}/test`\n- Attach add-ons to workflow events with `GET /api/addons/triggers` and `POST /api/addons/triggers`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `settings: manage` is needed to change.\n\n**Good to know:** secrets are never returned once set. Follow the resulting runs in the Workflows service."
+    },
+    "Analytics": {
+      "displayName": "Analytics",
+      "description": "Analytics collects playback beacons from your players and reports audience, usage and per-asset viewing for your account.\n\n**Use it to:**\n- Send viewing beacons from a player with `POST /api/public/analytics/beacon`\n- Read reports with `GET /api/analytics/overview`, `GET /api/analytics/realtime`, `GET /api/analytics/audience` and `GET /api/analytics/asset`\n- See billable usage with `GET /api/analytics/usage`\n- Set how long analytics data is kept with `PUT /api/analytics/retention`\n\n**Credential:** playback token for beacons. Reports use an admin session (Bearer) or account secret key, with `analytics: view` to read and `analytics: manage` to change retention.\n\n**Good to know:** beacon values are bounded, so send what the player measured rather than accumulated totals."
+    },
+    "Apps": {
+      "displayName": "Apps and keys",
+      "description": "Apps are the players, websites and mobile apps that publish your content, and each one carries the publishable keys used in public API calls.\n\n**Use it to:**\n- Register an app and receive its publishable key (`pk_…`) with `POST /api/apps`\n- List and edit apps with `GET /api/apps` and `PUT /api/apps/{id}`\n- Issue or revoke keys with `POST /api/apps/{id}/keys` and `DELETE /api/apps/keys/{keyId}`\n- Issue an account secret key (`sk_live_…`) for your servers with `POST /api/apps/secret-keys`\n\n**Credential:** admin session (Bearer) or account secret key, with `apps: view` to read and `apps: manage` to change. Secret keys also need the admin tier.\n\n**Good to know:** keys are shown once, at creation. Never put a secret key in an app or web page."
+    },
+    "Audit": {
+      "displayName": "Audit log",
+      "description": "The audit log records who did what in your account, including deletes, so you can review and export changes.\n\n**Use it to:**\n- Search the log by action, record type, person and date range with `GET /api/audit`\n- Fill filter menus from `GET /api/audit/facets`\n- Export matching rows as CSV with `GET /api/audit/export.csv`\n\n**Credential:** admin session (Bearer) or account secret key, any signed-in admin user.\n\n**Good to know:** the CSV export is capped at 50,000 rows, so narrow the date range for larger periods."
+    },
+    "Auth": {
+      "displayName": "Sign-in",
+      "description": "Auth signs people in to Volt: your admin users to the console and API, and your viewers to your apps, including two-step sign-in.\n\n**Use it to:**\n- Sign admin users in and out with `POST /api/auth/login`, `POST /api/auth/refresh` and `POST /api/auth/logout`, and read their access with `GET /api/auth/me`\n- Sign viewers in with `POST /api/public/auth/login` or `POST /api/public/auth/register`, and reset passwords with `POST /api/public/auth/password-reset`\n- Complete two-step sign-in with the `mfa/challenge/send` and `mfa/challenge/verify` requests\n- Use your own identity provider through `POST /api/public/auth/token-exchange`\n\n**Credential:** none to sign in (publishable key for viewers), then admin session or viewer session. Token exchange needs the account secret key.\n\n**Good to know:** call token exchange from your server only, never from an app."
+    },
+    "Availability": {
+      "displayName": "Availability (play gate)",
+      "description": "The play gate decides whether an asset or stream may be played here and now, explains why not, and issues the short-lived playback token.\n\n**Use it to:**\n- Check anonymous playback with `GET /api/public/availability`\n- Check playback for a signed-in viewer, using their groups and entitlements, with `POST /api/public/availability`\n- Pass the returned playback token to the player and to analytics beacons\n\n**Credential:** publishable key, with a viewer session optional.\n\n**Good to know:** the anonymous GET is cached at the edge per app, asset and country, the signed-in POST is never cached. `/api/availability` is an older alias."
+    },
+    "Channels": {
+      "displayName": "Channels",
+      "description": "Channels are your 24/7 linear streams: their sources, output, on-air state, redundancy and timeline.\n\n**Use it to:**\n- Create and configure channels with `POST /api/channels` and `PATCH /api/channels/{id}`\n- Start, stop and put a channel on air with `POST /api/channels/{id}/start`, `.../stop` and `.../air`\n- Set filler, auto connect and run failover or test-stream checks with `POST /api/channels/{id}/filler`, `.../auto-connect` and `.../failover-test`\n- Read coverage, history, timeline, dayparts and thumbnails with `GET /api/channels/{id}/timeline` and related requests\n\n**Credential:** admin session (Bearer) or account secret key, with `channels: view` to read, `channels: operate` to start, stop or air, and `channels: manage` to change. Radio stations need the same `radio` level.\n\n**Good to know:** creating a channel counts against your group's channel limit. Check `GET /api/channels/{id}/delete-impact` before deleting."
+    },
+    "Daypart Presets": {
+      "displayName": "Daypart presets",
+      "description": "Daypart presets are ready-made ways of dividing a broadcast day into labelled parts (such as breakfast or prime time) for a channel's timeline.\n\n**Use it to:**\n- List the available presets with `GET /api/daypart-presets`\n- Apply a preset or your own dayparts to a channel with `PUT /api/channels/{id}/dayparts`\n- Read a channel's current dayparts with `GET /api/channels/{id}/dayparts`\n\n**Credential:** admin session (Bearer) or account secret key, with `channels: view`. Applying dayparts to a channel needs `channels: manage`.\n\n**Good to know:** dayparts label the channel timeline only. They do not change the schedule or what goes to air."
+    },
+    "Discovery": {
+      "displayName": "Discovery and health",
+      "description": "The starting point of the API: a service document that links to every collection, plus reference lists and health checks.\n\n**Use it to:**\n- Start at `GET /api` and follow links instead of hard-coding paths (send `Accept: application/ld+json` for the hypermedia form)\n- Read the vocabulary with `GET /api/context.jsonld` and `GET /api/doc`\n- Fill pickers from `GET /api/caption-languages` and `GET /api/ingest-protocols`\n- Check the service with `GET /health` and `GET /health/ready`\n\n**Credential:** none."
+    },
+    "Docs": {
+      "displayName": "Documentation access",
+      "description": "Opens this documentation site for a signed-in admin user by issuing a short-lived pass.\n\n**Use it to:**\n- Get a documentation link for the current user with `GET /api/docs/session`\n- Back a Documentation button in your own admin tools, sending the user to the returned URL before it expires\n\n**Credential:** admin session (Bearer), any signed-in admin user. Account secret keys are refused because documentation access is for people."
+    },
+    "EPG": {
+      "displayName": "EPG (programme guide)",
+      "description": "The EPG holds the programme schedule for each channel and event, including geo rules, slot replacement and automatic VOD after airing.\n\n**Use it to:**\n- Read a guide window with `GET /api/epg` (pass `channelId` or `eventId`, plus `from` and `to`) and now and next with `GET /api/epg/now-next`\n- Add, edit and repeat programmes with `POST /api/epg`, `PATCH /api/epg/{id}`, `POST /api/epg/series` and `POST /api/epg/copy-day`\n- Import XMLTV guides with `POST /api/epg/import/sources` and export them with `GET /api/epg/xmltv` or partner feeds\n- Check overlaps with `GET /api/epg/conflicts` and convert an aired programme with `POST /api/epg/{id}/convert`\n\n**Credential:** admin session (Bearer) or account secret key, with `epg: view` to read, `epg: operate` to run imports and `epg: manage` to change.\n\n**Good to know:** overlaps are reported, not blocked, so check conflicts after bulk changes."
+    },
+    "Encode Profiles": {
+      "displayName": "Encoding profiles and ladders",
+      "description": "Encoding profiles are the individual renditions Volt can produce, and ladders group them into the set a source is encoded to.\n\n**Use it to:**\n- Create and edit renditions with `POST /api/encode-profiles` and `PATCH /api/encode-profiles/{id}`\n- Build ladders and set their members in order with `POST /api/encode-profiles/ladders` and `PUT /api/encode-profiles/ladders/{id}/members`\n- Preview what a given source would receive with `GET /api/encode-profiles/ladders/{id}/preview`\n- See the live profiles with `GET /api/encode-profiles/live-profiles`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `settings: manage` is needed to change.\n\n**Good to know:** a ladder that follows a live output profile shows that profile's rungs rather than its own."
+    },
+    "Engines": {
+      "displayName": "Engines",
+      "description": "Engines are the encoding and processing engines available to your account, with what each one can do.\n\n**Use it to:**\n- List engines and their capabilities with `GET /api/engines` and `GET /api/engines/{id}`\n- Check a profile or job against an engine before using it with `POST /api/engines/{id}/validate`\n- Choose the engine for an output profile with `PUT /api/engines/profiles/{profileId}`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `settings: manage` is needed to validate or change."
+    },
+    "Events": {
+      "displayName": "Events",
+      "description": "Events are scheduled, time-bounded live streams such as a match or a concert, provisioned automatically for their scheduled window.\n\n**Use it to:**\n- Schedule and edit events with `POST /api/events` and `PATCH /api/events/{id}`\n- Start or stop an event by hand with `POST /api/events/{id}/start` and `.../stop`\n- Set filler and auto connect with `POST /api/events/{id}/filler` and `.../auto-connect`\n- Review what happened with `GET /api/events/{id}/history`\n\n**Credential:** admin session (Bearer) or account secret key, with `events: view` to read, `events: operate` to start or stop and `events: manage` to change.\n\n**Good to know:** auto connect only decides whether a running event resumes after a restart. The schedule still decides when it runs."
+    },
+    "Files": {
+      "displayName": "Image library",
+      "description": "The image library stores your account's images (posters, logos, artwork) and reads their embedded metadata so you can find and reuse them.\n\n**Use it to:**\n- Upload, rename, tag and delete images with `POST /api/files`, `PATCH /api/files/{id}` and `DELETE /api/files/{id}`\n- Browse folders with `GET /api/files/folders` and create them with `POST /api/files/folders`\n- Search names, tags, places and descriptions with `GET /api/files/search`\n- Re-read EXIF, IPTC and XMP metadata with `POST /api/files/{id}/metadata/refresh`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `media: manage` is needed to change.\n\n**Good to know:** uploading to a path that already exists answers 409. Render sized versions through the Images service."
+    },
+    "Filler Assets": {
+      "displayName": "Slates and loops",
+      "description": "Slates (still images) and loops (short videos) are the filler a channel or event shows when its input is lost.\n\n**Use it to:**\n- List filler assets with `GET /api/filler-assets`\n- Register an asset and get an upload address with `POST /api/filler-assets`\n- Mark it ready or rename it with `PATCH /api/filler-assets/{id}`, and remove it with `DELETE /api/filler-assets/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read and `media: manage` to change.\n\n**Good to know:** upload the bytes to the returned address, then update the asset. Point a channel at it with `POST /api/channels/{id}/filler`."
+    },
+    "Fleet": {
+      "displayName": "Fleet and usage",
+      "description": "Fleet shows the servers carrying your live work right now and the billable streaming time you have used.\n\n**Use it to:**\n- See running hosts, their streams and latest load with `GET /api/fleet/hosts` and `GET /api/fleet/hosts/{id}/samples`\n- Read usage for today, this month and per period with `GET /api/fleet/usage`\n- Break usage down for one stream with `GET /api/fleet/usage/stream/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `fleet: view`.\n\n**Good to know:** usage is measured in time. Any cost figure is indicative only."
+    },
+    "Groups": {
+      "displayName": "Channel groups",
+      "description": "Channel groups tie channels, stations and events to an output profile and give each group its share of your plan's channel limits.\n\n**Use it to:**\n- List groups with `GET /api/groups`\n- Create, rename or remove a group with `POST /api/groups`, `PATCH /api/groups/{id}` and `DELETE /api/groups/{id}`\n- See how much of its allocation a group is using with `GET /api/groups/{id}/usage`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `settings: manage` is needed to change.\n\n**Good to know:** new items start in the default group, which cannot be removed. A group can only be removed when nothing is in it."
+    },
+    "Image delivery": {
+      "displayName": "Image delivery",
+      "description": "Image delivery serves resized, cropped and converted versions of your library images from signed URLs, cached at the edge.\n\n**Use it to:**\n- Use URLs from `POST /api/images/sign` (or built with your signing key) as `GET /img/*` in pages, players and apps\n- Check an image exists, without downloading it, with `HEAD /img/*`\n\n**Credential:** none, the signature in the URL is the authorisation.\n\n**Good to know:** responses are immutable, so change the options or path to get a new version rather than expecting a refresh."
+    },
+    "Images": {
+      "displayName": "Images (signed URLs)",
+      "description": "The image service resizes, crops and converts library images on the fly, and this service signs the URLs that request those renders.\n\n**Use it to:**\n- Turn render options (size, fit, crop, focus, format) into a signed URL with `POST /api/images/sign`\n- Get your account's signing key to build URLs locally with `GET /api/images/signing-key`\n- Read limits, formats and the base URL with `GET /api/images/config`, and counters with `GET /api/images/stats`\n\n**Credential:** admin session (Bearer) or account secret key, any signed-in admin user.\n\n**Good to know:** keep the signing key on your servers. It only signs your own account's images."
+    },
+    "Ingest": {
+      "displayName": "Ingest rules and transfers",
+      "description": "Ingest decides what happens to incoming media files: naming, folder structure, duplicates, required metadata and how the bytes are transferred.\n\n**Use it to:**\n- Set the rules ladder with `GET /api/ingest/rules` and `POST /api/ingest/rules`, and see the defaults with `GET /api/ingest/baseline`\n- Ask what would happen to a file before it moves with `POST /api/ingest/preview`\n- Pull files from linked Dropbox, OneDrive or Google Drive accounts with `POST /api/ingest/providers` and `POST /api/ingest/remote`\n- Release held assets with `GET /api/ingest/held` and `POST /api/ingest/assets/{id}/metadata`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: manage` to change.\n\n**Good to know:** remote ingest answers 202 with a job id, so follow it in the Jobs service."
+    },
+    "Jobs": {
+      "displayName": "Jobs",
+      "description": "Jobs track long-running work in your account, such as conversions and remote ingest, with progress and a reason when something fails.\n\n**Use it to:**\n- List and filter jobs with `GET /api/jobs`\n- Follow one job's progress and result with `GET /api/jobs/{id}`\n- Retry a failed job or cancel one in progress with `POST /api/jobs/{id}/retry` and `POST /api/jobs/{id}/cancel`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read and `media: operate` to retry or cancel.\n\n**Good to know:** long operations return a job id instead of blocking. Poll the job rather than repeating the original request."
+    },
+    "Library": {
+      "displayName": "Library originals",
+      "description": "Serves the original bytes of an image in your account's library by its path.\n\n**Use it to:**\n- Fetch an original image with `GET /library/*`\n- Use it where you need the untouched file rather than a rendered size, for example to download a master\n\n**Credential:** none.\n\n**Good to know:** for display, prefer signed `/img/*` URLs, which are resized and cached at the edge."
+    },
+    "Live": {
+      "displayName": "Live playback",
+      "description": "Live playback is the public address viewers' players use to watch a live channel or listen to a station.\n\n**Use it to:**\n- Play a channel's HLS or DASH output from `GET /live/{id}/master.m3u8` or `GET /live/{id}/manifest.mpd`\n- Play a radio station's audio from `GET /live/{id}/stream.mp3`\n\n**Credential:** none, or a share or playback token where the content requires one.\n\n**Good to know:** the address only serves when the channel is on air and producing valid output. Expect 404 when off air and 503 when there is no valid content."
+    },
+    "Me": {
+      "displayName": "My account (viewer)",
+      "description": "Me lets a signed-in viewer manage their own account in your app: profile, sign-in security, purchases and devices.\n\n**Use it to:**\n- Read and update the profile with `GET /api/public/me` and `PATCH /api/public/me`\n- Change email, password or mobile number, and turn on two-step sign-in with the `me/email`, `me/password`, `me/phone` and `me/mfa` requests\n- Show entitlements and purchases with `GET /api/public/me/entitlements` and `GET /api/public/me/purchases`\n- List devices and sign out everywhere with `GET /api/public/me/sessions` and `POST /api/public/me/sign-out-everywhere`\n\n**Credential:** viewer session (Bearer).\n\n**Good to know:** groups and entitlements cannot be changed here. `DELETE /api/public/me` deletes the viewer's account."
+    },
+    "Metadata Schemas": {
+      "displayName": "Metadata schemas",
+      "description": "Metadata schemas are named, typed sets of custom fields that you assign to VOD assets, channels and events.\n\n**Use it to:**\n- Create and edit schemas with `POST /api/metadata-schemas` and `PATCH /api/metadata-schemas/{id}`\n- Use field types string, text, number, boolean, date, enum, url and tags\n- See the merged fields of a schema that extends another with `GET /api/metadata-schemas/{id}/effective-fields`\n- Review changes with `GET /api/metadata-schemas/{id}/history`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `settings: manage` is needed to change.\n\n**Good to know:** values are validated against the assigned schema when you save a record."
+    },
+    "Monitoring": {
+      "displayName": "Monitoring",
+      "description": "Monitoring gives one view of everything running in your account and a ranked list of what needs attention.\n\n**Use it to:**\n- See every running channel, station and event with its health with `GET /api/monitoring/live`\n- Get the ranked list of problems (health, failed jobs, QC, stale publications, capacity) with `GET /api/monitoring/overview`\n- Read the recent activity feed with `GET /api/monitoring/feed`\n\n**Credential:** admin session (Bearer) or account secret key, with `monitoring: view`.\n\n**Good to know:** each view is one request for the whole account, so poll these instead of fetching each channel."
+    },
+    "Notification Templates": {
+      "displayName": "Notification templates",
+      "description": "Notification templates are reusable message layouts for the notifications Volt sends to your team.\n\n**Use it to:**\n- List templates with `GET /api/notification-templates`\n- Create, edit and delete templates with `POST /api/notification-templates`, `PATCH /api/notification-templates/{id}` and `DELETE /api/notification-templates/{id}`\n- Use a template when sending through the Notifications service\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: manage` to change.\n\n**Good to know:** deleting a template does not change notifications already sent with it."
+    },
+    "Notifications": {
+      "displayName": "Notifications",
+      "description": "Notifications send messages to your team by email, in-app inbox or push, and keep a record of each delivery.\n\n**Use it to:**\n- Send a notification, optionally from a template, with `POST /api/notifications`, and review sends with `GET /api/notifications`\n- Retry failed deliveries with `POST /api/notifications/deliveries/{id}/retry`\n- Register push devices (iOS, Android, web) with `POST /api/notifications/devices`\n- Read and clear the in-app inbox with `GET /api/notifications/inbox` and `POST /api/notifications/inbox/read-all`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, the operator tier or above is needed to send or change.\n\n**Good to know:** use `POST /api/notifications/test` to check a channel before relying on it."
+    },
+    "Output Profiles": {
+      "displayName": "Output profiles",
+      "description": "Output profiles define how a live stream is delivered: rendition ladder, HLS and/or DASH packaging, transcode or package-only workflow, DVR window and retention.\n\n**Use it to:**\n- List profiles with `GET /api/output-profiles`\n- Create a profile with `POST /api/output-profiles`\n- Delete a profile with `DELETE /api/output-profiles/{id}`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `settings: manage` is needed to change.\n\n**Good to know:** a channel group uses one output profile, so its channels share these settings."
+    },
+    "Payments": {
+      "displayName": "Payments and entitlements",
+      "description": "Payments connects your payment providers to Volt so that verified purchases grant viewers access to premium content.\n\n**Use it to:**\n- Verify an app store receipt or provider token from your app with `POST /api/public/payments/verify`\n- Connect providers and map products with `PUT /api/payments/providers/{provider}` and `PATCH /api/payments/products/{id}`\n- Look up a viewer's purchases with `GET /api/payments/viewers/{externalId}`\n- Grant access by hand or record an outside payment with `POST /api/payments/grants` and `POST /api/payments/manual`\n\n**Credential:** publishable key plus viewer session for verify. Management uses an admin session (Bearer) or account secret key, with `payments: view` to read and `payments: manage` to change.\n\n**Good to know:** nothing is granted on an unverified event. `/api/payments/verify` is an older alias."
+    },
+    "Plan": {
+      "displayName": "Plan and limits",
+      "description": "The plan sets how many channels and stations your account may have and how many may run at once.\n\n**Use it to:**\n- Read the plan, current use and how it is shared between groups with `GET /api/plan`\n- Change limits, where permitted, with `PATCH /api/plan`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read. Changes are limited to the people the response says may make them.\n\n**Good to know:** the plan cannot go below what is in use or what groups have been given, so lower a group's allocation first."
+    },
+    "Player": {
+      "displayName": "Player",
+      "description": "The player API is what the embeddable Volt player (or your own) calls from your website or app to start playback and show what is on.\n\n**Use it to:**\n- Start playback in one request with `POST /api/public/player/session`\n- Show the current track or programme with `POST /api/public/player/now-playing` and the guide with `GET /api/public/player/epg`\n- Get an event's phase (pre, live, ended, replay, cancelled) with `GET /api/public/player/event`\n- Send batched player telemetry with `POST /api/public/player/events`\n\n**Credential:** publishable key or player token. Calls are also checked against the app's allowed origins.\n\n**Good to know:** telemetry is capped at 50 events per call. The `/api/player/*` paths are older aliases."
+    },
+    "Player Config": {
+      "displayName": "Player configuration",
+      "description": "Player configuration controls how the embeddable Volt player looks and behaves for each channel.\n\n**Use it to:**\n- Read a channel's player settings with `GET /api/player-config/{channelId}`\n- Save new settings with `PUT /api/player-config/{channelId}`\n- Check what the embedded player is reporting with `GET /api/player-config/{channelId}/report`\n\n**Credential:** admin session (Bearer) or account secret key, with `apps: view` to read and `apps: manage` to change.\n\n**Good to know:** players pick up these settings through `POST /api/public/player/session`, so there is nothing to change in the embed code."
+    },
+    "Publications": {
+      "displayName": "Publications",
+      "description": "Publications record where each VOD asset has been published and the view counts reported back.\n\n**Use it to:**\n- List publications and their view counts with `GET /api/publications`\n- Publish an asset to your portal with `POST /api/publications/vod/{id}/publish`\n- Refresh view counts from the platforms with `POST /api/publications/sync-views`\n\n**Credential:** admin session (Bearer) or account secret key, with `vod: view` to read, `vod: operate` to publish and `vod: manage` to sync.\n\n**Good to know:** for social platforms, use the Social service to publish."
+    },
+    "Publish Targets": {
+      "displayName": "Publish targets",
+      "description": "Publish targets are the destinations your VOD assets can be sent to, such as linked YouTube, Facebook, X, TikTok or Dailymotion accounts and your portal.\n\n**Use it to:**\n- List configured targets with `GET /api/publish-targets`\n- Add a target with `POST /api/publish-targets`\n- Rename, change or remove a target with `PATCH /api/publish-targets/{id}` and `DELETE /api/publish-targets/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: manage` to change.\n\n**Good to know:** to link a social account through the platform's own sign-in, use `POST /api/social/connect/{platform}`."
+    },
+    "Publishing Rules": {
+      "displayName": "Publishing rules",
+      "description": "Publishing rules set what an asset gets by default (where it is published and on what terms), from account level down to content type or owner.\n\n**Use it to:**\n- List every rule with `GET /api/publishing-rules` and your publishing points with `GET /api/publishing-rules/points`\n- Create or replace the rule for one level with `PUT /api/publishing-rules/{scopeKind}/{scopeId}`\n- See what an asset would get, and from which rule, with `GET /api/publishing-rules/resolve`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: manage` to change.\n\n**Good to know:** the account rule always exists and cannot be deleted. More specific rules override it."
+    },
+    "Radio": {
+      "displayName": "Radio stations",
+      "description": "Radio covers audio-only stations: their pipeline, on-air state, levels, now-playing metadata and timed content log.\n\n**Use it to:**\n- List stations and open one with `GET /api/radio` and `GET /api/radio/{id}`\n- Start, stop and put a station on air with `POST /api/radio/{id}/start`, `.../stop` and `.../air`\n- Read now playing, levels, QC and the log with `GET /api/radio/{id}/nowplaying`, `.../levels`, `.../qc` and `.../log`\n- Check a source before using it with `POST /api/radio/probe`\n\n**Credential:** admin session (Bearer) or account secret key, with `radio: view` to read, `radio: operate` to start, stop or air and `radio: manage` to change.\n\n**Good to know:** stations are channels too, so groups, recording, EPG and access rules apply to them unchanged."
+    },
+    "Recordings": {
+      "displayName": "Recordings",
+      "description": "Recordings are the raw captures of your live output: one per event run, and one per calendar day for each continuous channel.\n\n**Use it to:**\n- List and open recordings with `GET /api/recordings` and `GET /api/recordings/{id}`\n- Publish a whole recording as VOD with `POST /api/recordings/{id}/publish`, or clip a time range with `POST /api/recordings/{id}/clip`\n- Download an MP4 with `GET /api/recordings/{id}/download`\n- Read the timeline, waveform, transcript and programmes with `GET /api/recordings/{id}/timeline` and related requests\n\n**Credential:** admin session (Bearer) or account secret key, with `recordings: view` to read, `recordings: operate` to publish and `recordings: manage` to compose clips.\n\n**Good to know:** clips and downloads answer 409 `no_media`, with the gaps, when nothing was recorded in the range. Downloads answer 202 while exporting."
+    },
+    "Scheduled Clips": {
+      "displayName": "Scheduled clips",
+      "description": "Scheduled clips are clipping windows set on a live timeline. When the window ends, Volt cuts it into a VOD asset.\n\n**Use it to:**\n- List clipping windows with `GET /api/scheduled-clips`\n- Schedule a clip, choosing a manifest, progressive or both, with `POST /api/scheduled-clips`\n- Cancel a clip that has not been cut yet with `DELETE /api/scheduled-clips/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `recordings: view` to read and `recordings: manage` to change.\n\n**Good to know:** a clip can only be cancelled while it is still scheduled."
+    },
+    "Search": {
+      "displayName": "Search",
+      "description": "Search finds channels, radio stations, events and recordings in your account by name or title.\n\n**Use it to:**\n- Run one search across your account with `GET /api/search`\n- Back a site-wide search box in your own admin tools\n- Use each result's kind to link to the right record\n\n**Credential:** admin session (Bearer) or account secret key, any signed-in admin user."
+    },
+    "Share": {
+      "displayName": "Share page",
+      "description": "The share page is what a share link's recipient opens: a standalone page that plays the shared asset and offers permitted downloads.\n\n**Use it to:**\n- Open the recipient page with `GET /share/{token}`\n- Get the page's data and a playback token with `POST /api/share/{token}/resolve`\n- Send an access code by email with `POST /api/share/{token}/request-code`\n- Download a permitted element with `GET /api/share/{token}/download/{element}`\n\n**Credential:** the share link token, plus a PIN or emailed code when the link has one.\n\n**Good to know:** these requests never accept an admin credential and never reach any other asset."
+    },
+    "Share Links": {
+      "displayName": "Share links",
+      "description": "Share links give someone outside your account a private link to one asset, optionally protected by a PIN or emailed code.\n\n**Use it to:**\n- Create a link with `POST /api/share-links`\n- List links and see their views with `GET /api/share-links` and `GET /api/share-links/{id}`\n- End a link at once with `POST /api/share-links/{id}/revoke`\n\n**Credential:** admin session (Bearer) or account secret key, with `sharing: view` to read and `sharing: manage` to change.\n\n**Good to know:** the link URL is returned once, at creation. Each link reaches exactly one asset."
+    },
+    "Social": {
+      "displayName": "Social publishing",
+      "description": "Social publishing sends your VOD assets to linked social accounts and tracks each post.\n\n**Use it to:**\n- See which platforms are available with `GET /api/social/platforms` and link an account with `POST /api/social/connect/{platform}`\n- Publish an asset to one or more accounts with `POST /api/social/publish/{assetId}` (prefill from `GET /api/social/publish/{assetId}/defaults`)\n- Follow, retry or take down posts with `GET /api/social/publications` and the `retry` and `remove` requests\n- Refresh view counts with `POST /api/social/sync-views`\n\n**Credential:** admin session (Bearer) or account secret key, with `vod: view` to read, `vod: operate` to publish or retry and `vod: manage` to link, remove or sync.\n\n**Good to know:** a sandbox account (`POST /api/social/sandbox/{platform}`) behaves like a platform without posting, for testing."
+    },
+    "Social Sandbox": {
+      "displayName": "Social sandbox preview",
+      "description": "Shows what a post to a sandbox social account would look like, without anything being posted to a real platform.\n\n**Use it to:**\n- Open the preview of a sandbox post with `GET /social-sandbox/{id}`\n- Check titles, descriptions and media before publishing for real\n- Create the sandbox account first with `POST /api/social/sandbox/{platform}`, then publish to it as usual\n\n**Credential:** admin session.\n\n**Good to know:** sandbox posts never leave Volt, and their view counts are not real.",
+      "hidden": true,
+      "hiddenReason": "test-only preview of sandbox social posts"
+    },
+    "Source Preview": {
+      "displayName": "Source preview",
+      "description": "Source preview relays a channel's HLS input so the console can play it even when the source does not allow cross-site playback.\n\n**Use it to:**\n- Play the relayed input from `GET /api/source-preview/{token}/index.m3u8`\n- Let the player follow the rewritten playlist and segment addresses (`.../pl` and `.../seg`)\n\n**Credential:** the preview token in the address, issued for an input you can see.\n\n**Good to know:** the relay only fetches addresses from that input's own playlists.",
+      "hidden": true,
+      "hiddenReason": "console helper; preview tokens are issued by the Volt console"
+    },
+    "Sources": {
+      "displayName": "Sources",
+      "description": "Sources helps you check a contribution feed before you attach it to a channel, station or event.\n\n**Use it to:**\n- Probe a source address and protocol and see what it is sending with `POST /api/sources/probe`\n- Read an HLS playlist (master variants and renditions, or a media playlist) with `POST /api/sources/hls`\n\n**Credential:** admin session (Bearer) or account secret key, with `manage` on `channels`, `radio` or `events`.\n\n**Good to know:** `POST /api/sources/hls` reads the playlist text only, so it is quick enough to call as the address is typed."
+    },
+    "Status": {
+      "displayName": "Stream status",
+      "description": "Status reports the latest state and event log of each live channel and event, by polling or as a live push.\n\n**Use it to:**\n- Poll the status of every stream with `GET /api/status`\n- Read one stream and its event log with `GET /api/status/{kind}/{id}` and `GET /api/status/{kind}/{id}/events`\n- Receive changes within about a second over server-sent events with `GET /api/status/stream`\n\n**Credential:** admin session (Bearer) or account secret key, with `monitoring: view`. The live stream also accepts a `?ticket=` for EventSource.\n\n**Good to know:** open one live stream per viewer screen, not one per channel."
+    },
+    "Storage": {
+      "displayName": "Storage and retention",
+      "description": "Storage shows what media your account holds, where it lives, whether it can be read now, and what the retention rules will do to it next.\n\n**Use it to:**\n- Check what your storage supports with `GET /api/storage/capabilities`\n- List media objects with `GET /api/storage/objects`, and hold or restore one with `POST /api/storage/objects/{id}/hold` and `.../restore`\n- Set retention rules with `PUT /api/storage/retention`, preview them with `POST /api/storage/retention/preview`, and see the effective result with `GET /api/storage/retention/effective`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read and `media: manage` to change.\n\n**Good to know:** read capabilities first. Archive tiers and restore are only offered where storage supports them."
+    },
+    "Thumbnails": {
+      "displayName": "Thumbnails",
+      "description": "Thumbnails provides stills and sprite sheets of your channels and events for hover previews, scrubbing and clip thumbnails.\n\n**Use it to:**\n- Get sprite sheets for a time span with `GET /api/thumbnails/storyboard`\n- Get WebVTT thumbnail tracks with `GET /api/thumbnails/vtt`, `GET /api/thumbnails/recordings/{id}.vtt` and `GET /api/thumbnails/vod/{id}.vtt`\n- Check which hours are built with `GET /api/thumbnails/status`, and build older hours with `POST /api/thumbnails/build`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, the operator tier or above is needed to build.\n\n**Good to know:** a storyboard request covers at most 48 hours and defaults to the last hour."
+    },
+    "Tickets": {
+      "displayName": "Support tickets",
+      "description": "Tickets let your team raise support requests with the Volt team and follow their progress.\n\n**Use it to:**\n- List your account's tickets with `GET /api/tickets`\n- Raise a ticket, with a priority, with `POST /api/tickets`\n- Follow one ticket with `GET /api/tickets/{id}`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, the operator tier or above is needed to raise one."
+    },
+    "Uploads": {
+      "displayName": "Uploads",
+      "description": "Uploads move media files into Volt in chunks, so large files can resume after an interruption.\n\n**Use it to:**\n- Open an upload session with `POST /api/uploads`, and list or abandon sessions with `GET /api/uploads` and `DELETE /api/uploads/{id}`\n- Send each chunk with `PUT /api/uploads/{id}/chunks/{index}`\n- Check progress with `GET /api/uploads/{id}/state`, then complete with `POST /api/uploads/{id}/finish`\n\n**Credential:** admin session (Bearer) or account secret key to open and list, with `media: view` to read and `media: manage` to change. Chunks and finish use the upload session token returned when the session opens.\n\n**Good to know:** send chunk bodies as raw bytes, not JSON. The session token only works for its own upload."
+    },
+    "Uploads (tus)": {
+      "displayName": "Uploads (tus)",
+      "description": "A resumable upload endpoint that follows the open tus protocol, for clients that already speak tus.\n\n**Use it to:**\n- Create an upload with `POST /api/tus`, passing the file name, type and optional metadata in `Upload-Metadata`\n- Send bytes with `PATCH /api/tus/{id}` and check the offset with `HEAD /api/tus/{id}`\n- Abandon an upload with `DELETE /api/tus/{id}`\n\n**Credential:** admin session (Bearer) or account secret key on every request, with `media: manage`.\n\n**Good to know:** a tus upload is an ordinary upload session, so it follows your ingest rules like any other."
+    },
+    "User Groups": {
+      "displayName": "User groups (access roles)",
+      "description": "The original address for access roles. It manages the same named sets of feature access levels as the Access roles service.\n\n**Use it to:**\n- List roles and member counts with `GET /api/user-groups`\n- Create, edit, copy or delete roles with `POST /api/user-groups`, `PATCH /api/user-groups/{id}` and `POST /api/user-groups/{id}/copy`\n- Read the feature list with `GET /api/user-groups/catalogue`\n\n**Credential:** admin session (Bearer) or account secret key, with `access: view` (or `users: view`) to read and `access: manage` to change.\n\n**Good to know:** prefer `/api/access-roles` for new integrations. Both addresses act on the same roles."
+    },
+    "Users": {
+      "displayName": "Admin users",
+      "description": "Users are your own staff who sign in to Volt, with their roles, status and two-step sign-in.\n\n**Use it to:**\n- List and open users with `GET /api/users` and `GET /api/users/{id}`\n- Add, change or remove users with `POST /api/users`, `PATCH /api/users/{id}` and `DELETE /api/users/{id}`\n- Reset a locked-out user's two-step sign-in with `POST /api/users/{id}/mfa/reset`\n- Require two-step sign-in for everyone with `PUT /api/users/security-policy`\n\n**Credential:** admin session (Bearer) or account secret key, with `users: view` to read and `users: manage` to change. The security policy also needs the admin tier.\n\n**Good to know:** you cannot change yourself, someone above your tier, or someone whose access you do not fully hold."
+    },
+    "VOD": {
+      "displayName": "VOD assets",
+      "description": "VOD assets are your on-demand videos, from recordings, clips or uploads, with their metadata, review state and availability.\n\n**Use it to:**\n- List and open assets with `GET /api/vod` and `GET /api/vod/{id}`, and edit metadata with `PUT /api/vod/{id}`\n- Review, QC and trim with `POST /api/vod/{id}/review`, `POST /api/vod/{id}/qc` and `PATCH /api/vod/{id}/trim`\n- Publish or withdraw with `POST /api/vod/{id}/publish` and `POST /api/vod/{id}/withdraw`, and set availability with `PATCH /api/vod/{id}/availability`\n- Get schema.org JSON-LD for SEO with `GET /api/vod/{id}/schema.org`\n\n**Credential:** admin session (Bearer) or account secret key, with `vod: view` to read, `vod: operate` to publish or withdraw and `vod: manage` to change.\n\n**Good to know:** metadata is validated against the asset's assigned schema."
+    },
+    "Viewers": {
+      "displayName": "Viewers",
+      "description": "Viewers are the public users of your apps, as your team sees them for support and access management.\n\n**Use it to:**\n- Find viewers with `GET /api/viewers` and open one, with entitlements and sessions, with `GET /api/viewers/{id}`\n- Change a viewer's groups or status with `PATCH /api/viewers/{id}`\n- Sign a viewer out everywhere or reset their two-step sign-in with `POST /api/viewers/{id}/sign-out` and `.../mfa/reset`\n\n**Credential:** admin session (Bearer) or account secret key, with `viewers: view` to read, `viewers: operate` to sign out and `viewers: manage` to change.\n\n**Good to know:** to grant paid access, use `POST /api/payments/grants`."
+    },
+    "Watchfolders": {
+      "displayName": "Watchfolders",
+      "description": "Watchfolders pick up files dropped into a folder and ingest them by your ordered rules, with a review queue for refused files.\n\n**Use it to:**\n- Create and edit folders with `POST /api/watchfolders` and `PATCH /api/watchfolders/{id}`\n- Add and order rules with `POST /api/watchfolders/{id}/rules` and `PATCH /api/watchfolders/{id}/rules/{ruleId}`\n- Test a file name without moving anything with `POST /api/watchfolders/{id}/dry-run`, or scan now with `POST /api/watchfolders/{id}/scan`\n- Reprocess or remove refused files with `GET /api/watchfolders/{id}/items` and `.../resolve`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read, `media: operate` to dry-run and `media: manage` to change.\n\n**Good to know:** use the dry run before changing rules on a busy folder."
+    },
+    "Workflows": {
+      "displayName": "Workflows",
+      "description": "Workflows show how work moves through Volt and which add-ons run at each stage, with a record of every run.\n\n**Use it to:**\n- See the stages, hooks and attached add-ons with `GET /api/workflows/map`\n- List and open runs with `GET /api/workflows/runs` and `GET /api/workflows/runs/{id}`\n- Run an add-on by hand, cancel or retry with `POST /api/workflows/runs` and the `cancel` and `retry` requests\n- Trace what happened to one item with `GET /api/workflows/trace`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: operate` to run, cancel or retry.\n\n**Good to know:** a retry creates a new run with the same add-on, subject and options."
+    },
+    "XMLTV": {
+      "displayName": "XMLTV partner feeds",
+      "description": "XMLTV partner feeds publish your programme guide at a private URL for PVRs, IPTV middleware and guide aggregators to poll.\n\n**Use it to:**\n- Give a partner a feed URL of the form `GET /xmltv/{token}.xml` (or `.xml.gz`)\n- Create, rescope, rotate or revoke feeds with `POST /api/epg/xmltv/feeds` and related requests\n\n**Credential:** the feed token in the URL, no headers needed.\n\n**Good to know:** rotate a feed's token if its URL leaks. The old URL stops working."
+    }
+  },
+  "GET /api/vod": {
+    "summary": "List VOD assets",
+    "description": "The account's on-demand library: recordings published as VOD, clips, uploads and watch-folder files. Search titles and file names with `q`, filter on any field below (for example `review_state=in_review` or `published=true`), and sort with `sort=-created_at`."
+  },
+  "GET /api/recordings": {
+    "summary": "List recordings",
+    "description": "Raw captures of live output, newest first. `q` searches titles and source names, then the programme on air and the transcript. Filter by `channel_id`, `kind`, `status` or time (`start_epoch_ms[gte]=...`)."
+  },
+  "GET /api/jobs": {
+    "summary": "List jobs",
+    "description": "Background work (encodes, imports, conversions) with its state. Typical: `state=failed,cancelled&created_at[gte]=2026-10-17` to find what went wrong today."
+  }
+}

@@ -1,3 +1,5 @@
+import { accountSettingsRouter } from './modules/accountSettings';
+import { sourcePreviewRouter } from './modules/sourcePreview';
 import express from 'express';
 import cors from 'cors';
 import { existsSync } from 'node:fs';
@@ -43,8 +45,10 @@ import { attachMp3Listener } from './services/radio/pipeline';
 import { icecastAuthRouter } from './modules/icecastAuth';
 import { analyticsRouter, analyticsBeaconRouter } from './modules/analytics';
 import { platformRouter } from './modules/platform';
+import { fleetPlanRouter } from './modules/fleetPlan';
 import { platformAuthRouter } from './modules/platformAuth';
 import { ticketsRouter, platformTicketsRouter } from './modules/tickets';
+import { docsSessionRouter } from './modules/docsSession';
 import { notificationsRouter, notificationTemplatesRouter } from './modules/notifications';
 import { shareLinksRouter, publicShareRouter } from './modules/shareLinks';
 import { publicLiveRouter } from './modules/publicLive';
@@ -58,13 +62,27 @@ import { encodeProfilesRouter } from './modules/encodeProfiles';
 import { enginesRouter, engineHooksRouter } from './modules/engines';
 import { workflowsRouter, addonsRouter, addonCallbacksRouter } from './modules/workflows';
 import { imageStore } from './services/imageStore';
-import { parseSpec, resizeFromStore } from './services/imageResize';
+import { imagesPublicRouter, imagesApiRouter, imageService } from './modules/images';
+import { thumbnailsRouter } from './modules/thumbnails';
+import { auditDeletes } from './services/deleteAudit';
+import { auditRouter } from './modules/audit';
+import { planRouter } from './modules/plan';
 import { isBootReconciled } from './services/orchestrator';
+import { mountHealth, publicOnlyGuard } from './scale/health';
+import { publicAuthRouter, publicMeRouter } from './modules/publicApi';
+import { viewersAdminRouter } from './modules/viewersAdmin';
+import { scaleConfig } from './scale/config';
 
 export function createServer() {
   const app = express();
   app.set('trust proxy', true); // correct protocol/host behind the ALB for absolute link IRIs
+  // Scale: /health/live + /health/ready (scale/health.ts), and on the viewer
+  // tier (ROLE=api-public) a 404 for anything that is not a public path.
+  mountHealth(app);
+  if (scaleConfig.role === 'api-public') app.use(publicOnlyGuard());
   app.use(cors({ origin: config.corsOrigin, credentials: true }));
+  // EVERY DELETE IS LOGGED (services/deleteAudit.ts): done, or refused and why.
+  app.use('/api', auditDeletes());
   // Image uploads arrive base64 in JSON (base64 inflates ~33%), so the library route
   // needs a larger body limit than the 1mb default. This parser runs first for
   // /api/files and consumes the stream, so the global 1mb parser below skips it.
@@ -222,6 +240,8 @@ export function createServer() {
   // Public live delivery (NO admin auth): /live/:id/master.m3u8|manifest.mpd. Only
   // serves when the channel is on air with valid content; off air returns 404.
   app.use(publicLiveRouter);
+  // Source preview relay: token-addressed, so it is mounted before any requireAuth (modules/sourcePreview.ts).
+  app.use('/api/source-preview', sourcePreviewRouter);
 
   // Content-negotiated JSON-LD + Hydra (Accept: application/ld+json). No-op for
   // plain-JSON clients, so the default contract is unchanged.
@@ -233,6 +253,8 @@ export function createServer() {
   app.use('/api/search', searchRouter);
   app.use('/api/sources', sourcesRouter);
   app.use('/api/groups', groupsRouter);
+  app.use('/api/plan', planRouter);
+  app.use('/api/account-settings', accountSettingsRouter);  // logo and colours (docs/ACCOUNT_SETTINGS.md)  // the account's plan and how groups share it (docs/PLAN_AND_GROUPS.md)
   app.use('/api/events', eventsRouter);
   app.use('/api/output-profiles', profilesRouter);
   app.get('/api/ingest-protocols', (_req, res) => res.json({ protocols: INGEST_PROTOCOLS }));
@@ -262,24 +284,14 @@ export function createServer() {
   app.use('/api/workflows', workflowsRouter);       // base workflow map, add-on runs, traces (WORKFLOWS.md)
   app.use('/api/addons', addonsRouter);             // add-on services + triggers (admin)
 
-  // Resized preview derivatives (WebP), cached under the store's derived/ prefix.
-  //   /img/<WxH>[,fit]/<store-key>   e.g. /img/320x200/library/<acct>/slates/x.png
-  app.get('/img/*', async (req, res) => {
-    try {
-      const rest = req.path.replace(/^\/img\//, '');
-      const slash = rest.indexOf('/');
-      if (slash < 0) return res.status(400).end();
-      const spec = parseSpec(decodeURIComponent(rest.slice(0, slash)));
-      const key = decodeURIComponent(rest.slice(slash + 1));
-      if (!spec || !/^(library|derived)\//.test(key)) return res.status(400).end();
-      const out = await resizeFromStore(key, spec);
-      if (!out) return res.status(404).end();
-      res.setHeader('Content-Type', out.contentType);
-      res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.end(out.buffer);
-    } catch { res.status(400).end(); }
-  });
+  // On-the-fly image service: signed URLs only, immutable responses, S3 +
+  // CloudFront derivative cache (modules/images.ts, docs/IMAGES.md).
+  //   /img/{sig}/{W}x{H},{fit}[,token...]/library/{acct}/{path}
+  imageService();   // fail at boot, not on the first request, when misconfigured
+  app.use('/img', imagesPublicRouter());
+  app.use('/api/images', imagesApiRouter);  // sign, signing-key, config, stats
+  app.use('/api/audit', auditRouter);  // the account's audit log: who did what, deletes included (admins)
+  app.use('/api/thumbnails', thumbnailsRouter);  // encoder stills, sprite sheets, hover + clip VTTs
 
   // Serve image-library bytes from the store (local dir or S3). Public read so <img>
   // tags + the resize service can fetch by path (keys carry the opaque account id;
@@ -293,6 +305,9 @@ export function createServer() {
       const ct: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', avif: 'image/avif' };
       if (ct[ext]) res.setHeader('Content-Type', ct[ext]);
       res.setHeader('Cache-Control', 'public, max-age=300');
+      // Originals may be SVG: never let one run script on this origin.
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
       res.setHeader('Access-Control-Allow-Origin', '*');
       (stream as any).pipe(res);
     } catch { res.status(400).end(); }
@@ -341,21 +356,36 @@ export function createServer() {
   app.use('/api/radio', radioRouter);                    // radio (audio-only) stations
   app.use('/api/apps', appsRouter);                      // app registration + API keys
   app.use('/api/users', usersRouter);                    // tenant user management (admin+)
-  app.use('/api/user-groups', userGroupsRouter);         // per-feature access groups (admin+)
+  app.use('/api/user-groups', userGroupsRouter);         // access roles (original path)
+  app.use('/api/access-roles', userGroupsRouter);        // access roles (ACCESS_CONTROL.md)
   // THE PLAYER'S PUBLIC SURFACE. Publishable-key + origin allow-list, never a
   // JWT: this is called from a browser on somebody else's website. Mounted
   // beside the other publishable-key routes rather than under the authed /api
   // tree, because a stray requireAuth here would break every embed silently.
   app.use('/api/player', playerRouter);
+  // ---- THE PUBLIC API (/api/public/*): viewers and anonymous visitors only.
+  // See modules/publicApi.ts and ACCESS_CONTROL.md. The older public paths
+  // below stay as aliases of the same handlers.
+  app.use('/api/public/auth', publicAuthRouter);
+  app.use('/api/public/me', publicMeRouter);
+  app.use('/api/public/availability', availabilityRouter);
+  app.use('/api/public/access', accessRouter);
+  app.use('/api/public/player', playerRouter);
+  app.use('/api/public/analytics/beacon', analyticsBeaconRouter);
+  app.use('/api/public/payments', paymentsAppRouter);
+  // Admin view of public users (feature `viewers`).
+  app.use('/api/viewers', viewersAdminRouter);
   app.use('/api/availability', availabilityRouter);      // public play-gate → mints playback token (publishable key)
   app.use('/api/access', accessRouter);                  // public check-access → booleans, no token (publishable key)
   app.use('/api/analytics/beacon', analyticsBeaconRouter); // public session beacon (playback-token)
   app.use('/api/analytics', analyticsRouter);            // tenant reports (realtime/audience/usage)
   app.use('/api/tickets', ticketsRouter);                // client support tickets
+  app.use('/api/docs', docsSessionRouter);              // signed pass to the customer docs site (modules/docsSession.ts)
   app.use('/api/notifications', notificationsRouter);    // notifications (send/inbox/retry)
   app.use('/api/notification-templates', notificationTemplatesRouter);
   app.use('/api/share-links', shareLinksRouter);         // admin: create/list/revoke share links
   app.use('/api/platform/auth', platformAuthRouter);     // SaaS-admin 2-step login (password → TOTP)
+  app.use('/api/platform/fleet-plan', fleetPlanRouter);   // placement + consolidation advice (read-only)
   app.use('/api/platform', platformRouter);              // SaaS-admin cross-tenant dashboard
   app.use('/api/platform/tickets', platformTicketsRouter); // SaaS-admin ticket triage
   app.use('/api/publish-targets', publishTargetsRouter); // social account config

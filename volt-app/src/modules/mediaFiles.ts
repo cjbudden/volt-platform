@@ -2,15 +2,18 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, one, tx } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
-import { asyncHandler, notFound, conflict } from '../util/http';
+import { asyncHandler, notFound, conflict, badRequest } from '../util/http';
 import { actor, writeAudit, VersionConflict } from '../services/audit';
 import { imageStore, safeKey } from '../services/imageStore';
 import { probeImage } from '../services/imageDims';
+import { readImageFacts } from '../services/images/metadata';
+import { insertMediaRow, refreshMediaFacts, rowsNeedingFacts } from '../services/mediaLibrary';
+import { buildFileSearch, childFolders, matchFolders, type FileFilters } from '../services/mediaSearch';
 
 export const mediaFilesRouter = Router();
 mediaFilesRouter.use(requireAuth);
 
-const KIND = z.enum(['watermark', 'slate', 'poster', 'brand', 'keyframe', 'other']);
+const KIND = z.enum(['watermark', 'slate', 'poster', 'brand', 'keyframe', 'storyboard', 'other']);
 
 function cleanPath(p: string): string {
   return safeKey(p).replace(/\/+/g, '/').replace(/^\/|\/$/g, '');
@@ -19,44 +22,120 @@ function folderOf(path: string): string { const i = path.lastIndexOf('/'); retur
 function storeKeyFor(account: string, path: string): string { return `library/${account}/${path}`; }
 function urlFor(storeKey: string): string { return '/' + storeKey; }
 
-/** List / browse / search the account's images. */
+/** Query string -> search filters (shared by the list and the combined search). */
+function filtersFrom(qs: Record<string, string>): FileFilters {
+  const num = (v?: string) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : undefined);
+  let near: FileFilters['near'];
+  if (qs.near) {
+    const [lat, lng, km] = qs.near.split(',').map(Number);
+    if (![lat, lng].every(Number.isFinite) || Math.abs(lat) > 90 || Math.abs(lng) > 180) throw badRequest('near must be lat,lng[,km]');
+    near = { lat, lng, km: Number.isFinite(km) && km > 0 ? Math.min(km, 20000) : 25 };
+  }
+  const iso = (v?: string) => {
+    if (!v) return undefined;
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) throw badRequest(`not a date: ${v}`);
+    return d.toISOString();
+  };
+  const sort = qs.sort as FileFilters['sort'];
+  if (sort && !['name', 'newest', 'oldest', 'taken', 'relevance'].includes(sort)) throw badRequest('sort must be name, newest, oldest, taken or relevance');
+  return {
+    q: qs.q, folder: qs.folder, recursive: qs.recursive === '1', kind: qs.kind, tag: qs.tag,
+    source: qs.source, channel: qs.channel, from: iso(qs.from), to: iso(qs.to),
+    hasLocation: qs.hasLocation === '1', near, sort, limit: num(qs.limit), offset: num(qs.offset),
+  };
+}
+
+async function searchFiles(acc: string, f: FileFilters) {
+  const b = buildFileSearch(acc, f);
+  const rows = await query(
+    `SELECT *, count(*) OVER() AS _total FROM media_files WHERE ${b.where} ORDER BY ${b.order} LIMIT ${b.limit} OFFSET ${b.offset}`,
+    b.params);
+  const total = rows.length ? Number((rows[0] as any)._total) : 0;
+  return { total, items: rows.map((r: any) => { const { _total, search, ...rest } = r; return { ...rest, url: urlFor(r.store_key) }; }) };
+}
+
+/** List / browse / search the account's images.
+ *  folder, recursive=1, kind, tag, q, source (upload|watchfolder|encoder), channel,
+ *  from/to (captured or taken), hasLocation=1, near=lat,lng,km, sort, limit, offset.
+ *  Answers an array (X-Total-Count says how many matched). */
 mediaFilesRouter.get('/', asyncHandler(async (req, res) => {
-  const acc = accountId(req);
-  const { folder, kind, q, tag, recursive } = req.query as Record<string, string>;
-  const where: string[] = ['account_id = $1']; const params: any[] = [acc];
-  if (folder !== undefined) {
-    if (recursive === '1') { params.push(folder ? folder + '%' : '%'); where.push(`(folder LIKE $${params.length})`); }
-    else { params.push(folder); where.push(`folder = $${params.length}`); }
-  }
-  if (kind) { params.push(kind); where.push(`kind = $${params.length}`); }
-  const term = (q ?? '').trim();
-  if (term) {
-    params.push(`%${term}%`);
-    // match the file name, its folder path, OR any of its tags
-    where.push(`(name ILIKE $${params.length} OR path ILIKE $${params.length} OR array_to_string(tags, ' ') ILIKE $${params.length})`);
-  }
-  if (tag) { params.push(tag); where.push(`$${params.length} = ANY(tags)`); }
-  const rows = await query(`SELECT * FROM media_files WHERE ${where.join(' AND ')} ORDER BY folder, name`, params);
-  res.json(rows.map((r: any) => ({ ...r, url: urlFor(r.store_key) })));
+  const r = await searchFiles(accountId(req), filtersFrom(req.query as Record<string, string>));
+  res.set('X-Total-Count', String(r.total));
+  res.json(r.items);
 }));
 
-/** Folder tree: explicit folders + every folder implied by a file path. */
-mediaFilesRouter.get('/folders', asyncHandler(async (req, res) => {
-  const acc = accountId(req);
+/** All folder paths for an account: explicit folders plus every folder a file implies. */
+async function allFolderPaths(acc: string): Promise<{ paths: string[]; counts: Map<string, number> }> {
   const explicit = await query('SELECT path FROM media_folders WHERE account_id = $1', [acc]);
-  const fromFiles = await query('SELECT DISTINCT folder AS path FROM media_files WHERE account_id = $1 AND folder <> \'\'', [acc]);
+  const counts = await query(
+    `SELECT folder, count(*)::int AS n FROM media_files WHERE account_id = $1 AND folder <> '' GROUP BY folder`, [acc]);
   const set = new Set<string>();
-  for (const r of [...explicit, ...fromFiles]) {
-    const p = (r as any).path as string;
-    // add every ancestor so the tree is complete
-    const parts = p.split('/');
+  for (const r of [...explicit.map((e: any) => e.path), ...counts.map((c: any) => c.folder)] as string[]) {
+    const parts = r.split('/');
     for (let i = 1; i <= parts.length; i++) set.add(parts.slice(0, i).join('/'));
   }
-  const counts = await query(
-    `SELECT folder, count(*)::int AS n FROM media_files WHERE account_id = $1 GROUP BY folder`, [acc]);
-  const countMap = new Map(counts.map((c: any) => [c.folder, c.n]));
-  const folders = [...set].sort().map((path) => ({ path, name: path.split('/').pop(), count: countMap.get(path) ?? 0 }));
-  res.json({ folders });
+  return { paths: [...set].sort(), counts: new Map(counts.map((c: any) => [c.folder, c.n])) };
+}
+
+/** Files AND folders for one search box: { folders, files, total }. */
+mediaFilesRouter.get('/search', asyncHandler(async (req, res) => {
+  const acc = accountId(req);
+  const qs = req.query as Record<string, string>;
+  const f = filtersFrom(qs);
+  const [files, tree] = await Promise.all([searchFiles(acc, { ...f, limit: f.limit ?? 200 }), f.q ? allFolderPaths(acc) : null]);
+  const folders = tree ? matchFolders(tree.paths, f.q!).map((path) => ({
+    path, name: path.split('/').pop(), count: tree.counts.get(path) ?? 0,
+  })) : [];
+  res.json({ folders, files: files.items, total: files.total });
+}));
+
+/** Re-read metadata from the stored bytes: one file. */
+mediaFilesRouter.post('/:id/metadata/refresh', asyncHandler(async (req, res) => {
+  const row = await one<any>('SELECT * FROM media_files WHERE id=$1 AND account_id=$2', [req.params.id, accountId(req)]);
+  if (!row) throw notFound('Image not found');
+  const body = await imageStore().get(row.store_key);
+  if (!body) throw notFound('Image bytes are missing from the store');
+  const updated = await refreshMediaFacts(row.id, await readImageFacts(body));
+  const { search, ...rest } = updated;
+  res.json({ ...rest, url: urlFor(updated.store_key) });
+}));
+
+/** Backfill metadata for files uploaded before it was captured. Batches of up to 200. */
+mediaFilesRouter.post('/metadata/backfill', asyncHandler(async (req, res) => {
+  const acc = accountId(req);
+  const mine = await rowsNeedingFacts(acc, 200);
+  let done = 0, missing = 0;
+  for (const r of mine) {
+    const body = await imageStore().get(r.store_key);
+    if (!body) { missing++; continue; }
+    await refreshMediaFacts(r.id, await readImageFacts(body));
+    done++;
+  }
+  const left = await one<{ n: number }>(
+    `SELECT count(*)::int AS n FROM media_files WHERE account_id = $1 AND checksum IS NULL AND source <> 'encoder'`, [acc]);
+  res.json({ refreshed: done, missing, remaining: left?.n ?? 0 });
+}));
+
+/** Folder tree: explicit folders + every folder implied by a file path.
+ *  ?parent=<path> answers only that folder's children (lazy tree);
+ *  ?q=<words> answers folders whose path contains every word. */
+mediaFilesRouter.get('/folders', asyncHandler(async (req, res) => {
+  const acc = accountId(req);
+  const { q, parent } = req.query as Record<string, string>;
+  const { paths, counts } = await allFolderPaths(acc);
+  const deep = (p: string) => {
+    let n = 0;
+    for (const [f, c] of counts) if (f === p || f.startsWith(p + '/')) n += c;
+    return n;
+  };
+  const shape = (path: string) => ({
+    path, name: path.split('/').pop(), count: counts.get(path) ?? 0, total: deep(path),
+    hasChildren: paths.some((x) => x.startsWith(path + '/')),
+  });
+  if (q && q.trim()) return res.json({ folders: matchFolders(paths, q).map(shape) });
+  if (parent !== undefined) return res.json({ folders: childFolders(paths, parent).map(shape) });
+  res.json({ folders: paths.map((path) => ({ path, name: path.split('/').pop(), count: counts.get(path) ?? 0 })) });
 }));
 
 /** Create an (empty) folder. */
@@ -89,23 +168,31 @@ mediaFilesRouter.post('/', asyncHandler(async (req, res) => {
   const exists = await one('SELECT id FROM media_files WHERE account_id=$1 AND path=$2', [acc, path]);
   if (exists) throw conflict(`An image already exists at ${path}`);
   const info = probeImage(buf);
-  const contentType = b.contentType || info.contentType || 'application/octet-stream';
+  // What the file says about itself: dimensions, EXIF/GPS/IPTC/XMP, checksum.
+  const facts = await readImageFacts(buf);
+  const contentType = b.contentType || facts.contentType || info.contentType || 'application/octet-stream';
   const storeKey = storeKeyFor(acc, path);
   await imageStore().put(storeKey, buf, contentType);
   const who = actor(req);
-  const row = await one<any>(
-    `INSERT INTO media_files(account_id, kind, path, folder, name, content_type, size_bytes, width, height, tags, store_key, created_by, updated_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12) RETURNING *`,
-    [acc, b.kind, path, folder, name, contentType, buf.length, info.width, info.height, b.tags ?? [], storeKey, who.userId]
-  );
+  const row = await insertMediaRow({
+    accountId: acc, kind: b.kind, path, folder, name, storeKey, sizeBytes: buf.length, contentType,
+    tags: b.tags ?? [], userId: who.userId, source: 'upload',
+    facts: { ...facts, width: facts.width ?? info.width, height: facts.height ?? info.height, contentType },
+  });
+  // Same bytes already in the library? Say so (informational, never refused).
+  const dupes = await query(
+    `SELECT id, path FROM media_files WHERE account_id = $1 AND checksum = $2 AND id <> $3 LIMIT 5`,
+    [acc, facts.checksum, row.id]);
   await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label,
     action: 'create', entityType: 'media_file', entityId: row.id, snapshot: { path, kind: b.kind, bytes: buf.length } });
-  res.status(201).json({ ...row, url: urlFor(row.store_key) });
+  delete row.search;
+  res.status(201).json({ ...row, url: urlFor(row.store_key), duplicateOf: dupes });
 }));
 
 mediaFilesRouter.get('/:id', asyncHandler(async (req, res) => {
   const row = await one<any>('SELECT * FROM media_files WHERE id=$1 AND account_id=$2', [req.params.id, accountId(req)]);
   if (!row) throw notFound('Image not found');
+  delete row.search;
   res.json({ ...row, url: urlFor(row.store_key) });
 }));
 
@@ -149,6 +236,7 @@ mediaFilesRouter.patch('/:id', asyncHandler(async (req, res) => {
       action: 'update', entityType: 'media_file', entityId: cur.id,
       snapshot: { from: cur.path, to: path, kind: row.kind } });
     res.set('ETag', String(row.version));
+    delete row.search;
     res.json({ ...row, url: urlFor(row.store_key) });
   } catch (e) { if ((e as any)?.status) throw e; throw e; }
 }));

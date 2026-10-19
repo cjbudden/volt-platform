@@ -6,6 +6,7 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { publish, NotPublishable } from '../services/availability';
 import { validateTargets, type Target } from '../services/publishingRules';
 import { actorLabel } from '../util/actor';
+import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage } from '../util/listQuery';
 
 /**
  * Publishing & social distribution.
@@ -23,15 +24,32 @@ const PLATFORMS = ['portal', 'youtube', 'facebook', 'x', 'tiktok', 'dailymotion'
 export const publishTargetsRouter = Router();
 publishTargetsRouter.use(requireAuth);
 
+const PUBLISH_TARGETS_LIST = defineList({
+  path: '/api/publish-targets',
+  fields: {
+    id: { sql: 'id', type: 'uuid' },
+    platform: { sql: 'platform', type: 'string', doc: 'portal, youtube, facebook, x, tiktok or dailymotion' },
+    name: { sql: 'name', type: 'string' },
+    external_account: { sql: 'external_account', type: 'string' },
+    enabled: { sql: 'enabled', type: 'boolean' },
+    created_at: { sql: 'created_at', type: 'timestamp' },
+  },
+  search: ['name', 'external_account', 'platform'],
+  defaultSort: 'platform,name',
+  unpagedLimit: 1000,
+});
+
 publishTargetsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const rows = await query(
-      `SELECT id, platform, name, external_account, enabled, created_at
-         FROM publish_targets WHERE account_id=$1 ORDER BY platform, name`,
-      [accountId(req)]
-    );
-    res.json(rows);
+    const params: unknown[] = [accountId(req)];
+    const pl = parseList(PUBLISH_TARGETS_LIST, req.query, params);
+    const where = `FROM publish_targets WHERE account_id=$1${whereSql(pl)}`;
+    const whereCount = `FROM publish_targets WHERE account_id=$1${countWhereSql(pl)}`;  // totals ignore the cursor
+    const rows = await query<any>(
+      `SELECT id, platform, name, external_account, enabled, created_at ${where} ${pageSql(pl)}`, params);
+    const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${whereCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
+    res.json(finishPage(req, res, pl, rows, total));
   })
 );
 
@@ -85,31 +103,66 @@ publishTargetsRouter.delete(
 export const publicationsRouter = Router();
 publicationsRouter.use(requireAuth);
 
+// THE SAME OWNERSHIP RULE AS THE LIBRARY (vod.ts OWNER_ACCOUNT). An uploaded or
+// watch-folder asset has no channel or event, so it belongs to its account
+// directly. The inner join on groups made every such asset "not found" here:
+// its publications could not be listed and it could not be published at all.
 async function ownedAsset(assetId: string, acct: string) {
   return one<any>(
     `SELECT v.* FROM vod_assets v
        LEFT JOIN channels c ON c.id=v.channel_id
        LEFT JOIN events e ON e.id=v.event_id
-       JOIN groups g ON g.id=COALESCE(c.group_id,e.group_id)
-      WHERE v.id=$1 AND g.account_id=$2`,
+       LEFT JOIN groups g ON g.id=COALESCE(c.group_id,e.group_id)
+      WHERE v.id=$1 AND COALESCE(g.account_id, v.account_id)=$2`,
     [assetId, acct]
   );
 }
 
-/** List publications for an asset (with live-ish view counts). */
+/**
+ * List publications for an asset (with live-ish view counts). assetId stays
+ * required: this is the asset's own list, not a cross-library search.
+ */
+const PUBLICATIONS_LIST = defineList({
+  path: '/api/publications',
+  fields: {
+    id: { sql: 'p.id', type: 'uuid' },
+    platform: { sql: 'p.platform', type: 'string' },
+    status: { sql: 'p.status', type: 'enum', values: ['pending', 'published', 'failed', 'removed', 'withdrawn'] },
+    stage: { sql: 'p.stage', type: 'string' },
+    target_id: { sql: 'p.target_id', type: 'uuid' },
+    target_name: { sql: 't.name', type: 'string' },
+    app_id: { sql: 'p.app_id', type: 'uuid' },
+    external_url: { sql: 'p.external_url', type: 'string', sort: false },
+    stale: { sql: 'p.stale', type: 'boolean', doc: 'The asset has changed since this copy went out' },
+    views: { sql: 'p.views', type: 'number' },
+    attempts: { sql: 'p.attempts', type: 'number' },
+    published_at: { sql: 'p.published_at', type: 'timestamp' },
+    last_synced_at: { sql: 'p.last_synced_at', type: 'timestamp' },
+    created_at: { sql: 'p.created_at', type: 'timestamp', notNull: true },
+  },
+  search: ['platform', 'target_name', 'external_url'],
+  defaultSort: '-created_at',
+  extraParams: ['assetId'],
+  unpagedLimit: 1000,
+});
+
 publicationsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const assetId = typeof req.query.assetId === 'string' ? req.query.assetId : null;
     if (!assetId) throw badRequest('assetId required');
     if (!(await ownedAsset(assetId, accountId(req)))) throw notFound('Asset not found');
-    const rows = await query(
-      `SELECT p.*, t.name AS target_name FROM publications p
+    const params: unknown[] = [assetId];
+    const pl = parseList(PUBLICATIONS_LIST, req.query, params);
+    const where = `FROM publications p
          LEFT JOIN publish_targets t ON t.id=p.target_id
-        WHERE p.vod_asset_id=$1 ORDER BY p.created_at DESC`,
-      [assetId]
-    );
-    res.json(rows);
+        WHERE p.vod_asset_id=$1${whereSql(pl)}`;
+    const whereCount = `FROM publications p
+         LEFT JOIN publish_targets t ON t.id=p.target_id
+        WHERE p.vod_asset_id=$1${countWhereSql(pl)}`;  // totals ignore the cursor
+    const rows = await query<any>(`SELECT p.*, t.name AS target_name ${where} ${pageSql(pl)}`, params);
+    const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${whereCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
+    res.json(finishPage(req, res, pl, rows, total));
   })
 );
 

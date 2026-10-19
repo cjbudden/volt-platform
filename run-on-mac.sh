@@ -15,6 +15,13 @@
 #   5. Starts the control-plane API on :8080 and the React app on :5173,
 #      with an Icecast relay on :8000 so radio stations can serve MP3
 #
+#   6. Checks and builds the customer docs (guides, API reference, release
+#      notes) and serves them on :3000, so the ? button in the app works
+#
+#  Docs only (checks + build, then exit):   bash run-on-mac.sh docs
+#  Skip the docs:                           DOCS=0 bash run-on-mac.sh
+#  Docs with live reload while writing:     DOCS_DEV=1 bash run-on-mac.sh
+#
 #  Requirements: Node 20+ (you have it via nvm) and EITHER a local Postgres
 #  on :5432 OR Docker installed. Docker does NOT need to be running before you
 #  start: step 2 starts Docker Desktop, OrbStack or colima for you and waits.
@@ -24,6 +31,9 @@ cd "$(dirname "$0")"
 ROOT="$(pwd)"
 DBURL="postgres://volt:volt@localhost:5432/volt"
 SNAP="$ROOT/volt_web_demo.sql"
+DOCS_ONLY=0; [ "${1:-}" = "docs" ] && DOCS_ONLY=1
+DOCS="${DOCS:-1}"; [ "$DOCS_ONLY" = "1" ] && DOCS=1
+DOCS_PORT="${DOCS_PORT:-3000}"
 
 have() { command -v "$1" >/dev/null 2>&1; }
 pg_up() { (exec 3<>/dev/tcp/localhost/5432) 2>/dev/null; }
@@ -169,8 +179,11 @@ fi
 # Clean state: any channel/event left 'live' from a previous run has NO encoder running
 # now. Mark them ended so the list is truthful and a fresh Send source can't collide
 # with a stale launch.
-run_psql -q -c "UPDATE channels SET status='ended' WHERE status='live'; UPDATE events SET status='ended' WHERE status='live';" >/dev/null 2>&1 || true
-echo "    reset any stale 'live' streams to ended (clean start)."
+# Not in docs-only mode: the app may be running in another terminal.
+if [ "$DOCS_ONLY" != "1" ]; then
+  run_psql -q -c "UPDATE channels SET status='ended' WHERE status='live'; UPDATE events SET status='ended' WHERE status='live';" >/dev/null 2>&1 || true
+  echo "    reset any stale 'live' streams to ended (clean start)."
+fi
 
 # the test-stream feature (Start test stream → real HLS playback + live subtitles)
 # needs ffmpeg on PATH; the app still runs without it, just no live playback.
@@ -236,7 +249,7 @@ fi
 # NB: Docker still uses your Mac's CPU, so keep test ladders light (720p/480p).
 WANT_DOCKER=0
 [ "${REQ_MODE:-}" = "docker" ] && WANT_DOCKER=1
-if [ "$WANT_DOCKER" = "0" ] && [ "$ENCODER_MODE" = "mock" ] && [ "$DOCKER_OK" = "1" ]; then
+if [ "$WANT_DOCKER" = "0" ] && [ "$ENCODER_MODE" = "mock" ] && [ "$DOCKER_OK" = "1" ] && [ "$DOCS_ONLY" != "1" ]; then
   echo "    native encoder tools missing, but Docker is running — using the Docker encoder."
   WANT_DOCKER=1
 fi
@@ -260,7 +273,7 @@ if [ "$WANT_DOCKER" = "1" ]; then
   echo "      NB: Docker uses your Mac's CPU; keep ladders light (720p/480p) for smooth realtime."
 fi
 
-echo "==> 5/5  Starting API (:8080) and the app (:5173)..."
+[ "$DOCS_ONLY" = "1" ] || echo "==> 5/5  Starting API (:8080) and the app (:5173)..."
 # free stale dev servers from a previous run, otherwise the new ones can't bind and
 # you keep seeing the OLD build. (Safe: only touches these two ports.)
 free_port() {
@@ -268,6 +281,8 @@ free_port() {
   pids=$(lsof -ti tcp:"$1" 2>/dev/null || true)
   if [ -n "$pids" ]; then echo "    freeing port $1 (stale pids: $pids)"; kill $pids 2>/dev/null || true; sleep 1; kill -9 $pids 2>/dev/null || true; fi
 }
+# Docs-only mode leaves a running app alone: it frees and reaps nothing.
+if [ "$DOCS_ONLY" != "1" ]; then
 free_port 8080
 free_port 5173
 # Reap any orphaned encoder/ffmpeg/packager from a previous run BEFORE starting.
@@ -277,6 +292,7 @@ free_port 5173
 pkill -f "$ROOT/volt-encoder/bin/encoder.py" 2>/dev/null || true
 pkill -f "$ROOT/volt-app/origin" 2>/dev/null || true
 if command -v docker >/dev/null 2>&1; then docker ps -q --filter "name=volt-enc-" 2>/dev/null | xargs -r docker rm -f >/dev/null 2>&1 || true; fi
+fi
 # ---------------------------------------------------------------------------
 #  THE MP3 RELAY.
 #
@@ -302,7 +318,9 @@ icecast_alive() {
 }
 
 ICE_OK=0
-if [ "$DOCKER_OK" != "1" ]; then
+if [ "$DOCS_ONLY" = "1" ]; then
+  echo "    docs only: no Icecast relay needed."
+elif [ "$DOCKER_OK" != "1" ]; then
   echo "    no Docker, so no Icecast relay on :8000."
 elif icecast_alive; then
   echo "    Icecast is already running on :8000."
@@ -401,6 +419,118 @@ install_if_needed() {
 
 install_if_needed "$ROOT/volt-app" "API"
 
+# THE PLAYER SDK (volt-player): the embed bundle the API serves at
+# /player/volt-player.js (share pages, customer embeds), and the source the
+# console imports for its own players. Rebuilt when its source is newer than
+# the bundle; the API only serves a bundle that exists when it starts.
+if [ -d "$ROOT/volt-player" ]; then
+  install_if_needed "$ROOT/volt-player" "player SDK"
+  if [ ! -f "$ROOT/volt-player/dist/volt-player.js" ] || [ -n "$(find "$ROOT/volt-player/src" -newer "$ROOT/volt-player/dist/volt-player.js" -type f 2>/dev/null | head -1)" ]; then
+    echo "    building the player SDK…"
+    ( cd "$ROOT/volt-player" && npx vite build >/dev/null 2>&1 ) && echo "    player SDK built." || echo "    player SDK build FAILED (cd volt-player && npm run build); share pages fall back to hls.js"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+#  CUSTOMER DOCS: CHECK, BUILD, SERVE   (docs-site/MAINTAINING.md, RELEASING.md)
+#
+#  The docs are generated from the code, so they go stale the moment the code
+#  moves and nobody notices until a customer does. Every start therefore checks
+#  the things the docs are made from, in the foreground because they take
+#  seconds, and says plainly what is out of date:
+#    - the route inventory (read from the app) and the API reference built from it
+#    - the guides for terms that must never reach customers (scrub.json)
+#    - core changes that have no change note yet (for the next release notes)
+#    - the docs sign-in endpoint, against this database
+#  Generated files that are merely out of date are regenerated, and named, so
+#  they get committed. A real failure is reported, not fatal: the app still starts.
+#
+#  The site BUILD (which also fails on a broken link or a banned term) runs in
+#  the background, only when docs sources changed since the last build, then the
+#  site is served on :3000. DOCS_URL points the app's ? button at it. Locally
+#  there is no signing key, so no cookie is needed.
+# ---------------------------------------------------------------------------
+DOCS_FAIL=0
+DOCS_LOG="$ROOT/volt-app/origin/_docs.log"
+docs_say() { echo "    [docs] $*"; }
+docs_regen() {  # $1 label, $2 check cmd, $3 regenerate cmd, $4 files to commit
+  if ( cd "$ROOT/volt-app" && eval "$2" ) >/dev/null 2>&1; then docs_say "$1: current"
+  elif ( cd "$ROOT/volt-app" && eval "$3" ) >/dev/null 2>&1; then docs_say "$1: was out of date, regenerated. Commit $4"
+  else docs_say "$1: FAILED. Run in volt-app: $3"; DOCS_FAIL=1; fi
+}
+docs_checks() {
+  docs_regen "route inventory" "npx tsx scripts/api-routes.ts --check" "npx tsx scripts/api-routes.ts" "volt-app/docs/API_ROUTES.md + api-routes.json"
+  docs_regen "API reference" "node scripts/openapi.mjs --check" "node scripts/openapi.mjs" "volt-app/docs/openapi.json"
+  if out=$(cd "$ROOT/docs-site" && node scripts/check-scrub.mjs docs release-notes 2>&1); then docs_say "guides: no internal terms"
+  else docs_say "guides: banned terms found:"; echo "$out" | sed 's/^/      /' | head -12; DOCS_FAIL=1; fi
+  if out=$(node "$ROOT/scripts/release/check.mjs" 2>&1); then docs_say "change notes: $(echo "$out" | sed 's/^change notes: //')"
+  else docs_say "change notes: core changes without a note (fine while working; needed before a release):"; echo "$out" | sed -n '2,6p' | sed 's/^/      /'; fi
+  if out=$(cd "$ROOT/volt-app" && DOCS_TEST_EMAIL="${DOCS_TEST_EMAIL:-admin@rtm.example}" DOCS_TEST_PASSWORD="${DOCS_TEST_PASSWORD:-volt1234}" npx tsx test/docs-session.check.ts 2>&1); then
+    docs_say "sign-in endpoint: $(echo "$out" | grep -c '^PASS') checks passed"
+  else docs_say "sign-in endpoint test FAILED:"; echo "$out" | grep -E '^(FAIL|login)' | head -6 | sed 's/^/      /'; DOCS_FAIL=1; fi
+  # THE API LIST STANDARD (volt-app/docs/API_STANDARDS.md): every list endpoint,
+  # every sort and filter, against this database. Read-only, about half a
+  # minute, so it runs in docs-only mode rather than on every start.
+  if [ "$DOCS_ONLY" = "1" ]; then
+    if out=$(cd "$ROOT/volt-app" && DOCS_TEST_EMAIL="${DOCS_TEST_EMAIL:-admin@rtm.example}" DOCS_TEST_PASSWORD="${DOCS_TEST_PASSWORD:-volt1234}" npx tsx test/listStandard.check.ts 2>&1); then
+      docs_say "API lists: $(echo "$out" | tail -1)"
+    else docs_say "API lists test FAILED:"; echo "$out" | grep -E '^FAIL' | head -8 | sed 's/^/      /'; DOCS_FAIL=1; fi
+  fi
+}
+docs_needs_build() {  # true when anything the site is built from is newer than the last build
+  local stamp="$ROOT/docs-site/build/index.html"
+  [ -f "$stamp" ] || return 0
+  [ -n "$(find "$ROOT/docs-site/docs" "$ROOT/docs-site/release-notes" "$ROOT/docs-site/src" "$ROOT/docs-site/static/_public" \
+           "$ROOT/docs-site/docusaurus.config.ts" "$ROOT/docs-site/sidebars.ts" "$ROOT/docs-site/scrub.json" \
+           "$ROOT/docs-site/package-lock.json" "$ROOT/volt-app/docs/openapi.json" "$ROOT/brand/fonts/web" "$ROOT/brand/logos/svg" \
+           -type f -newer "$stamp" 2>/dev/null | head -1)" ]
+}
+docs_build() {
+  install_if_needed "$ROOT/docs-site" "docs"
+  if docs_needs_build; then
+    docs_say "building the site (log: volt-app/origin/_docs.log)..."
+    # A stale build cache (after a Docusaurus upgrade, say) fails every page
+    # with an unrelated-looking render error. One retry from a clean cache
+    # tells that apart from a real problem in the docs.
+    if ( cd "$ROOT/docs-site" && VOLT_APP_URL=http://localhost:5173 DOCS_SITE_URL="http://localhost:$DOCS_PORT" npm run build ) > "$DOCS_LOG" 2>&1 \
+       || { docs_say "build failed; clearing the build cache and retrying once..."
+            ( cd "$ROOT/docs-site" && npx docusaurus clear && VOLT_APP_URL=http://localhost:5173 DOCS_SITE_URL="http://localhost:$DOCS_PORT" npm run build ) > "$DOCS_LOG" 2>&1; }; then
+      docs_say "site built: no broken links, no internal terms."
+    else
+      docs_say "site build FAILED. Last lines:"; grep -E 'Error|error|banned|scrub|Broken|broken' "$DOCS_LOG" | tail -8 | sed 's/^/      /'
+      return 1
+    fi
+  else
+    docs_say "site unchanged since the last build: not rebuilding."
+  fi
+}
+
+if [ "$DOCS" = "1" ] && [ -d "$ROOT/docs-site" ]; then
+  echo "==> Docs: checking what the customer docs are generated from..."
+  mkdir -p "$ROOT/volt-app/origin"
+  docs_checks
+  if [ "$DOCS_ONLY" = "1" ]; then
+    docs_build || DOCS_FAIL=1
+    echo
+    if [ "$DOCS_FAIL" = "0" ]; then echo "Docs: all checks passed. Preview: (cd docs-site && npm run serve)"; exit 0
+    else echo "Docs: something needs fixing (see [docs] lines above)."; exit 1; fi
+  fi
+  free_port "$DOCS_PORT"
+  export DOCS_URL="http://localhost:$DOCS_PORT"
+  if [ "${DOCS_DEV:-0}" = "1" ]; then
+    ( install_if_needed "$ROOT/docs-site" "docs" >/dev/null
+      cd "$ROOT/docs-site" && npm run prepare-assets >/dev/null 2>&1; VOLT_APP_URL=http://localhost:5173 "$ROOT/docs-site/node_modules/.bin/docusaurus" start --port "$DOCS_PORT" --no-open >> "$DOCS_LOG" 2>&1 ) &
+    docs_say "live-reload docs starting on http://localhost:$DOCS_PORT"
+  else
+    ( if docs_build; then
+        cd "$ROOT/docs-site" && "$ROOT/docs-site/node_modules/.bin/docusaurus" serve --port "$DOCS_PORT" --no-open >> "$DOCS_LOG" 2>&1 &
+        sleep 2; docs_say "serving http://localhost:$DOCS_PORT"
+      fi ) &
+  fi
+elif [ "$DOCS" != "1" ]; then
+  echo "==> Docs: skipped (DOCS=0)."
+fi
+
 # HAND-TYPED IDS -> RANDOM UUIDS. The demo data used ids typed to be easy to
 # spot (...0000a001 for RTM, ...0c0001 for RTM News 24), which showed in every
 # URL and image path. This gives them real random ids, in the database and in
@@ -424,6 +554,7 @@ cleanup() {
   # These reference our unique bin/origin paths, so the match is safe.
   pkill -f "$ROOT/volt-encoder/bin/encoder.py" 2>/dev/null || true
   pkill -f "$ROOT/volt-app/origin" 2>/dev/null || true
+  pkill -f "$ROOT/docs-site/node_modules" 2>/dev/null || true   # docs server (serve or live reload)
   docker ps -q --filter "name=volt-enc-" 2>/dev/null | xargs -r docker rm -f >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
@@ -434,7 +565,8 @@ install_if_needed "$ROOT/volt-web" "app"
 echo
 echo "======================================================================"
 echo "  Opening http://localhost:5173   —  sign in: admin@rtm.example / volt1234"
-echo "  (Ctrl-C here stops both the app and the API.)"
+[ "$DOCS" = "1" ] && echo "  Docs:   http://localhost:$DOCS_PORT  (or the ? button in the app)"
+echo "  (Ctrl-C here stops the app, the API and the docs.)"
 echo "======================================================================"
 echo
 npm run dev

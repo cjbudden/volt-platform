@@ -14,6 +14,7 @@ import { api, type PublishingRule, type PublishingPoints } from '../api'
 import { PageHead } from '../scaffold'
 import { RuleEditor } from '../RuleEditor'
 import { navigate } from '../router'
+import { usePageNotice } from '../notices'
 
 export default function PublishingPage() {
   const [rules, setRules] = useState<PublishingRule[] | null>(null)
@@ -21,16 +22,16 @@ export default function PublishingPage() {
   const [err, setErr] = useState('')
   const [open, setOpen] = useState<{ kind: 'schema' | 'owner'; id: string; name: string } | null>(null)
   async function load() {
-    try { const [r, p] = await Promise.all([api.publishingRules(), api.publishingPoints()]); setRules(r); setPoints(p) }
+    try { const [r, p] = await Promise.all([api.publishingRules(), api.publishingPoints()]); setRules(r); setPoints(p); setErr('') }
     catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() }, [])
+  usePageNotice('load', err ? { kind: 'error', title: "Couldn't load publishing rules.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
   const typeRules = (rules ?? []).filter(r => r.scope_kind === 'schema')
   const ownerRules = (rules ?? []).filter(r => r.scope_kind === 'owner')
   return (
     <>
       <PageHead title="Publishing Rules" sub="Where on-demand content goes when it is published, and how it stays available: geo, access, paywall, expiry. The account default applies to everything; a content type, a channel, an event or a station can override any part of it, and so can a single item." />
-      {err && <div className="err">{err}</div>}
 
       <div className="card" style={{ padding: 18, marginBottom: 16 }}>
         <div className="sec-label">Publishing points</div>

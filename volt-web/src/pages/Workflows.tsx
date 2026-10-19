@@ -7,6 +7,7 @@ import {
 import { PageHead } from '../scaffold'
 import { navigate, useRoute } from '../router'
 import { pressable } from '../a11y'
+import { useNotify, usePageNotice, FormStatus } from '../notices'
 import '../workflows.css'
 
 /* ============================================================================
@@ -113,16 +114,19 @@ export default function WorkflowsPage({ canManage }: { canManage: boolean }) {
   useEffect(() => { if (runParam) setOpenRun(runParam) }, [runParam])
   useEffect(() => { if (traceParam) setTraceKey(traceParam) }, [traceParam?.type, traceParam?.id])
 
+  const notify = useNotify()
   usePoll(() => {
-    api.workflowMap().then(setMap).catch(e => setErr(e.message))
+    api.workflowMap().then(m => { setMap(m); setErr('') }).catch(e => setErr(e.message))
     api.workflowRuns({ limit: 60 }).then(r => setRuns(r.runs)).catch(() => {})
     api.workflowEvents(30).then(r => setEvents(r.events)).catch(() => {})
   }, 4000, [])
 
   usePoll(() => {
     if (!traceKey) { setTrace(null); return }
-    api.workflowTrace(traceKey.type, traceKey.id).then(setTrace).catch(e => { setErr(e.message); setTraceKey(null) })
+    api.workflowTrace(traceKey.type, traceKey.id).then(setTrace).catch(e => { notify({ kind: 'error', message: e.message }); setTraceKey(null) })
   }, 4000, [traceKey?.type, traceKey?.id])
+  // The map is polled every few seconds, so a failure clears itself once the server answers again.
+  usePageNotice('load', err ? { kind: 'error', title: "Couldn't load the workflow map.", message: err } : null)
 
   const go = (t: Tab) => navigate(t === 'map' ? '/workflows' : `/workflows/${t}`)
   const openRuns = runs.filter(r => isOpen(r.state))
@@ -147,7 +151,6 @@ export default function WorkflowsPage({ canManage }: { canManage: boolean }) {
       <PageHead title="Workflows"
         sub="The pipeline every channel, recording and file follows, the hooks where add-on services attach, and where each piece of work is right now."
         action={canManage ? <button className="btn primary" onClick={() => go('addons')}>Add-on services</button> : undefined} />
-      {err && <div className="err" style={{ marginBottom: 10 }}>{err}</div>}
 
       <div className="stats wf-stats">
         <Stat label="Running now" value={counts.open} tone={counts.open ? 'sched' : undefined} />
@@ -439,7 +442,8 @@ function HookPanel({ hook, stage, canManage, onClose, onChanged }: {
   const [channels, setChannels] = useState<Channel[]>([])
   const [addonId, setAddonId] = useState('')
   const [scope, setScope] = useState<string[]>([])
-  const [err, setErr] = useState('')
+  const notify = useNotify()
+  const fail = (e: any) => notify({ kind: 'error', message: e.message })
   const [busy, setBusy] = useState(false)
   const hookSubjects = hook.id.startsWith('stream.') ? ['channel', 'event'] : [hook.subject]
 
@@ -452,17 +456,17 @@ function HookPanel({ hook, stage, canManage, onClose, onChanged }: {
 
   async function attach() {
     if (!addonId) return
-    setBusy(true); setErr('')
+    setBusy(true)
     try {
       await api.createAddonTrigger({ addonId, hook: hook.id, filter: scope.length ? { channelIds: scope } : {} })
       setAddonId(''); setScope([]); onChanged()
-    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+    } catch (e: any) { fail(e) } finally { setBusy(false) }
   }
   async function toggle(id: string, enabled: boolean) {
-    try { await api.updateAddonTrigger(id, { enabled }); onChanged() } catch (e: any) { setErr(e.message) }
+    try { await api.updateAddonTrigger(id, { enabled }); onChanged() } catch (e: any) { fail(e) }
   }
   async function remove(id: string) {
-    try { await api.deleteAddonTrigger(id); onChanged() } catch (e: any) { setErr(e.message) }
+    try { await api.deleteAddonTrigger(id); onChanged() } catch (e: any) { fail(e) }
   }
 
   return (
@@ -518,7 +522,6 @@ function HookPanel({ hook, stage, canManage, onClose, onChanged }: {
               )}
           </>
         )}
-        {err && <div className="err">{err}</div>}
       </div>
     </div>
   )
@@ -691,8 +694,7 @@ function RunDrawer({ id, onClose, onTrace }: { id: string; onClose: () => void; 
         {run && (
           <div className="drawer-f">
             {(run.subject_type === 'recording' || run.subject_type === 'vod_asset') && <button className="btn ghost" onClick={() => onTrace(run)}>Show on map</button>}
-            <span style={{ flex: 1 }} />
-            {err && <span className="drawer-f-err">{err}</span>}
+            <FormStatus error={err} />
             {isOpen(run.state)
               ? <button className="btn ghost" disabled={busy} onClick={() => act(() => api.cancelAddonRun(run.id))}>Cancel run</button>
               : <button className="btn primary" disabled={busy} onClick={() => act(() => api.retryAddonRun(run.id))}>Run again</button>}
@@ -713,12 +715,15 @@ function AddonsView({ canManage, map, onChanged }: { canManage: boolean; map: Wo
   const [secret, setSecret] = useState<{ name: string; secret: string } | null>(null)
   const [test, setTest] = useState<Record<string, string>>({})
   const [err, setErr] = useState('')
+  const notify = useNotify()
+  const fail = (e: any) => notify({ kind: 'error', message: e.message })
 
   const load = () => {
-    api.addons().then(r => setAddons(r.addons)).catch(e => setErr(e.message))
+    api.addons().then(r => { setAddons(r.addons); setErr('') }).catch(e => setErr(e.message))
     api.addonTriggers().then(r => setTriggers(r.triggers)).catch(() => {})
   }
   useEffect(load, [])
+  usePageNotice('addons-load', err ? { kind: 'error', title: "Couldn't load add-on services.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
   async function runTest(a: AddonService) {
     setTest(t => ({ ...t, [a.id]: 'Sending a signed ping…' }))
@@ -726,21 +731,20 @@ function AddonsView({ canManage, map, onChanged }: { canManage: boolean; map: Wo
     catch (e: any) { setTest(t => ({ ...t, [a.id]: e.message })) }
   }
   async function toggle(a: AddonService) {
-    try { await api.updateAddon(a.id, { enabled: !a.enabled }); load(); onChanged() } catch (e: any) { setErr(e.message) }
+    try { await api.updateAddon(a.id, { enabled: !a.enabled }); load(); onChanged() } catch (e: any) { fail(e) }
   }
   async function rotate(a: AddonService) {
-    try { const r = await api.rotateAddonSecret(a.id); setSecret({ name: a.name, secret: r.signingSecret }) } catch (e: any) { setErr(e.message) }
+    try { const r = await api.rotateAddonSecret(a.id); setSecret({ name: a.name, secret: r.signingSecret }) } catch (e: any) { fail(e) }
   }
   // Two presses, no browser dialog: deleting an add-on also deletes its run history.
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
   async function remove(a: AddonService) {
     if (confirmDel !== a.id) { setConfirmDel(a.id); setTimeout(() => setConfirmDel(c => (c === a.id ? null : c)), 4000); return }
-    try { await api.deleteAddon(a.id); setConfirmDel(null); load(); onChanged() } catch (e: any) { setErr(e.message) }
+    try { await api.deleteAddon(a.id); setConfirmDel(null); load(); onChanged() } catch (e: any) { fail(e) }
   }
 
   return (
     <>
-      {err && <div className="err">{err}</div>}
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
         <div className="sec-label" style={{ margin: 0, flex: 1 }}>Add-on services</div>
         {canManage && <button className="btn primary" onClick={() => setEdit('new')}>New add-on</button>}
@@ -798,7 +802,7 @@ function AddonsView({ canManage, map, onChanged }: { canManage: boolean; map: Wo
                 <div className="hintxt">{t.filter?.channelIds?.length ? `${t.filter.channelIds.length} channel${t.filter.channelIds.length === 1 ? '' : 's'} only` : 'Every channel and event'}{h && !h.live ? ' · this hook is planned and does not fire yet' : ''}</div>
               </div>
               <span className={`nt-pill ${t.enabled ? 'ok' : ''}`}>{t.enabled ? 'On' : 'Off'}</span>
-              {canManage && <button className="btn ghost" onClick={async () => { try { await api.deleteAddonTrigger(t.id); load(); onChanged() } catch (e: any) { setErr(e.message) } }}>Detach</button>}
+              {canManage && <button className="btn ghost" onClick={async () => { try { await api.deleteAddonTrigger(t.id); load(); onChanged() } catch (e: any) { fail(e) } }}>Detach</button>}
             </div>
           )
         })}
@@ -894,8 +898,7 @@ function AddonForm({ addon, onClose, onSaved }: { addon: AddonService | null; on
             <div className="hintxt">A run with no outcome by then is marked timed out.</div></div>
         </div>
         <div className="drawer-f">
-          {err && <span className="drawer-f-err">{err}</span>}
-          <span style={{ flex: 1 }} />
+          <FormStatus error={err} />
           <button className="btn ghost" onClick={onClose}>Cancel</button>
           <button className="btn primary" disabled={busy || !name.trim() || !accepts.length || (kind === 'webhook' && !endpoint.trim())} onClick={save}>{busy ? 'Saving…' : addon ? 'Save' : 'Create'}</button>
         </div>

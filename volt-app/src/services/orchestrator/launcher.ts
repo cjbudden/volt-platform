@@ -27,8 +27,28 @@ export interface LaunchResult {
  */
 export type Liveness = 'alive' | 'dead' | 'unknown';
 
+/**
+ * WHERE AND HOW BIG, from placement (services/fleet/assign.ts).
+ *
+ * Optional on every launch, and every field optional within it: a launcher
+ * that cannot use a hint ignores it (local and docker run on one box), and a
+ * launch with no hints behaves exactly as it did before placement existed.
+ */
+export interface LaunchHints {
+  /** Task-level reservation, sized from the stream's output settings. */
+  cpuUnits?: number;
+  memoryMib?: number;
+  gpus?: number;
+  /** The one capacity provider to launch into (a pool sized for this stream). */
+  capacityProvider?: string;
+  /** Pin to this running server (ECS memberOf on ec2InstanceId). */
+  ec2InstanceId?: string;
+  /** Our compute_hosts id for the pinned server (bookkeeping only). */
+  hostId?: string;
+}
+
 export interface TaskLauncher {
-  launchEncoder(streamId: string, jobConfig: Record<string, any>): Promise<LaunchResult>;
+  launchEncoder(streamId: string, jobConfig: Record<string, any>, hints?: LaunchHints): Promise<LaunchResult>;
   /**
    * Launch a radio station.
    *
@@ -44,10 +64,10 @@ export interface TaskLauncher {
    * Shaka Packager and no SPEKE client, since there is no video to package and
    * audio radio is not DRM'd. Sizing differs by roughly an order of magnitude.
    */
-  launchRadio(streamId: string, jobConfig: Record<string, any>): Promise<LaunchResult>;
+  launchRadio(streamId: string, jobConfig: Record<string, any>, hints?: LaunchHints): Promise<LaunchResult>;
   launchThumbnailer(jobConfig: Record<string, any>): Promise<LaunchResult>;
   /** Launch the separate captions/whisper add-on task (own image + GPU sizing). */
-  launchCaptions(streamId: string, jobConfig: Record<string, any>): Promise<LaunchResult>;
+  launchCaptions(streamId: string, jobConfig: Record<string, any>, hints?: LaunchHints): Promise<LaunchResult>;
   stopTask(taskArn: string, reason: string): Promise<void>;
   /**
    * IS THIS TASK STILL RUNNING?
@@ -80,7 +100,7 @@ export interface TaskLauncher {
 
 /** Records intent, hands back fake ARNs. Deterministic for tests. */
 export class MockTaskLauncher implements TaskLauncher {
-  public launched: Array<{ kind: string; streamId?: string; job: Record<string, any> }> = [];
+  public launched: Array<{ kind: string; streamId?: string; job: Record<string, any>; hints?: LaunchHints }> = [];
   public stopped: string[] = [];
   /**
    * Arns THIS instance handed out.
@@ -105,9 +125,9 @@ export class MockTaskLauncher implements TaskLauncher {
    */
   public failLaunchFor = new Set<string>();
   private n = 0;
-  async launchEncoder(streamId: string, job: Record<string, any>): Promise<LaunchResult> {
+  async launchEncoder(streamId: string, job: Record<string, any>, hints?: LaunchHints): Promise<LaunchResult> {
     if (this.failLaunchFor.has(streamId)) throw new Error('mock: the launcher refused the task');
-    this.launched.push({ kind: 'encoder', streamId, job });
+    this.launched.push({ kind: 'encoder', streamId, job, hints });
     const arn = `mock:encoder:${streamId}:${++this.n}`;
     this.issued.add(arn);
     return { taskArn: arn, lifecycle: 'spot' };
@@ -118,14 +138,14 @@ export class MockTaskLauncher implements TaskLauncher {
     this.issued.add(arn);
     return { taskArn: arn, lifecycle: 'on_demand' };
   }
-  async launchCaptions(streamId: string, job: Record<string, any>): Promise<LaunchResult> {
-    this.launched.push({ kind: 'captions', streamId, job });
+  async launchCaptions(streamId: string, job: Record<string, any>, hints?: LaunchHints): Promise<LaunchResult> {
+    this.launched.push({ kind: 'captions', streamId, job, hints });
     const arn = `mock:captions:${streamId}:${++this.n}`;
     this.issued.add(arn);
     return { taskArn: arn, lifecycle: 'on_demand' };
   }
-  async launchRadio(streamId: string, job: Record<string, any>): Promise<LaunchResult> {
-    this.launched.push({ kind: 'radio', streamId, job });
+  async launchRadio(streamId: string, job: Record<string, any>, hints?: LaunchHints): Promise<LaunchResult> {
+    this.launched.push({ kind: 'radio', streamId, job, hints });
     const arn = `mock:radio:${streamId}:${++this.n}`;
     this.issued.add(arn);
     return { taskArn: arn, lifecycle: 'on_demand' };
@@ -207,52 +227,82 @@ export class EcsTaskLauncher implements TaskLauncher {
     };
   }
 
-  /** Build the RunTaskCommand input (kept separate so it can be unit-tested). */
-  runTaskInput(taskDef: string, containerName: string, env: Record<string, string>): Record<string, any> {
+  /**
+   * Build the RunTaskCommand input (kept separate so it can be unit-tested).
+   *
+   * PACKING. Every launch asks ECS to BINPACK on CPU: of the servers that can
+   * take the task, the one with the least CPU left wins, so new work fills
+   * running servers before ECS scales out a new one. Without a strategy ECS was
+   * free to spread tasks across half-empty servers, which is the fragmentation
+   * consolidation would otherwise have to undo with live moves.
+   *
+   * HINTS (services/fleet/assign.ts) narrow that further: the reservation is
+   * sized to the stream (a task-level cpu/memory override, so a package-only
+   * channel no longer reserves the same half-server as a full 1080p ladder),
+   * the pool is the one sized for it, and a chosen server is pinned with a
+   * memberOf constraint. With no hints the input is what it always was, plus
+   * binpack.
+   */
+  runTaskInput(taskDef: string, containerName: string, env: Record<string, string>, hints?: LaunchHints): Record<string, any> {
     const o = config.orchestrator;
-    return {
+    const container: Record<string, any> = {
+      name: containerName,
+      environment: Object.entries(env).map(([name, value]) => ({ name, value })),
+    };
+    if (hints?.gpus) container.resourceRequirements = [{ type: 'GPU', value: String(hints.gpus) }];
+    const overrides: Record<string, any> = { containerOverrides: [container] };
+    if (hints?.cpuUnits) overrides.cpu = String(hints.cpuUnits);
+    if (hints?.memoryMib) overrides.memory = String(hints.memoryMib);
+    const input: Record<string, any> = {
       cluster: o.ecsCluster,
       taskDefinition: taskDef,
       count: 1,
-      capacityProviderStrategy: [
-        { capacityProvider: o.spotProvider, weight: 4 },
-        { capacityProvider: o.onDemandProvider, weight: 1, base: 1 },
-      ],
+      capacityProviderStrategy: hints?.capacityProvider
+        ? [{ capacityProvider: hints.capacityProvider, weight: 1 }]
+        : [
+            { capacityProvider: o.spotProvider, weight: 4 },
+            { capacityProvider: o.onDemandProvider, weight: 1, base: 1 },
+          ],
+      placementStrategy: [{ type: 'binpack', field: 'cpu' }],
       networkConfiguration: this.netConfig(),
-      overrides: {
-        containerOverrides: [
-          {
-            name: containerName,
-            environment: Object.entries(env).map(([name, value]) => ({ name, value })),
-          },
-        ],
-      },
+      overrides,
       propagateTags: 'TASK_DEFINITION',
     };
+    if (hints?.ec2InstanceId) {
+      input.placementConstraints = [{ type: 'memberOf', expression: `ec2InstanceId == ${hints.ec2InstanceId}` }];
+    }
+    return input;
   }
 
-  private async run(taskDef: string, containerName: string, env: Record<string, string>): Promise<LaunchResult> {
+  private async run(taskDef: string, containerName: string, env: Record<string, string>, hints?: LaunchHints): Promise<LaunchResult> {
     const { RunTaskCommand } = await import('@aws-sdk/client-ecs');
     const ecs = await this.client();
-    const input = this.runTaskInput(taskDef, containerName, env);
-    const out = await ecs.send(new RunTaskCommand(input as any));
+    let out = await ecs.send(new RunTaskCommand(this.runTaskInput(taskDef, containerName, env, hints) as any));
+    // A pinned server can fill up between the plan and the launch (another
+    // start, a task that grew). That must cost a better choice, never the
+    // start: retry once unpinned, in the same pool, and let binpack choose.
+    if (!out.tasks?.[0]?.taskArn && hints?.ec2InstanceId) {
+      console.warn(`[ecs] pinned placement on ${hints.ec2InstanceId} refused (${JSON.stringify(out.failures ?? [])}); retrying unpinned`);
+      const { ec2InstanceId: _pin, hostId: _h, ...rest } = hints;
+      out = await ecs.send(new RunTaskCommand(this.runTaskInput(taskDef, containerName, env, rest) as any));
+    }
     const task = out.tasks?.[0];
     if (!task?.taskArn) throw new Error(`ECS RunTask returned no task: ${JSON.stringify(out.failures ?? [])}`);
     const lifecycle = (task.capacityProviderName ?? '').includes('spot') ? 'spot' : 'on_demand';
     return { taskArn: task.taskArn, lifecycle };
   }
 
-  launchEncoder(streamId: string, job: Record<string, any>) {
+  launchEncoder(streamId: string, job: Record<string, any>, hints?: LaunchHints) {
     return this.run(config.orchestrator.encoderTaskDef, 'encoder', {
       JOB_CONFIG_JSON: JSON.stringify(job),
-    });
+    }, hints);
   }
   launchThumbnailer(job: Record<string, any>) {
     return this.run(config.orchestrator.thumbnailerTaskDef, 'thumbnailer', {
       THUMB_CONFIG_JSON: JSON.stringify(job),
     });
   }
-  launchRadio(streamId: string, job: Record<string, any>) {
+  launchRadio(streamId: string, job: Record<string, any>, hints?: LaunchHints) {
     // A station is long-lived and tiny. It still takes the same spot-preferring
     // capacity strategy as everything else, because the station reconnects to
     // its source on restart and the relay's listeners reconnect to the mount,
@@ -260,14 +310,14 @@ export class EcsTaskLauncher implements TaskLauncher {
     // recovery.
     return this.run(config.orchestrator.radioTaskDef, 'radio', {
       JOB_CONFIG_JSON: JSON.stringify(job),
-    });
+    }, hints);
   }
-  launchCaptions(streamId: string, job: Record<string, any>) {
+  launchCaptions(streamId: string, job: Record<string, any>, hints?: LaunchHints) {
     // GPU-only capacity: the captions task def targets a GPU capacity provider so
     // this heavy add-on never lands on the lean encoder fleet.
     return this.run(config.orchestrator.captionsTaskDef, 'captions', {
       CAPTIONS_CONFIG_JSON: JSON.stringify(job),
-    });
+    }, hints);
   }
   async stopTask(taskArn: string, reason: string): Promise<void> {
     const { StopTaskCommand } = await import('@aws-sdk/client-ecs');

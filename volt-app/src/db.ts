@@ -1,7 +1,10 @@
 import { Pool, PoolClient } from 'pg';
 import { config } from './config';
+import { scaleConfig } from './scale/config';
 
-export const pool = new Pool({ connectionString: config.databaseUrl, max: 10 });
+// DB_POOL_MAX (default 10, as before). Behind RDS Proxy many tasks share a
+// smaller set of real connections, so this can stay modest per task.
+export const pool = new Pool({ connectionString: config.databaseUrl, max: scaleConfig.dbPoolMax });
 
 /** Simple query helper. */
 export async function query<T = any>(text: string, params: any[] = []): Promise<T[]> {

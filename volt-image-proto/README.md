@@ -1,4 +1,11 @@
-# volt-image-proto — on-the-fly image service (prototype)
+# volt-image-proto: on-the-fly image service (superseded prototype)
+
+> **Superseded. Not used by the app.** The production image service is part of
+> the control plane (`volt-app/src/modules/images.ts`) and is documented in
+> [`volt-app/docs/IMAGES.md`](../volt-app/docs/IMAGES.md). Nothing starts or
+> imports this folder, including `run-on-mac.sh`. It is kept as the record of
+> the August 2026 prototype. Do not deploy it: it accepts unsigned (`unsafe`)
+> URLs and has no size, source or concurrency guards.
 
 A high-performance image endpoint built on **sharp** (libvips): request any source
 image at a size + treatment via the URL, rendered on demand and cached. See
@@ -38,8 +45,9 @@ node src/server.mjs    # then open http://localhost:8791/gallery
 - `gallery.html` — visual gallery of transforms
 - `test.mjs` — assertions · `gen.mjs` — test-card generator
 
-## Productionise
-Resolve `{path}` from S3 (per-account prefix), put the derivative cache on S3 +
-CloudFront, require signatures (drop `unsafe`), add max-dimension + format guards,
-and add a URL-signing helper to the console/SDK. Then mount as `src/modules/images.ts`
-in the API.
+## Productionise: done
+Every item that was listed here (S3 sources per account, S3 + CloudFront
+derivative cache, required signatures, size and format guards, a signing helper
+for the console and SDK, `src/modules/images.ts`) shipped in the control plane
+on 15 Oct 2026. The prototype's path-style URLs still work there, behind a
+signature. See `volt-app/docs/IMAGES.md`, section 9.

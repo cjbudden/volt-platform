@@ -29,6 +29,10 @@ export interface Gate {
   status: GateStatus;
   detail: string;
   billable: boolean;
+  /** The word shown on the gate (docs/STATUS_MAP.md): what the status MEANS for
+   *  this gate, e.g. a stopped Server is UNASSIGNED in a shared pool and NOT
+   *  CONNECTED on a single server. `status` stays the machine-readable state. */
+  badge?: string;
 }
 
 export type OverallStatus = 'idle' | 'starting' | 'ready' | 'onair' | 'degraded' | 'error' | 'stopped';
@@ -97,10 +101,16 @@ export interface HealthInput {
    * behaviour. A caller that cannot say when the run started is not made worse.
    */
   runStartedAt?: number | null;
+  /** The servers around this stream, for the words on a stopped Server gate. */
+  fleet?: FleetContext | null;
+  /** Epoch ms of the latest status report from the encoder (connection-lost check). */
+  lastReportAt?: number | null;
   /** Auto connect state, so the diagnosis can say whether a retry is coming. */
   recovery?: {
     autoConnect?: boolean; armed?: boolean; attempts?: number; maxAttempts?: number;
     gaveUp?: boolean; lastError?: string | null;
+    /** An operator (or the schedule) asked it to stop, and nobody has started it since. */
+    stopRequestedAt?: string | number | null; stopRequestedBy?: string | null; desiredStopped?: boolean;
   } | null;
 }
 
@@ -115,10 +125,120 @@ export function recoveryOf(row: any): NonNullable<HealthInput['recovery']> | nul
     maxAttempts: config.orchestrator.resumeMaxAttempts,
     gaveUp: row.resume_gave_up_at != null,
     lastError: row.resume_last_error ?? null,
+    stopRequestedAt: row.stop_requested_at ?? null,
+    stopRequestedBy: row.stop_requested_by ?? null,
+    desiredStopped: row.desired_state === 'stopped',
   };
 }
 
+/** Servers that could carry this stream (services/fleetContext.ts). */
+export interface FleetContext {
+  /** Encoder servers up right now (compute_hosts state = up). */
+  serversUp: number;
+  /** One server runs everything (local or docker launcher): a stopped stream is
+   *  not unassigned there, it is simply not connected to it. */
+  single: boolean;
+}
+
+/** No status report for this long while running means the connection is lost. */
+export const REPORT_LOST_MS = 90_000;
+
+/**
+ * THE WORD ON EACH GATE (docs/STATUS_MAP.md). The status says how serious it is
+ * (and picks the colour); the badge says what it means for that gate, so a
+ * stopped channel does not read "STOPPED" five times, and a server that is
+ * simply not assigned to this stream does not read as stopped at all.
+ */
+export function applyBadges(gates: Gate[], inp: HealthInput): Gate[] {
+  const f = inp.fleet ?? null;
+  for (const g of gates) {
+    const st = g.status; const d = g.detail || '';
+    switch (g.gate) {
+      case 'server':
+        if (st === 'healthy') g.badge = 'READY';
+        else if (st === 'starting') g.badge = /stopping/i.test(d) ? 'STOPPING' : 'ASSIGNING';
+        else if (st === 'failed') g.badge = /still running/i.test(d) ? 'STOP FAILED' : /connection lost/i.test(d) ? 'CONNECTION LOST' : 'FAILED';
+        else if (st === 'degraded') g.badge = 'DEGRADED';
+        else {
+          // stopped or idle: say what the servers are doing, not that "it" stopped
+          if (f?.single) { g.badge = 'NOT CONNECTED'; g.detail = 'server up · this stream is not running on it'; }
+          else if (f && f.serversUp > 0) { g.badge = 'UNASSIGNED'; g.detail = `${f.serversUp} server${f.serversUp === 1 ? '' : 's'} running · none assigned to this stream (£0)`; }
+          else { g.badge = 'NO SERVER'; g.detail = 'no server running · one starts with the stream (£0)'; }
+        }
+        break;
+      case 'input':
+        g.badge = st === 'healthy' ? 'RECEIVING' : st === 'degraded' ? 'DEGRADED' : st === 'failed' ? 'NO SIGNAL'
+          : st === 'starting' ? 'CONNECTING' : inp.hasPrimarySource ? 'NOT CONNECTED' : 'NO SOURCE';
+        break;
+      case 'encoder':
+        g.badge = st === 'healthy' ? 'RUNNING' : st === 'degraded' ? 'STALLED' : st === 'failed' ? 'FAILED'
+          : st === 'starting' ? (/stopping/i.test(d) ? 'STOPPING' : 'STARTING') : 'NOT RUNNING';
+        break;
+      case 'output':
+        g.badge = st === 'healthy' ? 'PRODUCING' : st === 'degraded' ? 'STALLED' : st === 'failed' ? 'FAILED'
+          : st === 'starting' ? 'STARTING' : 'NONE';
+        break;
+      case 'public':
+        g.badge = st === 'healthy' ? 'ON AIR' : st === 'ready' ? 'READY (PRIVATE)' : st === 'failed' ? 'ON AIR · NO CONTENT'
+          : st === 'starting' ? 'WARMING UP' : 'OFF AIR';
+        break;
+    }
+  }
+  return gates;
+}
+
+/** How long a stop may take before "still running" becomes an error. */
+export const STOP_GRACE_MS = 45_000;
+
+/**
+ * STOPPED ON PURPOSE IS NOT AN ERROR.
+ *
+ * Pressing Stop (or a scheduled stop) records the intent (desired stopped,
+ * stop_requested_at). From that moment until the next Start, whatever the
+ * teardown throws off -- a relay killed mid-read, a packager that exits
+ * non-zero, "source down" as the inputs close -- is the stop doing its job,
+ * not a fault, and is not reported as one. The events stay in the log.
+ *
+ * One exception, which is the only error a stop can have: the stream does not
+ * actually stop. If the encoder is still running STOP_GRACE_MS after the stop
+ * was issued, the Server gate says so.
+ */
+function stoppedOnPurpose(inp: HealthInput): PipelineHealth | null {
+  const r = inp.recovery;
+  if (!r?.desiredStopped || r.stopRequestedAt == null) return null;
+  const at = typeof r.stopRequestedAt === 'number' ? r.stopRequestedAt : Date.parse(String(r.stopRequestedAt));
+  if (!Number.isFinite(at)) return null;
+  // a stop older than the run now in progress belongs to a previous run
+  if (inp.runStartedAt != null && at < inp.runStartedAt - 1000) return null;
+  const live = inp.ownerStatus === 'live';
+  const ago = Math.max(0, Date.now() - at);
+  const by = String(r.stopRequestedBy ?? '');
+  const who = by.startsWith('schedule') ? 'the schedule' : 'an operator';
+  if (live && ago > STOP_GRACE_MS) {
+    const msg = `stop issued ${Math.round(ago / 1000)} s ago but the encoder is still running`;
+    const gates: Gate[] = [
+      { gate: 'server', label: 'Server', billable: true, status: 'failed', detail: msg },
+      { gate: 'input', label: 'Input', billable: false, status: 'stopped', detail: 'stop issued' },
+      { gate: 'encoder', label: 'Encoder', billable: false, status: 'stopped', detail: 'stop issued' },
+      { gate: 'output', label: 'Output', billable: false, status: 'stopped', detail: 'stop issued' },
+      { gate: 'public', label: 'On air', billable: false, status: 'stopped', detail: 'off air' },
+    ];
+    return { gates: applyBadges(gates, inp), primaryError: { gate: 'server', label: 'Server', message: msg }, onAir: false, live: true, overall: 'error', settling: false, settlingReason: null, diagnosis: null };
+  }
+  const detail = live ? 'stopping…' : `stopped by ${who}`;
+  const gates: Gate[] = [
+    { gate: 'server', label: 'Server', billable: true, status: live ? 'starting' : 'stopped', detail: live ? 'stopping…' : 'stopped (£0)' },
+    { gate: 'input', label: 'Input', billable: false, status: 'stopped', detail: inp.hasPrimarySource ? 'source configured · stopped' : 'no source configured' },
+    { gate: 'encoder', label: 'Encoder', billable: false, status: live ? 'starting' : 'stopped', detail },
+    { gate: 'output', label: 'Output', billable: false, status: 'stopped', detail: 'no output (stopped)' },
+    { gate: 'public', label: 'On air', billable: false, status: 'stopped', detail: 'off air' },
+  ];
+  return { gates: applyBadges(gates, inp), primaryError: null, onAir: false, live, overall: 'stopped', settling: false, settlingReason: null, diagnosis: null };
+}
+
 export function computePipelineHealth(inp: HealthInput): PipelineHealth {
+  const onPurpose = stoppedOnPurpose(inp);
+  if (onPurpose) return onPurpose;
   const { ownerStatus, st, events, logTailErrors } = inp;
   const live = ownerStatus === 'live';
   const ended = ownerStatus === 'ended';
@@ -142,8 +262,15 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
         // milliseconds of skew would be a worse bug than the one being fixed.
         return !Number.isFinite(t) || t >= runStartedAt - 1000;
       });
-  const startIdx = fresh.findIndex((e) => e.type === 'channel.start');
-  const run = startIdx >= 0 ? fresh.slice(0, startIdx + 1) : fresh.slice();
+  // CLEAR QC (POST /api/channels/:id/reset-health): an operator's qc.reset is a
+  // boundary too. What happened before it stays in the log, but no longer
+  // decides the gates: the channel is judged on what happens from then on, and
+  // a fault that is still real (a stalled output, a source that is down) is
+  // reported again by its next event or by the ground truth checks below.
+  const resetIdx = fresh.findIndex((e) => e.type === 'qc.reset');
+  const scoped = resetIdx >= 0 ? fresh.slice(0, resetIdx) : fresh;
+  const startIdx = scoped.findIndex((e) => e.type === 'channel.start');
+  const run = startIdx >= 0 ? scoped.slice(0, startIdx + 1) : scoped.slice();
   const firstOf = (rx: RegExp) => run.find((e) => rx.test(e.type));
   const unresolved = (failRx: RegExp, okRx: RegExp) => {
     const fi = run.findIndex((e) => failRx.test(e.type));
@@ -194,10 +321,18 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   const gates: Gate[] = [];
 
   // ---- 1) SERVER (billable compute) ----------------------------------------
+  // CONNECTION LOST: running, it has reported before, and has gone quiet. The
+  // encoder sends a heartbeat every ten seconds, so ninety seconds of silence
+  // is a lost server or a lost link to it, not a quiet stream.
+  const lastAt = inp.lastReportAt ?? (st?.updated_at ? Date.parse(String(st.updated_at)) : null);
+  const silentMs = live && !crashed && lastAt != null && Number.isFinite(lastAt) ? Date.now() - lastAt : 0;
+  const lost = silentMs > REPORT_LOST_MS;
   gates.push({
     gate: 'server', label: 'Server', billable: true,
-    ...(live
-      ? { status: 'healthy' as GateStatus, detail: 'encoder compute up' }
+    ...(lost
+      ? { status: 'failed' as GateStatus, detail: `connection lost: no report from the encoder for ${Math.round(silentMs / 1000)} s` }
+      : live
+      ? { status: 'healthy' as GateStatus, detail: 'assigned · stream connected' }
       : ended
         ? (crashed
             ? { status: 'failed' as GateStatus, detail: `stopped: ${stopReason}` }
@@ -363,7 +498,7 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   });
 
   return {
-    gates, primaryError, onAir: published && outputValid, live: effLive, overall,
+    gates: applyBadges(gates, inp), primaryError, onAir: published && outputValid, live: effLive, overall,
     // Named so the console can say "starting, retrying" with the captured
     // reason rather than either a bare spinner or a red box.
     settling: settling || false,

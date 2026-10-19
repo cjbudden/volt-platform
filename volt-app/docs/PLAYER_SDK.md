@@ -1,0 +1,261 @@
+# The Volt player SDK
+
+One player, everywhere Volt plays: customers' websites and apps, the share
+preview page, and the console. Phase 1 (this release) is the **web SDK** with
+its skins; the native SDKs follow the same contract (section 9).
+
+Code: `volt-player/src/sdk` (the SDK), `volt-player/src/index.ts` (the
+`window.VoltPlayer` bundle), `volt-web/src/VoltPlayerView.tsx` (the console's
+React wrapper). Tests: `volt-app/test/player-sdk.check.ts` (47, the rules),
+`volt-app/test/player-sdk-api.check.sh` (29, the server side),
+`volt-app/test/player-layouts.check.ts` (12, saved skins vs the bundle).
+
+## 1. What it does
+
+| Feature | Where it works |
+|---|---|
+| Video and audio: HLS and DASH (Shaka), progressive MP3/MP4, the browser's own HLS on Apple devices | every browser with Media Source Extensions; iPhone and Safari natively |
+| **Playlists** from Volt asset ids, plain URLs, or items with metadata | all |
+| **Guide (EPG)**: the programme on air, a schedule panel, the next programme | live channels and events with a published guide |
+| **Up next**: a card before the end of an item (counts down and plays the next) or of a programme (says what starts next) | all |
+| **Start over** (back to the programme's start) and **Go live** | live streams with a DVR window and PROGRAM-DATE-TIME |
+| **Quality menu** (Auto shows what it picked) | adaptive streams with more than one size |
+| **Subtitles menu**, only when the stream has subtitles; the viewer's language is remembered | all |
+| **Audio language menu**, only when there is more than one | all |
+| **Chromecast** (Google Cast web sender, loaded only where it can cast) | Chrome and Edge, desktop and Android |
+| **AirPlay** | Safari (macOS, iPhone, iPad) |
+| Picture in picture, full screen, keyboard (space, arrows, m, f, c) | where the browser supports them |
+| **Viewer beacons** for Analytics (start, heartbeat, end) | any item with a playback token |
+| Themes (no code) and custom skins (code) | all |
+
+## 2. Skins
+
+| Skin | For | Saved in Player setup? |
+|---|---|---|
+| `video` | The front-end video player: title, logo, the controls above, up next, schedule | yes |
+| `event` | An event's whole life: promo (poster, the two teams or the line-up), countdown, postponed / cancelled, the paywall's passes with Buy, the replay afterwards; the `video` player while it is live | yes |
+| `audio_square` | A square tile: artwork, track, play | yes |
+| `audio_wave` | A strip: artwork, track, a live waveform (from the audio itself when the browser allows, a gentle idle motion otherwise) | yes |
+| `audio_nowplaying` | Big artwork, track details, the last five tracks, what is coming up | yes |
+| `admin` | The console's player: no branding or casting, the bar under the picture, what is actually playing (resolution, bitrate, buffer, distance from live), a stats overlay | no (console only) |
+
+The four original station layouts (`card`, `bar`, `hero`, `stage`) remain. A
+station whose saved layout is an SDK skin is handed to the SDK player by the
+same embed snippet, with no change on the customer's page.
+
+**What the audio skins show**, best first: the track now playing (the
+station's metadata, enriched with artwork), else the programme on air (the
+guide), else the item's own title and artwork. "Recently played" is the last
+five songs from the station's content log (idents and ad breaks left out);
+"Coming up" is the guide.
+
+## 3. Embedding
+
+**From the console**: the **Embed player** button beside Share, on a channel's
+page (icon) and in an event's drawer (Player). It offers video skins only (a
+channel gets the video player; an event gets the event player or the plain
+video player), the app and its key (with "Create a key for this embed", shown
+once), account branding or a colour, corners, autoplay, schedule / start over,
+Chromecast, AirPlay, the checkout and sign-in pages for paid events, and a
+width. The preview is the real player in demo mode (for events: Countdown,
+Paid, Postponed, Live, Replay). The tag carries its own settings, so nothing
+is saved and two sites can embed the same event differently. Radio stations
+keep their own Player setup page with the audio skins.
+
+**No code** (a CMS block, a static page):
+
+```html
+<div data-volt-player data-app-key="pk_live_…" data-asset-id="<channel, event or VOD id>"
+     data-skin="video" data-primary-color="#e11d48"></div>
+<script src="https://<your volt>/player/volt-player.js"></script>
+```
+
+Other attributes: `data-event-id` (the event skin), `data-purchase-url`,
+`data-sign-in-url`, `data-playlist="<id>,<id>,…"`, `data-src="<manifest URL>"`,
+`data-epg-channel="<channel id>"`, `data-station-id` (radio now playing),
+`data-theme='{"radius":4,"logoUrl":"https://…"}'`, `data-logo`,
+`data-autoplay`, `data-muted`, `data-poster`. The original station embed
+(`data-channel-id` only) still works and follows the station's saved config.
+
+**With code**:
+
+```js
+const player = await VoltPlayer.VoltPlayer.create({
+  el: '#player', appKey: 'pk_live_…',
+  playlist: ['<asset id>', '<asset id>', 'https://cdn.example.com/promo/master.m3u8'],
+  epg: { channelId: '<channel id>' },          // or an array of programmes
+  theme: { primary: '#e11d48', logoUrl: 'https://…/logo.png', upNextSeconds: 20 },
+  skin: 'video', autoplay: true, muted: true,
+})
+player.on('itemchange', ({ index }) => …)
+player.on('programmechange', (p) => …)
+player.next(); player.seek(120); player.setTheme({ radius: 0 })
+```
+
+Options (all optional except `el`): `skin`, `theme`, `apiBase`, `appKey`,
+`source`, `item`, `playlist`, `startIndex`, `assetId`, `epg`, `stationId`,
+`autoplay`, `muted`, `poster`, `watermark`, `startAt`, `requestHeaders`,
+`beacons`, `cast` (`false`, or `{ receiverAppId }`), `airplay`, `media`,
+`strings` (translations), `demo`, `onEvent`, and for events `eventId`,
+`viewerToken`, `purchaseUrl`, `signInUrl`.
+
+Events: `state`, `ready`, `play`, `pause`, `ended`, `error`, `itemchange`,
+`programmechange`, `upnext`, `qualitychange`, `castchange`,
+`presentationchange`, `locked`, `purchase`, `signin`. A declarative embed
+dispatches `volt-player-ready` (the player in `event.detail`) so a page can
+listen without creating the player itself.
+
+## 4. The contract (state and commands)
+
+A skin is given **state** and **commands**, never the stream. The full shapes
+are in `volt-player/src/sdk/types.ts`; the native SDKs expose the same fields.
+
+State (the parts skins use most): `status` (idle, loading, ready, playing,
+paused, buffering, ended, error, offline), `playing`, `error`, `currentTime`,
+`duration`, `live`, `seekable`, `dvr`, `atLiveEdge`, `behindLive`, `wallClock`,
+`programme`, `nextProgramme`, `schedule`, `canStartOver`, `qualities`,
+`quality`, `activeQuality`, `textTracks`, `textTrack`, `audioTracks`, `items`,
+`index`, `item`, `upNext`, `nowPlaying`, `history`, `nextTrack`, `cast`,
+`airplay`, `fullscreen`, `pip`, `hasPicture`, `audioOnly`, `volume`, `muted`,
+and for events `event`, `presentation`, `msToStart`, `access` (mode, message,
+products) and `replaying`; status `locked` means the gate wants a purchase or
+a sign-in.
+
+Commands: `play`, `pause`, `toggle`, `seek`, `seekBy`, `goLive`, `startOver`,
+`setQuality`, `setTextTrack`, `setAudioTrack`, `setVolume`, `toggleMute`,
+`setRate`, `next`, `previous`, `playItem`, `cancelUpNext`, `toggleFullscreen`,
+`togglePip`, `cast`, `airplay`, `levels` (frequency data for a visualiser),
+`purchase`, `signIn`, `playReplay`, `refreshAccess`.
+
+## 5. Theme (no code) and custom skins (code)
+
+**The theme** is saved in Player setup (Radio > station > Player) and applies
+to every built-in skin. Stored as the two colour columns plus
+`player_configs.options.theme`:
+
+| Token | Meaning | CSS variable |
+|---|---|---|
+| `primary` | buttons, progress, live dot | `--vp-primary`, `--vp-primary-ink` |
+| `secondary` | chrome and cards | `--vp-secondary`, `--vp-secondary-ink` |
+| `background`, `text` | the chrome's own colours (text is replaced if unreadable) | `--vp-bg`, `--vp-text`, `--vp-muted` |
+| `radius` | corners, 0-28 px | `--vp-radius` |
+| `font` | a font the page loads | `--vp-font` |
+| `logoUrl`, `logoPosition` | https or a path on the site; top left, top right, bottom right, hidden | |
+| `upNextSeconds`, `autoAdvance` | when the up-next card appears; play the next item by itself | |
+| `controls` | which controls show (title, 10 s buttons, volume, quality, subtitles, audio, start over, schedule, up next, recently played, PiP, full screen, Chromecast, AirPlay) | |
+
+Text on a colour is always black or white, whichever reads better; a chosen
+text colour below 3:1 contrast is replaced. "Use account branding" fills the
+colours and logo from Admin > Account settings.
+
+**A custom skin** is a `mount(ctx)` and an `update(state)`:
+
+```js
+VoltPlayer.registerSkin('acme', () => ({
+  mount(ctx) { /* build DOM in ctx.root, place ctx.stage (the picture), wire ctx.commands */ },
+  update(state) { /* cheap: change what changed */ },
+}))
+VoltPlayer.VoltPlayer.create({ el: '#p', skin: 'acme', appKey, assetId })
+```
+
+`VoltPlayer.kit` has the pieces the built-in skins use (icons, buttons with
+tooltips, menus, sliders, auto-hide, time formatting). A complete example:
+`volt-player/examples/custom-skin.html`. `demo: { … }` renders any state with
+no stream, for designing a skin.
+
+## 6. Events: countdown, phases, paid access
+
+`GET /api/player/event?appKey=&eventId=` gives the event skin its title,
+promo (from the event's schema.org metadata: competition, venue and round, the
+home and away teams or performers with logos, the poster), the start in epoch
+ms, the promoter's messages, the published replay, and **the phase**, which
+the control plane decides and the player never guesses from its clock:
+
+| Phase | When | The skin shows |
+|---|---|---|
+| `pre` | before the start | countdown (days, hours, minutes, seconds), the start in the viewer's own time, Add to calendar (.ics) |
+| `offline` | past the start, not live yet | "Starting soon"; the stream starts by itself |
+| `live` | live, inside its public window, output valid | the video player |
+| `postponed` | metadata `eventStatus` EventPostponed / EventRescheduled | was / now, or "a new date will be announced" |
+| `cancelled` | EventCancelled | said plainly, no countdown |
+| `ended` / `replay` | after the end, without / with a published VOD | the closing message / Watch the replay |
+
+The player polls the phase every 30 s (every 5 s in the last two minutes and
+during a delayed start) and loads the stream the moment it is live.
+
+**Paid and members-only events.** The play gate answers a paywall with the
+passes (name, what it covers, price in the viewer's locale). The skin lists
+them with Buy at any phase, so viewers buy before the start. Buy opens the
+checkout page (`purchaseUrl`, with `{productKey}`, `{assetId}`, `{price}`,
+`{currency}` filled in) or, without one, emits `purchase` for the host page's
+own checkout. Once the viewer has bought or signed in, the page passes their
+Volt viewer session token: `player.setViewerToken(token)`, and the gate is
+asked again. "Already bought? Check again" does the same. A region block is
+shown as a message.
+
+## 7. Live: guide, up next, start over
+
+The guide comes from `GET /api/player/epg?appKey=&channelId=` (programmes from
+6 hours back to 24 ahead, not the radio content log, refreshed every 5
+minutes). The programme shown is the one **at the playhead**: a viewer three
+minutes behind live sees the change three minutes later.
+
+Start over needs the stream's wall clock (HLS PROGRAM-DATE-TIME, which the Volt
+packager writes) and a DVR window that reaches back to the programme's start.
+The button only appears when both are true, so it never promises a beginning
+that has already left the window.
+
+## 8. Casting
+
+**Chromecast**: the TV is sent the stream URL and plays it itself, so the URL
+must be reachable from the TV and allow its origin (CORS); Volt's delivery
+does. The receiver is Google's Default Media Receiver unless an app id is set
+(`cast: { receiverAppId }`; a branded receiver is registered in the Google
+Cast console). **AirPlay** uses Safari's picker; on Apple devices the player
+plays HLS natively so there is a URL to hand over. Both are off on share
+previews (a private preview stays on the device it was opened on) and in the
+console.
+
+## 9. Where Volt uses it
+
+| Page | Skin | Notes |
+|---|---|---|
+| Share preview (`/share/<token>`) | `video` in the account's primary colour | watermark inside the picture (stays in full screen); beacons filed as "Share link"; falls back to hls.js only if the bundle is missing |
+| Recording page | `admin` | playlists under `/api/` carry the operator's token |
+| Media library (video preview) | `admin` | |
+| Player setup preview (radio) | the chosen skin, in demo mode | exactly what embeds will render |
+| Embed player (channel and event pages) | `video`, or `event` for events | builds the tag; preview in demo mode |
+| Customer embeds | any | the station snippet, or the SDK options above |
+
+The console imports the SDK source (`@volt/player`), loaded on first use so
+pages that play nothing do not download Shaka.
+
+## 10. Native SDKs (next phases)
+
+Same state, commands, theme tokens and skins, built on each platform's own
+player so DRM, background audio and system controls work properly:
+
+| Platform | Built on | Casting |
+|---|---|---|
+| iOS, iPadOS, tvOS (Swift package) | AVPlayer; SwiftUI skins | AirPlay (system), Chromecast (Google Cast SDK) |
+| Android phone, tablet, Android TV, Fire TV (Kotlin) | Media3 ExoPlayer; Compose skins (TV: D-pad focus) | Chromecast (Cast framework) |
+| Chromecast receiver | CAF receiver with the Volt skin | (is the target) |
+| Samsung Tizen, LG webOS | this web SDK in a TV shell, remote-key navigation | |
+| Roku | BrightScript / SceneGraph | |
+
+The rules in `volt-player/src/sdk/schedule.ts` and `theme.ts` are ported line
+for line, and `test/player-sdk.check.ts`'s cases become each SDK's unit tests.
+
+## 11. Server side
+
+| Endpoint | What it gives the player |
+|---|---|
+| `POST /api/availability` (play gate) | `delivery` (HLS, DASH, and MP3 for radio) for channels, **events** (live in their public window) and **VOD**, plus `meta` (title, description, artwork, length, live); a paywall answer carries the passes and the meta |
+| `GET /api/player/event` | an event's phase, times, promo, messages and replay (cached 10 s) |
+| `GET /api/player/epg` | the guide around now (cached a minute, keyed and scoped like every player call) |
+| `POST /api/player/now-playing` | the track now, plus `history` (last five songs) |
+| `POST /api/player/session` | a station's sources and saved config (skin + theme) |
+| `PUT /api/player-config/:id` | saves `layout` (any skin above except `admin`) and `options.theme` |
+
+Migrations `0055_player_sdk_skins.sql` and `0056_player_event_skin.sql` let a
+config name the SDK skins.

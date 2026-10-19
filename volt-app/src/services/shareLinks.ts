@@ -1,3 +1,4 @@
+import { accountBrand } from '../modules/accountSettings';
 /**
  * Share links: time-limited, standalone, single-resource preview grants.
  *
@@ -64,7 +65,7 @@ export const ACCESS_PERIODS: Record<string, number> = {
 
 /** Reason codes a resolve can fail with (kept stable for the page + tests). */
 export type ShareDenyReason = 'not_found' | 'revoked' | 'expired' | 'view_cap' | 'pin_required' | 'pin_wrong'
-  | 'code_required' | 'code_wrong' | 'code_expired';
+  | 'code_required' | 'code_wrong' | 'code_expired' | 'geo_blocked';
 
 export interface ShareRow {
   id: string; account_id: string; resource_kind: ShareResourceKind; resource_id: string;
@@ -165,10 +166,14 @@ export function manifestUrls(kind: ShareResourceKind, resourceId: string, master
 export async function loadResource(kind: ShareResourceKind, resourceId: string, accountId: string): Promise<any | null> {
   if (kind === 'vod') {
     const a = await one<any>(
+      // Any asset the account owns: recorded from a channel or an event, or
+      // uploaded (no group: the account owns it directly, as in vod.ts). This
+      // joined channels only, so event and uploaded assets could not be shared.
       `SELECT v.* FROM vod_assets v
-         JOIN channels c ON c.id=v.channel_id
-         JOIN groups g   ON g.id=c.group_id
-        WHERE v.id=$1 AND g.account_id=$2`,
+         LEFT JOIN channels c ON c.id=v.channel_id
+         LEFT JOIN events e   ON e.id=v.event_id
+         LEFT JOIN groups g   ON g.id=COALESCE(c.group_id, e.group_id)
+        WHERE v.id=$1 AND COALESCE(g.account_id, v.account_id)=$2`,
       [resourceId, accountId]
     );
     if (!a) return null;
@@ -293,17 +298,24 @@ export async function openShare(raw: string, opts: { pin?: string; email?: strin
   if (!resource) return { ok: false, reason: 'not_found' };
 
   // geo/rights: same gate as public playback (VOD has an assetId to evaluate)
+  // ACCOUNT-WIDE GEO (services/geoAccess.ts): a share link is the account's
+  // content too, live or on demand.
+  {
+    const { accountGeo, geoBlocks } = await import('./geoAccess');
+    const why = geoBlocks(await accountGeo(row.account_id), opts.geo, 'This preview');
+    if (why) return { ok: false, reason: 'geo_blocked' };
+  }
   let mode: 'play' | 'replacement' | 'blocked' = 'play';
   let playAssetId = resource.id;
   if (row.resource_kind === 'vod') {
-    const rights = await evaluateAccess(resource.id, opts.geo);
+    const rights = await evaluateAccess(resource.id, opts.geo, { accountId: row.account_id });
     if (!rights.allowed) {
       if (rights.replacementAssetId) { mode = 'replacement'; playAssetId = rights.replacementAssetId; }
       else return { ok: false, reason: 'not_found' }; // treat a hard blackout as no-content on a share page
     }
   }
 
-  const account = await one<any>(`SELECT name FROM accounts WHERE id=$1`, [row.account_id]);
+  const account = await accountBrand(row.account_id);
   const creator = row.created_by ? await one<any>(`SELECT display_name, email FROM users WHERE id=$1`, [row.created_by]) : null;
 
   // view accounting + first-open stamp (atomic)
@@ -331,6 +343,7 @@ export async function openShare(raw: string, opts: { pin?: string; email?: strin
   const tok = mintPlaybackToken({
     accountId: row.account_id, appId: null, assetId: playAssetId,
     assetKind: row.resource_kind, geo: opts.geo, ttlSec: 300,
+    source: 'share',
   });
   const download = row.access_type === 'allow_download';
   return {
@@ -347,7 +360,8 @@ export async function openShare(raw: string, opts: { pin?: string; email?: strin
       hls: resource.hls, dash: resource.dash,
       mode,
       playbackToken: tok.token, expiresIn: tok.expiresIn,
-      brand: { account: account?.name ?? 'Volt' },
+      // the account's logo and colours (Admin > Account settings)
+      brand: { account: account.name, logo: account.logo, primary: account.primary, secondary: account.secondary },
       sharedBy: creator?.display_name ?? creator?.email ?? null,
       message: row.message,
       expiresAt: row.expires_at,

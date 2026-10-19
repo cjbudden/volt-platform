@@ -34,10 +34,14 @@ import { query, one } from '../db';
 import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest, ApiError } from '../util/http';
-import { verifyKey, checkRestrictions, type AppRow } from '../services/apiKeys';
+import { verifyKey, checkRestrictions, appForKey } from '../services/apiKeys';
 import { cachedTrackMeta, buildCard } from '../services/radio/trackMeta';
 import { publicMp3Url } from '../services/radio/jobConfig';
 import { icyState } from '../services/radio/icyMeta';
+import { cached } from '../scale/cache';
+import { scaleConfig } from '../scale/config';
+import { assetKindFor } from '../services/viewerPath';
+import { playerEventBatch } from '../scale/batches';
 
 export const playerRouter = Router();
 export const playerAdminRouter = Router();
@@ -80,6 +84,28 @@ function shapeConfig(row: any) {
  * stations and one brand actually wants.
  */
 async function configFor(accountIdVal: string, channelId: string) {
+  // Cached: every listener start asked for it. Edits invalidate through the
+  // player_configs trigger (migration 0046).
+  return cached(`pcfg:${accountIdVal}:${channelId}`,
+    { ttlSec: scaleConfig.cache.rulesTtlSec, tags: [`playercfg:${accountIdVal}`, `asset:${channelId}`] },
+    () => configForUncached(accountIdVal, channelId));
+}
+
+/**
+ * The station as the public player sees it, cached. 404 for another tenant's
+ * station or a missing one alike (the null is cached under the asking account).
+ */
+function radioStation(acct: string, channelId: string): Promise<any | null> {
+  return cached(`radiost:${acct}:${channelId}`,
+    { ttlSec: scaleConfig.cache.rulesTtlSec, tags: [`asset:${channelId}`, `acct:${acct}`] },
+    () => one<any>(
+      `SELECT c.id, c.name, c.kind, c.status, c.metadata, c.brand_ref, g.account_id
+         FROM channels c JOIN groups g ON g.id = c.group_id
+        WHERE c.id = $1 AND g.account_id = $2 AND c.kind = 'radio'`,
+      [channelId, acct]));
+}
+
+async function configForUncached(accountIdVal: string, channelId: string) {
   const row = await one<any>(
     `SELECT * FROM player_configs
       WHERE account_id = $1 AND (channel_id = $2 OR channel_id IS NULL)
@@ -115,7 +141,7 @@ playerRouter.post('/session', asyncHandler(async (req, res) => {
   const key = await verifyKey(b.appKey);
   if (!key || key.kind !== 'publishable') throw new ApiError(401, 'invalid publishable key');
 
-  const app = await one<AppRow>(`SELECT id, type, restrictions, enabled FROM apps WHERE id=$1`, [key.app_id]);
+  const app = await appForKey(key);
   if (!app) throw new ApiError(401, 'app not found for key');
   const reason = checkRestrictions(app, {
     referrer: req.get('referer') || undefined,
@@ -130,12 +156,7 @@ playerRouter.post('/session', asyncHandler(async (req, res) => {
   // THE STATION MUST BELONG TO THE KEY'S ACCOUNT. Answered as 404 whether it
   // is another tenant's or does not exist, so this cannot be used to discover
   // which uuids are real.
-  const ch = await one<any>(
-    `SELECT c.id, c.name, c.kind, c.status, c.metadata, c.brand_ref, g.account_id
-       FROM channels c JOIN groups g ON g.id = c.group_id
-      WHERE c.id = $1 AND g.account_id = $2 AND c.kind = 'radio'`,
-    [b.channelId, key.account_id]
-  );
+  const ch = await radioStation(key.account_id, b.channelId);
   if (!ch) throw notFound('Station not found');
 
   const cfg = await configFor(key.account_id, ch.id);
@@ -183,7 +204,7 @@ playerRouter.post('/now-playing', asyncHandler(async (req, res) => {
   const b = sessionSchema.parse(req.body);
   const key = await verifyKey(b.appKey);
   if (!key || key.kind !== 'publishable') throw new ApiError(401, 'invalid publishable key');
-  const app = await one<AppRow>(`SELECT id, type, restrictions, enabled FROM apps WHERE id=$1`, [key.app_id]);
+  const app = await appForKey(key);
   if (!app) throw new ApiError(401, 'app not found for key');
   const reason = checkRestrictions(app, {
     referrer: req.get('referer') || undefined,
@@ -192,12 +213,7 @@ playerRouter.post('/now-playing', asyncHandler(async (req, res) => {
   });
   if (reason) throw new ApiError(403, reason);
 
-  const ch = await one<any>(
-    `SELECT c.id, c.name, c.status, c.metadata, c.brand_ref
-       FROM channels c JOIN groups g ON g.id = c.group_id
-      WHERE c.id = $1 AND g.account_id = $2 AND c.kind = 'radio'`,
-    [b.channelId, key.account_id]
-  );
+  const ch = await radioStation(key.account_id, b.channelId);
   if (!ch) throw notFound('Station not found');
 
   const cfg = await configFor(key.account_id, ch.id);
@@ -209,6 +225,17 @@ playerRouter.post('/now-playing', asyncHandler(async (req, res) => {
     artworkUrl: cfg.fallbackArtworkUrl ?? ch.brand_ref ?? null,
   });
 
+  // THE LAST FIVE TRACKS (the SDK's now-playing skin), each with what the
+  // metadata cache knows (artwork, album). Cache reads only, like the card.
+  const recent = await recentTracks(ch.id, icy?.title ?? null).catch(() => []);
+  const history = [];
+  for (const r of recent) {
+    const m = await cachedTrackMeta(r.raw).catch(() => null);
+    if (!m || !m.title) continue;
+    history.push({ title: m.title, artist: m.artist ?? null, album: m.album ?? null, year: m.year ?? null,
+      artworkUrl: m.artworkUrl ?? null, startedAt: r.startedAt });
+  }
+
   res.json({
     ...card,
     onAir: ch.status === 'live',
@@ -216,7 +243,152 @@ playerRouter.post('/now-playing', asyncHandler(async (req, res) => {
     // station actually sent rather than guessing from the parsed result.
     raw: icy?.title ?? null,
     since: icy?.since ?? null,
+    history,
+    // What is next is only known from a schedule, not from ICY; the SDK reads the guide for that.
+    next: null,
   });
+}));
+
+/**
+ * The last tracks a station played, from its content log (the ICY titles the
+ * metadata reader records as programmes). Songs only: idents and ad breaks are
+ * not "recently played". Cached for a few seconds, because every listener's
+ * player asks the same question.
+ */
+function recentTracks(channelId: string, excludeRaw: string | null): Promise<Array<{ raw: string; startedAt: number }>> {
+  return cached(`np-hist:${channelId}`, { ttlSec: 10, tags: [`asset:${channelId}`] }, async () => {
+    const rows = await query<any>(
+      `SELECT title, starts_at FROM programmes
+        WHERE channel_id = $1 AND source_ref LIKE 'icy:%' AND COALESCE(metadata->>'class', 'song') = 'song'
+        ORDER BY starts_at DESC LIMIT 7`, [channelId]);
+    return rows.map((r: any) => ({ raw: r.title as string, startedAt: new Date(r.starts_at).getTime() }));
+  }).then((list) => {
+    // The newest row is the track playing now: leave it out of the history.
+    const out = list.filter((x, i) => !(i === 0 && excludeRaw && x.raw === excludeRaw));
+    return out.slice(0, 5);
+  });
+}
+
+// ---------------------------------------------------------------------------
+//  PUBLIC: the guide, for the SDK player's schedule, up next and start over
+// ---------------------------------------------------------------------------
+
+const epgQuery = z.object({
+  appKey: z.string().min(8),
+  channelId: z.string().uuid(),
+  /** Hours back and forward. Back so "start over" and the schedule show what aired. */
+  past: z.coerce.number().min(0).max(24).default(6),
+  hours: z.coerce.number().min(1).max(72).default(24),
+});
+
+/**
+ * GET /api/player/epg?appKey=pk_…&channelId=<channel or event>
+ *
+ * The published guide around now: programmes from `past` hours ago to `hours`
+ * ahead. Keyed and origin-checked like every player call; a channel of another
+ * account answers 404 like one that does not exist. The radio content log (the
+ * as-run ICY titles) is not a guide and is left out. Cached briefly and safe
+ * for the edge: the same for every viewer of the channel.
+ */
+playerRouter.get('/epg', asyncHandler(async (req, res) => {
+  const q = epgQuery.parse(req.query);
+  const key = await verifyKey(q.appKey);
+  if (!key || key.kind !== 'publishable') throw new ApiError(401, 'invalid publishable key');
+  const app = await appForKey(key);
+  if (!app) throw new ApiError(401, 'app not found for key');
+  const reason = checkRestrictions(app, { referrer: req.get('referer') || undefined, origin: req.get('origin') || undefined, ip: req.ip });
+  if (reason) throw new ApiError(403, reason);
+  const kind = await assetKindFor(key.account_id, q.channelId);
+  if (kind !== 'channel' && kind !== 'event') throw notFound('Channel not found');
+  const col = kind === 'event' ? 'event_id' : 'channel_id';
+  const programmes = await cached(`player-epg:${q.channelId}:${q.past}:${q.hours}:${Math.floor(Date.now() / 60000)}`,
+    { ttlSec: 60, tags: [`asset:${q.channelId}`, `epg:${q.channelId}`] }, async () => {
+      const rows = await query<any>(
+        `SELECT id, title, starts_at, ends_at, metadata FROM programmes
+          WHERE ${col} = $1 AND (source_ref IS NULL OR source_ref NOT LIKE 'icy:%')
+            AND status <> 'cancelled'
+            AND ends_at > now() - make_interval(hours => $2::int) AND starts_at < now() + make_interval(hours => $3::int)
+          ORDER BY starts_at LIMIT 400`, [q.channelId, Math.round(q.past), Math.round(q.hours)]);
+      return rows.map((r: any) => {
+        const md = r.metadata ?? {};
+        const img = [md.imageUrl, md.image, md.poster].find((v) => typeof v === 'string' && /^(https?:\/\/|\/(?!\/))/.test(v)) ?? null;
+        return {
+          id: r.id, title: r.title,
+          subtitle: md.subtitle ?? md.episodeTitle ?? null,
+          description: md.description ?? md.synopsis ?? null,
+          imageUrl: img,
+          startsAt: new Date(r.starts_at).getTime(), endsAt: new Date(r.ends_at).getTime(),
+        };
+      });
+    });
+  res.set('cache-control', 'public, max-age=60');
+  res.json({ channelId: q.channelId, programmes });
+}));
+
+// ---------------------------------------------------------------------------
+//  PUBLIC: an event, for the SDK's event skin (countdown, phases, replay)
+// ---------------------------------------------------------------------------
+
+const eventQuery = z.object({ appKey: z.string().min(8), eventId: z.string().uuid() });
+
+/**
+ * GET /api/player/event?appKey=pk_…&eventId=<uuid>
+ *
+ * Everything the event skin shows around the stream: the title and promo
+ * (poster, teams or performers), when it starts in the viewer's own clock,
+ * which phase it is in, the promoter's messages, and the published replay.
+ *
+ * THE PHASE IS DECIDED HERE, not by the player's clock: a start time passing
+ * does not mean the event started, and a called-off match must not count down.
+ *
+ *   cancelled / postponed  from the metadata's schema.org eventStatus
+ *   live                   live, inside its public window, output valid
+ *   pre                    before the start
+ *   replay / ended         after it, with or without a published replay
+ *   offline                past the start but not producing (a delayed start)
+ */
+playerRouter.get('/event', asyncHandler(async (req, res) => {
+  const q = eventQuery.parse(req.query);
+  const key = await verifyKey(q.appKey);
+  if (!key || key.kind !== 'publishable') throw new ApiError(401, 'invalid publishable key');
+  const app = await appForKey(key);
+  if (!app) throw new ApiError(401, 'app not found for key');
+  const reason = checkRestrictions(app, { referrer: req.get('referer') || undefined, origin: req.get('origin') || undefined, ip: req.ip });
+  if (reason) throw new ApiError(403, reason);
+  if ((await assetKindFor(key.account_id, q.eventId)) !== 'event') throw notFound('Event not found');
+  const body = await cached(`player-event:${q.eventId}`, { ttlSec: 10, tags: [`asset:${q.eventId}`] }, async () => {
+    const e = await one<any>(
+      `SELECT id, name, status, scheduled_start, scheduled_end, public_start, public_end, metadata FROM events WHERE id = $1`, [q.eventId]);
+    if (!e) return null;
+    const md = e.metadata ?? {};
+    const ms = (v: any) => (v ? new Date(v).getTime() : null);
+    const startsAt = ms(e.public_start) ?? ms(e.scheduled_start);
+    const endsAt = ms(e.public_end) ?? ms(e.scheduled_end);
+    const replay = await one<any>(
+      `SELECT id FROM vod_assets WHERE event_id = $1 AND published ORDER BY created_at DESC LIMIT 1`, [q.eventId]);
+    const { presentationFromEventStatus, promoFromMetadata } = await import('../services/eventPromo');
+    const { resolveEventManifest } = await import('./publicLive');
+    const live = (await resolveEventManifest(q.eventId, 'master.m3u8')).ok;
+    const now = Date.now();
+    const presentation = presentationFromEventStatus(md.eventStatus)
+      ?? (live ? 'live'
+        : e.status === 'ended' || (endsAt != null && now > endsAt) ? (replay ? 'replay' : 'ended')
+        : startsAt != null && now < startsAt ? 'pre'
+        : 'offline');
+    const prev = ms(md.previousStartDate);
+    const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+    return {
+      id: e.id, title: str(md.name) ?? e.name, description: str(md.description),
+      startsAt, endsAt, previousStartsAt: prev && prev !== startsAt ? prev : null,
+      presentation,
+      preMessage: str(md.preMessage), endedMessage: str(md.endedMessage),
+      promo: promoFromMetadata(md, { type: md['@type'] ?? md.type ?? null }),
+      replayAssetId: replay?.id ?? null,
+    };
+  });
+  if (!body) throw notFound('Event not found');
+  res.set('cache-control', 'public, max-age=10');
+  res.json(body);
 }));
 
 // ---------------------------------------------------------------------------
@@ -260,7 +432,7 @@ playerRouter.post('/events', asyncHandler(async (req, res) => {
   const b = eventSchema.parse(req.body);
   const key = await verifyKey(b.appKey);
   if (!key || key.kind !== 'publishable') throw new ApiError(401, 'invalid publishable key');
-  const app = await one<AppRow>(`SELECT id, type, restrictions, enabled FROM apps WHERE id=$1`, [key.app_id]);
+  const app = await appForKey(key);
   if (!app) throw new ApiError(401, 'app not found for key');
   const reason = checkRestrictions(app, {
     referrer: req.get('referer') || undefined,
@@ -271,21 +443,14 @@ playerRouter.post('/events', asyncHandler(async (req, res) => {
 
   // Scoped like everything else: events for a station that is not this
   // account's are dropped rather than recorded against the wrong tenant.
-  const ch = await one<any>(
-    `SELECT c.id FROM channels c JOIN groups g ON g.id = c.group_id
-      WHERE c.id=$1 AND g.account_id=$2`,
-    [b.channelId, key.account_id]
-  );
-  if (!ch) throw notFound('Station not found');
+  // Ownership comes from the cache, and the rows go into a batch: one
+  // multi-row INSERT per second per process instead of one per event.
+  if ((await assetKindFor(key.account_id, b.channelId)) !== 'channel') throw notFound('Station not found');
 
   const origin = req.get('origin') || req.get('referer') || null;
   for (const e of b.events) {
-    await query(
-      `INSERT INTO player_events (account_id, channel_id, app_id, session_id, event, origin, layout, detail, at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb, COALESCE(to_timestamp($9/1000.0), now()))`,
-      [key.account_id, ch.id, app.id, b.sessionId, e.event, origin?.slice(0, 300) ?? null,
-       e.layout ?? null, JSON.stringify(e.detail ?? {}), e.at ?? null]
-    );
+    playerEventBatch.add([key.account_id, b.channelId, app.id, b.sessionId, e.event, origin?.slice(0, 300) ?? null,
+      e.layout ?? null, JSON.stringify(e.detail ?? {}), e.at != null ? new Date(e.at) : new Date()]);
   }
   // 204: there is nothing useful to say back, and a body would be parsed by
   // clients that should be using sendBeacon and ignoring the response.
@@ -301,7 +466,7 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 const configSchema = z.object({
   channelId: z.string().uuid().nullable().optional(),
   name: z.string().min(1).max(80).optional(),
-  layout: z.enum(['card', 'bar', 'hero']).optional(),
+  layout: z.enum(['card', 'bar', 'hero', 'stage', 'video', 'event', 'audio_square', 'audio_wave', 'audio_nowplaying']).optional(),
   primaryColor: z.string().regex(HEX, 'colour must be #rrggbb').optional(),
   secondaryColor: z.string().regex(HEX, 'colour must be #rrggbb').optional(),
   options: z.record(z.any()).optional(),
@@ -413,4 +578,14 @@ export const LAYOUTS = [
     detail: 'A single row: play control, scrolling title, volume. For a site header or a sticky footer.' },
   { id: 'hero', name: 'Hero',
     detail: 'Full-width, large artwork behind a blurred wash. For a station\'s own landing page.' },
+  // THE PLAYER SDK'S SKINS (docs/PLAYER_SDK.md): themeable (logo, corner
+  // radius, font, which controls show) and the same on every platform.
+  { id: 'audio_square', name: 'Square', sdk: true,
+    detail: 'A square tile: artwork, track, play. Fits a grid of stations.' },
+  { id: 'audio_wave', name: 'Waveform', sdk: true,
+    detail: 'A strip with artwork, the track and a live waveform.' },
+  { id: 'audio_nowplaying', name: 'Now playing', sdk: true,
+    detail: 'Big artwork and track details, the last five tracks and what is coming up.' },
+  { id: 'video', name: 'Video', sdk: true,
+    detail: 'The full video player: quality and subtitles, schedule, start over, up next, Chromecast and AirPlay.' },
 ];

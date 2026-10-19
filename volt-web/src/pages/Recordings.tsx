@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, type RecordingSource, type RecordingSourcesFeed, type RecordingSourceQuery } from '../api'
 import { PageHead, FChip, EntityCell, StatusPill } from '../scaffold'
 import { navigate } from '../router'
+import { usePageNotice } from '../notices'
 
 /* ============================================================================
    RECORDINGS — TIER 1: the sources that have recorded content.
@@ -102,6 +103,8 @@ export default function Recordings() {
     /* eslint-disable-next-line */
   }, [feed?.counts.capturing])
 
+  usePageNotice('load', err ? { kind: 'error', title: "Couldn't load recordings.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
+
   const counts = feed?.counts
   const rows = feed?.sources ?? []
   const datesSet = !!(recFrom || recTo || madeFrom || madeTo)
@@ -110,7 +113,6 @@ export default function Recordings() {
   return (
     <>
       <PageHead title="Recordings" sub="Everything that has recorded content. Open a source to search, scrub and clip across its whole retained range." />
-      {err && <div className="err">{err}</div>}
 
       <div className="filters">
         <FChip label="All" n={counts?.all ?? 0} on={type === 'all'} onClick={() => setType('all')} />

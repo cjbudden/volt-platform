@@ -3,6 +3,7 @@ import { Orchestrator } from './service';
 import { reconcileFleet } from '../fleet/reconcile';
 import { meterOnce } from '../fleet/meter';
 import { sampleFleet, pruneSamples } from '../fleet/metrics';
+import { adviseConsolidation, pruneFleetPlans } from '../fleet/advisor';
 import { resumeOnce } from './resume';
 import { closeOrphanAirSessions } from '../airSessions';
 
@@ -128,7 +129,7 @@ export function startScheduler(): () => void {
   // Prune telemetry on the same schedule as retention; the ledger is never
   // pruned, because it is the billable record.
   const prune = setInterval(
-    () => pruneSamples(o.sampleRetentionDays).catch((e) => console.error('[fleet] prune error', e)),
+    () => { pruneSamples(o.sampleRetentionDays).catch((e) => console.error('[fleet] prune error', e)); pruneFleetPlans(o.sampleRetentionDays).catch((e) => console.error('[fleet] plan prune error', e)); },
     o.retentionSweepSeconds * 1000
   );
 
@@ -158,6 +159,25 @@ export function startScheduler(): () => void {
   // Sixty seconds rather than the thirty-second tick because an ingest folder is
   // not a real-time surface and every pass hashes files it has already seen; the
   // operator who wants it now has a Scan button.
+  // ENCODER THUMBNAILS: library stills, sprite sheets and hourly VTTs
+  // (services/thumbnails). Own interval, own error boundary: a slow decode can
+  // never delay the pass that keeps channels on air. The pass has a time budget
+  // and resumes where it stopped. Retention runs with it, at most once an hour.
+  let lastThumbSweep = 0;
+  const thumbs = config.thumbnails.enabled ? setInterval(
+    () => import('../thumbnails/builder').then(async (m) => {
+      const r = await m.thumbnailPass();
+      if (r && (r.tiles || r.frames)) console.log(`[thumbnails] ${r.streams} stream(s): ${r.tiles} tile(s), ${r.frames} still(s) in ${r.ms} ms${r.deadline ? ' (budget reached)' : ''}`);
+      if (Date.now() - lastThumbSweep > 3600_000) {
+        lastThumbSweep = Date.now();
+        const sw = await m.sweepThumbnails();
+        if (sw.hours) console.log(`[thumbnails] retention: removed ${sw.hours} hour(s), ${sw.files} file(s)`);
+      }
+    }).catch((e) => console.error('[thumbnails] pass error', e)),
+    config.thumbnails.passSeconds * 1000
+  ) : null;
+  thumbs?.unref?.();
+
   const watch = setInterval(
     () => import('../watchfolder/store').then(async (m) => {
       const rs = await m.scanAllFolders();
@@ -201,6 +221,7 @@ export function startScheduler(): () => void {
     clearInterval(fleet);
     clearInterval(prune);
     clearInterval(watch);
+    if (thumbs) clearInterval(thumbs);
     if (resume) clearInterval(resume);
   };
 }
@@ -229,4 +250,9 @@ export async function fleetPass(): Promise<void> {
   try {
     await sampleFleet();
   } catch (e) { console.error('[fleet] telemetry sample failed', e); }
+  // Last: it reads the samples just taken, and it only ever ADVISES. A
+  // failure here leaves the fleet exactly as it was.
+  try {
+    await adviseConsolidation();
+  } catch (e) { console.error('[fleet] consolidation advice failed', e); }
 }

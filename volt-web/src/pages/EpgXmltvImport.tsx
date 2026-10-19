@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type ImportSource, type ImportRun, type GuideChannel, type ImportCounts, type ImportTestResult, type ImportSourceBody } from '../api'
 import { pressable } from '../a11y'
+import { FormStatus, Notice } from '../notices'
 import XmltvLineup from './EpgXmltvLineup'
 
 /* ============================================================================
@@ -90,6 +91,7 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
   const [channels, setChannels] = useState<GuideChannel[]>([])
   const [err, setErr] = useState('')
   const [form, setForm] = useState<Form | null>(null)
+  const [formErr, setFormErr] = useState('')
   const [panel, setPanel] = useState<Record<string, 'channels' | 'runs' | 'test' | null>>({})
   const [tests, setTests] = useState<Record<string, ImportTestResult | null>>({})
   const urlRef = useRef<HTMLInputElement>(null)
@@ -104,12 +106,12 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
 
   async function save() {
     if (!form) return
-    setErr('')
-    if (!form.name.trim()) { setErr('Name the source after where the guide comes from'); return }
-    if (form.kind === 'url' && !/^https?:\/\//i.test(form.url.trim())) { setErr('Enter the guide URL, starting with https://'); return }
-    if (form.kind === 'url' && form.requestMode === 'per_day' && !form.url.includes('{date}')) { setErr('One request per day needs {date} in the URL, where the day goes'); return }
-    if (form.kind === 'url' && form.requestMode === 'single' && form.url.includes('{date}')) { setErr('{date} is for one request per day. For one request covering the window, use {from} and {to}'); return }
-    if (form.minDaysAhead > form.daysAhead) { setErr('The alert threshold cannot be more than the days kept ahead'); return }
+    setFormErr('')
+    if (!form.name.trim()) { setFormErr('Name the source after where the guide comes from'); return }
+    if (form.kind === 'url' && !/^https?:\/\//i.test(form.url.trim())) { setFormErr('Enter the guide URL, starting with https://'); return }
+    if (form.kind === 'url' && form.requestMode === 'per_day' && !form.url.includes('{date}')) { setFormErr('One request per day needs {date} in the URL, where the day goes'); return }
+    if (form.kind === 'url' && form.requestMode === 'single' && form.url.includes('{date}')) { setFormErr('{date} is for one request per day. For one request covering the window, use {from} and {to}'); return }
+    if (form.minDaysAhead > form.daysAhead) { setFormErr('The alert threshold cannot be more than the days kept ahead'); return }
     if (form.timeMode === 'local' && !form.fallbackTz && !window.confirm("Ignoring the feed's offsets with no source time zone reads every time in each channel's own zone. Continue?")) return
     const before = form.id ? sources?.find(x => x.id === form.id) : null
     const timesChanged = !!before && ((before.fallbackTz ?? '') !== form.fallbackTz || (before.timeMode ?? 'offsets') !== form.timeMode)
@@ -134,7 +136,7 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
       }
       await api.createImportSource({ ...body, name: body.name!, kind: form.kind })
       setForm(null); load()
-    } catch (e: any) { setErr(e.message) }
+    } catch (e: any) { setFormErr(e.message) }
   }
 
   function showResult(id: string, r: { status: string; counts: ImportCounts; warnings: string[]; error?: string }) {
@@ -183,7 +185,7 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
       <div className="drawer" style={{ width: 860, maxWidth: '100vw' }} {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
         <div className="drawer-h"><div className="t">XMLTV import</div><button className="xbtn" onClick={onClose} aria-label="Close">✕</button></div>
         <div className="drawer-b">
-          {err && <div className="err">{err}</div>}
+          {err && <Notice kind="error" variant="compact" message={err} />}
           <input ref={fileRef} type="file" accept=".xml,.gz,.xmltv,application/xml,text/xml,application/gzip" style={{ display: 'none' }}
             onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) upload(f) }} />
 
@@ -310,8 +312,9 @@ export default function XmltvImportDrawer({ onClose, onImported }: { onClose: ()
                 <input type="checkbox" checked={form.autoMap} onChange={e => setForm({ ...form, autoMap: e.target.checked })} />
                 Use channels automatically when the match is certain: our channel has their XMLTV id, or the name is unique on both sides
               </label>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-                <button className="btn ghost" onClick={() => setForm(null)}>Cancel</button>
+              <div className="modal-f">
+                <FormStatus error={formErr} />
+                <button className="btn ghost" onClick={() => { setForm(null); setFormErr('') }}>Cancel</button>
                 <button className="btn primary" onClick={save}>{form.id ? 'Save' : 'Add source'}</button>
               </div>
             </div>

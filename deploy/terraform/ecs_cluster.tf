@@ -50,6 +50,11 @@ resource "aws_autoscaling_group" "spot" {
 
   capacity_rebalance = true
 
+  # Required by managed termination protection: ECS clears the flag on a server
+  # only once it carries no tasks, so scale-in can never remove a server that
+  # is still running a live encoder.
+  protect_from_scale_in = true
+
   mixed_instances_policy {
     instances_distribution {
       on_demand_base_capacity                  = 0
@@ -88,6 +93,9 @@ resource "aws_autoscaling_group" "ondemand" {
   max_size            = var.ondemand_max
   desired_capacity    = var.ondemand_min
 
+  # See the spot group: only empty servers are ever scaled in.
+  protect_from_scale_in = true
+
   launch_template {
     id      = aws_launch_template.ecs.id
     version = "$Latest"
@@ -108,7 +116,9 @@ resource "aws_ecs_capacity_provider" "spot" {
   name = "${var.project}-spot"
   auto_scaling_group_provider {
     auto_scaling_group_arn         = aws_autoscaling_group.spot.arn
-    managed_termination_protection = "DISABLED"
+    # ENABLED: with DISABLED, a scale-in let the Auto Scaling group pick which
+    # server to terminate, and that could be one still carrying a live stream.
+    managed_termination_protection = "ENABLED"
     managed_scaling {
       status                    = "ENABLED"
       target_capacity           = 100
@@ -122,7 +132,9 @@ resource "aws_ecs_capacity_provider" "ondemand" {
   name = "${var.project}-ondemand"
   auto_scaling_group_provider {
     auto_scaling_group_arn         = aws_autoscaling_group.ondemand.arn
-    managed_termination_protection = "DISABLED"
+    # ENABLED: with DISABLED, a scale-in let the Auto Scaling group pick which
+    # server to terminate, and that could be one still carrying a live stream.
+    managed_termination_protection = "ENABLED"
     managed_scaling {
       status                    = "ENABLED"
       target_capacity           = 100
@@ -137,6 +149,8 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
   capacity_providers = [
     aws_ecs_capacity_provider.spot.name,
     aws_ecs_capacity_provider.ondemand.name,
+    aws_ecs_capacity_provider.spot_large.name,
+    aws_ecs_capacity_provider.ondemand_large.name,
     "FARGATE",
   ]
 

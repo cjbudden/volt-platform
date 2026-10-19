@@ -36,9 +36,16 @@ analyticsBeaconRouter.post(
     const b = beaconSchema.parse(req.body);
     let tok: any;
     try {
-      tok = verifyPlaybackToken(b.playbackToken);
+      tok = verifyPlaybackToken(b.playbackToken, { graceSec: 6 * 3600 });
     } catch {
       throw new ApiError(401, 'invalid playback token');
+    }
+    // An expired token may carry a session's heartbeats and its end, not begin
+    // a new one. A share-link page is the exception: it holds one token for
+    // the whole visit (re-resolving would count another view of the link), so
+    // a viewer coming back to the tab starts a new session with it.
+    if (b.event === 'start' && tok.src !== 'share' && Number(tok.exp) * 1000 < Date.now()) {
+      throw new ApiError(401, 'playback token expired');
     }
     const r = await ingest(
       b.sessionId,
@@ -57,6 +64,8 @@ analyticsBeaconRouter.post(
         referer: req.get('referer') || undefined,
         ip: req.ip,
         geo: tok.geo || undefined,
+        // a share-link preview is filed as such, not as an anonymous web play
+        ...(tok.src === 'share' ? { source: 'share' as const, clientApp: 'Share link' } : {}),
       },
       { seconds: b.seconds, bitrateKbps: b.bitrateKbps, ttffMs: b.ttffMs, rebufferMs: b.rebufferMs, bytes: b.bytes }
     );
@@ -198,7 +207,7 @@ analyticsRouter.get(
       totals: {
         views: sum('total_views'),
         uniques: sum('unique_views'),
-        watchHours: Math.round(sum('watch_seconds') / 3600),
+        watchHours: Math.round(sum('watch_seconds') / 36) / 100,   // two decimals: a small test reads as 0.05, not 0
         blocked: sum('blocked_count'),
         peakConcurrent: daily.reduce((a: number, r: any) => Math.max(a, r.peak_concurrent ?? 0), 0),
       },
@@ -206,7 +215,7 @@ analyticsRouter.get(
       liveStreams: live,
       top: top.map((r: any) => ({
         kind: r.kind, id: r.id, name: r.name,
-        views: Number(r.views), watchHours: Math.round(Number(r.watch_seconds) / 3600),
+        views: Number(r.views), watchHours: Math.round(Number(r.watch_seconds) / 36) / 100,
         peakConcurrent: r.peak_concurrent,
       })),
       byApp: merge('by_app'),

@@ -46,7 +46,7 @@ const html = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=
  .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 </style></head><body>
 <div class=wrap>
- <h1><span>⚡</span> Image service — test view</h1>
+ <h1><svg class="vmark" viewBox="0 0 24 24" width="1em" height="1em" style="vertical-align:-0.12em" aria-hidden="true"><defs><linearGradient id="vmk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b8cff"/><stop offset="1" stop-color="#4f46e5"/></linearGradient></defs><path fill="url(#vmk)" d="M14 1 3.5 14H11zM10 23 20.5 10H13z"/></svg> Image service — test view</h1>
  <div class=sub>Upload your own image and see it at any size / crop / filter, exactly how the service would return it. The API URL for each setting is shown so you can confirm the contract. <span class=pill>client-side preview</span> mirrors the sharp service semantics; the checks at the bottom are from the real service.</div>
  <div class=cols>
   <div>

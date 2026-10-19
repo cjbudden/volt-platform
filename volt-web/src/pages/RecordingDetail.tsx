@@ -1,10 +1,12 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { api, getToken, recordingRangeUrl, type RecordingRow, type RecordingTimeline, type VodAssetRow, type RecordingProgramme, type TranscriptSearch } from '../api'
+import { api, recordingRangeUrl, type RecordingRow, type RecordingTimeline, type VodAssetRow, type RecordingProgramme, type TranscriptSearch } from '../api'
 import AudioVisualizer from '../AudioVisualizer'
+import VoltPlayerView from '../VoltPlayerView'
 import ClipTimeline, { gapsInRange, GAP_REASON } from '../ClipTimeline'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import type { Waveform } from '../api'
 import { pressable } from '../a11y'
+import { Notice, PageError } from '../notices'
 import { SendToAddon } from './Workflows'
 
 /* ============================================================================
@@ -291,43 +293,10 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   }
 
   // ---- player wiring --------------------------------------------------------
+  // The Volt player SDK with the admin skin (VoltPlayerView): the same player
+  // customers embed, so a recording plays here exactly as it will for them.
+  // The /api/ playlists carry the operator's token; segments stay public.
   const playUrl = loaded ? recordingRangeUrl(id, loaded.from, loaded.to) : null
-  useEffect(() => {
-    let cancelled = false; let hls: any
-    const v = videoRef.current
-    if (!v || !playUrl) return
-    setPlayerErr('')
-    ;(async () => {
-      const Hls = (await import('hls.js')).default
-      if (cancelled) return
-      if (Hls.isSupported()) {
-        hls = new Hls({
-          // hls.js invokes xhrSetup BEFORE xhr.open; open it ourselves so we can
-          // attach the bearer for the /api playlists (segments stay public).
-          xhrSetup: (xhr: XMLHttpRequest, u: string) => {
-            try {
-              if (new URL(u, window.location.href).pathname.startsWith('/api/')) {
-                xhr.open('GET', u, true)
-                xhr.setRequestHeader('authorization', `Bearer ${getToken()}`)
-              }
-            } catch {}
-          },
-        })
-        hls.loadSource(playUrl); hls.attachMedia(v)
-        hls.on(Hls.Events.MANIFEST_PARSED, () => { v.play().catch(() => {}) })
-        let recoveries = 0
-        hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
-          if (!data.fatal) return
-          if (data.type === Hls.ErrorTypes.MEDIA_ERROR && recoveries < 3) { recoveries++; try { hls.recoverMediaError() } catch {}; return }
-          setPlayerErr('Playback failed: ' + (data.details || data.type))
-          try { hls.stopLoad() } catch {}
-        })
-      } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
-        v.src = playUrl; v.play().catch(() => {})
-      } else setPlayerErr('HLS is not supported in this browser')
-    })()
-    return () => { cancelled = true; try { hls?.destroy() } catch {} }
-  }, [playUrl])
 
   // playhead: player time -> wall clock on the loaded range
   useEffect(() => {
@@ -443,7 +412,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   // on this page, so an unconditional guard let one rejected action replace
   // the working page — including the controls needed to retry — with a line
   // of red text and no way back except navigating away.
-  if (err && !rec) return (<><BackRow onBack={onBack} /><div className="err">{err}</div></>)
+  if (err && !rec) return (<><BackRow onBack={onBack} /><PageError message={err} onRetry={() => { loadRec() }} /></>)
   if (!rec || !domain) return (<><BackRow onBack={onBack} /><div className="loading">Loading recording…</div></>)
 
   const vods = rec.vod_assets ?? []
@@ -512,10 +481,9 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
                   the live audio visualiser (level + spectrum), so a muted review still
                   shows whether there is signal. The <video> element still drives
                   playback/seek; it is just not the visible surface. */}
-              <video ref={videoRef} controls playsInline
-                style={tl?.audioOnly
-                  ? { width: '100%', height: 44, background: '#000', borderRadius: 10, border: '1px solid var(--border)' }
-                  : { width: '100%', height: '100%', maxHeight: 430, background: '#000', borderRadius: 10, border: '1px solid var(--border)', objectFit: 'contain' }} />
+              <VoltPlayerView src={playUrl} mediaRef={videoRef} skin="admin"
+                onError={m => setPlayerErr(m ? 'Playback failed: ' + m : '')}
+                style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)' }} />
               {tl?.audioOnly && (
                 <div style={{ marginTop: 10 }}>
                   <AudioVisualizer media={videoRef.current} height={330} idleText="Load a range and press play" />
@@ -529,7 +497,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
                     onChange={e => setTsQ(e.target.value)}
                     placeholder="Search subtitles… (all words, any order)" />
                   {tsLangs.length > 1 && (
-                    <select className="inp" style={{ width: 64, fontSize: 'var(--fs-sm)', padding: '6px 6px' }} value={tsLang} onChange={e => setTsLang(e.target.value)}>
+                    <select className="inp sel-sm" style={{ width: 76 }} value={tsLang} onChange={e => setTsLang(e.target.value)}>
                       <option value="">all</option>
                       {tsLangs.map(l => <option key={l} value={l}>{l}</option>)}
                     </select>
@@ -556,7 +524,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
               </div>
             )}
           </div>
-          {playerErr && <div className="err" style={{ marginTop: 6 }}>{playerErr}</div>}
+          {playerErr && <div style={{ marginTop: 6 }}><Notice kind="error" variant="compact" message={playerErr} /></div>}
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '8px 0 12px', flexWrap: 'wrap' }}>
             <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-body)' }}>
               <span style={{ color: 'var(--faint)' }}>Position </span>{playheadMs != null ? fmtClock(playheadMs) : '—'}
@@ -580,6 +548,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
           {tl && view && <ClipTimeline
             domain={domain} spans={tl.spans} gaps={tl.gaps ?? []} fallbacks={tl.fallbacks ?? []} view={view} setView={setView}
             programmes={programmes} waveform={wave} waveLoading={waveBusy}
+            streamId={rec.channel_id ?? rec.event_id}
             from={selFrom} to={selTo} loaded={loaded} playheadMs={playheadMs} flash={flash}
             onChange={(f, t) => { setSelFrom(f); setSelTo(t) }}
             onSeek={(ms) => {
@@ -646,7 +615,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
               <a key={a.format} className="btn ghost" href={a.url} download style={{ marginLeft: 6 }}>{a.label}</a>
             ))}
           </div>
-          {actErr && <div className="err" style={{ marginTop: 8 }}>{actErr}</div>}
+          {actErr && <div style={{ marginTop: 8 }}><Notice kind="error" variant="compact" message={actErr} /></div>}
           {gapOffer && (
             <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8, background: 'rgba(251,191,36,.08)', border: '1px solid rgba(251,191,36,.35)', fontSize: 'var(--fs-sm)' }}>
               <div style={{ color: 'var(--text)', marginBottom: 4 }}>

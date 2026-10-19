@@ -129,10 +129,19 @@ def test_the_gpu_rung_differs_only_in_the_codec():
 
 def test_audio_is_the_same_everywhere():
     assert la.audio_track_args(0) == [
-        "-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k", "-ac", "2"]
+        "-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000"]
     # THE OPTIONAL MAP. A source that claims three tracks and delivers two must
     # not take the whole encode down.
     assert la.audio_track_args(2)[1].endswith("?")
+
+
+def test_audio_frames_are_whole_ticks_on_the_packager_clock():
+    """At 44.1 kHz an AAC frame is 2089.796 ticks of 90 kHz; Shaka rounds it to
+    2089 and logs a ~137-tick gap every segment. At the rate we encode to, a
+    frame must be a whole number of ticks so that cannot happen."""
+    args = la.audio_track_args(0)
+    sr = int(args[args.index("-ar") + 1])
+    assert (1024 * 90000) % sr == 0
 
 
 # ------------------------------------------------------------ the invariants

@@ -37,6 +37,8 @@ import subprocess
 import threading
 import time
 
+import ingest_args
+
 BUS_BASE = 20000
 PRIV_BASE = {"primary": 21000, "backup": 22000, "filler": 23000}
 # Transcode failover: the selector feeds ONE chosen source to this port and the
@@ -167,7 +169,15 @@ def relay_cmd(inp, group, idx, progress_url):
     cmd += inp.get("_edge_flags") or ["-fflags", "+genpts"]
     if proto in ("hls", "http", "https") or inp.get("_pace"):
         cmd += ["-re"]
-    cmd += ["-i", inp["url"]]
+    if proto in ("hls", "http", "https"):
+        cmd += ["-i", inp["url"]]
+    else:
+        # SRT / RTMP / DASH / NDI / ST 2110 with their settings (ingest_args.py)
+        cmd += ingest_args.open_args(inp, os.environ.get("WORK_DIR", "/work"), idx=idx, env=os.environ)
+    if ingest_args.needs_encode(inp):
+        # uncompressed sources are encoded once to the rendition, not copied
+        cmd += ingest_args.encode_rendition_args(inp) + ["-f", "mpegts", _priv_url(group, idx)]
+        return cmd
     # EXPLICIT stream selection: a multi-variant master lists every rendition's streams
     # and ffmpeg probes them all (printing 'could not find codec parameters' for the
     # ones it never downloads). Map the first video + first audio deterministically so

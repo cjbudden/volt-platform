@@ -3,7 +3,10 @@ import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, conflict, badRequest } from '../util/http';
+import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { orchestrator } from '../services/orchestrator';
+import { checkVideoSources } from './channels';
+import { cleanParams } from '../services/ingestProtocols';
 import { validateEntityMetadata } from './metadataSchemas';
 import { defaultTypeId } from '../services/contentTypes';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
@@ -29,29 +32,64 @@ const sourceSchema = z.object({
   streamKey: z.string().optional(),
   renditionLabel: z.string().optional(),
   renditionBitrateKbps: z.number().int().positive().optional(),
+  params: z.record(z.union([z.string(), z.number()])).optional(),
 });
 
 async function replaceEventInputs(eventId: string, sources: z.infer<typeof sourceSchema>[]) {
   await query('DELETE FROM stream_inputs WHERE event_id = $1', [eventId]);
   for (const s of sources) {
     await query(
-      `INSERT INTO stream_inputs(event_id, role, protocol, ingest_url, stream_key, rendition_label, rendition_bitrate_kbps)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      `INSERT INTO stream_inputs(event_id, role, protocol, ingest_url, stream_key, rendition_label, rendition_bitrate_kbps, params)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
       [eventId, s.role ?? 'primary', s.protocol, s.ingestUrl ?? null, s.streamKey ?? null,
-       s.renditionLabel ?? null, s.renditionBitrateKbps ?? null]
+       s.renditionLabel ?? null, s.renditionBitrateKbps ?? null, JSON.stringify(cleanParams(s.protocol, s.params))]
     );
   }
 }
 
+// The list standard (util/listQuery.ts). Without a limit the list still comes
+// back whole (up to 1000), as the console expects until it pages.
+const eventList = defineList({
+  path: '/api/events',
+  fields: {
+    id: { sql: 'e.id', type: 'uuid' },
+    name: { sql: 'e.name', type: 'string' },
+    status: { sql: 'e.status', type: 'enum', values: ['scheduled', 'provisioning', 'testing', 'live', 'stopping', 'ended', 'error'] },
+    group_id: { sql: 'e.group_id', type: 'uuid' },
+    scheduled_start: { sql: 'e.scheduled_start', type: 'timestamp', notNull: true },
+    scheduled_end: { sql: 'e.scheduled_end', type: 'timestamp' },
+    public_start: { sql: 'e.public_start', type: 'timestamp' },
+    public_end: { sql: 'e.public_end', type: 'timestamp' },
+    actual_start: { sql: 'e.actual_start', type: 'timestamp' },
+    actual_end: { sql: 'e.actual_end', type: 'timestamp' },
+    auto_vod: { sql: 'e.auto_vod', type: 'boolean' },
+    auto_connect: { sql: 'e.auto_connect', type: 'boolean' },
+    recording_enabled: { sql: 'e.recording_enabled', type: 'boolean' },
+    resilience_tier: { sql: 'e.resilience_tier', type: 'enum', values: ['standard', 'resilient_input', 'full_redundancy'] },
+    desired_state: { sql: 'e.desired_state', type: 'string' },
+    expected_viewers: { sql: 'e.expected_viewers', type: 'number' },
+    xmltv_id: { sql: 'e.xmltv_id', type: 'string' },
+    created_at: { sql: 'e.created_at', type: 'timestamp' },
+    updated_at: { sql: 'e.updated_at', type: 'timestamp' },
+  },
+  search: ['name', 'xmltv_id'],
+  defaultSort: '-scheduled_start',
+  unpagedLimit: 1000,
+  aliases: { groupId: 'group_id', scheduledStart: 'scheduled_start', scheduledEnd: 'scheduled_end', createdAt: 'created_at' },
+});
+
 eventsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const rows = await query(
-      `SELECT e.* FROM events e JOIN groups g ON g.id = e.group_id
-        WHERE g.account_id = $1 ORDER BY e.scheduled_start DESC`,
-      [accountId(req)]
-    );
-    res.json(rows);
+    const base: unknown[] = [accountId(req)];
+    const params = [...base];
+    const pl = parseList(eventList, req.query, params);
+    const from = `FROM events e JOIN groups g ON g.id = e.group_id WHERE g.account_id = $1${whereSql(pl)}`;
+    const rows = await query<any>(`SELECT e.* ${from} ${pageSql(pl)}`, params);
+    const cParams = [...base];
+    const cWhere = pl.count ? whereSql(parseList(eventList, { ...req.query, cursor: undefined, offset: undefined }, cParams)) : '';
+    const total = pl.count ? (await one<any>(`SELECT count(*)::int AS n FROM events e JOIN groups g ON g.id = e.group_id WHERE g.account_id = $1${cWhere}`, cParams))?.n : undefined;
+    res.json(finishPage(req, res, pl, rows, total));
   })
 );
 
@@ -104,6 +142,7 @@ eventsRouter.post(
   '/',
   asyncHandler(async (req, res) => {
     const b = createSchema.parse(req.body);
+    checkVideoSources(b.sources);
     const group = await one<any>('SELECT id, max_concurrent FROM groups WHERE id = $1 AND account_id = $2', [
       b.groupId,
       accountId(req),
@@ -182,6 +221,7 @@ const editEventSchema = z.object({
 });
 const editEvent = asyncHandler(async (req, res) => {
   const b = editEventSchema.parse(req.body);
+  if (b.sources) checkVideoSources(b.sources);
   const raw = (req.body ?? {}) as Record<string, unknown>;
   const has = (k: string) => Object.prototype.hasOwnProperty.call(raw, k);
   const current = await one<any>(

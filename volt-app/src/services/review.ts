@@ -164,8 +164,8 @@ export async function queue(accountId: string, limit = 100) {
        FROM vod_assets v
        LEFT JOIN channels c ON c.id = v.channel_id
        LEFT JOIN events   e ON e.id = v.event_id
-       JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
-      WHERE g.account_id = $1 AND v.review_state IN ('in_review', 'changes_requested')
+       LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
+      WHERE COALESCE(g.account_id, v.account_id) = $1 AND v.review_state IN ('in_review', 'changes_requested')
       ORDER BY v.created_at
       LIMIT $2`,
     [accountId, limit]

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type ReviewQueueRow, type AssetReview, type QcFinding } from '../api'
 import { navigate } from '../router'
+import { Notice, PageError, usePageNotice } from '../notices'
 
 /* ============================================================================
    REVIEW — clips waiting for somebody, and what a machine already found.
@@ -106,7 +107,7 @@ function ReviewPanel({ assetId, onDecided }: { assetId: string; onDecided: () =>
   // on this page, so an unconditional guard let one rejected action replace
   // the working page — including the controls needed to retry — with a line
   // of red text and no way back except navigating away.
-  if (err && !r) return <div className="err">{err}</div>
+  if (err && !r) return <Notice kind="error" variant="compact" title="Couldn't load this review." message={err} actions={[{ label: 'Retry', onClick: () => { load() } }]} />
   if (!r) return <div className="loading">Loading…</div>
 
   async function move(to: AssetReview['state']) {
@@ -190,7 +191,7 @@ function ReviewPanel({ assetId, onDecided }: { assetId: string; onDecided: () =>
           Approving with QC findings outstanding is allowed, and it is recorded against your name.
         </div>
       )}
-      {err && <div className="err" style={{ marginBottom: 10 }}>{err}</div>}
+      {err && <div style={{ marginBottom: 10 }}><Notice kind="error" variant="compact" message={err} /></div>}
 
       {r.history.length > 0 && (
         <>
@@ -231,8 +232,9 @@ export default function ReviewPage() {
     catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() }, [])
+  usePageNotice('load', err && rows ? { kind: 'error', title: "Couldn't load the review queue.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
-  if (err && !rows) return <div className="err">{err}</div>
+  if (err && !rows) return <PageError message={err} onRetry={load} />
   if (!rows) return <div className="loading">Loading the queue…</div>
 
   return (
@@ -245,7 +247,6 @@ export default function ReviewPage() {
         <div className="spacer" />
         <button className="btn ghost" onClick={load}>Refresh</button>
       </div>
-      {err && <div className="err">{err}</div>}
 
       {rows.length === 0 ? (
         <div className="empty">

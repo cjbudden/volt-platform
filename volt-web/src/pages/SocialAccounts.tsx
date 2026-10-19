@@ -3,6 +3,7 @@ import { api, type SocialAccount, type SocialPlatformsStatus } from '../api'
 import { PageHead } from '../scaffold'
 import { navigate } from '../router'
 import { pressable } from '../a11y'
+import { useNotify, usePageNotice } from '../notices'
 
 /* ============================================================================
    SOCIAL ACCOUNTS (Admin). Link the YouTube channels, Facebook Pages and X,
@@ -34,6 +35,8 @@ export default function SocialAccountsPage() {
   const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState('')
   const [setupOpen, setSetupOpen] = useState<string | null>(null)
+  const notify = useNotify()
+  const fail = (e: any) => notify({ kind: 'error', message: e.message })
 
   const load = () => {
     api.socialPlatforms().then(setSt).catch(e => setErr(e.message))
@@ -50,20 +53,20 @@ export default function SocialAccountsPage() {
   }, [])
 
   async function connect(id: string) {
-    setErr(''); setBusy(id)
+    setBusy(id)
     try { const { url } = await api.socialConnect(id); window.location.assign(url) }
-    catch (e: any) { setErr(e.message); setBusy('') }
+    catch (e: any) { fail(e); setBusy('') }
   }
   async function sandbox(id: string) {
-    setErr(''); setBusy(`sb-${id}`)
-    try { await api.socialSandbox(id); load() } catch (e: any) { setErr(e.message) } finally { setBusy('') }
+    setBusy(`sb-${id}`)
+    try { await api.socialSandbox(id); load() } catch (e: any) { fail(e) } finally { setBusy('') }
   }
+  usePageNotice('load', err ? { kind: 'error', title: "Couldn't load social accounts.", message: err, actions: [{ label: 'Retry', onClick: () => { setErr(''); load() } }] } : null)
 
   return (
     <>
       <PageHead title="Social accounts" sub="The channels, Pages and accounts clips can be published to. Each is linked by signing in on the platform; Volt never sees the password, and keeps only an access token, encrypted." />
       {banner && <div className={`nt-banner ${banner.ok ? 'ok' : 'bad'}`} role="status">{banner.text}<button className="xbtn" onClick={() => setBanner(null)} aria-label="Dismiss">✕</button></div>}
-      {err && <div className="err">{err}</div>}
       {st && !st.tokenKeyConfigured && (
         <div className="lock-note"><strong>Set SOCIAL_TOKEN_KEY before linking real accounts.</strong> Tokens are encrypted with a key derived from the sign-in secret until then, and rotating that secret would disconnect every account.</div>
       )}
@@ -118,10 +121,10 @@ export default function SocialAccountsPage() {
                       </div>
                       {a.link_status === 'expired' && a.mode === 'live' && <button className="btn" onClick={() => connect(p.id)}>Reconnect</button>}
                       <div className={`sw ${a.enabled ? '' : 'off'}`} title={a.enabled ? 'Enabled: can be published to' : 'Disabled'}
-                        {...pressable(() => { api.socialSetEnabled(a.id, !a.enabled).then(load).catch(e => setErr(e.message)) }, { label: a.enabled ? 'Disable account' : 'Enable account' })}><i /></div>
+                        {...pressable(() => { api.socialSetEnabled(a.id, !a.enabled).then(load).catch(fail) }, { label: a.enabled ? 'Disable account' : 'Enable account' })}><i /></div>
                       <button className="btn ghost" onClick={() => {
                         if (window.confirm(`Disconnect ${a.account_label ?? a.name}? Posts already published stay on ${p.label}; Volt stops publishing to it and forgets its token.`))
-                          api.socialDisconnect(a.id).then(load).catch(e => setErr(e.message))
+                          api.socialDisconnect(a.id).then(load).catch(fail)
                       }}>Disconnect</button>
                     </div>
                   )

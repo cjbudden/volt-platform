@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type FleetHost, type FleetUsage, type StreamUsage, type UsageBucket } from '../api'
 import { pressable } from '../a11y'
+import { PageError, usePageNotice } from '../notices'
 
 /* ============================================================================
    FLEET — the servers, and the billable time they produced.
@@ -355,7 +356,9 @@ export default function FleetPage() {
     /* eslint-disable-next-line */
   }, [period])
 
-  if (err && !usage) return <div className="card p-4"><div className="err">{err}</div></div>
+  usePageNotice('load', err && usage ? { kind: 'error', title: "Couldn't refresh the fleet.", message: err, actions: [{ label: 'Retry', onClick: () => { load(period) } }] } : null)
+
+  if (err && !usage) return <PageError message={err} onRetry={() => load(period)} />
   if (!usage || !hosts) return <div className="card p-4"><div className="loading">Reading the fleet…</div></div>
 
   const t = usage.totals
@@ -377,7 +380,6 @@ export default function FleetPage() {
         </div>
       </div>
 
-      {err && <div className="err" style={{ marginBottom: 12 }}>{err}</div>}
 
       <div className="card p-4" style={{ marginBottom: 16 }}>
         <div className="flex" style={{ gap: 34, flexWrap: 'wrap' }}>

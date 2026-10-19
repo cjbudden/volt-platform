@@ -10,13 +10,84 @@ import { config } from '../config';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { liveDirFor } from './liveOrigin';
+import { fleetContext } from './fleetContext';
 import { computePipelineHealth, recoveryOf, type PipelineHealth } from './pipelineHealth';
 import { recommendInstance, buildBilling, type Billing } from './billing';
+import { serverStatusFor, type ServerStatus } from './fleet/serverStatus';
 
 const DVR_MAX_SEC = 14400; // 4h cap for 24x7 channels
 
+/**
+ * CPU AND BYTES RECEIVED for the run in progress, from numbers already kept:
+ *
+ *   cpu     the encoder's own reading of its processes (its ten-second
+ *           heartbeat, stream_metrics.py), as a share of the CPU it may use.
+ *           An encoder that cannot measure itself (a Mac running it natively)
+ *           sends none, and the host's sampled CPU stands in, marked as the
+ *           whole machine, with how many streams share it.
+ *   ingest  bytes each input has received since the run started, and the
+ *           rate over the last heartbeat.
+ *
+ * A reading older than a minute is dropped rather than shown as current.
+ */
+/**
+ * REALTIME VIEWERS for the channel page, from the same session beacons every
+ * report uses (services/analytics.ts): now (the live concurrency), the last
+ * hour minute by minute (from play_sessions), the change against an hour ago
+ * and today's peak. Share-link previews count, console previews do not (the
+ * console's players send no beacons). Zero is a real zero here: there is
+ * always a reading, and an empty hour reads as an empty hour.
+ */
+export async function channelViewers(accountId: string | null, id: string, kind: 'channel' | 'event') {
+  const { liveConcurrency } = await import('./analytics');
+  const current = await liveConcurrency(kind, id).catch(() => 0);
+  const rows = accountId ? await query<{ t: string; v: number }>(
+    `SELECT m AS t, (SELECT count(*)::int FROM play_sessions s
+                      WHERE s.account_id = $1 AND s.asset_kind = $2 AND s.asset_id = $3
+                        AND s.started_at <= m AND COALESCE(s.ended_at, s.last_seen_at) >= m - interval '30 seconds') AS v
+       FROM generate_series(date_trunc('minute', now()) - interval '60 minutes', date_trunc('minute', now()), interval '1 minute') AS m`,
+    [accountId, kind, id]).catch(() => []) : [];
+  const series = rows.map((r) => ({ t: new Date(r.t).getTime(), v: Number(r.v) }));
+  if (series.length) series[series.length - 1].v = Math.max(series[series.length - 1].v, current);
+  const hourAgo = series[0]?.v ?? 0;
+  const trendPct = hourAgo > 0 ? Math.round(((current - hourAgo) / hourAgo) * 100) : (current > 0 ? 100 : 0);
+  const today = accountId ? await one<{ peak_concurrent: number }>(
+    `SELECT peak_concurrent FROM analytics_rollups WHERE account_id = $1 AND scope = $2 AND scope_id = $3 AND bucket_date = current_date`,
+    [accountId, kind, id]).catch(() => null) : null;
+  let peak = Math.max(Number(today?.peak_concurrent ?? 0), current, ...series.map((p) => p.v));
+  let peakAt = '';
+  const top = series.reduce((a, p) => (p.v >= (a?.v ?? -1) ? p : a), null as null | { t: number; v: number });
+  if (top && top.v === peak) peakAt = new Date(top.t).toISOString();
+  return { current, peak, peakAt, trendPct, series };
+}
+
+export interface StreamMetricsView {
+  cpu: { pct: number; cores: number | null; source: 'encoder' | 'host'; tasksOnHost?: number | null; atMs: number } | null;
+  ingest: { key: string; role: string | null; label: string | null; bytes: number | null; bps: number | null }[];
+  ingestAtMs: number | null;
+}
+export async function streamMetrics(channelId: string, st: any, kind: OwnerKind = 'channel'): Promise<StreamMetricsView> {
+  const m = st?.metrics ?? null;
+  const fresh = m?.at_ms && Date.now() - Number(m.at_ms) < 60_000;
+  let cpu: StreamMetricsView['cpu'] = null;
+  if (fresh && typeof m.cpu_pct === 'number') cpu = { pct: m.cpu_pct, cores: m.cpu_cores ?? null, source: 'encoder', atMs: Number(m.at_ms) };
+  else {
+    const h = await one<any>(
+      `SELECT hs.cpu_pct, hs.tasks_on_host, hs.at FROM instances i JOIN host_samples hs ON hs.host_id = i.host_id
+        WHERE i.${kind === 'event' ? 'event_id' : 'channel_id'} = $1 AND i.terminated_at IS NULL AND hs.cpu_pct IS NOT NULL
+          AND hs.at > now() - interval '5 minutes'
+        ORDER BY hs.at DESC LIMIT 1`, [channelId]).catch(() => null);
+    if (h) cpu = { pct: Number(h.cpu_pct), cores: null, source: 'host', tasksOnHost: h.tasks_on_host ?? null, atMs: new Date(h.at).getTime() };
+  }
+  const ingest = fresh && m.ingest && typeof m.ingest === 'object'
+    ? Object.entries(m.ingest).map(([key, v]: [string, any]) => ({ key, role: v?.role ?? null, label: v?.label ?? null, bytes: v?.bytes ?? null, bps: v?.bps ?? null }))
+    : [];
+  return { cpu, ingest, ingestAtMs: fresh ? Number(m.at_ms) : null };
+}
+
 export interface ChannelDetail {
   kind: 'channel';
+  metrics: StreamMetricsView | null;
   group: { id: string; name: string } | null;
   profile: any | null;
   dvr: { effective_sec: number; max_sec: number; mode: string; source: 'channel' | 'profile'; capped: boolean };
@@ -48,6 +119,8 @@ export interface ChannelDetail {
   log: { ts: string; level: string; title: string; detail: string }[];
   health: PipelineHealth;
   billing: Billing;
+  /** Is there a server for it, and if anything is wrong, what to do (no load figures). */
+  server: ServerStatus;
   degraded?: boolean;
   onAir: boolean;
   public: { url: string; dashUrl: string; available: boolean };
@@ -199,12 +272,13 @@ export async function loadChannelHealthLite(
     outputAgeMs,
     onAirPublished: channel.on_air === true,
     recovery: recoveryOf(channel),
+    fleet: await fleetContext(),
   });
 }
 
 export async function buildChannelDetail(channel: any, nowMs: number): Promise<ChannelDetail> {
   const group = channel.group_id
-    ? await one<any>('SELECT id, name, output_profile_id FROM groups WHERE id = $1', [channel.group_id])
+    ? await one<any>('SELECT id, name, output_profile_id, account_id FROM groups WHERE id = $1', [channel.group_id])
     : null;
   const profile = group?.output_profile_id
     ? await one<any>('SELECT * FROM output_profiles WHERE id = $1', [group.output_profile_id])
@@ -241,8 +315,9 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   // error flash). runSince also feeds billing below.
   const runSince = await runningSinceMs(channel.id);
   const st = scopeStatusToRun(await one<any>(
-    `SELECT output_available, active_source, fallback_in_use, filler_in_use, packager_ok, sources, updated_at
+    `SELECT output_available, active_source, fallback_in_use, filler_in_use, packager_ok, sources, metrics, updated_at
        FROM stream_status WHERE channel_id = $1`, [channel.id]), runSince);
+  const metrics = channel.status === 'live' ? await streamMetrics(channel.id, st) : null;
   const reporting = !!st;
   const outputAvailable = !!st?.output_available;
   const seg = Number(profile?.segment_dur ?? 4).toFixed(1);
@@ -277,6 +352,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     outputAgeMs: outMtime > 0 ? (nowMs - outMtime) : null,
     onAirPublished: channel.on_air === true,
     recovery: recoveryOf(channel),
+    fleet: await fleetContext(),
   });
   // back-compat: `degraded` now means "a gate is failed or degraded" (a REAL problem,
   // not merely 'starting'). This kills the false OUTPUT ERROR during warm-up.
@@ -287,6 +363,12 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   const serverUp = channel.status === 'live';
   const sinceMs = runSince;
   const billing = buildBilling(serverUp, sinceMs, nowMs, recommendInstance(profile?.workflow_type, ladder));
+  const server = await serverStatusFor({
+    kind: 'channel', id: channel.id, streamLive: serverUp,
+    workflow: profile?.workflow_type ?? null, ladder, sources,
+    watermark: channel.watermark_enabled === true && !!channel.watermark_ref,
+    gpu: profile?.codec_backend === 'nvenc',
+  });
 
   const outGate = health.gates.find((g) => g.gate === 'output')!;
   const encGate = health.gates.find((g) => g.gate === 'encoder')!;
@@ -306,7 +388,9 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
       const ss = sstates[s.role] || sstates[s.rendition_label] || null;
       const up = ss?.state === 'up';
       return {
+        id: s.id,
         role: s.role,
+        label: s.rendition_label ?? null,
         protocol: (s.protocol || '').toUpperCase(),
         state: up ? 'live' : (reporting ? 'down' : 'idle'),
         detail: up ? (ss?.detail || 'receiving')
@@ -349,7 +433,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   const epg = { now: nowObj, next: nextObj, lane };
 
   // viewers — real analytics only; empty until wired/there is live data (no fabrication)
-  const viewers = { current: 0, peak: 0, peakAt: '', trendPct: 0, series: [] as { t: number; v: number }[] };
+  const viewers = await channelViewers(group?.account_id ?? null, channel.id, 'channel');
 
   // Public delivery: the on-air state + the public playback URL a viewer/app would use.
   // available = the public URL would actually serve right now (published + valid content).
@@ -373,7 +457,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     resumeLastError: channel.resume_last_error ?? null,
     resumeArmedAt: channel.resume_armed_at ?? null,
     resumeAttempts: Number(channel.resume_attempts ?? 0) || 0,
-    ladder, sources, viewers, epg, statusBoard, log, health, billing, degraded,
+    ladder, sources, viewers, epg, statusBoard, log, health, billing, server, degraded, metrics,
     onAir, public: publicBlock,
     watermark: {
       enabled: channel.watermark_enabled === true,

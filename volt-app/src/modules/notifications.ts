@@ -10,6 +10,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, conflict, forbidden } from '../util/http';
 import { ROLE_RANK, rankOf } from '../auth/roles';
 import { sendNotification, retryFailed, channelConfig, MAX_ATTEMPTS } from '../services/notifications';
+import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 
 export const notificationsRouter = Router();
 notificationsRouter.use(requireAuth);
@@ -30,19 +31,50 @@ notificationsRouter.post('/', asyncHandler(async (req, res) => {
   res.status(201).json(r);
 }));
 
+// THE LIST STANDARD (util/listQuery.ts). The delivery counts are aggregates,
+// so the list filters and sorts the grouped rows (a sub-select) and can ask,
+// say, for every notification that still has a delivery retrying.
+const notificationsList = defineList({
+  path: '/api/notifications',
+  fields: {
+    id: { sql: 'x.id', type: 'uuid' },
+    topic: { sql: 'x.topic', type: 'string', doc: 'e.g. event.reminder, alert, publish, expiry' },
+    subject: { sql: 'x.subject', type: 'string' },
+    body: { sql: 'x.body', type: 'string', sort: false },
+    created_at: { sql: 'x.created_at', type: 'timestamp', notNull: true },
+    deliveries: { sql: 'x.deliveries', type: 'number' },
+    sent: { sql: 'x.sent', type: 'number' },
+    retrying: { sql: 'x.retrying', type: 'number' },
+    gave_up: { sql: 'x.gave_up', type: 'number' },
+  },
+  search: ['topic', 'subject', 'body'],
+  defaultSort: '-created_at',
+  // It always returned the newest 200; that stays the default page.
+  defaultLimit: 200,
+  maxLimit: 200,
+});
+
 notificationsRouter.get('/', asyncHandler(async (req, res) => {
   // With per-notification delivery counts, so the sent log can show at a glance
   // which ones reached everybody and which are still retrying or gave up.
-  const rows = await query(
-    `SELECT n.*,
+  const inner = `SELECT n.*,
             count(d.id)::int AS deliveries,
             count(d.id) FILTER (WHERE d.status = 'sent')::int AS sent,
             count(d.id) FILTER (WHERE d.status = 'failed' AND d.gave_up_at IS NULL)::int AS retrying,
             count(d.id) FILTER (WHERE d.status = 'failed' AND d.gave_up_at IS NOT NULL)::int AS gave_up
        FROM notifications n LEFT JOIN notification_deliveries d ON d.notification_id = n.id
       WHERE n.account_id=$1
-      GROUP BY n.id ORDER BY n.created_at DESC LIMIT 200`, [accountId(req)]);
-  res.json(rows);
+      GROUP BY n.id`;
+  const params: unknown[] = [accountId(req)];
+  const pl = parseList(notificationsList, req.query, params);
+  const rows = await query(`SELECT * FROM (${inner}) x WHERE true${whereSql(pl)} ${pageSql(pl)}`, params);
+  let total: number | undefined;
+  if (pl.count) {
+    const cp: unknown[] = [accountId(req)];
+    const cpl = parseList(notificationsList, { ...req.query, cursor: undefined, offset: undefined }, cp);
+    total = Number((await one<any>(`SELECT count(*)::int AS n FROM (${inner}) x WHERE true${whereSql(cpl)}`, cp))?.n ?? 0);
+  }
+  res.json(finishPage(req, res, pl, rows, total));
 }));
 
 /** Which channels can deliver here, and the retry policy. */
@@ -92,6 +124,26 @@ notificationsRouter.delete('/devices/:id', asyncHandler(async (req, res) => {
   res.status(204).end();
 }));
 
+// THE LIST STANDARD (util/listQuery.ts) for the inbox: filter unread with
+// read_at[exists]=false, search subjects and bodies, page back.
+const inboxList = defineList({
+  path: '/api/notifications/inbox',
+  fields: {
+    id: { sql: 'd.id', type: 'uuid' },
+    status: { sql: 'd.status', type: 'enum', values: ['pending', 'sent', 'failed'] },
+    read_at: { sql: 'd.read_at', type: 'timestamp' },
+    created_at: { sql: 'd.created_at', type: 'timestamp', notNull: true },
+    topic: { sql: 'n.topic', type: 'string' },
+    subject: { sql: 'n.subject', type: 'string' },
+    body: { sql: 'n.body', type: 'string', sort: false },
+  },
+  search: ['topic', 'subject', 'body'],
+  defaultSort: '-created_at',
+  defaultLimit: 200,
+  maxLimit: 200,
+  extraParams: ['recipient'],
+});
+
 /** In-app inbox for a recipient (defaults to the current user's email). */
 notificationsRouter.get('/inbox', asyncHandler(async (req, res) => {
   // YOUR inbox. `?recipient=` used to be honoured for anybody, scoped only by
@@ -105,13 +157,16 @@ notificationsRouter.get('/inbox', asyncHandler(async (req, res) => {
     throw forbidden('You can only read your own inbox');
   }
   const recipient = asked || mine;
-  const rows = await query(
+  const params: unknown[] = [accountId(req), recipient];
+  const pl = parseList(inboxList, req.query, params);
+  const rows = finishPage(req, res, pl, await query(
     `SELECT d.id, d.status, d.read_at, d.created_at, n.topic, n.subject, n.body
        FROM notification_deliveries d JOIN notifications n ON n.id=d.notification_id
-      WHERE d.account_id=$1 AND d.channel='in_app' AND d.recipient=$2
-      ORDER BY d.created_at DESC LIMIT 200`,
-    [accountId(req), recipient]
-  );
+      WHERE d.account_id=$1 AND d.channel='in_app' AND d.recipient=$2${whereSql(pl)}
+      ${pageSql(pl)}`,
+    params
+  ));
+  // `unread` counts the rows on this page, as it always did (one page of 200).
   res.json({ recipient, unread: rows.filter((r: any) => !r.read_at).length, items: rows });
 }));
 

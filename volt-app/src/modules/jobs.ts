@@ -8,11 +8,11 @@
 //  invisible.
 // ============================================================================
 import { Router } from 'express';
-import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
 import { cancel, retry } from '../services/jobs/queue';
+import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 
 export const jobsRouter = Router();
 jobsRouter.use(requireAuth);
@@ -29,16 +29,37 @@ const OWNED = `
   LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
 `;
 
-const listQuery = z.object({
-  type: z.string().optional(),
-  state: z.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']).optional(),
-  channelId: z.string().uuid().optional(),
-  correlationId: z.string().uuid().optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
+// THE LIST STANDARD (util/listQuery.ts): search, filter on any column below,
+// sort, page. The console's old camelCase parameters still work as aliases.
+const jobsList = defineList({
+  path: '/api/jobs',
+  fields: {
+    id: { sql: 'j.id', type: 'uuid' },
+    type: { sql: 'j.type', type: 'string', doc: 'Job type, e.g. clip.extract' },
+    state: { sql: 'j.state', type: 'enum', values: ['queued', 'running', 'succeeded', 'failed', 'cancelled'] },
+    progress_pct: { sql: 'j.progress_pct', type: 'number' },
+    attempts: { sql: 'j.attempts', type: 'number' },
+    error_code: { sql: 'j.error_code', type: 'string' },
+    last_error: { sql: 'j.last_error', type: 'string', sort: false },
+    channel_id: { sql: 'j.channel_id', type: 'uuid' },
+    event_id: { sql: 'j.event_id', type: 'uuid' },
+    correlation_id: { sql: 'j.correlation_id', type: 'uuid' },
+    source_name: { sql: 'COALESCE(c.name, e.name)', type: 'string', doc: 'Name of the channel or event' },
+    created_at: { sql: 'j.created_at', type: 'timestamp', notNull: true },
+    started_at: { sql: 'j.started_at', type: 'timestamp' },
+    finished_at: { sql: 'j.finished_at', type: 'timestamp' },
+    run_after: { sql: 'j.run_after', type: 'timestamp' },
+  },
+  search: ['type', 'source_name', 'last_error', 'error_code'],
+  defaultSort: '-created_at',
+  defaultLimit: 50,
+  maxLimit: 200,
+  aliases: { channelId: 'channel_id', eventId: 'event_id', correlationId: 'correlation_id' },
 });
 
 jobsRouter.get('/', asyncHandler(async (req, res) => {
-  const q = listQuery.parse(req.query);
+  const params: unknown[] = [accountId(req)];
+  const pl = parseList(jobsList, req.query, params);
   const rows = await query(
     `SELECT j.id, j.type, j.state, j.progress_pct, j.progress_note,
             j.attempts, j.max_attempts, j.last_error, j.error_code,
@@ -46,17 +67,19 @@ jobsRouter.get('/', asyncHandler(async (req, res) => {
             j.created_at, j.started_at, j.finished_at, j.run_after,
             COALESCE(c.name, e.name) AS source_name
      ${OWNED}
-     WHERE g.account_id = $1
-       AND ($2::text IS NULL OR j.type = $2)
-       AND ($3::text IS NULL OR j.state::text = $3)
-       AND ($4::uuid IS NULL OR j.channel_id = $4)
-       AND ($5::uuid IS NULL OR j.correlation_id = $5)
-     ORDER BY j.created_at DESC
-     LIMIT $6`,
-    [accountId(req), q.type ?? null, q.state ?? null, q.channelId ?? null,
-     q.correlationId ?? null, q.limit]
+     WHERE g.account_id = $1${whereSql(pl)}
+     ${pageSql(pl)}`,
+    params
   );
-  res.json({ jobs: rows });
+  // Only count when asked: a count over every job is not free.
+  // The total ignores the cursor, so it is the same on every page.
+  let total: number | undefined;
+  if (pl.count) {
+    const cp: unknown[] = [accountId(req)];
+    const cpl = parseList(jobsList, { ...req.query, cursor: undefined, offset: undefined }, cp);
+    total = Number((await one<any>(`SELECT count(*)::int AS n ${OWNED} WHERE g.account_id = $1${whereSql(cpl)}`, cp))?.n ?? 0);
+  }
+  res.json({ jobs: finishPage(req, res, pl, rows, total) });
 }));
 
 /** One job with its full attempt history — what you need when it failed twice. */

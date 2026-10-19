@@ -1,0 +1,58 @@
+/* Volt docs theme. Colours and type come from the Volt brand tokens
+   (brand/tokens/volt-tokens.css): Archivo for headings, Inter for text,
+   JetBrains Mono for code. Fonts are copied into static/fonts at build. */
+@font-face { font-family: "Archivo"; src: url("/fonts/Archivo-Variable.woff2") format("woff2"); font-weight: 100 900; font-stretch: 62% 125%; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("/fonts/Inter-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("/fonts/JetBrainsMono-Variable.woff2") format("woff2"); font-weight: 100 800; font-display: swap; }
+
+:root {
+  --ifm-color-primary: #4f46e5;
+  --ifm-color-primary-dark: #463ed2;
+  --ifm-color-primary-darker: #423ac6;
+  --ifm-color-primary-darkest: #3730a3;
+  --ifm-color-primary-light: #5569f2;
+  --ifm-color-primary-lighter: #6b7ff5;
+  --ifm-color-primary-lightest: #8f9ef7;
+  --ifm-background-color: #f6f8fc;
+  --ifm-background-surface-color: #ffffff;
+  --ifm-font-color-base: #0f1218;
+  --ifm-color-emphasis-600: #4b5468;
+  --ifm-toc-border-color: #dfe4ee;
+  --ifm-hr-border-color: #dfe4ee;
+  --ifm-font-family-base: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ifm-heading-font-family: "Archivo", "Inter", system-ui, sans-serif;
+  --ifm-font-family-monospace: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --ifm-font-size-base: 15px;
+  --ifm-line-height-base: 1.6;
+  --ifm-code-font-size: 90%;
+  --ifm-navbar-background-color: #ffffff;
+  --ifm-global-radius: 6px;
+  --docusaurus-highlighted-code-line-bg: rgba(85, 105, 242, 0.12);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #8b9cff;
+  --ifm-color-primary-dark: #7486fd;
+  --ifm-color-primary-darker: #6a7cfc;
+  --ifm-color-primary-darkest: #4f5ff0;
+  --ifm-color-primary-light: #a1aefe;
+  --ifm-color-primary-lighter: #adb8fe;
+  --ifm-color-primary-lightest: #cdd3ff;
+  --ifm-background-color: #0f1218;
+  --ifm-background-surface-color: #171b24;
+  --ifm-font-color-base: #e9ecf4;
+  --ifm-color-emphasis-600: #98a1b6;
+  --ifm-toc-border-color: rgba(255, 255, 255, 0.07);
+  --ifm-hr-border-color: rgba(255, 255, 255, 0.07);
+  --ifm-navbar-background-color: #171b24;
+  --docusaurus-highlighted-code-line-bg: rgba(107, 155, 255, 0.16);
+}
+
+h1, h2, h3 { letter-spacing: -0.01em; }
+h1 { font-weight: 700; font-variation-settings: "wdth" 100; }
+.navbar__title { font-family: var(--ifm-heading-font-family); font-weight: 600; }
+.navbar__logo { height: 1.6rem; }
+table { display: table; width: 100%; font-size: 0.93em; }
+td, th { vertical-align: top; }
+code { font-variant-numeric: tabular-nums; }
+.markdown { max-width: 78ch; }

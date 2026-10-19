@@ -17,7 +17,21 @@ export interface StreamInputRow {
   protocol: string;
   ingest_url: string | null;
   stream_key: string | null;
+  /** per-protocol settings (stream_inputs.params): SRT mode/latency/passphrase, NDI discovery, 2110 SDP… */
+  params?: Record<string, string | number> | null;
 }
+
+/** The input's protocol settings for the encoder, only when there are any. */
+function paramsOf(i: StreamInputRow): Record<string, any> {
+  return i.params && Object.keys(i.params).length ? { params: i.params } : {};
+}
+
+/**
+ * NDI and ST 2110 carry uncompressed video: there is nothing to re-package, so
+ * a packaging rendition from them is ENCODED once to its own size and bitrate
+ * (the encoder's relay encodes instead of copying).
+ */
+const ENCODE_ON_PACKAGE = new Set(['ndi', 'st2110']);
 export interface ProfileRow {
   rungs: Array<{ height: number; bitrate_kbps: number; fps?: number }>;
   packaging: 'hls' | 'dash' | 'both';
@@ -81,7 +95,18 @@ export interface JobConfigCtx {
 function inputUrl(i: StreamInputRow): string {
   // Prefer an explicit ingest_url; otherwise it is an endpoint we issue and the
   // stream key selects the stream (the encoder listens / connects per protocol).
-  if (i.ingest_url) return i.ingest_url;
+  if (i.ingest_url) {
+    // RTMP: server URL + stream key, as an encoder is given them. ffmpeg opens one
+    // address, so the key becomes the last path segment (rtmp://host/app/KEY),
+    // unless it is already there.
+    const proto = String(i.protocol).toLowerCase();
+    const key = (i.stream_key ?? '').trim();
+    if ((proto === 'rtmp' || proto === 'rtmps') && key) {
+      const base = i.ingest_url.trim().replace(/\/+$/, '');
+      return base.endsWith(`/${key}`) ? base : `${base}/${key}`;
+    }
+    return i.ingest_url;
+  }
 
   // THE BACKSTOP FOR THE BUG THIS DEFAULT CAUSED.
   //
@@ -136,6 +161,7 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
         role: i.role,
         protocol: i.protocol,
         url: inputUrl(i),
+        ...paramsOf(i),
         has_audio: true,
       }));
     // backups (a 2nd mezzanine) if failover is on
@@ -148,6 +174,7 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
             role: 'backup',
             protocol: i.protocol,
             url: inputUrl(i),
+            ...paramsOf(i),
           }))
       );
     }
@@ -169,6 +196,8 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
         protocol: i.protocol,
         url: inputUrl(i),
         bitrate_kbps: i.rendition_bitrate_kbps ?? undefined,
+        ...paramsOf(i),
+        ...(ENCODE_ON_PACKAGE.has(String(i.protocol).toLowerCase()) ? { encode: true } : {}),
         ...(idx === 0 ? { has_audio: true } : {}),
       }));
   }

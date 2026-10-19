@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Volt Docs: sign in</title>
+<style>
+  :root { --bg:#f6f8fc; --panel:#fff; --ink:#0f1218; --muted:#4b5468; --volt:#4f46e5; --line:#dfe4ee; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1218; --panel:#171b24; --ink:#e9ecf4; --muted:#98a1b6; --volt:#6b9bff; --line:rgba(255,255,255,.08); } }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--ink); font:15px/1.6 Inter, system-ui, sans-serif; padding:16px; box-sizing:border-box; }
+  main { max-width:440px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:28px; }
+  h1 { font-size:20px; margin:0 0 8px; }
+  p { color:var(--muted); margin:0 0 18px; }
+  a.btn { display:inline-block; background:var(--volt); color:#fff; text-decoration:none; padding:9px 16px; border-radius:6px; font-weight:600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Sign in to read the docs</h1>
+  <p>Volt documentation is for customers. Open it from Volt (Help menu, then Documentation) and it signs you in here. If you were already reading, your docs session has expired: open it from Volt again.</p>
+  <a class="btn" id="app" href="/">Go to Volt</a>
+</main>
+<script>
+  // The deploy script writes the app URL into this page (APP_URL placeholder).
+  var app = "__VOLT_APP_URL__"; if (app.indexOf("__") !== 0) document.getElementById("app").href = app;
+</script>
+</body>
+</html>

@@ -5,6 +5,7 @@ import { navigate } from '../router'
 import { pressable } from '../a11y'
 import XmltvDrawer from './EpgXmltv'
 import XmltvImportDrawer from './EpgXmltvImport'
+import { usePageNotice } from '../notices'
 
 /* ============================================================================
    EPG section — one guide per channel (the traditional programme guide) and
@@ -39,9 +40,11 @@ export default function Epg() {
   const [xmltvOpen, setXmltvOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
 
+  const load = () => api.epgOwners().then(r => { setRows(r); setErr('') }).catch((e: any) => setErr(e.message))
   useEffect(() => {
-    api.epgOwners().then(setRows).catch((e: any) => setErr(e.message))
+    load()
   }, [])
+  usePageNotice('load', err ? { kind: 'error', title: "Couldn't load the guides.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
   const counts = useMemo(() => {
     const c = rows || []
@@ -77,7 +80,6 @@ export default function Epg() {
         </div>} />
       {xmltvOpen && <XmltvDrawer onClose={() => setXmltvOpen(false)} />}
       {importOpen && <XmltvImportDrawer onClose={() => setImportOpen(false)} onImported={() => api.epgOwners().then(setRows).catch(() => {})} />}
-      {err && <div className="err">{err}</div>}
       {rows === null ? (
         <div className="loading">Loading guides…</div>
       ) : (

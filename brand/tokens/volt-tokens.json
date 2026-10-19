@@ -1,0 +1,567 @@
+{
+  "name": "Volt Streaming",
+  "version": 1,
+  "color": {
+    "themes": [
+      {
+        "id": "dark",
+        "name": "Control room"
+      },
+      {
+        "id": "light",
+        "name": "Paper"
+      }
+    ],
+    "tokens": [
+      {
+        "name": "volt",
+        "value": {
+          "dark": "#5569f2",
+          "light": "#5569f2"
+        },
+        "usage": "Volt primary, solid. The centre of the Volt blend. Single-colour marks, icons, focus ring, selected state, first chart series, diagram icons. 3.9:1 on panel and 4.2:1 on Paper: graphics and large text only. Words use volt-text."
+      },
+      {
+        "name": "volt-start",
+        "value": {
+          "dark": "#5b8cff",
+          "light": "#5b8cff"
+        },
+        "usage": "Volt Blue. The light end of the Volt blend (top-left of every gradient)."
+      },
+      {
+        "name": "volt-end",
+        "value": {
+          "dark": "#4f46e5",
+          "light": "#4f46e5"
+        },
+        "usage": "Volt Indigo. The deep end of the Volt blend (bottom-right). Also \"Streaming\" in the wordmark on Paper."
+      },
+      {
+        "name": "volt-strong",
+        "value": {
+          "dark": "#4f46e5",
+          "light": "#4f46e5"
+        },
+        "usage": "Filled primary buttons, filled tags and CTA shapes, with on-volt text (6.3:1)."
+      },
+      {
+        "name": "volt-text",
+        "value": {
+          "dark": "#8b9cff",
+          "light": "#4f46e5"
+        },
+        "usage": "Links, eyebrows and blue words on ground and panel (6.8:1 Control room, 5.9:1 Paper)."
+      },
+      {
+        "name": "volt-soft",
+        "value": {
+          "dark": "rgba(85,105,242,0.18)",
+          "light": "#eceefe"
+        },
+        "usage": "Tint behind a selected row, an info banner or the Volt group in a diagram. Text on it stays ink."
+      },
+      {
+        "name": "on-volt",
+        "value": {
+          "dark": "#ffffff",
+          "light": "#ffffff"
+        },
+        "usage": "Text and icons on volt-strong and on the Volt blend."
+      },
+      {
+        "name": "current",
+        "value": {
+          "dark": "#9a9dff",
+          "light": "#4f46e5"
+        },
+        "usage": "\"Streaming\" in the wordmark on Control room, the second chart series. Never a button. 7.1:1 on panel (Control room)."
+      },
+      {
+        "name": "ground",
+        "value": {
+          "dark": "#0f1218",
+          "light": "#f6f8fc"
+        },
+        "usage": "Page and slide background. Control room is the default for product, web and marketing, Paper for documents and print."
+      },
+      {
+        "name": "panel",
+        "value": {
+          "dark": "#171b24",
+          "light": "#ffffff"
+        },
+        "usage": "Cards, diagram nodes, slide panels, the lower-third bar."
+      },
+      {
+        "name": "panel-2",
+        "value": {
+          "dark": "#1c2130",
+          "light": "#eef2f8"
+        },
+        "usage": "Inputs and nested surfaces inside a panel."
+      },
+      {
+        "name": "panel-3",
+        "value": {
+          "dark": "#212736",
+          "light": "#e4e9f2"
+        },
+        "usage": "Chips, type tags, badge fills, hover wash."
+      },
+      {
+        "name": "line",
+        "value": {
+          "dark": "rgba(255,255,255,0.07)",
+          "light": "#dfe4ee"
+        },
+        "usage": "Hairlines between panels and table rows."
+      },
+      {
+        "name": "line-strong",
+        "value": {
+          "dark": "rgba(255,255,255,0.11)",
+          "light": "#c6cedc"
+        },
+        "usage": "Borders that must be seen: diagram nodes and group boundaries, the co-branding divider."
+      },
+      {
+        "name": "ink",
+        "value": {
+          "dark": "#e9ecf4",
+          "light": "#0f1218"
+        },
+        "usage": "Primary text and the \"Volt\" word in the lockup, on ground, panel and panel-2 (15.9:1 Control room)."
+      },
+      {
+        "name": "ink-muted",
+        "value": {
+          "dark": "#98a1b6",
+          "light": "#4b5468"
+        },
+        "usage": "Secondary text, decks, meta lines and diagram detail lines, on ground and every panel (5.8:1 or better)."
+      },
+      {
+        "name": "ink-faint",
+        "value": {
+          "dark": "#6a7387",
+          "light": "#626b80"
+        },
+        "usage": "Decorative meta at 12px or larger and secondary connectors. 3.6:1 on panel in Control room: below AA, kept to match the shipped UI. Use ink-muted for anything that must be read."
+      },
+      {
+        "name": "live",
+        "value": {
+          "dark": "#4ade80",
+          "light": "#15803d"
+        },
+        "usage": "Status: on air, healthy, passing. Always with its word and a dot."
+      },
+      {
+        "name": "sched",
+        "value": {
+          "dark": "#38bdf8",
+          "light": "#0369a1"
+        },
+        "usage": "Status: ready, scheduled, starting."
+      },
+      {
+        "name": "warn",
+        "value": {
+          "dark": "#fbbf24",
+          "light": "#b45309"
+        },
+        "usage": "Status: degraded, needs attention."
+      },
+      {
+        "name": "down",
+        "value": {
+          "dark": "#f87171",
+          "light": "#b91c1c"
+        },
+        "usage": "Status: error, off air unexpectedly, failed. Told apart from live by its word and position, never hue alone."
+      },
+      {
+        "name": "idle",
+        "value": {
+          "dark": "#66708a",
+          "light": "#5b6478"
+        },
+        "usage": "Status: stopped, idle, not configured. A dot or mark only (3.5:1 Control room)."
+      },
+      {
+        "name": "filler",
+        "value": {
+          "dark": "#a78bfa",
+          "light": "#6d28d9"
+        },
+        "usage": "Slates, filler and loop content on timelines and EPG blocks."
+      }
+    ]
+  },
+  "type": {
+    "fonts": [
+      {
+        "family": "Archivo",
+        "file": "fonts/Archivo-Variable.woff2",
+        "weight": "100 900",
+        "style": "normal"
+      },
+      {
+        "family": "Inter",
+        "file": "fonts/Inter-Variable.woff2",
+        "weight": "100 900",
+        "style": "normal"
+      },
+      {
+        "family": "JetBrains Mono",
+        "file": "fonts/JetBrainsMono-Variable.woff2",
+        "weight": "100 800",
+        "style": "normal"
+      }
+    ],
+    "families": {
+      "display": "\"Archivo\", \"Helvetica Neue\", Arial, sans-serif",
+      "sans": "\"Inter\", system-ui, -apple-system, \"Segoe UI\", Arial, sans-serif",
+      "mono": "\"JetBrains Mono\", ui-monospace, Menlo, Consolas, monospace"
+    },
+    "groups": [
+      {
+        "name": "Marketing",
+        "family": "display",
+        "styles": [
+          {
+            "name": "display-xl",
+            "fontSize": "88px",
+            "lineHeight": 0.92,
+            "fontWeight": 800,
+            "letterSpacing": "-0.02em",
+            "usage": "Hero headline on web and 16:9 ads. Width 112. One per layout.",
+            "sample": "Go live. Stay live."
+          },
+          {
+            "name": "display-l",
+            "fontSize": "64px",
+            "lineHeight": 0.95,
+            "fontWeight": 800,
+            "letterSpacing": "-0.02em",
+            "usage": "Slide title on a title slide, social headline. Width 112.",
+            "sample": "Every live hour becomes a library."
+          },
+          {
+            "name": "display-m",
+            "fontSize": "44px",
+            "lineHeight": 1.0,
+            "fontWeight": 800,
+            "letterSpacing": "-0.015em",
+            "usage": "Section openers on the web, content slide titles. Width 112.",
+            "sample": "Turn your archive into a channel."
+          },
+          {
+            "name": "headline",
+            "fontSize": "32px",
+            "lineHeight": 1.1,
+            "fontWeight": 700,
+            "letterSpacing": "-0.01em",
+            "usage": "Card and feature headlines, small ad formats.",
+            "sample": "Live → VOD in one take"
+          },
+          {
+            "name": "eyebrow",
+            "fontSize": "12px",
+            "lineHeight": "16px",
+            "fontWeight": 600,
+            "letterSpacing": "0.14em",
+            "usage": "Uppercase label above a headline, diagram group labels. Width 112, in volt-text or ink-muted.",
+            "sample": "LIVE TO VOD"
+          },
+          {
+            "name": "deck",
+            "fontSize": "20px",
+            "lineHeight": 1.45,
+            "fontWeight": 400,
+            "family": "sans",
+            "usage": "One-line standfirst under a headline, in ink-muted.",
+            "sample": "Record every channel as it airs and publish clips while the match is still on."
+          }
+        ]
+      },
+      {
+        "name": "Documents",
+        "family": "display",
+        "styles": [
+          {
+            "name": "doc-title",
+            "fontSize": "34px",
+            "lineHeight": "40px",
+            "fontWeight": 700,
+            "letterSpacing": "-0.01em",
+            "usage": "Document and proposal title.",
+            "sample": "Volt Streaming platform overview"
+          },
+          {
+            "name": "doc-h1",
+            "fontSize": "24px",
+            "lineHeight": "30px",
+            "fontWeight": 700,
+            "letterSpacing": "-0.01em",
+            "usage": "Section heading.",
+            "sample": "Live channels and failover"
+          },
+          {
+            "name": "doc-h2",
+            "fontSize": "18px",
+            "lineHeight": "24px",
+            "fontWeight": 600,
+            "usage": "Subsection heading.",
+            "sample": "Primary and backup inputs"
+          },
+          {
+            "name": "doc-h3",
+            "fontSize": "15px",
+            "lineHeight": "20px",
+            "fontWeight": 600,
+            "family": "sans",
+            "usage": "Minor heading, table titles.",
+            "sample": "Supported ingest protocols"
+          },
+          {
+            "name": "doc-body",
+            "fontSize": "15px",
+            "lineHeight": "24px",
+            "fontWeight": 400,
+            "family": "sans",
+            "usage": "Running text in documents and on the web.",
+            "sample": "When the primary input drops, Volt switches to the backup within one segment and logs the switch on the channel timeline."
+          },
+          {
+            "name": "doc-caption",
+            "fontSize": "12.5px",
+            "lineHeight": "18px",
+            "fontWeight": 400,
+            "family": "sans",
+            "usage": "Captions, footnotes, table text, in ink-muted.",
+            "sample": "Figure 2. Signal path for a live event with a backup encoder."
+          }
+        ]
+      },
+      {
+        "name": "Interface",
+        "family": "sans",
+        "styles": [
+          {
+            "name": "ui-h1",
+            "fontSize": "23px",
+            "lineHeight": 1.25,
+            "fontWeight": 700,
+            "letterSpacing": "-0.5px",
+            "usage": "Page and entity title in the product.",
+            "sample": "Sky Sport Live"
+          },
+          {
+            "name": "ui-h2",
+            "fontSize": "15px",
+            "lineHeight": 1.3,
+            "fontWeight": 600,
+            "usage": "Card headings and modal titles.",
+            "sample": "Output renditions"
+          },
+          {
+            "name": "ui-h3",
+            "fontSize": "14px",
+            "lineHeight": 1.3,
+            "fontWeight": 600,
+            "usage": "Sub-headings and stat values.",
+            "sample": "Viewers now"
+          },
+          {
+            "name": "ui-body",
+            "fontSize": "13px",
+            "lineHeight": 1.45,
+            "fontWeight": 400,
+            "usage": "Body, buttons, inputs and sub-lines in the product. Diagram node labels at 600.",
+            "sample": "Recording starts when the channel goes on air."
+          },
+          {
+            "name": "ui-sm",
+            "fontSize": "12.5px",
+            "lineHeight": 1.45,
+            "fontWeight": 400,
+            "usage": "Dense body and table cells.",
+            "sample": "Last switch to backup 14:02:11"
+          },
+          {
+            "name": "ui-tag",
+            "fontSize": "11.5px",
+            "lineHeight": 1.2,
+            "fontWeight": 600,
+            "letterSpacing": "0.02em",
+            "usage": "Status pills and type tags, uppercase.",
+            "sample": "ON AIR"
+          },
+          {
+            "name": "ui-label",
+            "fontSize": "11px",
+            "lineHeight": 1.2,
+            "fontWeight": 600,
+            "letterSpacing": "0.06em",
+            "usage": "Uppercase section labels in cards.",
+            "sample": "INPUTS"
+          },
+          {
+            "name": "ui-micro",
+            "fontSize": "10.5px",
+            "lineHeight": 1.3,
+            "fontWeight": 500,
+            "usage": "Meta text, gate detail, timeline ruler ticks.",
+            "sample": "Encoder · 3 renditions"
+          }
+        ]
+      },
+      {
+        "name": "Data",
+        "family": "mono",
+        "styles": [
+          {
+            "name": "timecode",
+            "fontSize": "13px",
+            "lineHeight": 1.3,
+            "fontWeight": 500,
+            "usage": "Timecode, durations, clocks. Always HH:MM:SS:FF.",
+            "sample": "00:59:58:12"
+          },
+          {
+            "name": "code",
+            "fontSize": "12.5px",
+            "lineHeight": "20px",
+            "fontWeight": 400,
+            "usage": "Code, API examples, stream URLs and keys.",
+            "sample": "srt://ingest.example:9000?streamid=ch2"
+          },
+          {
+            "name": "data-sm",
+            "fontSize": "11.5px",
+            "lineHeight": 1.3,
+            "fontWeight": 500,
+            "letterSpacing": "0.02em",
+            "usage": "Protocol tags, IDs in tables, diagram detail lines.",
+            "sample": "SRT · HLS · DASH"
+          }
+        ]
+      }
+    ]
+  },
+  "spacing": {
+    "tokens": [
+      {
+        "name": "space-1",
+        "value": "4px",
+        "usage": "Icon to label inside a tag, tight inline gaps."
+      },
+      {
+        "name": "space-2",
+        "value": "8px",
+        "usage": "Icon to text in buttons, gap between pills."
+      },
+      {
+        "name": "space-3",
+        "value": "12px",
+        "usage": "Gap between form fields, list rows."
+      },
+      {
+        "name": "space-4",
+        "value": "16px",
+        "usage": "Card padding (dense), grid gutters, minimum page gutter on phones."
+      },
+      {
+        "name": "space-5",
+        "value": "20px",
+        "usage": "Card padding in the product."
+      },
+      {
+        "name": "space-6",
+        "value": "24px",
+        "usage": "Gap between cards, between diagram nodes."
+      },
+      {
+        "name": "space-8",
+        "value": "32px",
+        "usage": "Section spacing inside a page, slide inner padding."
+      },
+      {
+        "name": "space-12",
+        "value": "48px",
+        "usage": "Safe area on social and ad formats, between page sections."
+      },
+      {
+        "name": "space-16",
+        "value": "64px",
+        "usage": "Slide margins at 1920 wide, hero padding."
+      }
+    ]
+  },
+  "radius": {
+    "tokens": [
+      {
+        "name": "radius-xs",
+        "value": "4px",
+        "usage": "Progress bars, timeline clips, ruler ticks, the lower-third square."
+      },
+      {
+        "name": "radius-ctl",
+        "value": "10px",
+        "usage": "Buttons, inputs, selects, the CTA shape."
+      },
+      {
+        "name": "radius-tile",
+        "value": "11px",
+        "usage": "Thumbnails, entity thumbs, diagram nodes."
+      },
+      {
+        "name": "radius-card",
+        "value": "16px",
+        "usage": "Cards, panels, marketing blocks, diagram group boundaries."
+      },
+      {
+        "name": "radius-pill",
+        "value": "999px",
+        "usage": "Status pills, type tags, protocol tags."
+      }
+    ]
+  },
+  "shadow": {
+    "tokens": [
+      {
+        "name": "shadow-card",
+        "value": {
+          "dark": "0 1px 0 rgba(255,255,255,0.03) inset, 0 8px 30px -12px rgba(0,0,0,0.6)",
+          "light": "0 1px 2px rgba(15,18,24,0.06), 0 8px 24px -12px rgba(15,18,24,0.18)"
+        },
+        "usage": "The only shadow. Cards and floating panels on ground."
+      },
+      {
+        "name": "shadow-tile",
+        "value": {
+          "dark": "0 4px 12px -4px rgba(0,0,0,0.6)",
+          "light": "0 4px 12px -4px rgba(15,18,24,0.35)"
+        },
+        "usage": "Under the app tile. Neutral, never a coloured glow."
+      }
+    ]
+  },
+  "gradient": {
+    "note": "The Volt blend, taken from the app tile. Use it on the mark, the app tile and one hero block per layout. Never behind body text.",
+    "tokens": [
+      {
+        "name": "volt-blend",
+        "value": "linear-gradient(140deg, #5b8cff 0%, #4f46e5 100%)",
+        "usage": "The mark in colour artwork, the app tile, one identity block per layout."
+      },
+      {
+        "name": "tile-light",
+        "value": "linear-gradient(180deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0) 50%, rgba(30,27,110,0) 70%, rgba(30,27,110,0.22) 100%)",
+        "usage": "Lighting layer over the blend on the app tile: light from above, shade at the base. Pair with a 1px inner rgba(255,255,255,0.16) edge."
+      }
+    ]
+  }
+}

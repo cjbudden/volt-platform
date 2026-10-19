@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type IcyProbe } from './api'
 import { pressable } from './a11y'
+import { Notice } from './notices'
 
 /* ============================================================================
    SOURCE METADATA — what the stream says about itself, before you save it.
@@ -79,7 +80,7 @@ function SourceMetadataPanel({ url, targets, onClose }: {
         </div>
         <p style={{ color: 'var(--muted)', marginTop: 4, wordBreak: 'break-all', fontSize: 'var(--fs-sm)' }}>{url}</p>
 
-        {err && <div className="err">{err}</div>}
+        {err && <Notice kind="error" variant="compact" message={err} />}
         {!probe && !err && <div className="loading">Reading the stream…</div>}
 
         {probe && !probe.ok && (

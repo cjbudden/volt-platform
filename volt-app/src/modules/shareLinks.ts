@@ -1,3 +1,4 @@
+import { accountBrand } from './accountSettings';
 /**
  * Share links.
  *
@@ -20,6 +21,7 @@ import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, badRequest, notFound } from '../util/http';
+import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage } from '../util/listQuery';
 import {
   createShareLink, openShare, findShareByToken, loadResource, ACCESS_PERIODS,
   requestShareEmailCode,
@@ -78,14 +80,42 @@ shareLinksRouter.post('/', asyncHandler(async (req, res) => {
   res.status(201).json(out);
 }));
 
+const SHARE_LINKS_LIST = defineList({
+  path: '/api/share-links',
+  fields: {
+    id: { sql: 'id', type: 'uuid' },
+    label: { sql: 'label', type: 'string' },
+    resource_kind: { sql: 'resource_kind', type: 'enum', values: ['vod', 'channel', 'event'] },
+    resource_id: { sql: 'resource_id', type: 'uuid' },
+    access_type: { sql: 'access_type', type: 'enum', values: ['preview_only', 'allow_download'] },
+    token_prefix: { sql: 'token_prefix', type: 'string', doc: 'The first characters of the link token, to recognise a link' },
+    revoked: { sql: 'revoked', type: 'boolean' },
+    expired: { sql: '(expires_at IS NOT NULL AND expires_at < now())', type: 'boolean', sort: false, doc: 'Past its expiry time' },
+    expires_at: { sql: 'expires_at', type: 'timestamp' },
+    max_views: { sql: 'max_views', type: 'number' },
+    view_count: { sql: 'view_count', type: 'number' },
+    first_opened_at: { sql: 'first_opened_at', type: 'timestamp' },
+    last_viewed_at: { sql: 'last_viewed_at', type: 'timestamp' },
+    created_at: { sql: 'created_at', type: 'timestamp', notNull: true },
+  },
+  search: ['label', 'token_prefix', 'recipients::text'],
+  defaultSort: '-created_at',
+  unpagedLimit: 1000,
+});
+
 shareLinksRouter.get('/', asyncHandler(async (req, res) => {
+  const params: unknown[] = [accountId(req)];
+  const pl = parseList(SHARE_LINKS_LIST, req.query, params);
+  const where = `FROM share_links WHERE account_id=$1${whereSql(pl)}`;
+    const whereCount = `FROM share_links WHERE account_id=$1${countWhereSql(pl)}`;  // totals ignore the cursor
   const rows = await query<any>(
     `SELECT id, resource_kind, resource_id, label, recipients, access_type, expires_at, max_views,
             view_count, first_opened_at, last_viewed_at, revoked, created_at, token_prefix
-       FROM share_links WHERE account_id=$1 ORDER BY created_at DESC`,
-    [accountId(req)]
+       ${where} ${pageSql(pl)}`,
+    params
   );
-  res.json(rows);
+  const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${whereCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
+  res.json(finishPage(req, res, pl, rows, total));
 }));
 
 shareLinksRouter.get('/:id', asyncHandler(async (req, res) => {
@@ -138,8 +168,15 @@ publicShareRouter.post('/api/share/:token/resolve', asyncHandler(async (req, res
   const out = await openShare(req.params.token, { pin, email, code: verifyCode, geo });
   if (!out.ok) {
     const needsAuth = ['pin_required', 'pin_wrong', 'code_required', 'code_wrong', 'code_expired'].includes(out.reason);
-    const code = needsAuth ? 401 : out.reason === 'not_found' ? 404 : 410;
-    return res.status(code).json({ ok: false, reason: out.reason });
+    const code = needsAuth ? 401 : out.reason === 'not_found' ? 404 : out.reason === 'geo_blocked' ? 451 : 410;
+    // The PIN and email screens are branded too. Only once the link is known
+    // to exist (it asks for a PIN), so the brand never answers "is this a link".
+    let brand: any;
+    if (needsAuth) {
+      const row = await findShareByToken(req.params.token);
+      if (row) { const b = await accountBrand(row.account_id); brand = { account: b.name, logo: b.logo, primary: b.primary, secondary: b.secondary }; }
+    }
+    return res.status(code).json({ ok: false, reason: out.reason, ...(brand ? { brand } : {}) });
   }
   res.json({ ok: true, ...out.view });
 }));

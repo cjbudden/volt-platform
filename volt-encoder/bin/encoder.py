@@ -38,7 +38,10 @@ import threading
 import time
 
 import source_selector
+import stream_metrics
+import ingest_args
 from ladder_args import gop_for, video_rung_args, audio_track_args
+from packager_log import PackagerLogFilter, resolve_mode as resolve_packager_log_mode
 import events as events_mod
 
 WORK_DIR = os.environ.get("WORK_DIR", "/work")
@@ -554,23 +557,53 @@ def input_args(inp):
     # a read-ahead queue on the demux thread benefits every protocol: it stops a busy
     # encoder from starving the reader (see _http_resilience_flags)
     q = ["-thread_queue_size", os.environ.get("INGEST_QUEUE", "4096")]
-    if proto == "srt":
-        return ["-fflags", "+genpts", *q, "-i", url]
-    if proto in ("rtmp", "rtmps"):
-        return [*q, "-i", url]
     if proto == "hls":
         # START AT THE LIVE EDGE — see _hls_edge_flags for why this must adapt to whether
         # the source playlist is live or a bounded (ENDLIST) DVR window.
         return [*_hls_edge_flags(url), "-i", url]
-    die(f"unsupported input protocol: {proto}")
+    # SRT / RTMP / DASH / NDI / ST 2110, with the console's per-protocol settings
+    # (ingest_args.py). A source this node cannot open stops the job with the reason.
+    try:
+        return ingest_args.open_args({**inp, "url": url}, WORK_DIR, q, idx=inp.get("_idx", 0), env=os.environ)
+    except (ValueError, RuntimeError) as e:
+        die(f"input {inp.get('rendition_label') or inp.get('role', 'primary')} ({proto}): {e}")
+
+
+# INGEST METER (stream_metrics.py): every relay that writes an ffmpeg -progress
+# file is listed here as (key, role, label, path); the heartbeat reads how many
+# bytes each has received. The key is "<role>:<rendition label>", which is how
+# the console matches it to the channel's input.
+_ingest_inputs = []
+
+
+def _ingest_key(inp, idx):
+    return f"{inp.get('role', 'primary')}:{inp.get('rendition_label') or idx}"
+
+
+def _segment_hints(cfg, inputs):
+    """An encoded packaging rendition (NDI / ST 2110) needs the segment length
+    and frame rate for its GOP; the relays only see their input."""
+    for inp in inputs:
+        inp["_seg"] = cfg.get("segment_seconds", 4)
+        inp["_fps"] = cfg.get("fps", 25)
 
 
 def start_relay(inp, idx):
     """package_only: pull one already-encoded rendition and re-mux to UDP TS.
-    No re-encode (-c copy) — cheap, CPU-light, preserves the client's GOPs."""
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin"]
+    No re-encode (-c copy) — cheap, CPU-light, preserves the client's GOPs.
+    -progress every 5 s feeds the ingest meter (bytes received); for a copy
+    relay the bytes written are the bytes received."""
+    prog = os.path.join(WORK_DIR, f"progress-relay-{idx}.txt")
+    _ingest_inputs.append((_ingest_key(inp, idx), inp.get("role", "primary"), inp.get("rendition_label"), prog))
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin",
+           "-progress", prog, "-stats_period", "5"]
+    inp.setdefault("_idx", idx)
     cmd += input_args(inp)
-    cmd += ["-c", "copy", "-f", "mpegts", udp_out(idx)]
+    if ingest_args.needs_encode(inp):
+        # NDI / ST 2110: uncompressed, so this rendition is encoded once (ingest_args)
+        cmd += ingest_args.encode_rendition_args(inp) + ["-f", "mpegts", udp_out(idx)]
+    else:
+        cmd += ["-c", "copy", "-f", "mpegts", udp_out(idx)]
     name = f"relay:{inp.get('rendition_label', idx)}"
     return spawn(name, cmd)
 
@@ -867,14 +900,47 @@ def build_shaka(cfg, keys):
 # ---------------------------------------------------------------------------
 # process management
 # ---------------------------------------------------------------------------
-def spawn(name, cmd, critical=True):
+def spawn(name, cmd, critical=True, log_filter=None):
     # critical=False for selector-managed children (relays/forwarders/filler):
     # their death is EXPECTED (a source dropping) and handled by failover, so it
     # must not trip the whole-container teardown below.
     log(f"start {name}: {' '.join(shlex.quote(c) for c in cmd)}")
-    proc = subprocess.Popen(cmd)
+    if log_filter is None:
+        proc = subprocess.Popen(cmd)
+    else:
+        # FILTERED STDERR (packager only, see packager_log.py): the child's stderr is
+        # read line by line and rewritten through the filter. The pump must never
+        # stop reading, or a full pipe would block the packager, so any filter error
+        # drops to raw pass-through for the rest of the run.
+        proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True,
+                                errors="replace", bufsize=1)
+        threading.Thread(target=_pump_filtered, args=(name, proc, log_filter),
+                         name=f"log:{name}", daemon=True).start()
     _children.append((name, proc, critical))
     return proc
+
+
+def _pump_filtered(name, proc, log_filter):
+    ok = True
+    for raw in proc.stderr:
+        line = raw.rstrip("\n")
+        if ok:
+            try:
+                for out in log_filter.feed(line):
+                    sys.stderr.write(out + "\n")
+                sys.stderr.flush()
+                continue
+            except Exception as e:  # noqa: BLE001
+                ok = False
+                log(f"{name}: log filter failed ({e}); passing output through unfiltered")
+        sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+    try:
+        for out in log_filter.flush():
+            sys.stderr.write(out + "\n")
+        sys.stderr.flush()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 _shutting_down = False
@@ -2091,7 +2157,12 @@ def main():
     keys = fetch_drm_keys(cfg.get("drm"))
 
     # Shaka first so its UDP listeners are up before FFmpeg starts pushing.
-    shaka = spawn("packager", build_shaka(cfg, keys))
+    # Packager log noise: Shaka's harmless AAC rounding warning is summarised, not
+    # repeated every segment (packager_log.py). packager_log=all restores raw output.
+    plog = resolve_packager_log_mode(cfg.get("packager_log"), os.environ.get("VOLT_PACKAGER_LOG"))
+    log(f"packager log mode: {plog}")
+    shaka = spawn("packager", build_shaka(cfg, keys),
+                  log_filter=None if plog == "all" else PackagerLogFilter(plog))
     time.sleep(1)
     _events.packager(True)
 
@@ -2111,6 +2182,7 @@ def main():
             # group to the bus with health-driven failover + filler-on-loss.
             prim, bak = primary_inputs(cfg), backup_inputs(cfg)
             prepare_failover_inputs(prim + bak)
+            _segment_hints(cfg, prim + bak)
             selector = source_selector.SourceSelector(
                 cfg, ladder=ladder_from_inputs(prim),
                 primary=prim, backup=bak,
@@ -2124,7 +2196,10 @@ def main():
                 f"{len(bak)} backup rendition(s), "
                 f"loss_behavior={cfg['redundancy'].get('input_loss_behavior','slate')}")
             selector.start()
+            for group, i, inp, pp in getattr(selector, "_relay_specs", []):
+                _ingest_inputs.append((f"{group}:{inp.get('rendition_label') or i}", group, inp.get("rendition_label"), pp))
         else:
+            _segment_hints(cfg, primary_inputs(cfg))
             for i, inp in enumerate(primary_inputs(cfg)):
                 start_relay(inp, i)
             # no failover monitor on this path; assume primary feeding on start
@@ -2149,6 +2224,8 @@ def main():
             log(f"redundancy: transcode input_failover on — primary + {len(bak)} backup, "
                 f"loss_behavior={cfg['redundancy'].get('input_loss_behavior','slate')}")
             selector.start()
+            for group, i, inp, pp in getattr(selector, "_relay_specs", []):
+                _ingest_inputs.append((f"{group}:{inp.get('rendition_label') or i}", group, inp.get("rendition_label"), pp))
             feed = f"udp://127.0.0.1:{source_selector.SOURCE_FEED_PORT}?reuse=1&buffer_size=2097152"
             start_transcode(cfg, keys, source_override=feed)
             # NOTE: on the failover path the selector's health loop owns the source up/down
@@ -2188,6 +2265,12 @@ def main():
     # 9 Oct while capturing the demo). packager() only emits an event on a change,
     # so this is a status refresh, not log noise.
     last_beat = 0.0
+    # CPU AND INGEST, read on the same ten-second beat (stream_metrics.py): the
+    # kernel's accounting for this encoder's processes and the relays' own
+    # -progress byte counts. Nothing new runs to produce them.
+    metrics = stream_metrics.StreamMetrics(
+        pids=lambda: [os.getpid()] + [p.pid for _n, p, _c in _children if p.poll() is None],
+        inputs=lambda: list(_ingest_inputs))
     try:
         while True:
             for name, proc, critical in _children:
@@ -2197,6 +2280,10 @@ def main():
                     shutdown()
             if _events is not None and time.time() - last_beat >= 10:
                 last_beat = time.time()
+                try:
+                    _events.status["metrics"] = metrics.sample()
+                except Exception:  # noqa: BLE001  the meter never stops the stream
+                    pass
                 try:
                     _events.packager(shaka.poll() is None)
                 except Exception:  # noqa: BLE001

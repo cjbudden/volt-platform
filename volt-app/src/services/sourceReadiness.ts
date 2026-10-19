@@ -49,6 +49,7 @@ export interface SourceRow {
   ingest_url?: string | null;
   stream_key?: string | null;
   rendition_label?: string | null;
+  params?: Record<string, unknown> | null;
 }
 
 /** An error the HTTP layer turns into a 400 rather than a 500 (see util/http). */
@@ -89,7 +90,13 @@ export function sourceProblem(inputs: SourceRow[], label = 'This channel'): stri
     const desc = getProtocol(id);
     const name = desc?.label ?? (id ? id.toUpperCase() : 'source');
 
-    if (has(r.ingest_url)) return null;                  // usable: nothing more to check
+    if (has(r.ingest_url)) {
+      // A setting the protocol cannot work without (an ST 2110 flow with no SDP).
+      const missing = (desc?.fields ?? []).find((f) => f.required && !has(String((r.params ?? {})[f.key] ?? '')));
+      if (!missing) return null;                          // usable
+      reasons.push(`${label} has a ${name} source without its ${missing.label}.`);
+      continue;
+    }
 
     // No URL. For a push protocol a stream key is still enough, because the
     // endpoint is ours to issue and the key is what selects the channel.

@@ -26,11 +26,11 @@
  #toast.show{opacity:1}
 </style></head><body>
 <div class=wrap>
- <h1><span>⚡</span> Volt — Product Feature Tracker</h1>
+ <h1><svg class="vmark" viewBox="0 0 24 24" width="1em" height="1em" style="vertical-align:-0.12em" aria-hidden="true"><defs><linearGradient id="vmk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b8cff"/><stop offset="1" stop-color="#4f46e5"/></linearGradient></defs><path fill="url(#vmk)" d="M14 1 3.5 14H11zM10 23 20.5 10H13z"/></svg> Volt — Product Feature Tracker</h1>
  <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-12.</div>
  <div class=sub>Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>45</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>1</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>38</b> 📱 In app</span><span class=chip><b>12</b> 📱 Partial</span><span class=chip><b>1</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>46</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>1</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>38</b> 📱 In app</span><span class=chip><b>13</b> 📱 Partial</span><span class=chip><b>1</b> ⚙︎ Backend only</span><span class=chip><b>1</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="partial">
     <div class=top><div class=name>Frame-accurate scrub &amp; clip</div>
@@ -615,6 +615,19 @@
     <div class=actions>
          <button class="btn ok" data-approve="Workflows: hooks, add-on services and the workflow dashboard">✓ Approve as working</button>
          <button class="btn warn" data-changes="Workflows: hooks, add-on services and the workflow dashboard">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="partial">
+    <div class=top><div class=name>Automatic stream sizing, placement and consolidation advice</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>WHY: running cost is set by how many servers are up, and customers should never have to understand load. WHAT: every start works out the stream's CPU, GPU, memory and bandwidth from its output settings (transcode or packaging, ladder, fps, watermark, captions, backup source, DRM), reserves exactly that plus headroom, and puts it on the fullest running server that can take it without its existing streams noticing, or starts the smallest server that holds it. 24/7 channels stay on on-demand servers, events can use Spot. Measured runs with the same settings replace the estimate over time. Consolidation of under-used servers is planned on every fleet pass and shown, but nothing is moved until the no-interruption handoff is built. Customers see only 'Running' or 'Starting a server', and a plain fix when something is wrong.</div>
+    <div class=meta>A package-only channel reserves well under 1 vCPU, not the old 2 vCPU default; A full 1080p x264 ladder goes to a large server, not an undersized small one; A second channel lands on the same running server when it fits; A channel is never placed on Spot; an event prefers Spot; Nothing is moved by consolidation (advise only)</div>
+    <div class=how><b>How to test:</b> Start a package-only channel and a full 1080p transcode channel. Channel page: the billing strip says 'Server Running' (no instance type). Platform: GET /api/platform/fleet-plan/stream/&lt;id&gt; shows the estimate, the reservation and why that server was chosen; GET /api/platform/fleet-plan/hosts shows every server's measured and planned load; GET /api/platform/fleet-plan shows the latest consolidation advice. Checks: npx tsx test/stream-load.check.ts, placement-planner, consolidation-plan, server-status, placement-e2e (needs DATABASE_URL).</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="Automatic stream sizing, placement and consolidation advice">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Automatic stream sizing, placement and consolidation advice">Request changes</button>
        </div>
     
   </div><div class=card data-status="in_review" data-app="full">

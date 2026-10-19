@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import { api, type ContentType, type SchemaField } from '../api'
 import { PageHead } from '../scaffold'
 import { RuleEditor } from '../RuleEditor'
+import { useNotify, usePageNotice } from '../notices'
 
 const APPLIES: { key: 'radio' | 'tv' | 'event' | 'vod'; label: string }[] = [
   { key: 'radio', label: 'Radio stations' }, { key: 'tv', label: 'TV channels' }, { key: 'event', label: 'Events' }, { key: 'vod', label: 'On-demand assets' },
@@ -23,14 +24,15 @@ export default function ContentTypesPage() {
   const [sel, setSel] = useState<string | null>(null)
   const [err, setErr] = useState('')
   const [filter, setFilter] = useState<'all' | 'radio' | 'tv' | 'event' | 'vod'>('all')
-  async function load() { try { const t = await api.contentTypes(); setTypes(t); if (!sel && t.length) setSel(t[0].id) } catch (e: any) { setErr(e.message) } }
+  async function load() { try { const t = await api.contentTypes(); setTypes(t); setErr(''); if (!sel && t.length) setSel(t[0].id) } catch (e: any) { setErr(e.message) } }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [])
+  const notify = useNotify()
+  usePageNotice('load', err ? { kind: 'error', title: "Couldn't load content types.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
   const cur = types?.find(t => t.id === sel) ?? null
   const shown = (types ?? []).filter(t => filter === 'all' || t.applies_to.includes(filter))
   return (
     <>
       <PageHead title="Content Types" sub="What metadata each kind of content carries, and which EPG fields it fills. Standard types are schema.org-based; edit them or add your own." />
-      {err && <div className="err">{err}</div>}
       <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 16, alignItems: 'start' }}>
         <div className="card" style={{ padding: 12 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
@@ -60,7 +62,7 @@ export default function ContentTypesPage() {
                 appliesTo: base?.applies_to ?? ['event'], schemaOrgType: base?.schema_org_type ?? undefined,
               })
               await load(); setSel(created.id)
-            } catch (e: any) { setErr(e.message) }
+            } catch (e: any) { notify({ kind: 'error', message: e.message }) }
           }}>{cur ? `New type extending ${cur.name}` : 'New type'}</button>
         </div>
         <div>
@@ -126,14 +128,14 @@ function TypeEditor({ type, all, onChanged, onDeleted }: { type: ContentType; al
               <tr key={i}>
                 <td><input {...inp} value={f.key} onChange={e => setField(i, { key: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') })} style={{ ...inp.style, width: 120, fontFamily: 'ui-monospace,monospace' }} /></td>
                 <td><input {...inp} value={f.label ?? ''} onChange={e => setField(i, { label: e.target.value })} style={{ ...inp.style, width: 150 }} /></td>
-                <td><select {...inp} value={f.type} onChange={e => setField(i, { type: e.target.value as any })}>{FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></td>
+                <td><select className="inp sel-sm" value={f.type} onChange={e => setField(i, { type: e.target.value as any })}>{FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></td>
                 <td>
                   {f.type === 'enum' && <input {...inp} placeholder="a, b, c" value={(f.options ?? []).join(', ')} onChange={e => setField(i, { options: e.target.value.split(',').map(x => x.trim()).filter(Boolean) })} style={{ ...inp.style, width: 160 }} />}
                   {f.type === 'enum' && <label style={{ fontSize: 'var(--fs-micro)', marginLeft: 6 }}><input type="checkbox" checked={!!f.multiple} onChange={e => setField(i, { multiple: e.target.checked })} /> multi</label>}
                   {f.type === 'reference' && <input {...inp} placeholder="sports-team" value={f.refDomain ?? ''} onChange={e => setField(i, { refDomain: e.target.value })} style={{ ...inp.style, width: 120 }} />}
                 </td>
                 <td><input type="checkbox" checked={!!f.required} onChange={e => setField(i, { required: e.target.checked })} /></td>
-                <td><select {...inp} value={f.epg ?? ''} onChange={e => setField(i, { epg: e.target.value || undefined })}>{EPG_SLOTS.map(sl => <option key={sl} value={sl}>{sl || '—'}</option>)}</select></td>
+                <td><select className="inp sel-sm" value={f.epg ?? ''} onChange={e => setField(i, { epg: e.target.value || undefined })}>{EPG_SLOTS.map(sl => <option key={sl} value={sl}>{sl || '—'}</option>)}</select></td>
                 <td><input {...inp} value={f.schemaOrg ?? ''} onChange={e => setField(i, { schemaOrg: e.target.value || undefined })} style={{ ...inp.style, width: 120 }} /></td>
                 <td><button className="btn ghost" style={{ padding: '2px 8px' }} onClick={() => setFields(fs => fs.filter((_, k) => k !== i))}>✕</button></td>
               </tr>

@@ -49,7 +49,7 @@ export function LangPicker({ value, onChange, options }: {
         </span>
       ))}
       {remaining.length > 0 && (
-        <select className="inp" value="" style={{ width: 'auto', padding: '4px 8px', fontSize: 'var(--fs-sm)' }}
+        <select className="inp sel-sm" value="" style={{ width: 'auto' }}
           aria-label="Add caption language"
           onChange={e => { if (e.target.value) onChange([...value, e.target.value]) }}>
           <option value="">+ Add language…</option>

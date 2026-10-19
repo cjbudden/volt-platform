@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
+import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage } from '../util/listQuery';
 
 /**
  * Scheduled clips — a clipping window set on the live timeline. The orchestrator
@@ -19,20 +20,39 @@ const OWNED = `
   JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
 `;
 
+const SCHEDULED_CLIPS_LIST = defineList({
+  path: '/api/scheduled-clips',
+  fields: {
+    id: { sql: 'sc.id', type: 'uuid' },
+    title: { sql: 'sc.title', type: 'string' },
+    status: { sql: 'sc.status', type: 'enum', values: ['scheduled', 'firing', 'done', 'error', 'cancelled'] },
+    output_kind: { sql: 'sc.output_kind', type: 'enum', values: ['manifest', 'progressive', 'both'] },
+    channel_id: { sql: 'sc.channel_id', type: 'uuid' },
+    event_id: { sql: 'sc.event_id', type: 'uuid' },
+    source_name: { sql: 'COALESCE(c.name, e.name)', type: 'string' },
+    vod_asset_id: { sql: 'sc.vod_asset_id', type: 'uuid' },
+    start_epoch_ms: { sql: 'sc.start_epoch_ms', type: 'number' },
+    end_epoch_ms: { sql: 'sc.end_epoch_ms', type: 'number', notNull: true },
+    created_at: { sql: 'sc.created_at', type: 'timestamp' },
+  },
+  search: ['title', 'source_name'],
+  defaultSort: '-end_epoch_ms',
+  // The hypermedia links (services/hypermedia.ts) and the console use camelCase.
+  aliases: { channelId: 'channel_id', eventId: 'event_id' },
+  unpagedLimit: 1000,
+});
+
 scheduledClipsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const channelId = typeof req.query.channelId === 'string' ? req.query.channelId : null;
-    const eventId = typeof req.query.eventId === 'string' ? req.query.eventId : null;
-    const rows = await query(
-      `SELECT sc.*, COALESCE(c.name, e.name) AS source_name ${OWNED}
-        WHERE g.account_id = $1
-          AND ($2::uuid IS NULL OR sc.channel_id = $2)
-          AND ($3::uuid IS NULL OR sc.event_id = $3)
-        ORDER BY sc.end_epoch_ms DESC`,
-      [accountId(req), channelId, eventId]
-    );
-    res.json(rows);
+    const params: unknown[] = [accountId(req)];
+    const pl = parseList(SCHEDULED_CLIPS_LIST, req.query, params);
+    const where = `${OWNED} WHERE g.account_id = $1${whereSql(pl)}`;
+    const whereCount = `${OWNED} WHERE g.account_id = $1${countWhereSql(pl)}`;  // totals ignore the cursor
+    const rows = await query<any>(
+      `SELECT sc.*, COALESCE(c.name, e.name) AS source_name ${where} ${pageSql(pl)}`, params);
+    const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${whereCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
+    res.json(finishPage(req, res, pl, rows, total));
   })
 );
 

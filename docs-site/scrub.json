@@ -1,0 +1,110 @@
+{
+  "_comment": "What must never reach customer docs. Used by scripts/check-scrub.mjs (fails the build) and by the OpenAPI generator (rewrites captured examples). 'replace' is applied to generated content; 'banned' fails the build wherever it appears. Patterns are case-insensitive regular expressions.",
+  "replace": [
+    {
+      "from": "rtm\\.example",
+      "to": "example.com"
+    },
+    {
+      "from": "\\bRTM\\b",
+      "to": "Example Broadcaster"
+    },
+    {
+      "from": "admin@volt\\.test",
+      "to": "admin@example.com"
+    },
+    {
+      "from": "VoltTest!2026",
+      "to": "your-password"
+    },
+    {
+      "from": "volt1234",
+      "to": "your-password"
+    },
+    {
+      "from": "DEF CON Radio",
+      "to": "Radio One"
+    },
+    {
+      "from": "somafm\\.com",
+      "to": "source.example"
+    },
+    {
+      "from": "triple j",
+      "to": "Youth FM"
+    },
+    {
+      "from": "\\s*On a test server with SECURITY_CODE_ECHO=1 [^.]*\\.",
+      "to": ""
+    },
+    {
+      "from": "SECURITY_CODE_ECHO=1",
+      "to": "test mode"
+    },
+    {
+      "from": "\\bpostgres(ql)?\\b",
+      "to": "\"database\""
+    }
+  ],
+  "banned": [
+    {
+      "pattern": "\\bglue(mps)?\\b",
+      "why": "former product name"
+    },
+    {
+      "pattern": "\\bIPSB\\b",
+      "why": "third party"
+    },
+    {
+      "pattern": "\\bRTM\\b",
+      "why": "customer/prospect name"
+    },
+    {
+      "pattern": "rtm\\.example",
+      "why": "customer/prospect name in demo data"
+    },
+    {
+      "pattern": "somafm",
+      "why": "real station in seed data"
+    },
+    {
+      "pattern": "/api/platform/",
+      "why": "Volt-staff platform API is not customer documentation"
+    },
+    {
+      "pattern": "\\bsrc/[\\w./-]+\\.(ts|tsx|py)\\b",
+      "why": "internal source path"
+    },
+    {
+      "pattern": "\\b[\\w-]+\\.(ts|tsx|py)\\b(?!x)",
+      "why": "internal source file name"
+    },
+    {
+      "pattern": "\\bROLE=api-",
+      "why": "internal deployment tier"
+    },
+    {
+      "pattern": "\\b(VIEWER_JWT_SECRET|JWT_SECRET|DATABASE_URL|SECURITY_CODE_ECHO)\\b",
+      "why": "internal environment variable"
+    },
+    {
+      "pattern": "\\bmigration \\d{4}\\b",
+      "why": "internal schema detail"
+    },
+    {
+      "pattern": "\\b(ECS|Fargate|RDS|Terraform|Postgres(ql)?)\\b",
+      "why": "internal infrastructure"
+    },
+    {
+      "pattern": "\\bsk_live_[A-Za-z0-9]{8,}",
+      "why": "looks like a real secret key"
+    }
+  ],
+  "scan": [
+    ".html",
+    ".md",
+    ".mdx",
+    ".json",
+    ".xml"
+  ]
+}

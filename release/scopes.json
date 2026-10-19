@@ -1,0 +1,19 @@
+{
+  "_comment": "Which part of the repo a changed file belongs to. FIRST MATCH WINS, so specific rules go above general ones. core = the streaming product every customer gets (release notes are written for these). saas = the platform-operator layer unique to running Volt as SaaS (tenancy, staff admin, billing, tickets, docs hosting): changelog only. internal = tests, tooling, infrastructure, docs sources: changelog only. A file matching nothing is internal.",
+  "rules": [
+    { "scope": "internal", "globs": ["_to_delete/**", "_archive/**", "_stage/**", "outputs/**", "**/*.tgz", "**/__pycache__/**", "**/node_modules/**"] },
+    { "scope": "internal", "globs": ["**/test/**", "**/tests/**", "**/dev/**", "**/*.check.*", "**/*.test.*", "**/test_*.py", "e2e/**", "volt-encoder/synctest.sh", "volt-encoder/bin/test-*"] },
+    { "scope": "internal", "globs": ["deploy/**", "scripts/**", "volt-app/scripts/**", "volt-app/api/**", "volt-app/docs/**", "docs-site/**", "changes/**", "release/**", ".githooks/**", "feature-tracker/**", "brand/**", "VERSION", "CHANGELOG.md", "*.md", "*.sh", "*.html", "volt-frame-proto/**", "volt-image-proto/**"] },
+    { "scope": "saas", "globs": [
+      "volt-app/src/modules/platform.ts", "volt-app/src/modules/platformAuth.ts", "volt-app/src/modules/tickets.ts", "volt-app/src/modules/docsSession.ts",
+      "volt-app/src/auth/platform.ts", "volt-app/src/services/billing.ts", "volt-app/src/services/tenancy.ts", "volt-app/src/scale/**",
+      "volt-web/src/pages/SystemAdmin.tsx", "volt-web/src/docsLink.tsx"
+    ] },
+    { "scope": "core", "globs": [
+      "volt-app/src/**", "volt-app/migrations/**", "volt-app/package.json",
+      "volt-web/src/**", "volt-web/index.html",
+      "volt-encoder/bin/**", "volt-encoder/Dockerfile",
+      "volt-player/src/**", "volt-agent/src/**", "packages/*/src/**"
+    ] }
+  ]
+}

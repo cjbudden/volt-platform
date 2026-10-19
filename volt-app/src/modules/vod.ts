@@ -21,6 +21,7 @@ import { actor, writeAudit } from '../services/audit';
 import { publish, withdraw, republish, NotPublishable } from '../services/availability';
 import { resolveForAsset } from '../services/publishingRules';
 import { cleanSettings } from './publishingRules';
+import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage } from '../util/listQuery';
 
 /**
  * VOD Library — assets DERIVED from a recording (auto-published, clips, exports).
@@ -55,11 +56,69 @@ const OWNED = `
 /** The account that owns the asset, whichever way it got here. */
 const OWNER_ACCOUNT = `COALESCE(g.account_id, v.account_id)`;
 
+/**
+ * THE LIBRARY LIST, searchable, filterable, sortable and paged the standard
+ * way (util/listQuery.ts). Field names are the row's own property names.
+ * It used to return every asset; without limit/cursor it still returns up to
+ * 1000, so the library page keeps its data until it pages on the server.
+ */
+const VOD_LIST = defineList({
+  path: '/api/vod',
+  fields: {
+    id: { sql: 'v.id', type: 'uuid' },
+    title: { sql: 'v.title', type: 'string' },
+    kind: { sql: 'v.kind', type: 'enum', values: ['clip', 'full_event', 'export'] },
+    source_kind: { sql: 'v.source_kind', type: 'enum', values: ['recording', 'upload', 'watchfolder'], doc: 'Where the asset came from' },
+    source_name: { sql: 'COALESCE(c.name, e.name)', type: 'string', doc: 'The channel or event it was cut from' },
+    channel_id: { sql: 'v.channel_id', type: 'uuid' },
+    event_id: { sql: 'v.event_id', type: 'uuid' },
+    recording_id: { sql: 'v.recording_id', type: 'uuid' },
+    schema_id: { sql: 'v.schema_id', type: 'uuid' },
+    schema_name: { sql: 'ms.name', type: 'string' },
+    published: { sql: 'v.published', type: 'boolean' },
+    portal_visible: { sql: 'v.portal_visible', type: 'boolean' },
+    output_kind: { sql: 'v.output_kind', type: 'enum', values: ['manifest', 'progressive', 'both'] },
+    review_state: { sql: 'v.review_state', type: 'enum', values: ['draft', 'in_review', 'changes_requested', 'approved', 'rejected'] },
+    qc_state: { sql: 'v.qc_state', type: 'string' },
+    availability_state: { sql: 'v.availability_state', type: 'enum', values: ['draft', 'scheduled', 'available', 'expired', 'withdrawn'] },
+    available_from: { sql: 'v.available_from', type: 'timestamp' },
+    available_until: { sql: 'v.available_until', type: 'timestamp' },
+    withdrawn_at: { sql: 'v.withdrawn_at', type: 'timestamp' },
+    thumb_status: { sql: 'v.thumb_status', type: 'enum', values: ['uploading', 'processing', 'ready', 'error'] },
+    original_filename: { sql: 'v.original_filename', type: 'string' },
+    mime: { sql: 'v.mime', type: 'string' },
+    start_epoch_ms: { sql: 'v.start_epoch_ms', type: 'number' },
+    end_epoch_ms: { sql: 'v.end_epoch_ms', type: 'number' },
+    duration_ms: { sql: 'v.duration_ms', type: 'number' },
+    source_bytes: { sql: 'v.source_bytes', type: 'number' },
+    source_coverage_pct: { sql: 'v.source_coverage_pct', type: 'number' },
+    has_stale_publication: { sql: 'EXISTS (SELECT 1 FROM publications p WHERE p.vod_asset_id = v.id AND p.stale)', type: 'boolean', doc: 'A published copy is older than this asset' },
+    publication_count: { sql: '(SELECT count(*) FROM publications p WHERE p.vod_asset_id = v.id)::int', type: 'number' },
+    encode_state: { sql: 'j.state', type: 'enum', values: ['queued', 'running', 'succeeded', 'failed', 'cancelled'] },
+    encode_pct: { sql: 'j.progress_pct', type: 'number' },
+    created_at: { sql: 'v.created_at', type: 'timestamp', notNull: true },
+    updated_at: { sql: 'v.updated_at', type: 'timestamp' },
+    built_at: { sql: 'v.built_at', type: 'timestamp' },
+    reviewed_at: { sql: 'v.reviewed_at', type: 'timestamp' },
+  },
+  search: ['title', 'original_filename', 'source_name', 'schema_name', "v.metadata->>'description'"],
+  defaultSort: '-created_at',
+  // The hypermedia links (services/hypermedia.ts) and older callers use camelCase.
+  aliases: { recordingId: 'recording_id', channelId: 'channel_id', eventId: 'event_id' },
+  unpagedLimit: 1000,
+});
+
 vodRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const published =
-      req.query.published === 'true' ? true : req.query.published === 'false' ? false : null;
+    const params: unknown[] = [accountId(req)];
+    const pl = parseList(VOD_LIST, req.query, params);
+    const from = `${OWNED}
+       LEFT JOIN metadata_schemas ms ON ms.id = v.schema_id
+       LEFT JOIN jobs j ON j.id = v.encode_job_id
+       WHERE COALESCE(g.account_id, v.account_id) = $1`;
+    const fromCount = from + countWhereSql(pl);  // totals ignore the cursor
+    const fromPage = from + whereSql(pl);
     const rows = await query(
       `SELECT v.*, ms.name AS schema_name, COALESCE(c.name, e.name) AS source_name,
               -- Whether the copy that went out is still the copy that is here.
@@ -74,14 +133,12 @@ vodRouter.get(
               -- be able to say which.
               j.state AS encode_state, j.progress_pct AS encode_pct,
               j.progress_note AS encode_note, j.last_error AS encode_error
-       ${OWNED}
-       LEFT JOIN metadata_schemas ms ON ms.id = v.schema_id
-       LEFT JOIN jobs j ON j.id = v.encode_job_id
-       WHERE COALESCE(g.account_id, v.account_id) = $1 AND ($2::boolean IS NULL OR v.published = $2)
-       ORDER BY v.created_at DESC`,
-      [accountId(req), published]
+       ${fromPage}
+       ${pageSql(pl)}`,
+      params
     );
-    res.json(rows);
+    const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${fromCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
+    res.json(finishPage(req, res, pl, rows as any[], total));
   })
 );
 

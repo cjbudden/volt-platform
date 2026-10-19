@@ -4,6 +4,7 @@ import { query, one } from '../db';
 import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound } from '../util/http';
+import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage } from '../util/listQuery';
 
 /**
  * Slates & Loops — uploaded filler assets, managed separately from VOD. A slate
@@ -18,17 +19,38 @@ import { asyncHandler, notFound } from '../util/http';
 export const fillerAssetsRouter = Router();
 fillerAssetsRouter.use(requireAuth);
 
+const FILLER_LIST = defineList({
+  path: '/api/filler-assets',
+  fields: {
+    id: { sql: 'id', type: 'uuid' },
+    name: { sql: 'name', type: 'string' },
+    kind: { sql: 'kind', type: 'enum', values: ['slate', 'loop'] },
+    status: { sql: 'status', type: 'enum', values: ['uploading', 'processing', 'ready', 'error'] },
+    filename: { sql: 'filename', type: 'string' },
+    content_type: { sql: 'content_type', type: 'string' },
+    width: { sql: 'width', type: 'number' },
+    height: { sql: 'height', type: 'number' },
+    duration_ms: { sql: 'duration_ms', type: 'number' },
+    bytes: { sql: 'bytes', type: 'number' },
+    uploaded_at: { sql: 'uploaded_at', type: 'timestamp' },
+    created_at: { sql: 'created_at', type: 'timestamp', notNull: true },
+    updated_at: { sql: 'updated_at', type: 'timestamp' },
+  },
+  search: ['name', 'filename'],
+  defaultSort: '-created_at',
+  unpagedLimit: 1000,
+});
+
 fillerAssetsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const kind = typeof req.query.kind === 'string' ? req.query.kind : null;
-    const rows = await query(
-      `SELECT * FROM filler_assets
-        WHERE account_id = $1 AND ($2::text IS NULL OR kind = $2::filler_kind)
-        ORDER BY created_at DESC`,
-      [accountId(req), kind]
-    );
-    res.json(rows);
+    const params: unknown[] = [accountId(req)];
+    const pl = parseList(FILLER_LIST, req.query, params);
+    const where = `FROM filler_assets WHERE account_id = $1${whereSql(pl)}`;
+    const whereCount = `FROM filler_assets WHERE account_id = $1${countWhereSql(pl)}`;  // totals ignore the cursor
+    const rows = await query<any>(`SELECT * ${where} ${pageSql(pl)}`, params);
+    const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${whereCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
+    res.json(finishPage(req, res, pl, rows, total));
   })
 );
 

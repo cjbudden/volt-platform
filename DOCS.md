@@ -19,7 +19,9 @@ current version is always the file in this repo.
 | **Why the subtitles line up** (and how to prove it again) | `CAPTIONS.md` + `volt-encoder/synctest.sh` |
 | **The history of a change** (what changed, when, why) | `git log --oneline`, every change is a commit with a message |
 | **How to run / test locally** | This page's *Run & test* + *Test base* sections |
-| **The API** (params, payloads, hypermedia) | `volt-app/docs/API.md` + Postman collection |
+| **The API** (public/admin/platform split, credentials, params, payloads) | `volt-app/docs/API_GUIDE.md` (how to use it) · `API_ROUTES.md` (every route and the access it needs) · `API.md` + Postman collection (request by request, live examples) |
+| **Customer docs, API reference, release notes** (how to publish, how access works) | `docs-site/MAINTAINING.md` |
+| **How to cut a release** (change notes, versions, changelog) | `RELEASING.md` · scope rules `release/scopes.json` |
 | **A specific file** | It's in this repo; the important ones are linked below |
 
 **Fast orientation (do this at the start of any work session):**
@@ -51,7 +53,19 @@ current version is always the file in this repo.
 - [Forms & fields](volt-app/docs/DESIGN_forms_and_fields.md), channel/event form design.
 - [Source preview & monitor](volt-app/docs/DESIGN_source_preview_monitor.md), previewing any source type.
 - [Frame-accurate media access](volt-app/docs/DESIGN_frame_access.md)
-- [On-the-fly image service](volt-app/docs/DESIGN_image_service.md)
+- **[Image service guide](volt-app/docs/IMAGES.md)**, resize, crop and filter by signed URL: every
+  option, signing (API, SDK, console), limits, caching and scale, configuration, local run, AWS deploy.
+- [On-the-fly image service (design record)](volt-app/docs/DESIGN_image_service.md)
+- **[Encoder thumbnails](volt-app/docs/THUMBNAILS.md)**, stills in the library per channel/date/hour, 10-minute
+  sprite sheets and hourly VTTs for 24x7 channels, hover previews, clip VTTs, API, settings, storage.
+- **[Audit log, channel deletes and limits](volt-app/docs/AUDIT_LOG.md)**, every delete logged (refusals too),
+  the Audit log report and `/api/audit`, admin-only channel delete with impact, group limits and create errors.
+- **[Plan, limits and channel groups](volt-app/docs/PLAN_AND_GROUPS.md)**, the plan at the account (owner or system admin), groups
+  sharing it out, the default group, removing groups.
+- **[Permissions map](volt-app/docs/PERMISSIONS_MAP.md)**, every default user type against every area and account control.
+- **[Console feedback, actions and layout standard](volt-app/docs/UI_FEEDBACK.md)**, where errors, warnings and
+  results go (global, page, form, field/row), row "⋯" menus, selection and bulk actions, list filters and sort,
+  the event calendar (day, week, month, year), confirmations.
 - [File manager + watchfolder ingest](volt-app/docs/DESIGN_file_manager_watchfolder.md)
 - [Media Library](volt-app/docs/DESIGN_media_library.md), publishing rules, metadata by content type (schema.org standard schemas, event types, EPG field mapping), availability / geo / paywall defaults with per-asset override, uploads + encoding profile. Preview + rename built.
 - [API access map (public vs admin)](volt-app/docs/API_ACCESS_MAP.md)
@@ -74,8 +88,12 @@ current version is always the file in this repo.
 - **[Embedding the player](volt-app/docs/EMBEDDING.md)**, customer-facing: the JS embed, the
   iframe embed, every attribute, the SDK, headless mode, events, postMessage, and the
   things that go wrong.
-- [API reference](volt-app/docs/API.md) · [API additions](volt-app/docs/API-additions.md)
-- Postman, `volt-app/api/Volt.postman_collection.json` (+ `Volt.postman_environment.json`)
+- **[API usage guide](volt-app/docs/API_GUIDE.md)**: the three APIs (public, admin, platform), credentials, sign-in and two-step sign-in, access levels, errors.
+- [Every route](volt-app/docs/API_ROUTES.md): generated from the running app (`npm run docs:routes`), with the credential and the feature and level each needs.
+- [API reference, request by request](volt-app/docs/API.md) and the [playground](volt-app/docs/api-playground.html): generated from a live run (`api/capture_api.sh`).
+- Postman, `volt-app/api/Volt.postman_collection.json` (+ `Volt.postman_environment.json`): the same requests, runnable in order, checked by `api/verify.sh`.
+- [Access control](ACCESS_CONTROL.md): roles, rules and security behind the API.
+- Older notes kept for history: [API additions (Aug)](volt-app/docs/API-additions.md), [access map (Sep)](volt-app/docs/API_ACCESS_MAP.md).
 
 ---
 
@@ -171,7 +189,9 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
   rotate (old URL dies), scoped list, email deliveries. 42 assertions.
 - `radio-brand.check.ts`, audio-only (radio) job config: no video ladder or GPU, AAC
   rung defaulting, video path untouched, and brand never becoming an encoder overlay.
-- **API contract**, `volt-app/api/verify.sh` (Newman, runs the Postman collection).
+- **API contract**, `volt-app/api/verify.sh` (Newman runs the Postman collection end to end: public, admin and platform, 128 requests).
+- **Route reference current**, `test/docs.check.sh` (fails when a route was added or re-gated without `npm run docs:routes`).
+- `identity/identity-check.ts`, email change, mobile, two-step sign-in, account policy, resets, group renames (59 checks).
 
 **Encoder, `volt-encoder/`**
 - `validate.sh`, REAL encoder against a synthetic source (HLS path), offline.
@@ -197,9 +217,21 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
 - `bin/capbench.py`, text-quality benchmark against the Unified vod2live demo's own
   professional subtitle track (complements syncheck, which measures placement).
 
+**Image service** (`volt-app/`)
+- `test/images.check.ts` (`npm run test:images`), 145 checks, no database: SDK maths, both
+  grammars, every guard, per-account signing and rotation, the sharp pipeline, memory/disk/S3
+  caches, single-flight, the busy limiter, the HTTP route, the signing API.
+- `test/images-api.check.sh`, 22 checks through the real control plane (upload, sign, render,
+  refusals, tenancy).
+- `test/images-s3.check.ts`, the S3 drivers against a real S3 API (MinIO/LocalStack/AWS).
+- `packages/image-url` `npm test`, the published SDK.
+- `test/thumbnails.check.ts`, 81 checks: naming and time zones, VTT maths, metadata extraction, and a real
+  hour built from an encoded fixture (stills, sheets, VTT, rows, clip VTT, retention).
+- `test/media-library.check.sh`, 43 checks through the real API: upload metadata, search, folders, thumbnails API.
+
 **Prototypes**
 - `volt-frame-proto/test.mjs`, 15/15 frame-accuracy assertions.
-- `volt-image-proto/test.mjs`, 14/14 image-service contract checks.
+- `volt-image-proto/test.mjs`, superseded image prototype (reference only).
 
 **End-to-end**, `e2e/run-e2e.sh` (brings up the stack, runs the pipeline, checks output);
 plus `e2e/local-pipeline-test.sh`, `e2e/source-ladder.sh`, `e2e/extractor-test.sh`.

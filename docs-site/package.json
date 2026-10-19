@@ -1,0 +1,32 @@
+{
+  "name": "volt-docs",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Volt customer documentation: guides, API reference (Scalar) and release notes.",
+  "scripts": {
+    "prepare-assets": "node scripts/prepare.mjs",
+    "start": "npm run prepare-assets && docusaurus start",
+    "build": "npm run prepare-assets && docusaurus build && node scripts/check-scrub.mjs build",
+    "serve": "docusaurus serve",
+    "check": "node scripts/check-scrub.mjs docs release-notes static/openapi.json",
+    "clear": "docusaurus clear"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.10.2",
+    "@docusaurus/preset-classic": "3.10.2",
+    "@mdx-js/react": "^3.1.0",
+    "@scalar/api-reference": "1.75.0",
+    "@scalar/docusaurus": "0.8.51",
+    "clsx": "^2.1.1",
+    "prism-react-renderer": "^2.4.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@docusaurus/module-type-aliases": "3.10.2",
+    "@docusaurus/tsconfig": "3.10.2",
+    "@docusaurus/types": "3.10.2",
+    "typescript": "~5.8.3"
+  },
+  "engines": { "node": ">=20" }
+}

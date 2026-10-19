@@ -1,0 +1,5468 @@
+[
+ {
+  "method": "GET",
+  "path": "/api/apps",
+  "search": [
+   "name"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {
+   "createdAt": "created_at"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "type": {
+    "type": "enum",
+    "values": [
+     "web",
+     "ios",
+     "android",
+     "tv",
+     "roku",
+     "server"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "enabled": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "updated_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/apps/keys",
+  "search": [
+   "app_name",
+   "key_prefix"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {
+   "appId": "app_id",
+   "createdAt": "created_at"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "app_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "Empty for account secret keys"
+   },
+   "app_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "kind": {
+    "type": "enum",
+    "values": [
+     "secret",
+     "publishable"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "key_prefix": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "enabled": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "last_used_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "request_count": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels",
+  "search": [
+   "name",
+   "group_name",
+   "xmltv_id"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {
+   "groupId": "group_id",
+   "createdAt": "created_at",
+   "updatedAt": "updated_at",
+   "onAir": "on_air"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "kind": {
+    "type": "enum",
+    "values": [
+     "tv",
+     "radio"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "tv or radio"
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "scheduled",
+     "provisioning",
+     "testing",
+     "live",
+     "stopping",
+     "ended",
+     "error"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "group_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "group_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "enabled": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "on_air": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "recording_enabled": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "auto_connect": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "resilience_tier": {
+    "type": "enum",
+    "values": [
+     "standard",
+     "resilient_input",
+     "full_redundancy"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "desired_state": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "xmltv_id": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "tz": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "updated_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg",
+  "search": [
+   "title"
+  ],
+  "defaultSort": "starts_at",
+  "defaultLimit": 50,
+  "maxLimit": 1000,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {
+   "startsAt": "starts_at",
+   "endsAt": "ends_at",
+   "seriesId": "series_id",
+   "autoVod": "auto_vod"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "title": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "starts_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "ends_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "scheduled",
+     "live",
+     "aired",
+     "cancelled"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "series_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "source_ref": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "auto_vod": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "geo_mode": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "replacement_kind": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "clip_status": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "clip_asset_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "actual_start": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "actual_end": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "expected_viewers": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "updated_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/channels",
+  "search": [
+   "name",
+   "xmltvId"
+  ],
+  "defaultSort": "name",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "xmltvId": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "The id set on the channel (unset channels use their Volt id)"
+   },
+   "medium": {
+    "type": "enum",
+    "values": [
+     "tv",
+     "radio"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "tz": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "epgEnabled": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/epg/xmltv/feeds",
+  "search": [
+   "name"
+  ],
+  "defaultSort": "-createdAt",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "enabled": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "includeEvents": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "timeBasis": {
+    "type": "enum",
+    "values": [
+     "scheduled",
+     "asrun"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "tzMode": {
+    "type": "enum",
+    "values": [
+     "local",
+     "utc"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "lang": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "pastDays": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "futureDays": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "pollCount": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "lastPolledAt": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/events",
+  "search": [
+   "name",
+   "xmltv_id"
+  ],
+  "defaultSort": "-scheduled_start",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {
+   "groupId": "group_id",
+   "scheduledStart": "scheduled_start",
+   "scheduledEnd": "scheduled_end",
+   "createdAt": "created_at"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "scheduled",
+     "provisioning",
+     "testing",
+     "live",
+     "stopping",
+     "ended",
+     "error"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "group_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "scheduled_start": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "scheduled_end": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "public_start": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "public_end": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "actual_start": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "actual_end": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "auto_vod": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "auto_connect": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "recording_enabled": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "resilience_tier": {
+    "type": "enum",
+    "values": [
+     "standard",
+     "resilient_input",
+     "full_redundancy"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "desired_state": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "expected_viewers": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "xmltv_id": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "updated_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/filler-assets",
+  "search": [
+   "name",
+   "filename"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "kind": {
+    "type": "enum",
+    "values": [
+     "slate",
+     "loop"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "uploading",
+     "processing",
+     "ready",
+     "error"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "filename": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "content_type": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "width": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "height": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "duration_ms": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "bytes": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "uploaded_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "updated_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/ingest/held",
+  "search": [
+   "title",
+   "originalFilename"
+  ],
+  "defaultSort": "-createdAt",
+  "defaultLimit": 200,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "title": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "originalFilename": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "bytes": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "mime": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "schemaId": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "awaiting_metadata",
+     "duplicate",
+     "rejected"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/ingest/transfers",
+  "search": [
+   "externalId",
+   "error"
+  ],
+  "defaultSort": "-createdAt",
+  "defaultLimit": 100,
+  "maxLimit": 100,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "provider": {
+    "type": "enum",
+    "values": [
+     "aspera",
+     "masv",
+     "signiant",
+     "s3accel"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "state": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "created, running, landed, failed..."
+   },
+   "externalId": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "error": {
+    "type": "string",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/jobs",
+  "search": [
+   "type",
+   "source_name",
+   "last_error",
+   "error_code"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {
+   "channelId": "channel_id",
+   "eventId": "event_id",
+   "correlationId": "correlation_id"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "type": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "Job type, e.g. clip.extract"
+   },
+   "state": {
+    "type": "enum",
+    "values": [
+     "queued",
+     "running",
+     "succeeded",
+     "failed",
+     "cancelled"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "progress_pct": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "attempts": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "error_code": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "last_error": {
+    "type": "string",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "channel_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "event_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "correlation_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "source_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "Name of the channel or event"
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "started_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "finished_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "run_after": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/monitoring/feed",
+  "search": [
+   "type",
+   "name"
+  ],
+  "defaultSort": "-ts",
+  "defaultLimit": 60,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {
+   "channelId": "channel_id",
+   "eventId": "event_id"
+  },
+  "fields": {
+   "id": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "type": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "e.g. source.down, failover.switch"
+   },
+   "ts": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "Channel or event name"
+   },
+   "channel_id": {
+    "type": "uuid",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "event_id": {
+    "type": "uuid",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/notifications",
+  "search": [
+   "topic",
+   "subject",
+   "body"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 200,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "topic": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "e.g. event.reminder, alert, publish, expiry"
+   },
+   "subject": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "body": {
+    "type": "string",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "deliveries": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "sent": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "retrying": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "gave_up": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/notifications/inbox",
+  "search": [
+   "topic",
+   "subject",
+   "body"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 200,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "pending",
+     "sent",
+     "failed"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "read_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "topic": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "subject": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "body": {
+    "type": "string",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/publications",
+  "search": [
+   "platform",
+   "target_name",
+   "external_url"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "platform": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "pending",
+     "published",
+     "failed",
+     "removed",
+     "withdrawn"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "stage": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "target_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "target_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "app_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "external_url": {
+    "type": "string",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "stale": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ],
+    "doc": "The asset has changed since this copy went out"
+   },
+   "views": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "attempts": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "published_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "last_synced_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/publish-targets",
+  "search": [
+   "name",
+   "external_account",
+   "platform"
+  ],
+  "defaultSort": "platform,name",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "platform": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "portal, youtube, facebook, x, tiktok or dailymotion"
+   },
+   "name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "external_account": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "enabled": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/radio",
+  "search": [
+   "name",
+   "group_name"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {
+   "groupId": "group_id",
+   "createdAt": "created_at",
+   "onAir": "on_air"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "scheduled",
+     "provisioning",
+     "testing",
+     "live",
+     "stopping",
+     "ended",
+     "error"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "group_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "group_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "recording_enabled": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "on_air": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/recordings",
+  "search": [],
+  "defaultSort": "-start_epoch_ms",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {
+   "channelId": "channel_id"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "title": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "kind": {
+    "type": "enum",
+    "values": [
+     "event",
+     "channel_day"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "How the capture is sliced: one run per event, or one per channel per day"
+   },
+   "recording_type": {
+    "type": "enum",
+    "values": [
+     "tv_channel",
+     "radio_station",
+     "audio_stream",
+     "event",
+     "simulcast",
+     "ad_hoc"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "source_type": {
+    "type": "enum",
+    "values": [
+     "radio",
+     "channel",
+     "event"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "What the source is"
+   },
+   "source_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "channel_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "event_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "container_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "recording",
+     "complete",
+     "error"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "day_utc": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ],
+    "doc": "The UTC day of a channel-day recording"
+   },
+   "start_epoch_ms": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "end_epoch_ms": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "duration_ms": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "retention_days": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "expires_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "storage_state": {
+    "type": "enum",
+    "values": [
+     "pending",
+     "writing",
+     "available",
+     "archiving",
+     "archived",
+     "restoring",
+     "restored",
+     "deleting",
+     "deleted"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "next_action": {
+    "type": "enum",
+    "values": [
+     "keep",
+     "to_cold",
+     "to_archive",
+     "delete"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "next_action_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "thumb_status": {
+    "type": "enum",
+    "values": [
+     "uploading",
+     "processing",
+     "ready",
+     "error"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "vod_count": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/scheduled-clips",
+  "search": [
+   "title",
+   "source_name"
+  ],
+  "defaultSort": "-end_epoch_ms",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {
+   "channelId": "channel_id",
+   "eventId": "event_id"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "title": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "scheduled",
+     "firing",
+     "done",
+     "error",
+     "cancelled"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "output_kind": {
+    "type": "enum",
+    "values": [
+     "manifest",
+     "progressive",
+     "both"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "channel_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "event_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "source_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "vod_asset_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "start_epoch_ms": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "end_epoch_ms": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/share-links",
+  "search": [
+   "label",
+   "token_prefix"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "label": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "resource_kind": {
+    "type": "enum",
+    "values": [
+     "vod",
+     "channel",
+     "event"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "resource_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "access_type": {
+    "type": "enum",
+    "values": [
+     "preview_only",
+     "allow_download"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "token_prefix": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "The first characters of the link token, to recognise a link"
+   },
+   "revoked": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "expired": {
+    "type": "boolean",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ],
+    "doc": "Past its expiry time"
+   },
+   "expires_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "max_views": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "view_count": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "first_opened_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "last_viewed_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/status",
+  "search": [
+   "name"
+  ],
+  "defaultSort": "-updated_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {
+   "channelId": "channel_id",
+   "eventId": "event_id"
+  },
+  "fields": {
+   "stream_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": false,
+    "ops": [],
+    "doc": "Channel or event id (tiebreak)"
+   },
+   "channel_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "event_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "output_available": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "active_source": {
+    "type": "enum",
+    "values": [
+     "primary",
+     "backup",
+     "filler"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "fallback_in_use": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "filler_in_use": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "packager_ok": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "updated_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/status/:kind/:id/events",
+  "search": [
+   "type"
+  ],
+  "defaultSort": "-id",
+  "defaultLimit": 100,
+  "maxLimit": 500,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "seq": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "type": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "e.g. channel.start, source.down, failover.switch"
+   },
+   "ts": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/storage/objects",
+  "search": [
+   "logical_key",
+   "rendition",
+   "recording_title",
+   "source_name"
+  ],
+  "defaultSort": "-updated_at",
+  "defaultLimit": 100,
+  "maxLimit": 500,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {
+   "channelId": "channel_id",
+   "recordingId": "recording_id",
+   "eventId": "event_id",
+   "vodAssetId": "vod_asset_id"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "logical_key": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "kind": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "run_rendition, clip_output or export"
+   },
+   "rendition": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "state": {
+    "type": "enum",
+    "values": [
+     "pending",
+     "writing",
+     "available",
+     "archiving",
+     "archived",
+     "restoring",
+     "restored",
+     "deleting",
+     "deleted"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "bytes": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "duration_ms": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "segment_count": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "hold": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "retain_until": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "recording_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "vod_asset_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "channel_id": {
+    "type": "uuid",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "event_id": {
+    "type": "uuid",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "recording_title": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "source_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "updated_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/tickets",
+  "search": [
+   "subject",
+   "body"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "subject": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "body": {
+    "type": "string",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "open",
+     "pending",
+     "resolved",
+     "closed"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "priority": {
+    "type": "enum",
+    "values": [
+     "low",
+     "normal",
+     "high",
+     "urgent"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "opened_by": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "assignee_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "updated_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/users",
+  "search": [
+   "email",
+   "displayName"
+  ],
+  "defaultSort": "created_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {
+   "createdAt": "created_at",
+   "tier": "role"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "email": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "displayName": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "role": {
+    "type": "enum",
+    "values": [
+     "owner",
+     "admin",
+     "operator",
+     "viewer"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "The access tier"
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "active",
+     "invited",
+     "disabled"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "isPlatform": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "mfa": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ],
+    "doc": "Two-step sign-in is on"
+   },
+   "emailVerified": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod",
+  "search": [
+   "title",
+   "original_filename",
+   "source_name",
+   "schema_name"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {
+   "recordingId": "recording_id",
+   "channelId": "channel_id",
+   "eventId": "event_id"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "title": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "kind": {
+    "type": "enum",
+    "values": [
+     "clip",
+     "full_event",
+     "export"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "source_kind": {
+    "type": "enum",
+    "values": [
+     "recording",
+     "upload",
+     "watchfolder"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "Where the asset came from"
+   },
+   "source_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "The channel or event it was cut from"
+   },
+   "channel_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "event_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "recording_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "schema_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "schema_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "published": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "portal_visible": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "output_kind": {
+    "type": "enum",
+    "values": [
+     "manifest",
+     "progressive",
+     "both"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "review_state": {
+    "type": "enum",
+    "values": [
+     "draft",
+     "in_review",
+     "changes_requested",
+     "approved",
+     "rejected"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "qc_state": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "availability_state": {
+    "type": "enum",
+    "values": [
+     "draft",
+     "scheduled",
+     "available",
+     "expired",
+     "withdrawn"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "available_from": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "available_until": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "withdrawn_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "thumb_status": {
+    "type": "enum",
+    "values": [
+     "uploading",
+     "processing",
+     "ready",
+     "error"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "original_filename": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "mime": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "start_epoch_ms": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "end_epoch_ms": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "duration_ms": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "source_bytes": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "source_coverage_pct": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "has_stale_publication": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ],
+    "doc": "A published copy is older than this asset"
+   },
+   "publication_count": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "encode_state": {
+    "type": "enum",
+    "values": [
+     "queued",
+     "running",
+     "succeeded",
+     "failed",
+     "cancelled"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "encode_pct": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "updated_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "built_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "reviewed_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/watchfolders/:id/items",
+  "search": [
+   "object_key",
+   "reason",
+   "rule_name"
+  ],
+  "defaultSort": "-seen_at",
+  "defaultLimit": 200,
+  "maxLimit": 500,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "object_key": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "The file path in the folder"
+   },
+   "status": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "seen, ingested, quarantined, failed, reprocessed or removed"
+   },
+   "size_bytes": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "target_kind": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "workflow": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "matched_rule_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "rule_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "media_file_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "reason": {
+    "type": "string",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "seen_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "resolved_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/workflows/events",
+  "search": [
+   "hook",
+   "title"
+  ],
+  "defaultSort": "-id",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {
+   "subjectType": "subject_type",
+   "subjectId": "subject_id"
+  },
+  "fields": {
+   "id": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "hook": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "subject_type": {
+    "type": "enum",
+    "values": [
+     "channel",
+     "event",
+     "recording",
+     "vod_asset"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "subject_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "title": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "channel_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "event_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "/api/workflows/runs",
+  "search": [
+   "addon_name",
+   "subject_title",
+   "hook",
+   "step",
+   "error"
+  ],
+  "defaultSort": "-created_at",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {
+   "addonId": "addon_id",
+   "subjectType": "subject_type",
+   "subjectId": "subject_id"
+  },
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "addon_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "addon_name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "category": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "addon_kind": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "trigger_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "hook": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "The hook that started it ('manual' for a hand run)"
+   },
+   "subject_type": {
+    "type": "enum",
+    "values": [
+     "channel",
+     "event",
+     "recording",
+     "vod_asset"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "subject_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "subject_title": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "channel_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "event_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "state": {
+    "type": "enum",
+    "values": [
+     "queued",
+     "dispatched",
+     "running",
+     "succeeded",
+     "failed",
+     "cancelled",
+     "timed_out"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "progress_pct": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "step": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "external_ref": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "error": {
+    "type": "string",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "created_by": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "dispatched_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "updated_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "finished_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "deadline_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ }
+]

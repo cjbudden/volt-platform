@@ -4,6 +4,7 @@ import { IngestPanel } from '../IngestPanel'
 import { api, type VodAssetRow } from '../api'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import { navigate } from '../router'
+import { Notice, PageError, useNotify, usePageNotice } from '../notices'
 import MediaPreview from '../MediaPreview'
 import { RuleEditor } from '../RuleEditor'
 import { MetadataForm, TypePicker } from '../ContentTypeFields'
@@ -117,11 +118,22 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
     try { setD(await api.vodAsset(id)); setErr('') } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [id])
+  // HOVER PREVIEWS: the clip's thumbnail VTT (cues re-timed from the channel's
+  // hourly sprite sheets). Optional: no VTT, no strip.
+  const [thumbsVtt, setThumbsVtt] = useState<string | null>(null)
+  useEffect(() => {
+    let gone = false
+    setThumbsVtt(null)
+    api.vodThumbnailsVtt(id).then(v => { if (!gone) setThumbsVtt(v) }).catch(() => { /* none yet */ })
+    return () => { gone = true }
+  }, [id])
+  const notify = useNotify()
+  usePageNotice('asset-load', err && d ? { kind: 'error', title: "Couldn't refresh this asset.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
   // Only when there is nothing to show: `err` is also written by Publish, so
   // an unconditional guard let one rejected publish replace the whole asset
   // panel with a line of red text and no way back.
-  if (err && !d) return <div className="err">{err}</div>
+  if (err && !d) return <Notice kind="error" variant="compact" title="Couldn't load this asset." message={err} actions={[{ label: 'Retry', onClick: () => { load() } }]} />
   if (!d) return <div className="loading">Loading…</div>
 
   // WHAT TO PLAY. A progressive file when there is one (instant seeking), the
@@ -136,8 +148,8 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   const pubs = (d.publications ?? []).filter((p: any) => p.platform === 'portal' || p.platform === 'app')
 
   async function act(fn: () => Promise<any>, label: string) {
-    setBusy(label); setErr('')
-    try { await fn(); await load(); onChanged() } catch (e: any) { setErr(e.message) } finally { setBusy('') }
+    setBusy(label)
+    try { await fn(); await load(); onChanged() } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy('') }
   }
 
   return (
@@ -167,7 +179,7 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, alignItems: 'start' }}>
           <div>
             {playable ? (
-              <MediaPreview sources={{ file, hls }} audioOnly={audioOnly} title={d.title} />
+              <MediaPreview sources={{ file, hls }} audioOnly={audioOnly} title={d.title} thumbnailsVtt={thumbsVtt} />
             ) : (
               <div style={{
                 height: 200, background: 'var(--panel-2)', borderRadius: 8,
@@ -290,7 +302,6 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
       {tab === 'availability' && (
         <AvailabilityPanel d={d} onChanged={() => { load(); onChanged() }} />
       )}
-      {err && <div className="err" style={{ marginTop: 8 }}>{err}</div>}
     </div>
   )
 }
@@ -339,12 +350,12 @@ function AvailabilityPanel({ d, onChanged }: { d: any; onChanged: () => void }) 
   const [a, setA] = useState<AssetAvailability | null>(null)
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
-  const [msg, setMsg] = useState('')
+  const notify = useNotify()
   async function load() { try { setA(await api.vodAvailability(d.id)) } catch (e: any) { setErr(e.message) } }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [d.id])
   async function act(label: string, fn: () => Promise<any>, ok: string) {
-    setBusy(label); setErr(''); setMsg('')
-    try { await fn(); setMsg(ok); await load(); onChanged() } catch (e: any) { setErr(e.message) } finally { setBusy('') }
+    setBusy(label); setErr('')
+    try { await fn(); notify({ kind: 'ok', message: ok }); await load(); onChanged() } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy('') }
   }
   if (!a) return <div className="loading">{err || 'Loading availability…'}</div>
   const ui = STATE_UI[a.state] ?? STATE_UI.draft
@@ -390,8 +401,7 @@ function AvailabilityPanel({ d, onChanged }: { d: any; onChanged: () => void }) 
           </div>
         </>
       )}
-      {msg && <div style={{ color: 'var(--ok,#4ade80)', fontSize: 'var(--fs-sm)', marginTop: 8 }}>{msg}</div>}
-      {err && <div className="err" style={{ marginTop: 8 }}>{err}</div>}
+      {err && <div style={{ marginTop: 8 }}><Notice kind="error" variant="compact" message={err} /></div>}
     </div>
   )
 }
@@ -410,6 +420,7 @@ export default function VodPage() {
     try { setRows(await api.vodAssets()); setErr('') } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() }, [])
+  usePageNotice('load', err && rows ? { kind: 'error', title: "Couldn't load the library.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
   const counts = useMemo(() => {
     const r = rows ?? []
@@ -437,7 +448,7 @@ export default function VodPage() {
     }
   })
 
-  if (err && !rows) return <div className="err">{err}</div>
+  if (err && !rows) return <PageError message={err} onRetry={load} />
   if (!rows) return <div className="loading">Loading the library…</div>
 
   return (
@@ -450,7 +461,6 @@ export default function VodPage() {
         <div className="spacer" />
         <button className="btn ghost" onClick={load}>Refresh</button>
       </div>
-      {err && <div className="err">{err}</div>}
 
       <IngestPanel onDone={load} />
 

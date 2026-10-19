@@ -24,6 +24,7 @@ import {
   type RetentionStage,
 } from '../services/media/retention';
 import { reconcileStream } from '../services/media/reconcile';
+import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { actorLabel } from '../util/actor';
 
 export const storageRouter = Router();
@@ -36,35 +37,68 @@ storageRouter.get('/capabilities', asyncHandler(async (_req, res) => {
 }));
 
 /** Media objects owned by the caller's account, newest first. */
-storageRouter.get('/objects', asyncHandler(async (req, res) => {
-  const q = z.object({
-    state: z.string().optional(),
-    channelId: z.string().uuid().optional(),
-    recordingId: z.string().uuid().optional(),
-    limit: z.coerce.number().int().min(1).max(500).default(100),
-  }).parse(req.query);
+// THE LIST STANDARD (util/listQuery.ts). channel_id filters on the owning
+// channel whether the object or its recording carries it, as before; it is
+// not sortable because the row shows the object's own column.
+const objectsList = defineList({
+  path: '/api/storage/objects',
+  fields: {
+    id: { sql: 'o.id', type: 'uuid' },
+    logical_key: { sql: 'o.logical_key', type: 'string' },
+    kind: { sql: 'o.kind', type: 'string', doc: 'run_rendition, clip_output or export' },
+    rendition: { sql: 'o.rendition', type: 'string' },
+    state: { sql: 'o.state', type: 'enum', values: ['pending', 'writing', 'available', 'archiving', 'archived', 'restoring', 'restored', 'deleting', 'deleted'] },
+    bytes: { sql: 'o.bytes', type: 'number' },
+    duration_ms: { sql: 'o.duration_ms', type: 'number' },
+    segment_count: { sql: 'o.segment_count', type: 'number' },
+    hold: { sql: 'o.hold', type: 'boolean' },
+    retain_until: { sql: 'o.retain_until', type: 'timestamp' },
+    recording_id: { sql: 'o.recording_id', type: 'uuid' },
+    vod_asset_id: { sql: 'o.vod_asset_id', type: 'uuid' },
+    channel_id: { sql: 'COALESCE(o.channel_id, r.channel_id)', type: 'uuid', sort: false },
+    event_id: { sql: 'COALESCE(o.event_id, r.event_id)', type: 'uuid', sort: false },
+    recording_title: { sql: 'r.title', type: 'string' },
+    source_name: { sql: 'COALESCE(c.name, e.name)', type: 'string' },
+    created_at: { sql: 'o.created_at', type: 'timestamp' },
+    updated_at: { sql: 'o.updated_at', type: 'timestamp', notNull: true },
+  },
+  search: ['logical_key', 'rendition', 'recording_title', 'source_name'],
+  defaultSort: '-updated_at',
+  defaultLimit: 100,
+  maxLimit: 500,
+  aliases: { channelId: 'channel_id', recordingId: 'recording_id', eventId: 'event_id', vodAssetId: 'vod_asset_id' },
+});
 
+storageRouter.get('/objects', asyncHandler(async (req, res) => {
+  const from = `FROM media_objects o
+       LEFT JOIN recordings r ON r.id = o.recording_id
+       LEFT JOIN channels c ON c.id = COALESCE(o.channel_id, r.channel_id)
+       LEFT JOIN events   e ON e.id = COALESCE(o.event_id, r.event_id)
+       LEFT JOIN groups  gc ON gc.id = c.group_id
+       LEFT JOIN groups  ge ON ge.id = e.group_id
+      WHERE COALESCE(gc.account_id, ge.account_id) = $1`;
+  const params: unknown[] = [accountId(req)];
+  const pl = parseList(objectsList, req.query, params);
   const rows = await query<any>(
     `SELECT o.*,
             r.title AS recording_title,
             COALESCE(c.name, e.name) AS source_name,
             (SELECT json_agg(json_build_object('tier', l.tier, 'uri', l.uri, 'bytes', l.bytes))
                FROM media_locations l WHERE l.object_id = o.id AND l.present) AS locations
-       FROM media_objects o
-       LEFT JOIN recordings r ON r.id = o.recording_id
-       LEFT JOIN channels c ON c.id = COALESCE(o.channel_id, r.channel_id)
-       LEFT JOIN events   e ON e.id = COALESCE(o.event_id, r.event_id)
-       LEFT JOIN groups  gc ON gc.id = c.group_id
-       LEFT JOIN groups  ge ON ge.id = e.group_id
-      WHERE COALESCE(gc.account_id, ge.account_id) = $1
-        AND ($2::text IS NULL OR o.state::text = $2)
-        AND ($3::uuid IS NULL OR COALESCE(o.channel_id, r.channel_id) = $3)
-        AND ($4::uuid IS NULL OR o.recording_id = $4)
-      ORDER BY o.updated_at DESC
-      LIMIT $5`,
-    [accountId(req), q.state ?? null, q.channelId ?? null, q.recordingId ?? null, q.limit]
+       ${from}${whereSql(pl)}
+      ${pageSql(pl)}`,
+    params
   );
-  res.json({ objects: rows, count: rows.length });
+  let total: number | undefined;
+  if (pl.count) {
+    const cp: unknown[] = [accountId(req)];
+    const cpl = parseList(objectsList, { ...req.query, cursor: undefined, offset: undefined }, cp);
+    total = Number((await one<any>(`SELECT count(*)::int AS n ${from}${whereSql(cpl)}`, cp))?.n ?? 0);
+  }
+  const page = finishPage(req, res, pl, rows, total);
+  // `count` is the number of rows on this page, as it always was. The total
+  // is X-Total-Count, with count=true.
+  res.json({ objects: page, count: page.length });
 }));
 
 async function ownedObject(req: any) {

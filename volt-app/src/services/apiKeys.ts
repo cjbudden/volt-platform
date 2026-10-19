@@ -15,7 +15,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
-import { query, one } from '../db';
+import { keyByHash, appById } from './viewerPath';
+import { noteKeyUse } from '../scale/keyUsage';
 
 export function sha256(s: string): string {
   return createHash('sha256').update(s).digest('hex');
@@ -46,15 +47,20 @@ export interface ApiKeyRow {
  */
 export async function verifyKey(raw: string): Promise<ApiKeyRow | null> {
   if (!raw || !/^(sk|pk)_/.test(raw)) return null;
-  const row = await one<ApiKeyRow>(
-    `SELECT k.id, k.account_id, k.app_id, k.kind, k.scopes, k.enabled
-       FROM api_keys k JOIN accounts a ON a.id = k.account_id
-      WHERE k.key_hash=$1 AND k.enabled=true AND COALESCE(a.status,'active') <> 'suspended'`,
-    [sha256(raw)]
-  );
+  // CACHED, AND METERED IN MEMORY. Every viewer of an app presents the same
+  // publishable key, so the lookup is shared (scale/cache.ts; a disable or an
+  // account suspension still applies at once through the change triggers) and
+  // the usage counter is batched (scale/keyUsage.ts). The per-request UPDATE
+  // that used to sit here queued every viewer on one row lock.
+  const row = await keyByHash(sha256(raw));
   if (!row) return null;
-  await query(`UPDATE api_keys SET last_used_at=now(), request_count=request_count+1 WHERE id=$1`, [row.id]);
+  noteKeyUse(row.id);
   return row;
+}
+
+/** The app a publishable key belongs to, cached. Same columns as the old inline query. */
+export function appForKey(key: ApiKeyRow): Promise<AppRow | null> {
+  return appById(key.app_id);
 }
 
 export interface AppRow {
@@ -115,19 +121,37 @@ export function mintPlaybackToken(opts: {
    */
   assetKind: 'channel' | 'event' | 'vod';
   geo?: string; ttlSec?: number;
+  /** Where the play came from, when it is not an app: 'share' for a share-link preview. */
+  source?: 'share';
 }): { token: string; expiresIn: number } {
   const ttl = opts.ttlSec ?? 120;
   const token = jwt.sign(
     { typ: 'playback', aid: opts.accountId, app: opts.appId,
-      asset: opts.assetId, kind: opts.assetKind, geo: opts.geo ?? null },
-    config.jwt.accessSecret,
+      asset: opts.assetId, kind: opts.assetKind, geo: opts.geo ?? null, ...(opts.source ? { src: opts.source } : {}) },
+    playbackSecret(),
     { expiresIn: ttl }
   );
   return { token, expiresIn: ttl };
 }
 
-export function verifyPlaybackToken(token: string): any {
-  const d = jwt.verify(token, config.jwt.accessSecret) as any;
+/**
+ * The key playback tokens are signed with. PLAYBACK_TOKEN_SECRET when set,
+ * otherwise the operator access secret as before. A separate secret is what
+ * lets an edge function verify playback tokens without holding the key that
+ * signs operator sessions.
+ */
+function playbackSecret(): string {
+  return process.env.PLAYBACK_TOKEN_SECRET || config.jwt.accessSecret;
+}
+
+export function verifyPlaybackToken(token: string, opts: { graceSec?: number } = {}): any {
+  // A playback token lives minutes, a viewing session hours. The token proves
+  // the session STARTED legitimately; heartbeats and the end of that session
+  // may carry it after it expires, within graceSec (the beacon allows six
+  // hours). A start never gets grace.
+  const d = (opts.graceSec
+    ? jwt.verify(token, playbackSecret(), { clockTolerance: opts.graceSec })
+    : jwt.verify(token, playbackSecret())) as any;
   if (d.typ !== 'playback') throw new Error('not a playback token');
   return d;
 }

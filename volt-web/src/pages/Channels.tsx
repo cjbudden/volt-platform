@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, thumbUrl, type Group } from '../api'
+import { api, thumbUrl, type Group, type PlanView } from '../api'
 import { subscribeLive } from '../liveStatus'
-import { useProtocols, protoOf, SourceInput, hlsChoicePending, type SourceValue } from '../protocols'
+import { useProtocols, SourceInput, hlsChoicePending, sourceProblem, sourceToApi, type SourceValue } from '../protocols'
 import { ImagePicker } from '../ImagePicker'
 import { ImageRefField, GuideIconField } from '../ImageRefField'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
-import { PageHead, NewButton, FChip, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, type RetUnit } from '../scaffold'
+import DeleteChannelDialog, { BulkRemoveDialog } from '../DeleteChannelDialog'
+import { RowMenu, Icons, useSelection, SelectCell, SelectAllHead, BulkBar, ConfirmDialog, runBulk, bulkSummary, type MenuItem } from '../listActions'
+import { navigate } from '../router'
+import { usePref, byName, ChipGroup, GroupFilter, SortSelect, ListToolbar, ClearFilters, NoMatches } from '../listFilters'
+import { usePageNotice, useNotify, FormStatus } from '../notices'
+import { isFull, fullReason, groupLabel, noRoomReason, pickGroup, planFullReason } from '../lib/capacity'
+import { PackageRenditions, pkgToSources, DEFAULT_PKG_ROWS, type PkgRow, type PkgFallback } from '../PackageRenditions'
+import { PageHead, NewButton, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, type RetUnit } from '../scaffold'
+import { useAccess, ReadOnlyBadge } from '../access'
 import { pressable } from '../a11y'
 import { TypePicker, MetadataForm } from '../ContentTypeFields'
 import { DrawerTabs, TabPane, type DrawerTab } from '../scaffold'
@@ -26,9 +34,16 @@ function fmtRetention(sec?: number | null, days?: number | null): string {
 }
 
 export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
+  // ACCESS (access.tsx): manage = create; operate = start/stop (in the table).
+  const { can } = useAccess()
+  const canManage = can('channels', 'manage')
   const [channels, setChannels] = useState<any[] | null>(null)
   const [groups, setGroups] = useState<Group[]>([])
-  const [filter, setFilter] = useState<'all' | 'transcode' | 'package_only'>('all')
+  // FILTERS AND SORT (listFilters.tsx), remembered in this browser.
+  const [filter, setFilter] = usePref<'all' | 'transcode' | 'package_only'>('channels.type', 'all', ['all', 'transcode', 'package_only'])
+  const [stat, setStat] = usePref<'all' | RunState>('channels.status', 'all', ['all', 'running', 'stopped', 'problem'])
+  const [groupId, setGroupId] = usePref<string>('channels.group', '')
+  const [sort, setSort] = usePref<ChannelSort>('channels.sort', 'name', ['name', 'name_desc', 'status', 'group', 'newest'])
   const [err, setErr] = useState('')
 
   // This is the app's DEFAULT route, and it had no error path at all: `load()`
@@ -61,56 +76,101 @@ export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
     return () => clearInterval(iv)
   }, [])
 
+  // OVER THE LIMIT, NO CREATE. Only once the groups are known (an empty list
+  // while loading must not read as "no group").
+  const tvGroups = groups.filter(g => g.workflow_type === 'transcode' || g.workflow_type === 'package_only')
+  // THE PLAN FIRST (Admin > Plan & limits), then the groups' shares.
+  const [plan, setPlan] = useState<PlanView | null>(null)
+  useEffect(() => { api.plan().then(setPlan).catch(() => {}) }, [channels?.length])
+  const noRoom = channels === null ? null : (planFullReason(plan, 'channel') ?? noRoomReason(tvGroups, 'channel'))
+  // Standard places (notices.tsx): why New channel is unavailable, and a load
+  // failure with Retry, both in the page notice region.
+  const radioInFull = tvGroups.some(g => (g.radio_count ?? 0) > 0)
+  usePageNotice('limit', noRoom ? {
+    kind: 'warn', title: 'New channels are unavailable.', message: noRoom,
+    actions: [...(radioInFull ? [{ label: 'View radio stations', onClick: () => navigate('/radio') }] : []), { label: 'Plan & limits', onClick: () => navigate('/plan') }],
+  } : null)
+  usePageNotice('load', err ? {
+    kind: 'error', title: "Couldn't load channels.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }],
+  } : null)
+
+  // Each chip set counts what the OTHER filters leave, so the numbers match
+  // what clicking the chip would show.
+  const typeOk = (c: any, f = filter) => f === 'all' || c._g?.workflow_type === f
+  const statOk = (c: any, f = stat) => f === 'all' || runState(c) === f
+  const groupOk = (c: any) => !groupId || c.group_id === groupId
   const shown = useMemo(() => {
     if (!channels) return channels
-    if (filter === 'all') return channels
-    return channels.filter(c => c._g?.workflow_type === filter)
-  }, [channels, filter])
-
+    const rows = channels.filter(c => typeOk(c) && statOk(c) && groupOk(c))
+    return sortChannels(rows, sort)
+    // eslint-disable-next-line
+  }, [channels, filter, stat, groupId, sort])
   const counts = useMemo(() => {
     const c = channels || []
+    const forType = c.filter(x => statOk(x) && groupOk(x))
+    const forStat = c.filter(x => typeOk(x) && groupOk(x))
     return {
-      all: c.length,
-      transcode: c.filter(x => x._g?.workflow_type === 'transcode').length,
-      package_only: c.filter(x => x._g?.workflow_type === 'package_only').length,
+      all: forType.length,
+      transcode: forType.filter(x => typeOk(x, 'transcode')).length,
+      package_only: forType.filter(x => typeOk(x, 'package_only')).length,
+      sAll: forStat.length,
+      running: forStat.filter(x => runState(x) === 'running').length,
+      stopped: forStat.filter(x => runState(x) === 'stopped').length,
+      problem: forStat.filter(x => runState(x) === 'problem').length,
     }
-  }, [channels])
+    // eslint-disable-next-line
+  }, [channels, filter, stat, groupId])
+  const filtered = filter !== 'all' || stat !== 'all' || !!groupId
+  const clearFilters = () => { setFilter('all'); setStat('all'); setGroupId('') }
+  // a remembered group that no longer exists is dropped
+  useEffect(() => { if (groupId && groups.length && !groups.some(g => g.id === groupId)) setGroupId('') /* eslint-disable-next-line */ }, [groups, groupId])
 
   return (
     <>
-      <PageHead title="Channels" sub="24×7 live channels. Transcode builds the rendition ladder for you; packaging takes a pre-encoded ladder."
-        action={<NewButton label="New channel" onClick={() => setCreateOpen(true)} />} />
+      <PageHead title="Channels" sub="24×7 live channels. Transcode builds the rendition ladder for you; packaging takes a pre-encoded ladder." />
 
-      {err && (
-        <div className="err" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ flex: 1 }}>{err}</span>
-          <button className="btn ghost" onClick={load}>Retry</button>
-        </div>
-      )}
 
       {channels === null ? (
         err ? null : <div className="loading">Loading channels…</div>
       ) : channels.length === 0 ? (
-        <EmptyState onCreate={() => setCreateOpen(true)} />
+        <EmptyState onCreate={canManage && !noRoom ? () => setCreateOpen(true) : undefined} />
       ) : (
         <>
-          <div className="filters">
-            <FChip label="All" n={counts.all} on={filter === 'all'} onClick={() => setFilter('all')} />
-            <FChip label="Transcode" n={counts.transcode} on={filter === 'transcode'} onClick={() => setFilter('transcode')} />
-            <FChip label="Packaging" n={counts.package_only} on={filter === 'package_only'} onClick={() => setFilter('package_only')} />
-          </div>
-          <ChannelTable channels={shown || []} onChanged={load} onOpen={onOpen} />
+          <ListToolbar
+            left={<>
+              <ChipGroup label="Type" value={filter} onChange={setFilter} options={[
+                { value: 'all', label: 'All', n: counts.all },
+                { value: 'transcode', label: 'Transcode', n: counts.transcode },
+                { value: 'package_only', label: 'Packaging', n: counts.package_only },
+              ]} />
+              <ChipGroup label="Status" value={stat} onChange={setStat} options={[
+                { value: 'all', label: 'All', n: counts.sAll },
+                { value: 'running', label: 'Running', n: counts.running },
+                { value: 'stopped', label: 'Stopped / idle', n: counts.stopped },
+                ...(counts.problem || stat === 'problem' ? [{ value: 'problem' as const, label: 'Problems', n: counts.problem }] : []),
+              ]} />
+              <ClearFilters on={filtered} onClear={clearFilters} />
+            </>}
+            right={<>
+              <GroupFilter groups={groups} value={groupId} onChange={setGroupId} />
+              <SortSelect value={sort} onChange={setSort} options={CHANNEL_SORTS} />
+              <span className="tb-sep" aria-hidden="true" />
+              {canManage ? <NewButton label="New channel" onClick={() => setCreateOpen(true)} blockedReason={noRoom} /> : <ReadOnlyBadge feature="channels" />}
+            </>} />
+          {shown && shown.length === 0
+            ? <div className="card"><NoMatches what="channels" onClear={clearFilters} /></div>
+            : <ChannelTable channels={shown || []} onChanged={load} onOpen={onOpen} />}
         </>
       )}
 
-      {createOpen && (
+      {createOpen && canManage && (
         <CreateChannel groups={groups} onClose={() => setCreateOpen(false)} onCreated={() => { setCreateOpen(false); load() }} />
       )}
     </>
   )
 }
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState({ onCreate }: { onCreate?: () => void }) {
   return (
     <div className="empty">
       <div className="ic">
@@ -118,39 +178,132 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       </div>
       <h3>No channels yet</h3>
       <p>Create your first channel to start a live stream. You can make a transcode channel — we build the ABR ladder — or a packaging channel, where you send a pre-encoded ladder and we package it.</p>
+      {onCreate && (
       <button className="btn primary" onClick={onCreate} style={{ margin: '0 auto' }}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>
         Create your first channel
       </button>
+      )}
     </div>
   )
 }
 
+type RunState = 'running' | 'stopped' | 'problem'
+/** Running (encoder up), stopped / idle, or a problem (error or degraded). */
+export function runState(c: any): RunState {
+  const ps = c.pipelineState
+  if (ps === 'error' || ps === 'degraded') return 'problem'
+  if (c.status === 'live' || ps === 'onair' || ps === 'ready' || ps === 'starting') return 'running'
+  return 'stopped'
+}
+type ChannelSort = 'name' | 'name_desc' | 'status' | 'group' | 'newest'
+const CHANNEL_SORTS: { value: ChannelSort; label: string }[] = [
+  { value: 'name', label: 'Name A to Z' },
+  { value: 'name_desc', label: 'Name Z to A' },
+  { value: 'status', label: 'Status (running first)' },
+  { value: 'group', label: 'Group' },
+  { value: 'newest', label: 'Newest first' },
+]
+const STATE_ORDER: Record<RunState, number> = { running: 0, problem: 1, stopped: 2 }
+function sortChannels(rows: any[], sort: ChannelSort): any[] {
+  const r = [...rows]
+  const nm = (a: any, b: any) => byName(a.name, b.name)
+  switch (sort) {
+    case 'name_desc': return r.sort((a, b) => -nm(a, b))
+    case 'status': return r.sort((a, b) => STATE_ORDER[runState(a)] - STATE_ORDER[runState(b)] || nm(a, b))
+    case 'group': return r.sort((a, b) => byName(a._g?.name ?? '', b._g?.name ?? '') || nm(a, b))
+    case 'newest': return r.sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')) || nm(a, b))
+    default: return r.sort(nm)
+  }
+}
+
 function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChanged: () => void; onOpen?: (id: string) => void }) {
+  // ACCESS: operate = start/stop (one or many); manage = edit settings;
+  // administrators remove (one or many, always confirmed).
+  const { can, isAdminTier } = useAccess()
+  const canRun = can('channels', 'operate')
+  const canManage = can('channels', 'manage')
   const [busy, setBusy] = useState<string | null>(null)
-  const [err, setErr] = useState('')
+  const notify = useNotify()
+  const setErr = (m: string) => { if (m) notify({ kind: 'error', message: m }) }
+  const setDone = (m: string) => { if (m) notify({ kind: 'ok', message: m }) }
+  const [delId, setDelId] = useState<string | null>(null)
+  const [bulkRemove, setBulkRemove] = useState<{ id: string; name: string }[] | null>(null)
+  const [confirmStop, setConfirmStop] = useState<any[] | null>(null)
+  const [bulkBusy, setBulkBusy] = useState<string | null>(null)
+  const sel = useSelection(channels.map(c => c.id))
+  const picked = channels.filter(c => sel.sel.has(c.id))
+  const isLive = (c: any) => c.status === 'live'
+  const view = (id: string) => onOpen ? onOpen(id) : navigate(`/channels/${id}`)
+
   // try/finally with no catch: a viewer pressing Start watched the button
   // flicker to "…" and back with no explanation at all, and the rejection went
   // to the console. Starting a channel is not a silent operation.
   async function toggle(c: any) {
     setBusy(c.id); setErr('')
-    try { await api.startStop(c.id, c.status === 'live' ? 'stop' : 'start'); await onChanged() }
+    try { await api.startStop(c.id, isLive(c) ? 'stop' : 'start'); await onChanged() }
     catch (e: any) {
       setErr(`${c.name}: ${e?.forbidden ? 'you do not have permission to do that' : (e?.message || 'failed')}`)
     }
     finally { setBusy(null) }
   }
+
+  async function bulk(action: 'start' | 'stop', rows: any[]) {
+    setErr(''); setDone('')
+    const verb = action === 'start' ? 'Starting' : 'Stopping'
+    setBulkBusy(`${verb} 0 of ${rows.length}…`)
+    const res = await runBulk(rows, r => api.startStop(r.id, action), d => setBulkBusy(`${verb} ${d} of ${rows.length}…`))
+    setBulkBusy(null)
+    const msg = bulkSummary(action === 'start' ? 'Started' : 'Stopped', res)
+    if (res.failed.length) setErr(msg); else setDone(msg)
+    sel.clear(); onChanged()
+  }
+
+  function menuFor(c: any): MenuItem[] {
+    const items: MenuItem[] = [{ key: 'view', label: 'View', icon: Icons.view, onSelect: () => view(c.id) }]
+    if (canManage) items.push({ key: 'edit', label: 'Edit settings', icon: Icons.settings, onSelect: () => navigate(`/channels/${c.id}?settings`) })
+    if (isAdminTier) items.push({
+      key: 'remove', label: 'Remove', icon: Icons.remove, danger: true, separator: true,
+      disabledReason: isLive(c) ? 'Stop the channel first' : null,
+      onSelect: () => { setDone(''); setDelId(c.id) },
+    })
+    return items
+  }
+
+  const toStart = picked.filter(c => !isLive(c))
+  const toStop = picked.filter(isLive)
+  const toRemove = picked.filter(c => !isLive(c))
+
   return (
+    <>
+      <BulkBar count={picked.length} noun={['channel', 'channels']} onClear={sel.clear} busy={bulkBusy} actions={[
+        ...(canRun ? [
+          { key: 'start', label: 'Start', icon: Icons.start, count: toStart.length, onRun: () => bulk('start', toStart),
+            hint: toStart.length ? undefined : 'All of them are running already' },
+          { key: 'stop', label: 'Stop', icon: Icons.stop, count: toStop.length, onRun: () => setConfirmStop(toStop),
+            hint: toStop.length ? undefined : 'None of them are running' },
+        ] : []),
+        ...(isAdminTier ? [{ key: 'remove', label: 'Remove', icon: Icons.remove, danger: true, count: toRemove.length,
+          onRun: () => { setDone(''); setBulkRemove(toRemove.map(c => ({ id: c.id, name: c.name }))) },
+          hint: toRemove.length ? (toRemove.length < picked.length ? 'Running channels are left out: stop them first' : undefined) : 'Stop them first' }] : []),
+      ]} />
     <div className="card">
-      {err && (
-        <div className="err" style={{ margin: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ flex: 1 }}>{err}</span>
-          <button className="btn ghost" onClick={() => setErr('')}>Dismiss</button>
-        </div>
+      {delId && <DeleteChannelDialog id={delId} onClose={() => setDelId(null)}
+        onDeleted={(name) => { setDelId(null); setDone(`${name} was removed. The removal is in the audit log.`); onChanged() }} />}
+      {bulkRemove && <BulkRemoveDialog rows={bulkRemove} what="channel" onClose={() => setBulkRemove(null)}
+        onDone={(summary) => { setBulkRemove(null); sel.clear(); setDone(`${summary} Each removal is in the audit log.`); onChanged() }} />}
+      {confirmStop && (
+        <ConfirmDialog title={`Stop ${confirmStop.length} channel${confirmStop.length === 1 ? '' : 's'}?`} confirmLabel="Stop" danger
+          body={<>
+            <p style={{ margin: '0 0 6px' }}>Their encoders come down and viewers lose the stream. They can be started again.</p>
+            <ul className="bulk-list">{confirmStop.map(c => <li key={c.id}>{c.name}</li>)}</ul>
+          </>}
+          onCancel={() => setConfirmStop(null)} onConfirm={() => { const rows = confirmStop; setConfirmStop(null); bulk('stop', rows) }} />
       )}
       <table>
         <thead>
           <tr>
+            <SelectAllHead allOn={sel.allOn} someOn={sel.someOn} onToggle={sel.toggleAll} label="Select all channels" />
             <th>Channel</th>
             <th>Type</th>
             <th>Renditions</th>
@@ -162,9 +315,11 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
         <tbody>
           {channels.map((c, i) => {
             const wt = c._g?.workflow_type
-            const live = c.status === 'live'
+            const live = isLive(c)
+            const on = sel.sel.has(c.id)
             return (
-              <tr key={c.id} onClick={() => onOpen?.(c.id)} style={onOpen ? { cursor: 'pointer' } : undefined}>
+              <tr key={c.id} className={on ? 'selected' : undefined} onClick={() => view(c.id)} style={{ cursor: 'pointer' }}>
+                <SelectCell on={on} onToggle={() => sel.toggle(c.id)} label={`Select ${c.name}`} />
                 <td><EntityCell name={c.name} sub={c._g?.name} index={i} imgUrl={c.brand_ref ? thumbUrl(c.brand_ref, 80, 80, 'inside') : null} /></td>
                 <td>
                   <span className={`tag type ${wt === 'transcode' ? 'chan' : 'event'}`}>
@@ -200,9 +355,15 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{c.recording_enabled === false ? 'rec off' : fmtRetention(c.recording_retention_sec, c.recording_retention_days)}</td>
                 <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-                  <button className={`btn ${live ? 'ghost' : 'primary'}`} disabled={busy === c.id} onClick={() => toggle(c)}>
-                    {busy === c.id ? '…' : live ? 'Stop' : 'Start'}
-                  </button>
+                  {/* One primary action, then "⋯" for the rest: same height, side by side. */}
+                  <div className="row-actions">
+                    {canRun ? (
+                      <button className={`btn act ${live ? 'ghost' : 'primary'}`} disabled={busy === c.id || !!bulkBusy} onClick={() => toggle(c)}>
+                        {busy === c.id ? '…' : live ? 'Stop' : 'Start'}
+                      </button>
+                    ) : <button className="btn act primary" onClick={() => view(c.id)}>Open</button>}
+                    <RowMenu label={`More actions for ${c.name}`} items={menuFor(c)} />
+                  </div>
                 </td>
               </tr>
             )
@@ -210,6 +371,7 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
         </tbody>
       </table>
     </div>
+    </>
   )
 }
 
@@ -217,7 +379,6 @@ const RUNG_PRESETS = [
   { height: 1080, bitrateKbps: 5000 }, { height: 720, bitrateKbps: 2800 },
   { height: 480, bitrateKbps: 1200 }, { height: 360, bitrateKbps: 800 }, { height: 240, bitrateKbps: 400 },
 ]
-type PkgRow = { label: string; bitrateKbps: number; protocol: string; url: string; backupUrl: string }
 
 /* ============================================================================
    NEW CHANNEL, in the same three tabs as a radio station:
@@ -257,7 +418,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   const [dvrMin, setDvrMin] = useState(60)
   const DVR_MAX_MIN = 240
 
-  const protocols = useProtocols()
+  const protocols = useProtocols('video')
   // transcode: single source + optional backup + selectable ladder
   const [tSrc, setTSrc] = useState<SourceValue>({ protocol: 'srt', url: '' })
   const [tBackupOn, setTBackupOn] = useState(false)
@@ -265,12 +426,8 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   const [ladder, setLadder] = useState(() => RUNG_PRESETS.map(r => ({ ...r, on: [1080, 720, 480].includes(r.height) })))
 
   // package: per-rendition input rows + fallback
-  const [rows, setRows] = useState<PkgRow[]>([
-    { label: '1080p', bitrateKbps: 5000, protocol: 'hls', url: '', backupUrl: '' },
-    { label: '720p', bitrateKbps: 2800, protocol: 'hls', url: '', backupUrl: '' },
-    { label: '480p', bitrateKbps: 1200, protocol: 'hls', url: '', backupUrl: '' },
-  ])
-  const [fallbackMode, setFallbackMode] = useState<'none' | 'matching' | 'single'>('none')
+  const [rows, setRows] = useState<PkgRow[]>(() => DEFAULT_PKG_ROWS.map(r => ({ ...r })))
+  const [fallbackMode, setFallbackMode] = useState<PkgFallback>('none')
   const [fbSrc, setFbSrc] = useState<SourceValue>({ protocol: 'hls', url: '' })
 
   // filler on total loss (both flows)
@@ -289,24 +446,41 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const candidates = ofType[type]
-  const group = candidates.find(g => g.id === groupId) ?? candidates.find(g => g.channel_count < g.max_channels) ?? candidates[0]
-  const groupFull = !!group && group.channel_count >= group.max_channels
+  const group = pickGroup(candidates, groupId)
+  const groupFull = !!group && isFull(group)
+  // Why Create is unavailable, shown in the footer (not only a tooltip).
+  const blocked = !group
+    ? `This account has no ${type === 'transcode' ? 'transcode' : 'packaging'} group, so this type of channel cannot be created yet.`
+    : groupFull ? fullReason(group) : null
 
   // The channel name IS the metadata name (the server writes it there).
   const setName = setNameRaw
 
-  function setRow(i: number, patch: Partial<PkgRow>) { setRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r)) }
-  function addRow() { setRows(rs => [...rs, { label: '', bitrateKbps: 1000, protocol: 'hls', url: '', backupUrl: '' }]) }
-  function delRow(i: number) { setRows(rs => rs.filter((_, j) => j !== i)) }
-  const heightFromLabel = (l: string) => parseInt(l, 10) || 0
 
+  // NOTHING FAILS SILENTLY. Anything thrown on the way to the request (a
+  // source check, a watermark check, the network) used to escape as an
+  // unhandled rejection: the button did nothing and said nothing.
   async function submit() {
     setErr('')
+    try { await submitInner() }
+    catch (e: any) {
+      const msg = String(e?.message || '').trim()
+      if (/metadata|required field/i.test(msg)) setTab('metadata')
+      setErr(e?.forbidden ? 'Your access does not allow creating channels.'
+        : msg && msg !== 'ValidationError' ? msg : 'The channel could not be created. Check the fields and try again.')
+      setBusy(false)
+    }
+  }
+
+  async function submitInner() {
     if (!name.trim()) { setTab('settings'); setErr('Give the channel a name'); return }
     if (!group) { setTab('settings'); setErr(`This account has no ${type === 'transcode' ? 'transcode' : 'packaging'} group, so a ${type === 'transcode' ? 'transcode' : 'packaging'} channel cannot be created yet. See Group under Type.`); return }
-    if (groupFull) { setTab('settings'); setErr(`${group.name} is full (${group.max_channels} channels). Choose another group or ask for a higher limit.`); return }
+    if (groupFull) { setTab('settings'); setErr(fullReason(group) ?? `${group.name} is full`); return }
     if (type === 'transcode') { const w = wmProblem(wm); if (w) { setTab('settings'); setErr(w); return } }
-    const hlsWait = await hlsChoicePending([tSrc, ...(tBackupOn ? [tBackup] : []), fbSrc]); if (hlsWait) { setErr(hlsWait); return }
+    const hlsWait = await hlsChoicePending(type === 'transcode'
+      ? [tSrc, ...(tBackupOn ? [tBackup] : [])]
+      : [...rows.map(r => ({ url: r.url, protocol: r.protocol })), ...(fallbackMode === 'matching' ? rows.map(r => ({ url: r.backupUrl, protocol: r.protocol })) : []), ...(fallbackMode === 'single' ? [fbSrc] : [])])
+    if (hlsWait) { setErr(hlsWait); return }
 
     const sources: NonNullable<Parameters<typeof api.createChannel>[0]['sources']> = []
     let outputLadder: { height: number; bitrateKbps: number }[] = []
@@ -317,20 +491,16 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
       const rungs = ladder.filter(r => r.on)
       if (!rungs.length) { setErr('Select at least one output rendition'); return }
       outputLadder = rungs.map(r => ({ height: r.height, bitrateKbps: r.bitrateKbps }))
-      sources.push({ role: 'primary', protocol: tSrc.protocol, ingestUrl: tSrc.url.trim(), streamKey: tSrc.streamKey?.trim() || undefined })
-      if (tBackupOn && tBackup.url.trim()) sources.push({ role: 'backup', protocol: tBackup.protocol, ingestUrl: tBackup.url.trim(), streamKey: tBackup.streamKey?.trim() || undefined })
+      const why = sourceProblem(protocols, tSrc) ?? (tBackupOn && tBackup.url.trim() ? sourceProblem(protocols, tBackup) : null)
+      if (why) { setErr(`${sourceProblem(protocols, tSrc) ? 'Primary' : 'Backup'} source: ${why}`); return }
+      sources.push({ role: 'primary', ...sourceToApi(tSrc, protocols) })
+      if (tBackupOn && tBackup.url.trim()) sources.push({ role: 'backup', ...sourceToApi(tBackup, protocols) })
     } else {
-      const filled = rows.filter(r => r.url.trim() && r.label.trim())
-      if (!filled.length) { setErr('Add at least one rendition input (label + URL)'); return }
-      outputLadder = filled.map(r => ({ height: heightFromLabel(r.label), bitrateKbps: r.bitrateKbps }))
-      for (const r of filled) sources.push({ role: 'primary', protocol: r.protocol, ingestUrl: r.url.trim(), renditionLabel: r.label.trim(), renditionBitrateKbps: r.bitrateKbps })
-      if (fallbackMode === 'matching') {
-        for (const r of filled) if (r.backupUrl.trim()) sources.push({ role: 'backup', protocol: r.protocol, ingestUrl: r.backupUrl.trim(), renditionLabel: r.label.trim(), renditionBitrateKbps: r.bitrateKbps })
-      } else if (fallbackMode === 'single') {
-        if (!fbSrc.url.trim()) { setErr('Add the single fallback source URL'); return }
-        sources.push({ role: 'backup', protocol: fbSrc.protocol, ingestUrl: fbSrc.url.trim(), streamKey: fbSrc.streamKey?.trim() || undefined })
-        fallbackTranscode = true // one source, transcoded up to all matching bitrates
-      }
+      const out = pkgToSources(rows, fallbackMode, fbSrc, protocols)
+      if ('error' in out) { setErr(out.error); return }
+      sources.push(...out.sources)
+      outputLadder = out.outputLadder
+      fallbackTranscode = out.fallbackTranscode // one source, transcoded up to all matching bitrates
     }
 
     setBusy(true)
@@ -358,10 +528,6 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
         catch { /* channel created fine; captions can still be set in Settings */ }
       }
       onCreated()
-    } catch (e: any) {
-      // A guide field the content type requires is on the Metadata tab: go there.
-      if (/metadata|required field/i.test(String(e.message))) setTab('metadata')
-      setErr(e.message)
     } finally { setBusy(false) }
   }
 
@@ -399,13 +565,13 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
             {candidates.length === 0 ? (
               <div className="group-missing" role="status">
                 <strong>This account has no {type === 'transcode' ? 'transcode' : 'packaging'} group.</strong> A channel goes into a group, and the group decides whether it is transcode or packaging.
-                {' '}A platform administrator adds one under System admin, then the account, then Groups.
+                {' '}An account administrator adds one under Admin, Channel groups.
                 {ofType[type === 'transcode' ? 'package_only' : 'transcode'].length > 0 && <> You can create a {type === 'transcode' ? 'packaging' : 'transcode'} channel now.</>}
               </div>
             ) : (
               <>
                 <select className="inp" value={group?.id ?? ''} onChange={e => setGroupId(e.target.value)} disabled={candidates.length === 1}>
-                  {candidates.map(g => <option key={g.id} value={g.id} disabled={g.channel_count >= g.max_channels}>{g.name}: {g.channel_count} of {g.max_channels} channels{g.channel_count >= g.max_channels ? ' (full)' : ''}</option>)}
+                  {candidates.map(g => <option key={g.id} value={g.id} disabled={isFull(g)}>{groupLabel(g)}</option>)}
                 </select>
                 <div className="hintxt">{group?.profile_name ? `Output profile ${group.profile_name}` : ''}{group?.rungs?.length ? `, default ladder ${group.rungs.map(r => `${r.height}p`).join(', ')}` : ''}{candidates.length === 1 ? '. The only group of this type in the account.' : ''}</div>
               </>
@@ -438,40 +604,8 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
             </>
           ) : (
             <>
-              <div className="sec-label">Sent renditions (your pre-encoded ladder)</div>
-              <div className="field">
-                {rows.map((r, i) => (
-                  <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 11, padding: 11, marginBottom: 10 }}>
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                      <input className="inp" style={{ width: 90 }} value={r.label} onChange={e => setRow(i, { label: e.target.value })} placeholder="1080p" />
-                      <input className="inp" style={{ width: 110 }} value={r.bitrateKbps} onChange={e => setRow(i, { bitrateKbps: Number(e.target.value.replace(/[^0-9]/g, '')) || 0 })} placeholder="kbps" />
-                      <select className="inp" style={{ width: 100 }} value={r.protocol} onChange={e => setRow(i, { protocol: e.target.value })}>{protocols.filter(p => p.packageFriendly).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select>
-                      {rows.length > 1 && <button className="xbtn" onClick={() => delRow(i)} title="Remove">✕</button>}
-                    </div>
-                    <input className="inp" value={r.url} onChange={e => setRow(i, { url: e.target.value })} placeholder={protoOf(protocols, r.protocol).urlPlaceholder} />
-                    {fallbackMode === 'matching' && (
-                      <input className="inp" style={{ marginTop: 8 }} value={r.backupUrl} onChange={e => setRow(i, { backupUrl: e.target.value })} placeholder="backup https://…/1080p.m3u8" />
-                    )}
-                  </div>
-                ))}
-                <button className="chip" onClick={addRow}>+ Add rendition</button>
-                <div className="hintxt">Each rendition is packaged 1:1 to the matching output. Height is read from the label (e.g. 1080p).</div>
-              </div>
-
-              <div className="sec-label">Fallback</div>
-              <div className="field"><label>On source loss</label>
-                <select className="inp" value={fallbackMode} onChange={e => setFallbackMode(e.target.value as any)}>
-                  <option value="none">None</option>
-                  <option value="matching">Matching backup URLs (per rendition)</option>
-                  <option value="single">Single fallback source → transcode to all bitrates</option>
-                </select>
-              </div>
-              {fallbackMode === 'single' && (
-                <>
-                  <SourceInput protocols={protocols} value={fbSrc} onChange={setFbSrc} label="Fallback source" />
-                  <div className="hintxt" style={{ marginTop: -6 }}>Transcoded up to every rendition bitrate so all outputs stay continuous.</div>
-                </>
-              )}
+              <PackageRenditions protocols={protocols} rows={rows} onRows={setRows}
+                mode={fallbackMode} onMode={setFallbackMode} fb={fbSrc} onFb={setFbSrc} />
             </>
           )}
 
@@ -549,9 +683,9 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
         </div>
         <div className="drawer-f">
           {/* In the footer, so a problem is seen wherever the form is scrolled to. */}
-          {err && <div className="err drawer-f-err" role="alert">{err}</div>}
+          <FormStatus error={err} blocked={blocked} />
           <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy || !group || groupFull} onClick={submit} title={!group ? `No ${type === 'transcode' ? 'transcode' : 'packaging'} group in this account` : ''}>{busy ? 'Creating…' : 'Create channel'}</button>
+          <button className="btn primary" disabled={busy || !!blocked} onClick={submit} title={blocked ?? ''}>{busy ? 'Creating…' : 'Create channel'}</button>
         </div>
       </div>
     </div>

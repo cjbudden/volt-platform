@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, type MonitoringOverview, type FleetAlert, type AlertSeverity } from '../api'
 import { navigate } from '../router'
 import { collapseRuns, fmtClock, fmtAgo, fmtSpan } from '../activityLog'
+import { PageError, usePageNotice } from '../notices'
 
 /* ============================================================================
    MONITORING — what needs attention, and nothing else.
@@ -162,7 +163,9 @@ export default function MonitoringPage() {
     /* eslint-disable-next-line */
   }, [])
 
-  if (err && !d) return <div className="card p-4"><div className="err">{err}</div></div>
+  usePageNotice('load', err && d ? { kind: 'error', title: "Couldn't refresh monitoring.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
+
+  if (err && !d) return <PageError message={err} onRetry={load} />
   if (!d) return <div className="card p-4"><div className="loading">Checking the fleet…</div></div>
 
   const shown = filter === 'all' ? d.alerts : d.alerts.filter(a => a.severity === filter)
@@ -185,7 +188,6 @@ export default function MonitoringPage() {
         </div>
       </div>
 
-      {err && <div className="err" style={{ marginBottom: 12 }}>{err}</div>}
 
       <div className="card p-4" style={{ marginBottom: 16 }}>
         <div className="flex" style={{ gap: 34, flexWrap: 'wrap' }}>

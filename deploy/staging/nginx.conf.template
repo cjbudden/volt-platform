@@ -1,0 +1,132 @@
+# Volt staging edge (rendered to /etc/nginx/nginx.conf by the image's envsubst;
+# only the EDGE_SHARED_SECRET variable is substituted). Plays the part CloudFront, WAF and the ALB play in AWS:
+#
+#   1. ROUTES viewer paths to api-public, everything else to api-admin
+#      (the same split as the ALB listener rules in deploy/terraform/scaling_alb.tf).
+#   2. CACHES the anonymous play gate (GET /api/availability) and the /live
+#      redirect for as long as the API says (X-Accel-Expires), keyed on the
+#      same things as the CloudFront cache policy: URL, Origin, viewer country.
+#   3. SETS the viewer's country (X-Viewer-Country). Staging has no GeoIP, so
+#      it is taken from an X-Test-Country request header for testing and is
+#      empty otherwise. The API trusts it (TRUST_EDGE_GEO=true) because nothing
+#      reaches the API except through here.
+#   4. RATE LIMITS per client IP, like the WAF rate rules.
+
+worker_processes auto;
+events { worker_connections 8192; }
+
+http {
+  sendfile on;
+  keepalive_timeout 65;
+  client_max_body_size 0;            # tus / chunked uploads to the admin API
+
+  # Docker's DNS, so scaled api-public replicas are picked up on reload.
+  resolver 127.0.0.11 valid=10s ipv6=off;
+
+  log_format edge '$remote_addr "$request" $status $body_bytes_sent '
+                  'cache=$upstream_cache_status up=$upstream_addr rt=$request_time';
+  access_log /dev/stdout edge;
+
+  proxy_cache_path /var/cache/nginx/viewer levels=1:2 keys_zone=viewer:50m max_size=512m inactive=2m use_temp_path=off;
+
+  # Per-IP limits (WAF stand-in). Generous: households and mobile carriers share IPs.
+  limit_req_zone $binary_remote_addr zone=viewer_rl:20m rate=50r/s;
+  limit_req_zone $binary_remote_addr zone=auth_rl:10m rate=5r/s;
+  limit_req_status 429;
+
+  map $http_x_test_country $viewer_country { default $http_x_test_country; }
+
+  upstream api_public {
+    zone api_public 64k;
+    server api-public:8080 resolve;
+    keepalive 64;
+  }
+  upstream api_admin {
+    zone api_admin 64k;
+    server api-admin:8080 resolve;
+    keepalive 16;
+  }
+
+  server {
+    listen 80 default_server;
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # Overwrite whatever the client sent: the API trusts these.
+    proxy_set_header X-Viewer-Country $viewer_country;
+    proxy_set_header CloudFront-Viewer-Country "";
+    # Proves to the API that this request came through the edge (EDGE_SHARED_SECRET).
+    proxy_set_header X-Volt-Edge "${EDGE_SHARED_SECRET}";
+
+    # ---- viewer paths -> api-public ------------------------------------------
+
+    # The anonymous play gate: cached per URL + Origin + country. A request
+    # with a viewer session (Authorization) is never cached or served from cache.
+    location ~ ^/api/(public/)?availability$ {
+      limit_req zone=viewer_rl burst=100 nodelay;
+      proxy_pass http://api_public;
+      proxy_cache viewer;
+      proxy_cache_methods GET HEAD;
+      proxy_cache_key "$request_method|$request_uri|$http_origin|$viewer_country";
+      proxy_cache_lock on;              # one request per key goes to the API on a miss
+      proxy_cache_lock_timeout 5s;
+      proxy_cache_use_stale updating error timeout;
+      proxy_cache_bypass $http_authorization;
+      proxy_no_cache $http_authorization;
+      add_header X-Edge-Cache $upstream_cache_status always;
+    }
+
+    # Public live manifests (302 to the origin/CDN) and radio streams.
+    location /live/ {
+      limit_req zone=viewer_rl burst=100 nodelay;
+      proxy_pass http://api_public;
+      proxy_cache viewer;
+      proxy_cache_key "$request_method|$request_uri";
+      proxy_cache_lock on;
+      add_header X-Edge-Cache $upstream_cache_status always;
+      # stream.mp3 is a long-lived response
+      proxy_buffering off;
+      proxy_read_timeout 1h;
+    }
+
+    # Viewer sign-in is a credential endpoint: tighter per-IP limit.
+    location ~ ^/api/public/auth/ {
+      limit_req zone=auth_rl burst=50 nodelay;
+      proxy_pass http://api_public;
+    }
+
+    location ~ ^/(api/public/|api/access|api/player/|api/analytics/beacon|api/payments/verify|share/|api/share/|xmltv/|img/|library/|player|clips/) {
+      limit_req zone=viewer_rl burst=200 nodelay;
+      proxy_pass http://api_public;
+    }
+
+    # ---- everything else -> api-admin ------------------------------------------
+
+    location /api/auth/ {
+      limit_req zone=auth_rl burst=20 nodelay;
+      proxy_pass http://api_admin;
+    }
+    location /api/platform/auth/ {
+      limit_req zone=auth_rl burst=20 nodelay;
+      proxy_pass http://api_admin;
+    }
+
+    # Live status (Server-Sent Events): no buffering, long reads.
+    location /api/status/ {
+      proxy_pass http://api_admin;
+      proxy_buffering off;
+      proxy_read_timeout 1h;
+    }
+
+    location / {
+      proxy_pass http://api_admin;
+      proxy_read_timeout 300s;
+      proxy_request_buffering off;
+    }
+
+    location = /edge-health { return 200 "ok\n"; }
+  }
+}

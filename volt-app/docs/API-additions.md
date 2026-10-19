@@ -1,3 +1,7 @@
+> **Superseded (Oct 2026).** These August notes are kept for history. The current
+> reference is `API_GUIDE.md` (how to use the API), `API_ROUTES.md` (every route and the
+> access it needs) and `API.md` + the Postman collection (request by request).
+
 # Volt Streaming — API additions (2 Aug build)
 
 New endpoint groups added this build. These are **not yet in the Postman capture**

@@ -228,9 +228,12 @@ export function PageHead({ title, sub, action }: { title: string; sub: string; a
 }
 
 /** Standard "New X" primary button for the page head. */
-export function NewButton({ label, onClick }: { label: string; onClick: () => void }) {
+export function NewButton({ label, onClick, blockedReason }: { label: string; onClick: () => void; blockedReason?: string | null }) {
+  // BLOCKED SAYS WHY. A full group (or no group) disables the button; the
+  // reason is a warning in the page notice region (notices.tsx), the standard
+  // place, raised by the page. The tooltip repeats it.
   return (
-    <button className="btn primary" onClick={onClick}>
+    <button className="btn primary" onClick={onClick} disabled={!!blockedReason} title={blockedReason || undefined}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>
       {label}
     </button>
@@ -279,6 +282,10 @@ export const GATE_COLOR: Record<string, string> = {
 
 export interface StripGate {
   gate: string; label: string; status: string; detail?: string; billable?: boolean
+  /** What the status means for this gate, e.g. UNASSIGNED, NOT CONNECTED, RECEIVING. */
+  badge?: string
+  /** A live reading in the box's lower right (CPU on Server, data received on Input). */
+  meter?: { text: string; title?: string; warn?: boolean } | null
 }
 
 export function PipelineStrip({ gates }: { gates: StripGate[] }) {
@@ -287,7 +294,8 @@ export function PipelineStrip({ gates }: { gates: StripGate[] }) {
     <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 0 14px' }}>
       {gates.map((g, i) => {
         // A healthy PUBLIC gate is the one that means we are truly on air.
-        const label = (g.gate === 'public' && g.status === 'healthy') ? 'ON AIR' : g.status
+        // the gate's own word for its state (docs/STATUS_MAP.md), else the raw status
+        const label = g.badge ?? ((g.gate === 'public' && g.status === 'healthy') ? 'ON AIR' : g.status)
         const color = GATE_COLOR[g.status] ?? '#64748b'
         return (
           <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 6, flex: '1 1 0', minWidth: 0 }}>
@@ -298,10 +306,17 @@ export function PipelineStrip({ gates }: { gates: StripGate[] }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-label)', color: 'var(--muted)' }}>
                 <span className="dot-s" style={{ background: color }} />
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.label}</span>
-                {g.billable && <span style={{ marginLeft: 'auto', color: '#fbbf24', fontSize: 9 }}>●</span>}
+                {/* THE AMBER DOT: this gate is what is billed (server time). Named on
+                    hover and to screen readers, and lit only while it is running. */}
+                {g.billable && <span className="bill-dot" data-tip={g.status === 'healthy' || g.status === 'starting' || g.status === 'degraded' ? 'Billable: server time is charged while this runs' : 'Billable: server time is charged only while a stream runs (nothing now)'}
+                  role="img" aria-label="Billable resource" tabIndex={0}
+                  style={{ marginLeft: 'auto', color: g.status === 'healthy' || g.status === 'starting' || g.status === 'degraded' ? '#fbbf24' : 'rgba(251,191,36,.35)', fontSize: 9 }}>●</span>}
               </div>
               <div style={{ fontWeight: 700, fontSize: 'var(--fs-xs)', color, textTransform: 'uppercase' }}>{label}</div>
-              <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.detail}</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0, fontSize: 'var(--fs-micro)', color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.detail}</div>
+                {g.meter && <span className="gate-meter" title={g.meter.title} style={g.meter.warn ? { color: 'var(--warn)' } : undefined}>{g.meter.text}</span>}
+              </div>
             </div>
             {i < gates.length - 1 && (
               <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 'var(--fs-sm)', flex: 'none' }}>→</div>

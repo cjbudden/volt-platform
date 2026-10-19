@@ -54,7 +54,17 @@ async function readCpu(): Promise<CpuSnapshot | null> {
     const idle = f[3] + (f[4] ?? 0);
     const total = f.reduce((a, b) => a + b, 0);
     return { total, idle, at: Date.now() };
-  } catch { return null; }
+  } catch {
+    // No /proc (macOS running the stack natively): the same counters from the
+    // OS, summed over every core. Same meaning, so the same arithmetic applies.
+    try {
+      const cs = cpus();
+      if (!cs.length) return null;
+      let total = 0, idle = 0;
+      for (const c of cs) { const t = c.times; total += t.user + t.nice + t.sys + t.idle + t.irq; idle += t.idle; }
+      return { total, idle, at: Date.now() };
+    } catch { return null; }
+  }
 }
 
 async function readNet(): Promise<NetSnapshot | null> {

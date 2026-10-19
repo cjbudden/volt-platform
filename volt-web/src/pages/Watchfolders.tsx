@@ -249,7 +249,7 @@ function Queue({ folder }: { folder: Watchfolder }) {
     <div className="card" style={{ padding: 18, marginTop: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
         <h3 style={{ margin: 0, fontSize: 'var(--fs-body)' }}>Queue</h3>
-        <select style={box} value={filter} onChange={e => setFilter(e.target.value)}>
+        <select className="inp sel-sm" style={{ width: 'auto' }} value={filter} onChange={e => setFilter(e.target.value)}>
           <option value="open">Needs a person</option>
           <option value="quarantined">Needs review</option>
           <option value="failed">Failed</option>

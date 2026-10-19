@@ -53,7 +53,7 @@ xml(){ curl -s "$B/epg/xmltv?download=0" -H "$A"; }
 CH=$(curl -s -X POST "$B/channels" -H "$A" -H "$J" -d "{\"groupId\":\"$G\",\"name\":\"Icon News\",\"brandRef\":\"$LOGO\",\"sources\":[{\"role\":\"primary\",\"protocol\":\"hls\",\"ingestUrl\":\"http://127.0.0.1:9/a.m3u8\"}]}" | jget 'd["id"]')
 ok "a new channel with a logo and no guide icon stores none" '[ -n "$CH" ] && [ -z "$(q "SELECT guide_icon_ref FROM channels WHERE id='"'"'$CH'"'"'")" ]'
 ok "the guide uses the channel logo" '[ "$(gc $CH)" = "('"'"'brand'"'"', '"'"'$LOGO'"'"')" ]'
-ok "and the XMLTV <icon> is the logo, as an absolute image URL" 'xml | grep -q "<icon src=\"http://localhost:$PORT/img/256x256,inside/library/$ACC/brands/news.png\"/>"'
+ok "and the XMLTV <icon> is the logo, as an absolute SIGNED image URL" 'xml | grep -q "<icon src=\"http://localhost:$PORT/img/[A-Za-z0-9_-]\{22\}/256x256,inside/library/$ACC/brands/news.png\"/>"'
 
 # ---- a guide icon set in the channel's settings wins
 V=$(q "SELECT version FROM channels WHERE id='$CH'")

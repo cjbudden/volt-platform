@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef, type ReactElement } from 'react'
-import { api, setSession, clearSession, noteActivity, setUnauthorizedHandler, type SearchHit, type Me } from './api'
+import { api, setSession, clearSession, noteActivity, setUnauthorizedHandler, isMfaStep, ensureImageSigning, type SearchHit, type Me, type MfaStep, type Session } from './api'
+import { useImageSigning } from './imageSigning'
+import { SignInSecondStep } from './security'
+import AccountPage from './pages/Account'
+import ChannelGroupsPage from './pages/ChannelGroups'
 import Channels from './pages/Channels'
 import ChannelDetail from './pages/ChannelDetail'
 import ImageLibrary from './pages/ImageLibrary'
@@ -13,6 +17,13 @@ import LoopsPage from './pages/Loops'
 import VodPage from './pages/Vod'
 import ReviewPage from './pages/Review'
 import AnalyticsPage from './pages/Analytics'
+import AuditLogPage from './pages/AuditLog'
+import NewStreamChooser from './NewStreamChooser'
+import UiSamplesPage from './pages/UiSamples'
+import PlanLimitsPage from './pages/PlanLimits'
+import AccountSettingsPage from './pages/AccountSettings'
+import PermissionsMapPage from './pages/PermissionsMap'
+import { GlobalNotices, PageNoticesProvider, usePageNotice, Notice } from './notices'
 import LivePage from './pages/Live'
 import MonitoringPage from './pages/Monitoring'
 import FleetPage from './pages/Fleet'
@@ -35,14 +46,16 @@ import { useRoute, navigate, hrefFor } from './router'
 import { pressable, openable } from './a11y'
 import { resetLiveBackoff } from './liveStatus'
 import { UploadIndicator } from './uploads'
+import { DocsButton } from './docsLink'
 import { IngestQueue } from './IngestQueue'
 import { ErrorBoundary } from './ErrorBoundary'
+import { AccessProvider, makeAccess } from './access'
 import NotificationBell from './NotificationBell'
 import NotificationsPage from './pages/Notifications'
 import SocialAccountsPage from './pages/SocialAccounts'
 import WorkflowsPage from './pages/Workflows'
 
-const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z" /></svg>
+const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 1 3.5 14H11zM10 23 20.5 10H13z" /></svg>
 
 const I = {
   dash: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>,
@@ -51,6 +64,7 @@ const I = {
   // Stacked servers: the fleet is machines, not screens, and the icon says so.
   fleet: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="6" rx="1.5" /><rect x="3" y="14" width="18" height="6" rx="1.5" /><path d="M7 7h.01M7 17h.01" /></svg>,
   channels: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="13" rx="2" /><path d="m17 2-5 5-5-5" /></svg>,
+  palette: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2z" /><circle cx="7.5" cy="11" r="1" /><circle cx="10" cy="7" r="1" /><circle cx="14.5" cy="7" r="1" /><circle cx="17" cy="11" r="1" /></svg>,
   events: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>,
   loops: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 2l4 4-4 4" /><path d="M3 11v-1a4 4 0 014-4h14M7 22l-4-4 4-4" /><path d="M21 13v1a4 4 0 01-4 4H3" /></svg>,
   rec: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" /></svg>,
@@ -73,11 +87,20 @@ const I = {
 /** Which FEATURE (from /auth/me) each content nav item belongs to; items whose
  *  feature the user's group sets to 'none' are hidden so the nav matches the API. */
 const NAV_FEATURE: Record<string, string> = {
+  dashboard: 'monitoring', live: 'monitoring', monitoring: 'monitoring', multiview: 'monitoring',
+  fleet: 'fleet', workflows: 'settings',
   channels: 'channels', radio: 'radio', events: 'events', epg: 'epg', loops: 'media',
   recordings: 'recordings', vod: 'vod', images: 'media', analytics: 'analytics',
-  watchfolders: 'media',
-  encoding: 'media',
+  review: 'vod', watchfolders: 'media', storage: 'media',
+  encoding: 'settings', groups: 'settings', plan: 'settings', 'account-settings': 'settings', permissions: 'access',
+  // Admin sections
+  'content-types': 'settings', publishing: 'settings', ingest: 'settings', social: 'settings',
+  payments: 'payments', apikeys: 'apps',
 }
+/** Sections open to any signed-in admin user (their own inbox). */
+const OPEN_SECTIONS = new Set(['notifications', 'account'])
+/** User Management is shown when ANY of its tabs is available. */
+const USERS_FEATURES = ['users', 'access', 'viewers']
 
 interface NavItem { key: string; label: string; icon: ReactElement; badge?: string }
 interface NavGroup { group: string; items: NavItem[] }
@@ -109,6 +132,7 @@ const NAV: NavGroup[] = [
   ] },
   { group: 'Insight', items: [
     { key: 'analytics', label: 'Analytics', icon: I.analytics },
+    { key: 'audit', label: 'Audit log', icon: I.shield },
   ] },
 ]
 
@@ -123,6 +147,9 @@ export default function App() {
   // "the access map has not arrived" and "the access map says nothing" were
   // the same state, and the gating below treated both as full access.
   const [meLoaded, setMeLoaded] = useState(false)
+  // Re-render once the image signing key arrives, so thumbnails switch from the
+  // original bytes to signed, resized derivatives (imageSigning.ts).
+  useImageSigning()
 
   // The session ending is the API's news to deliver, not something a page can
   // work out. An expired token used to leave every screen showing the bare
@@ -164,11 +191,15 @@ export default function App() {
   const section = route.section
   const channelId = route.channelId
   const createOpen = route.create
+  const [chooserOpen, setChooserOpen] = useState(false)
   const setCreateOpen = (open: boolean) => navigate(open ? '/channels/new' : '/channels', { replace: true })
   const openChannel = (id: string) => navigate(`/channels/${id}`)
 
-  const account = email.split('@')[1]?.split('.')[0]?.toUpperCase() || 'RTM'
-  const EXTRA_LABEL: Record<string, string> = { apikeys: 'API Keys & Apps', users: 'User Management', system: 'System Admin', 'content-types': 'Content Types', publishing: 'Publishing Rules', ingest: 'Ingest Rules', payments: 'Payments', notifications: 'Notifications', social: 'Social accounts' }
+  // THE BADGE at the foot of the menu: who is signed in and to which account.
+  // Everything comes from /auth/me (the server), never from the email domain.
+  const who = me?.displayName?.trim() || me?.email || email
+  const initials = (who.includes('@') ? who.split('@')[0] : who).split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '·'
+  const EXTRA_LABEL: Record<string, string> = { plan: 'Plan & limits', 'account-settings': 'Account settings', permissions: 'Permissions map', 'ui-samples': 'Notices and errors: samples', account: 'My account', groups: 'Channel Groups', apikeys: 'API Keys & Apps', users: 'Users & Roles', system: 'System Admin', 'content-types': 'Content Types', publishing: 'Publishing Rules', ingest: 'Ingest Rules', payments: 'Payments', notifications: 'Notifications', social: 'Social accounts' }
   const label = NAV.flatMap(g => g.items).find(i => i.key === section)?.label
     || EXTRA_LABEL[section]
     || (section ? section.charAt(0).toUpperCase() + section.slice(1) : 'Channels')
@@ -177,24 +208,37 @@ export default function App() {
     document.title = channelId ? `VOLT · Channel` : `VOLT · ${label}`
   }, [channelId, label])
 
+  // Two-step sign-in: the password answer may be a challenge instead of a session.
+  const [step, setStep] = useState<MfaStep | null>(null)
+
   async function login(e: React.FormEvent) {
     e.preventDefault(); setErr(''); setBusy(true)
     try {
-      // THE WHOLE LOGIN RESPONSE, not just the access token. `r.refresh` used
-      // to be dropped here, which is what capped every session at ACCESS_TTL of
-      // wall clock however hard somebody was working. See api.ts.
-      const r = await api.login(email, pw); setSession(r); setAuthed(true)
-      // The access map gates the nav and the buttons. If it cannot be read we
-      // must know that, because the gating below now fails CLOSED: swallowing
-      // the error used to show every user the full admin navigation, including
-      // API Keys and User Management, and each of those pages then sat on
-      // "Loading…" forever behind a 403.
-      resetLiveBackoff()   // a fresh credential deserves a fresh attempt
-      api.me()
-        .then((m) => { setMe(m); setMeLoaded(true) })
-        .catch(() => { setMe(null); setMeLoaded(true) })
+      const r = await api.login(email, pw)
+      if (isMfaStep(r)) { setStep(r); setPw(''); return }
+      finishSignIn(r)
     }
     catch (e: any) { setErr('Sign in failed: ' + e.message) } finally { setBusy(false) }
+  }
+
+  function finishSignIn(r: Session) {
+    // THE WHOLE LOGIN RESPONSE, not just the access token. `r.refresh` used
+    // to be dropped here, which is what capped every session at ACCESS_TTL of
+    // wall clock however hard somebody was working. See api.ts.
+    setSession(r); setStep(null); setAuthed(true)
+    void ensureImageSigning()
+    // The access map gates the nav and the buttons. If it cannot be read we
+    // must know that, because the gating below now fails CLOSED: swallowing
+    // the error used to show every user the full admin navigation, including
+    // API Keys and User Management, and each of those pages then sat on
+    // "Loading…" forever behind a 403.
+    resetLiveBackoff()   // a fresh credential deserves a fresh attempt
+    reloadMe()
+  }
+  function reloadMe() {
+    api.me()
+      .then((m) => { setMe(m); setMeLoaded(true) })
+      .catch(() => { setMe(null); setMeLoaded(true) })
   }
 
   // FAIL CLOSED once the answer is in. Before /auth/me resolves we still show
@@ -202,38 +246,70 @@ export default function App() {
   // worse than briefly offering a link. Once it has answered and said nothing
   // — a 403, a timeout, a broken account — the admin surfaces are hidden
   // rather than offered and then refused.
-  const isAdmin = (!meLoaded && !me) || me?.role === 'admin' || me?.role === 'owner'
-  const featureLevel = (key: string): string => {
-    if (!me) return meLoaded ? 'none' : 'manage'
+  // ACCESS: one map from /auth/me drives the menu, the deep-link guard and
+  // every button (access.tsx). FAIL CLOSED: nothing is shown until it answers.
+  const access = makeAccess(me, meLoaded)
+  const isAdmin = access.isAdminTier
+  const sectionAllowed = (key: string): boolean => {
+    if (!me) return false
+    if (OPEN_SECTIONS.has(key)) return true
+    if (key === 'users') return USERS_FEATURES.some(f => access.can(f, 'view'))
+    if (key === 'system') return !!me.platformRole
+    // The audit log is for account administrators (owner, admin).
+    if (key === 'audit') return access.isAdminTier
+    // The notices and errors reference page: anyone signed in (it calls no API).
+    if (key === 'ui-samples') return true
     const f = NAV_FEATURE[key]
-    if (!f) return 'view'                        // unmapped items stay visible
-    return me.features?.[f] ?? 'manage'
+    return f ? access.can(f, 'view') : false
   }
+  const ADMIN_ITEMS: NavItem[] = [
+    { key: 'account-settings', label: 'Account settings', icon: I.palette },
+    { key: 'plan', label: 'Plan & limits', icon: I.fleet },
+    { key: 'groups', label: 'Channel Groups', icon: I.channels },
+    { key: 'content-types', label: 'Content Types', icon: I.epg },
+    { key: 'publishing', label: 'Publishing Rules', icon: I.vod },
+    { key: 'ingest', label: 'Ingest Rules', icon: I.vod },
+    { key: 'payments', label: 'Payments', icon: I.fleet },
+    { key: 'social', label: 'Social accounts', icon: I.vod },
+    { key: 'notifications', label: 'Notifications', icon: I.bell },
+    { key: 'apikeys', label: 'API Keys & Apps', icon: I.key },
+    { key: 'users', label: 'Users & Roles', icon: I.users },
+    { key: 'permissions', label: 'Permissions map', icon: I.shield },
+  ]
   const nav: NavGroup[] = [
-    ...NAV.map(g => ({ ...g, items: g.items.filter(it => featureLevel(it.key) !== 'none') }))
+    ...NAV.map(g => ({ ...g, items: g.items.filter(it => sectionAllowed(it.key)) }))
       .filter(g => g.items.length > 0),
-    ...(isAdmin ? [{ group: 'Admin', items: [
-      { key: 'content-types', label: 'Content Types', icon: I.epg },
-      { key: 'publishing', label: 'Publishing Rules', icon: I.vod },
-      { key: 'ingest', label: 'Ingest Rules', icon: I.vod },
-      { key: 'payments', label: 'Payments', icon: I.fleet },
-      { key: 'social', label: 'Social accounts', icon: I.vod },
-      { key: 'notifications', label: 'Notifications', icon: I.bell },
-      { key: 'apikeys', label: 'API Keys & Apps', icon: I.key },
-      { key: 'users', label: 'User Management', icon: I.users },
-    ] }] : []),
+    ...[{ group: 'Admin', items: ADMIN_ITEMS.filter(it => sectionAllowed(it.key)) }].filter(g => g.items.length > 0),
     ...(me?.platformRole ? [{ group: 'System', items: [
       { key: 'system', label: 'System Admin', icon: I.shield },
     ] }] : []),
   ]
+  // A deep link to a section the role does not include gets a clear answer
+  // rather than a page of failed requests.
+  const blocked = !!me && !!section && !sectionAllowed(section)
+  // Landing on "/" (Channels) with a role that has no TV: go to the first
+  // section the role does include instead of a "no access" page.
+  const firstAllowed = nav[0]?.items[0]?.key
+  useEffect(() => {
+    if (blocked && window.location.pathname === '/' && firstAllowed) navigate('/' + firstAllowed, { replace: true })
+  }, [blocked, firstAllowed])
 
   if (!authed) {
     return (
       <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+        {step ? (
+          <div className="card" style={{ width: 380, padding: 28 }}>
+            <div className="brand" style={{ padding: '0 0 14px' }}>
+              <div className="logo">{BOLT}</div>
+              <div><div className="n">Volt Streaming</div><div className="s">{email}</div></div>
+            </div>
+            <SignInSecondStep step={step} onSession={finishSignIn} onCancel={() => { setStep(null); setErr('') }} />
+          </div>
+        ) : (
         <form onSubmit={login} className="card" style={{ width: 360, padding: 28 }}>
           <div className="brand" style={{ padding: '0 0 14px' }}>
             <div className="logo">{BOLT}</div>
-            <div><div className="n">VOLT Stream</div><div className="s">OTT Streaming Platform</div></div>
+            <div><div className="n">Volt Streaming</div><div className="s">Live streaming platform</div></div>
           </div>
           {/* type and autoComplete are not decoration on a sign-in form: they
               are what makes a phone offer the right keyboard, what lets a
@@ -247,9 +323,11 @@ export default function App() {
             <input id="signin-pw" name="password" className="inp" type="password"
               autoComplete="current-password"
               value={pw} onChange={e => setPw(e.target.value)} /></div>
-          {err && <div className="err">{err}</div>}
+          {/* outside the shell (no page region): a compact notice in the form */}
+          {err && <div style={{ marginBottom: 10 }}><Notice kind="error" variant="compact" message={err} /></div>}
           <button className="btn primary" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }} disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
         </form>
+        )}
       </div>
     )
   }
@@ -259,7 +337,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="logo">{BOLT}</div>
-          <div><div className="n">VOLT Stream</div><div className="s">OTT Streaming Platform</div></div>
+          <div><div className="n">Volt Streaming</div><div className="s">Live streaming platform</div></div>
         </div>
         <nav className="nav">
           {nav.map(g => (
@@ -278,26 +356,32 @@ export default function App() {
             </div>
           ))}
         </nav>
-        <div className="side-foot">
-          <div className="avatar">{account.slice(0, 2)}</div>
-          <div><div className="nm">{email.split('@')[0]}</div><div className="rl">
-            {(me?.account?.name || account)} · {me ? (me.role.charAt(0).toUpperCase() + me.role.slice(1)) : 'Admin'}
-            {me?.userGroupName ? ` · ${me.userGroupName}` : ''}
+        <a className="side-foot" href="/account" title="My account: profile, email, password and two-step sign-in"
+          style={{ textDecoration: 'none', color: 'inherit' }}
+          onClick={e => { if (e.metaKey || e.ctrlKey || e.button === 1) return; e.preventDefault(); navigate('/account') }}>
+          <div className="avatar">{initials}</div>
+          <div style={{ minWidth: 0 }}><div className="nm" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{who}</div><div className="rl">
+            {me?.account?.name ?? ''}{me ? ` · ${me.roles?.length ? me.roles.map(r => r.name).join(', ') : me.role.charAt(0).toUpperCase() + me.role.slice(1)}` : ''}
           </div></div>
-        </div>
+        </a>
       </aside>
 
       <div className="main">
         <IngestQueue />
         <div className="topbar">
-          <div className="crumb"><b>{label}</b></div>
+          {/* THE TOP BAR IS FOR GLOBAL ACTIONS ONLY: search, uploads, notices, New
+              Stream, sign out. The page names itself in its own title. */}
           <GlobalSearch />
           <div className="top-actions">
             <UploadIndicator />
             <NotificationBell canManage={isAdmin} />
-            <button className="btn primary" onClick={() => navigate('/channels/new')}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>New Stream
-            </button>
+            {/* NEW STREAM asks which kind first (NewStreamChooser), then opens that form. */}
+            {(access.can('channels', 'manage') || access.can('events', 'manage') || access.can('radio', 'manage')) && (
+              <button className="btn primary" onClick={() => setChooserOpen(true)} aria-haspopup="dialog">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>New Stream
+              </button>
+            )}
+            <DocsButton />
             <div className="icon-btn" title="Sign out"
               {...pressable(() => {
                 // Revoke the refresh token server-side before dropping it, or
@@ -309,11 +393,26 @@ export default function App() {
             </div>
           </div>
         </div>
+        {/* GLOBAL notices (notices.tsx): app-wide states, under the top bar. */}
+        <GlobalNotices />
         <div className="content">
           {/* One broken section stays one broken section. Keyed on the route so
               navigating away clears it rather than trapping the operator. */}
+          <AccessProvider value={access}>
+          {/* PAGE notices: one region at the top of the content, cleared per route. */}
+          <PageNoticesProvider key={`${route.path}`}>
           <ErrorBoundary resetKey={`${section}:${channelId ?? ''}`} label={label}>
-          {section === 'channels'
+          <RoleHint text={(() => {
+            // Pages not individually gated yet still say what the role allows;
+            // the API refuses the rest with a message naming the feature.
+            const f = NAV_FEATURE[section]
+            const gated = ['channels', 'radio', 'events', 'users', 'groups'].includes(section)
+            if (!me || !f || gated || blocked || access.can(f, 'manage')) return null
+            return access.can(f, 'operate') ? 'Your role lets you run items here but not change their settings.' : 'Your role lets you view this section but not change anything in it.'
+          })()} />
+          {!meLoaded ? <div className="loading">Loading…</div>
+            : blocked ? <NoAccess title={label} />
+            : section === 'channels'
             ? (channelId
                 ? <ChannelDetail key={channelId} id={channelId} onBack={() => navigate('/channels')} />
                 : <Channels createOpen={createOpen} setCreateOpen={setCreateOpen} onOpen={openChannel} />)
@@ -339,6 +438,8 @@ export default function App() {
             ? <StoragePage />
             : section === 'analytics'
             ? <AnalyticsPage />
+            : section === 'audit'
+            ? <AuditLogPage />
             : section === 'live'
             ? <LivePage />
             : section === 'monitoring'
@@ -346,7 +447,7 @@ export default function App() {
             : section === 'fleet'
             ? <FleetPage />
             : section === 'workflows'
-            ? <WorkflowsPage canManage={isAdmin} />
+            ? <WorkflowsPage canManage={access.can('settings', 'manage')} />
             : section === 'dashboard'
             ? <DashboardPage />
             : section === 'multiview'
@@ -380,13 +481,37 @@ export default function App() {
             ? <ApiKeys />
             : section === 'users'
             ? <Users />
+            : section === 'account' && me
+            ? <AccountPage me={me} onChanged={reloadMe} />
+            : section === 'groups'
+            ? <ChannelGroupsPage />
+            : section === 'plan'
+            ? <PlanLimitsPage />
+            : section === 'account-settings'
+            ? <AccountSettingsPage />
+            : section === 'permissions'
+            ? <PermissionsMapPage />
             : section === 'system'
             ? <SystemAdmin />
+            : section === 'ui-samples'
+            ? <UiSamplesPage />
             : <Placeholder title={label} />}
           </ErrorBoundary>
+          </PageNoticesProvider>
+          {chooserOpen && <NewStreamChooser onClose={() => setChooserOpen(false)} />}
+          </AccessProvider>
         </div>
       </div>
     </div>
+  )
+}
+
+function NoAccess({ title }: { title: string }) {
+  return (
+    <>
+      <div className="page-head"><div><h1>{title}</h1><p>Your role does not include this section.</p></div></div>
+      <div className="empty"><div className="ic">{I.shield}</div><h3>No access</h3><p>Ask an administrator for a role that includes it.</p></div>
+    </>
   )
 }
 
@@ -457,4 +582,10 @@ function GlobalSearch() {
       )}
     </div>
   )
+}
+
+/** What the role allows on this page, as an info notice in the page region. */
+function RoleHint({ text }: { text: string | null }) {
+  usePageNotice('role', text ? { kind: 'info', message: text } : null)
+  return null
 }

@@ -111,6 +111,19 @@ Playback: manifests/segments land in the S3 origin and serve via
 `https://<cdn_domain>/…`. The same Postman collection / `api-playground.html`
 work against the ALB URL — set `baseUrl` to `control_plane_url`.
 
+### Image service
+`images.tf` adds the image library bucket (`<project>-<env>-images`), the image CDN and the
+URL-signing secret, and passes `IMAGE_*` settings to every control-plane role. After apply:
+```bash
+terraform output -raw image_cdn_base_url     # where signed image URLs point
+```
+For a custom domain set `image_edge_aliases = ["img.example.com"]` and
+`image_edge_certificate_arn` (ACM, us-east-1), then point DNS at the distribution. Smoke test:
+upload an image in the console, copy a URL from the URL builder, fetch it twice and check
+`X-Image-Cache` (`MISS`, then `MEMORY`, `HIT` or a CloudFront `Hit`). The images bucket is not
+force-emptied on destroy unless `images_force_destroy = true`. Full guide, secret rotation and
+purging: `volt-app/docs/IMAGES.md` sections 14 and 15.
+
 ## 7. Teardown
 ```bash
 terraform destroy
@@ -136,3 +149,14 @@ snapshot and the bucket won't force‑empty — intentional guard rails.
 - **Scaling & chaos (Tier‑3)** builds on this: launch N synthetic channels to find
   the per‑node ceiling; kill a node and confirm ECS reschedules + S3‑origin
   continuity; force a Spot interruption and confirm the on‑demand base absorbs it.
+
+## Scaling for large audiences
+
+The `scaling_*.tf` files add the role-split services (api-public, scheduler,
+worker), autoscaling, CloudFront + WAF in front of the API, ElastiCache Valkey,
+RDS Proxy and the optional Firehose beacon stream. Settings are in the
+"Scaling" block of `terraform.tfvars.example`. The full guide, including the
+pre-event checklist, is `SCALING.md` at the repository root.
+
+Health checks changed with it: the ALB checks `/health/ready` (database
+reachable) and the container checks `/health/live` (process up).

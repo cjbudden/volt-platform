@@ -1,7 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
-import { api, type EpgOwner, type EpgOwnerRow, type ProgrammeRow, type ProgrammeConflict, type ProgrammeBody, type ProgrammeVod, type VodState } from '../api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { api, ApiError, type EpgOwner, type EpgOwnerRow, type ProgrammeRow, type ProgrammeConflict, type ProgrammeBody, type ProgrammeVod, type VodState, type EpgScope, type EpgSeriesInfo, type RepeatPolicy } from '../api'
 import { ImagePicker } from '../ImagePicker'
 import { pressable } from '../a11y'
+import { navigate } from '../router'
+import { FormStatus, useNotify, usePageNotice } from '../notices'
+import { Segmented } from '../listFilters'
+import { EpgTimeline } from './EpgTimeline'
+import { CopyDayModal, RepeatEditor, PolicyPicker, PlacePreview, usePreview, defaultRepeat, toRule, browserTz, toDateInput as ymd, type RepeatValue } from './EpgRepeat'
 
 /* ============================================================================
    EPG builder — the guide for ONE channel or event, edited a day at a time in
@@ -70,9 +75,22 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
   const [converting, setConverting] = useState<string | null>(null)
   const [conflicts, setConflicts] = useState<ProgrammeConflict[]>([])
   const [err, setErr] = useState('')
+  const [errStatus, setErrStatus] = useState(0)
+  const notify = useNotify()
   const [editing, setEditing] = useState<ProgrammeRow | 'new' | null>(null)
+  // "Add programme" from the timeline opens at the clicked time.
+  const [newAt, setNewAt] = useState<string | undefined>(undefined)
+  // List or timeline: the same day, two readings of it. Remembered per viewer.
+  const [view, setView] = useState<'list' | 'timeline'>(() => {
+    try { return localStorage.getItem('volt.epg.view') === 'timeline' ? 'timeline' : 'list' } catch { return 'list' }
+  })
+  useEffect(() => { try { localStorage.setItem('volt.epg.view', view) } catch { /* per-viewer nicety only */ } }, [view])
+  const addAt = (hhmm?: string) => { setNewAt(hhmm); setEditing('new') }
   const [copyOpen, setCopyOpen] = useState(false)
-  const [toast, setToast] = useState('')
+  // A toast can carry an Undo: copy, repeat and clear record a batch the
+  // server can reverse, which is a better safety net than a confirm dialog.
+  const [toast, setToast] = useState<{ msg: string; batchId?: string | null } | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   /* Which programmes take part in an overlap, and who they overlap with.
      The banner only counts them: the rows themselves carry the highlight, so
@@ -92,7 +110,7 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
 
   async function load() {
     try {
-      setErr('')
+      setErr(''); setErrStatus(0)
       // The lifecycle read measures the archive on disk, so it is allowed to
       // fail on its own without taking the schedule down with it: a guide that
       // will not render because a coverage scan errored is a worse outcome
@@ -104,33 +122,78 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
           .then(r => r.programmes).catch(() => ({} as Record<string, ProgrammeVod>)),
       ])
       setProgs(p); setConflicts(c); setVod(v)
-    } catch (e: any) { setErr(e.message) }
+    } catch (e: any) { setErr(e.message); setErrStatus(e instanceof ApiError ? e.status : 0) }
   }
 
   /** Convert one aired slot now. The same conversion the scheduler runs. */
   async function convert(p: ProgrammeRow) {
-    setConverting(p.id); setErr('')
+    setConverting(p.id)
     try {
       await api.convertProgramme(p.id)
       flash(`"${p.title}" is being converted to a VOD asset`)
       await load()
-    } catch (e: any) { setErr(e.message) } finally { setConverting(null) }
+    } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setConverting(null) }
   }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [owner.kind, owner.id, day.getTime()])
   useEffect(() => {
     api.epgOwners().then(rs => setOwnerRow(rs.find(r => r.kind === owner.kind && r.id === owner.id) ?? null)).catch(() => {})
   }, [owner.kind, owner.id])
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(''), 2500) }
+  function flash(m: string, batchId?: string | null) {
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    setToast({ msg: m, batchId })
+    toastTimer.current = setTimeout(() => setToast(null), batchId ? 12000 : 3000)
+  }
+  async function undo(batchId: string) {
+    try {
+      const r = await api.epgUndo(batchId)
+      flash(`Undone: ${r.removed} removed${r.restored ? `, ${r.restored} restored` : ''}${r.keptStarted ? `. ${r.keptStarted} already started and were kept` : ''}`)
+      load()
+    } catch (e: any) { notify({ kind: 'error', message: e.message }) }
+  }
   async function remove(p: ProgrammeRow) {
-    if (!window.confirm(`Remove "${p.title}"?`)) return
-    try { await api.deleteProgramme(p.id); load() } catch (e: any) { setErr(e.message) }
+    if (!window.confirm(p.series_id
+      ? `Remove this "${p.title}" only? Its other repeats stay. To change or remove the repeat, open the programme.`
+      : `Remove "${p.title}"?`)) return
+    try { await api.deleteProgramme(p.id); load() } catch (e: any) { notify({ kind: 'error', message: e.message }) }
   }
   async function clearDay() {
-    if (!window.confirm(`Clear all programmes on ${day.toDateString()}?`)) return
-    try { const r = await api.epgClearDay(owner, dayStart.toISOString(), dayEnd.toISOString()); flash(`${r.deleted} programme(s) removed`); load() }
-    catch (e: any) { setErr(e.message) }
+    if (!window.confirm(`Clear all programmes on ${day.toDateString()}? You can undo this straight after.`)) return
+    try { const r = await api.epgClearDay(owner, dayStart.toISOString(), dayEnd.toISOString()); flash(`${r.deleted} programme(s) removed`, r.batchId); load() }
+    catch (e: any) { notify({ kind: 'error', message: e.message }) }
   }
+
+  /* SAY WHY, AND OFFER THE WAY OUT. A bare "Owner not found" under "Couldn't
+     load this day" read as a broken guide when the real cause is that the guide's
+     owner is not in this account (deleted, a stale bookmark, a mistyped link, or
+     another tenant's id). A guide needs nothing created first: programmes hang off
+     the channel or event itself, so the fix is to pick an owner that exists or
+     create one. Anything else (403, 5xx, network) keeps its own message + Retry. */
+  const what = owner.kind === 'event' ? 'event' : owner.kind === 'radio' ? 'station' : 'channel'
+  const createPath = owner.kind === 'event' ? '/events?new' : owner.kind === 'radio' ? '/radio/new' : '/channels/new'
+  const loadNotice = !err ? null
+    : errStatus === 404 ? {
+        kind: 'error' as const,
+        title: `This ${what} isn't in your account, so it has no guide to show.`,
+        message: `No ${what} with id ${owner.id} was found. It may have been deleted, or the link is out of date. ` +
+          `A guide needs nothing set up first: open a ${what} that exists and add programmes, or create a new ${what}.`,
+        actions: [
+          { label: 'Choose from the EPG list', onClick: () => navigate('/epg') },
+          { label: `Create a new ${what}`, onClick: () => navigate(createPath) },
+          { label: 'Retry', onClick: () => { load() } },
+        ],
+      }
+    : errStatus === 403 ? {
+        kind: 'error' as const,
+        title: `You don't have access to this ${what}'s guide.`,
+        message: `${err}. Ask an account admin for EPG access, or choose a guide you can edit.`,
+        actions: [{ label: 'Choose from the EPG list', onClick: () => navigate('/epg') }],
+      }
+    : { kind: 'error' as const, title: "Couldn't load this day.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] }
+  usePageNotice('load', loadNotice)
+  usePageNotice('overlaps', conflicts.length > 0 ? {
+    kind: 'warn', message: `${conflicts.length} overlap${conflicts.length === 1 ? '' : 's'} today. Overlaps are allowed, but the highlighted rows should be checked.`,
+  } : null)
 
   const shiftDay = (n: number) => setDay(d => { const x = new Date(d); x.setDate(x.getDate() + n); return x })
 
@@ -148,11 +211,14 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
           <p>Add programmes, copy days, and control each slot: geo access, replacement, and post-airing clip automation.</p>
         </div>
         <div className="spacer" />
-        <button className="btn ghost" onClick={() => setCopyOpen(true)}>Copy day…</button>
+        {/* No owner, no guide: these would only fail with the same 404. */}
+        {errStatus !== 404 && <>
+        <button className="btn ghost" onClick={() => setCopyOpen(true)}>Copy or repeat day…</button>
         <button className="btn ghost" onClick={clearDay}>Clear day</button>
-        <button className="btn primary" onClick={() => setEditing('new')}>
+        <button className="btn primary" onClick={() => addAt()}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" style={{ width: 15 }}><path d="M12 5v14M5 12h14" /></svg>Add programme
         </button>
+        </>}
       </div>
 
       {/* day navigation */}
@@ -163,23 +229,27 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
           style={{ width: 160 }} />
         <button className="btn ghost" onClick={() => shiftDay(1)}>Next →</button>
         <button className="btn ghost" onClick={() => { const d = new Date(); d.setHours(0, 0, 0, 0); setDay(d) }}>Today</button>
+        <Segmented label="View" value={view} onChange={setView} options={[
+          { value: 'list', label: 'List', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> },
+          { value: 'timeline', label: 'Timeline', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 4v16M7 5h10v5H7zM7 13h13v6H7z" /></svg> },
+        ]} />
         <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', marginLeft: 'auto' }}>{day.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
       </div>
 
-      {err && <div className="err">{err}</div>}
-      {conflicts.length > 0 && (
-        <div className="err" style={{ background: 'rgba(220,170,60,.12)', borderColor: 'rgba(220,170,60,.4)', color: 'var(--warn,#e2b64f)' }}>
-          {conflicts.length} overlap{conflicts.length === 1 ? '' : 's'} today. Overlaps are allowed, but the highlighted rows should be checked.
-        </div>
-      )}
 
       {progs === null ? (
-        <div className="loading">Loading day…</div>
+        err ? null : <div className="loading">Loading day…</div>
+      ) : view === 'timeline' ? (
+        <>
+        <VodSummary vod={vod} />
+        <EpgTimeline day={day} progs={progs} vod={vod} overlapsById={overlapsById} ownerWord={what}
+          onEdit={p => setEditing(p)} onAdd={hhmm => addAt(hhmm)} />
+        </>
       ) : progs.length === 0 ? (
         <div className="empty">
           <h3>Nothing scheduled on this day</h3>
           <p>Add the first programme, or use Copy day to repeat another day's schedule here.</p>
-          <button className="btn primary" onClick={() => setEditing('new')} style={{ margin: '0 auto' }}>Add programme</button>
+          <button className="btn primary" onClick={() => addAt()} style={{ margin: '0 auto' }}>Add programme</button>
         </div>
       ) : (
         <>
@@ -204,6 +274,7 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
                     <td style={{ fontFamily: 'ui-monospace,monospace', color: overlaps ? 'var(--warn,#e2b64f)' : 'var(--muted)' }}>{fmtT(p.ends_at)}</td>
                     <td style={{ color: 'var(--muted)' }}>{fmtDur(Date.parse(p.ends_at) - Date.parse(p.starts_at))}</td>
                     <td><b>{p.title}</b>{live && <span className="badge live" style={{ marginLeft: 8 }}>ON NOW</span>}
+                      {p.series_id && <span className="badge" style={{ marginLeft: 8 }} title={p.series_detached ? 'Part of a repeat, changed on its own' : 'Part of a repeat'}>{p.series_detached ? 'Repeat, edited' : 'Repeats'}</span>}
                       {overlaps && (
                         <span className="badge" style={{ marginLeft: 8, color: 'var(--warn,#e2b64f)', borderColor: 'rgba(220,170,60,.5)', background: 'rgba(220,170,60,.12)' }}>
                           Overlaps {overlaps.length === 1 ? `"${overlaps[0]}"` : `${overlaps.length} programmes`}
@@ -239,15 +310,18 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
         </>
       )}
 
-      {editing && <ProgrammeDrawer owner={owner} day={day} programme={editing === 'new' ? null : editing}
+      {editing && <ProgrammeDrawer owner={owner} day={day} programme={editing === 'new' ? null : editing} initialStart={newAt}
         vod={editing === 'new' ? undefined : vod[editing.id]}
         converting={editing !== 'new' && converting === editing.id}
         onConvert={editing === 'new' ? undefined : () => convert(editing)}
-        onClose={() => setEditing(null)} onDone={() => { setEditing(null); load() }} />}
+        onClose={() => setEditing(null)} onDone={(msg, batchId) => { setEditing(null); if (msg) flash(msg, batchId); load() }} />}
       {copyOpen && <CopyDayModal owner={owner} day={day} count={progs?.length ?? 0}
-        onClose={() => setCopyOpen(false)} onDone={(msg) => { setCopyOpen(false); flash(msg); load() }} />}
+        onClose={() => setCopyOpen(false)} onDone={(msg, batchId) => { setCopyOpen(false); flash(msg, batchId); load() }} />}
       {toast && (
-        <div style={{ position: 'fixed', left: '50%', bottom: 26, transform: 'translateX(-50%)', zIndex: 60, background: 'var(--panel-3,#161b26)', border: '1px solid var(--border)', padding: '10px 16px', borderRadius: 10, fontSize: 'var(--fs-body)' }}>{toast}</div>
+        <div className="epg-toast" role="status">
+          <span>{toast.msg}</span>
+          {toast.batchId && <button className="btn ghost sm" onClick={() => { const b = toast.batchId!; setToast(null); undo(b) }}>Undo</button>}
+        </div>
       )}
     </>
   )
@@ -354,10 +428,10 @@ function VodSummary({ vod }: { vod: Record<string, ProgrammeVod> }) {
 }
 
 /* ---------------------------------------------------- programme drawer */
-function ProgrammeDrawer({ owner, day, programme: p, vod, converting, onConvert, onClose, onDone }: {
-  owner: EpgOwner; day: Date; programme: ProgrammeRow | null
+function ProgrammeDrawer({ owner, day, programme: p, initialStart, vod, converting, onConvert, onClose, onDone }: {
+  owner: EpgOwner; day: Date; programme: ProgrammeRow | null; initialStart?: string
   vod?: ProgrammeVod; converting?: boolean; onConvert?: () => void
-  onClose: () => void; onDone: () => void
+  onClose: () => void; onDone: (msg?: string, batchId?: string | null) => void
 }) {
   const isEdit = !!p
   const [title, setTitle] = useState(p?.title ?? '')
@@ -370,7 +444,7 @@ function ProgrammeDrawer({ owner, day, programme: p, vod, converting, onConvert,
   const [tags, setTags] = useState(Array.isArray(p?.metadata?.tags) ? p!.metadata!.tags.join(', ') : (p?.metadata?.tags ?? ''))
   const [rating, setRating] = useState(p?.metadata?.rating ?? '')
   const timeOf = (iso: string) => { const d = new Date(iso); return `${p2(d.getHours())}:${p2(d.getMinutes())}` }
-  const [startT, setStartT] = useState(p ? timeOf(p.starts_at) : '09:00')
+  const [startT, setStartT] = useState(p ? timeOf(p.starts_at) : (initialStart ?? '09:00'))
   const [endT, setEndT] = useState(p ? timeOf(p.ends_at) : '')
   const [autoVod, setAutoVod] = useState(p?.auto_vod ?? false)
   const [geoMode, setGeoMode] = useState<'worldwide' | 'allow' | 'block'>(p?.geo_mode ?? 'worldwide')
@@ -389,6 +463,48 @@ function ProgrammeDrawer({ owner, day, programme: p, vod, converting, onConvert,
     return d.toISOString()
   }
 
+  /* REPEAT. A programme that is not yet part of a repeat can be set to repeat
+     here; one that is shows which repeat, and asks which occurrences a change
+     or delete applies to. A programme from an imported feed repeats when the
+     feed says so and is not offered a repeat of its own. */
+  const tz = browserTz()
+  const isSeries = !!(p?.series_id && p?.series_key)
+  const isImported = !!(p?.source_ref && !p.source_ref.startsWith('series:'))
+  const [repeat, setRepeat] = useState<RepeatValue>(() => defaultRepeat(day))
+  const [policy, setPolicy] = useState<RepeatPolicy>('replace')
+  const [scope, setScope] = useState<EpgScope>('this')
+  const [series, setSeries] = useState<EpgSeriesInfo | null>(null)
+  useEffect(() => { if (p?.series_id) api.epgSeries(p.series_id).then(setSeries).catch(() => setSeries(null)) }, [p?.series_id])
+  const startIso = isoAt(startT)
+  const endIso = endT.trim() ? isoAt(endT) : null
+  const repeatRule = !isSeries && !isImported ? toRule(repeat, day) : null
+  const repeatErr = repeatRule && 'error' in repeatRule ? repeatRule.error
+    : repeatRule && !endIso ? 'Set an end time so every repeat has a length' : ''
+  const previewBody = repeatRule && !('error' in repeatRule) && !repeatErr && startIso && endIso && Date.parse(endIso) > Date.parse(startIso) && title.trim()
+    ? { title: title.trim(), startsAt: startIso, endsAt: endIso, ...repeatRule, policy } : null
+  const pv = usePreview(JSON.stringify(previewBody), previewBody ? () => api.epgRepeat({ owner, ...previewBody, tz, dryRun: true }) : null)
+  const scopeWord = scope === 'this' ? 'this one' : scope === 'following' ? 'this and following' : 'all repeats'
+
+  async function stopAfterThis() {
+    if (!p || !series) return
+    const from = ymd(new Date(new Date(p.starts_at).getTime() + 86_400_000))
+    if (!window.confirm(`Stop repeating after ${new Date(p.starts_at).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}? Later repeats that have not aired are removed.`)) return
+    setBusy(true)
+    try { const r = await api.epgEndSeries(series.id, from); onDone(`Repeat stopped: ${r.deleted} later programme(s) removed`) }
+    catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  async function del() {
+    if (!p) return
+    const sc: EpgScope = isSeries ? scope : 'this'
+    const msg = sc === 'this' ? `Delete "${p.title}"${isSeries ? ' (this one only)' : ''}?`
+      : sc === 'following' ? `Delete "${p.title}" on this day and every later repeat?` : `Delete "${p.title}" from every repeat that has not aired?`
+    if (!window.confirm(msg)) return
+    setBusy(true)
+    try { await api.deleteProgramme(p.id, sc); onDone(sc === 'this' ? `"${p.title}" deleted` : `"${p.title}" deleted from ${scopeWord}`) }
+    catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+
   async function submit() {
     setErr(''); setConflictNote('')
     if (!title.trim()) { setErr('Give the programme a title'); return }
@@ -398,6 +514,7 @@ function ProgrammeDrawer({ owner, day, programme: p, vod, converting, onConvert,
     if (endT.trim() && !endsAt) { setErr('End time must be HH:MM'); return }
     if (endsAt && Date.parse(endsAt) <= Date.parse(startsAt)) { setErr('End must be after start'); return }
     if (replKind !== 'none' && !replRef.trim()) { setErr('Pick the replacement asset'); return }
+    if (repeatErr) { setErr(repeatErr); return }
     const body: ProgrammeBody = {
       title: title.trim(), startsAt, ...(endsAt ? { endsAt } : {}),
       autoVod,
@@ -420,12 +537,22 @@ function ProgrammeDrawer({ owner, day, programme: p, vod, converting, onConvert,
     }
     setBusy(true)
     try {
-      if (isEdit) await api.patchProgramme(p!.id, body)
-      else {
+      let id = p?.id
+      let note: string | undefined
+      if (isEdit) {
+        const r: any = await api.patchProgramme(p!.id, isSeries ? { ...body, scope } : body)
+        if (r?.repeat) note = `Changed ${r.repeat.updated} repeat(s)${r.repeat.keptEdited ? `. ${r.repeat.keptEdited} changed on their own were left as they are` : ''}`
+      } else {
         const created = await api.createProgramme(owner, body)
+        id = created.id
         if (created.conflicts?.length) setConflictNote(`Note: overlaps ${created.conflicts.map(c => `"${c.title}"`).join(', ')}`)
       }
-      onDone()
+      if (repeatRule && !('error' in repeatRule) && id) {
+        const r = await api.epgRepeat({ programmeId: id, ...repeatRule, policy, tz })
+        onDone(`"${title.trim()}" now repeats (${r.describe ?? 'repeat'}): ${r.summary.added} added${r.summary.replaced ? `, ${r.summary.replaced} replaced` : ''}${r.summary.skipped ? `, ${r.summary.skipped} skipped` : ''}`, r.batchId)
+        return
+      }
+      onDone(note)
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
 
@@ -459,6 +586,39 @@ function ProgrammeDrawer({ owner, day, programme: p, vod, converting, onConvert,
               <input className="inp" value={endT} onChange={e => setEndT(e.target.value)} placeholder="HH:MM" style={{ fontFamily: 'ui-monospace,monospace' }} />
             </div>
           </div>
+
+          <div className="sec-label">Repeat</div>
+          {isSeries ? (
+            <div className="rp-scope">
+              <div>
+                <span className="t">{series?.description ?? 'Part of a repeat'}</span>
+                {series && <span className="hintxt"> · {series.kind === 'day' ? 'part of a repeated day' : 'this programme repeats'} · {series.upcoming} upcoming</span>}
+              </div>
+              {p?.series_detached && <div className="hintxt">This one was changed on its own, so changes to all repeats leave it as it is.</div>}
+              <div>
+                <div className="hintxt" style={{ marginBottom: 6 }}>Save and Delete apply to</div>
+                <Segmented label="Apply to" value={scope} onChange={setScope} options={[
+                  { value: 'this', label: 'This one' }, { value: 'following', label: 'This and following' }, { value: 'series', label: 'All repeats' },
+                ]} />
+              </div>
+              {series && <button type="button" className="btn ghost sm" style={{ alignSelf: 'flex-start' }} disabled={busy} onClick={stopAfterThis}>Stop repeating after this</button>}
+            </div>
+          ) : isImported ? (
+            <div className="hintxt">This programme comes from an imported guide feed, so it repeats when the feed says so. Use Copy or repeat day to place it on other days.</div>
+          ) : (
+            <>
+              <RepeatEditor value={repeat} onChange={setRepeat} allowNone />
+              {repeat.freq !== 'none' && (
+                <>
+                  <div className="field" style={{ marginTop: 10 }}><label>If a slot is already taken</label>
+                    <PolicyPicker compact value={policy} onChange={setPolicy} />
+                  </div>
+                  {repeatErr ? <div className="err">{repeatErr}</div>
+                    : <PlacePreview compact verb="Repeats add" loading={pv.loading} result={pv.result} error={pv.error} />}
+                </>
+              )}
+            </>
+          )}
 
           <div className="sec-label">Slot controls</div>
           <div className="field"><label>Geo access for this period</label>
@@ -554,80 +714,14 @@ function ProgrammeDrawer({ owner, day, programme: p, vod, converting, onConvert,
           )}
 
           {conflictNote && <div className="hintxt" style={{ color: 'var(--warn)' }}>{conflictNote}</div>}
-          {err && <div className="err">{err}</div>}
         </div>
         <div className="drawer-f">
+          <FormStatus error={err} />
+          {isEdit && <button className="btn ghost" style={{ color: 'var(--down,#f87171)' }} disabled={busy} onClick={del}>{isSeries && scope !== 'this' ? `Delete ${scopeWord}` : 'Delete'}</button>}
           <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save changes' : 'Add programme'}</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* ---------------------------------------------------- copy day modal */
-function CopyDayModal({ owner, day, count, onClose, onDone }: {
-  owner: EpgOwner; day: Date; count: number; onClose: () => void; onDone: (msg: string) => void
-}) {
-  const [mode, setMode] = useState<'tomorrow' | 'week' | 'custom'>('tomorrow')
-  const [customDates, setCustomDates] = useState<string[]>([toDateInput(new Date(day.getTime() + 86_400_000))])
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-
-  async function run() {
-    setErr('')
-    let offsets: number[] = []
-    if (mode === 'tomorrow') offsets = [1]
-    else if (mode === 'week') offsets = [1, 2, 3, 4, 5, 6, 7]
-    else {
-      offsets = customDates.filter(Boolean).map(ds => {
-        const [y, m, d] = ds.split('-').map(Number)
-        return Math.round((new Date(y, m - 1, d).getTime() - day.getTime()) / 86_400_000)
-      }).filter(o => o !== 0)
-      if (!offsets.length) { setErr('Pick at least one target date (not the source day)'); return }
-    }
-    setBusy(true)
-    try {
-      const dayEnd = new Date(day.getTime() + 86_400_000)
-      const r = await api.epgCopyDay(owner, day.toISOString(), dayEnd.toISOString(), offsets)
-      onDone(`Copied ${r.copied} programme(s) onto ${offsets.length} day(s) — ${r.created} created`)
-    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
-  }
-
-  return (
-    <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="" style={{ alignItems: 'center', justifyContent: 'center' }}>
-      <div className="card" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 460, maxWidth: '95vw', padding: 20 }}>
-        <h3 style={{ margin: '0 0 4px' }}>Copy day</h3>
-        <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', margin: '0 0 12px' }}>
-          Copy the {count} programme(s) of {day.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' })} onto other days (same times, independent copies).
-        </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-body)', cursor: 'pointer' }}>
-            <input type="radio" checked={mode === 'tomorrow'} onChange={() => setMode('tomorrow')} /> Tomorrow
-          </label>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-body)', cursor: 'pointer' }}>
-            <input type="radio" checked={mode === 'week'} onChange={() => setMode('week')} /> Each of the next 7 days
-          </label>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-body)', cursor: 'pointer' }}>
-            <input type="radio" checked={mode === 'custom'} onChange={() => setMode('custom')} /> Specific dates
-          </label>
-          {mode === 'custom' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 24 }}>
-              {customDates.map((d, i) => (
-                <div key={i} style={{ display: 'flex', gap: 6 }}>
-                  <input className="inp" type="date" value={d} onChange={e => setCustomDates(ds => ds.map((x, j) => j === i ? e.target.value : x))} />
-                  <button className="xbtn" onClick={() => setCustomDates(ds => ds.filter((_, j) => j !== i))}>✕</button>
-                </div>
-              ))}
-              <button className="btn ghost" style={{ alignSelf: 'flex-start', padding: '4px 10px', fontSize: 'var(--fs-sm)' }}
-                onClick={() => setCustomDates(ds => [...ds, toDateInput(new Date(day.getTime() + 86_400_000))])}>+ Add date</button>
-            </div>
-          )}
-        </div>
-        {err && <div className="err" style={{ marginTop: 10 }}>{err}</div>}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
-          <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy || count === 0} onClick={run}>{busy ? 'Copying…' : 'Copy'}</button>
+          <button className="btn primary" disabled={busy} onClick={submit}>
+            {busy ? 'Saving…' : isEdit ? (isSeries ? `Save ${scopeWord}` : repeatRule && !('error' in repeatRule) ? 'Save and repeat' : 'Save changes') : repeatRule && !('error' in repeatRule) ? 'Add and repeat' : 'Add programme'}
+          </button>
         </div>
       </div>
     </div>

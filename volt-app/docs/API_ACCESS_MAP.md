@@ -1,3 +1,10 @@
+> **Superseded in part (Oct 2026).** The full access model, including the
+> `/api/public/*` namespace, admin roles and permission levels, public user
+> accounts, platform step-up and the hooks for new features, is in
+> `ACCESS_CONTROL.md` at the repository root. Where the two disagree,
+> ACCESS_CONTROL.md is current. The class of every route is now generated from
+> the running app into `API_ROUTES.md`, and `API_GUIDE.md` explains the split.
+
 # Volt Streaming — API access map (public vs admin)
 
 Every control-plane route's access class. **The default is ADMIN** — the vast

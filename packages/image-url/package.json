@@ -1,0 +1,17 @@
+{
+  "name": "@volt/image-url",
+  "version": "1.0.0",
+  "description": "Build and sign Volt image service URLs (resize, crop, focus, filters). Zero dependencies; runs in Node, browsers, workers and React Native.",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "sync": "node scripts/sync.js",
+    "build": "node scripts/sync.js && tsc -p tsconfig.json",
+    "test": "node scripts/sync.js && tsc -p tsconfig.json && node test/smoke.js",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": { "typescript": "^5.4.0" },
+  "engines": { "node": ">=18" }
+}

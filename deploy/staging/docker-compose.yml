@@ -1,0 +1,200 @@
+# Volt STAGING: the scaled shape on one server, no cloud.
+#
+#   cd deploy/staging
+#   cp .env.example .env            # then edit the secrets
+#   docker compose up -d --build
+#   open http://<server>/            # console, through the edge
+#
+# Same image, same code paths as AWS, with stand-ins:
+#
+#   AWS                         here
+#   CloudFront + WAF            edge (nginx): routing, viewer cache, rate limits
+#   ALB path routing            edge (nginx) upstreams
+#   ECS api-public service      api-public, PUBLIC_REPLICAS copies
+#   ECS api-admin service       api-admin
+#   ECS scheduler (1 leader)    scheduler (run 2 to test fail-over)
+#   ECS worker service          worker
+#   ElastiCache Valkey          valkey
+#   RDS / RDS Proxy             db (Postgres 16)
+#
+# Scale the viewer tier:  docker compose up -d --scale api-public=4 && docker compose restart edge
+# Load test it:           see ../loadtest/README.md
+#
+# The local dev compose (volt-app/docker-compose.yml) is unchanged: one
+# process doing everything.
+
+x-volt-env: &volt-env
+  NODE_ENV: production
+  DATABASE_URL: postgres://volt:${POSTGRES_PASSWORD:-volt}@db:5432/volt
+  DATABASE_LISTEN_URL: postgres://volt:${POSTGRES_PASSWORD:-volt}@db:5432/volt
+  REDIS_URL: redis://valkey:6379
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+  PLAYBACK_TOKEN_SECRET: ${PLAYBACK_TOKEN_SECRET:-}
+  VIEWER_JWT_SECRET: ${VIEWER_JWT_SECRET:-}
+  # Sign-in security (ACCESS_CONTROL.md section 12). Email codes go to the
+  # mailpit catcher below unless SMTP_URL points at a real server.
+  MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
+  SMTP_URL: ${SMTP_URL:-smtp://mailpit:1025}
+  NOTIFY_FROM: ${NOTIFY_FROM:-volt@staging.local}
+  SMS_PROVIDER: ${SMS_PROVIDER:-}
+  SMS_SENDER_ID: ${SMS_SENDER_ID:-}
+  INGEST_TOKEN: ${INGEST_TOKEN:-staging-ingest-token}
+  PORT: "8080"
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
+  INTERNAL_API_BASE_URL: http://api-admin:8080
+  CORS_ORIGIN: ${PUBLIC_BASE_URL:-http://localhost}
+  # The edge sets X-Viewer-Country on every request it forwards and nothing
+  # reaches the API except through it, so the header can be trusted.
+  TRUST_EDGE_GEO: "true"
+  EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET:?set EDGE_SHARED_SECRET in .env}
+  DB_POOL_MAX: "10"
+  # Shared disk: every role reads and writes the same files (image library,
+  # clips, uploads, the local origin). In AWS these live in S3.
+  ORIGIN_DIR: /data/origin
+  CLIPS_DIR: /data/clips
+  UPLOAD_STAGING_DIR: /data/uploads-staging
+  FILLER_DIR: /data/filler
+  IMAGE_STORE_DIR: /data/image-store
+  # Encoders. mock = no real encoders (enough for viewer-path load tests).
+  # docker = real encoder containers; needs the socket mounted below and the
+  # encoder image built (see volt-encoder/README).
+  ORCH_LAUNCHER: ${ORCH_LAUNCHER:-mock}
+  RADIO_MODE: container
+  ICECAST_HOST: icecast
+  ICECAST_PORT: "8000"
+  ICECAST_SOURCE_USER: source
+  ICECAST_SOURCE_PASSWORD: ${ICECAST_SOURCE_PASSWORD:-hackme}
+  ICECAST_PUBLIC_BASE: ${PUBLIC_BASE_URL:-http://localhost}:8000
+  ICECAST_AUTH_SECRET: ${ICECAST_AUTH_SECRET:-staging-relay-secret}
+  PREWARM_MODE: log
+
+x-volt-app: &volt-app
+  build:
+    context: ../..
+    dockerfile: volt-app/Dockerfile
+  image: volt-control-plane:staging
+  restart: unless-stopped
+  volumes:
+    - voltdata:/data
+  depends_on:
+    db:
+      condition: service_healthy
+    # Catches every email the API sends (sign-in codes, email changes, alerts)
+  # so staging can be tested without a real mail server: http://<host>:8025
+  mailpit:
+    image: axllent/mailpit:v1.21
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_PORT:-8025}:8025"
+
+  valkey:
+      condition: service_healthy
+  healthcheck:
+    # Liveness only: a database outage must not make every container restart.
+    test: ["CMD-SHELL", "node -e \"fetch('http://localhost:8080/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+    interval: 10s
+    timeout: 3s
+    retries: 3
+    start_period: 60s
+  stop_grace_period: 30s
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: volt
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-volt}
+      POSTGRES_DB: volt
+    command: ["postgres", "-c", "max_connections=300", "-c", "shared_buffers=512MB"]
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U volt"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  valkey:
+    image: valkey/valkey:8.0
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  icecast:
+    image: libretime/icecast:2.4.4
+    restart: unless-stopped
+    environment:
+      ICECAST_SOURCE_PASSWORD: ${ICECAST_SOURCE_PASSWORD:-hackme}
+      ICECAST_ADMIN_PASSWORD: ${ICECAST_ADMIN_PASSWORD:-hackme}
+      ICECAST_RELAY_PASSWORD: ${ICECAST_SOURCE_PASSWORD:-hackme}
+      ICECAST_PASSWORD: ${ICECAST_SOURCE_PASSWORD:-hackme}
+    ports:
+      - "8000:8000"
+
+  # Owns the schema (migrates on boot) and serves the console + admin API.
+  api-admin:
+    <<: *volt-app
+    environment:
+      <<: *volt-env
+      ROLE: api-admin
+    # Uncomment with ORCH_LAUNCHER=docker so this role can start encoders.
+    # volumes:
+    #   - voltdata:/data
+    #   - /var/run/docker.sock:/var/run/docker.sock
+
+  # The viewer tier. Scaled out; serves only public paths.
+  api-public:
+    <<: *volt-app
+    environment:
+      <<: *volt-env
+      ROLE: api-public
+    deploy:
+      replicas: ${PUBLIC_REPLICAS:-2}
+
+  # One leader runs the scheduler (event provisioning, reconciler, sweeps,
+  # pre-warm). Scale to 2 to watch fail-over: kill the leader and the other
+  # takes over within LEADER_RETRY_SEC.
+  scheduler:
+    <<: *volt-app
+    environment:
+      <<: *volt-env
+      ROLE: scheduler
+    deploy:
+      replicas: ${SCHEDULER_REPLICAS:-1}
+
+  # Background jobs (clips, VOD encodes, QC, social publishing).
+  worker:
+    <<: *volt-app
+    environment:
+      <<: *volt-env
+      ROLE: worker
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+    deploy:
+      replicas: ${WORKER_REPLICAS:-1}
+
+  # The edge: CloudFront + WAF + ALB in one nginx. See nginx.conf.
+  edge:
+    image: nginx:1.27.5-alpine   # 1.27.3+ needed for 'server ... resolve' in upstreams
+    restart: unless-stopped
+    depends_on:
+      - api-admin
+      - api-public
+    ports:
+      - "${EDGE_PORT:-80}:80"
+    environment:
+      # The official image runs envsubst over /etc/nginx/templates/*.template,
+      # replacing only variables set here, and writes the result to this dir.
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+      EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET:?set EDGE_SHARED_SECRET in .env}
+    volumes:
+      - ./nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
+
+volumes:
+  dbdata:
+  voltdata:

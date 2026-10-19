@@ -156,6 +156,8 @@ ok "and telemetry from a disallowed origin is refused too" \
 
 # The origin must come from the HEADER. A body-supplied origin would make the
 # one question this data exists to answer unanswerable.
+# Telemetry is written in batches (scale/batches.ts, about once a second): wait for one.
+sleep 2
 ORIGIN_ROW=$(psql "$DATABASE_URL" -tAc "SELECT origin FROM player_events WHERE session_id='abc123def' LIMIT 1")
 ok "the recorded origin is the request header" '[ "$ORIGIN_ROW" = "https://radio.example.com" ]'
 

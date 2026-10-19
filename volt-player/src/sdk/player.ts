@@ -1,0 +1,645 @@
+// ============================================================================
+//  THE VOLT PLAYER: engine + playlist + guide + casting + beacons + a skin.
+//
+//    const p = await VoltPlayer.create({ el: '#player', appKey: 'pk_…',
+//                                        playlist: ['<asset id>', '<asset id>'],
+//                                        theme: { primary: '#e11d48' } });
+//
+//  The player owns state; the skin draws it. Everything a skin can do goes
+//  through Commands, so a client's custom skin gets the same powers as ours
+//  and none of the dangerous ones.
+// ============================================================================
+import type {
+  Commands, PlayerEventName, PlayerState, PlaylistItem, Programme, ResolvedTheme, Skin, SkinFactory,
+  Theme, VoltPlayerSdkOptions,
+} from './types';
+import { Engine, isApple, readableError } from './engine';
+import { Beacons } from './beacons';
+import { Caster, contentTypeFor, showAirPlayPicker, watchAirPlay } from './cast';
+import { applyTheme, resolveTheme } from './theme';
+import { canStartOver, cleanSchedule, hasSource, normalizePlaylist, programmeAfter, programmeAt, startOverTarget, upNextFor } from './schedule';
+import { defaultApiBase, fetchEvent, fetchNowPlaying, fetchSchedule, fillUrl, GateError, mergeResolved, resolveAsset } from './resolver';
+import { getSkin } from './skins';
+import { STRINGS, format } from './strings';
+import { injectBaseStyles } from './skins/kit';
+
+const EPG_REFRESH_MS = 5 * 60_000;
+const NOW_PLAYING_MS = 15_000;
+const store = {
+  get(k: string): string | null { try { return localStorage.getItem(`volt-player:${k}`); } catch { return null; } },
+  set(k: string, v: string): void { try { localStorage.setItem(`volt-player:${k}`, v); } catch { /* private mode */ } },
+};
+
+export function initialState(): PlayerState {
+  return {
+    status: 'idle', playing: false, buffering: false, error: null, errorCode: null,
+    currentTime: 0, duration: NaN, live: false, seekable: null, dvr: false, atLiveEdge: true, behindLive: 0, wallClock: null,
+    programme: null, nextProgramme: null, schedule: [], canStartOver: false,
+    volume: 1, muted: false, rate: 1,
+    qualities: [], quality: 'auto', activeQuality: null, textTracks: [], textTrack: null, audioTracks: [], audioTrack: null,
+    items: [], index: -1, item: null, upNext: null,
+    nowPlaying: null, history: [], nextTrack: null,
+    cast: { available: false, state: 'none', device: null },
+    airplay: { available: false, active: false },
+    fullscreen: false, pip: { available: false, active: false },
+    hasPicture: false, audioOnly: false,
+    event: null, presentation: null, msToStart: null, access: { mode: null, message: null, products: [] }, replaying: false,
+  };
+}
+
+export class VoltPlayer {
+  readonly root: HTMLElement;
+  readonly media: HTMLVideoElement;
+  private o: VoltPlayerSdkOptions;
+  private api: string;
+  private engine: Engine;
+  private skin: Skin | null = null;
+  private skinRoot: HTMLElement;
+  private stage: HTMLElement;
+  private theme: ResolvedTheme;
+  private themeLayers: Array<Partial<Theme> | undefined>;
+  private s: PlayerState = initialState();
+  private listeners = new Map<string, Set<(d?: unknown) => void>>();
+  private raf = 0;
+  private tick: ReturnType<typeof setInterval> | null = null;
+  private timers: Array<ReturnType<typeof setInterval>> = [];
+  private beacons: Beacons | null = null;
+  private caster: Caster | null = null;
+  private loadSeq = 0;
+  private dismissedFor: string | null = null;
+  private lastProgrammeId: string | null = null;
+  private analyser: AnalyserNode | null = null;
+  private freq: Uint8Array | null = null;
+  private offs: Array<() => void> = [];
+  private kind = '';
+  private url = '';
+  private ownsMedia: boolean;
+  private destroyed = false;
+
+  static async create(o: VoltPlayerSdkOptions): Promise<VoltPlayer> {
+    const p = new VoltPlayer(o);
+    await p.start();
+    return p;
+  }
+
+  constructor(o: VoltPlayerSdkOptions) {
+    this.o = o;
+    const host = typeof o.el === 'string' ? document.querySelector<HTMLElement>(o.el) : o.el;
+    if (!host) throw new Error(`volt-player: no element matched ${String(o.el)}`);
+    injectBaseStyles();
+    this.api = defaultApiBase(o.apiBase);
+    this.root = document.createElement('div');
+    this.root.className = 'vp';
+    this.root.tabIndex = 0;
+    host.appendChild(this.root);
+    this.ownsMedia = !o.media;
+    this.media = o.media ?? document.createElement('video');
+    this.media.playsInline = true;
+    this.media.setAttribute('playsinline', '');
+    this.media.crossOrigin = 'anonymous';
+    this.media.controls = false;
+    this.media.classList.add('vp-media');
+    if (o.poster) this.media.poster = o.poster;
+    this.stage = document.createElement('div');
+    this.stage.className = 'vp-stage';
+    this.stage.appendChild(this.media);
+    if (o.watermark) {
+      const wm = document.createElement('div');
+      wm.className = 'vp-watermark';
+      wm.textContent = o.watermark;
+      this.stage.appendChild(wm);
+    }
+    this.skinRoot = document.createElement('div');
+    this.skinRoot.className = 'vp-skin';
+    this.root.appendChild(this.skinRoot);
+    this.themeLayers = [o.theme];
+    this.theme = resolveTheme(...this.themeLayers);
+    applyTheme(this.root, this.theme);
+    this.engine = new Engine(this.media, { requestHeaders: o.requestHeaders, nativeHlsOnApple: o.airplay !== false, textContainer: this.stage });
+    this.engine.onChange = () => this.pullEngine();
+    this.engine.onError = (msg, code) => this.fail(msg, code);
+  }
+
+  // ---------------------------------------------------------------- lifecycle
+  private async start(): Promise<void> {
+    const vol = Number(store.get('volume'));
+    this.media.volume = Number.isFinite(vol) && vol >= 0 && vol <= 1 && store.get('volume') != null ? vol : 1;
+    this.media.muted = !!this.o.muted || store.get('muted') === '1';
+    this.mountSkin(this.o.skin);
+    this.wireMedia();
+    this.wireRoot();
+    this.setupCasting();
+
+    const items = normalizePlaylist([
+      ...(this.o.item ? [this.o.item] : []),
+      ...(this.o.source ? [{ id: 'source', source: this.o.source } as PlaylistItem] : []),
+      ...(this.o.assetId ? [this.o.assetId] : []),
+      ...(this.o.playlist ?? []),
+      // An event with nothing else to play plays itself.
+      ...(this.o.eventId && !this.o.item && !this.o.source && !this.o.assetId && !this.o.playlist?.length ? [this.o.eventId] : []),
+    ]);
+    this.set({ items, pip: { available: !!(document as any).pictureInPictureEnabled && this.ownsMedia, active: false } });
+    if (this.o.demo) { this.setDemo(this.o.demo); this.emit('ready'); return; }
+
+    if (this.o.epg) void this.loadSchedule();
+    if (this.o.eventId && this.o.appKey) await this.pollEvent();
+    if (this.o.stationId && this.o.appKey) void this.pollNowPlaying();
+    this.tick = setInterval(() => this.derive(), 500);
+    if (items.length) await this.load(Math.min(Math.max(0, this.o.startIndex ?? 0), items.length - 1), !!this.o.autoplay);
+    this.emit('ready');
+  }
+
+  async destroy(): Promise<void> {
+    this.destroyed = true;
+    this.beacons?.destroy();
+    if (this.tick) clearInterval(this.tick);
+    if (this.eventTimer) clearTimeout(this.eventTimer);
+    for (const t of this.timers) clearInterval(t);
+    for (const f of this.offs) { try { f(); } catch { /* */ } }
+    cancelAnimationFrame(this.raf);
+    try { this.skin?.destroy?.(); } catch { /* */ }
+    await this.engine.destroy();
+    this.root.remove();
+  }
+
+  // --------------------------------------------------------------- public API
+  getState(): PlayerState { return this.s; }
+  on(name: PlayerEventName, fn: (d?: unknown) => void): () => void {
+    if (!this.listeners.has(name)) this.listeners.set(name, new Set());
+    this.listeners.get(name)!.add(fn);
+    return () => this.listeners.get(name)?.delete(fn);
+  }
+  get commands(): Commands { return this.cmd; }
+  play(): void { this.cmd.play(); }
+  pause(): void { this.cmd.pause(); }
+  seek(t: number): void { this.cmd.seek(t); }
+  next(): void { this.cmd.next(); }
+  previous(): void { this.cmd.previous(); }
+
+  /** Change the theme live (the console's preview). */
+  setTheme(t: Partial<Theme>): void {
+    this.themeLayers = [this.o.theme, t];
+    this.theme = resolveTheme(...this.themeLayers);
+    applyTheme(this.root, this.theme);
+    try { this.skin?.themeChanged?.(this.theme); } catch { /* */ }
+    this.render();
+  }
+
+  /** Demo mode: show this state (merged over the current one). */
+  setDemo(p: Partial<PlayerState>): void {
+    const item = p.item ?? (p.items && p.items[p.index ?? 0]) ?? this.s.item;
+    this.set({ ...p, item });
+  }
+
+  /** Swap the skin without stopping playback. */
+  setSkin(skin: string | SkinFactory): void { this.mountSkin(skin); this.render(); }
+
+  /** Replace the playlist and play from `index`. */
+  async setPlaylist(entries: Array<PlaylistItem | string>, index = 0, autoplay = true): Promise<void> {
+    const items = normalizePlaylist(entries);
+    this.set({ items });
+    if (items.length) await this.load(Math.min(index, items.length - 1), autoplay);
+  }
+
+  async setSource(source: PlaylistItem['source'], meta: Partial<PlaylistItem> = {}, autoplay = true): Promise<void> {
+    await this.setPlaylist([{ id: meta.id ?? 'source', ...meta, source }], 0, autoplay);
+  }
+
+  // -------------------------------------------------------------------- skin
+  private mountSkin(skin: string | SkinFactory | undefined) {
+    try { this.skin?.destroy?.(); } catch { /* */ }
+    this.skinRoot.innerHTML = '';
+    const make = typeof skin === 'function' ? skin : getSkin(skin ?? 'video');
+    this.skin = make();
+    this.root.dataset.skin = typeof skin === 'string' ? skin : 'custom';
+    try {
+      this.skin.mount({ root: this.skinRoot, stage: this.stage, theme: this.theme, commands: this.cmd, t: (k, v) => format(this.o.strings?.[k] ?? STRINGS[k] ?? k, v) });
+    } catch (e) { console.error('[volt-player] skin failed to mount', e); }
+    // A skin that never placed the stage still shows the picture.
+    if (!this.stage.isConnected) this.skinRoot.prepend(this.stage);
+  }
+
+  // -------------------------------------------------------------------- state
+  private set(p: Partial<PlayerState>) {
+    this.s = { ...this.s, ...p };
+    this.render();
+  }
+
+  private render() {
+    if (this.raf) return;
+    this.raf = requestAnimationFrame(() => {
+      this.raf = 0;
+      if (this.destroyed) return;
+      try { this.skin?.update(this.s); } catch (e) { console.warn('[volt-player] skin threw', e); }
+      this.emit('state', this.s);
+    });
+  }
+
+  private emit(name: PlayerEventName, d?: unknown) {
+    for (const f of this.listeners.get(name) ?? []) { try { f(d); } catch { /* a listener never breaks playback */ } }
+    try { this.o.onEvent?.(name, d); } catch { /* */ }
+  }
+
+  private fail(msg: string, code: string | number | null) {
+    this.set({ status: 'error', error: msg, errorCode: code, playing: false, buffering: false });
+    this.emit('error', { message: msg, code });
+  }
+
+  private pullEngine() {
+    const e = this.engine.snapshot();
+    const prevQ = this.s.activeQuality?.id;
+    this.set({
+      live: e.live, duration: e.duration, seekable: e.seekable,
+      dvr: e.live && !!e.seekable && e.seekable.end - e.seekable.start > 90,
+      qualities: e.qualities, activeQuality: e.activeQuality, quality: e.quality,
+      textTracks: e.textTracks, textTrack: e.textTrack, audioTracks: e.audioTracks, audioTrack: e.audioTrack,
+      audioOnly: e.audioOnly || this.s.audioOnly && !this.s.hasPicture,
+    });
+    if (e.activeQuality?.id !== prevQ) this.emit('qualitychange', e.activeQuality);
+  }
+
+  /** Twice a second: the clock-driven parts (live position, programme, up next). */
+  private derive() {
+    if (this.destroyed) return;
+    const m = this.media;
+    const casting = this.caster?.connected;
+    const e = this.engine.snapshot();
+    const currentTime = casting ? this.caster!.remote.currentTime : m.currentTime;
+    const behindLive = e.live && e.seekable ? Math.max(0, e.seekable.end - currentTime) : 0;
+    const wallClock = e.presentationStart != null ? e.presentationStart + currentTime * 1000 : (e.live ? Date.now() - behindLive * 1000 : null);
+    const sched = this.s.schedule;
+    const programme = sched.length ? programmeAt(sched, wallClock ?? Date.now()) : null;
+    const nextProgramme = sched.length ? programmeAfter(sched, programme ? programme.endsAt - 1 : (wallClock ?? Date.now())) : null;
+    const item = this.s.item;
+    const dismissKey = programme ? `p:${programme.id}` : `i:${this.s.index}`;
+    const upNext = this.theme.controls.upNext ? upNextFor({
+      hasNextItem: this.s.index + 1 < this.s.items.length, nextItem: this.s.items[this.s.index + 1] ?? null,
+      currentTime, duration: e.duration, live: e.live, programme, nextProgramme, playheadClock: wallClock,
+      seconds: this.theme.upNextSeconds, autoAdvance: this.theme.autoAdvance, dismissed: this.dismissedFor === dismissKey,
+    }) : null;
+    if (programme?.id !== this.lastProgrammeId) { this.lastProgrammeId = programme?.id ?? null; if (programme) this.emit('programmechange', programme); }
+    if (upNext && !this.s.upNext) this.emit('upnext', upNext);
+    this.set({
+      currentTime, behindLive, atLiveEdge: !e.live || behindLive < 8, wallClock: e.live ? wallClock : null,
+      programme, nextProgramme, upNext,
+      canStartOver: this.theme.controls.startOver && canStartOver(programme, e.presentationStart, e.seekable, e.live),
+      seekable: e.seekable,
+      hasPicture: m.videoWidth > 0,
+      item: item,
+      msToStart: this.countdown(),
+    });
+  }
+
+  /** Milliseconds to the event's start, while there is a start to count down to. */
+  private countdown(): number | null {
+    const ev = this.s.event;
+    if (!ev || ev.startsAt == null || !['pre', 'postponed', 'offline'].includes(this.s.presentation ?? '')) return null;
+    const ms = ev.startsAt - Date.now();
+    return ms > 0 ? ms : null;
+  }
+
+  /**
+   * The event's phase, from the control plane. Polled: every 30 s, every 5 s
+   * in the last two minutes before the start and while a delayed start is
+   * pending, so the stream begins within seconds of going live. When the phase
+   * becomes live the stream is loaded (the gate gives no URLs before then).
+   */
+  private async pollEvent() {
+    const run = async () => {
+      if (this.destroyed) return;
+      const ev = await fetchEvent(this.api, this.o.appKey!, this.o.eventId!).catch(() => null);
+      if (ev && !this.destroyed) {
+        const was = this.s.presentation;
+        this.set({ event: ev, presentation: ev.presentation });
+        if (ev.presentation !== was) {
+          this.emit('presentationchange', ev.presentation);
+          const idle = ['offline', 'error', 'idle'].includes(this.s.status);
+          if (ev.presentation === 'live' && was && idle && !this.s.replaying && this.s.items.length) void this.load(Math.max(0, this.s.index), !!this.o.autoplay);
+        }
+      }
+      const soon = ev?.startsAt != null && ev.startsAt - Date.now() < 120_000 && ['pre', 'offline'].includes(ev.presentation);
+      this.eventTimer = setTimeout(run, soon ? 5000 : 30000);
+    };
+    await run();
+  }
+  private eventTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** A signed-in viewer (after a purchase or sign-in): ask the gate again with them. */
+  setViewerToken(token: string | null): void {
+    this.o = { ...this.o, viewerToken: token };
+    this.cmd.refreshAccess();
+  }
+
+  // ------------------------------------------------------------------ loading
+  private async load(index: number, autoplay: boolean): Promise<void> {
+    const seq = ++this.loadSeq;
+    this.beacons?.destroy();
+    this.beacons = null;
+    this.dismissedFor = null;
+    let item = this.s.items[index];
+    if (!item) return;
+    this.set({ index, item, status: 'loading', error: null, errorCode: null, upNext: null, hasPicture: false, audioOnly: false, qualities: [], textTracks: [], audioTracks: [],
+      access: { mode: null, message: null, products: [] } });
+    this.emit('itemchange', { index, item });
+    try {
+      if (item.assetId && !hasSource(item.source)) {
+        if (!this.o.appKey) throw new GateError(401, 'This player needs an app key to play asset ids.', null);
+        const r = await resolveAsset(this.api, this.o.appKey, item.assetId, this.o.viewerToken);
+        if (seq !== this.loadSeq) return;
+        item = mergeResolved(item, r);
+        const items = this.s.items.slice(); items[index] = item;
+        this.set({ items, item });
+      }
+      if (!hasSource(item.source)) {
+        // An event before its start is not "off air": the skin shows the countdown.
+        this.set({ status: 'offline', error: this.s.presentation && this.s.presentation !== 'live' ? null : this.t('offline'), live: item.live ?? true });
+        return;
+      }
+      if (item.artworkUrl && !this.o.poster && this.ownsMedia) this.media.poster = item.artworkUrl;
+      const startAt = index === (this.o.startIndex ?? 0) ? this.o.startAt : undefined;
+      const used = await this.engine.load(item.source!, startAt);
+      if (seq !== this.loadSeq) return;
+      this.kind = used.kind; this.url = used.url;
+      this.set({ status: 'ready' });
+      this.pullEngine();
+      // Subtitles in the language the viewer chose last time, when this item has it.
+      const lang = store.get('textLang');
+      if (lang) { const id = this.engine.textByLang(lang); if (id) this.engine.setTextTrack(id); }
+      this.startBeacons(item);
+      if (this.caster?.connected) await this.castCurrent();
+      else if (autoplay) this.cmd.play();
+    } catch (e: any) {
+      if (seq !== this.loadSeq) return;
+      // PAYWALL / SIGN IN / REGION: not a failure. The viewer is shown what it
+      // is (title, artwork from the gate) and what would let them watch.
+      if (e instanceof GateError && (e.status === 402 || e.mode === 'paywall' || e.mode === 'sign_in' || e.status === 451)) {
+        const m = e.meta ?? {};
+        const it = { ...item, title: item.title ?? m.title ?? null, artworkUrl: item.artworkUrl ?? m.artworkUrl ?? null, description: item.description ?? m.description ?? null };
+        const items = this.s.items.slice(); items[index] = it;
+        const mode = e.mode === 'paywall' || e.status === 402 ? 'paywall' : e.mode === 'sign_in' ? 'sign_in' : 'blocked';
+        this.set({ items, item: it, status: 'locked', error: null, errorCode: e.status, live: it.live ?? true,
+          access: { mode, message: e.message, products: e.products } });
+        this.emit('locked', { mode, products: e.products, assetId: item.assetId });
+        return;
+      }
+      this.fail(e instanceof GateError ? e.message : (e?.message || readableError(e)), e?.status ?? e?.code ?? null);
+    }
+  }
+
+  private startBeacons(item: PlaylistItem) {
+    const b = this.o.beacons;
+    if (b === false || !item.playbackToken) return;
+    const cfg = typeof b === 'object' ? b : {};
+    this.beacons = new Beacons(this.media, {
+      url: cfg.url ?? `${this.api}/api/analytics/beacon`,
+      token: item.playbackToken,
+      prefix: cfg.prefix ?? 'web',
+      kbps: () => { const q = this.s.activeQuality; return q ? Math.round(q.bitrate / 1000) : undefined; },
+    });
+  }
+
+  private async loadSchedule() {
+    const run = async () => {
+      const g = this.o.epg;
+      let list: Programme[] = [];
+      if (Array.isArray(g)) list = cleanSchedule(g);
+      else if (g && this.o.appKey) list = await fetchSchedule(this.api, this.o.appKey, g.channelId).catch(() => []);
+      if (!this.destroyed) this.set({ schedule: list });
+    };
+    await run();
+    if (!Array.isArray(this.o.epg)) this.timers.push(setInterval(run, EPG_REFRESH_MS));
+  }
+
+  private async pollNowPlaying() {
+    const run = async () => {
+      const r = await fetchNowPlaying(this.api, this.o.appKey!, this.o.stationId!).catch(() => null);
+      if (r && !this.destroyed) this.set({ nowPlaying: r.nowPlaying, history: r.history, nextTrack: r.next });
+    };
+    await run();
+    this.timers.push(setInterval(run, NOW_PLAYING_MS));
+  }
+
+  // -------------------------------------------------------------- media wiring
+  private wireMedia() {
+    const m = this.media;
+    const on = (ev: string, fn: () => void) => { m.addEventListener(ev, fn); this.offs.push(() => m.removeEventListener(ev, fn)); };
+    on('playing', () => { this.set({ status: 'playing', playing: true, buffering: false, error: null }); this.emit('play'); });
+    on('play', () => this.set({ playing: true }));
+    on('pause', () => { if (this.caster?.connected) return; this.set({ status: m.ended ? 'ended' : 'paused', playing: false }); this.emit('pause'); });
+    on('waiting', () => this.set({ status: 'buffering', buffering: true }));
+    on('canplay', () => this.set({ buffering: false, status: this.s.playing ? 'playing' : this.s.status === 'loading' ? 'ready' : this.s.status }));
+    on('volumechange', () => {
+      store.set('volume', String(m.volume)); store.set('muted', m.muted ? '1' : '0');
+      this.set({ volume: m.volume, muted: m.muted });
+    });
+    on('ratechange', () => this.set({ rate: m.playbackRate }));
+    on('loadedmetadata', () => this.pullEngine());
+    on('durationchange', () => this.pullEngine());
+    on('resize', () => this.set({ hasPicture: m.videoWidth > 0 }));
+    on('ended', () => this.onEnded());
+    on('error', () => { if (this.engine.mode && this.engine.mode !== 'shaka' && this.s.status !== 'loading') this.fail(this.t('stopped'), m.error?.code ?? null); });
+    on('enterpictureinpicture', () => this.set({ pip: { ...this.s.pip, active: true } }));
+    on('leavepictureinpicture', () => this.set({ pip: { ...this.s.pip, active: false } }));
+    const fs = () => this.set({ fullscreen: document.fullscreenElement === this.root || (document as any).webkitFullscreenElement === this.root });
+    document.addEventListener('fullscreenchange', fs);
+    document.addEventListener('webkitfullscreenchange', fs);
+    this.offs.push(() => document.removeEventListener('fullscreenchange', fs), () => document.removeEventListener('webkitfullscreenchange', fs));
+    if (this.o.airplay !== false) this.offs.push(watchAirPlay(m, (a) => this.set({ airplay: a })));
+    this.set({ volume: m.volume, muted: m.muted });
+  }
+
+  private onEnded() {
+    this.beacons?.end();
+    this.set({ status: 'ended', playing: false });
+    this.emit('ended', { index: this.s.index });
+    const nextIdx = this.s.index + 1;
+    if (nextIdx < this.s.items.length && this.theme.autoAdvance && this.dismissedFor !== `i:${this.s.index}`) void this.load(nextIdx, true);
+  }
+
+  /** Keyboard: space/k play, ←/→ 10 s, ↑/↓ volume, m mute, f fullscreen, c subtitles. */
+  private wireRoot() {
+    const key = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.closest?.('input,select,textarea')) return;
+      const c = this.cmd;
+      switch (e.key) {
+        case ' ': case 'k': c.toggle(); break;
+        case 'ArrowLeft': c.seekBy(-10); break;
+        case 'ArrowRight': c.seekBy(10); break;
+        case 'ArrowUp': c.setVolume(this.media.volume + 0.1); break;
+        case 'ArrowDown': c.setVolume(this.media.volume - 0.1); break;
+        case 'm': c.toggleMute(); break;
+        case 'f': c.toggleFullscreen(); break;
+        case 'c': if (this.s.textTracks.length) c.setTextTrack(this.s.textTrack ? null : this.s.textTracks[0].id); break;
+        default: return;
+      }
+      e.preventDefault();
+    };
+    this.root.addEventListener('keydown', key);
+    this.offs.push(() => this.root.removeEventListener('keydown', key));
+  }
+
+  // ----------------------------------------------------------------- casting
+  private setupCasting() {
+    if (this.o.cast === false) return;
+    const c = new Caster(typeof this.o.cast === 'object' ? this.o.cast.receiverAppId : undefined);
+    this.caster = c;
+    c.onChange = (st) => { this.set({ cast: { ...st } }); this.emit('castchange', st); };
+    c.onRemote = () => this.set({ playing: c.remote.playing, status: c.remote.playing ? 'playing' : 'paused' });
+    c.onEnd = (t) => {
+      // Back on this device, from where the TV was (VOD), or at the live edge.
+      if (!this.s.live && t != null) { try { this.media.currentTime = t; } catch { /* */ } }
+      this.cmd.play();
+    };
+    void c.init();
+  }
+
+  private async castCurrent() {
+    const c = this.caster;
+    const it = this.s.item;
+    if (!c || !it || !this.url) return;
+    this.media.pause();
+    await c.load({
+      url: this.url, contentType: contentTypeFor(this.kind), title: it.title ?? null, subtitle: it.subtitle ?? this.s.programme?.title ?? null,
+      artworkUrl: it.artworkUrl ?? null, live: this.s.live, currentTime: this.media.currentTime,
+    });
+  }
+
+  // ---------------------------------------------------------------- commands
+  private t(k: string, v?: Record<string, string | number>) { return format(this.o.strings?.[k] ?? STRINGS[k] ?? k, v); }
+
+  private cmd: Commands = {
+    play: () => {
+      if (this.o.demo) { this.set({ playing: true, status: 'playing' }); return; }
+      if (this.caster?.connected) { if (!this.caster.remote.playing) this.caster.playPause(); return; }
+      if (this.s.status === 'offline' || (this.s.status === 'error' && this.s.item)) { void this.load(Math.max(0, this.s.index), true); return; }
+      if (this.s.live && this.s.status === 'paused' && this.s.seekable && this.media.currentTime < this.s.seekable.start) this.engine.goLive();
+      const p = this.media.play();
+      p?.catch?.((e: any) => {
+        if (e?.name === 'NotAllowedError') {
+          // Autoplay with sound refused: try muted, which browsers allow, and show the unmute control.
+          if (!this.media.muted && this.o.autoplay) { this.media.muted = true; this.media.play().catch(() => this.set({ playing: false, status: 'ready' })); return; }
+          this.set({ playing: false, status: 'ready' });
+        } else if (e?.name !== 'AbortError') this.fail(readableError(e), e?.name ?? null);
+      });
+    },
+    pause: () => { if (this.o.demo) { this.set({ playing: false, status: 'paused' }); return; } if (this.caster?.connected) { if (this.caster.remote.playing) this.caster.playPause(); return; } this.media.pause(); },
+    toggle: () => (this.s.playing ? this.cmd.pause() : this.cmd.play()),
+    seek: (t) => {
+      const r = this.s.seekable;
+      const lo = r ? r.start : 0, hi = r ? r.end : (Number.isFinite(this.media.duration) ? this.media.duration : t);
+      const v = Math.min(Math.max(t, lo), hi);
+      if (this.caster?.connected) this.caster.seek(v); else this.media.currentTime = v;
+      this.derive();
+    },
+    seekBy: (d) => this.cmd.seek((this.caster?.connected ? this.caster.remote.currentTime : this.media.currentTime) + d),
+    goLive: () => { this.engine.goLive(); if (this.media.paused) this.cmd.play(); this.derive(); },
+    startOver: () => {
+      const p = this.s.programme;
+      const e = this.engine.snapshot();
+      if (!p) return;
+      const r = startOverTarget(p.startsAt, e.presentationStart, e.seekable);
+      if (!r) return;
+      this.media.currentTime = r.seconds;
+      if (this.media.paused) this.cmd.play();
+      this.derive();
+    },
+    setQuality: (id) => this.engine.setQuality(id),
+    setTextTrack: (id) => {
+      this.engine.setTextTrack(id);
+      const lang = id ? this.engine.snapshot().textTracks.find((t) => t.id === id)?.lang : null;
+      store.set('textLang', lang ?? '');
+    },
+    setAudioTrack: (id) => this.engine.setAudioTrack(id),
+    setVolume: (v) => {
+      const x = Math.min(1, Math.max(0, v));
+      if (this.caster?.connected) this.caster.setVolume(x);
+      this.media.volume = x;
+      if (x > 0 && this.media.muted) this.media.muted = false;
+    },
+    toggleMute: () => { this.media.muted = !this.media.muted; },
+    setRate: (r) => { this.media.playbackRate = r; },
+    next: () => { if (this.s.index + 1 < this.s.items.length) void this.load(this.s.index + 1, true); },
+    previous: () => {
+      if (this.media.currentTime > 5 && !this.s.live) { this.cmd.seek(0); return; }
+      if (this.s.index > 0) void this.load(this.s.index - 1, true);
+    },
+    playItem: (i) => { if (i >= 0 && i < this.s.items.length) void this.load(i, true); },
+    cancelUpNext: () => {
+      this.dismissedFor = this.s.programme ? `p:${this.s.programme.id}` : `i:${this.s.index}`;
+      this.set({ upNext: null });
+    },
+    toggleFullscreen: () => {
+      const d = document as any;
+      const el = this.root as any;
+      if (d.fullscreenElement || d.webkitFullscreenElement) { (d.exitFullscreen ?? d.webkitExitFullscreen)?.call(d); return; }
+      if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      // iPhone: only the video element can go full screen.
+      else (this.media as any).webkitEnterFullscreen?.();
+    },
+    togglePip: () => {
+      const d = document as any;
+      if (d.pictureInPictureElement) { d.exitPictureInPicture?.().catch?.(() => {}); return; }
+      (this.media as any).requestPictureInPicture?.().catch?.(() => {});
+    },
+    cast: () => {
+      const c = this.caster;
+      const it = this.s.item;
+      if (!c || !it || !this.url) return;
+      void c.toggle({ url: this.url, contentType: contentTypeFor(this.kind), title: it.title ?? null,
+        subtitle: it.subtitle ?? this.s.programme?.title ?? null, artworkUrl: it.artworkUrl ?? null,
+        live: this.s.live, currentTime: this.media.currentTime }).then(() => { if (c.connected) this.media.pause(); });
+    },
+    airplay: () => showAirPlayPicker(this.media),
+    levels: () => this.levels(),
+    purchase: (productKey) => {
+      const p = this.s.access.products.find((x) => x.productKey === productKey) ?? null;
+      const assetId = this.s.item?.assetId ?? this.o.eventId ?? null;
+      this.emit('purchase', { productKey, product: p, assetId });
+      if (this.o.purchaseUrl) {
+        const url = fillUrl(this.o.purchaseUrl, { productKey, assetId, price: p ? (p.priceCents / 100).toFixed(2) : '', currency: p?.currency ?? '' });
+        try { window.open(url, '_blank', 'noopener'); } catch { location.href = url; }
+      }
+    },
+    signIn: () => {
+      const assetId = this.s.item?.assetId ?? this.o.eventId ?? null;
+      this.emit('signin', { assetId });
+      if (this.o.signInUrl) {
+        const url = fillUrl(this.o.signInUrl, { assetId });
+        try { window.open(url, '_blank', 'noopener'); } catch { location.href = url; }
+      }
+    },
+    playReplay: () => {
+      const id = this.s.event?.replayAssetId;
+      if (!id) return;
+      this.set({ replaying: true });
+      void this.setPlaylist([{ id, assetId: id, title: this.s.event?.title ?? null }], 0, true);
+    },
+    refreshAccess: () => { if (this.s.items.length) void this.load(Math.max(0, this.s.index), true); },
+  };
+
+  /**
+   * Frequency data for a visualiser. Built the first time a skin asks, after
+   * playback has started (an AudioContext needs a gesture). Media played
+   * through Shaka is same-origin to the page, so the analyser can read it; a
+   * cross-origin MP3 without CORS cannot be read and the skin falls back to
+   * its idle animation (null).
+   */
+  private levels(): Uint8Array | null {
+    if (this.analyser && this.freq) { this.analyser.getByteFrequencyData(this.freq as any); return this.freq; }
+    if (!this.s.playing || !this.ownsMedia) return null;
+    if (this.engine.mode === 'progressive' && isApple()) return null; // Safari silences a tapped cross-origin element
+    try {
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const ctx: AudioContext = new Ctx();
+      const src = ctx.createMediaElementSource(this.media);
+      const an = ctx.createAnalyser();
+      an.fftSize = 128;
+      an.smoothingTimeConstant = 0.78;
+      src.connect(an); an.connect(ctx.destination);
+      this.analyser = an;
+      this.freq = new Uint8Array(an.frequencyBinCount);
+      return this.freq;
+    } catch { this.analyser = null; return null; }
+  }
+}

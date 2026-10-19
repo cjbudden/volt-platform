@@ -1,0 +1,8 @@
+#!/bin/sh
+# Volt: a commit that changes core product code must carry a change note.
+# Installed by scripts/release/install-hooks.sh. Bypass once: git commit --no-verify
+ROOT="$(git rev-parse --show-toplevel)"
+for d in "$ROOT/volt" "$ROOT"; do
+  if [ -f "$d/scripts/release/check.mjs" ]; then exec node "$d/scripts/release/check.mjs" --staged; fi
+done
+exit 0

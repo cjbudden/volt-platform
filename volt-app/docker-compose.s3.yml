@@ -1,0 +1,46 @@
+# S3 stand-in for the image library and derivative cache, so the exact cloud
+# code path (S3 drivers, CacheControl metadata on derivatives) runs locally.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.s3.yml up --build
+#
+# MinIO console: http://localhost:9001 (volt / voltvoltvolt). Bucket: volt-images,
+# originals under library/, derivatives under img-cache/ (as in the cloud).
+services:
+  api:
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      IMAGE_STORE_DRIVER: s3
+      IMAGE_CACHE_DRIVER: s3
+      IMAGE_S3_BUCKET: volt-images
+      IMAGE_CACHE_S3_BUCKET: volt-images
+      IMAGE_CACHE_S3_PREFIX: img-cache
+      AWS_ENDPOINT_URL_S3: http://minio:9000
+      S3_FORCE_PATH_STYLE: "1"
+      AWS_REGION: ap-southeast-2
+      AWS_ACCESS_KEY_ID: volt
+      AWS_SECRET_ACCESS_KEY: voltvoltvolt
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: volt
+      MINIO_ROOT_PASSWORD: voltvoltvolt
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio:/data
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "until mc alias set local http://minio:9000 volt voltvoltvolt; do sleep 1; done &&
+                  mc mb --ignore-existing local/volt-images"
+
+volumes:
+  minio:

@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${DATABASE_URL:?set DATABASE_URL}"
 export JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:-devsecret} JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-devrefresh} INGEST_TOKEN=${INGEST_TOKEN:-dev-ingest}
-export PORT=${PORT:-8094} ORCH_LAUNCHER=mock
+export PORT=${PORT:-8094} ORCH_LAUNCHER=mock ANALYTICS_FLUSH_SEC=1 ANALYTICS_CONCURRENCY_SEC=1
 pass=0; fail=0; ok(){ echo "  ✓ $1"; pass=$((pass+1)); }; no(){ echo "  ✗ $1"; fail=$((fail+1)); }
 # two tenants; U1 is also a SaaS platform admin
 A1=00000000-0000-0000-0000-0000000000a1; U1=00000000-0000-0000-0000-0000000000f1; G1=00000000-0000-0000-0000-0000000000b1; C1=00000000-0000-0000-0000-0000000000c1; D1=00000000-0000-0000-0000-0000000000d1
@@ -34,7 +34,10 @@ npx tsx src/index.ts >/tmp/volt-saas.log 2>&1 & SRV=$!
 trap 'kill $SRV 2>/dev/null || true' EXIT
 for i in $(seq 1 30); do curl -fsS "localhost:$PORT/health" >/dev/null 2>&1 && break || sleep 1; done
 mint(){ node -e "console.log(require('jsonwebtoken').sign({sub:'$1',account_id:'$2',role:'owner'},process.env.JWT_ACCESS_SECRET,{expiresIn:3600}))"; }
-T1=$(mint $U1 $A1); T2=$(mint $U2 $A2)
+# U1 is platform staff: /api/platform accepts only a PLATFORM session (audience
+# volt:platform, issued after the authenticator code; ACCESS_CONTROL.md).
+mintp(){ node -e "console.log(require('jsonwebtoken').sign({sub:'$1',account_id:'$2',role:'owner',typ:'access',aud:'volt:platform',amr:['pwd','otp']},process.env.JWT_ACCESS_SECRET,{expiresIn:3600}))"; }
+T1=$(mintp $U1 $A1); T2=$(mint $U2 $A2)
 BASE="http://localhost:$PORT"; JS="Content-Type: application/json"
 jf(){ node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(eval('JSON.parse(s)'+process.argv[1]))}catch(e){console.log('ERR')}})" "$1"; }
 
@@ -73,10 +76,13 @@ PBT=$(echo "$AVR" | jf '.playbackToken')
 # a viewing session: start -> heartbeat -> (still live)
 curl -fsS -X POST -H "$JS" "$BASE/api/analytics/beacon" -d "{\"playbackToken\":\"$PBT\",\"sessionId\":\"session-0001\",\"event\":\"start\"}" >/dev/null
 curl -fsS -X POST -H "$JS" "$BASE/api/analytics/beacon" -d "{\"playbackToken\":\"$PBT\",\"sessionId\":\"session-0002\",\"event\":\"start\"}" >/dev/null
+# Beacons are buffered and concurrency recomputed every ANALYTICS_*_SEC (1 s here).
+sleep 3
 RT=$(curl -fsS -H "Authorization: Bearer $T1" "$BASE/api/analytics/realtime")
 [ "$(echo "$RT" | jf '.total_concurrent')" = "2" ] && ok "realtime concurrency = 2 live sessions" || no "realtime concurrency: $RT"
 # end a session -> rolls up
 curl -fsS -X POST -H "$JS" "$BASE/api/analytics/beacon" -d "{\"playbackToken\":\"$PBT\",\"sessionId\":\"session-0001\",\"event\":\"end\",\"seconds\":120}" >/dev/null
+sleep 3
 AUD=$(curl -fsS -H "Authorization: Bearer $T1" "$BASE/api/analytics/audience")
 [ "$(echo "$AUD" | jf '.total_views')" -ge 1 ] && ok "audience rollup recorded a view" || no "audience: $AUD"
 echo "$AUD" | grep -q 'by_app' && ok "audience carries by-app/device/geo breakdown" || no "no by-app dimension"

@@ -13,6 +13,7 @@ import { CLIP_EXTRACT } from '../services/jobs/handlers/clipExtract';
 import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions, isAudioOnly, recordingGaps, recordingFallbacks } from '../services/localRecordingIndex';
 import { transcriptForStream, searchTranscript, transcriptMatches } from '../services/recordingSearch';
 import { waveform, primeWaveformCache } from '../services/waveform';
+import { defineList, parseList, whereSql, countWhereSql, countParams, finishPage } from '../util/listQuery';
 
 /**
  * Recordings library — the raw captures. An event recording is one bounded run;
@@ -162,49 +163,100 @@ recordingsRouter.get(
   })
 );
 
+/**
+ * THE RECORDINGS LIST, on the standard list contract (util/listQuery.ts).
+ * q keeps its own meaning here and is NOT the generic search: a recording
+ * matches on its title or source, on a programme that aired inside it, or on
+ * its transcript (checked on disk after SQL), so q is handled below and kept
+ * out of the generic parser. sourceId matches either owner column.
+ */
+const SOURCE_TYPE = `CASE WHEN c.radio_config IS NOT NULL THEN 'radio'
+                   WHEN c.id IS NOT NULL THEN 'channel' ELSE 'event' END`;
+const RECORDINGS_LIST = defineList({
+  path: '/api/recordings',
+  fields: {
+    id: { sql: 'r.id', type: 'uuid' },
+    title: { sql: 'r.title', type: 'string' },
+    kind: { sql: 'r.kind', type: 'enum', values: ['event', 'channel_day'], doc: 'How the capture is sliced: one run per event, or one per channel per day' },
+    recording_type: { sql: 'r.recording_type', type: 'enum', values: ['tv_channel', 'radio_station', 'audio_stream', 'event', 'simulcast', 'ad_hoc'] },
+    source_type: { sql: SOURCE_TYPE, type: 'enum', values: ['radio', 'channel', 'event'], doc: 'What the source is' },
+    source_name: { sql: 'COALESCE(c.name, e.name)', type: 'string' },
+    channel_id: { sql: 'r.channel_id', type: 'uuid' },
+    event_id: { sql: 'r.event_id', type: 'uuid' },
+    container_id: { sql: 'r.container_id', type: 'uuid' },
+    status: { sql: 'r.status', type: 'enum', values: ['recording', 'complete', 'error'] },
+    day_utc: { sql: 'r.day_utc', type: 'timestamp', doc: 'The UTC day of a channel-day recording' },
+    start_epoch_ms: { sql: 'r.start_epoch_ms', type: 'number', notNull: true },
+    end_epoch_ms: { sql: 'r.end_epoch_ms', type: 'number' },
+    duration_ms: { sql: 'r.duration_ms', type: 'number' },
+    retention_days: { sql: 'r.retention_days', type: 'number' },
+    expires_at: { sql: 'r.expires_at', type: 'timestamp' },
+    storage_state: { sql: 'r.storage_state', type: 'enum', values: ['pending', 'writing', 'available', 'archiving', 'archived', 'restoring', 'restored', 'deleting', 'deleted'] },
+    next_action: { sql: 'r.next_action', type: 'enum', values: ['keep', 'to_cold', 'to_archive', 'delete'] },
+    next_action_at: { sql: 'r.next_action_at', type: 'timestamp' },
+    thumb_status: { sql: 'r.thumb_status', type: 'enum', values: ['uploading', 'processing', 'ready', 'error'] },
+    vod_count: { sql: '(SELECT count(*)::int FROM vod_assets v WHERE v.recording_id = r.id)', type: 'number' },
+    created_at: { sql: 'r.created_at', type: 'timestamp' },
+  },
+  defaultSort: '-start_epoch_ms',
+  aliases: { channelId: 'channel_id' },
+  extraParams: ['sourceId'],
+  unpagedLimit: 1000,
+});
+
+/** With q, rows read before the transcript filter (it runs after SQL). */
+const RECORDINGS_Q_WINDOW = 2000;
+
 recordingsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const kind = typeof req.query.kind === 'string' ? req.query.kind : null;
-    const channelId = typeof req.query.channelId === 'string' ? req.query.channelId : null;
     // sourceId matches EITHER owner column: the Recordings section is grouped by
     // source, and a source is a channel, a radio station (also a channel) or an
     // event. The caller should not have to know which column applies.
     const sourceId = typeof req.query.sourceId === 'string' ? req.query.sourceId : null;
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const params: unknown[] = [accountId(req), q || null, sourceId];
+    const pl = parseList(RECORDINGS_LIST, { ...req.query, q: undefined }, params);
     // With a search term, a recording matches when its own title/source matches,
     // when an EPG programme AIRING INSIDE ITS WINDOW matches (find content by
     // what was on air), or — checked after SQL, on disk — when its transcript
-    // contains the words (find content by what was SAID).
-    const rows = await query(
+    // contains the words (find content by what was SAID). The transcript check
+    // cannot be in SQL, so with q a wider window is read and the page is cut
+    // after the filter; the cursor still resumes after the last row returned.
+    const rows = await query<any>(
       `SELECT r.*, COALESCE(c.name, e.name) AS source_name,
               -- WHAT THE SOURCE IS, not how the capture is sliced. r.kind is
               -- 'channel_day' for radio too, which is why radio stations used to
               -- list as "CHANNEL DAY".
-              CASE WHEN c.radio_config IS NOT NULL THEN 'radio'
-                   WHEN c.id IS NOT NULL THEN 'channel' ELSE 'event' END AS source_type,
+              ${SOURCE_TYPE} AS source_type,
               (SELECT count(*)::int FROM vod_assets v WHERE v.recording_id = r.id) AS vod_count,
-              CASE WHEN $4::text IS NULL THEN NULL
-                   WHEN r.title ILIKE '%'||$4||'%' OR COALESCE(c.name, e.name) ILIKE '%'||$4||'%' THEN 'title'
+              CASE WHEN $2::text IS NULL THEN NULL
+                   WHEN r.title ILIKE '%'||$2||'%' OR COALESCE(c.name, e.name) ILIKE '%'||$2||'%' THEN 'title'
                    WHEN r.channel_id IS NOT NULL AND EXISTS (
                      SELECT 1 FROM programmes p WHERE p.channel_id = r.channel_id
-                       AND p.title ILIKE '%'||$4||'%'
+                       AND p.title ILIKE '%'||$2||'%'
                        AND p.span && tstzrange(to_timestamp(r.start_epoch_ms/1000.0),
                              to_timestamp(COALESCE(r.end_epoch_ms, (extract(epoch from now())*1000)::bigint)/1000.0), '[)')
                    ) THEN 'programme'
                    ELSE NULL END AS matched_by
        ${OWNED}
        WHERE g.account_id = $1
-         AND ($2::text IS NULL OR r.kind = $2::recording_kind)
-         AND ($3::uuid IS NULL OR r.channel_id = $3)
-         AND ($5::uuid IS NULL OR r.channel_id = $5 OR r.event_id = $5)
-       ORDER BY r.start_epoch_ms DESC`,
-      [accountId(req), kind, channelId, q || null, sourceId]
+         AND ($3::uuid IS NULL OR r.channel_id = $3 OR r.event_id = $3)${whereSql(pl)}
+       ORDER BY ${pl.orderBy} LIMIT ${q ? RECORDINGS_Q_WINDOW : pl.limit + 1}`,
+      params
     );
-    if (!q) return res.json(rows);
+    if (!q) {
+      const total = pl.count
+        ? Number((await one<any>(`SELECT count(*)::int AS n ${OWNED} WHERE g.account_id = $1
+             AND ($2::text IS NULL OR $2::text IS NOT NULL)
+             AND ($3::uuid IS NULL OR r.channel_id = $3 OR r.event_id = $3)${countWhereSql(pl)}`, countParams(pl, params)))?.n ?? 0)  // totals ignore the cursor
+        : undefined;
+      return res.json(finishPage(req, res, pl, rows, total));
+    }
     const out: any[] = [];
     let scanned = 0;
     for (const r of rows) {
+      if (out.length > pl.limit) break;
       if (r.matched_by) { out.push(r); continue; }
       // transcript scan is a disk read — bound it to the most recent recordings
       if (scanned >= 50) continue;
@@ -214,7 +266,7 @@ recordingsRouter.get(
         out.push({ ...r, matched_by: 'transcript' });
       }
     }
-    res.json(out);
+    res.json(finishPage(req, res, pl, out));
   })
 );
 

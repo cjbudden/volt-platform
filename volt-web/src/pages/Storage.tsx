@@ -3,6 +3,7 @@ import {
   api, type StorageCapabilities, type MediaObjectRow, type RetentionRuleRow,
   type RetentionStageInput, type SweepPreview, type AnalyticsRetention,
 } from '../api'
+import { Notice, PageError, useNotify, usePageNotice } from '../notices'
 
 /* ============================================================================
    STORAGE — what media exists, where it lives, and what will happen to it.
@@ -109,15 +110,14 @@ function LadderEditor({ caps, rule, onSaved }: {
     rule?.stages?.map(s => ({ afterDays: s.afterDays, action: s.action, targetTier: s.targetTier ?? undefined }))
     ?? caps.defaultLadder.map(s => ({ afterDays: s.afterDays, action: s.action, targetTier: s.targetTier ?? undefined }))
   )
-  const [err, setErr] = useState('')
+  const notify = useNotify()
   const [busy, setBusy] = useState(false)
-  const [saved, setSaved] = useState('')
 
   const set = (i: number, patch: Partial<RetentionStageInput>) =>
     setStages(s => s.map((x, k) => k === i ? { ...x, ...patch } : x))
 
   async function save() {
-    setBusy(true); setErr(''); setSaved('')
+    setBusy(true)
     try {
       await api.saveRetentionRule({
         ruleId: rule?.id, name,
@@ -128,9 +128,9 @@ function LadderEditor({ caps, rule, onSaved }: {
           targetTier: s.targetTier || undefined,
         })),
       })
-      setSaved('Saved.')
+      notify({ kind: 'ok', message: 'Saved.' })
       onSaved()
-    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+    } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy(false) }
   }
 
   return (
@@ -202,10 +202,8 @@ function LadderEditor({ caps, rule, onSaved }: {
           ...s, { afterDays: (Math.max(0, ...s.map(x => Number(x.afterDays))) || 0) + 30, action: 'delete' },
         ])}>Add a rung</button>
         <div className="flex-1" />
-        {saved && <span style={{ color: 'var(--ok,#4ade80)', fontSize: 'var(--fs-sm)' }}>{saved}</span>}
         <button className="btn primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save ladder'}</button>
       </div>
-      {err && <div className="err" style={{ marginTop: 8 }}>{err}</div>}
     </div>
   )
 }
@@ -222,19 +220,20 @@ function ObjectDetail({ id, caps, onChanged }: { id: string; caps: StorageCapabi
     try { setD(await api.mediaObject(id)) } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [id])
+  const notify = useNotify()
 
   // Only when there is nothing to show. `err` is also written by the actions
   // on this page, so an unconditional guard let one rejected action replace
   // the working page — including the controls needed to retry — with a line
   // of red text and no way back except navigating away.
-  if (err && !d) return <div className="err">{err}</div>
+  if (err && !d) return <Notice kind="error" variant="compact" title="Couldn't load this object." message={err} actions={[{ label: 'Retry', onClick: () => { load() } }]} />
   if (!d) return <div className="loading">Loading…</div>
 
   const r = d.readability
 
   async function act(fn: () => Promise<any>, label: string) {
-    setBusy(label); setErr('')
-    try { await fn(); await load(); onChanged() } catch (e: any) { setErr(e.message) } finally { setBusy('') }
+    setBusy(label)
+    try { await fn(); await load(); onChanged() } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy('') }
   }
 
   return (
@@ -316,7 +315,7 @@ function EventRetention() {
   const [forever, setForever] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
-  const [swept, setSwept] = useState<string>('')
+  const notify = useNotify()
 
   async function load() {
     try {
@@ -326,8 +325,9 @@ function EventRetention() {
     } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() }, [])
+  usePageNotice('event-retention', err && r ? { kind: 'error', title: "Couldn't refresh event data retention.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
-  if (err && !r) return <div className="card p-4"><div className="err">{err}</div></div>
+  if (err && !r) return <div className="card p-4"><Notice kind="error" variant="compact" title="Couldn't load event data retention." message={err} actions={[{ label: 'Retry', onClick: () => { load() } }]} /></div>
   if (!r) return <div className="card p-4"><div className="loading">Loading…</div></div>
 
   return (
@@ -369,23 +369,21 @@ function EventRetention() {
           </>
         )}
         <button className="btn primary" disabled={!!busy} onClick={async () => {
-          setBusy('save'); setErr('')
+          setBusy('save')
           try { setR(await api.setAnalyticsRetention(forever ? null : Number(days))) }
-          catch (e: any) { setErr(e.message) } finally { setBusy('') }
+          catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy('') }
         }}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
         <div className="flex-1" />
         <button className="btn ghost" disabled={!!busy} onClick={async () => {
-          setBusy('sweep'); setErr('')
+          setBusy('sweep')
           try {
             const s = await api.sweepAnalyticsRetention()
-            setSwept(`Sealed ${s.seal.sealed} day(s), pruned ${s.prune.sessionsDeleted} session(s)` +
-              (s.prune.heldForUnsealed ? `, held ${s.prune.heldForUnsealed} unsealed` : '') + '.')
+            notify({ kind: 'ok', message: `Sealed ${s.seal.sealed} day(s), pruned ${s.prune.sessionsDeleted} session(s)` +
+              (s.prune.heldForUnsealed ? `, held ${s.prune.heldForUnsealed} unsealed` : '') + '.' })
             await load()
-          } catch (e: any) { setErr(e.message) } finally { setBusy('') }
+          } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy('') }
         }}>Seal and prune now</button>
       </div>
-      {swept && <div style={{ color: 'var(--ok,#4ade80)', fontSize: 'var(--fs-sm)', marginTop: 8 }}>{swept}</div>}
-      {err && <div className="err" style={{ marginTop: 8 }}>{err}</div>}
     </div>
   )
 }
@@ -399,6 +397,7 @@ export default function StoragePage() {
   const [open, setOpen] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [err, setErr] = useState('')
+  const notify = useNotify()
 
   async function load() {
     try {
@@ -424,7 +423,9 @@ export default function StoragePage() {
     !filter || o.logical_key.toLowerCase().includes(filter.toLowerCase())
     || (o.source_name ?? '').toLowerCase().includes(filter.toLowerCase()))
 
-  if (err && !caps) return <div className="err">{err}</div>
+  usePageNotice('load', err && caps ? { kind: 'error', title: "Couldn't load storage.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
+
+  if (err && !caps) return <PageError message={err} onRetry={load} />
   if (!caps) return <div className="loading">Loading storage…</div>
 
   return (
@@ -437,7 +438,6 @@ export default function StoragePage() {
         <div className="spacer" />
         <button className="btn ghost" onClick={load}>Refresh</button>
       </div>
-      {err && <div className="err">{err}</div>}
 
       {/* WHAT THIS DEPLOYMENT CAN DO. Stated first, because everything below is
           shaped by it and an operator looking for an archive that is not there
@@ -476,7 +476,7 @@ export default function StoragePage() {
         <div className="sec-label">What the next sweep would do</div>
         <div className="flex flex-wrap items-center gap-4">
           <button className="btn ghost" onClick={async () => {
-            try { setPreview(await api.previewSweep()) } catch (e: any) { setErr(e.message) }
+            try { setPreview(await api.previewSweep()) } catch (e: any) { notify({ kind: 'error', message: e.message }) }
           }}>Run a dry run</button>
           {preview && (
             <>

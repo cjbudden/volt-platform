@@ -57,6 +57,13 @@ function fromRegistry(): string[] {
   return [...body.matchAll(/^\s*([a-z_]+)\s*:\s*\w+Layout\s*,/gm)].map((m) => m[1]);
 }
 
+/** The SDK skins a config may name (sdk/skins/index.ts), minus the console's own. */
+function fromSdkSkins(): string[] {
+  const src = readFileSync(join(PLAYER, 'sdk', 'skins', 'index.ts'), 'utf8');
+  const body = src.slice(src.indexOf('const SKINS'), src.indexOf('export const BUILT_IN_SKINS'));
+  return [...body.matchAll(/^\s*([a-z_]+)\s*:\s*\w+Skin\s*,/gm)].map((m) => m[1]).filter((n) => n !== 'admin');
+}
+
 /** The names the shared type admits. */
 function fromTypes(): string[] {
   const src = readFileSync(join(PLAYER, 'types.ts'), 'utf8');
@@ -68,11 +75,14 @@ const sorted = (a: string[]) => [...a].sort().join(',');
 
 (async () => {
   const db = fromMigrations();
-  const reg = fromRegistry();
+  const legacy = fromRegistry();
+  const sdk = fromSdkSkins();
+  const reg = [...legacy, ...sdk];
   const ty = fromTypes();
 
   console.log(`\n  migration CHECK : ${db.join(', ') || '(none found)'}`);
-  console.log(`  registry        : ${reg.join(', ') || '(none found)'}`);
+  console.log(`  registry        : ${legacy.join(', ') || '(none found)'}`);
+  console.log(`  SDK skins       : ${sdk.join(', ') || '(none found)'}`);
   console.log(`  LayoutName type : ${ty.join(', ') || '(none found)'}\n`);
 
   db.length ? ok(`the migration declares ${db.length} layout(s)`)
@@ -95,19 +105,29 @@ const sorted = (a: string[]) => [...a].sort().join(',');
     : bad('and every layout the bundle builds can actually be selected',
           `the CHECK constraint rejects: ${unreachable.join(', ')}`);
 
-  sorted(ty) === sorted(reg)
+  sdk.length >= 4 ? ok(`the SDK builds ${sdk.length} saveable skin(s)`) : bad('the SDK builds its skins', `found ${sdk.join(', ')}`);
+
+  sorted(ty) === sorted(legacy)
     ? ok('the LayoutName type agrees with the registry')
-    : bad('the LayoutName type agrees with the registry', `${sorted(ty)} vs ${sorted(reg)}`);
+    : bad('the LayoutName type agrees with the registry', `${sorted(ty)} vs ${sorted(legacy)}`);
 
   // Each named layout must have a file behind it. A registry entry importing a
   // module that does not exist fails the build, but a name in the type or the
   // migration with no implementation fails nothing at all.
   const files = readdirSync(join(PLAYER, 'layouts'));
-  for (const n of db) {
+  for (const n of db.filter((x) => !sdk.includes(x))) {
     files.includes(`${n}.ts`)
       ? ok(`${n} has an implementation`)
       : bad(`${n} has an implementation`, `no layouts/${n}.ts`);
   }
+
+  // The console offers what can be saved: the admin router's schema must accept every name.
+  const playerTs = readFileSync(join(ROOT, 'src', 'modules', 'player.ts'), 'utf8');
+  const schema = playerTs.match(/layout:\s*z\.enum\(\[([^\]]*)\]\)/);
+  const accepted = schema ? [...schema[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]) : [];
+  sorted(accepted) === sorted(db)
+    ? ok('the console save schema accepts exactly the stored names')
+    : bad('the console save schema accepts exactly the stored names', `${sorted(accepted)} vs ${sorted(db)}`);
 
   // And the fallback stays, because it is right: an unknown name from a newer
   // console must render something rather than throw on a customer's page.

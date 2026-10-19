@@ -21,6 +21,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, type ShareLinkRow } from './api'
 import { pressable } from './a11y'
+import { FormStatus } from './notices'
 
 /** What is being shared. `kind` maps onto the API's resource kinds; radio
  *  stations ARE channels, so they share as a channel with radio wording. */
@@ -225,8 +226,8 @@ export function ShareDrawer({ target, onClose }: { target: ShareTarget; onClose:
               Internal only. It is how you will recognise this link in the list below.
             </div>
 
-            {err && <div className="err" style={{ margin: '12px 0 10px' }}>{err}</div>}
-            <div className="flex gap-2 justify-end" style={{ marginTop: 16 }}>
+            <div className="modal-f">
+              <FormStatus error={err} />
               <button className="btn ghost" onClick={onClose}>Cancel</button>
               <button className="btn primary" disabled={busy} onClick={create}>
                 {busy ? (delivery === 'email' ? 'Sending…' : 'Creating…') : delivery === 'email' ? 'Create and send email' : 'Create link'}

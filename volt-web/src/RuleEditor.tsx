@@ -209,7 +209,7 @@ function FieldControl({ k, value, points, onChange, scopeKind }: { k: RuleKey; v
     case 'availableFrom':
       return (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select {...inp} value={value?.mode ?? 'publish'} onChange={e => onChange(e.target.value === 'at' ? { mode: 'at', at: value?.at ?? new Date().toISOString() } : { mode: 'publish' })}>
+          <select className="inp sel-sm" value={value?.mode ?? 'publish'} onChange={e => onChange(e.target.value === 'at' ? { mode: 'at', at: value?.at ?? new Date().toISOString() } : { mode: 'publish' })}>
             <option value="publish">When published</option><option value="at">At a set time</option>
           </select>
           {value?.mode === 'at' && <input {...inp} type="datetime-local" value={(value.at ?? '').slice(0, 16)} onChange={e => onChange({ mode: 'at', at: new Date(e.target.value).toISOString() })} />}
@@ -217,7 +217,7 @@ function FieldControl({ k, value, points, onChange, scopeKind }: { k: RuleKey; v
     case 'expire':
       return (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select {...inp} value={value?.mode ?? 'never'} onChange={e => onChange(e.target.value === 'days' ? { mode: 'days', days: value?.days ?? 30 } : e.target.value === 'at' ? { mode: 'at', at: value?.at ?? new Date().toISOString() } : { mode: 'never' })}>
+          <select className="inp sel-sm" value={value?.mode ?? 'never'} onChange={e => onChange(e.target.value === 'days' ? { mode: 'days', days: value?.days ?? 30 } : e.target.value === 'at' ? { mode: 'at', at: value?.at ?? new Date().toISOString() } : { mode: 'never' })}>
             <option value="never">Never</option><option value="days">After a number of days</option><option value="at">On a date</option>
           </select>
           {value?.mode === 'days' && <input {...inp} type="number" min={1} style={{ ...inp.style, width: 90 }} value={value.days} onChange={e => onChange({ mode: 'days', days: Math.max(1, Number(e.target.value) || 1) })} />}
@@ -226,7 +226,7 @@ function FieldControl({ k, value, points, onChange, scopeKind }: { k: RuleKey; v
     case 'geo':
       return (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select {...inp} value={value?.mode ?? 'worldwide'} onChange={e => onChange({ mode: e.target.value, countries: value?.countries ?? [] })}>
+          <select className="inp sel-sm" value={value?.mode ?? 'worldwide'} onChange={e => onChange({ mode: e.target.value, countries: value?.countries ?? [] })}>
             <option value="worldwide">Worldwide</option><option value="allow">Only in these countries</option><option value="block">Blocked in these countries</option>
           </select>
           {value?.mode !== 'worldwide' && <input {...inp} placeholder="AU, NZ, GB" value={(value?.countries ?? []).join(', ')}
@@ -234,7 +234,7 @@ function FieldControl({ k, value, points, onChange, scopeKind }: { k: RuleKey; v
         </div>)
     case 'access':
       return (
-        <select {...inp} value={value ?? 'free'} onChange={e => onChange(e.target.value)}>
+        <select className="inp sel-sm" value={value ?? 'free'} onChange={e => onChange(e.target.value)}>
           <option value="free">Free</option><option value="entitled">Entitlement required</option><option value="paid">Paid (paywall)</option>
         </select>)
     case 'paywall':

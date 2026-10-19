@@ -20,7 +20,11 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    /* The player SDK, imported as source (one player for the console, the
+       share page and every embed). See volt-player/src/sdk. */
+    "paths": { "@volt/player": ["../volt-player/src/sdk/index.ts"], "@volt/player/*": ["../volt-player/src/sdk/*"] }
   },
   "include": ["src"]
 }

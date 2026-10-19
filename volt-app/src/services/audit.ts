@@ -13,6 +13,7 @@
  * constants, never user input); values are parameterised.
  */
 import { query, tx } from '../db';
+import { markDeleteLogged } from './deleteAudit';
 import type { PoolClient } from 'pg';
 import type { Request } from 'express';
 
@@ -79,6 +80,9 @@ export async function writeAudit(c: PoolClient | null, o: {
                VALUES ($1, (SELECT id FROM users WHERE id = $2), $3,$4,$5,$6::jsonb)`;
   const params = [o.accountId, o.userId, o.action, o.entityType, o.entityId, JSON.stringify(detail)];
   if (c) await c.query(sql, params); else await query(sql, params);
+  // The route recorded its own delete, with its snapshot: the request-level
+  // net in deleteAudit.ts must not add a second, thinner row.
+  if (o.action === 'delete') markDeleteLogged();
 }
 
 /**
