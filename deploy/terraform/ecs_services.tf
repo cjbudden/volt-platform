@@ -105,7 +105,19 @@ resource "aws_ecs_task_definition" "encoder" {
     environment = [
       { name = "AWS_DEFAULT_REGION", value = var.region },
       { name = "S3_BUCKET", value = aws_s3_bucket.origin.id },
+      # volt-encoder/bin/health_server.py: /healthz /readyz /metrics /status
+      { name = "HEALTH_PORT", value = "9090" },
     ]
+    portMappings = [{ containerPort = 9090, protocol = "tcp" }]
+    # LIVENESS only: a dead packager or a stalled supervisor. A lost source is
+    # /readyz's business, and restarting the container would not fix it.
+    healthCheck = {
+      command     = ["CMD-SHELL", "curl -fsS http://127.0.0.1:9090/healthz || exit 1"]
+      interval    = 15
+      timeout     = 5
+      retries     = 3
+      startPeriod = 60
+    }
     logConfiguration = {
       logDriver = "awslogs"
       options = {

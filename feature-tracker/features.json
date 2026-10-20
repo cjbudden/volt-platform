@@ -804,6 +804,24 @@
         ]
       },
       "feedback": []
+    },
+    {
+      "id": "fairplay-drm",
+      "name": "DRM: FairPlay in HLS, with Widevine and PlayReady, keys from SPEKE",
+      "summary": "WHY: Apple devices need FairPlay to play protected streams. WHAT: a DRM channel asks the key service (SPEKE v2, Axinom) for keys for Widevine, PlayReady and FairPlay; HLS playlists carry the FairPlay key tag with the key service's skd:// URI and every segment is encrypted from the first second. Also an encoder health endpoint for the ECS health check and Prometheus.",
+      "status": "ready_to_test",
+      "app_surface": "na",
+      "test": {
+        "how": "Run volt-encoder/dev/test_fairplay_drm.py with PACKAGER_BIN set (it uses a local stand-in key service). With an Axinom tenant: set the DRM profile on a channel, start it, and check the media playlist has #EXT-X-KEY:METHOD=SAMPLE-AES with an skd:// URI; play it in Safari once the FairPlay certificate is configured. Health: start an encoder with HEALTH_PORT=9090 and open /healthz, /readyz and /metrics.",
+        "artifact": "",
+        "checks": [
+          "Playlists carry the FairPlay key tag",
+          "First segment is encrypted",
+          "Key service credential is read from Secrets Manager",
+          "/healthz fails when the packager dies, /readyz when no picture"
+        ]
+      },
+      "feedback": []
     }
   ],
   "note": "Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set."

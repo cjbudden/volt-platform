@@ -55,6 +55,43 @@ AUDIO_IDX_BASE = 100
 PACKAGER_BIN = os.environ.get("PACKAGER_BIN", "packager")
 
 _children = []   # (name, Popen, critical)
+# HEALTH ENDPOINT state (health_server.py): the supervisor loop's last turn,
+# the latest metrics sample and when this encoder started. HEALTH_PORT turns
+# the endpoint on (off by default, so a local run opens no port).
+_health = {"loop_beat": None, "metrics": None, "started_at": time.time()}
+
+
+def _newest_segment_age(out_dir):
+    """Seconds since the newest .m4s/.ts under out_dir (one level of rendition dirs)."""
+    newest = None
+    try:
+        with os.scandir(out_dir) as top:
+            for d in top:
+                if not d.is_dir():
+                    continue
+                with os.scandir(d.path) as inner:
+                    for f in inner:
+                        if f.name.endswith((".m4s", ".ts", ".mp4")) and not f.name.startswith("init"):
+                            m = f.stat().st_mtime
+                            newest = m if newest is None or m > newest else newest
+    except OSError:
+        return None
+    return None if newest is None else max(0.0, time.time() - newest)
+
+
+def health_snapshot(cfg):
+    """What /healthz, /readyz, /metrics and /status read. Never raises on a missing piece."""
+    status = dict(_events.status) if _events is not None else {}
+    return {
+        "stream_id": cfg.get("stream_id") or cfg.get("channel_id"),
+        "loop_beat": _health["loop_beat"],
+        "started_at": _health["started_at"],
+        "segment_seconds": cfg.get("segment_seconds") or 4,
+        "segment_age_s": _newest_segment_age(OUT_DIR),
+        "children": [(n, p.poll() is None, c) for n, p, c in list(_children)],
+        "status": status,
+        "metrics": _health["metrics"] or status.get("metrics"),
+    }
 BASE_OUT_DIR = None   # local mode: the channel origin root (runs live in runs/<RUN_ID>)
 RUN_ID = None         # this run's unique, date-ordered id (local mode)
 _selectors = []  # SourceSelector instances (own their own poller threads)
@@ -255,43 +292,99 @@ def validate_config(cfg):
 # CPIX POST and returns {key_id, key, iv, pssh...} which we translate into
 # Shaka's --keys / --pssh flags.
 # ---------------------------------------------------------------------------
+def resolve_drm_auth(drm):
+    """The SPEKE credential for this job, never written into the job itself.
+
+    The control plane sends `auth_ref` (a Secrets Manager ARN, read with the
+    task role) and `tenant_id`; Axinom's Basic credential is
+    "<tenant_id>:<management key>". Until 20 Oct 2026 the encoder read only
+    `drm.auth`, which the control plane never sends, so every SPEKE request
+    in production went out unauthenticated. `env:NAME` reads a variable
+    (local runs); a literal `auth` still wins for tests and old jobs.
+    """
+    if drm.get("auth"):
+        return drm["auth"]
+    ref = drm.get("auth_ref") or ""
+    secret = ""
+    if ref.startswith("env:"):
+        secret = os.environ.get(ref[4:], "")
+    elif ref.startswith("arn:aws:secretsmanager:"):
+        # "<arn>#<field>" picks one field of a JSON secret (the shared
+        # integrations secret holds several credentials).
+        arn, _, field = ref.partition("#")
+        try:
+            secret = subprocess.check_output(
+                ["aws", "secretsmanager", "get-secret-value", "--secret-id", arn,
+                 "--query", "SecretString", "--output", "text"], timeout=20).decode().strip()
+            if field:
+                secret = str(json.loads(secret).get(field) or "")
+        except Exception as exc:  # noqa: BLE001
+            die(f"could not read the DRM key service credential {arn}: {exc}")
+    elif ref:
+        die(f"unsupported DRM auth_ref {ref!r}: use a Secrets Manager ARN or env:NAME")
+    if not secret:
+        return ""
+    tenant = drm.get("tenant_id")
+    return f"{tenant}:{secret}" if tenant and ":" not in secret else secret
+
+
 def fetch_drm_keys(drm):
     if not drm or drm.get("mode", "none") == "none":
         return None
     log(f"fetching DRM keys from SPEKE server for content_id={drm.get('content_id')}")
     args = [
-        sys.executable, "/app/bin/speke_client.py",
+        sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "speke_client.py"),
         "--url", drm["speke_url"],
         "--content-id", drm["content_id"],
-        "--auth", drm.get("auth", ""),
-        "--systems", ",".join(drm.get("systems", ["widevine", "playready", "fairplay"])),
+        "--systems", ",".join(drm.get("systems") or ["widevine", "playready", "fairplay"]),
     ]
+    # The credential travels in the environment, not argv (which every
+    # process on the host can read).
+    env = dict(os.environ, SPEKE_AUTH=resolve_drm_auth(drm))
     try:
-        out = subprocess.check_output(args, timeout=30)
+        out = subprocess.check_output(args, timeout=30, env=env)
     except subprocess.CalledProcessError as exc:
         die(f"SPEKE key request failed: {exc}")
     except subprocess.TimeoutExpired:
         die("SPEKE key request timed out")
     keys = json.loads(out)
-    log(f"received {len(keys.get('keys', []))} content key(s) from SPEKE")
+    log(f"received {len(keys.get('keys', []))} content key(s) from SPEKE"
+        + (f", FairPlay key URI {keys['hls_key_uri']}" if keys.get("hls_key_uri") else ""))
     return keys
 
 
 def shaka_drm_flags(keys):
-    """Translate SPEKE key material into Shaka raw-key cbcs flags."""
+    """Translate SPEKE key material into Shaka raw-key cbcs flags.
+
+    FairPlay end to end (20 Oct 2026): --protection_systems names the systems
+    (with FairPlay in it Shaka writes the SAMPLE-AES EXT-X-KEY with
+    KEYFORMAT="com.apple.streamingkeydelivery"), --hls_key_uri is the skd://
+    URI from the key server, --iv the server's explicit IV, and every PSSH box
+    it returned goes to --pssh. Checked against a real Shaka in
+    dev/test_fairplay_drm.py: playlists, cbcs init segments, and a decrypt
+    back to frames.
+    """
     if not keys:
         return []
-    flags = ["--enable_raw_key_encryption", "--protection_scheme", "cbcs"]
+    # --clear_lead: Shaka leaves the first 5 seconds in the clear by default,
+    # and writes no key tag until the first encrypted segment, so the start of
+    # every run (and of every recording cut from it) was unprotected. 0 unless
+    # DRM_CLEAR_LEAD says otherwise.
+    flags = ["--enable_raw_key_encryption", "--protection_scheme", "cbcs",
+             "--clear_lead", os.environ.get("DRM_CLEAR_LEAD", "0")]
     for k in keys["keys"]:
         parts = [f"label={k.get('label', '')}",
                  f"key_id={k['key_id']}",
                  f"key={k['key']}"]
         flags += ["--keys", ":".join(parts)]
-    for system, pssh in keys.get("pssh", {}).items():
-        # Shaka accepts concatenated raw pssh boxes for the systems in play.
-        pass
-    if keys.get("pssh_hex"):
-        flags += ["--pssh", keys["pssh_hex"]]
+    ivs = {k["iv"] for k in keys["keys"] if k.get("iv")}
+    if len(ivs) == 1:
+        flags += ["--iv", ivs.pop()]
+    pssh_hex = keys.get("pssh_hex") or "".join((keys.get("pssh") or {}).values())
+    if pssh_hex:
+        flags += ["--pssh", pssh_hex]
+    if keys.get("protection_systems"):
+        flags += ["--protection_systems", keys["protection_systems"]]
     if keys.get("hls_key_uri"):
         flags += ["--hls_key_uri", keys["hls_key_uri"]]
     return flags
@@ -2318,8 +2411,17 @@ def main():
     metrics = stream_metrics.StreamMetrics(
         pids=lambda: [os.getpid()] + [p.pid for _n, p, _c in _children if p.poll() is None],
         inputs=lambda: list(_ingest_inputs))
+    if os.environ.get("HEALTH_PORT"):
+        try:
+            import health_server
+            health_server.start(int(os.environ["HEALTH_PORT"]), lambda: health_snapshot(cfg),
+                                bind=os.environ.get("HEALTH_BIND", "0.0.0.0"))
+            log(f"health endpoint on :{os.environ['HEALTH_PORT']} (/healthz /readyz /metrics /status)")
+        except Exception as e:  # noqa: BLE001  monitoring never stops the stream
+            log(f"health endpoint not started ({e})")
     try:
         while True:
+            _health["loop_beat"] = time.time()
             for name, proc, critical in _children:
                 if critical and proc.poll() is not None:
                     log(f"critical child {name} exited rc={proc.returncode}; "
@@ -2328,7 +2430,7 @@ def main():
             if _events is not None and time.time() - last_beat >= 10:
                 last_beat = time.time()
                 try:
-                    _events.status["metrics"] = metrics.sample()
+                    _events.status["metrics"] = _health["metrics"] = metrics.sample()
                 except Exception:  # noqa: BLE001  the meter never stops the stream
                     pass
                 try:
