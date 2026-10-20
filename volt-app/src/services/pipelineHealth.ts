@@ -60,6 +60,68 @@ export interface PipelineHealth {
   overall: OverallStatus;
   /** What the platform thinks went wrong, when something did. See failureDiagnosis.ts. */
   diagnosis?: FailureDiagnosis | null;
+  /**
+   * THE CAPTIONS LANE (20 Oct 2026): live captions / translation for this run,
+   * from the encoder's caption.status and caption.error events. A side lane,
+   * not a gate: failed captions never make the channel red, because the
+   * picture and sound are fine. Null when the run has no captions.
+   */
+  captions?: CaptionsLane | null;
+}
+
+export interface CaptionsLane {
+  /** starting: engine loading. healthy: cues being written. degraded: errors
+   *  after cues were flowing (windows being skipped). failed: never produced
+   *  or cannot start. stopped: the run is not live. */
+  status: 'starting' | 'healthy' | 'degraded' | 'failed' | 'stopped';
+  detail: string;
+  engine: string | null;
+  languages: string[];
+  /** Where it failed: import, init or transcribe. */
+  stage: string | null;
+  /** How to fix it, as the encoder said. */
+  hint: string | null;
+  errors: number;
+  since: string | null;
+}
+
+/**
+ * The captions lane for one run. `run` is newest-first and already cut to the
+ * current run (and to any Clear QC), as computePipelineHealth uses it.
+ */
+export function captionsLane(run: Ev[], live: boolean): CaptionsLane | null {
+  const cap = run.filter((e) => e.type === 'caption.status' || e.type === 'caption.error');
+  if (!cap.length) return null;
+  const startEv = [...cap].reverse().find((e) => e.type === 'caption.status' && d(e.detail).state === 'starting');
+  const engine = startEv ? String(d(startEv.detail).engine ?? '') || null : null;
+  const langsEv = cap.find((e) => Array.isArray(d(e.detail).langs));
+  const languages: string[] = langsEv ? d(langsEv.detail).langs.map(String) : [];
+  const produced = cap.some((e) => e.type === 'caption.status' && d(e.detail).state === 'producing');
+  const latest = cap[0];
+  const ld = d(latest.detail);
+  const since = latest.ts ? new Date(latest.ts).toISOString() : null;
+  const base = { engine, languages, since };
+  const langList = languages.length ? ` (${languages.join(', ')})` : '';
+  if (!live) {
+    return { ...base, status: 'stopped', detail: produced ? `captions ran${langList}` : 'captions did not produce before the run ended',
+      stage: null, hint: null, errors: 0 };
+  }
+  if (latest.type === 'caption.error') {
+    const stage = ld.stage ? String(ld.stage) : null;
+    const errors = Number(ld.count ?? 1) || 1;
+    const reason = String(ld.reason ?? 'unknown error');
+    // A transcribe error after cues were flowing skips that window; the lane
+    // is degraded until the encoder reports it producing again.
+    const degraded = produced && stage === 'transcribe';
+    return { ...base, status: degraded ? 'degraded' : 'failed',
+      detail: degraded ? `windows skipped: ${reason}` : `${stage ? `${stage}: ` : ''}${reason}`,
+      stage, hint: ld.hint ? String(ld.hint) : null, errors };
+  }
+  if (ld.state === 'producing') {
+    return { ...base, status: 'healthy', detail: `writing captions${langList}${ld.recovered ? ', recovered' : ''}`,
+      stage: null, hint: null, errors: Number(ld.errors ?? 0) || 0 };
+  }
+  return { ...base, status: 'starting', detail: `${engine ?? 'engine'} loading${langList}`, stage: null, hint: null, errors: 0 };
 }
 
 interface Ev { seq?: number; type: string; detail: any; ts?: any }
@@ -504,5 +566,6 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
     settling: settling || false,
     settlingReason,
     diagnosis,
+    captions: captionsLane(run, effLive),
   };
 }

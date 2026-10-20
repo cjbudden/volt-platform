@@ -182,17 +182,149 @@ class OfflineAdapter:
 
 
 class GladiaAdapter:
-    """Real streaming STT + translation. Requires GLADIA_API_KEY + network."""
+    """Gladia live (v2) streaming STT + translation, behind the same interface as
+    WhisperAdapter: the encoder points `audio_path` at each caption window's WAV
+    (16 kHz mono s16, from the delivered audio) and sets `split_at` to where the
+    window starts inside it; `transcribe()` returns Cues timed against that WAV.
 
-    def __init__(self, api_key: str):
+    One live SESSION serves every window of a run, so Gladia keeps its own
+    context across window boundaries (it is a streaming recogniser, unlike
+    Whisper, so only each window's NEW audio is sent, never the preroll):
+
+      POST {GLADIA_API_URL}/v2/live  (X-Gladia-Key)  -> {id, url}
+      websocket url: binary PCM in, JSON out:
+        {"type": "transcript",  "data": {"is_final": true, "utterance": {start, end, text, language, words}}}
+        {"type": "translation", "data": {"target_language", "translated_utterance": {start, end, text}}}
+      {"type": "stop_recording"} to end.
+
+    Utterance times are seconds since the session's first audio byte, so each
+    window maps them onto its WAV with the stream time at which its audio began.
+    Each window waits up to GLADIA_WINDOW_WAIT_SEC for the final that reaches
+    the end of what it sent. A final that still arrives late is returned with
+    the next window, timed correctly, so the encoder keeps it only if it falls
+    in a window it has not published yet (a live segment cannot be re-cut). A
+    dropped socket ends the session; the next window opens a new one.
+
+    Needs GLADIA_API_KEY. Tests point GLADIA_API_URL at a local stand-in.
+    """
+
+    CHUNK_BYTES = 3200  # 100 ms of 16 kHz mono s16
+
+    def __init__(self, api_key: str, source_lang: str = "auto", targets=None,
+                 base_url: str | None = None, wait_s: float | None = None):
         self.api_key = api_key
+        self.source_lang = source_lang
+        self.targets = list(targets or [])
+        self.base_url = (base_url or os.environ.get("GLADIA_API_URL") or "https://api.gladia.io").rstrip("/")
+        self.wait_s = float(wait_s if wait_s is not None else os.environ.get("GLADIA_WINDOW_WAIT_SEC", "4"))
+        self.audio_path = ""
+        self.split_at = None
+        self.ws = None
+        self.session_id = None
+        self.sent_s = 0.0          # stream seconds sent in this session
+        self.sample_rate = 16000
+        self._held = []            # (stream_start, stream_end, text, lang) not yet returned
+        self.sessions_opened = 0
 
-    def transcribe(self, targets: list[str]) -> list[Cue]:  # pragma: no cover (needs network)
-        raise NotImplementedError(
-            "Wire Gladia streaming websocket here: push program audio frames, receive "
-            "partial+final transcripts and translations, map to Cue(start,end,text,lang). "
-            "Gated on GLADIA_API_KEY; OfflineAdapter covers the offline/test path."
-        )
+    # ---- session -----------------------------------------------------------------
+    def _init_body(self, targets):
+        body = {
+            "encoding": "wav/pcm", "sample_rate": self.sample_rate, "bit_depth": 16, "channels": 1,
+            "messages_config": {"receive_partial_transcripts": False, "receive_final_transcripts": True},
+        }
+        if self.source_lang and self.source_lang != "auto":
+            body["language_config"] = {"languages": [self.source_lang], "code_switching": False}
+        others = [t for t in targets if t != self.source_lang]
+        if others:
+            body["realtime_processing"] = {"translation": True, "translation_config": {"target_languages": others}}
+        return body
+
+    def _open(self, targets):
+        import urllib.request
+        from ws_client import WebSocket
+        req = urllib.request.Request(f"{self.base_url}/v2/live", data=json.dumps(self._init_body(targets)).encode(),
+                                     method="POST", headers={"Content-Type": "application/json", "X-Gladia-Key": self.api_key})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            info = json.loads(r.read())
+        self.ws = WebSocket(info["url"])
+        self.session_id = info.get("id")
+        self.sent_s = 0.0
+        self._held = []
+        self.sessions_opened += 1
+
+    def close(self):
+        if self.ws is not None:
+            try:
+                self.ws.send_text(json.dumps({"type": "stop_recording"}))
+            except OSError:
+                pass
+            self.ws.close()
+        self.ws = None
+
+    # ---- one window ----------------------------------------------------------------
+    def _read_window_pcm(self):
+        import wave
+        with wave.open(self.audio_path, "rb") as w:
+            if w.getnchannels() != 1 or w.getsampwidth() != 2:
+                raise ValueError("captions[gladia]: window audio must be mono 16-bit PCM")
+            self.sample_rate = w.getframerate()
+            start = int(round((self.split_at or 0.0) * self.sample_rate))
+            w.setpos(min(start, w.getnframes()))
+            return w.readframes(w.getnframes() - min(start, w.getnframes()))
+
+    def _take(self, msg, base_lang):
+        """A final transcript or translation as (stream_start, stream_end, text, lang)."""
+        t, data = msg.get("type"), msg.get("data") or {}
+        if t == "transcript" and data.get("is_final", True):
+            u = data.get("utterance") or {}
+            if (u.get("text") or "").strip():
+                return (float(u["start"]), float(u["end"]), u["text"].strip(), u.get("language") or base_lang)
+        if t == "translation":
+            u = data.get("translated_utterance") or {}
+            if (u.get("text") or "").strip():
+                return (float(u["start"]), float(u["end"]), u["text"].strip(), data.get("target_language") or u.get("language"))
+        if t == "error":
+            raise RuntimeError(f"gladia: {data.get('message') or msg}")
+        return None
+
+    def transcribe(self, targets: list[str]) -> list[Cue]:
+        import socket
+        import time as _t
+        from ws_client import WebSocketClosed
+        targets = list(targets or self.targets)
+        if self.ws is None:
+            self._open(targets)
+        pcm = self._read_window_pcm()
+        win_stream_start = self.sent_s
+        base_lang = self.source_lang if self.source_lang and self.source_lang != "auto" else "en"
+        try:
+            for i in range(0, len(pcm), self.CHUNK_BYTES):
+                self.ws.send_binary(pcm[i:i + self.CHUNK_BYTES])
+            self.sent_s += len(pcm) / 2 / self.sample_rate
+            # Collect finals until one reaches the end of what was sent (the window
+            # is complete) or the wait runs out (what is still pending is held).
+            deadline = _t.time() + self.wait_s
+            while _t.time() < deadline:
+                self.ws.settimeout(max(0.05, deadline - _t.time()))
+                try:
+                    _op, raw = self.ws.recv()
+                except socket.timeout:
+                    break
+                got = self._take(json.loads(raw), base_lang)
+                if got:
+                    self._held.append(got)
+                    if got[3] == base_lang and got[1] >= self.sent_s - 0.3:
+                        # the source has caught up; give translations a moment, then stop
+                        deadline = min(deadline, _t.time() + 0.3)
+        except (WebSocketClosed, OSError) as e:
+            self.close()
+            raise RuntimeError(f"gladia session ended: {e}") from e
+        # stream time -> this WAV: the window's audio began at win_stream_start,
+        # which is split_at seconds into the WAV.
+        shift = (self.split_at or 0.0) - win_stream_start
+        out = [Cue(s + shift, e + shift, wrap_cue_text(text), lang) for s, e, text, lang in self._held]
+        self._held = []
+        return out
 
 
 # ---- cue shaping -----------------------------------------------------------
@@ -450,7 +582,10 @@ def make_adapter(cfg: dict):
     if engine == "gladia":
         key = os.environ.get("GLADIA_API_KEY")
         if key:
-            return GladiaAdapter(key)
+            a = GladiaAdapter(key, cfg.get("source_lang", "auto"), cfg.get("targets", []))
+            if cfg.get("audio_path"):
+                a.audio_path = cfg["audio_path"]
+            return a
         raise SystemExit("captions[gladia]: no GLADIA_API_KEY and no offline_fixture — nothing to do")
     raise SystemExit(f"captions: unknown engine '{engine}' (want whisper|gladia|offline)")
 

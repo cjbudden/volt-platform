@@ -316,6 +316,7 @@ export class Orchestrator {
       sourceLang: ctx.profile.caption_source_lang,
       targets: ctx.profile.caption_targets,
       modelSize: (ctx.profile as any).caption_model_size,
+      cpuInEncoder: config.orchestrator.captionsCpuInEncoder,
     });
     let capRes: { taskArn: string; lifecycle: 'spot' | 'on_demand' } | null = null;
     let capAssignment: Assignment | null = null;

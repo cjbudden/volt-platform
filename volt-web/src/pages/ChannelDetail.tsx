@@ -451,6 +451,22 @@ const GATE_META: Record<string, { icon: string; hint: string }> = {
   output:  { icon: '⬆', hint: 'Are packaged segments advancing?' },
   public:  { icon: '📡', hint: 'Is the output being served to viewers?' },
 }
+/** Live captions for this run: a side lane in QC. Failed captions never turn the channel red. */
+function CaptionsLaneRow({ lane }: { lane?: { status: string; detail: string; engine: string | null; languages: string[]; hint: string | null; errors: number } | null }) {
+  if (!lane) return null
+  const c = GATE_COLOR[lane.status] || GATE_COLOR.idle
+  return (
+    <div style={{ margin: '-6px 0 18px', padding: '10px 12px', borderRadius: 10, border: `1px solid ${c}55`, background: `${c}12`, display: 'flex', gap: 14, alignItems: 'baseline', flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>Captions{lane.engine ? ` · ${lane.engine}` : ''}</span>
+      <b style={{ color: c, textTransform: 'uppercase', fontSize: 'var(--fs-body)' }}>{lane.status}</b>
+      <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', wordBreak: 'break-word', flex: '1 1 240px' }}>
+        {lane.detail}{lane.errors ? ` · ${lane.errors} error${lane.errors === 1 ? '' : 's'}` : ''}
+      </span>
+      {lane.hint && lane.status === 'failed' && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', flexBasis: '100%' }}>How to fix: {lane.hint}</span>}
+    </div>
+  )
+}
+
 function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefresh: () => void }) {
   const h = d.health
   const gates = h?.gates || []
@@ -509,6 +525,9 @@ function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefr
             </div>
           ))}
         </div>
+
+        {/* the captions lane: beside the gates, never one of them (pipelineHealth.ts captionsLane) */}
+        <CaptionsLaneRow lane={(h as any)?.captions} />
 
         {/* the real logs behind the gates */}
         <h3 style={{ margin: '10px 0 6px' }}>Real logs <span style={{ color: 'var(--faint)', fontWeight: 400, fontSize: 'var(--fs-sm)' }}>· encoder + pipeline events</span></h3>

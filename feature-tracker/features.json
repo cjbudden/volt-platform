@@ -822,6 +822,24 @@
         ]
       },
       "feedback": []
+    },
+    {
+      "id": "live-captions-gladia-cpu",
+      "name": "Live captions: Gladia live, Whisper on CPU, Captions lane in QC",
+      "summary": "WHY: captions should run with the engine the account pays for, without a GPU for small models, and an operator should see at a glance whether they are working. WHAT: the Gladia engine transcribes and translates live; Whisper tiny/base can run inside the encoder on CPU; QC shows a Captions lane (starting, healthy, degraded, failed with how to fix it).",
+      "status": "ready_to_test",
+      "app_surface": "partial",
+      "test": {
+        "how": "Run volt-encoder/dev/test_gladia_live.py and dev/test_whisper_cpu.py. With a Gladia key: set the account captions provider to Gladia, enable captions on a profile with targets, start a channel with speech, open QC: the Captions lane goes starting then healthy, and the player shows subtitle tracks per language. Remove the key: the lane shows failed with how to fix it while the channel stays on air.",
+        "artifact": "",
+        "checks": [
+          "Gladia subtitles appear per language",
+          "QC Captions lane shows healthy",
+          "A captions failure leaves the channel on air",
+          "Whisper tiny on CPU keeps up live"
+        ]
+      },
+      "feedback": []
     }
   ],
   "note": "Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set."

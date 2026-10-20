@@ -18,6 +18,14 @@
  *               this stream. The orchestrator tracks it as an `instances` row
  *               (role='captions') so it counts in projected-instances and cost.
  *
+ *   • whisper on CPU, in the encoder (20 Oct 2026) — tiny and base are small
+ *               enough to run beside the packager on CPU (faster-whisper int8,
+ *               NLLB on CPU when a non-English target needs it), so no GPU task
+ *               is launched. Needs an encoder image built with CAPTIONS_CPU=true
+ *               (and CAPTIONS_MT=true for NLLB), announced to the control plane
+ *               by CAPTIONS_CPU_IN_ENCODER=true. Off by default: an image without
+ *               the stack would fail every window.
+ *
  * Pure and unit-tested (test/captions-plan.check.ts).
  */
 
@@ -30,13 +38,20 @@ export interface CaptionsPlanInput {
   sourceLang?: string;          // 'auto' or an ISO code
   targets?: string[];           // e.g. ['en','ms','zh','ta']
   modelSize?: string;           // whisper size: tiny|base|small|medium|large-v3
+  /** The encoder image carries the CPU caption stack (CAPTIONS_CPU_IN_ENCODER). */
+  cpuInEncoder?: boolean;
 }
+
+/** Whisper sizes that keep up with live on CPU beside the packager. */
+export const CPU_WHISPER_SIZES = ['tiny', 'base'] as const;
 
 export interface CaptionsPlan {
   mode: CaptionsMode;
   enabled: boolean;
   /** true only for whisper: a dedicated task the orchestrator launches + tears down. */
   runsSeparateTask: boolean;
+  /** Transcribed inside the encoder task (gladia always, whisper tiny/base on CPU). */
+  inEncoder: boolean;
   needsGpu: boolean;
   /** any non-English target => a downstream NLLB MT model is needed on top of Whisper. */
   needsMt: boolean;
@@ -73,7 +88,7 @@ export function sizeWhisper(modelSize: string, needsMt: boolean): { vramGb: numb
 export function resolveCaptionsPlan(inp: CaptionsPlanInput): CaptionsPlan {
   const provider = inp.accountProvider ?? 'none';
   const off: CaptionsPlan = {
-    mode: 'none', enabled: false, runsSeparateTask: false, needsGpu: false,
+    mode: 'none', enabled: false, runsSeparateTask: false, inEncoder: false, needsGpu: false,
     needsMt: false, sourceLang: inp.sourceLang ?? 'auto', targets: [], modelSize: null,
     image: null, estVramGb: 0, instanceType: null,
   };
@@ -89,16 +104,24 @@ export function resolveCaptionsPlan(inp: CaptionsPlanInput): CaptionsPlan {
   if (provider === 'gladia') {
     // thin sidecar, no model, no GPU, no separate task
     return {
-      mode: 'gladia', enabled: true, runsSeparateTask: false, needsGpu: false,
+      mode: 'gladia', enabled: true, runsSeparateTask: false, inEncoder: true, needsGpu: false,
       needsMt, sourceLang, targets, modelSize: null, image: null, estVramGb: 0, instanceType: null,
     };
   }
 
-  // whisper: dedicated add-on task, own image + GPU sizing
   const modelSize = inp.modelSize ?? 'small';
+  // whisper tiny/base on CPU inside the encoder, when its image has the stack
+  if (inp.cpuInEncoder && (CPU_WHISPER_SIZES as readonly string[]).includes(modelSize)) {
+    return {
+      mode: 'whisper', enabled: true, runsSeparateTask: false, inEncoder: true, needsGpu: false,
+      needsMt, sourceLang, targets, modelSize, image: null, estVramGb: 0, instanceType: null,
+    };
+  }
+
+  // whisper: dedicated add-on task, own image + GPU sizing
   const { vramGb, instanceType } = sizeWhisper(modelSize, needsMt);
   return {
-    mode: 'whisper', enabled: true, runsSeparateTask: true, needsGpu: true,
+    mode: 'whisper', enabled: true, runsSeparateTask: true, inEncoder: false, needsGpu: true,
     needsMt, sourceLang, targets, modelSize, image: 'volt-captions',
     estVramGb: vramGb, instanceType,
   };

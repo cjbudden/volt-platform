@@ -1,4 +1,5 @@
 import { config } from '../config';
+import { resolveCaptionsPlan } from './captionsPlan';
 
 /**
  * Build the JSON job config the Volt encoder container reads (matches
@@ -273,12 +274,25 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
   // hasn't licensed — it's pinned to the account provider.
   const acctProvider = ctx.account?.captions_provider ?? 'none';
   if (profile.captions_enabled && acctProvider !== 'none') {
+    // WHERE the words are produced (captionsPlan.ts): in this encoder (gladia,
+    // or whisper tiny/base on CPU) or by the separate GPU add-on task. The
+    // encoder used to start its own whisper worker in both cases, so with the
+    // GPU add-on it ran a second transcription (and, in an image without the
+    // CPU stack, reported an import error on every run).
+    const plan = resolveCaptionsPlan({
+      accountProvider: acctProvider, captionsEnabled: true,
+      sourceLang: profile.caption_source_lang ?? 'auto', targets: profile.caption_targets ?? [],
+      modelSize: (profile as any).caption_model_size ?? undefined,
+      cpuInEncoder: config.orchestrator.captionsCpuInEncoder,
+    });
     cfg.captions = {
       enabled: true,
       engine: acctProvider, // account decides the engine; profile can't exceed it
       source_lang: profile.caption_source_lang ?? 'auto',
       targets: profile.caption_targets ?? [],
       offset_sec: profile.caption_offset_sec ?? 0,
+      in_encoder: plan.inEncoder,
+      ...(plan.mode === 'whisper' && plan.modelSize ? { model_size: plan.modelSize } : {}),
     };
   }
 

@@ -126,6 +126,9 @@ export const config = {
     encoderTaskDef: process.env.ENCODER_TASK_DEF ?? 'volt-encoder',
     thumbnailerTaskDef: process.env.THUMBNAILER_TASK_DEF ?? 'volt-thumbnailer',
     captionsTaskDef: process.env.CAPTIONS_TASK_DEF ?? 'volt-captions',   // GPU add-on task (whisper+NLLB)
+    // The encoder image was built with CAPTIONS_CPU=true, so whisper tiny/base
+    // runs inside the encoder on CPU instead of a GPU add-on (captionsPlan.ts).
+    captionsCpuInEncoder: (process.env.CAPTIONS_CPU_IN_ENCODER ?? 'false') === 'true',
     radioTaskDef: process.env.RADIO_TASK_DEF ?? 'volt-radio',           // audio-only station (ffmpeg alone, no packager)
     // HOW A STATION RUNS. 'container' launches volt-radio through the launcher,
     // exactly like a television channel. 'inprocess' is the old path where the

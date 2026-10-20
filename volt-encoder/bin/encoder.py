@@ -1994,6 +1994,13 @@ def start_captions(cfg, out_dir):
         # (no 404) and it fills in as cues arrive.
         _atomic_write(os.path.join(sub_root, l, "subs.m3u8"),
                           _live_sub_playlist([], win_sec, 0))
+    if cap.get("in_encoder") is False:
+        # The GPU add-on task (volt-captions) transcribes this stream and writes
+        # the WebVTT; this encoder only advertises the subtitle tracks (the empty
+        # playlists above). Running its own worker as well transcribed twice, and
+        # in an image without the CPU stack it failed on every run.
+        log(f"captions: {engine} runs as its own task; advertising subtitle tracks {langs} only")
+        return
     tmp = os.path.join(WORK_DIR, "cap_audio")
     os.makedirs(tmp, exist_ok=True)
     log(f"captions: engine={engine} window={win_sec}s ({per_win} delivered audio "
@@ -2032,12 +2039,23 @@ def start_captions(cfg, out_dir):
                 cap_event("caption.error", stage="init", reason=str(e),
                           hint="whisper/NLLB model failed to load; check the model download + memory")
                 return
+        elif engine == "gladia":
+            # ONE live session for the whole run (GladiaAdapter keeps it open across
+            # windows); building an adapter per window opened a session per window.
+            try:
+                reuse = capmod.make_adapter({"engine": "gladia", "source_lang": src_lang, "targets": targets})
+            except BaseException as e:  # noqa: BLE001  make_adapter exits when no key is set
+                log(f"captions: gladia not available ({e}); worker not started")
+                cap_event("caption.error", stage="init", reason=str(e),
+                          hint="set GLADIA_API_KEY for the gladia engine, or use whisper")
+                return
         adir = os.path.join(out_dir, "audio")
         wav = os.path.join(tmp, "window.wav")
         store = {l: [] for l in langs}       # published cues, for the final VOD VTT
         published = []                       # [(idx, pdt, dur)] in the live window
         cursor = None                        # next audio segment number to start a window at
         errs = 0
+        failing = False
         produced = False
         keep = max(3, int(round(float(cfg.get("dvr_seconds", 300)) / win_sec)))
         last_text = {}
@@ -2112,8 +2130,14 @@ def start_captions(cfg, out_dir):
                         cap_event("caption.error", stage="transcribe", chunk=cursor,
                                   reason=str(e), count=errs)
                     cursor += per_win
+                    failing = True
                     continue
                 proc = time.time() - t0
+                if failing:
+                    # RECOVERED: say so, or the QC lane stays on the last error for the
+                    # rest of the run although captions are flowing again.
+                    failing = False
+                    cap_event("caption.status", state="producing", langs=langs, recovered=True, errors=errs)
                 # cue times are relative to the WAV; wav_pts puts them on the media
                 # timeline exactly, and offset_cfg is the optional playout offset
                 cues = capmod.apply_offset(raw, wav_pts + offset_cfg)

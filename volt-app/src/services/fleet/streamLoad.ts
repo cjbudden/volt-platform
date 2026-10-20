@@ -76,6 +76,15 @@ export const K = {
   relayPerInput: 20,
   drmPerMbps: 10,
   gladia: 120,
+  // Whisper on CPU in the encoder: a window of N seconds must transcribe in
+  // well under N seconds. Measured 20 Oct 2026 (faster-whisper 1.0.3 int8,
+  // arm64 VM, warm model): tiny 0.19 and base 0.30 CPU-seconds per second of
+  // audio. Reserved at about four times that for slower cores and bursts.
+  // NLLB-600M on CPU is an estimate (not measured here): about one core.
+  whisperCpu: { tiny: 768, base: 1280 } as Record<'tiny' | 'base', number>,
+  memWhisperCpu: { tiny: 512, base: 768 } as Record<'tiny' | 'base', number>,
+  nllbCpu: 1024,
+  memNllbCpu: 2560,
   memBase: 384,
   memPerTranscodeRung1080: 150,
   memPerTranscodeRungMin: 48,
@@ -206,6 +215,17 @@ export function estimateEncoderLoad(job: Record<string, any>, probe?: SourceProb
   if (job.drm) lines.push(line('DRM encryption', { cpuUnits: K.drmPerMbps * (outTotalKbps / 1000), memoryMib: 16 }));
   if (job.captions?.enabled && job.captions.engine === 'gladia') {
     lines.push(line('live captions (Gladia, in the cloud)', { cpuUnits: K.gladia, memoryMib: K.memGladia, netOutBps: kbpsToBps(K.gladiaUpKbps) }));
+  }
+  if (job.captions?.enabled && job.captions.engine === 'whisper' && job.captions.in_encoder) {
+    // faster-whisper int8 on CPU (captionsPlan.ts CPU_WHISPER_SIZES), plus NLLB
+    // on CPU when a target is neither English nor the source language.
+    const size = job.captions.model_size === 'base' ? 'base' : 'tiny';
+    const src = job.captions.source_lang && job.captions.source_lang !== 'auto' ? job.captions.source_lang : 'en';
+    const mt = (job.captions.targets ?? []).some((t: string) => t !== 'en' && t !== src);
+    lines.push(line(`live captions (Whisper ${size} on CPU${mt ? ' + translation' : ''})`, {
+      cpuUnits: K.whisperCpu[size] + (mt ? K.nllbCpu : 0),
+      memoryMib: K.memWhisperCpu[size] + (mt ? K.memNllbCpu : 0),
+    }));
   }
 
   const load = total(lines, gpus);
