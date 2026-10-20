@@ -212,6 +212,12 @@ export interface PlayerState {
   upNext: UpNext | null;
   /** In-stream graphics on screen now. Empty unless graphics are on (theme.showGraphics / options.showGraphics). */
   graphics: StreamGraphic[];
+  /**
+   * An ad break the stream has signalled is playing (FAST breaks, a live
+   * channel's SCTE-35 or an operator's Go to break). While it is set the
+   * player draws no graphics of its own and offers no Up next.
+   */
+  adBreak: { id: string; endsAt: number | null } | null;
 
   /** Audio services. */
   nowPlaying: TrackInfo | null;

@@ -50,9 +50,9 @@ export default function NewStreamChooser({ onClose }: { onClose: () => void }) {
     { key: 'radio', title: 'Radio station', icon: I.radio, to: '/radio?new',
       desc: 'Audio only: Icecast, HLS or SRT in; MP3, HLS and DASH out, with a now-playing log.',
       disabledReason: role('radio', 'stations') ?? planFullReason(plan, 'station') ?? (groups ? noRoomReason(groups, 'station') : null) },
-    { key: 'fast', title: 'FAST channel', icon: I.fast, badge: 'Coming soon',
-      desc: 'A linear channel scheduled from your library, with ad breaks.',
-      disabledReason: 'Not available yet.' },
+    { key: 'fast', title: 'FAST channel', icon: I.fast, to: '/fast?new',
+      desc: 'A linear channel built from your library: a run order of films and series that loops, with the guide written for you and ad breaks.',
+      disabledReason: role('channels', 'channels') ?? planFullReason(plan, 'channel') ?? (groups ? noRoomReason(groups, 'channel') : null) },
   ]
 
   function go(k: Kind) { if (!k.to || k.disabledReason) return; onClose(); navigate(k.to) }

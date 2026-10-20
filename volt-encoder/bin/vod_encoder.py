@@ -147,6 +147,22 @@ def _rotation(v):
 # ---------------------------------------------------------------------------
 #  ENCODE
 # ---------------------------------------------------------------------------
+# MEDIA TIME STARTS AT ZERO, so audio and video segments line up.
+#
+# ffmpeg's MPEG-TS muxer starts timestamps at 1.4 s by default (muxdelay
+# 0.7 + preload 0.7). The packager cuts VIDEO at the keyframes (1.48, 3.48 ...)
+# but AUDIO on a grid from zero (2.0, 4.0 ...), so every audio segment
+# straddled two video segments. Playing a whole file nobody notices; cutting
+# the asset at a segment boundary, which is exactly what a FAST channel does at
+# every ad break and every programme join, leaves the audio up to a segment
+# early or late at the splice. With both delays at zero the two grids agree to
+# within one AAC frame (21 ms) plus the B-frame offset (80 ms), so a cut at a
+# video boundary is a cut at an audio boundary too, and the asset can go to
+# air on a VOD-to-live channel as it is, with no second encode.
+# VOD_ZERO_START=0 restores the old offset.
+ZERO_START = [] if os.environ.get("VOD_ZERO_START", "1") == "0" else ["-muxdelay", "0", "-muxpreload", "0"]
+
+
 def rendition_dir(out_dir, label):
     d = os.path.join(out_dir, label)
     os.makedirs(d, exist_ok=True)
@@ -182,7 +198,7 @@ def build_encode_cmd(cfg, work_dir):
         # path puts on the UDP bus, so the packager sees exactly what it sees
         # live: parameter sets in band ahead of every IDR.
         path = os.path.join(work_dir, f"{label}.ts")
-        cmd += ["-f", "mpegts", path]
+        cmd += ZERO_START + ["-f", "mpegts", path]
         parts.append({"label": label, "path": path, "height": r["height"],
                       "bitrate_kbps": r["bitrate_kbps"]})
 
@@ -190,7 +206,7 @@ def build_encode_cmd(cfg, work_dir):
     if cfg.get("has_audio", True):
         cmd += audio_track_args(0)
         audio_path = os.path.join(work_dir, "audio.ts")
-        cmd += ["-f", "mpegts", audio_path]
+        cmd += ZERO_START + ["-f", "mpegts", audio_path]
 
     return cmd, parts, audio_path
 

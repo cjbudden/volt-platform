@@ -115,6 +115,23 @@ export function startScheduler(): () => void {
   );
   avail.unref?.();
 
+  // FAST LINEUPS: keep every active lineup's guide (and its breaks) a week
+  // ahead. Deterministic, so a top-up only appends what comes next.
+  const fast = setInterval(
+    () => import('../fast/store').then((m) => m.topUpFast())
+      .then((n) => { if (n) console.log(`[fast] topped up ${n} lineup(s)`); })
+      .catch((e) => console.error('[fast] top-up error', e)),
+    10 * 60_000
+  );
+  fast.unref?.();
+  // and a playout for every FAST channel on air (local launcher; see playoutRunner.ts)
+  const fastPlay = setInterval(
+    () => import('../fast/playoutRunner').then((m) => m.reconcilePlayouts()).catch((e) => console.error('[fast] playout reconcile error', e)),
+    30_000
+  );
+  fastPlay.unref?.();
+  import('../fast/playoutRunner').then((m) => m.reconcilePlayouts()).catch(() => null);
+
   // THE FLEET PASS, kept on its own interval and its own error boundary.
   //
   // It observes and meters; it can start nothing and stop nothing. Keeping it

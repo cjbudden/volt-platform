@@ -36,6 +36,7 @@ import { ingestRouter as ingestRulesRouter, ingestCallbacksRouter } from './modu
 import { tusRouter } from './modules/tus';
 import { paymentsRouter, paymentsAppRouter, paymentsWebhookRouter } from './modules/payments';
 import { epgRouter } from './modules/epg';
+import { fastRouter, fastPlayoutRouter, fastPublicRouter } from './modules/fast';
 import { xmltvAdminRouter, xmltvPublicRouter } from './modules/xmltv';
 import { xmltvImportRouter } from './modules/xmltvImport';
 import { appsRouter, availabilityRouter, accessRouter } from './modules/apps';
@@ -358,6 +359,12 @@ export function createServer() {
   app.use('/api/epg/import', xmltvImportRouter);          // XMLTV import: sources, channel mapping, runs
   app.use('/api/epg', xmltvAdminRouter);                  // XMLTV export, guide channels, partner feeds (per-route auth)
   app.use('/api/epg', epgRouter);                        // EPG / programme scheduling
+  // FAST / VOD-to-live channels (docs/DESIGN_fast_channels.md): lineups, ads,
+  // breaks for the console; the timeline for the playout (ingest token); and
+  // the per-viewer ad stitcher, public like the origin it sits beside.
+  app.use('/api/fast-playout', fastPlayoutRouter);
+  app.use('/api/fast', fastRouter);
+  app.use('/fast', fastPublicRouter);
   // Icecast asks this before admitting a listener; it is the on-air gate now
   // that the control plane is not the one holding the socket. Mounted BEFORE
   // the authed radio router because the caller is the relay, not a user.

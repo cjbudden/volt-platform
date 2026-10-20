@@ -22,7 +22,7 @@ import { defaultApiBase, fetchEvent, fetchNowPlaying, fetchSchedule, fillUrl, Ga
 import { getSkin } from './skins';
 import { STRINGS, format } from './strings';
 import { injectBaseStyles } from './skins/kit';
-import { activeAt, fromDashRegion, fromHlsRegions, fromNativeCues, mergeGraphics, upNextFromGraphic } from './triggers';
+import { activeAt, adBreakAt, fromDashRegion, fromHlsRegions, fromNativeCues, mergeGraphics, upNextFromGraphic } from './triggers';
 import type { TriggerReport } from './engine';
 
 const EPG_REFRESH_MS = 5 * 60_000;
@@ -39,7 +39,7 @@ export function initialState(): PlayerState {
     programme: null, nextProgramme: null, schedule: [], canStartOver: false,
     volume: 1, muted: false, rate: 1,
     qualities: [], quality: 'auto', activeQuality: null, textTracks: [], textTrack: null, audioTracks: [], audioTrack: null,
-    items: [], index: -1, item: null, upNext: null, graphics: [],
+    items: [], index: -1, item: null, upNext: null, graphics: [], adBreak: null,
     nowPlaying: null, history: [], nextTrack: null,
     cast: { available: false, state: 'none', device: null },
     airplay: { available: false, active: false },
@@ -285,7 +285,10 @@ export class VoltPlayer {
     // IN-STREAM GRAPHICS (sdk/triggers.ts): what the manifest says is on screen at
     // this media time. Only when graphics are on; the triggers are always parsed.
     const graphicsOn = this.o.showGraphics ?? this.theme.showGraphics;
-    const graphics = graphicsOn ? activeAt(this.streamGraphics.values(), currentTime) : [];
+    // AD BREAK: while the stream says a break is on, nothing of ours is drawn
+    // over it (no Up next, no programme cards, no bugs), only the break itself.
+    const adBreak = adBreakAt(this.streamGraphics.values(), currentTime);
+    const graphics = !graphicsOn ? [] : adBreak ? [adBreak] : activeAt(this.streamGraphics.values(), currentTime);
     // No guide loaded: the stream's own programme marker names what is on.
     const inband = !sched.length && e.presentationStart != null ? graphics.find((g) => g.graphic === 'programme') : undefined;
     const programme = sched.length ? programmeAt(sched, wallClock ?? Date.now())
@@ -298,7 +301,8 @@ export class VoltPlayer {
     // The stream's own Up next wins over one worked out from a fetched guide: it is
     // what the broadcaster's schedule said at airing time, and it needs no app key.
     const upG = graphics.find((g) => g.graphic === 'up-next');
-    const upNext = this.theme.controls.upNext && upG && this.dismissedFor !== `g:${upG.id}` ? upNextFromGraphic(upG, currentTime, wallClock)
+    const hideForBreak = !!adBreak;
+    const upNext = hideForBreak ? null : this.theme.controls.upNext && upG && this.dismissedFor !== `g:${upG.id}` ? upNextFromGraphic(upG, currentTime, wallClock)
       : this.theme.controls.upNext ? upNextFor({
       hasNextItem: this.s.index + 1 < this.s.items.length, nextItem: this.s.items[this.s.index + 1] ?? null,
       currentTime, duration: e.duration, live: e.live, programme, nextProgramme, playheadClock: wallClock,
@@ -315,6 +319,7 @@ export class VoltPlayer {
     this.set({
       currentTime, behindLive, atLiveEdge: !e.live || behindLive < 8, wallClock: e.live ? wallClock : null,
       programme, nextProgramme, upNext, graphics,
+      adBreak: adBreak ? { id: adBreak.data.break || adBreak.id, endsAt: adBreak.end != null && e.presentationStart != null ? e.presentationStart + adBreak.end * 1000 : null } : null,
       canStartOver: this.theme.controls.startOver && canStartOver(programme, e.presentationStart, e.seekable, e.live),
       seekable: e.seekable,
       hasPicture: m.videoWidth > 0,
@@ -373,7 +378,7 @@ export class VoltPlayer {
     this.activeGraphicIds = '';
     let item = this.s.items[index];
     if (!item) return;
-    this.set({ index, item, status: 'loading', error: null, errorCode: null, upNext: null, graphics: [], hasPicture: false, audioOnly: false, qualities: [], textTracks: [], audioTracks: [],
+    this.set({ index, item, status: 'loading', error: null, errorCode: null, upNext: null, graphics: [], adBreak: null, hasPicture: false, audioOnly: false, qualities: [], textTracks: [], audioTracks: [],
       access: { mode: null, message: null, products: [] } });
     this.emit('itemchange', { index, item });
     try {

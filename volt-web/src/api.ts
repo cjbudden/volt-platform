@@ -3078,3 +3078,7 @@ export interface TimelineGrid {
   next: string | null
   links: { self: string; next: string | null; live: string; status: string }
 }
+
+/** The authenticated request helper, for feature clients kept in their own
+ *  files (graphics/gfxApi.ts) so this file does not grow without end. */
+export const apiRequest = req

@@ -232,7 +232,12 @@ ingestRouter.get(
     const { triggersForStream, wireFormat } = await import('../services/graphicTriggers');
     const list = await triggersForStream(kind, id, from, to);
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ id, kind, from: from.toISOString(), to: to.toISOString(), generated_at: new Date(now).toISOString(), triggers: list.map(wireFormat) });
+    // breaks: the ad-break windows on their own, for a burn-in compositor that
+    // must take graphics off air during a break (the same windows the triggers carry)
+    const breaks = list.filter((t) => t.graphic === 'ad-break').map((t) => ({
+      id: t.data.BREAK, start: t.start.toISOString(), duration: t.durationSec, hideGraphics: t.data['HIDE-GRAPHICS'] !== 'none',
+    }));
+    res.json({ id, kind, from: from.toISOString(), to: to.toISOString(), generated_at: new Date(now).toISOString(), triggers: list.map(wireFormat), breaks });
   })
 );
 

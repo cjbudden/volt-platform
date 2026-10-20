@@ -80,13 +80,31 @@ export interface Trigger {
   id: string;
   cls: string;
   /** What to draw. 'programme' is the boundary marker; the rest are graphics. */
-  graphic: 'programme' | 'ad' | 'up-next';
+  graphic: 'programme' | 'ad' | 'up-next' | 'ad-break';
   start: Date;
   /** Null for an open-ended programme. */
   durationSec: number | null;
   /** Client attributes, without the X- prefix. Values are plain strings. */
   data: Record<string, string>;
 }
+
+/**
+ * An ad break on the stream: a FAST channel's scheduled break, a live
+ * source's SCTE-35 cue, or an operator's Go to break (stream_breaks,
+ * migration 0064). It is the ONE signal every graphic consults: the player
+ * hides its graphics for it, Up next is moved out of it, and a burn-in
+ * compositor reads the same windows from the timed-events feed.
+ */
+export interface BreakWindow {
+  id: string;
+  start: Date;
+  durationSec: number;
+  source?: string;
+  /** Default true. False keeps graphics up (a sponsored break that wants its bug). */
+  hideGraphics?: boolean;
+}
+
+export const SCHEME_AD = 'urn:com:boomlabs:volt:ad:2026';
 
 /** Content, not an ad or a filler strand: what "up next" may name. */
 const isContent = (p: ScheduleItem) => !['ad', 'filler', 'slate'].includes(String(p.kind ?? 'content').toLowerCase());
@@ -107,9 +125,17 @@ const fetchable = (u: string | null | undefined) => (u && /^(https?:\/\/|\/(?!\/
  *   - the programme is long enough that the card does not cover most of it
  *     (at least the lead plus the card plus a minute).
  */
-export function buildTriggers(items: ScheduleItem[], settings: GraphicsSettings): Trigger[] {
+export function buildTriggers(items: ScheduleItem[], settings: GraphicsSettings, breaks: BreakWindow[] = []): Trigger[] {
   const list = [...items].sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
   const out: Trigger[] = [];
+  const hiding = breaks.filter((b) => b.durationSec > 0 && b.hideGraphics !== false);
+  for (const b of breaks) {
+    if (!(b.durationSec > 0)) continue;
+    out.push({
+      id: `brk:${b.id}`, cls: CLASS_AD, graphic: 'ad-break', start: b.start, durationSec: b.durationSec,
+      data: { GRAPHIC: 'ad-break', BREAK: b.id, 'HIDE-GRAPHICS': b.hideGraphics === false ? 'none' : 'all', ...(b.source ? { SOURCE: b.source } : {}) },
+    });
+  }
   for (const p of list) {
     const isAd = String(p.kind ?? '').toLowerCase() === 'ad';
     const dur = p.endsAt ? (p.endsAt.getTime() - p.startsAt.getTime()) / 1000 : null;
@@ -134,7 +160,17 @@ export function buildTriggers(items: ScheduleItem[], settings: GraphicsSettings)
     if (next.startsAt.getTime() - p.endsAt.getTime() > 5 * 60_000) continue;
     const len = (p.endsAt.getTime() - p.startsAt.getTime()) / 1000;
     if (len < u.leadSec + u.durationSec + 60) continue;
-    const start = new Date(p.endsAt.getTime() - u.leadSec * 1000);
+    let start = new Date(p.endsAt.getTime() - u.leadSec * 1000);
+    // NEVER OVER A BREAK. A card that would be on screen during an ad break is
+    // moved to finish just before it (FAST channels put a break at the end of
+    // most programmes, exactly where Up next goes); if that leaves it too close
+    // to the programme's start, there is no card.
+    for (let guard = 0; guard < 8; guard++) {
+      const hit = hiding.find((b) => start.getTime() < b.start.getTime() + b.durationSec * 1000 && start.getTime() + u.durationSec * 1000 > b.start.getTime());
+      if (!hit) break;
+      start = new Date(hit.start.getTime() - (u.durationSec + 2) * 1000);
+    }
+    if (start.getTime() < p.startsAt.getTime() + 60_000) continue;
     out.push({
       id: `up-next:${p.id}`, cls: CLASS_GRAPHIC, graphic: 'up-next', start, durationSec: u.durationSec,
       data: {
@@ -180,7 +216,7 @@ export function dashEvent(t: Trigger): { schemeIdUri: string; value: string; id:
   const data: Record<string, string> = {};
   for (const [k, v] of Object.entries(t.data)) data[k.toLowerCase()] = String(v);
   return {
-    schemeIdUri: t.graphic === 'up-next' ? SCHEME_GRAPHIC : SCHEME_PROGRAMME,
+    schemeIdUri: t.graphic === 'up-next' ? SCHEME_GRAPHIC : t.graphic === 'ad-break' ? SCHEME_AD : SCHEME_PROGRAMME,
     value: t.graphic,
     id: t.id,
     start: t.start.toISOString(),
@@ -209,7 +245,7 @@ const BLOCK_MS = 6 * 3600_000;
 
 async function loadBlock(kind: 'channel' | 'event', id: string, blockStart: number) {
   const { cached } = await import('../scale/cache');
-  return cached<{ items: any[]; graphics: unknown }>(
+  return cached<{ items: any[]; graphics: unknown; breaks?: any[] }>(
     `gtrig:${id}:${blockStart}`,
     { ttlSec: 300, tags: [`asset:${id}`], l2: true },
     async () => {
@@ -228,7 +264,15 @@ async function loadBlock(kind: 'channel' | 'event', id: string, blockStart: numb
           LIMIT 500`,
         [id, from.toISOString(), to.toISOString()]);
       const owner = await one<any>(`SELECT graphics FROM ${kind === 'channel' ? 'channels' : 'events'} WHERE id = $1`, [id]).catch(() => null);
+      // Ad breaks (migration 0064). A database without the table yet has none.
+      const brk = await query<any>(
+        `SELECT id, starts_at, duration_ms, source, hide_graphics FROM stream_breaks
+          WHERE ${kind === 'channel' ? 'channel_id' : 'event_id'} = $1 AND status <> 'cancelled'
+            AND starts_at < $3::timestamptz AND starts_at + make_interval(secs => duration_ms / 1000.0) > $2::timestamptz
+          ORDER BY starts_at LIMIT 2000`,
+        [id, from.toISOString(), to.toISOString()]).catch(() => [] as any[]);
       return {
+        breaks: brk.map((b) => ({ id: String(b.id), start: new Date(b.starts_at).toISOString(), durationSec: Number(b.duration_ms) / 1000, source: b.source, hideGraphics: b.hide_graphics !== false })),
         graphics: owner?.graphics ?? {},
         items: rows.map((r) => {
           const m = r.metadata ?? {};
@@ -253,6 +297,7 @@ export async function triggersForStream(kind: 'channel' | 'event', id: string, f
     const first = Math.floor(from.getTime() / BLOCK_MS) * BLOCK_MS;
     const last = Math.floor((to.getTime() + aheadSec * 1000) / BLOCK_MS) * BLOCK_MS;
     const seen = new Map<string, ScheduleItem>();
+    const brks = new Map<string, BreakWindow>();
     let graphics: unknown = {};
     for (let b = first; b <= last; b += BLOCK_MS) {
       const blk = await loadBlock(kind, id, b);
@@ -260,8 +305,9 @@ export async function triggersForStream(kind: 'channel' | 'event', id: string, f
       for (const r of blk.items) {
         seen.set(r.id, { ...r, startsAt: new Date(r.startsAt), endsAt: r.endsAt ? new Date(r.endsAt) : null });
       }
+      for (const b of blk.breaks ?? []) brks.set(b.id, { ...b, start: new Date(b.start) });
     }
-    return triggersFor(buildTriggers([...seen.values()], resolveGraphics(graphics)), from, to, aheadSec);
+    return triggersFor(buildTriggers([...seen.values()], resolveGraphics(graphics), [...brks.values()]), from, to, aheadSec);
   } catch {
     return [];
   }

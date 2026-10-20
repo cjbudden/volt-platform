@@ -125,3 +125,20 @@ export function upNextFromGraphic(g: StreamGraphic, t: number, wallClock: number
     totalMs: Math.round(((g.end ?? g.start + 12) - g.start) * 1000),
   };
 }
+
+/**
+ * The ad break at media time t, if one is on and asks for graphics to be
+ * hidden. A break is a STATE, not a graphic: it is reported whether or not
+ * graphics are switched on, so a host page can pause its own overlays too.
+ * The server sends HIDE-GRAPHICS=all on every break unless a break was set up
+ * to keep them (a sponsored break that wants its bug, say).
+ */
+export function adBreakAt(all: Iterable<StreamGraphic>, t: number): StreamGraphic | null {
+  for (const g of all) {
+    if (g.graphic !== 'ad-break') continue;
+    if (t < g.start || (g.end != null && t >= g.end)) continue;
+    if ((g.data.hide_graphics ?? 'all') === 'none') continue;
+    return g;
+  }
+  return null;
+}

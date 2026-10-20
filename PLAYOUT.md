@@ -151,6 +151,8 @@ Phase 2, rule driven dynamic replacement. Feed access and geo rules into the sam
 playout decision, so a viewer in a blacked out region is served the loop while others
 get live, using the identical splice engine. Different trigger, same playout.
 
+**Phase 3 built 20 Oct 2026** as FAST channels: `volt-app/docs/DESIGN_fast_channels.md` (playlist builder, playout from packaged VOD for HLS and DASH, SCTE-35 breaks, server-side ads).
+
 Phase 3, VOD playlist channels. Compose a channel from a playlist of VOD assets, each
 pre encoded to the ladder, looped and sequenced by the playout engine, with an EPG
 generated automatically to match the playlist, delivered as a live HLS and DASH stream.

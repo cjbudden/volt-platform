@@ -181,6 +181,7 @@ boot().then(async () => {
     registerClipHandlers();
     registerQcHandlers();
     registerVodEncodeHandlers();
+    (await import('./services/jobs/handlers/adCondition')).registerAdConditionHandlers();
     registerRemoteIngestHandlers();
     (await import('./services/workflows/runs')).registerAddonHandlers();
     await registerFillerHandlers();

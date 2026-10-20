@@ -33,6 +33,7 @@ import MultiviewPage from './pages/Multiview'
 import Events from './pages/Events'
 import Epg from './pages/Epg'
 import EpgDetail from './pages/EpgDetail'
+import FastPage from './pages/Fast'
 import ApiKeys from './pages/ApiKeys'
 import Users from './pages/Users'
 import SystemAdmin from './pages/SystemAdmin'
@@ -73,6 +74,7 @@ const I = {
   multiview: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>,
   analytics: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18" /><path d="m7 14 4-4 3 3 5-6" /></svg>,
   epg: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M8 4v16M3 14h18" /></svg>,
+  fast: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M7 9h4M7 12h7M7 15h5M17 9v6" /></svg>,
   radio: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 11h16a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><circle cx="8" cy="15.5" r="2.5" /><path d="M17 14h2M17 17h2M18 3 7 8" /></svg>,
   key: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.8 7.8 5.5 5.5 0 017.8-7.8zm0 0L15 8m-2 2 4-4m0 0 3 3 3-3-3-3" /></svg>,
   bell: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" /></svg>,
@@ -89,7 +91,7 @@ const I = {
 const NAV_FEATURE: Record<string, string> = {
   dashboard: 'monitoring', live: 'monitoring', monitoring: 'monitoring', multiview: 'monitoring',
   fleet: 'fleet', workflows: 'settings',
-  channels: 'channels', radio: 'radio', events: 'events', epg: 'epg', loops: 'media',
+  channels: 'channels', radio: 'radio', events: 'events', epg: 'epg', loops: 'media', fast: 'channels',
   recordings: 'recordings', vod: 'vod', images: 'media', analytics: 'analytics',
   review: 'vod', watchfolders: 'media', storage: 'media',
   encoding: 'settings', groups: 'settings', plan: 'settings', 'account-settings': 'settings', permissions: 'access',
@@ -117,6 +119,7 @@ const NAV: NavGroup[] = [
     { key: 'channels', label: 'Channels', icon: I.channels },
     { key: 'radio', label: 'Radio', icon: I.radio },
     { key: 'events', label: 'Events', icon: I.events },
+    { key: 'fast', label: 'FAST', icon: I.fast },
     { key: 'epg', label: 'EPG', icon: I.epg },
     { key: 'loops', label: 'Loops & Fillers', icon: I.loops },
   ] },
@@ -454,6 +457,8 @@ export default function App() {
             ? <MultiviewPage />
             : section === 'events'
             ? <Events />
+            : section === 'fast'
+            ? <FastPage path={route.path} />
             : section === 'epg'
             ? (route.epgOwner
                 ? <EpgDetail key={route.epgOwner.kind + route.epgOwner.id} owner={route.epgOwner} onBack={() => navigate('/epg')} />
