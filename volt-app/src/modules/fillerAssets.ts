@@ -4,7 +4,7 @@ import { query, one } from '../db';
 import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound } from '../util/http';
-import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage } from '../util/listQuery';
+import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage, onlyIdParam } from '../util/listQuery';
 
 /**
  * Slates & Loops — uploaded filler assets, managed separately from VOD. A slate
@@ -51,6 +51,21 @@ fillerAssetsRouter.get(
     const rows = await query<any>(`SELECT * ${where} ${pageSql(pl)}`, params);
     const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${whereCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
     res.json(finishPage(req, res, pl, rows, total));
+  })
+);
+
+/**
+ * One item by id: the canonical "self" link that the JSON-LD + Hydra layer
+ * (services/hypermedia.ts) gives every member, so a deep link resolves.
+ * Same tenant scoping as the list. (20 Oct 2026)
+ */
+fillerAssetsRouter.get(
+  '/:id',
+  onlyIdParam,
+  asyncHandler(async (req, res) => {
+    const row = await one<any>(`SELECT * FROM filler_assets WHERE id=$1 AND account_id=$2`, [req.params.id, accountId(req)]);
+    if (!row) throw notFound('Filler asset not found');
+    res.json(row);
   })
 );
 

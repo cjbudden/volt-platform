@@ -81,6 +81,75 @@ async function refuses(qs: string, expect: RegExp, label: string) {
     ok(seen.length === all.length && new Set(seen).size === all.length, `cursor paging sort=${sort}: ${seen.length}/${all.length} rows, no repeats`);
   }
 
+  // Both directions (20 Oct 2026): walk forward collecting pages, then walk
+  // back with rel="prev" from the end and get exactly the same pages; last
+  // is the final rows in view order; first drops the cursor.
+  const linkRel = (h: Record<string, string>, rel: string) => {
+    const m = (h.Link || '').split(/,\s*(?=<)/).map((x) => x.match(/^<([^>]+)>;\s*rel="([^"]+)"/)).find((x) => x && x[2] === rel);
+    return m ? new URL(m[1], 'http://x').search.slice(1) : null;
+  };
+  for (const sort of ['-created_at', 'name', 'state,-created_at,size', 'archived,-size']) {
+    const fwd: string[][] = [];
+    let qs: string | null = `sort=${sort}&limit=6`;
+    let lastHeaders: Record<string, string> = {};
+    for (let n = 0; n < 30 && qs; n++) {
+      const { page, headers } = await list(qs);
+      fwd.push(page.map((x: any) => x.id));
+      lastHeaders = headers;
+      qs = linkRel(headers, 'next');
+    }
+    const back: string[][] = [];
+    qs = linkRel(lastHeaders, 'prev');
+    for (let n = 0; n < 30 && qs; n++) {
+      const { page, headers } = await list(qs);
+      back.unshift(page.map((x: any) => x.id));
+      qs = linkRel(headers, 'prev');
+    }
+    back.push(fwd[fwd.length - 1]);
+    ok(JSON.stringify(back) === JSON.stringify(fwd), `prev walks back over the same ${fwd.length} pages, sort=${sort}`);
+    const firstQs = linkRel(lastHeaders, 'first');
+    ok(!!firstQs && !/cursor=/.test(firstQs) && JSON.stringify((await list(firstQs!)).page.map((x: any) => x.id)) === JSON.stringify(fwd[0]), `first link is page one, sort=${sort}`);
+    const lastQs = linkRel((await list(`sort=${sort}&limit=6`)).headers, 'last');
+    const flat = fwd.flat();
+    const lastPage = await list(lastQs!);
+    ok(JSON.stringify(lastPage.page.map((x: any) => x.id)) === JSON.stringify(flat.slice(-6)) && !linkRel(lastPage.headers, 'next') && !!linkRel(lastPage.headers, 'prev'), `last is the final 6 rows in view order, no next, sort=${sort}`);
+  }
+  r = await list('limit=6');
+  ok(!linkRel(r.headers, 'prev') && !!linkRel(r.headers, 'first') && !!linkRel(r.headers, 'last'), 'page one: no prev, has first and last');
+  r = await list('limit=200');
+  ok(!linkRel(r.headers, 'prev') && !linkRel(r.headers, 'first') && !linkRel(r.headers, 'next'), 'one page: no paging links at all');
+  r = await list('offset=12&limit=6');
+  ok(!!linkRel(r.headers, 'prev') && JSON.stringify((await list(linkRel(r.headers, 'prev')!)).page.map((x: any) => x.id)) === JSON.stringify((await list('offset=6&limit=6')).page.map((x: any) => x.id)), 'prev from an offset page is the page before it');
+  const pc = (await list('sort=name&limit=5&offset=5')).headers['X-Prev-Cursor'];
+  await refuses(`sort=-name&limit=5&cursor=${pc}`, /different search, filter or sort/, 'prev cursor reused with another sort');
+
+  // Microsecond timestamps (20 Oct 2026). Postgres keeps microseconds, a JS
+  // Date (and so a cursor) keeps milliseconds. Rows written in one statement
+  // share now(), and rows a few microseconds apart share a millisecond: paging
+  // must neither repeat the anchor row (ascending) nor skip its neighbours
+  // (descending), in either direction.
+  await pool.query(`CREATE TEMP TABLE ticks (id uuid primary key, account text, name text, state text, size numeric, archived boolean, created_at timestamptz, notes text)`);
+  await pool.query(`INSERT INTO ticks SELECT gen_random_uuid(), 'acct', 'T'||g, 'live', g, false, timestamptz '2026-10-20 10:00:00.123' + (g % 5) * interval '1 microsecond' + (g / 5) * interval '1 millisecond', null FROM generate_series(1, 23) g`);
+  const ticks = (await pool.query(`SELECT id FROM ticks`)).rows.length;
+  for (const sort of ['created_at', '-created_at']) {
+    const seen: string[] = [];
+    let qs: string | null = `sort=${sort}&limit=4`;
+    let lastH: Record<string, string> = {};
+    for (let n = 0; n < 30 && qs; n++) {
+      const u = new URL('http://x/api/widgets?' + qs);
+      const query: any = Object.fromEntries(u.searchParams);
+      const params: unknown[] = ['acct'];
+      const pl = parseList(spec, query, params);
+      const rows = (await pool.query(`SELECT * FROM ticks w WHERE w.account = $1${whereSql(pl)} ${pageSql(pl)}`, params)).rows;
+      const res = fakeRes();
+      const page = finishPage({ originalUrl: u.pathname + u.search } as any, res, pl, rows);
+      seen.push(...page.map((x: any) => x.id));
+      lastH = res.h;
+      qs = linkRel(res.h, 'next');
+    }
+    ok(seen.length === ticks && new Set(seen).size === ticks, `microsecond timestamps, sort=${sort}: ${seen.length}/${ticks} rows, ${new Set(seen).size} distinct`);
+  }
+
   // filters
   r = await list('state=live&limit=200');
   ok(r.page.length === all.filter((x) => x.state === 'live').length && r.page.every((x: any) => x.state === 'live'), 'state=live');

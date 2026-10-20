@@ -11,8 +11,11 @@
  *   <field>[op]=v eq ne gt gte lt lte in nin contains starts exists
  *   sort          comma list of fields, "-" for descending; ties broken by id
  *   limit         page size (default 50, max 200 unless the resource says)
- *   cursor        opaque, from the previous page's Link rel="next"; bound to
- *                 the same q, filters and sort, so paging never changes view
+ *   cursor        opaque, from the previous page's Link rel="next" (or
+ *                 "prev", "last"); bound to the same q, filters and sort, so
+ *                 paging never changes view. Keyset in both directions: a
+ *                 cursor reads after a row (next), before a row (prev) or
+ *                 the final page (last)
  *   offset        alternative to cursor for tables that need page jumps
  *   count=true    also return the total that match (X-Total-Count)
  *
@@ -25,6 +28,7 @@
  * object such as { jobs: [...] }). Paging travels in headers, so adopting the
  * standard breaks no client:
  *   Link: <...&cursor=...>; rel="next"     (RFC 8288)
+ *   Link: <...>; rel="first", rel="prev", rel="last" when they exist
  *   X-Next-Cursor, X-Total-Count (with count=true), X-Page-Limit
  */
 import { createHash } from 'node:crypto';
@@ -99,6 +103,16 @@ export interface ParsedList {
   /** Fields in sort order, with direction, ending in the id tiebreak. */
   sortKeys: { name: string; desc: boolean }[];
   fingerprint: string;
+  /**
+   * Which way this page was read. "after" (the default, and every cursor
+   * issued before 20 Oct 2026), "before" (a prev cursor: rows before the
+   * anchor, read in reverse and flipped back), "last" (the final page, read
+   * in reverse). orderBy is already reversed for "before" and "last";
+   * finishPage puts the rows back in view order.
+   */
+  direction: 'after' | 'before' | 'last';
+  /** True when the request carried a cursor or offset (so a first page exists before it). */
+  paged: boolean;
 }
 
 const RESERVED = new Set(['q', 'sort', 'limit', 'cursor', 'offset', 'count']);
@@ -120,12 +134,26 @@ function invalid(message: string, details: Record<string, unknown>): ApiError {
   return e;
 }
 
+/**
+ * Timestamps sort and page at MILLISECOND precision. Postgres stores
+ * microseconds but a row reaches JavaScript as a Date (milliseconds), so the
+ * cursor can only carry milliseconds. Comparing a microsecond column with a
+ * millisecond cursor repeated the anchor row on every ascending page (a
+ * client following next looped) and skipped rows in the anchor's millisecond
+ * on descending pages (found 20 Oct 2026; rows written in one statement share
+ * now()). Truncated on both sides, rows in one millisecond tie-break by id,
+ * so the keyset is exact. `AT TIME ZONE 'UTC'` makes the expression
+ * immutable, so an expression index can serve it:
+ *   CREATE INDEX ... ON t (date_trunc('milliseconds', created_at AT TIME ZONE 'UTC') DESC, id)
+ */
+const msTs = (e: string) => `date_trunc('milliseconds', (${e})::timestamptz AT TIME ZONE 'UTC')`;
+
 /** NULL-safe sort/compare expression: nulls sort as the smallest value, consistently. */
 function sortExpr(f: FieldSpec): string {
-  if (f.notNull) return f.type === 'enum' ? `(${f.sql})::text` : `(${f.sql})`;
+  if (f.notNull) return f.type === 'enum' ? `(${f.sql})::text` : f.type === 'timestamp' ? msTs(f.sql) : `(${f.sql})`;
   switch (f.type) {
     case 'number': return `COALESCE((${f.sql})::float8, '-Infinity'::float8)`;
-    case 'timestamp': return `COALESCE((${f.sql})::timestamptz, '-infinity'::timestamptz)`;
+    case 'timestamp': return msTs(`COALESCE((${f.sql})::timestamptz, '-infinity'::timestamptz)`);
     case 'boolean': return `COALESCE((${f.sql})::int, -1)`;
     default: return `COALESCE((${f.sql})::text, '')`;
   }
@@ -237,7 +265,8 @@ export function parseList(spec: ListSpec, query: Request['query'], params: unkno
   });
   if (sortKeys.length > 4) throw invalid('Sort by at most 4 fields', { sort: sortRaw });
   if (!sortKeys.some((k) => k.name === idField)) sortKeys.push({ name: idField, desc: false });
-  const orderBy = sortKeys.map((k) => `${sortExpr(sortFields[k.name])} ${k.desc ? 'DESC' : 'ASC'}`).join(', ');
+  const orderFor = (flip: boolean) => sortKeys.map((k) => `${sortExpr(sortFields[k.name])} ${k.desc !== flip ? 'DESC' : 'ASC'}`).join(', ');
+  let orderBy = orderFor(false);
 
   // ---- size
   const maxLimit = spec.maxLimit ?? 200;
@@ -255,12 +284,21 @@ export function parseList(spec: ListSpec, query: Request['query'], params: unkno
   let cursorWhere: string | null = null;
   const filterParamCount = params.length;
   const cursorRaw = str(query.cursor);
+  let direction: ParsedList['direction'] = 'after';
   if (cursorRaw) {
-    let c: { f: string; v: unknown[] };
+    let c: { f: string; v: unknown[]; d?: string };
     try { c = JSON.parse(Buffer.from(cursorRaw, 'base64url').toString('utf8')); } catch { throw invalid('cursor is not valid. Use the Link rel="next" from the previous page.', {}); }
-    if (!c || c.f !== fingerprint || !Array.isArray(c.v) || c.v.length !== sortKeys.length) {
+    const d = c?.d ?? 'a';
+    if (!c || c.f !== fingerprint || !['a', 'b', 'z'].includes(d) || (d !== 'z' && (!Array.isArray(c.v) || c.v.length !== sortKeys.length))) {
       throw invalid('cursor belongs to a different search, filter or sort. Start again without cursor.', {});
     }
+    direction = d === 'b' ? 'before' : d === 'z' ? 'last' : 'after';
+    if (direction !== 'after') orderBy = orderFor(true);
+  }
+  if (cursorRaw && direction !== 'last') {
+    const c = JSON.parse(Buffer.from(cursorRaw, 'base64url').toString('utf8')) as { v: unknown[] };
+    // "before" is the same keyset condition with every comparison turned round.
+    const flip = direction === 'before';
     // (a,b,id) after (x,y,z), honouring each key's direction:
     // a>x OR (a=x AND b<y) OR (a=x AND b=y AND id>z) ...
     const ors: string[] = [];
@@ -271,17 +309,18 @@ export function parseList(spec: ListSpec, query: Request['query'], params: unkno
         parts.push(`${sortExpr(f)} = ${sortExpr({ ...f, sql: `${p(c.v[j])}${sqlCast(f.type === 'enum' ? 'string' : f.type)}` })}`);
       }
       const f = sortFields[sortKeys[i].name];
-      parts.push(`${sortExpr(f)} ${sortKeys[i].desc ? '<' : '>'} ${sortExpr({ ...f, sql: `${p(c.v[i])}${sqlCast(f.type === 'enum' ? 'string' : f.type)}` })}`);
+      parts.push(`${sortExpr(f)} ${sortKeys[i].desc !== flip ? '<' : '>'} ${sortExpr({ ...f, sql: `${p(c.v[i])}${sqlCast(f.type === 'enum' ? 'string' : f.type)}` })}`);
       ors.push(`(${parts.join(' AND ')})`);
     }
     cursorWhere = `(${ors.join(' OR ')})`;
-  } else if (str(query.offset)) {
+  } else if (!cursorRaw && str(query.offset)) {
     if (!spec.allowOffset) throw invalid(`${spec.path} pages with cursor, not offset`, {});
     offset = Number(str(query.offset));
     if (!Number.isInteger(offset) || offset < 0 || offset > 100000) throw invalid('offset must be 0 to 100000', {});
   }
 
-  return { spec, where, cursorWhere, filterParamCount, orderBy, limit, offset, count: str(query.count) === 'true', sortKeys, fingerprint };
+  const paged = !!cursorRaw || offset > 0;
+  return { spec, where, cursorWhere, filterParamCount, orderBy, limit, offset, count: str(query.count) === 'true', sortKeys, fingerprint, direction, paged };
 }
 
 /** SQL tail for the page: ORDER BY + LIMIT (one extra row tells us there is a next page). */
@@ -303,27 +342,68 @@ export const countParams = (pl: ParsedList, params: unknown[]) => params.slice(0
  */
 export function finishPage<T extends Record<string, any>>(req: Request, res: Response, pl: ParsedList, rows: T[], total?: number): T[] {
   const more = rows.length > pl.limit;
-  const page = more ? rows.slice(0, pl.limit) : rows;
+  const reversed = pl.direction !== 'after';
+  // A reversed read comes back nearest-the-anchor first: trim, then flip to view order.
+  const page = more ? rows.slice(0, pl.limit) : rows.slice();
+  if (reversed) page.reverse();
   res.setHeader('X-Page-Limit', String(pl.limit));
   if (pl.count && typeof total === 'number') res.setHeader('X-Total-Count', String(total));
-  if (more && page.length) {
-    const last = page[page.length - 1];
-    const values = pl.sortKeys.map((k) => {
-      const f = pl.spec.fields[k.name];
-      const v = last[f.key ?? k.name];
-      return v instanceof Date ? v.toISOString() : v ?? null;
-    });
-    const cursor = Buffer.from(JSON.stringify({ f: pl.fingerprint, v: values })).toString('base64url');
+
+  const cursorAt = (row: T, d: 'a' | 'b' | 'z') => {
+    const body: { f: string; v?: unknown[]; d?: string } = { f: pl.fingerprint };
+    if (d !== 'z') {
+      body.v = pl.sortKeys.map((k) => {
+        const f = pl.spec.fields[k.name];
+        const v = row[f.key ?? k.name];
+        return v instanceof Date ? v.toISOString() : v ?? null;
+      });
+    }
+    if (d !== 'a') body.d = d; // "after" cursors keep the original shape
+    return Buffer.from(JSON.stringify(body)).toString('base64url');
+  };
+  const link = (cursor: string | null, rel: string) => {
     const u = new URL(req.originalUrl, 'http://x');
     u.searchParams.delete('offset');
-    u.searchParams.set('cursor', cursor);
+    u.searchParams.delete('cursor');
+    if (cursor) u.searchParams.set('cursor', cursor);
+    // Keep the page size the caller is reading, so every page is the same size
+    // (not a compatibility page above maxLimit, which a cursor may not ask for).
+    if (!u.searchParams.has('limit') && pl.limit <= (pl.spec.maxLimit ?? 200)) u.searchParams.set('limit', String(pl.limit));
+    res.append('Link', `<${u.pathname}${u.search}>; rel="${rel}"`);
+  };
+
+  // next: forward with more rows, or any "before" page (the anchor is after it).
+  const hasNext = page.length > 0 && (pl.direction === 'after' ? more : pl.direction === 'before');
+  // prev: a page read from a cursor or offset going forward, or a reversed read with more behind it.
+  const hasPrev = page.length > 0 && (pl.direction === 'after' ? pl.paged : more);
+  if (hasNext) {
+    const cursor = cursorAt(page[page.length - 1], 'a');
     res.setHeader('X-Next-Cursor', cursor);
-    res.append('Link', `<${u.pathname}${u.search}>; rel="next"`);
+    link(cursor, 'next');
   }
-  const exposed = 'Link, X-Next-Cursor, X-Total-Count, X-Page-Limit';
+  if (hasPrev) {
+    const cursor = cursorAt(page[0], 'b');
+    res.setHeader('X-Prev-Cursor', cursor);
+    link(cursor, 'prev');
+  }
+  if (hasNext || hasPrev) {
+    link(null, 'first');
+    link(cursorAt(page[0], 'z'), 'last');
+  }
+  const exposed = 'Link, X-Next-Cursor, X-Prev-Cursor, X-Total-Count, X-Page-Limit';
   const prev = res.getHeader('Access-Control-Expose-Headers');
   res.setHeader('Access-Control-Expose-Headers', prev ? `${prev}, ${exposed}` : exposed);
   return page;
+}
+
+/**
+ * Route guard for an item route declared as '/:id' on a router that also has
+ * named sub-paths ('/owners', '/series/:id'): a non-id falls through to the
+ * next route instead of being read as an id, so the item route shadows nothing.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function onlyIdParam(req: Request, _res: Response, next: (arg?: 'route') => void) {
+  return UUID_RE.test(String(req.params.id ?? '')) ? next() : next('route');
 }
 
 /* ---------- registry: the API reference documents exactly what parses ---------- */
@@ -332,6 +412,10 @@ const registry: ListSpec[] = [];
 export function defineList(spec: ListSpec): ListSpec {
   registry.push(spec);
   return spec;
+}
+/** The spec registered for a route pattern ("/api/status/:kind/:id/events"), if any. */
+export function findListSpec(path: string): ListSpec | undefined {
+  return registry.find((s) => s.path === path);
 }
 /** Plain-JSON form of every registered spec, for the API reference generator. */
 export function listSpecsForDocs() {

@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-19",
+  "updated": "2026-10-20",
   "features": [
     {
       "id": "live-stream-e2e",
@@ -765,6 +765,24 @@
           "Works on HLS and DASH",
           "Gone with graphics off",
           "Renaming the next programme updates the card"
+        ]
+      },
+      "feedback": []
+    },
+    {
+      "id": "api-paging-both-ways",
+      "name": "API lists page both ways; every record has a working link",
+      "summary": "WHY: an API client (or the hypermedia view) should move forward and back through any list and open any record from its link, without building URLs. WHAT: every list on the list standard now sends Link rel next, prev, first and last. Paging by a time no longer repeats or skips records. Filler assets, scheduled clips, publish targets, publications and programmes can be read by id.",
+      "status": "ready_to_test",
+      "app_surface": "na",
+      "test": {
+        "how": "In the API playground or Postman, list /api/filler-assets?limit=2 (with a few slates). Follow Link rel=next, then rel=prev: you are back on page one. rel=last gives the final page. Open a record's /api/filler-assets/{id}, /api/epg/{id} or /api/publications/{id}: it returns that record, and another account's id returns 404.",
+        "artifact": "",
+        "checks": [
+          "next then prev returns the same page",
+          "first and last links present when there is more than one page",
+          "sort=created_at pages without repeating a record",
+          "item by id works, another account's id is 404"
         ]
       },
       "feedback": []

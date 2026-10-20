@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { query, one, tx } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
-import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
+import { defineList, parseList, whereSql, pageSql, finishPage, onlyIdParam } from '../util/listQuery';
 import { expandRrule, validateRrule } from '../services/epg';
 import { programmeVodStates, convertProgramme } from '../services/epgVod';
 import { programmeFieldsFrom } from '../services/contentTypes';
@@ -157,6 +157,22 @@ epgRouter.get(
     const cWhere = pl.count ? whereSql(parseList(programmeList, { ...req.query, cursor: undefined, offset: undefined }, cParams)) : '';
     const total = pl.count ? (await one<any>(`SELECT count(*)::int AS n FROM programmes p WHERE p.${ownerCol(owner.kind)}=$1 AND p.span && tstzrange($2,$3,'[)')${cWhere}`, cParams))?.n : undefined;
     res.json(finishPage(req, res, pl, rows, total));
+  })
+);
+
+/**
+ * One item by id: the canonical "self" link that the JSON-LD + Hydra layer
+ * (services/hypermedia.ts) gives every member, so a deep link resolves.
+ * Same tenant scoping as the list. (20 Oct 2026)
+ */
+epgRouter.get(
+  '/:id',
+  onlyIdParam,
+  asyncHandler(async (req, res) => {
+    const row = await one<any>(`SELECT p.* FROM programmes p WHERE p.id=$1`, [req.params.id]);
+    const owner = row ? (row.event_id ? { kind: 'event' as OwnerKind, id: row.event_id } : row.channel_id ? { kind: 'channel' as OwnerKind, id: row.channel_id } : null) : null;
+    if (!row || !owner || !(await ownOwner(owner.kind, owner.id, accountId(req)))) throw notFound('Programme not found');
+    res.json(row);
   })
 );
 

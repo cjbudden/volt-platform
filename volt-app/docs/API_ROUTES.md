@@ -337,6 +337,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/epg` | admin session (Bearer) or account secret key | epg: view |  |
 | POST | `/api/epg` | admin session (Bearer) or account secret key | epg: manage |  |
 | DELETE | `/api/epg/:id` | admin session (Bearer) or account secret key | epg: manage |  |
+| GET | `/api/epg/:id` | admin session (Bearer) or account secret key | epg: view |  |
 | PATCH | `/api/epg/:id` | admin session (Bearer) or account secret key | epg: manage |  |
 | POST | `/api/epg/:id/convert` | admin session (Bearer) or account secret key | epg: manage |  |
 | POST | `/api/epg/batches/:id/undo` | admin session (Bearer) or account secret key | epg: manage |  |
@@ -442,6 +443,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | PATCH | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: manage |  |
 
 ### `/api/fleet`
+| GET | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: view |  |
 
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
@@ -648,6 +650,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 
 ### `/api/publish-targets`
 
+| GET | `/api/publications/:id` | admin session (Bearer) or account secret key | vod: view |  |
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | GET | `/api/publish-targets` | admin session (Bearer) or account secret key | settings: view |  |
@@ -658,6 +661,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 ### `/api/publishing-rules`
 
 | Method | Path | Credential | Access | Viewer tier |
+| GET | `/api/publish-targets/:id` | admin session (Bearer) or account secret key | settings: view |  |
 |---|---|---|---|---|
 | GET | `/api/publishing-rules` | admin session (Bearer) or account secret key | settings: view |  |
 | DELETE | `/api/publishing-rules/:scopeKind/:scopeId?` | admin session (Bearer) or account secret key | settings: manage |  |
@@ -725,6 +729,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
+| GET | `/api/scheduled-clips/:id` | admin session (Bearer) or account secret key | recordings: view |  |
 | GET | `/api/search` | admin session (Bearer) or account secret key | any signed-in admin user |  |
 
 ### `/api/share-links`

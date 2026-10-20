@@ -1071,6 +1071,15 @@
   "group": "/api/epg"
  },
  {
+  "method": "GET",
+  "path": "/api/epg/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
   "method": "PATCH",
   "path": "/api/epg/:id",
   "api": "admin",
@@ -1861,6 +1870,15 @@
   "access": "fleet: view",
   "viewerTier": false,
   "group": "/api/fleet"
+ },
+ {
+  "method": "GET",
+  "path": "/api/filler-assets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
  },
  {
   "method": "GET",
@@ -3744,6 +3762,15 @@
   "group": "/api/publishing-rules"
  },
  {
+  "method": "GET",
+  "path": "/api/publications/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/publications"
+ },
+ {
   "method": "DELETE",
   "path": "/api/publishing-rules/:scopeKind/:scopeId?",
   "api": "admin",
@@ -3787,6 +3814,15 @@
   "access": "settings: view",
   "viewerTier": false,
   "group": "/api/publishing-rules"
+ },
+ {
+  "method": "GET",
+  "path": "/api/publish-targets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/publish-targets"
  },
  {
   "method": "GET",
@@ -4183,6 +4219,15 @@
   "access": "public (legacy alias of /api/public/share/:token/request-code)",
   "viewerTier": true,
   "group": "/api/share"
+ },
+ {
+  "method": "GET",
+  "path": "/api/scheduled-clips/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/scheduled-clips"
  },
  {
   "method": "POST",

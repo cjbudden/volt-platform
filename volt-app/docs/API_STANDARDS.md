@@ -33,7 +33,7 @@ parameters, implemented once in `src/util/listQuery.ts`:
 | `<field>[op]=v` | Operators: `eq ne gt gte lt lte in nin contains starts exists` (which ones depends on the field's type) | `created_at[gte]=2026-10-01` |
 | `sort` | Comma list of fields, `-` for descending. Ties are broken by id, so order is always stable | `sort=-created_at,name` |
 | `limit` | Page size. Default 50, max 200 (a resource may document other values) | `limit=100` |
-| `cursor` | Next page, from the previous response. Bound to the same search, filters and sort | from `Link: rel="next"` |
+| `cursor` | Another page, from the previous response. Bound to the same search, filters and sort | from `Link: rel="next"`, `"prev"` or `"last"` |
 | `offset` | Page jump, only where a resource allows it | `offset=200` |
 | `count=true` | Also return the total that match (costs a count, so opt in) | `X-Total-Count: 1284` |
 
@@ -44,9 +44,15 @@ Rules:
   that lists what is allowed, so a developer fixes the call in one go.
 - **Values are typed:** dates in ISO 8601, ids as UUIDs, enums from the listed
   values, booleans as `true`/`false`. A wrong type is a `400` naming the field.
-- **Paging is in headers** (`Link: <...>; rel="next"`, `X-Next-Cursor`,
+- **Paging is in headers** (`Link: <...>; rel="next"`, `rel="prev"`,
+  `rel="first"`, `rel="last"`, `X-Next-Cursor`, `X-Prev-Cursor`,
   `X-Total-Count`, `X-Page-Limit`), so the body keeps its shape and no existing
-  client breaks. No `Link: next` means the last page.
+  client breaks. No `Link: next` means the last page, no `Link: prev` the
+  first. Cursors are keyset in both directions: `prev` reads the rows before
+  the first row of this page, `last` the final page of the view. A list that
+  fits on one page sends no paging links.
+- **Times page at millisecond precision.** Records in the same millisecond
+  are ordered by id, so paging by a time never repeats or skips a record.
 - **Never unbounded:** a list of records that grows (recordings, programmes,
   audit entries, jobs, notifications, users) always pages.
 - **Documented automatically:** each list's filters, operators, sort fields,

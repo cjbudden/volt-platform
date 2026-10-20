@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
-import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage } from '../util/listQuery';
+import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage, onlyIdParam } from '../util/listQuery';
 
 /**
  * Scheduled clips — a clipping window set on the live timeline. The orchestrator
@@ -53,6 +53,21 @@ scheduledClipsRouter.get(
       `SELECT sc.*, COALESCE(c.name, e.name) AS source_name ${where} ${pageSql(pl)}`, params);
     const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${whereCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
     res.json(finishPage(req, res, pl, rows, total));
+  })
+);
+
+/**
+ * One item by id: the canonical "self" link that the JSON-LD + Hydra layer
+ * (services/hypermedia.ts) gives every member, so a deep link resolves.
+ * Same tenant scoping as the list. (20 Oct 2026)
+ */
+scheduledClipsRouter.get(
+  '/:id',
+  onlyIdParam,
+  asyncHandler(async (req, res) => {
+    const row = await one<any>(`SELECT sc.*, COALESCE(c.name, e.name) AS source_name ${OWNED} WHERE sc.id=$1 AND g.account_id=$2`, [req.params.id, accountId(req)]);
+    if (!row) throw notFound('Scheduled clip not found');
+    res.json(row);
   })
 );
 

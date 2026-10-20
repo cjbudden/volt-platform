@@ -6,7 +6,7 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { publish, NotPublishable } from '../services/availability';
 import { validateTargets, type Target } from '../services/publishingRules';
 import { actorLabel } from '../util/actor';
-import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage } from '../util/listQuery';
+import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage, onlyIdParam } from '../util/listQuery';
 
 /**
  * Publishing & social distribution.
@@ -50,6 +50,21 @@ publishTargetsRouter.get(
       `SELECT id, platform, name, external_account, enabled, created_at ${where} ${pageSql(pl)}`, params);
     const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${whereCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
     res.json(finishPage(req, res, pl, rows, total));
+  })
+);
+
+/**
+ * One item by id: the canonical "self" link that the JSON-LD + Hydra layer
+ * (services/hypermedia.ts) gives every member, so a deep link resolves.
+ * Same tenant scoping as the list. (20 Oct 2026)
+ */
+publishTargetsRouter.get(
+  '/:id',
+  onlyIdParam,
+  asyncHandler(async (req, res) => {
+    const row = await one<any>(`SELECT id, platform, name, external_account, enabled, created_at FROM publish_targets WHERE id=$1 AND account_id=$2`, [req.params.id, accountId(req)]);
+    if (!row) throw notFound('Publish target not found');
+    res.json(row);
   })
 );
 
@@ -163,6 +178,22 @@ publicationsRouter.get(
     const rows = await query<any>(`SELECT p.*, t.name AS target_name ${where} ${pageSql(pl)}`, params);
     const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${whereCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
     res.json(finishPage(req, res, pl, rows, total));
+  })
+);
+
+/**
+ * One item by id: the canonical "self" link that the JSON-LD + Hydra layer
+ * (services/hypermedia.ts) gives every member, so a deep link resolves.
+ * Same tenant scoping as the list. (20 Oct 2026)
+ */
+publicationsRouter.get(
+  '/:id',
+  onlyIdParam,
+  asyncHandler(async (req, res) => {
+    const row = await one<any>(`SELECT p.*, t.name AS target_name FROM publications p LEFT JOIN publish_targets t ON t.id=p.target_id WHERE p.id=$1`, [req.params.id]);
+    // Owned through its asset, as the list is (an unowned id reads as not found).
+    if (!row || !(await ownedAsset(row.vod_asset_id, accountId(req)))) throw notFound('Publication not found');
+    res.json(row);
   })
 );
 
