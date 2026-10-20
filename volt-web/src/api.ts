@@ -3135,3 +3135,22 @@ export interface VodMarkersView {
 /** The authenticated request helper, for feature clients kept in their own
  *  files (graphics/gfxApi.ts) so this file does not grow without end. */
 export const apiRequest = req
+
+/** The same request, also returning the response headers, for lists that page
+ *  in headers (Link, X-Next-Cursor, X-Prev-Cursor, X-Total-Count). Used by the
+ *  Media Library (pages/vod/libraryApi.ts). */
+export async function apiRequestWithHeaders(path: string, opts: RequestInit = {}): Promise<{ body: any; headers: Headers }> {
+  await refreshIfDueSoon()
+  let r = await send(path, opts)
+  if (r.status === 401 && token && refreshToken) {
+    if (await refreshAccess()) r = await send(path, opts)
+  }
+  if (!r.ok) {
+    let msg = `${r.status}`
+    let body: any = null
+    try { body = await r.json(); msg = body.error || body.message || msg } catch { try { msg = await r.text() } catch { /* no body */ } }
+    if (r.status === 401 && token) { clearSession(); onUnauthorized?.() }
+    throw new ApiError(r.status, msg, body)
+  }
+  return { body: r.status === 204 ? null : await r.json(), headers: r.headers }
+}

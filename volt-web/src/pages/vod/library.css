@@ -1,0 +1,159 @@
+/* ============================================================================
+   MEDIA LIBRARY: grid cards, filter panel, completeness meter, target metadata,
+   encode panel. Built from the app's tokens (index.css, DESIGN_SYSTEM.md):
+   panels separated by tone and a 1px line, status by pill + dot + word, no
+   coloured edge bars, figures in tabular numerals.
+   ========================================================================== */
+
+/* ---- toolbar and filters */
+.lib-toolbar { margin-bottom: 10px }
+.lib-search { display: flex; align-items: center; gap: 8px; min-width: 300px; flex: 1 1 360px; padding: 0 12px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-ctl, 10px) }
+.lib-search:focus-within { border-color: rgba(63,123,255,.55); box-shadow: 0 0 0 2px rgba(63,123,255,.25) }
+.lib-search input { flex: 1; min-width: 0; border: 0; background: none; padding: 9px 0; box-shadow: none; outline: none }
+.lib-search-ic { color: var(--faint); display: grid }
+.lib-search-ic svg { width: 15px; height: 15px }
+.lib-filters { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; margin-bottom: 14px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius) }
+.lib-filter-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 22px }
+.lib-group { gap: 6px }
+.lib-chip { white-space: nowrap; font: inherit; font-size: var(--fs-sm); padding: 5px 11px; border: 1px solid var(--border); color: var(--muted) }
+.lib-chip:focus-visible, .lib-card-open:focus-visible, .lib-card-sel input:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px }
+.lib-none { font-size: var(--fs-sm); color: var(--faint) }
+.lib-more svg { width: 14px; height: 14px }
+.lib-range { display: flex; align-items: center; gap: 6px }
+.lib-range .inp { width: auto; padding-top: 6px; padding-bottom: 6px }
+.lib-num { width: 84px !important }
+.lib-to { font-size: var(--fs-sm); color: var(--faint) }
+.lib-cols { position: relative }
+.lib-cols > summary { list-style: none; cursor: pointer }
+.lib-cols > summary::-webkit-details-marker { display: none }
+.lib-cols-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 200px; padding: 8px;
+  background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 12px; box-shadow: var(--shadow); display: grid; gap: 2px }
+.lib-cols-menu label { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; font-size: var(--fs-sm); cursor: pointer }
+.lib-cols-menu label:hover { background: rgba(255,255,255,.04) }
+
+/* ---- shared cells */
+.lib-thumb { position: relative; aspect-ratio: 16 / 9; background: #0b0e14; overflow: hidden; display: grid; place-items: center }
+.lib-thumb img { width: 100%; height: 100%; object-fit: cover; display: block }
+.lib-thumb-ph { color: var(--idle); display: grid }
+.lib-thumb-ph svg { width: 28px; height: 28px }
+.lib-thumb.sm { width: 64px; flex: none; border-radius: 6px }
+.lib-thumb.sm .lib-thumb-ph svg { width: 18px; height: 18px }
+.lib-title-cell { display: flex; align-items: center; gap: 10px; min-width: 0 }
+.lib-pill { gap: 6px }
+.lib-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none }
+.lib-type { max-width: 180px; overflow: hidden; text-overflow: ellipsis }
+.lib-type.none, .lib-faint { color: var(--faint) }
+.lib-small { font-size: var(--fs-xs); margin-top: 6px }
+.lib-meta { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap }
+.lib-meta svg { width: 14px; height: 14px; flex: none }
+.lib-meta.warn { color: var(--warn) }
+.lib-meta.done { color: var(--live) }
+.lib-meta-none { color: var(--faint) }
+.lib-bar { display: inline-block; width: 56px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.08); overflow: hidden }
+.lib-bar > span { display: block; height: 100%; background: var(--brand); border-radius: 2px }
+.lib-meta.warn .lib-bar > span { background: var(--warn) }
+.lib-meta.done .lib-bar > span { background: var(--live) }
+.lib-pct { font-variant-numeric: tabular-nums; min-width: 3ch }
+.lib-miss { font-size: var(--fs-xs) }
+.lib-enc { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums }
+.lib-enc svg { width: 14px; height: 14px; flex: none; color: var(--faint) }
+.lib-enc.busy { color: var(--sched) }
+.lib-enc.bad { color: var(--down) }
+.lib-enc.none { color: var(--faint) }
+
+/* ---- grid */
+.lib-grid-head { display: flex; align-items: center; margin: 0 0 10px }
+.lib-selall { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--muted); cursor: pointer }
+.lib-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)) }
+.lib-card { position: relative; display: flex; flex-direction: column; min-width: 0;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+  transition: border-color .15s, background-color .15s }
+.lib-card:hover { border-color: var(--border-2) }
+.lib-card.on { border-color: rgba(63,123,255,.45); background: linear-gradient(0deg, var(--brand-dim), var(--brand-dim)), var(--panel) }
+.lib-card.open { border-color: rgba(63,123,255,.6) }
+.lib-card-open { position: relative; display: block; padding: 0; border: 0; background: none; cursor: pointer; color: inherit; text-align: left }
+.lib-card-sel { position: absolute; top: 8px; left: 8px; z-index: 2; display: grid; place-items: center; width: 28px; height: 28px;
+  border-radius: 8px; background: rgba(10,12,18,.72); cursor: pointer }
+.lib-card-sel input { margin: 0 }
+.lib-badge { position: absolute; z-index: 1; padding: 2px 7px; border-radius: 6px; background: rgba(10,12,18,.78);
+  color: #e9ecf4; font-size: var(--fs-micro); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .02em }
+.lib-badge-dur { right: 8px; bottom: 8px; font-family: ui-monospace, monospace }
+.lib-badge-res { right: 8px; top: 8px }
+.lib-card-b { display: flex; flex-direction: column; gap: 8px; padding: 11px 12px 12px; min-width: 0 }
+.lib-card-t { font-weight: 600; font-size: var(--fs-body); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.7em }
+.lib-card-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0 }
+.lib-card-foot { padding-top: 8px; border-top: 1px solid var(--border) }
+
+/* ---- table */
+.lib-table-card { overflow-x: auto }
+.lib-table tr.sel > td { background: rgba(63,123,255,.06) }
+.lib-pager { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 14px 0 4px; font-size: var(--fs-sm) }
+.lib-pager .btn svg { width: 14px; height: 14px }
+
+/* ---- asset drawer (grid) */
+.lib-drawer-asset { width: 980px }
+.lib-drawer-wide { width: 640px }
+.lib-drawer-wide .drawer-h .t, .lib-drawer-asset .drawer-h .t { display: flex; align-items: center; gap: 8px; min-width: 0 }
+.lib-drawer-wide .drawer-h .t svg { width: 18px; height: 18px; flex: none }
+.lib-table .lib-bar { width: 40px }
+
+/* ---- target metadata */
+.lib-target { padding: 12px 14px; margin-bottom: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px }
+.lib-target-h { display: flex; align-items: center; gap: 16px; flex-wrap: wrap }
+.lib-target-type { font-weight: 600; margin-top: 4px }
+.lib-so { margin-left: 8px; font-size: var(--fs-xs); color: var(--faint); font-weight: 500 }
+.lib-target-score { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums }
+.lib-target-score b { color: var(--text) }
+.lib-target-score.warn b { color: var(--warn) }
+.lib-target-score.done b { color: var(--live) }
+.lib-bar-l { width: 120px }
+.lib-target-score.warn .lib-bar > span { background: var(--warn) }
+.lib-target-score.done .lib-bar > span { background: var(--live) }
+.lib-target-warn { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; border-radius: 8px;
+  background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.25); color: var(--warn); font-size: var(--fs-sm) }
+.lib-target-warn svg, .lib-hint svg { width: 14px; height: 14px; flex: none }
+.lib-target-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 2px 18px }
+.lib-target-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); min-width: 0 }
+.lib-target-ic { display: grid; color: var(--faint) }
+.lib-target-ic svg { width: 14px; height: 14px }
+.lib-target-list li.is-filled .lib-target-ic { color: var(--live) }
+.lib-target-list li.is-missing .lib-target-ic { color: var(--warn) }
+.lib-target-l { flex: none; width: 128px; color: var(--muted) }
+.lib-target-v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.lib-req { margin-left: 6px; font-size: var(--fs-micro); color: var(--faint); text-transform: uppercase; letter-spacing: .06em }
+.lib-prov { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 6px; background: var(--panel-3); color: var(--sched); font-size: var(--fs-micro); font-weight: 600 }
+.lib-prov svg { width: 12px; height: 12px }
+.lib-hint { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: var(--fs-xs); color: var(--muted) }
+.lib-hint.warn { color: var(--warn) }
+.lib-sugg-type { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--border-2); border-radius: 10px; font-size: var(--fs-sm); cursor: pointer }
+.lib-sugg-type > span { display: flex; flex-direction: column; gap: 2px }
+.lib-sugg { width: 100%; font-size: var(--fs-sm) }
+.lib-sugg td, .lib-sugg th { vertical-align: top }
+.lib-sugg tr.same td { opacity: .6 }
+.lib-replace { display: block; color: var(--warn); font-size: var(--fs-xs) }
+
+/* ---- encode */
+.lib-encode-sum { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-variant-numeric: tabular-nums }
+.lib-encode-sum svg { width: 16px; height: 16px; color: var(--faint) }
+.lib-encode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 24px; margin-top: 6px }
+.lib-rend { margin-bottom: 8px }
+.lib-kv th { text-align: left; font-weight: 500; color: var(--faint); width: 150px; white-space: nowrap }
+.lib-kv td, .lib-kv th { padding: 6px 8px 6px 0; font-size: var(--fs-sm); border-bottom: 1px solid var(--border) }
+.lib-proto { margin-right: 4px; font-family: ui-monospace, monospace }
+.lib-rend { font-size: var(--fs-sm) }
+.lib-rend .mono { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums }
+.lib-derived { margin-left: 6px; padding: 0 5px; border-radius: 5px; border: 1px solid var(--border-2); color: var(--faint); font-size: var(--fs-micro); text-transform: none; letter-spacing: 0; font-weight: 500 }
+.lib-tracks { margin: 0; padding-left: 18px; font-size: var(--fs-sm); line-height: 1.7 }
+.lib-gaps { margin-top: 14px; font-size: var(--fs-sm); color: var(--muted) }
+.lib-gaps summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--faint) }
+.lib-gaps summary svg { width: 14px; height: 14px }
+.lib-gaps ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.6 }
+
+@media (max-width: 640px) {
+  .lib-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px }
+  .lib-search { min-width: 0; flex-basis: 100% }
+  .lib-target-l { width: 96px }
+}

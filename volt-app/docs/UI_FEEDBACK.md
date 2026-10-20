@@ -98,6 +98,7 @@ pickers on the right, wrapping on a narrow screen.
 | Channels | Type: All, Transcode, Packaging. Status: All, Running, Stopped / idle, Problems (shown when there are any) | yes | Name A to Z, Name Z to A, Status (running first), Group, Newest first | List |
 | Radio | Status: All, On air, Running off air, Stopped / idle | yes | Name A to Z, Name Z to A, Status (on air first), Group, Newest first | List |
 | Events | Status: All, Live, Upcoming, Ended | yes | Date (live, then upcoming soonest, then ended most recent), Date earliest first, Date latest first, Name A to Z, Name Z to A | List, Calendar |
+| Media Library | Content type (multi-select), Availability, Source, Missing required metadata. More filters: Top resolution, Codec, Review, Published copy is old, Date added, Duration. Filtered on the server and kept in the URL | no | Newest first, Oldest first, Title A to Z, Longest, Shortest, Least complete metadata, Highest resolution | List, Grid (optional table columns under Columns) |
 
 * Each chip's count is what that chip would show with the other filters
   applied, so the numbers always match the result.

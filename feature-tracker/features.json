@@ -2,6 +2,26 @@
   "updated": "2026-10-20",
   "features": [
     {
+      "id": "media-library-views",
+      "name": "Media Library: grid view, filters by content type, target metadata, EPG fill, encode details",
+      "summary": "WHY: a library of thousands of clips is only usable if you can find what is incomplete and fix it fast. WHAT: List or Grid (remembered), server-side filters by content type with counts, availability, source, missing required metadata, top resolution, codec, date and duration, all in the URL; a completeness measure against each type's target metadata (Episode, Movie, Clip, Sports match ...); Fill from EPG with per-field provenance that never overwrites typed values; an Encode tab with renditions, audio, captions, packaging, DRM and what is not recorded.",
+      "status": "ready_to_test",
+      "app_surface": "full",
+      "test": {
+        "how": "Media Library > Grid. Tick Content type: Programme / episode and Missing required: copy the URL into a new tab, the same view opens. Open a clip cut from a channel that has a guide > Metadata > Fill from EPG: empty fields are ticked, anything you typed shows 'Replaces it' only if you tick it. Apply: the fields show an EPG marker. Encode tab: renditions and the 'What is not recorded' list. Select several clips > Fill from EPG in the bulk bar.",
+        "artifact": "Media Library (/vod)",
+        "checks": [
+          "Grid and list both page, sort and select",
+          "Filter counts match the results",
+          "Filtered view survives a reload and a shared link",
+          "Typed values are never replaced unless ticked",
+          "Filled values show where they came from and are in the audit log",
+          "Encode tab marks derived values and lists the gaps"
+        ]
+      },
+      "feedback": []
+    },
+    {
       "id": "live-stream-e2e",
       "name": "Live stream end to end (create → transcode → play)",
       "summary": "Create a Transcode channel with an HLS/RTMP/SRT pull source, Send source, and the real encoder ingests + builds the ABR ladder (x264) + packages CMAF (HLS+DASH) to the origin, played back in the app with real status + event log. Verified in a full local stack against the JR HLS source: 1080/720/480 ABR served + playable.",

@@ -1,7 +1,7 @@
 import { SocialComposer, SocialPanel } from './SocialPublish'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { IngestPanel } from '../IngestPanel'
-import { api, type VodAssetRow } from '../api'
+import { api } from '../api'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import { navigate } from '../router'
 import { Notice, PageError, useNotify, usePageNotice } from '../notices'
@@ -10,6 +10,17 @@ import SkipMarkers from '../SkipMarkers'
 import { RuleEditor } from '../RuleEditor'
 import { MetadataForm, TypePicker } from '../ContentTypeFields'
 import type { AssetAvailability } from '../api'
+import { useRoute } from '../router'
+import { BulkBar, SelectAllHead, SelectCell, bulkSummary, runBulk, useSelection } from '../listActions'
+import { NoMatches, usePref } from '../listFilters'
+import { LibraryFilterPanel, LibraryToolbar } from './vod/LibraryFilters'
+import { LibraryGrid } from './vod/LibraryGrid'
+import { AvailabilityPill, Completeness, Keyscreen, TypeLabel } from './vod/LibraryCells'
+import { EncodePanel, TargetMetadataPanel } from './vod/AssetPanels'
+import { libraryApi, type LibraryFacets, type LibraryRow } from './vod/libraryApi'
+import { VIEWS, codecLabel, filtersToApi, filtersToSearch, isFiltered, parseColumns, parseFilters, resLabel, type LibraryFilters, type LibraryView } from './vod/libraryQuery'
+import { LibIcon } from './vod/icons'
+import './vod/library.css'
 
 /* ============================================================================
    MEDIA LIBRARY — everything that was cut or uploaded, and what state it is in.
@@ -103,7 +114,6 @@ function fmtDur(ms: number | string | null | undefined) {
            : `${m}:${String(ss).padStart(2, '0')}`
 }
 
-type Filter = 'all' | 'published' | 'unpublished' | 'in_review' | 'approved' | 'stale'
 
 // ---------------------------------------------------------------------------
 //  One asset, expanded
@@ -112,7 +122,7 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   const [d, setD] = useState<any>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
-  const [tab, setTab] = useState<'play' | 'markers' | 'sources' | 'publishing' | 'availability' | 'metadata'>('play')
+  const [tab, setTab] = useState<'play' | 'markers' | 'sources' | 'publishing' | 'availability' | 'metadata' | 'encode'>('play')
   const [composeOpen, setComposeOpen] = useState(false)
   const [socialKey, setSocialKey] = useState(0)
   async function load() {
@@ -156,11 +166,11 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   return (
     <div style={{ padding: '8px 2px 14px' }}>
       <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 12 }}>
-        {(['play', 'markers', 'metadata', 'availability', 'sources', 'publishing'] as const).map(t => (
+        {(['play', 'markers', 'metadata', 'encode', 'availability', 'sources', 'publishing'] as const).map(t => (
           <button key={t} className={`btn ${tab === t ? 'primary' : 'ghost'}`}
             style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }}
             onClick={() => setTab(t)}>
-            {t === 'play' ? 'Preview' : t === 'markers' ? 'Skip markers' : t === 'metadata' ? 'Metadata' : t === 'availability' ? 'Availability' : t === 'sources' ? 'Where it came from' : 'Where it went'}
+            {t === 'play' ? 'Preview' : t === 'markers' ? 'Skip markers' : t === 'metadata' ? 'Metadata' : t === 'encode' ? 'Encode' : t === 'availability' ? 'Availability' : t === 'sources' ? 'Where it came from' : 'Where it went'}
           </button>
         ))}
         <AvailabilityBadge state={d.availability_state} until={d.available_until} />
@@ -299,8 +309,14 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
       )}
 
       {tab === 'metadata' && (
-        <AssetMetadata d={d} onSaved={() => { load(); onChanged() }} />
+        <>
+          <TargetMetadataPanel asset={d} reloadKey={Date.parse(d.updated_at ?? '') || 0} onChanged={() => { load(); onChanged() }} />
+          {/* keyed on updated_at so an EPG fill shows in the form at once */}
+          <AssetMetadata key={d.updated_at ?? ''} d={d} onSaved={() => { load(); onChanged() }} />
+        </>
       )}
+
+      {tab === 'encode' && <EncodePanel id={d.id} />}
 
       {tab === 'availability' && (
         <AvailabilityPanel d={d} onChanged={() => { load(); onChanged() }} />
@@ -412,54 +428,92 @@ function AvailabilityPanel({ d, onChanged }: { d: any; onChanged: () => void }) 
 // ---------------------------------------------------------------------------
 
 
+/* ============================================================================
+   THE LIBRARY: list or grid, filtered, sorted and paged on the server.
+
+   The filters live in the URL (/vod?type=…&missing=1), so a view can be shared;
+   the list or grid choice and the optional table columns are remembered in
+   this browser. Selection, the bulk bar and the row detail work the same in
+   both views. See pages/vod/ and DESIGN_media_library.md, "Library views".
+   ========================================================================== */
+const PAGE = 48
+
 export default function VodPage() {
-  const [rows, setRows] = useState<VodAssetRow[] | null>(null)
+  useRoute() // re-render when the URL (the filters) changes
+  const filters = parseFilters(window.location.search)
+  const apiQs = filtersToApi(filters, { limit: PAGE })
+  const facetQs = filtersToApi(filters, { facets: true })
+  const setFilters = (f: LibraryFilters) => navigate(`/vod${filtersToSearch(f)}`, { replace: true })
+
+  const [view, setView] = usePref<LibraryView>('vod.view', 'list', VIEWS)
+  const [colPref, setColPref] = usePref<string>('vod.columns', 'type,complete')
+  const columns = parseColumns(colPref)
+
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [pageNo, setPageNo] = useState(0)
+  const [page, setPage] = useState<{ rows: LibraryRow[]; total: number | null; next: string | null; prev: string | null } | null>(null)
+  const [facets, setFacets] = useState<LibraryFacets | null>(null)
   const [err, setErr] = useState('')
-  const [filter, setFilter] = useState<Filter>('all')
-  const [q, setQ] = useState('')
   const [open, setOpen] = useState<string | null>(null)
+  const [bulkBusy, setBulkBusy] = useState<string | null>(null)
+  const [tick, setTick] = useState(0)
+  const notify = useNotify()
 
-  async function load() {
-    try { setRows(await api.vodAssets()); setErr('') } catch (e: any) { setErr(e.message) }
+  // A new filter or sort starts again at the first page.
+  useEffect(() => { setCursor(null); setPageNo(0) }, [apiQs])
+  useEffect(() => {
+    let gone = false
+    libraryApi.page(cursor ? `${apiQs}&cursor=${encodeURIComponent(cursor)}` : apiQs)
+      .then((p) => { if (!gone) { setPage(p); setErr('') } })
+      .catch((e) => { if (!gone) setErr(e.message) })
+    return () => { gone = true }
+  }, [apiQs, cursor, tick])
+  useEffect(() => {
+    let gone = false
+    libraryApi.facets(facetQs).then((f) => { if (!gone) setFacets(f) }).catch(() => { /* chips show without counts */ })
+    return () => { gone = true }
+  }, [facetQs, tick])
+  const load = () => setTick((t) => t + 1)
+  usePageNotice('load', err && page ? { kind: 'error', title: "Couldn't load the library.", message: err, actions: [{ label: 'Retry', onClick: load }] } : null)
+
+  const rows = page?.rows ?? []
+  const ids = useMemo(() => rows.map((r) => r.id), [rows])
+  const sel = useSelection(ids)
+  const chosen = rows.filter((r) => sel.sel.has(r.id))
+  const fromGuide = chosen.filter((r) => r.channel_id || r.event_id || (r as any).origin === 'clip' || (r as any).origin === 'recording')
+  const unpublished = chosen.filter((r) => !r.published && r.availability_state !== 'available' && r.availability_state !== 'scheduled')
+
+  async function bulkEpg() {
+    setBulkBusy(`Filling ${fromGuide.length} from the guide…`)
+    try {
+      const r = await libraryApi.epgBulk(fromGuide.map((x) => x.id), { title: true })
+      const why = r.results.filter((x) => !x.applied.length && !x.titleChanged && x.reason)
+      const name = (id: string) => rows.find((x) => x.id === id)?.title || 'Untitled'
+      notify({ kind: r.filled ? 'ok' : 'info', message: [`Filled ${r.filled} from the guide. Empty fields only, nothing typed was replaced.`, ...why.slice(0, 4).map((x) => `${name(x.assetId)}: ${x.reason}`), why.length > 4 ? `${why.length - 4} more left as they were.` : ''].filter(Boolean).join(' ') })
+      sel.clear(); load()
+    } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBulkBusy(null) }
   }
-  useEffect(() => { load() }, [])
-  usePageNotice('load', err && rows ? { kind: 'error', title: "Couldn't load the library.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
+  async function bulkPublish() {
+    setBulkBusy(`Publishing ${unpublished.length}…`)
+    const res = await runBulk(unpublished.map((r) => ({ id: r.id, name: r.title || 'Untitled' })), (r) => api.publishVod(r.id), (n) => setBulkBusy(`Publishing ${n} of ${unpublished.length}…`))
+    notify({ kind: res.failed.length ? 'warn' : 'ok', message: bulkSummary('Published', res) })
+    setBulkBusy(null); sel.clear(); load()
+  }
 
-  const counts = useMemo(() => {
-    const r = rows ?? []
-    return {
-      all: r.length,
-      published: r.filter(a => (a as any).published).length,
-      unpublished: r.filter(a => !(a as any).published).length,
-      in_review: r.filter(a => (a as any).review_state === 'in_review'
-        || (a as any).review_state === 'changes_requested').length,
-      approved: r.filter(a => (a as any).review_state === 'approved').length,
-      stale: r.filter(a => (a as any).has_stale_publication).length,
-    }
-  }, [rows])
+  if (err && !page) return <PageError message={err} onRetry={load} />
 
-  const shown = (rows ?? []).filter(a => {
-    const x = a as any
-    if (q && !`${a.title ?? ''} ${x.source_name ?? ''}`.toLowerCase().includes(q.toLowerCase())) return false
-    switch (filter) {
-      case 'published': return !!x.published
-      case 'unpublished': return !x.published
-      case 'in_review': return x.review_state === 'in_review' || x.review_state === 'changes_requested'
-      case 'approved': return x.review_state === 'approved'
-      case 'stale': return !!x.has_stale_publication
-      default: return true
-    }
-  })
-
-  if (err && !rows) return <PageError message={err} onRetry={load} />
-  if (!rows) return <div className="loading">Loading the library…</div>
+  const total = page?.total ?? null
+  const first = pageNo * PAGE + 1
+  const filtered = isFiltered(filters)
+  const show = (c: string) => columns.includes(c as any)
+  const extraCols = ['type', 'complete', 'encode', 'codec', 'renditions', 'blocks'].filter(show).length
 
   return (
     <>
       <div className="page-head">
         <div>
           <h1>Media Library</h1>
-          <p>Everything that has been cut, where it came from, and where it went.</p>
+          <p>Everything that has been cut or uploaded, what it is, how it was encoded, and where it went.</p>
         </div>
         <div className="spacer" />
         <button className="btn ghost" onClick={load}>Refresh</button>
@@ -467,92 +521,128 @@ export default function VodPage() {
 
       <IngestPanel onDone={load} />
 
-      <div className="card">
-        <div className="flex flex-wrap items-center gap-2" style={{ padding: '12px 14px 0' }}>
-          {(['all', 'published', 'unpublished', 'in_review', 'approved', 'stale'] as const).map(f => (
-            <button key={f} className={`btn ${filter === f ? 'primary' : 'ghost'}`}
-              style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }}
-              onClick={() => setFilter(f)}>
-              {f === 'all' ? 'All'
-                : f === 'in_review' ? 'Needs review'
-                : f === 'stale' ? 'Published copy is old'
-                : f[0].toUpperCase() + f.slice(1)}
-              <span style={{ color: 'var(--faint)', marginLeft: 6 }}>{counts[f]}</span>
-            </button>
-          ))}
-          <div className="flex-1" />
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter by title or source…"
-            style={{ width: 240 }} />
-        </div>
-        <table>
-          <thead>
-            <tr><th>Title</th><th>Source</th><th>Length</th><th>Sources</th><th>Review</th><th>QC</th><th>Availability</th><th>Cut</th><th /></tr>
-          </thead>
-          <tbody>
-            {shown.map(a => {
-              const x = a as any
-              return (
-                <Fragment key={a.id}>
-                  <tr onClick={() => setOpen(open === a.id ? null : a.id)} style={{ cursor: 'pointer' }}>
-                    <td>
-                      <b>{a.title || 'Untitled'}</b>
-                      {/* An asset with no master is still being made, not
-                          broken; a list that cannot tell them apart sends
-                          people looking for a fault that is not there. */}
-                      <div><EncodeState a={x} /></div>
-                    </td>
-                    <td style={{ color: 'var(--muted)' }}>
-                      {x.source_name ?? (x.source_kind === 'upload' ? 'Uploaded'
-                        : x.source_kind === 'watchfolder' ? 'Watchfolder' : '—')}
-                    </td>
-                    <td style={{ color: 'var(--muted)' }}>{fmtDur(a.duration_ms)}</td>
-                    <td style={{ color: 'var(--muted)' }}>
-                      {a.source_block_count == null ? <span style={{ color: 'var(--faint)' }}>—</span>
-                        : `${a.source_block_count} block${a.source_block_count === 1 ? '' : 's'}`}
-                      {(a.source_container_count ?? 0) > 1 && (
-                        <span style={{ color: 'var(--warn,#fbbf24)' }}> · {a.source_container_count} days</span>
+      <LibraryToolbar filters={filters} onChange={setFilters} view={view} onView={setView}
+        columns={columns} onColumns={(c) => setColPref(c.join(','))} />
+      <LibraryFilterPanel filters={filters} onChange={setFilters} facets={facets} />
+
+      <BulkBar count={sel.sel.size} noun={['asset', 'assets']} onClear={sel.clear} busy={bulkBusy}
+        actions={[
+          { key: 'epg', label: 'Fill from EPG', icon: LibIcon.epg, count: fromGuide.length, onRun: bulkEpg,
+            hint: fromGuide.length < sel.sel.size ? 'Uploaded files have no guide slot. Only empty fields are filled, and only from a clear programme match.' : 'Only empty fields are filled, and only from a clear programme match.' },
+          { key: 'publish', label: 'Publish', icon: LibIcon.publish, count: unpublished.length, onRun: bulkPublish,
+            hint: unpublished.length < sel.sel.size ? 'Assets that are already available or scheduled are left out' : undefined },
+        ]} />
+
+      {!page ? <div className="loading">Loading the library…</div> : rows.length === 0 ? (
+        filtered ? <NoMatches what="assets" onClear={() => setFilters({ ...parseFilters(''), sort: filters.sort })} />
+          : <div className="empty"><h3>Nothing here yet</h3><p>Clips appear once they are cut from a recording, and files once they are uploaded.</p></div>
+      ) : view === 'grid' ? (
+        <>
+          <div className="lib-grid-head">
+            <label className="lib-selall">
+              <input type="checkbox" checked={sel.allOn} ref={(el) => { if (el) el.indeterminate = sel.someOn && !sel.allOn }} onChange={sel.toggleAll} aria-label="Select all shown" />
+              Select all shown
+            </label>
+          </div>
+          <LibraryGrid rows={rows} selected={sel.sel} onToggle={sel.toggle} onOpen={(id) => setOpen(id)} openId={open} />
+          {open && (
+            <div className="drawer-scrim" onClick={(e) => { if (e.target === e.currentTarget) setOpen(null) }}>
+              <div className="drawer lib-drawer-asset" role="dialog" aria-modal="true" aria-label="Asset" onKeyDown={(e) => { if (e.key === 'Escape') setOpen(null) }}>
+                <div className="drawer-h">
+                  <span className="t">{rows.find((r) => r.id === open)?.title || 'Untitled'}</span>
+                  <button type="button" className="icon-btn" onClick={() => setOpen(null)} aria-label="Close" autoFocus>{LibIcon.close}</button>
+                </div>
+                <div className="drawer-b"><AssetDetail id={open} onChanged={load} /></div>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="card lib-table-card">
+          <table className="lib-table">
+            <thead>
+              <tr>
+                <SelectAllHead allOn={sel.allOn} someOn={sel.someOn} onToggle={sel.toggleAll} label="Select all shown" />
+                <th scope="col">Title</th>
+                <th scope="col">Source</th>
+                <th scope="col">Length</th>
+                {show('type') && <th scope="col">Content type</th>}
+                {show('complete') && <th scope="col">Metadata</th>}
+                {show('encode') && <th scope="col">Top rendition</th>}
+                {show('codec') && <th scope="col">Codec</th>}
+                {show('renditions') && <th scope="col">Renditions</th>}
+                {show('blocks') && <th scope="col">Sources</th>}
+                <th scope="col">Review</th><th scope="col">QC</th><th scope="col">Availability</th><th scope="col">Cut</th><th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((a) => {
+                const x = a as any
+                return (
+                  <Fragment key={a.id}>
+                    <tr onClick={() => setOpen(open === a.id ? null : a.id)} style={{ cursor: 'pointer' }} className={sel.sel.has(a.id) ? 'sel' : undefined}>
+                      <SelectCell on={sel.sel.has(a.id)} onToggle={() => sel.toggle(a.id)} label={`Select ${a.title || 'Untitled'}`} />
+                      <td>
+                        <div className="lib-title-cell">
+                          <Keyscreen row={a} w={96} h={54} className="sm" />
+                          <div className="min-w-0">
+                            <b>{a.title || 'Untitled'}</b>
+                            <div><EncodeState a={x} /></div>
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ color: 'var(--muted)' }}>
+                        {x.source_name ?? (x.source_kind === 'upload' ? 'Uploaded' : x.source_kind === 'watchfolder' ? 'Watchfolder' : '')}
+                      </td>
+                      <td className="mono" style={{ color: 'var(--muted)' }}>{fmtDur(a.duration_ms)}</td>
+                      {show('type') && <td><TypeLabel row={a} /></td>}
+                      {show('complete') && <td><Completeness row={a} /></td>}
+                      {show('encode') && <td>{a.top_height ? resLabel(a.top_height) : <span className="lib-faint">Not known</span>}</td>}
+                      {show('codec') && <td>{codecLabel(a.video_codec) || <span className="lib-faint">Not known</span>}</td>}
+                      {show('renditions') && <td>{a.rendition_count ?? <span className="lib-faint">Not known</span>}</td>}
+                      {show('blocks') && (
+                        <td style={{ color: 'var(--muted)' }}>
+                          {a.source_block_count == null ? <span className="lib-faint">Not recorded</span>
+                            : `${a.source_block_count} block${a.source_block_count === 1 ? '' : 's'}`}
+                          {(a.source_container_count ?? 0) > 1 && <span style={{ color: 'var(--warn,#fbbf24)' }}> · {a.source_container_count} days</span>}
+                        </td>
                       )}
-                    </td>
-                    <td style={{ color: REVIEW_TONE[x.review_state ?? 'draft'], fontSize: 'var(--fs-sm)' }}>
-                      {REVIEW_LABEL[x.review_state ?? 'draft']}
-                    </td>
-                    <td style={{ color: QC_TONE[x.qc_state] ?? 'var(--faint)', fontSize: 'var(--fs-sm)' }}>
-                      {x.qc_state ?? 'not run'}
-                    </td>
-                    <td style={{ fontSize: 'var(--fs-sm)' }}>
-                      {(() => {
-                        const st = (x.availability_state ?? (x.published ? 'available' : 'draft')) as string
-                        const ui = STATE_UI[st] ?? STATE_UI.draft
-                        return <span style={{ color: ui.color }} title={x.available_until ? `until ${new Date(x.available_until).toLocaleString()}` : undefined}>
-                          {ui.label}{st === 'available' && x.has_stale_publication ? ', copy is old' : ''}
-                        </span>
-                      })()}
-                    </td>
-                    <td style={{ color: 'var(--muted)' }}>{new Date(a.created_at).toLocaleDateString()}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button className="btn ghost" onClick={e => { e.stopPropagation(); setOpen(open === a.id ? null : a.id) }}>
-                        {open === a.id ? 'Close' : 'Open'}
-                      </button>
-                    </td>
-                  </tr>
-                  {open === a.id && (
-                    <tr><td colSpan={9} style={{ background: 'var(--panel-2)' }}>
-                      <AssetDetail id={a.id} onChanged={load} />
-                    </td></tr>
-                  )}
-                </Fragment>
-              )
-            })}
-            {shown.length === 0 && (
-              <tr><td colSpan={9} style={{ color: 'var(--faint)' }}>
-                {rows.length === 0
-                  ? 'Nothing here yet. Clips appear once they are cut from a recording.'
-                  : 'Nothing matches that filter.'}
-              </td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                      <td style={{ color: REVIEW_TONE[x.review_state ?? 'draft'], fontSize: 'var(--fs-sm)' }}>{REVIEW_LABEL[x.review_state ?? 'draft']}</td>
+                      <td style={{ color: QC_TONE[x.qc_state] ?? 'var(--faint)', fontSize: 'var(--fs-sm)' }}>{x.qc_state ?? 'not run'}</td>
+                      <td><AvailabilityPill row={a} />{x.has_stale_publication && <div className="lib-faint lib-small">copy is old</div>}</td>
+                      <td style={{ color: 'var(--muted)' }}>{new Date(a.created_at).toLocaleDateString()}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button className="btn ghost" onClick={e => { e.stopPropagation(); setOpen(open === a.id ? null : a.id) }} aria-expanded={open === a.id}>
+                          {open === a.id ? 'Close' : 'Open'}
+                        </button>
+                      </td>
+                    </tr>
+                    {open === a.id && (
+                      <tr><td colSpan={10 + extraCols} style={{ background: 'var(--panel-2)' }}>
+                        <AssetDetail id={a.id} onChanged={load} />
+                      </td></tr>
+                    )}
+                  </Fragment>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {page && rows.length > 0 && (
+        <nav className="lib-pager" aria-label="Pages">
+          <span className="lib-faint">
+            {total != null ? `${first} to ${first + rows.length - 1} of ${total}` : `${first} to ${first + rows.length - 1}`}
+          </span>
+          <button type="button" className="btn ghost sm" disabled={!page.prev && pageNo === 0} onClick={() => { setCursor(page.prev); setPageNo((n) => Math.max(0, n - 1)) }}>
+            {LibIcon.prev}Previous
+          </button>
+          <button type="button" className="btn ghost sm" disabled={!page.next} onClick={() => { setCursor(page.next); setPageNo((n) => n + 1) }}>
+            Next{LibIcon.next}
+          </button>
+        </nav>
+      )}
     </>
   )
 }
