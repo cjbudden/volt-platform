@@ -140,3 +140,27 @@ a.btn{text-decoration:none}
   .gfx-frow{grid-template-columns:1fr 1fr}
   .gfx-frow .now{grid-column:span 2}
 }
+
+/* stage states: never a silently blank preview */
+.gfx-stage-note{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:51;max-width:min(78%,520px);padding:10px 14px;border-radius:8px;background:rgba(10,14,22,.86);color:#e8edf5;font-size:var(--fs-sm);line-height:1.45;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,.3)}
+.gfx-stage-note.compact{padding:6px 10px;font-size:12px;max-width:86%}
+.gfx-stage-note.quiet{background:transparent;box-shadow:none;color:rgba(232,237,245,.75)}
+.gfx-stage-badge{position:absolute;right:8px;top:8px;z-index:52;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.gfx-stage-badge.dev{background:#f5c451;color:#2a1d00}
+.gfx-stage-badge.error{background:#f87171;color:#1a0505}
+.gfx-stage-badge.info{background:rgba(10,14,22,.8);color:#e8edf5}
+.gfx-status{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sm);font-weight:600;color:var(--text)}
+.gfx-status .d{width:8px;height:8px;border-radius:50%;flex:none;background:var(--idle)}
+.gfx-status .x{font-weight:400;color:var(--muted)}
+.gfx-status.ok .d{background:var(--live)}.gfx-status.dev .d{background:#f5c451}.gfx-status.err .d{background:#f87171}.gfx-status.err{color:#fca5a5}
+.gfx-style{margin-bottom:16px}
+.gfx-style-h{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:14px 0 8px}
+.gfx-style-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:8px}
+.gfx-style-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border-2);border-radius:8px}
+.gfx-style-row.changed{border-color:rgba(245,196,81,.55);background:rgba(245,196,81,.06)}
+.gfx-style-row input[type=color]{width:38px;height:34px;border:0;background:none;padding:0;flex:none}
+.gfx-style-row .n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gfx-style-aa{width:38px;height:34px;flex:none;display:grid;place-items:center;font-weight:700;color:var(--muted);border:1px solid var(--border-2);border-radius:6px}
+.gfx-style .mono,.gfx-style-row .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.gfx-status{white-space:nowrap}
+.gfx-status-full{display:flex;flex-direction:column;gap:2px;max-width:640px}

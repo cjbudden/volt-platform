@@ -44,6 +44,8 @@ export interface OgrafInfo {
   problems: { id: string; level: CheckLevel; title: string; detail: string }[];
   manifestCount: number;
   requiresInternet?: boolean;
+  /** Stylesheets Volt adds to the host page: volt-fonts.css from the style editor. */
+  css?: string[];
 }
 
 /** The manifests in a package, root first, then by path. */
@@ -162,6 +164,7 @@ export function readOgraf(files: PackageFile[]): Manifest | null {
     problems,
     manifestCount: manifests.length,
     ...(requiresInternet ? { requiresInternet: true } : {}),
+    ...(files.some((f) => f.path === 'volt-fonts.css') ? { css: ['volt-fonts.css'] } : {}),
   };
   return {
     ...(str(d.name, 120) ? { name: str(d.name, 120) } : {}),
@@ -239,6 +242,7 @@ export function ografHostPage(m: Manifest): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="generator" content="Volt OGraf host">
 <title>${(m.name ?? o.id).replace(/[<&]/g, '')}</title>
+${(o.css ?? []).filter((c) => /^[\w./-]+\.css$/.test(c)).map((c) => `<link rel="stylesheet" href="./${c}">`).join('\n')}
 <style>html,body{margin:0;padding:0;width:${w}px;height:${h}px;overflow:hidden;background:transparent}
 volt-ograf-graphic{position:absolute;left:0;top:0;width:${w}px;height:${h}px;display:block;overflow:hidden}</style>
 <script>(function(){

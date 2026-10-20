@@ -4776,6 +4776,131 @@
      "exists"
     ]
    },
+   "schema_key": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "Standard content type key (episode, movie, clip, sports-match ...)"
+   },
+   "schema_org_type": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "schema.org type of the content type (Episode, Movie, VideoObject, SportsEvent ...)"
+   },
+   "origin": {
+    "type": "enum",
+    "values": [
+     "recording",
+     "clip",
+     "upload",
+     "watchfolder"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "recording, clip, upload or watchfolder"
+   },
+   "metadata_completeness": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "Target metadata filled, 0 to 100"
+   },
+   "metadata_missing_required": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ],
+    "doc": "A required target field is empty, or the asset has no content type"
+   },
+   "top_height": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "Height of the top rendition (2160, 1080, 720 ...)"
+   },
+   "video_codec": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "h264, hevc or av1"
+   },
+   "rendition_count": {
+    "type": "number",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
    "has_stale_publication": {
     "type": "boolean",
     "sort": true,

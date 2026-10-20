@@ -164,6 +164,40 @@ const ok = (c: boolean, m: string, d = '') => { if (c) { pass++; console.log('PA
       await api('DELETE', `/api/graphics/templates/${og.id}/draft`);
     }
 
+    console.log('== status + style ==');
+    {
+      r = await api('GET', '/api/graphics/templates');
+      const byName = new Map<string, any>(r.j.items.map((x: any) => [x.name, x]));
+      ok([...byName.values()].filter((x: any) => x.owner === 'volt').every((x: any) => x.status?.state === 'ready'), 'Volt defaults are ready');
+      ok(r.j.items.some((x: any) => x.status?.state === 'in_development' || x.status?.state === 'incomplete'), 'drafts-only templates say so', JSON.stringify(r.j.items.map((x: any) => [x.name, x.status?.state])));
+      const lt = r.j.items.find((x: any) => x.owner === 'volt' && /Name super/.test(x.name));
+      r = await api('GET', `/api/graphics/templates/${lt.id}/versions/${lt.latest.id}/style`);
+      ok(r.s === 200 && r.j.tokens.some((t: any) => t.id === 'var:--bar') && r.j.fonts.some((f: any) => f.family === 'Volt Serif' && f.bundled), 'style of a Volt template can be read', JSON.stringify(r.j).slice(0, 200));
+      r = await api('POST', `/api/graphics/templates/${lt.id}/style`, { versionId: lt.latest.id, changes: { 'var:--bar': '#123456' } });
+      ok(r.s === 400 && /read-only/i.test(r.j.error ?? ''), 'a Volt template cannot be restyled in place', JSON.stringify(r.j));
+      r = await api('POST', `/api/graphics/templates/${lt.id}/duplicate`, { name: 'Name super (brand)' });
+      const mine = r.j;
+      r = await api('GET', `/api/graphics/templates/${mine.id}`);
+      ok(r.j.status?.state === 'in_development', 'the copy is in development until published', JSON.stringify(r.j.status));
+      const font = Buffer.from('wOF2-test-font').toString('base64');
+      r = await api('POST', `/api/graphics/templates/${mine.id}/style`, { versionId: mine.draft.id, changes: { 'var:--bar': '#123456', 'font:Volt Serif': 'Brand Sans' }, addFonts: [{ family: 'Brand Sans', filename: 'BrandSans-Bold.woff2', base64: font }] });
+      ok(r.s === 200 && r.j.status === 'draft' && r.j.publishable && /Style: 2 changes, 1 font added/.test(r.j.note ?? ''), 'restyle writes a checked draft with a note', JSON.stringify(r.j).slice(0, 300));
+      const styled = r.j;
+      let g = await fetch(`${base}/gfx/${styled.id}/index.html`);
+      const html = await g.text();
+      ok(html.includes('--bar:#123456') && html.includes('href="volt-fonts.css"') && /"Brand Sans"|Brand Sans/.test(html), 'served page carries the new colour and font');
+      g = await fetch(`${base}/gfx/${styled.id}/fonts/brand-sans.woff2`);
+      ok(g.status === 200 && g.headers.get('content-type') === 'font/woff2', 'the added font is served from the package');
+      r = await api('POST', `/api/graphics/templates/${mine.id}/style`, { versionId: styled.id, changes: { 'var:--bar': 'red;}body{display:none' } });
+      ok(r.s === 400 && /not a colour/.test(r.j.error ?? ''), 'bad colour refused');
+      r = await api('POST', `/api/graphics/templates/${mine.id}/style`, { versionId: styled.id, changes: {} });
+      ok(r.s === 400, 'nothing to change is a 400');
+      r = await api('GET', `/api/graphics/templates/${mine.id}/versions/${styled.id}/style`, undefined, { token: tokOther });
+      ok(r.s === 404, 'another account cannot read the style');
+      await api('DELETE', `/api/graphics/templates/${mine.id}/draft`);
+      await api('DELETE', `/api/graphics/templates/${mine.id}`);
+    }
+
     console.log('== duplicate ==');
     r = await api('POST', `/api/graphics/templates/${scorebug.id}/duplicate`, { name: 'Rugby scorebug' });
     const rugby = r.j;

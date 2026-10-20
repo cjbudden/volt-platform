@@ -154,3 +154,50 @@ errors. Two of them are test fixtures (`test/fixtures/ograf`, MIT).
 
 **Not yet:** custom actions in live control, non-real-time rendering (`goToTime`, `setActionsSchedule`) for the
 burn-in renderer, and OGraf thumbnails as library thumbnails.
+
+## 8. Status, previews and the style editor (not a designer)
+
+**Status.** Every template has one status, the same in the API (`status` on each template) and the console:
+
+| Status | Meaning |
+|---|---|
+| Ready | A published version passes its checks; setups can use it. A waiting draft is noted (ready to publish, or N errors). |
+| In development | Nothing published yet; the draft passes and can be published. Previews carry an IN DEVELOPMENT ribbon. |
+| N errors | Nothing published yet; the draft has errors that block publishing. The first one is named. |
+| No files | Nothing uploaded. |
+
+**Previews never fail silently.** Fields with no sample value get a generated one (the field label for text,
+three items for a list, the first option of a dropdown), so a template without sample data still draws. The stage
+then says what happened: *Loading preview*, *The preview did not load* (no answer from the template page within
+10 s), a template error, or *drew nothing with this data*. The last comes from the bridge: asked once the preview is
+on screen (Chrome pauses animation in off-screen frames), it counts the elements that paint (own text, a
+background, a border, an image) and returns where they are; library thumbnails zoom to that area when a template
+declares no `bbox`.
+
+**Dev server.** `volt-web`'s Vite config proxies `/gfx` to the API like `/api`. Without it every preview loads
+the console's own page inside the sandbox and shows nothing (the cause of the blank previews seen on 20 Oct).
+
+**The style editor ("Customise look", "Customise a copy" for Volt templates)** changes what a template already
+has, in any package, whoever made it:
+
+* theme variables (`--brand: #0a2350`) are edited at the declaration;
+* colours written as literals (#hex, rgb(), hsl()) in the template's own CSS, HTML and scripts are grouped
+  (#fff and #ffffff are one) and replaced everywhere; id selectors, `url(#id)` and `href="#x"` are left alone;
+* fonts: the first family of each `font-family`, `font:` shorthand or script `fontFamily` can be swapped for any
+  family the package has, keeping the fallbacks and the original quoting; `@font-face` rules are not rewritten;
+* font files (.woff2, .woff, .ttf, .otf, 4 MB each) are added to `fonts/` with an `@font-face` in
+  `volt-fonts.css`, linked from index.html (OGraf: from the host page).
+
+Vendor and minified scripts (`lib/`, `vendor/`, `*.min.js`, over 200 KB) are not scanned. Colours inside images,
+Lottie JSON or canvas drawing are out of reach; the editor says so when it finds nothing. Every save is a new
+draft, checked like any other, with a note of what changed; nothing on air changes until it is published and a
+setup moves to it.
+
+**No template designer in Volt (decision, 20 Oct 2026).** Designing broadcast graphics (layout, animation
+timing, motion) is what dedicated tools do well: Loopic (exports CasparCG, SPX and OGraf), SPX, Singular, or any
+HTML/CSS workflow, and OGraf makes their output portable. A designer in Volt would be a large surface to build,
+test and keep up with those tools. Volt's part is everything after design: import from any of them, check,
+preview, adapt to a brand (style editor, code editor), bind data and operate. Revisit if customers without a
+graphics team need simple layouts; the first step then would be field-level layout presets on Volt's own
+templates, not a free-form canvas.
+

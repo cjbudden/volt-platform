@@ -16,8 +16,37 @@ export interface Version {
   id: string; version: number | null; status: 'draft' | 'published'; manifest: Manifest; checks: Check[]; publishable: boolean
   sizeBytes: number; fileCount: number; note: string | null; createdAt: string; publishedAt: string | null; url: string
 }
+export type TemplateState = 'ready' | 'in_development' | 'incomplete' | 'empty'
+export interface TemplateStatus { state: TemplateState; label: string; detail: string; draft?: { publishable: boolean; errors: number; warnings: number } }
+
+/**
+ * Values for a preview: the template's own sample, and a generated value for
+ * every field the sample leaves out, so a template never previews empty just
+ * because its author shipped no sample data. Image fields stay empty.
+ */
+export function previewValues(m: Manifest | undefined | null): Record<string, any> {
+  const out: Record<string, any> = { ...(m?.sample ?? {}) }
+  for (const f of m?.fields ?? []) {
+    if (out[f.id] !== undefined && out[f.id] !== '') continue
+    if (f.options?.length) { out[f.id] = f.options[0].value; continue }
+    switch (f.type) {
+      case 'number': out[f.id] = 0; break
+      case 'boolean': out[f.id] = true; break
+      case 'color': out[f.id] = '#1f6feb'; break
+      case 'list': out[f.id] = [1, 2, 3].map((n) => `${f.label} ${n}`); break
+      case 'image': break
+      default: out[f.id] = f.label || f.id
+    }
+  }
+  return out
+}
+
+export interface StyleToken { id: string; kind: 'color' | 'font'; via: 'var' | 'literal'; label: string; value: string; uses: number; files: string[] }
+export interface StyleReport { versionId: string; tokens: StyleToken[]; fonts: { family: string; bundled: boolean; file?: string }[] }
+
 export interface Template {
   id: string; name: string; kind: Kind; source: 'volt' | 'upload' | 'paste' | 'duplicate'; owner: 'volt' | 'account'
+  status?: TemplateStatus
   latest: Version | null; draft: Version | null; setups?: number; assignments?: number; createdAt: string; updatedAt: string
 }
 export interface TemplateDetail extends Template {
@@ -85,6 +114,9 @@ export const gfx = {
     req('/graphics/templates/import' + qs(o as any), { method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream' } }),
   patchTemplate: (id: string, b: { name?: string; kind?: Kind }): Promise<Template> => req(`/graphics/templates/${id}`, { method: 'PATCH', ...J(b) }),
   archiveTemplate: (id: string) => req(`/graphics/templates/${id}`, { method: 'DELETE' }),
+  style: (id: string, vid: string): Promise<StyleReport> => req(`/graphics/templates/${id}/versions/${vid}/style`),
+  saveStyle: (id: string, b: { versionId: string; changes: Record<string, string>; addFonts?: { family: string; filename: string; base64: string }[] }): Promise<Version> =>
+    req(`/graphics/templates/${id}/style`, { method: 'POST', ...J(b) }),
   duplicate: (id: string, name?: string): Promise<Template> => req(`/graphics/templates/${id}/duplicate`, { method: 'POST', ...J({ name }) }),
   putDraftPaste: (id: string, b: { html: string; path?: string; keep?: boolean; files?: Record<string, any> }): Promise<Version> => req(`/graphics/templates/${id}/draft`, { method: 'PUT', ...J(b) }),
   putDraftUpload: (id: string, file: Blob, filename: string): Promise<Version> =>

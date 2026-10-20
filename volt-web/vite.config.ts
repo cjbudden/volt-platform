@@ -30,6 +30,7 @@ export default defineConfig({
       '/radio': 'http://localhost:8080',   // live MP3 fan-out (radio stations)
       '/filler': 'http://localhost:8080',  // uploaded slates & loops
       '/clips': 'http://localhost:8080',   // rendered clip outputs
+      '/gfx': 'http://localhost:8080',     // graphics template files (previews, player overlay)
       '^/player/': 'http://localhost:8080',  // the embed bundle (Player setup snippet, share pages)
     },
   },

@@ -19,7 +19,7 @@ import { PageHead } from '../scaffold'
 import { useAccess } from '../access'
 import { Notice } from '../notices'
 import { api } from '../api'
-import { gfx, KIND_LABEL, SOURCE_LABEL, type Assignment, type DataSource, type Kind, type Setup, type Template } from './gfxApi'
+import { gfx, previewValues, KIND_LABEL, SOURCE_LABEL, type Assignment, type DataSource, type Kind, type Setup, type Template } from './gfxApi'
 import { GraphicStage } from './GraphicStage'
 import { TemplateAdd } from './TemplateAdd'
 import { TemplateDetailPage } from './TemplateDetail'
@@ -111,6 +111,29 @@ function Stat({ label, value, sub, color }: { label: string; value: number | und
   )
 }
 
+const STATE_TONE: Record<string, string> = { ready: 'ok', in_development: 'dev', incomplete: 'err', empty: 'idle' }
+
+/** Ready / In development / N errors / No files, with the draft's state when one is waiting. */
+export function StatusPill({ t, full }: { t: Template; full?: boolean }) {
+  const s = t.status
+  if (!s) return null
+  const extra = s.state === 'ready' && s.draft ? (s.draft.publishable ? 'draft ready to publish' : `draft has ${s.draft.errors} error${s.draft.errors === 1 ? '' : 's'}`) : ''
+  const pill = (
+    <span className={`gfx-status ${STATE_TONE[s.state]}`} title={s.detail}>
+      <span className="d" aria-hidden="true" />{s.label}{!full && extra && <span className="x"> · {extra}</span>}
+    </span>
+  )
+  if (!full) return pill
+  return <div className="gfx-status-full">{pill}<span className="gfx-meta">{s.detail}</span></div>
+}
+
+/** The ribbon on a preview, for anything that cannot be used yet. */
+export function stageBadge(t: Template): { text: string; tone: 'dev' | 'error' } | undefined {
+  if (t.status?.state === 'in_development') return { text: 'In development', tone: 'dev' }
+  if (t.status?.state === 'incomplete') return { text: t.status.label, tone: 'error' }
+  return undefined
+}
+
 export function sourceTag(t: Template) {
   if (t.owner === 'volt') return <span className="tag gfx-volt">Volt</span>
   if (!t.latest) return <span className="tag gfx-draft">Draft</span>
@@ -121,10 +144,12 @@ function TemplatesTab({ templates }: { templates: Template[] | null }) {
   const [kind, setKind] = useState<Kind | 'all'>('all')
   const [source, setSource] = useState<'all' | 'volt' | 'mine' | 'draft'>('all')
   const [q, setQ] = useState('')
+  const [state, setState] = useState<'all' | 'ready' | 'in_development' | 'incomplete'>('all')
   const list = useMemo(() => (templates ?? []).filter((t) =>
     (kind === 'all' || t.kind === kind) &&
+    (state === 'all' || t.status?.state === state || (state === 'incomplete' && t.status?.state === 'empty')) &&
     (source === 'all' || (source === 'volt' ? t.owner === 'volt' : source === 'mine' ? t.owner === 'account' : !!t.draft)) &&
-    (!q || t.name.toLowerCase().includes(q.toLowerCase()))), [templates, kind, source, q])
+    (!q || t.name.toLowerCase().includes(q.toLowerCase()))), [templates, kind, source, q, state])
   if (!templates) return <div className="loading">Loading templates…</div>
   const kinds = (['all', 'scorebug', 'lower_third', 'ticker', 'bug', 'full_frame', 'other'] as const).filter((k) => k === 'all' || templates.some((t) => t.kind === k))
   return (
@@ -135,6 +160,10 @@ function TemplatesTab({ templates }: { templates: Template[] | null }) {
           {kinds.map((k) => <button key={k} className={`selchip ${kind === k ? 'sel' : ''}`} onClick={() => setKind(k)}>{k === 'all' ? 'All' : KIND_LABEL[k]}</button>)}
         </div>
         <div className="spacer" />
+        <label className="gfx-meta" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>Status
+          <select className="inp" style={{ width: 'auto' }} value={state} onChange={(e) => setState(e.target.value as any)}>
+            <option value="all">Any status</option><option value="ready">Ready</option><option value="in_development">In development</option><option value="incomplete">Has errors</option>
+          </select></label>
         <label className="gfx-meta" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>Source
           <select className="inp" style={{ width: 'auto' }} value={source} onChange={(e) => setSource(e.target.value as any)}>
             <option value="all">All sources</option><option value="volt">Volt</option><option value="mine">Yours</option><option value="draft">With a draft</option>
@@ -148,8 +177,8 @@ function TemplatesTab({ templates }: { templates: Template[] | null }) {
             return (
               <div className="card gfx-card" key={t.id}>
                 <a href={`/graphics/templates/${t.id}`} onClick={(e) => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(`/graphics/templates/${t.id}`) }} aria-label={`Preview ${t.name}`}>
-                  {v ? <GraphicStage focus={v.manifest.bbox} layers={[{ key: t.id, url: v.url, values: v.manifest.sample ?? {}, onAir: true, canvas: v.manifest.canvas }]} />
-                    : <div className="gfx-stage bg-picture" />}
+                  <GraphicStage compact autoFocus focus={v?.manifest.bbox} badge={stageBadge(t)} empty="No files uploaded yet"
+                    layers={v ? [{ key: t.id, url: v.url, values: previewValues(v.manifest), onAir: true, canvas: v.manifest.canvas }] : []} />
                 </a>
                 <div className="gfx-card-b">
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -159,6 +188,7 @@ function TemplatesTab({ templates }: { templates: Template[] | null }) {
                     </div>
                     {sourceTag(t)}
                   </div>
+                  <StatusPill t={t} />
                   <div className="gfx-meta"><span className={`gfx-dot ${used ? 'live' : ''}`} />{t.setups ? `${t.setups} setup${t.setups === 1 ? '' : 's'} · ${used} assigned` : 'Not used yet'}</div>
                   <div className="gfx-actions">
                     <button className="btn ghost sm" onClick={() => navigate(`/graphics/templates/${t.id}`)}>Preview</button>

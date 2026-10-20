@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**598 routes.** Public API: 61 · Sign-in (no session yet): 7 · Admin API: 479 · Platform API: 21 · Machine-to-machine: 11 · Delivery and previews (outside /api): 11 · Health and discovery: 8
+**621 routes.** Public API: 61 · Sign-in (no session yet): 7 · Admin API: 500 · Platform API: 21 · Machine-to-machine: 13 · Delivery and previews (outside /api): 11 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -408,6 +408,9 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | PUT | `/api/fast/channels/:id/ads` | admin session (Bearer) or account secret key | operator tier or above |  |
 | POST | `/api/fast/channels/:id/breaks/:bid/decide` | admin session (Bearer) or account secret key | operator tier or above |  |
 | POST | `/api/fast/channels/:id/lineups` | admin session (Bearer) or account secret key | operator tier or above |  |
+| POST | `/api/fast/channels/:id/on-air` | admin session (Bearer) or account secret key | operator tier or above |  |
+| POST | `/api/fast/channels/:id/prepare` | admin session (Bearer) or account secret key | operator tier or above |  |
+| GET | `/api/fast/channels/:id/readiness` | admin session (Bearer) or account secret key | any signed-in admin user |  |
 | GET | `/api/fast/library` | admin session (Bearer) or account secret key | any signed-in admin user |  |
 | DELETE | `/api/fast/lineups/:lid` | admin session (Bearer) or account secret key | operator tier or above |  |
 | GET | `/api/fast/lineups/:lid` | admin session (Bearer) or account secret key | any signed-in admin user |  |
@@ -441,10 +444,10 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/filler-assets` | admin session (Bearer) or account secret key | media: view |  |
 | POST | `/api/filler-assets` | admin session (Bearer) or account secret key | media: manage |  |
 | DELETE | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: manage |  |
+| GET | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: view |  |
 | PATCH | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: manage |  |
 
 ### `/api/fleet`
-| GET | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: view |  |
 
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
@@ -497,9 +500,11 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | PUT | `/api/graphics/templates/:id/draft` | admin session (Bearer) or account secret key | graphics: manage |  |
 | POST | `/api/graphics/templates/:id/draft/publish` | admin session (Bearer) or account secret key | graphics: manage |  |
 | POST | `/api/graphics/templates/:id/duplicate` | admin session (Bearer) or account secret key | graphics: manage |  |
+| POST | `/api/graphics/templates/:id/style` | admin session (Bearer) or account secret key | graphics: manage |  |
 | GET | `/api/graphics/templates/:id/versions/:vid/download` | admin session (Bearer) or account secret key | graphics: view |  |
 | GET | `/api/graphics/templates/:id/versions/:vid/files` | admin session (Bearer) or account secret key | graphics: view |  |
 | GET | `/api/graphics/templates/:id/versions/:vid/source` | admin session (Bearer) or account secret key | graphics: view |  |
+| GET | `/api/graphics/templates/:id/versions/:vid/style` | admin session (Bearer) or account secret key | graphics: view |  |
 | POST | `/api/graphics/templates/import` | admin session (Bearer) or account secret key | graphics: manage |  |
 
 ### `/api/groups`
@@ -558,11 +563,6 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | POST | `/api/jobs/:id/cancel` | admin session (Bearer) or account secret key | media: operate |  |
 | POST | `/api/jobs/:id/retry` | admin session (Bearer) or account secret key | media: operate |  |
 
-### `/api/metadata-schemas`
-
-| Method | Path | Credential | Access | Viewer tier |
-|---|---|---|---|---|
-| GET | `/api/metadata-schemas` | admin session (Bearer) or account secret key | settings: any signed-in admin user (lookup for forms) |  |
 ### `/api/live-streams`
 
 | Method | Path | Credential | Access | Viewer tier |
@@ -572,6 +572,11 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/live-streams/:kind/:id/schema.org` | admin session (Bearer) or account secret key | monitoring: view |  |
 | GET | `/api/live-streams/presets` | admin session (Bearer) or account secret key | monitoring: view |  |
 
+### `/api/metadata-schemas`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/metadata-schemas` | admin session (Bearer) or account secret key | settings: any signed-in admin user (lookup for forms) |  |
 | POST | `/api/metadata-schemas` | admin session (Bearer) or account secret key | settings: manage |  |
 | DELETE | `/api/metadata-schemas/:id` | admin session (Bearer) or account secret key | settings: manage |  |
 | GET | `/api/metadata-schemas/:id` | admin session (Bearer) or account secret key | settings: any signed-in admin user (lookup for forms) |  |
@@ -655,23 +660,23 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | GET | `/api/publications` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/publications/:id` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/publications/sync-views` | admin session (Bearer) or account secret key | vod: manage |  |
 | POST | `/api/publications/vod/:id/publish` | admin session (Bearer) or account secret key | vod: operate |  |
 
 ### `/api/publish-targets`
 
-| GET | `/api/publications/:id` | admin session (Bearer) or account secret key | vod: view |  |
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | GET | `/api/publish-targets` | admin session (Bearer) or account secret key | settings: view |  |
 | POST | `/api/publish-targets` | admin session (Bearer) or account secret key | settings: manage |  |
 | DELETE | `/api/publish-targets/:id` | admin session (Bearer) or account secret key | settings: manage |  |
+| GET | `/api/publish-targets/:id` | admin session (Bearer) or account secret key | settings: view |  |
 | PATCH | `/api/publish-targets/:id` | admin session (Bearer) or account secret key | settings: manage |  |
 
 ### `/api/publishing-rules`
 
 | Method | Path | Credential | Access | Viewer tier |
-| GET | `/api/publish-targets/:id` | admin session (Bearer) or account secret key | settings: view |  |
 |---|---|---|---|---|
 | GET | `/api/publishing-rules` | admin session (Bearer) or account secret key | settings: view |  |
 | DELETE | `/api/publishing-rules/:scopeKind/:scopeId?` | admin session (Bearer) or account secret key | settings: manage |  |
@@ -734,12 +739,12 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/scheduled-clips` | admin session (Bearer) or account secret key | recordings: view |  |
 | POST | `/api/scheduled-clips` | admin session (Bearer) or account secret key | recordings: manage |  |
 | DELETE | `/api/scheduled-clips/:id` | admin session (Bearer) or account secret key | recordings: manage |  |
+| GET | `/api/scheduled-clips/:id` | admin session (Bearer) or account secret key | recordings: view |  |
 
 ### `/api/search`
 
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
-| GET | `/api/scheduled-clips/:id` | admin session (Bearer) or account secret key | recordings: view |  |
 | GET | `/api/search` | admin session (Bearer) or account secret key | any signed-in admin user |  |
 
 ### `/api/share-links`
@@ -892,6 +897,9 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | PUT | `/api/vod/:id` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/availability` | admin session (Bearer) or account secret key | vod: view |  |
 | PATCH | `/api/vod/:id/availability` | admin session (Bearer) or account secret key | vod: manage |  |
+| GET | `/api/vod/:id/encode` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/vod/:id/epg-fill` | admin session (Bearer) or account secret key | vod: view |  |
+| POST | `/api/vod/:id/epg-fill` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/markers` | admin session (Bearer) or account secret key | vod: view |  |
 | DELETE | `/api/vod/:id/markers/:kind` | admin session (Bearer) or account secret key | vod: manage |  |
 | PUT | `/api/vod/:id/markers/:kind` | admin session (Bearer) or account secret key | vod: manage |  |
@@ -903,8 +911,11 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/vod/:id/review` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/:id/review` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/schema.org` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/vod/:id/target-metadata` | admin session (Bearer) or account secret key | vod: view |  |
 | PATCH | `/api/vod/:id/trim` | admin session (Bearer) or account secret key | vod: manage |  |
 | POST | `/api/vod/:id/withdraw` | admin session (Bearer) or account secret key | vod: operate |  |
+| POST | `/api/vod/epg-fill` | admin session (Bearer) or account secret key | vod: manage |  |
+| GET | `/api/vod/facets` | admin session (Bearer) or account secret key | vod: view |  |
 | GET | `/api/vod/review/queue` | admin session (Bearer) or account secret key | vod: view |  |
 
 ### `/api/watchfolders`
@@ -1023,6 +1034,8 @@ Encoders, engines, add-ons, payment providers. Each has its own secret.
 
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
+| POST | `/api/fast-playout/:id/heartbeat` | X-Volt-Ingest-Token | encoder / thumbnailer report |  |
+| GET | `/api/fast-playout/:id/state` | X-Volt-Ingest-Token | encoder / thumbnailer report |  |
 | GET | `/api/fast-playout/:id/timeline` | X-Volt-Ingest-Token | encoder / thumbnailer report |  |
 
 ### `/api/ingest`
@@ -1071,7 +1084,7 @@ Streams, images, share pages and players. The admin console web app is also serv
 
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
-| GET | `/fast/:id/s/:sid/:file` | admin session or internal | preview / internal |  |
+| GET | `/fast/:id/s/:sid/:file` | none, share token or playback token | public delivery | ✓ |
 
 ### `/gfx`
 

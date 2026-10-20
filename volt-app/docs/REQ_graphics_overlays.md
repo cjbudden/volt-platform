@@ -401,3 +401,21 @@ path), which OGraf's Lottie-based examples need; they still reach no network, no
 Details, mapping and checks: `GRAPHICS_TEMPLATE_STANDARD.md` section 7. Not yet: custom actions in live control,
 non-real-time rendering for burn-in.
 
+---
+
+## 15. Status, reliable previews and the style editor (built 20 Oct 2026)
+
+Christian: previews were blank; status (ready, in development, erroring) is key; at minimum copy a template and
+change its fonts and colours; a builder only if it does not over-commit us.
+
+* **Blank previews**: the console dev server did not proxy `/gfx`, so template frames loaded the console page.
+  Fixed, and the stage now always says why it shows nothing (did not load, template error, drew nothing).
+  Fields without samples get generated values; thumbnails zoom to where a graphic draws.
+* **Status**: Ready / In development / N errors / No files, on every template in the API and console, with a status
+  filter in the library and a ribbon on previews of anything not yet usable.
+* **Style editor**: colours (theme variables and literals) and fonts in any template, plus added font files, saved as
+  a checked draft. Volt templates are customised as a copy. API: `GET .../versions/:vid/style`,
+  `POST /api/graphics/templates/:id/style`.
+* **No in-app designer**: design happens in graphics tools (Loopic, SPX, Singular, OGraf producers); Volt imports,
+  adapts and operates. Reasoning in `GRAPHICS_TEMPLATE_STANDARD.md` section 8.
+

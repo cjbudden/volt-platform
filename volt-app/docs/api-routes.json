@@ -1503,6 +1503,24 @@
   "group": "/api/events"
  },
  {
+  "method": "POST",
+  "path": "/api/fast-playout/:id/heartbeat",
+  "api": "machine",
+  "credential": "X-Volt-Ingest-Token",
+  "access": "encoder / thumbnailer report",
+  "viewerTier": false,
+  "group": "/api/fast-playout"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fast-playout/:id/state",
+  "api": "machine",
+  "credential": "X-Volt-Ingest-Token",
+  "access": "encoder / thumbnailer report",
+  "viewerTier": false,
+  "group": "/api/fast-playout"
+ },
+ {
   "method": "GET",
   "path": "/api/fast-playout/:id/timeline",
   "api": "machine",
@@ -1625,6 +1643,33 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "POST",
+  "path": "/api/fast/channels/:id/on-air",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "POST",
+  "path": "/api/fast/channels/:id/prepare",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fast/channels/:id/readiness",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1836,6 +1881,15 @@
   "group": "/api/filler-assets"
  },
  {
+  "method": "GET",
+  "path": "/api/filler-assets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
   "method": "PATCH",
   "path": "/api/filler-assets/:id",
   "api": "admin",
@@ -1879,15 +1933,6 @@
   "access": "fleet: view",
   "viewerTier": false,
   "group": "/api/fleet"
- },
- {
-  "method": "GET",
-  "path": "/api/filler-assets/:id",
-  "api": "admin",
-  "credential": "admin session (Bearer) or account secret key",
-  "access": "media: view",
-  "viewerTier": false,
-  "group": "/api/filler-assets"
  },
  {
   "method": "GET",
@@ -2250,6 +2295,15 @@
   "group": "/api/graphics"
  },
  {
+  "method": "POST",
+  "path": "/api/graphics/templates/:id/style",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
   "method": "GET",
   "path": "/api/graphics/templates/:id/versions/:vid/download",
   "api": "admin",
@@ -2270,6 +2324,15 @@
  {
   "method": "GET",
   "path": "/api/graphics/templates/:id/versions/:vid/source",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/templates/:id/versions/:vid/style",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "graphics: view",
@@ -2628,6 +2691,42 @@
   "group": "/api/jobs"
  },
  {
+  "method": "GET",
+  "path": "/api/live-streams/:kind/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/live-streams"
+ },
+ {
+  "method": "GET",
+  "path": "/api/live-streams/:kind/:id/provider",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/live-streams"
+ },
+ {
+  "method": "GET",
+  "path": "/api/live-streams/:kind/:id/schema.org",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/live-streams"
+ },
+ {
+  "method": "GET",
+  "path": "/api/live-streams/presets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/live-streams"
+ },
+ {
   "method": "POST",
   "path": "/api/media/thumbnails",
   "api": "machine",
@@ -2689,42 +2788,6 @@
   "access": "settings: manage",
   "viewerTier": false,
   "group": "/api/metadata-schemas"
- },
- {
-  "method": "GET",
-  "path": "/api/live-streams/:kind/:id",
-  "api": "admin",
-  "credential": "admin session (Bearer) or account secret key",
-  "access": "monitoring: view",
-  "viewerTier": false,
-  "group": "/api/live-streams"
- },
- {
-  "method": "GET",
-  "path": "/api/live-streams/:kind/:id/provider",
-  "api": "admin",
-  "credential": "admin session (Bearer) or account secret key",
-  "access": "monitoring: view",
-  "viewerTier": false,
-  "group": "/api/live-streams"
- },
- {
-  "method": "GET",
-  "path": "/api/live-streams/:kind/:id/schema.org",
-  "api": "admin",
-  "credential": "admin session (Bearer) or account secret key",
-  "access": "monitoring: view",
-  "viewerTier": false,
-  "group": "/api/live-streams"
- },
- {
-  "method": "GET",
-  "path": "/api/live-streams/presets",
-  "api": "admin",
-  "credential": "admin session (Bearer) or account secret key",
-  "access": "monitoring: view",
-  "viewerTier": false,
-  "group": "/api/live-streams"
  },
  {
   "method": "GET",
@@ -3744,6 +3807,15 @@
   "group": "/api/publications"
  },
  {
+  "method": "GET",
+  "path": "/api/publications/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/publications"
+ },
+ {
   "method": "POST",
   "path": "/api/publications/sync-views",
   "api": "admin",
@@ -3789,6 +3861,15 @@
   "group": "/api/publish-targets"
  },
  {
+  "method": "GET",
+  "path": "/api/publish-targets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/publish-targets"
+ },
+ {
   "method": "PATCH",
   "path": "/api/publish-targets/:id",
   "api": "admin",
@@ -3805,15 +3886,6 @@
   "access": "settings: view",
   "viewerTier": false,
   "group": "/api/publishing-rules"
- },
- {
-  "method": "GET",
-  "path": "/api/publications/:id",
-  "api": "admin",
-  "credential": "admin session (Bearer) or account secret key",
-  "access": "vod: view",
-  "viewerTier": false,
-  "group": "/api/publications"
  },
  {
   "method": "DELETE",
@@ -3859,15 +3931,6 @@
   "access": "settings: view",
   "viewerTier": false,
   "group": "/api/publishing-rules"
- },
- {
-  "method": "GET",
-  "path": "/api/publish-targets/:id",
-  "api": "admin",
-  "credential": "admin session (Bearer) or account secret key",
-  "access": "settings: view",
-  "viewerTier": false,
-  "group": "/api/publish-targets"
  },
  {
   "method": "GET",
@@ -4204,6 +4267,15 @@
  },
  {
   "method": "GET",
+  "path": "/api/scheduled-clips/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/scheduled-clips"
+ },
+ {
+  "method": "GET",
   "path": "/api/search",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -4264,15 +4336,6 @@
   "access": "public (legacy alias of /api/public/share/:token/request-code)",
   "viewerTier": true,
   "group": "/api/share"
- },
- {
-  "method": "GET",
-  "path": "/api/scheduled-clips/:id",
-  "api": "admin",
-  "credential": "admin session (Bearer) or account secret key",
-  "access": "recordings: view",
-  "viewerTier": false,
-  "group": "/api/scheduled-clips"
  },
  {
   "method": "POST",
@@ -5032,6 +5095,33 @@
  },
  {
   "method": "GET",
+  "path": "/api/vod/:id/encode",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/:id/epg-fill",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/epg-fill",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
   "path": "/api/vod/:id/markers",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -5130,6 +5220,15 @@
   "group": "/api/vod"
  },
  {
+  "method": "GET",
+  "path": "/api/vod/:id/target-metadata",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
   "method": "PATCH",
   "path": "/api/vod/:id/trim",
   "api": "admin",
@@ -5144,6 +5243,24 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "vod: operate",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/epg-fill",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/facets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
   "viewerTier": false,
   "group": "/api/vod"
  },
@@ -5349,9 +5466,9 @@
   "method": "GET",
   "path": "/fast/:id/s/:sid/:file",
   "api": "delivery",
-  "credential": "admin session or internal",
-  "access": "preview / internal",
-  "viewerTier": false,
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
   "group": "/fast"
  },
  {

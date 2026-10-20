@@ -57,6 +57,8 @@ import { asyncHandler, badRequest, conflict, notFound } from '../util/http';
 import { actor, writeAudit } from '../services/audit';
 import { analyse, filesFromUpload, PackageError, safePath, type Analysed } from '../services/graphics/templatePackage';
 import { ografHostPage } from '../services/graphics/ograf';
+import { templateStatus } from '../services/graphics/status';
+import { applyStyle, readStyle, StyleError } from '../services/graphics/style';
 import { writeZip } from '../services/graphics/zip';
 import {
   loadTarget, assertTargetsAllowed, liveFor, liveOne, planFor, setValues, setAir, takeItem, takeOffRundown,
@@ -147,7 +149,7 @@ async function createTemplate(req: Request, raw: { path: string; data: Buffer }[
     await writeAudit(c, { accountId: acct, userId, label, action: 'create', entityType: 'graphics_template', entityId: t.id, snapshot: { name, kind: t.kind, source: o.source } });
     return { t, v };
   });
-  return { ...templateJson(out.t), draft: versionJson(out.v) };
+  return { ...templateJson(out.t), status: templateStatus(null, out.v), draft: versionJson(out.v) };
 }
 
 const templateJson = (t: any) => ({
@@ -173,7 +175,7 @@ graphicsRouter.get('/templates', asyncHandler(async (req, res) => {
       (SELECT count(*)::int FROM gfx_assignments a JOIN gfx_setups s ON s.id = a.setup_id LEFT JOIN gfx_state st ON st.assignment_id = a.id
          WHERE s.template_id = t.id AND a.account_id = $1 AND a.enabled) AS assignments
     FROM gfx_templates t WHERE ${where} ORDER BY t.account_id NULLS FIRST, t.name LIMIT 500`, params);
-  res.json({ items: rows.map((r) => ({ ...templateJson(r), latest: versionJson(r.latest), draft: versionJson(r.draft), setups: r.setups, assignments: r.assignments })) });
+  res.json({ items: rows.map((r) => ({ ...templateJson(r), status: templateStatus(r.latest, r.draft), latest: versionJson(r.latest), draft: versionJson(r.draft), setups: r.setups, assignments: r.assignments })) });
 }));
 
 graphicsRouter.post('/templates', asyncHandler(async (req, res) => {
@@ -203,7 +205,7 @@ graphicsRouter.get('/templates/:id', asyncHandler(async (req, res) => {
          WHERE a.setup_id = s.id) AS assignments
       FROM gfx_setups s JOIN gfx_template_versions v ON v.id = s.version_id
      WHERE s.template_id = $1 AND s.account_id = $2 ORDER BY s.name`, [t.id, acct]);
-  res.json({ ...templateJson(t), versions: versions.map(versionJson),
+  res.json({ ...templateJson(t), status: templateStatus(versions.find((v) => v.status === 'published'), versions.find((v) => v.status === 'draft')), versions: versions.map(versionJson),
     usedBy: used.map((u) => ({ setupId: u.id, setupName: u.name, versionId: u.version_id, version: u.version, assignments: u.assignments ?? [] })) });
 }));
 
@@ -264,6 +266,49 @@ graphicsRouter.put('/templates/:id/draft', rawBody, asyncHandler(async (req, res
   const { userId } = actor(req);
   const v = await tx((c) => insertVersion(c, t.id, a, userId, req.query.note ? String(req.query.note).slice(0, 300) : null));
   res.json(versionJson(v));
+}));
+
+// ---- style: change a template's colours and fonts (REQ section 15) -------------
+
+/**
+ * GET  /api/graphics/templates/:id/versions/:vid/style   the colours and fonts it uses
+ * POST /api/graphics/templates/:id/style                 { versionId, changes: { tokenId: value }, addFonts: [{ family, filename, base64 }] }
+ *      writes a new draft from that version with the changes applied, checked like any draft.
+ *      Volt templates are read-only: duplicate first (the console's "Customise a copy").
+ */
+graphicsRouter.get('/templates/:id/versions/:vid/style', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const t = await templateFor(acct, uuidParam(req.params.id, 'template'));
+  const v = await one<any>(`SELECT id FROM gfx_template_versions WHERE id = $1 AND template_id = $2`, [uuidParam(req.params.vid, 'version'), t.id]);
+  if (!v) throw notFound('No version with that id');
+  const files = (await filesOf(v.id)).map((f) => ({ path: f.path, data: f.content as Buffer }));
+  res.json({ versionId: v.id, ...readStyle(files) });
+}));
+
+const styleSchema = z.object({
+  versionId: z.string().uuid(),
+  changes: z.record(z.string().max(120)).default({}),
+  addFonts: z.array(z.object({ family: z.string().max(60), filename: z.string().max(120), base64: z.string().max(6_000_000) })).max(6).default([]),
+});
+graphicsRouter.post('/templates/:id/style', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const t = await templateFor(acct, uuidParam(req.params.id, 'template'), true);
+  const b = styleSchema.parse(req.body ?? {});
+  const v = await one<any>(`SELECT id, version, status FROM gfx_template_versions WHERE id = $1 AND template_id = $2`, [b.versionId, t.id]);
+  if (!v) throw notFound('No version with that id');
+  if (!Object.keys(b.changes).length && !b.addFonts.length) throw badRequest('Nothing to change.');
+  const files = (await filesOf(v.id)).map((f) => ({ path: f.path, data: f.content as Buffer }));
+  let raw;
+  try { raw = applyStyle(files, b.changes, b.addFonts.map((f) => ({ family: f.family.trim(), filename: f.filename, data: Buffer.from(f.base64, 'base64') }))); }
+  catch (e) { if (e instanceof StyleError) throw badRequest(e.message); throw e; }
+  const a = analyseOr400(raw);
+  const { userId, label } = actor(req);
+  const nv = await tx(async (c) => {
+    const row = await insertVersion(c, t.id, a, userId, `Style: ${Object.keys(b.changes).length} change${Object.keys(b.changes).length === 1 ? '' : 's'}${b.addFonts.length ? `, ${b.addFonts.length} font${b.addFonts.length === 1 ? '' : 's'} added` : ''} (from ${v.status === 'draft' ? 'the draft' : 'v' + v.version})`);
+    await writeAudit(c, { accountId: acct, userId, label, action: 'update', entityType: 'graphics_template', entityId: t.id, snapshot: { style: b.changes, fontsAdded: b.addFonts.map((f) => f.family) } });
+    return row;
+  });
+  res.json(versionJson(nv));
 }));
 
 graphicsRouter.delete('/templates/:id/draft', asyncHandler(async (req, res) => {
@@ -852,7 +897,9 @@ graphicsRouter.post('/rundowns/:eventId/items/:itemId/:action(skip|restore)', as
  * bridge calls the template's own CasparCG functions. Injected at serve time,
  * never stored, so the stored files stay exactly what was uploaded.
  */
-export const BRIDGE = `<script>(function(){var q=[],ready=false;function call(m){try{var f=window[m.op];if(typeof f!=='function')return;if(m.op==='update'){f(JSON.stringify(m.data||{}))}else{f()}}catch(e){parent.postMessage({type:'volt-gfx-error',message:String(e&&e.message||e)},'*')}}
+export const BRIDGE = `<script>(function(){var q=[],ready=false;
+var bb=null;function own(e){for(var k=e.firstChild;k;k=k.nextSibling)if(k.nodeType===3&&k.nodeValue.trim())return true;return false}function seen(root){var n=0,els=root.querySelectorAll('*');for(var i=0;i<els.length&&n<200;i++){var e=els[i];if(e.shadowRoot)n+=seen(e.shadowRoot);var t=String(e.tagName).toUpperCase();if(t==='HTML'||t==='BODY'||t==='SCRIPT'||t==='STYLE'||t==='LINK'||t==='META'||t==='HEAD')continue;var r=e.getBoundingClientRect();if(r.width<2||r.height<2||r.right<0||r.bottom<0||r.left>innerWidth||r.top>innerHeight)continue;var c=getComputedStyle(e);if(c.visibility==='hidden'||c.display==='none'||parseFloat(c.opacity)<0.05)continue;var paints=own(e)||t==='IMG'||t==='CANVAS'||t==='SVG'||t==='VIDEO'||(c.backgroundColor!=='rgba(0, 0, 0, 0)'&&c.backgroundColor!=='transparent')||c.backgroundImage!=='none'||(parseFloat(c.borderTopWidth)>0&&c.borderTopStyle!=='none'&&c.borderTopColor!=='rgba(0, 0, 0, 0)');if(!paints)continue;n++;var x0=Math.max(0,r.left),y0=Math.max(0,r.top),x1=Math.min(innerWidth,r.right),y1=Math.min(innerHeight,r.bottom);bb=bb?[Math.min(bb[0],x0),Math.min(bb[1],y0),Math.max(bb[2],x1),Math.max(bb[3],y1)]:[x0,y0,x1,y1]}return n}
+function call(m){if(m.op==='probe'){var v=0;bb=null;try{v=seen(document)}catch(_){}parent.postMessage({type:'volt-gfx-probe',visible:v,box:bb&&[Math.round(bb[0]),Math.round(bb[1]),Math.round(bb[2]-bb[0]),Math.round(bb[3]-bb[1])]},'*');return}try{var f=window[m.op];if(typeof f!=='function')return;if(m.op==='update'){f(JSON.stringify(m.data||{}))}else{f()}}catch(e){parent.postMessage({type:'volt-gfx-error',message:String(e&&e.message||e)},'*')}}
 addEventListener('message',function(e){var m=e.data;if(!m||m.type!=='volt-gfx')return;if(ready)call(m);else q.push(m)});
 addEventListener('load',function(){ready=true;q.splice(0).forEach(call);parent.postMessage({type:'volt-gfx-ready'},'*')});
 addEventListener('error',function(e){parent.postMessage({type:'volt-gfx-error',message:String(e.message||'script error')},'*')});

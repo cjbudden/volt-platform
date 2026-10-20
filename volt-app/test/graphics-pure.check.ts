@@ -16,8 +16,10 @@ import { isOn, plan, describe, type Programme, type AssignmentRun } from '../src
 import { resolveValues, coerce, pick } from '../src/services/graphics/values';
 import { nextManual, dueAutomatic, feedFired, normCue, parseCsv, cueFromText, zonedOn } from '../src/services/graphics/rundown';
 import { parseRss } from '../src/services/graphics/runtime';
-import { injectBridge } from '../src/modules/graphics';
+import { injectBridge, BRIDGE } from '../src/modules/graphics';
 import { fieldsFromSchema, ografHostPage, stripJsComments } from '../src/services/graphics/ograf';
+import { templateStatus } from '../src/services/graphics/status';
+import { readStyle, applyStyle, normColor } from '../src/services/graphics/style';
 
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string, d = '') => { if (c) { pass++; console.log('PASS ' + m); } else { fail++; console.log(`FAIL ${m}${d ? ' -- ' + d : ''}`); } };
@@ -263,6 +265,62 @@ console.log('== ograf ==');
   ok(!/<\/script><script>x/.test(page), 'the name cannot break out of the host page script');
   ok(/playAction',\{goto:0\}/.test(page) && /playAction',\{delta:1\}/.test(page) && /stopAction/.test(page) && /updateAction/.test(page), 'play, next, stop and update map to the OGraf actions');
   ok(injectBridge(page).indexOf("type!=='volt-gfx'") < page.length, 'the bridge goes into the host page like any template');
+}
+
+console.log('== status ==');
+{
+  const okv = { version: 3, checks: [{ level: 'ok' }, { level: 'warn' }] };
+  const badv = { checks: [{ level: 'error', title: 'Loads files from the internet' }, { level: 'error' }] };
+  eq(templateStatus(okv, null).state, 'ready', 'published: ready');
+  eq(templateStatus(okv, badv).draft, { publishable: false, errors: 2, warnings: 0 }, 'published with a broken draft: still ready, the draft says why not');
+  eq([templateStatus(null, okv).state, templateStatus(null, okv).label], ['in_development', 'In development'], 'only a passing draft: in development');
+  const inc = templateStatus(null, badv);
+  ok(inc.state === 'incomplete' && inc.label === '2 errors' && /internet/.test(inc.detail), 'only a failing draft: incomplete, first error named');
+  eq(templateStatus(null, null).state, 'empty', 'nothing: empty');
+}
+
+console.log('== style ==');
+{
+  const dir = join(__dirname, '..', 'assets', 'graphics', 'lower-third');
+  const lt = [{ path: 'index.html', data: readFileSync(join(dir, 'index.html')) }, ...readdirSync(join(dir, 'fonts')).map((n) => ({ path: `fonts/${n}`, data: readFileSync(join(dir, 'fonts', n)) }))];
+  const r = readStyle(lt);
+  const ids = r.tokens.map((t) => t.id);
+  ok(ids.includes('var:--bar') && ids.includes('var:--accent') && ids.includes('color:#ffffff') && ids.includes('font:Volt Serif') && ids.includes('font:Volt Sans'), 'name super: theme variables, colours and both families found', ids.join());
+  eq(r.fonts.filter((f) => f.bundled).map((f) => f.family), ['Volt Sans', 'Volt Serif'], 'bundled families from @font-face');
+  const out = applyStyle(lt, { 'var:--bar': '#123456', 'color:#ffffff': '#fafafa', 'font:Volt Serif': 'Volt Sans' });
+  const h = out.find((f) => f.path === 'index.html')!.data.toString();
+  ok(/--bar:#123456/.test(h) && !/#fff\b/i.test(h.replace(/--[\w-]+:[^;}]*/g, '')) && h.includes('#fafafa'), 'variable and every #fff / #ffffff literal changed');
+  ok((h.match(/Volt Serif/g) ?? []).length === 2 && /font:600 52px\/1 "Volt Sans"/.test(h), 'font shorthand swapped; @font-face rules untouched');
+  ok(analyse(out).publishable, 'the restyled package still passes its checks');
+
+  const page = (html: string, js = '') => [{ path: 'index.html', data: Buffer.from(html) }, ...(js ? [{ path: 'g.js', data: Buffer.from(js) }] : [])];
+  const tricky = page(`<style>#ab1{color:#ab1} .x{background:url(#fff)} a{color:rgb(10, 20, 30)}</style><a href="#bad">x</a><p style="font-family:Arial, sans-serif;color:#0A0">t</p>`,
+    `el.style.fontFamily = 'Arial'; el.style.color = "#00aa00"; ctx.font = "bold 40px Arial";`);
+  const t2 = readStyle(tricky);
+  eq(t2.tokens.filter((t) => t.kind === 'color').map((t) => `${t.value}x${t.uses}`).sort(), ['#00aa00x2', '#aabb11x1', 'rgb(10, 20, 30)x1'], 'id selectors, url(#id) and href="#x" are not colours; #0A0 and #00aa00 are one');
+  eq(t2.tokens.find((t) => t.id === 'font:Arial')?.uses, 2, 'CSS inline style and script fontFamily counted (canvas ctx.font is not CSS)');
+  const o2 = applyStyle(tricky, { 'font:Arial': 'Brand Sans', 'color:#00aa00': '#ff0000' }, [{ family: 'Brand Sans', filename: 'brand.woff2', data: Buffer.from('wOF2') }]);
+  const h2 = o2.find((f) => f.path === 'index.html')!.data.toString(); const j2 = o2.find((f) => f.path === 'g.js')!.data.toString();
+  ok(h2.includes('style="font-family:Brand Sans, sans-serif;color:#ff0000"') && j2.includes(`fontFamily = 'Brand Sans'`) && j2.includes('"#ff0000"'), 'swaps keep HTML attributes and script strings valid', h2 + ' | ' + j2);
+  ok(h2.includes('href="#bad"') && h2.includes('url(#fff)') && h2.includes('#ab1{'), 'non-colours left alone');
+  ok(o2.some((f) => f.path === 'fonts/brand-sans.woff2') && /@font-face\{font-family:"Brand Sans";src:url\("fonts\/brand-sans.woff2"\) format\("woff2"\)/.test(o2.find((f) => f.path === 'volt-fonts.css')!.data.toString()) && h2.includes('<link rel="stylesheet" href="volt-fonts.css">'), 'added font: file, @font-face and link');
+  throws(() => applyStyle(tricky, { 'font:Arial': 'Nope Font' }), /not a font in this template/, 'an unknown family is refused');
+  throws(() => applyStyle(tricky, { 'color:#00aa00': 'red; } body{display:none' }), /not a colour/, 'a colour value cannot inject CSS');
+  throws(() => applyStyle(tricky, { 'color:#123123': '#000' }), /Nothing called/, 'a stale token id is an error, not a silent no-op');
+  throws(() => applyStyle(tricky, {}, [{ family: 'x"}', filename: 'a.woff2', data: Buffer.from('') }]), /not a usable font name/, 'font names are sanitised');
+  const vendor = readStyle([{ path: 'index.html', data: Buffer.from('<p>x</p>') }, { path: 'lib/gsap.min.js', data: Buffer.from('a="#123456"') }]);
+  eq(vendor.tokens.length, 0, 'bundled libraries are not scanned');
+  eq(normColor('#FFFF'), '#ffffff', 'short hex with alpha ff is the plain colour');
+
+  // OGraf: colours set from the module, fonts reach the host page.
+  const fx = join(__dirname, 'fixtures', 'ograf', 'scoreboard');
+  const sbFiles = readdirSync(fx).map((n) => ({ path: n, data: readFileSync(join(fx, n)) }));
+  const sbStyle = readStyle(sbFiles);
+  ok(sbStyle.tokens.some((t) => t.kind === 'color'), 'OGraf scoreboard: colours found in graphic.mjs', String(sbStyle.tokens.length));
+  const sbOut = applyStyle(sbFiles, {}, [{ family: 'Brand Sans', filename: 'b.woff2', data: Buffer.from('wOF2') }]);
+  const sbA = analyse(sbOut);
+  ok(sbA.manifest.ograf?.css?.[0] === 'volt-fonts.css' && ografHostPage(sbA.manifest).includes('<link rel="stylesheet" href="./volt-fonts.css">'), 'OGraf: an added font is linked from the host page');
+  ok(BRIDGE.includes("m.op==='probe'") && BRIDGE.includes('volt-gfx-probe'), 'bridge answers a probe: does the template draw anything');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

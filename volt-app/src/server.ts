@@ -92,6 +92,8 @@ export function createServer() {
   // needs a larger body limit than the 1mb default. This parser runs first for
   // /api/files and consumes the stream, so the global 1mb parser below skips it.
   app.use('/api/files', express.json({ limit: '30mb' }));
+  // Graphics: pasted template HTML and fonts added in the style editor arrive in JSON.
+  app.use('/api/graphics/templates', express.json({ limit: '12mb' }));
   // Provider webhooks verify a signature over the exact bytes: mounted before the JSON parser.
   app.use('/api/payments/webhooks', paymentsWebhookRouter);
   // tus resumable uploads: PATCH bodies are raw octets, so this too sits before
@@ -361,9 +363,9 @@ export function createServer() {
   app.use('/api/fleet', fleetRouter);
   // The console's own player configuration. Session auth.
   app.use('/api/player-config', playerAdminRouter);
+  app.use('/api/live-streams', liveStreamsRouter);  // the stream aggregate: planes, preset, provider tiers (services/streamModel.ts)
   app.use('/api/streams', ingestRouter);  // encoder -> POST /api/streams/:id/report
   app.use('/api/media', mediaIngestRouter); // thumbnailer -> POST /api/media/thumbnails
-  app.use('/api/live-streams', liveStreamsRouter);  // the stream aggregate: planes, preset, provider tiers (services/streamModel.ts)
   app.use('/api/recordings', recordingsRouter);         // recordings library (+ publish/clip)
   app.use('/api/jobs', jobsRouter);                     // long-running work: progress, reasons, retry
   // Timeline, coverage and dayparts hang off a channel, so they mount UNDER the

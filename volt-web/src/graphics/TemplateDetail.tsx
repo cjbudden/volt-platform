@@ -5,9 +5,10 @@ import { navigate } from '../router'
 import { useAccess } from '../access'
 import { Notice, useNotify } from '../notices'
 import { ConfirmDialog } from '../listActions'
-import { gfx, KIND_LABEL, type Check, type Kind, type TField, type TemplateDetail, type Version } from './gfxApi'
+import { gfx, previewValues, KIND_LABEL, type Check, type Kind, type TField, type TemplateDetail, type Version } from './gfxApi'
 import { GraphicStage, type StageBackground, type StageHandle } from './GraphicStage'
-import { sourceTag } from './Graphics'
+import { sourceTag, StatusPill } from './Graphics'
+import { StyleEditor } from './StyleEditor'
 
 export function ChecksList({ checks }: { checks: Check[] }) {
   const order = { error: 0, warn: 1, ok: 2 }
@@ -58,6 +59,7 @@ export function TemplateDetailPage({ id }: { id: string }) {
   const [sample, setSample] = useState<Record<string, any>>({})
   const [editing, setEditing] = useState<string | null>(null)
   const [editPath, setEditPath] = useState('index.html')
+  const [styling, setStyling] = useState(() => new URLSearchParams(window.location.search).has('customise'))
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState<'archive' | 'discard' | null>(null)
   const [nameEdit, setNameEdit] = useState<string | null>(null)
@@ -70,10 +72,10 @@ export function TemplateDetailPage({ id }: { id: string }) {
     setT(r)
     if (!keepVid || !r.versions.some((v) => v.id === vid)) {
       const pick = r.versions.find((v) => v.status === 'draft') ?? r.versions[0] ?? null
-      setVid(pick?.id ?? null); setSample({ ...(pick?.manifest.sample ?? {}) })
+      setVid(pick?.id ?? null); setSample(previewValues(pick?.manifest))
     }
   }).catch((e) => setErr(e.message))
-  useEffect(() => { load() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); setStyling(new URLSearchParams(window.location.search).has('customise')) }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const v: Version | null = useMemo(() => t?.versions.find((x) => x.id === vid) ?? null, [t, vid])
   const draft = t?.versions.find((x) => x.status === 'draft') ?? null
@@ -92,10 +94,10 @@ export function TemplateDetailPage({ id }: { id: string }) {
   }
   const saveEditor = () => act(async () => {
     const nv = await gfx.putDraftPaste(t.id, { html: editing!, path: editPath, keep: true })
-    setEditing(null); setVid(nv.id); setSample({ ...(nv.manifest.sample ?? {}) })
+    setEditing(null); setVid(nv.id); setSample(previewValues(nv.manifest))
   }, 'Draft saved and checked.')
   const uploadVersion = (f: File | undefined) => f && act(async () => {
-    const nv = await gfx.putDraftUpload(t.id, f, f.name); setVid(nv.id); setSample({ ...(nv.manifest.sample ?? {}) })
+    const nv = await gfx.putDraftUpload(t.id, f, f.name); setVid(nv.id); setSample(previewValues(nv.manifest))
   }, 'New draft uploaded and checked.')
 
   const fields = (v?.manifest.fields ?? []).filter((f) => !f.hidden)
@@ -116,6 +118,7 @@ export function TemplateDetailPage({ id }: { id: string }) {
               {canManage && <button className="btn ghost sm" onClick={() => setNameEdit(t.name)}>Rename</button>}
             </div>
           )}
+          <div style={{ margin: '4px 0 2px' }}><StatusPill t={t} full /></div>
           <p>{v ? `${v.manifest.canvas[0]}×${v.manifest.canvas[1]}${v.manifest.fps ? ` at ${v.manifest.fps} fps` : ''} · ${fields.length} field${fields.length === 1 ? '' : 's'} · ${v.fileCount} file${v.fileCount === 1 ? '' : 's'}` : 'No files yet'}
             {t.owner === 'volt' && ' · shipped with Volt, read-only'}</p>
         </div>
@@ -129,11 +132,18 @@ export function TemplateDetailPage({ id }: { id: string }) {
           {canManage && <><input ref={upload} type="file" hidden accept=".zip,.html,.htm" onChange={(e) => uploadVersion(e.target.files?.[0])} />
             <button className="btn ghost" disabled={busy} onClick={() => upload.current?.click()}>Upload new version</button>
             <button className="btn ghost" disabled={busy} onClick={openEditor}>Edit code</button></>}
+          {canManage && v && <button className="btn ghost" disabled={busy} aria-pressed={styling} onClick={() => setStyling(!styling)}>Customise look</button>}
+          {!own && v && can('graphics', 'manage') && <button className="btn ghost" disabled={busy} title="Volt templates are read-only: this makes your own copy and opens it for changes"
+            onClick={() => act(async () => { const c = await gfx.duplicate(t.id, `${t.name} (custom)`); navigate(`/graphics/templates/${c.id}?customise`) })}>Customise a copy</button>}
           {latest && can('graphics', 'manage') && <button className="btn primary" onClick={() => navigate(`/graphics/setups/new?version=${latest.id}`)}>New setup from this</button>}
         </div>
       </div>
       {err && <Notice kind="error" message={err} />}
 
+      {styling && canManage && v && (
+        <StyleEditor templateId={t.id} version={v} replacesDraft={!!draft && v.status !== 'draft'} onClose={() => setStyling(false)}
+          onSaved={(nv) => { setVid(nv.id); setSample(previewValues(nv.manifest)); notify({ kind: 'ok', message: nv.publishable ? 'Saved to the draft. Preview it, then publish.' : 'Saved to the draft, but it has errors: see Checks.' }); load(true) }} />
+      )}
       {editing != null && (
         <div className="card card-b" style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
@@ -152,7 +162,7 @@ export function TemplateDetailPage({ id }: { id: string }) {
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 12 }}>
               <span style={{ fontWeight: 650 }}>Previewing</span>
               <div className="seg-choice" role="group" aria-label="Version">
-                {t.versions.slice(0, 4).map((x) => <button key={x.id} className={x.id === vid ? 'sel' : ''} onClick={() => { setVid(x.id); setSample({ ...(x.manifest.sample ?? {}) }) }}>
+                {t.versions.slice(0, 4).map((x) => <button key={x.id} className={x.id === vid ? 'sel' : ''} onClick={() => { setVid(x.id); setSample(previewValues(x.manifest)) }}>
                   {x.status === 'draft' ? 'Draft' : `v${x.version}`}</button>)}
               </div>
               <div style={{ flex: 1 }} />
@@ -162,7 +172,9 @@ export function TemplateDetailPage({ id }: { id: string }) {
               </div>
               <button className={`btn sm ${safe ? 'primary' : 'ghost'}`} aria-pressed={safe} onClick={() => setSafe(!safe)}>Safe area</button>
             </div>
-            {v && <GraphicStage ref={stage} layers={[{ key: v.id, url: v.url, values: sample, onAir, canvas: v.manifest.canvas }]} background={bg} safeArea={safe} />}
+            <GraphicStage ref={stage} layers={v ? [{ key: v.id, url: v.url, values: sample, onAir, canvas: v.manifest.canvas }] : []} background={bg} safeArea={safe}
+              empty="No files yet. Upload a package or paste HTML to see it here."
+              badge={v?.status === 'draft' ? (v.publishable ? { text: latest ? 'Draft changes' : 'In development', tone: 'dev' } : { text: `Draft · ${v.checks.filter((c) => c.level === 'error').length} error${v.checks.filter((c) => c.level === 'error').length === 1 ? '' : 's'}`, tone: 'error' }) : undefined} />
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12, alignItems: 'center' }}>
               <button className="btn primary" onClick={() => { if (onAir) stage.current?.replay(); else setOnAir(true) }}>Play</button>
               <button className="btn ghost" onClick={() => stage.current?.next()}>Next</button>
@@ -175,7 +187,7 @@ export function TemplateDetailPage({ id }: { id: string }) {
             <div className="card card-b">
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
                 <b>Sample data</b><span className="gfx-meta">Try values here. Nothing is saved.</span><div style={{ flex: 1 }} />
-                <button className="btn ghost sm" onClick={() => setSample({ ...(v?.manifest.sample ?? {}) })}>Reset</button>
+                <button className="btn ghost sm" onClick={() => setSample(previewValues(v?.manifest))}>Reset</button>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 }}>
                 {fields.map((f) => <div className="field" key={f.id} style={{ margin: 0 }}>
