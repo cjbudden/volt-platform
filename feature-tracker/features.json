@@ -786,6 +786,24 @@
         ]
       },
       "feedback": []
+    },
+    {
+      "id": "retention-s3",
+      "name": "Retention on S3: deleted clips leave the bucket, cold and archive rungs work",
+      "summary": "WHY: on a cloud deployment a retention rule must remove or move the real files, or storage cost grows while the library says the media is gone. WHAT: clips are uploaded to the bucket and governed by the same retention rules as local media: cool (Glacier Instant Retrieval), archive (Glacier, with restore) and delete actually act on S3. Live recordings in S3 are not covered yet (they share the channel's folder).",
+      "status": "ready_to_test",
+      "app_surface": "partial",
+      "test": {
+        "how": "Run test/s3Retention.check.ts against MinIO or moto (command at the top of the file). On a cloud deployment: give a channel a rule (cool at 0 days), make a clip, run the sweep, and check the clip's objects in the bucket are GLACIER_IR. Then a delete rule: the clip's folder under clips/<asset id>/ is gone and the asset shows as deleted.",
+        "artifact": "",
+        "checks": [
+          "Cool rung changes the storage class, links still work",
+          "Delete rung empties clips/<asset id>/ and nothing else",
+          "Deleted media keeps its history row",
+          "Archived media needs a restore before it moves again"
+        ]
+      },
+      "feedback": []
     }
   ],
   "note": "Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set."

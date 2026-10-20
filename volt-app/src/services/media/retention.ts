@@ -556,7 +556,12 @@ export async function sweep(opts: {
       }
 
       const target = due.tier!;
-      const source = locs.find((l) => l.present) ?? locs[0];
+      // The copy to move is the one in object storage. A clip on an S3
+      // deployment has a local copy too (built there, then uploaded), and
+      // picking that one sent every cold or archive rung to the local driver,
+      // which refuses, so the object failed the rung on every sweep. The
+      // local copy stays until a delete rung removes every location.
+      const source = locs.find((l) => l.present && l.tier !== 'local') ?? locs.find((l) => l.present) ?? locs[0];
       if (!source) continue;
 
       if (due.stage.action === 'to_archive') {

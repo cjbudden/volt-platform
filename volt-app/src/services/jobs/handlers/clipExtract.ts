@@ -161,6 +161,30 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
       segmentCount: null,
       actor: 'clip.extract',
     });
+    // ON AN S3 DEPLOYMENT the clip also goes to s3://<bucket>/clips/<assetId>/
+    // as a second location of the same object, so the ladder that removes the
+    // local copy removes the bucket copy too (services/media/s3Driver.ts), and
+    // cold/archive rungs have something to move. CLIPS_S3_UPLOAD=false keeps
+    // clips local only. (20 Oct 2026)
+    if (config.mediaStore.driver === 's3' && process.env.CLIPS_S3_UPLOAD !== 'false') {
+      const { uploadTree, mediaS3Client } = await import('../../media/s3Driver');
+      const up = await uploadTree(await mediaS3Client(config.aws.region), outDir, config.aws.s3Bucket, `clips/${p.vodAssetId}`);
+      await registerObject({
+        vodAssetId: p.vodAssetId,
+        channelId: (ctx.job as any).channel_id ?? null,
+        eventId: (ctx.job as any).event_id ?? null,
+        logicalKey: `clips/${p.vodAssetId}`,
+        kind: 'clip_output',
+        rendition: null,
+        tier: 's3_standard',
+        uri: up.uri,
+        bytes: up.bytes,
+        durationMs: result.durationMs ?? null,
+        segmentCount: null,
+        actor: 'clip.extract',
+      });
+      await ctx.progress(100, `uploaded ${up.files} file(s) to ${up.uri}`);
+    }
   } catch (e) {
     // Same reasoning as the provenance write below: the media exists and is
     // playable. An unregistered object costs storage, which is recoverable;

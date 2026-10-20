@@ -224,8 +224,24 @@ let override: StorageDriver | null = null;
 export function setStorageDriver(d: StorageDriver | null): void { override = d; }
 
 const local = new LocalDriver();
+let s3: StorageDriver | null = null;
 
+/**
+ * The deployment's driver. On MEDIA_STORE_DRIVER=s3 that is a router: s3://
+ * locations go to S3 (services/media/s3Driver.ts), local paths stay local.
+ * Until 20 Oct 2026 this returned the local driver whatever the setting, so an
+ * S3 deployment's sweep "deleted" s3:// locations with rmSync, which removed
+ * nothing.
+ */
 export function storageDriver(): StorageDriver {
   if (override) return override;
+  if (config.mediaStore.driver === 's3') {
+    if (!s3) s3 = new RoutingDriver(new S3Driver(() => mediaS3Client(config.aws.region)), local);
+    return s3;
+  }
   return local;
 }
+
+/** The local-disk driver on its own (tests, and the router's fallback). */
+export function localDriver(): StorageDriver { return local; }
+import { RoutingDriver, S3Driver, mediaS3Client } from './s3Driver';

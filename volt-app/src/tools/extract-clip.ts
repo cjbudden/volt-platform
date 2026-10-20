@@ -1,8 +1,14 @@
 /**
  * Extractor entrypoint. Reads an ExtractJob JSON (path as argv[2] or
  * EXTRACT_JOB_JSON env) and produces the clip outputs on disk. The orchestrator
- * launches this as a CPU task (like the thumbnailer); the caller uploads
- * job.outDir to S3 and updates the vod_asset's formats/progressive_key.
+ * launches this as a CPU task (like the thumbnailer).
+ *
+ * With `"upload": { "bucket": "...", "prefix": "vod/<assetId>" }` in the job
+ * (20 Oct 2026) the task also uploads job.outDir to s3://bucket/prefix/ and
+ * prints the location as `uploaded.uri`. The caller registers that URI as a
+ * media object location (services/media/objects.ts registerObject, tier
+ * s3_standard), which is what puts the extract on the retention ladder: the
+ * sweep's S3 driver removes exactly that prefix when the rule says delete.
  *
  *   npx tsx src/tools/extract-clip.ts job.json
  */
@@ -17,8 +23,13 @@ async function main() {
     console.error('usage: extract-clip <job.json>  (or EXTRACT_JOB_JSON=...)');
     process.exit(2);
   }
-  const job = JSON.parse(raw) as ExtractJob;
-  const result = await runExtractJob(job);
+  const job = JSON.parse(raw) as ExtractJob & { upload?: { bucket: string; prefix: string } };
+  const result: any = await runExtractJob(job);
+  if (job.upload) {
+    const { uploadTree, mediaS3Client } = await import('../services/media/s3Driver');
+    const region = process.env.AWS_REGION ?? 'ap-southeast-1';
+    result.uploaded = await uploadTree(await mediaS3Client(region), job.outDir, job.upload.bucket, job.upload.prefix);
+  }
   console.log(JSON.stringify(result));
 }
 
