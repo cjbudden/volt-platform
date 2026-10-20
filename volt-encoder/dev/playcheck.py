@@ -15,7 +15,11 @@ Checks, every second, per video variant playlist:
   window-regress: the segment list lost segments from the tail (rewind)
   dup-uri      : the same segment listed twice in one playlist
   pdt-backwards: EXT-X-PROGRAM-DATE-TIME not monotonically increasing
-  pdt-jump     : PDT gap bigger than 3x the segment duration (timeline tear)
+  pdt-jump     : PDT advances more than the listed segments between two stamps
+                 last (by over a second or a target duration): a timeline tear.
+                 Measured per gap against the EXTINF of the segments in it; it was
+                 3x the LAST segment's EXTINF, so one short spliced segment at the
+                 end (0.12 s) flagged every normal 2 s gap (20 Oct 2026)
   stale        : playlist did not advance for > 3x target duration
 Exit code 0 = no violations, 1 = violations (counts printed per class).
 """
@@ -90,7 +94,7 @@ class VariantState:
             return
         seq = None
         target = target_dur_hint
-        uris, pdts, dur = [], [], None
+        uris, pdts, dur, durs = [], [], None, []
         for l in lines:
             if l.startswith("#EXT-X-MEDIA-SEQUENCE:"):
                 seq = int(l.split(":", 1)[1])
@@ -103,6 +107,7 @@ class VariantState:
                 except ValueError: dur = None
             elif l and not l.startswith("#"):
                 uris.append(l.strip())
+                durs.append(dur if dur is not None else (target or 0))
         # duplicate URIs inside one playlist
         if len(set(uris)) != len(uris):
             dups = sorted({u for u in uris if uris.count(u) > 1})
@@ -116,12 +121,14 @@ class VariantState:
             if prev_tail not in uris and seq is not None and self.last_seq is not None and seq <= self.last_seq:
                 self.note("window-regress", f"tail {prev_tail} vanished without sequence advance")
         # PDT monotonic + tear-free
-        ts = [t for _, t in pdts if t is not None]
-        for a, b in zip(ts, ts[1:]):
+        stamped = [(i, t) for i, t in pdts if t is not None]
+        for (ia, a), (ib, b) in zip(stamped, stamped[1:]):
             if b < a - 0.2:
                 self.note("pdt-backwards", f"{b - a:+.2f}s")
-            elif dur and b - a > 3 * (dur or target):
-                self.note("pdt-jump", f"{b - a:.1f}s gap")
+                continue
+            listed = sum(durs[ia:ib])
+            if b - a > listed + max(1.0, target or 0):
+                self.note("pdt-jump", f"{b - a:.1f}s gap over {listed:.1f}s of segments")
         # liveness
         if uris and uris != self.last_uris:
             self.last_advance = time.time()
