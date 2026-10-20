@@ -879,6 +879,25 @@
         ]
       },
       "feedback": []
+    },
+    {
+      "id": "api-hypermedia",
+      "name": "API navigation by links (JSON-LD + Hydra): every list, record and operation",
+      "summary": "WHY: a client (or a developer in Postman) should start at /api and reach everything by following links, the way a WSDL client could, and see what each resource accepts without a manual. WHAT: with Accept: application/ld+json (or ?format=jsonld) every list is a paged Hydra collection with first/previous/next/last, the full count and its filters as a template; every record has a breadcrumb, sibling links and a link per sub-resource; /api links every collection; /api/doc declares each resource's operations and properties. Plain JSON is unchanged.",
+      "status": "ready_to_test",
+      "app_surface": "na",
+      "test": {
+        "how": "In Postman (volt-api collection, folder 2) or curl: GET /api, follow channels, then GET /api/channels?limit=1&format=jsonld and follow hydra:view.next then previous. Open a channel: check breadcrumb, siblings, history and epg links. GET /api/doc and find POST /channels/{id}/start under volt:Channel.",
+        "artifact": "",
+        "checks": [
+          "/api links radio, jobs, users, apps, share links and more",
+          "next then previous returns page one",
+          "breadcrumb runs from /api to the record",
+          "/api/doc declares POST /channels/{id}/start",
+          "plain JSON unchanged, with a Link rel=alternate header"
+        ]
+      },
+      "feedback": []
     }
   ],
   "note": "Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set."

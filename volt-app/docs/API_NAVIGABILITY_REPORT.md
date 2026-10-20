@@ -249,3 +249,21 @@ and folder 2 collapses, which is Finding 1 reproducible in one click.
   `boot reconcile corrected 2 stream status row(s)`. That is the "a claim is not
   evidence" rule working exactly as intended, and it is worth knowing it fires on
   a cold start and not just in tests.
+
+---
+
+## Update, 20 October 2026: the fixes
+
+All six items above are addressed, except trimming the member representation, which would break plain-JSON clients and stays open.
+
+| Item | Now |
+|---|---|
+| 1. `supportedOperation` | Every class in `/api/doc` declares its operations from the live route table: method, target template, expects, returns. `POST /api/channels/{id}/start` is declared as a POST |
+| 2. Coverage | The entry point links every top-level collection (radio, EPG guide channels, files, apps, users, jobs, share links, monitoring, fleet, storage and more). Every list endpoint is a `hydra:Collection`; every other answer under `/api` gets `@id`, `up` and a breadcrumb |
+| 3. Broken links | `volt:` now resolves to `/api/doc#`. `/api/epg` and `/api/publications` are IriTemplates in the entry point. Status links point at `/api/status?channelId=`, which answers 200 before a stream has ever run. Sub-resources that need parameters are IriTemplates |
+| 4. Negotiation seam | Plain JSON responses carry `Link: <...?format=jsonld>; rel="alternate"; type="application/ld+json"`, and `?format=jsonld` works without a header |
+| 5. `hydra:view` | `first`, `previous`, `next` and `last` from the list standard's cursor links; `totalItems` is the full count |
+| 6. Member size | Open (contract change) |
+
+Measured with the same blind walk (only `/api` typed by hand, demo seed, at most two URLs per route pattern): **70 GET route patterns reached, up from 18, with 0 failing links, down from 6.** Most of the remainder are routes whose seeded data is empty (no row to link to) or platform and viewer APIs, which are outside the admin entry point by design.
+

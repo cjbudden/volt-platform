@@ -233,7 +233,12 @@ Errors are JSON: `{error, code?, …}`.
 - **Ids:** UUIDs.
 - **Times:** ISO 8601 UTC in bodies (`2027-01-01T10:00:00Z`). Timeline positions are epoch milliseconds (`startMs`, `start_epoch_ms`).
 - **Lists:** most return an array. Searchable lists (for example `/api/viewers`) take `q`, `limit` (max 200) and `offset`, and return `{total, items}`.
-- **Hypermedia:** send `Accept: application/ld+json` on a GET for the JSON-LD/Hydra form with links (`GET /api` is the entry point). Plain JSON is unchanged.
+- **Hypermedia:** send `Accept: application/ld+json` (or add `?format=jsonld`) on a GET for the JSON-LD + Hydra form. `GET /api` is the entry point and links every top-level collection; `GET /api/doc` describes every class with its operations (method, expects, returns) and properties, and is also the `volt:` vocabulary. In that form:
+  - every list is a `hydra:Collection` with `hydra:totalItems` (all matches, not the page), a `hydra:view` with `first`, `previous`, `next` and `last` (the list standard's cursors, so paging stays inside your filters and sort), and `hydra:search`, an IriTemplate naming the filters the list accepts;
+  - members carry `previousSibling` / `nextSibling` in the order of the view you asked for;
+  - an item carries `@id`, `@type`, typed links (`up`, `collection`, `siblings`, and one link per sub-resource, such as a channel's `history` or `epg`), `operation` (what you can POST, PUT or DELETE) and a `breadcrumb` from the entry point to itself;
+  - a link that needs parameters (a time window, an owner) is an IriTemplate, never a bare URL that would fail.
+  Plain JSON bodies are unchanged. Each plain response carries `Link: <...?format=jsonld>; rel="alternate"; type="application/ld+json"` so a client can find the richer form.
 - **Multi-tenancy:** every admin credential resolves to one account, and every query is scoped to it.
 
 ## 10. Keeping the docs and Postman current

@@ -1,13 +1,13 @@
 {
   "info": {
     "_postman_id": "volt-api-navigability-2026-09-04",
-    "name": "VOLT API \u2014 navigability walk",
+    "name": "VOLT API — navigability walk",
     "description": "The main, full collection (public, admin and platform APIs, every request with a live example) is api/Volt.postman_collection.json; see docs/API_GUIDE.md. This one is a separate experiment: the hypermedia navigability walk. It signs in as an admin user without two-step sign-in (a user with it on gets a challenge, not a token).\n\nRuns the API the way a client with no documentation would: start at /api and only\nfollow links that appear in responses.\n\nIMPORTANT: the hypermedia layer is CONTENT NEGOTIATED. Without\n\"Accept: application/ld+json\" every collection returns a bare JSON array with no\nlinks and no ids. That header is set at collection level here. Remove it and\nfolder 2 stops working, which is itself one of the findings.\n\nFolder 4 documents defects on purpose: those requests are expected to fail, and\ntheir tests assert the failure so the collection turns green when they are fixed\nand stays honest until then.\n\nRun with: newman run volt-api.postman_collection.json -e volt-local.postman_environment.json",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
     {
-      "name": "1 \u00b7 Sign in",
+      "name": "1 · Sign in",
       "item": [
         {
           "name": "Login (captures {{token}})",
@@ -62,10 +62,10 @@
       ]
     },
     {
-      "name": "2 \u00b7 Discovery walk (links only)",
+      "name": "2 · Discovery walk (links only)",
       "item": [
         {
-          "name": "GET /api \u2014 the entry point",
+          "name": "GET /api — the entry point",
           "request": {
             "method": "GET",
             "header": [
@@ -104,7 +104,7 @@
           ]
         },
         {
-          "name": "GET /api/doc \u2014 supported classes",
+          "name": "GET /api/doc — supported classes",
           "request": {
             "method": "GET",
             "header": [
@@ -136,7 +136,7 @@
                   "console.log('classes described: ' + cls.length);",
                   "const ops = cls.reduce((n,c) => n + ((c['hydra:supportedOperation']||c.supportedOperation||[]).length), 0);",
                   "const props = cls.reduce((n,c) => n + ((c['hydra:supportedProperty']||c.supportedProperty||[]).length), 0);",
-                  "console.log('operations described: ' + ops + ' \u00b7 properties described: ' + props);",
+                  "console.log('operations described: ' + ops + ' · properties described: ' + props);",
                   "pm.test('DEFECT: classes are named but carry no operations', () => pm.expect(ops).to.equal(0));",
                   "pm.test('DEFECT: classes are named but carry no properties', () => pm.expect(props).to.equal(0));"
                 ]
@@ -182,7 +182,7 @@
           ]
         },
         {
-          "name": "GET /api/channels \u2014 the collection",
+          "name": "GET /api/channels — the collection",
           "request": {
             "method": "GET",
             "header": [
@@ -222,7 +222,53 @@
           ]
         },
         {
-          "name": "GET a channel \u2014 followed from the collection",
+          "name": "GET /api/channels?limit=1 — paging and siblings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/ld+json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/channels?limit=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "channels"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Followed from the entry point. Only carries ids and links when ld+json is asked for."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('a hydra:Collection', () => pm.expect(b['@type']).to.equal('hydra:Collection'));",
+                  "pm.test('totalItems counts every match', () => pm.expect(b['hydra:totalItems']).to.be.at.least(b['hydra:member'].length));",
+                  "pm.test('view has first', () => pm.expect(b['hydra:view'].first).to.be.a('string'));",
+                  "if (b['hydra:totalItems'] > 1) pm.test('view has next (cursor)', () => pm.expect(b['hydra:view'].next).to.include('cursor='));",
+                  "pm.test('filters published as an IriTemplate', () => pm.expect(b['hydra:search']['@type']).to.equal('hydra:IriTemplate'));",
+                  "pm.test('breadcrumb starts at the entry point', () => pm.expect(b.breadcrumb[0]['@id']).to.match(/\\/api$/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET a channel — followed from the collection",
           "request": {
             "method": "GET",
             "header": [
@@ -261,7 +307,7 @@
           ]
         },
         {
-          "name": "GET the channel's recordings \u2014 followed again",
+          "name": "GET the channel's recordings — followed again",
           "request": {
             "method": "GET",
             "header": [
@@ -304,7 +350,7 @@
           ]
         },
         {
-          "name": "GET /api/vod \u2014 and its schema.org projection",
+          "name": "GET /api/vod — and its schema.org projection",
           "request": {
             "method": "GET",
             "header": [
@@ -383,8 +429,8 @@
       ]
     },
     {
-      "name": "3 \u00b7 Works, but undiscoverable",
-      "description": "Every request here returns 200. None of them can be found by following links from /api, and none is decorated with JSON-LD even when ld+json is requested. A client has to be told these URLs exist.",
+      "name": "3 · Reached from the entry point (fixed 20 Oct 2026)",
+      "description": "These used to return 200 but could not be found by following links, and were never JSON-LD decorated. Since 20 Oct 2026 every list endpoint is a hydra:Collection, the entry point links every top-level collection, and every other answer under /api carries an @id, an up link and a breadcrumb. Each request asserts that.",
       "item": [
         {
           "name": "Radio stations",
@@ -415,9 +461,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
-                  "const b = pm.response.json();",
-                  "const decorated = !Array.isArray(b) && b && b['@id'];",
-                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.test('JSON-LD decorated: carries @id', () => pm.expect(!!(b && b['@id'])).to.equal(true));",
+                  "  pm.test('walks up and has a breadcrumb', () => { pm.expect(b.up || b.collection).to.be.a('string'); pm.expect(b.breadcrumb).to.be.an('array'); });",
+                  "}"
                 ]
               }
             }
@@ -453,9 +501,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
-                  "const b = pm.response.json();",
-                  "const decorated = !Array.isArray(b) && b && b['@id'];",
-                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.test('JSON-LD decorated: carries @id', () => pm.expect(!!(b && b['@id'])).to.equal(true));",
+                  "  pm.test('walks up and has a breadcrumb', () => { pm.expect(b.up || b.collection).to.be.a('string'); pm.expect(b.breadcrumb).to.be.an('array'); });",
+                  "}"
                 ]
               }
             }
@@ -490,9 +540,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
-                  "const b = pm.response.json();",
-                  "const decorated = !Array.isArray(b) && b && b['@id'];",
-                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.test('JSON-LD decorated: carries @id', () => pm.expect(!!(b && b['@id'])).to.equal(true));",
+                  "  pm.test('walks up and has a breadcrumb', () => { pm.expect(b.up || b.collection).to.be.a('string'); pm.expect(b.breadcrumb).to.be.an('array'); });",
+                  "}"
                 ]
               }
             }
@@ -527,9 +579,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
-                  "const b = pm.response.json();",
-                  "const decorated = !Array.isArray(b) && b && b['@id'];",
-                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.test('JSON-LD decorated: carries @id', () => pm.expect(!!(b && b['@id'])).to.equal(true));",
+                  "  pm.test('walks up and has a breadcrumb', () => { pm.expect(b.up || b.collection).to.be.a('string'); pm.expect(b.breadcrumb).to.be.an('array'); });",
+                  "}"
                 ]
               }
             }
@@ -565,9 +619,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
-                  "const b = pm.response.json();",
-                  "const decorated = !Array.isArray(b) && b && b['@id'];",
-                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.test('JSON-LD decorated: carries @id', () => pm.expect(!!(b && b['@id'])).to.equal(true));",
+                  "  pm.test('walks up and has a breadcrumb', () => { pm.expect(b.up || b.collection).to.be.a('string'); pm.expect(b.breadcrumb).to.be.an('array'); });",
+                  "}"
                 ]
               }
             }
@@ -603,9 +659,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
-                  "const b = pm.response.json();",
-                  "const decorated = !Array.isArray(b) && b && b['@id'];",
-                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.test('JSON-LD decorated: carries @id', () => pm.expect(!!(b && b['@id'])).to.equal(true));",
+                  "  pm.test('walks up and has a breadcrumb', () => { pm.expect(b.up || b.collection).to.be.a('string'); pm.expect(b.breadcrumb).to.be.an('array'); });",
+                  "}"
                 ]
               }
             }
@@ -641,9 +699,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
-                  "const b = pm.response.json();",
-                  "const decorated = !Array.isArray(b) && b && b['@id'];",
-                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.test('JSON-LD decorated: carries @id', () => pm.expect(!!(b && b['@id'])).to.equal(true));",
+                  "  pm.test('walks up and has a breadcrumb', () => { pm.expect(b.up || b.collection).to.be.a('string'); pm.expect(b.breadcrumb).to.be.an('array'); });",
+                  "}"
                 ]
               }
             }
@@ -678,9 +738,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
-                  "const b = pm.response.json();",
-                  "const decorated = !Array.isArray(b) && b && b['@id'];",
-                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.test('JSON-LD decorated: carries @id', () => pm.expect(!!(b && b['@id'])).to.equal(true));",
+                  "  pm.test('walks up and has a breadcrumb', () => { pm.expect(b.up || b.collection).to.be.a('string'); pm.expect(b.breadcrumb).to.be.an('array'); });",
+                  "}"
                 ]
               }
             }
@@ -715,9 +777,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
-                  "const b = pm.response.json();",
-                  "const decorated = !Array.isArray(b) && b && b['@id'];",
-                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.test('JSON-LD decorated: carries @id', () => pm.expect(!!(b && b['@id'])).to.equal(true));",
+                  "  pm.test('walks up and has a breadcrumb', () => { pm.expect(b.up || b.collection).to.be.a('string'); pm.expect(b.breadcrumb).to.be.an('array'); });",
+                  "}"
                 ]
               }
             }
@@ -752,9 +816,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('the endpoint works', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
-                  "const b = pm.response.json();",
-                  "const decorated = !Array.isArray(b) && b && b['@id'];",
-                  "pm.test('DEFECT: not linked from the entry point and not JSON-LD decorated', () => pm.expect(!!decorated).to.equal(false));"
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.test('JSON-LD decorated: carries @id', () => pm.expect(!!(b && b['@id'])).to.equal(true));",
+                  "  pm.test('walks up and has a breadcrumb', () => { pm.expect(b.up || b.collection).to.be.a('string'); pm.expect(b.breadcrumb).to.be.an('array'); });",
+                  "}"
                 ]
               }
             }
@@ -763,11 +829,11 @@
       ]
     },
     {
-      "name": "4 \u00b7 Broken links the API itself emits",
-      "description": "These URLs came out of the API's own responses during a link walk. Following them fails. Each test asserts the CURRENT broken behaviour, so it fails loudly once fixed.",
+      "name": "4 · Formerly broken links (fixed 20 Oct 2026)",
+      "description": "These URLs came out of the API's own responses during the September link walk and failed when followed. Each test now asserts the fix: scoped collections are IriTemplates, the volt: vocabulary is /api/doc, actions are declared as POST operations, and a stream's status link answers 200 before it has ever run.",
       "item": [
         {
-          "name": "Entry point \u2192 /api/publications",
+          "name": "Entry point → /api/publications",
           "request": {
             "method": "GET",
             "header": [
@@ -794,15 +860,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('DEFECT: advertised collection returns 400', () => pm.response.to.have.status(400));",
-                  "console.log(pm.response.text());"
+                  "pm.test('the bare collection still needs its scope (400)', () => pm.response.to.have.status(400));",
+                  "pm.sendRequest({ url: pm.environment.get('baseUrl') + '/api', header: { accept: 'application/ld+json' } }, (e, r) => {",
+                  "  pm.test('the entry point offers it as an IriTemplate, not a link', () => pm.expect(r.json().publications['@type']).to.equal('hydra:IriTemplate'));",
+                  "});"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Context \u2192 the volt: vocabulary",
+          "name": "Context → the volt: vocabulary",
           "request": {
             "method": "GET",
             "header": [
@@ -829,14 +897,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('DEFECT: the declared vocabulary namespace 404s', () => pm.response.to.have.status(404));"
+                  "pm.test('/api/vocab is not the vocabulary (404)', () => pm.response.to.have.status(404));",
+                  "pm.sendRequest({ url: pm.environment.get('baseUrl') + '/api/context.jsonld' }, (e, r) => {",
+                  "  pm.test('volt: resolves to the ApiDocumentation', () => pm.expect(r.json()['@context'].volt).to.match(/\\/api\\/doc#$/));",
+                  "});"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Channel \u2192 start",
+          "name": "Channel → start",
           "request": {
             "method": "GET",
             "header": [
@@ -865,14 +936,18 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('DEFECT: linked action 404s on GET because the method is not declared', () => pm.response.to.have.status(404));"
+                  "pm.test('GET on an action is still a 404', () => pm.response.to.have.status(404));",
+                  "pm.sendRequest({ url: pm.environment.get('baseUrl') + '/api/doc' }, (e, r) => {",
+                  "  const ch = r.json()['hydra:supportedClass'].find((c) => c['@id'] === 'volt:Channel');",
+                  "  pm.test('the doc declares POST /channels/{id}/start', () => pm.expect(ch['hydra:supportedOperation'].some((o) => o['hydra:method'] === 'POST' && /\\/start$/.test(o.target))).to.equal(true));",
+                  "});"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Channel \u2192 status",
+          "name": "Channel → status",
           "request": {
             "method": "GET",
             "header": [
@@ -901,8 +976,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('linked status is either a document or a 404', () => pm.expect(pm.response.code).to.be.oneOf([200,404]));",
-                  "pm.test('DEFECT: status is never JSON-LD decorated', () => { const b = pm.response.json(); pm.expect(!!(b && b['@id'])).to.equal(false); });"
+                  "pm.test('the old per-stream URL is a 404 until the stream has run', () => pm.expect(pm.response.code).to.be.oneOf([200,404]));",
+                  "pm.sendRequest({ url: pm.environment.get('baseUrl') + '/api/channels/' + pm.environment.get('channelId'), header: { accept: 'application/ld+json', authorization: 'Bearer ' + pm.environment.get('token') } }, (e, r) => {",
+                  "  pm.test('the channel now links its status as the filtered status collection', () => pm.expect(r.json().status).to.include('/api/status?channelId='));",
+                  "});"
                 ]
               }
             }

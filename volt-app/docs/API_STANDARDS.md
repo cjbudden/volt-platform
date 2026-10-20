@@ -190,3 +190,20 @@ exists but search does not use it yet.
   (`test/vodOwnership.check.ts`, which fails on the old code).
 - **Ignored filter:** `/api/vod?recordingId=` was ignored and returned every asset.
 - **Bad limit:** `/api/status/:kind/:id/events?limit=abc` was a server error.
+
+## 11. Hypermedia: navigate by links (in place, 20 October 2026)
+
+Every resource links to its parent, siblings and children, so a client starts at `GET /api` and follows links (the SOAP/WSDL navigability goal in `api_design`). JSON-LD + Hydra, content negotiated with `Accept: application/ld+json` or `?format=jsonld`. Implemented once, as a response post-processor (`middleware/hypermedia.ts`, `services/hypermedia.ts`), over the running app's own route table, so a new endpoint is covered without extra code:
+
+| Need | How |
+|---|---|
+| Discover | `/api` links every collection; scoped ones (`/api/epg`, `/api/publications`) are IriTemplates. Sign-in is a declared POST operation |
+| Describe (the WSDL half) | `/api/doc`: each class with `hydra:supportedOperation` (method, target template, expects, returns) and `hydra:supportedProperty` (from its list definition: type, filter operators, sortable) |
+| Drill down | typed links per item, plus one link per sub-resource route (`/api/channels/{id}/history`) |
+| Walk up | `up`, and `breadcrumb` (an ordered list from `/api` to the item; a recording's runs through its channel) |
+| Left and right | `previousSibling` / `nextSibling` on members, in the order of the requested view; `siblings` on an item |
+| Page | `hydra:view` with `first`, `previous`, `next` and `last`, taken from the list standard's keyset cursor links (section 2), so paging stays inside the caller's filters and sort; `hydra:totalItems` is the full match count |
+| Filter | `hydra:search`, an IriTemplate of the list's `q`, filters, `sort`, `limit`, `cursor` |
+
+Rules for a new endpoint: a link is emitted only when a GET route answers it, a sub-resource that needs query parameters is added to `PARAMETERISED` (it is then offered as an IriTemplate), and a collection that only answers inside a scope is added to `SCOPED`. `test/hypermedia.check.sh` asserts the contract (55 checks).
+
