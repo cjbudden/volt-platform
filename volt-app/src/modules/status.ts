@@ -237,7 +237,12 @@ ingestRouter.get(
     const breaks = list.filter((t) => t.graphic === 'ad-break').map((t) => ({
       id: t.data.BREAK, start: t.start.toISOString(), duration: t.durationSec, hideGraphics: t.data['HIDE-GRAPHICS'] !== 'none',
     }));
-    res.json({ id, kind, from: from.toISOString(), to: to.toISOString(), generated_at: new Date(now).toISOString(), triggers: list.map(wireFormat), breaks });
+    // control: the operator's source control for this run (switch source, force
+    // slate or loop), carried on the poll the encoder already makes
+    // (services/failoverControl.ts). Absent the choice, mode is auto.
+    const { currentFailoverControl } = await import('../services/failoverControl');
+    const failover = await currentFailoverControl(kind, id);
+    res.json({ id, kind, from: from.toISOString(), to: to.toISOString(), generated_at: new Date(now).toISOString(), triggers: list.map(wireFormat), breaks, control: { failover } });
   })
 );
 

@@ -840,6 +840,25 @@
         ]
       },
       "feedback": []
+    },
+    {
+      "id": "source-control-remote",
+      "name": "Switch source and force slate on cloud encoders",
+      "summary": "WHY: an operator must be able to cut to the backup or put the slate up during an incident, wherever the encoder runs. WHAT: the Failover panel's choice reaches the encoder within about 5 seconds on any deployment, is logged with who made it, and a restart goes back to automatic.",
+      "status": "ready_to_test",
+      "app_surface": "full",
+      "test": {
+        "how": "Start a channel with a backup source. In the Failover panel pick Force slate: within about 5 s the output shows the slate and the QC log shows the change with your name. Pick Backup: the backup source is on air. Pick Auto: back to the primary. Restart the channel: it starts in Auto.",
+        "artifact": "Channel > Failover panel",
+        "checks": [
+          "Slate on air within a few seconds",
+          "Backup on air",
+          "Auto returns to primary",
+          "Logged with who made it",
+          "Restart is automatic"
+        ]
+      },
+      "feedback": []
     }
   ],
   "note": "Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set."

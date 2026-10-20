@@ -17,6 +17,7 @@ import { buildChannelDetail, loadChannelHealthLite, DVR_MAX_SEC } from '../servi
 import { startTestStream, stopTestStream, testStreamStatus, isTestStreamAvailable } from '../services/testStream';
 import { outputHasValidContent } from './publicLive';
 import { config } from '../config';
+import { FAILOVER_MODES, setFailoverControl, currentFailoverControl } from '../services/failoverControl';
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { scheduleFillerPrep, FILLER_FIELDS, runFillerPrep, fillerStatus } from '../services/fillerPrep';
@@ -752,7 +753,7 @@ channelsRouter.post(
  *  then clear it (mode=auto) to resume health-driven behaviour. The real switch only
  *  happens on redundancy-enabled package channels (where the selector runs); the UI
  *  offers a preview simulation elsewhere. */
-const failoverModes = ['auto', 'primary_down', 'backup', 'slate', 'loop'] as const;
+const failoverModes = FAILOVER_MODES;
 const failoverTestSchema = z.object({ mode: z.enum(failoverModes) });
 function failoverControlPath(channelId: string) {
   return join(resolve(config.testStream.originDir, channelId), '_failover_control.json');
@@ -795,8 +796,12 @@ channelsRouter.post(
     const dir = resolve(config.testStream.originDir, req.params.id);
     try { mkdirSync(dir, { recursive: true }); } catch { /* exists */ }
     writeFileSync(failoverControlPath(req.params.id), JSON.stringify({ mode, at: Date.now() }));
+    // ...and the encoder wherever it runs: it picks this up on its timed-events
+    // poll (services/failoverControl.ts). The local file above serves an encoder
+    // on this machine at once.
+    const control = await setFailoverControl('channel', req.params.id, mode, actor(req).label);
     const hasBackup = !!(await one(`SELECT 1 FROM stream_inputs WHERE channel_id=$1 AND role='backup' LIMIT 1`, [req.params.id]));
-    res.json({ mode, hasBackup, ...channelFailoverCapability(chan) });
+    res.json({ mode, hasBackup, control, ...channelFailoverCapability(chan) });
   })
 );
 channelsRouter.get(
@@ -810,10 +815,15 @@ channelsRouter.get(
       [req.params.id, accountId(req)]
     );
     if (!chan) throw notFound('Channel not found');
-    let mode = 'auto';
-    try { mode = String(JSON.parse(readFileSync(failoverControlPath(req.params.id), 'utf8')).mode || 'auto'); } catch { /* no file yet */ }
+    // The run's control is the stream event (it reaches a remote encoder too);
+    // the local file is only consulted when no event says anything.
+    const control = await currentFailoverControl('channel', req.params.id);
+    let mode: string = control.mode;
+    if (!control.at) {
+      try { mode = String(JSON.parse(readFileSync(failoverControlPath(req.params.id), 'utf8')).mode || 'auto'); } catch { /* no file yet */ }
+    }
     const hasBackup = !!(await one(`SELECT 1 FROM stream_inputs WHERE channel_id=$1 AND role='backup' LIMIT 1`, [req.params.id]));
-    res.json({ mode, hasBackup, ...channelFailoverCapability(chan) });
+    res.json({ mode, hasBackup, control, ...channelFailoverCapability(chan) });
   })
 );
 

@@ -29,8 +29,8 @@
  <h1><svg class="vmark" viewBox="0 0 24 24" width="1em" height="1em" style="vertical-align:-0.12em" aria-hidden="true"><defs><linearGradient id="vmk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b8cff"/><stop offset="1" stop-color="#4f46e5"/></linearGradient></defs><path fill="url(#vmk)" d="M14 1 3.5 14H11zM10 23 20.5 10H13z"/></svg> Volt — Product Feature Tracker</h1>
  <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-20.</div>
  <div class=sub>Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>52</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>1</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>40</b> 📱 In app</span><span class=chip><b>15</b> 📱 Partial</span><span class=chip><b>1</b> ⚙︎ Backend only</span><span class=chip><b>3</b> — no UI</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>53</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>1</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>41</b> 📱 In app</span><span class=chip><b>15</b> 📱 Partial</span><span class=chip><b>1</b> ⚙︎ Backend only</span><span class=chip><b>3</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="partial">
     <div class=top><div class=name>Frame-accurate scrub &amp; clip</div>
@@ -706,6 +706,19 @@
     <div class=actions>
          <button class="btn ok" data-approve="Live captions: Gladia live, Whisper on CPU, Captions lane in QC">✓ Approve as working</button>
          <button class="btn warn" data-changes="Live captions: Gladia live, Whisper on CPU, Captions lane in QC">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="full">
+    <div class=top><div class=name>Switch source and force slate on cloud encoders</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#2563eb;color:#2563eb">📱 In app</span></div>
+    <div class=summary>WHY: an operator must be able to cut to the backup or put the slate up during an incident, wherever the encoder runs. WHAT: the Failover panel's choice reaches the encoder within about 5 seconds on any deployment, is logged with who made it, and a restart goes back to automatic.</div>
+    <div class=meta></div>
+    <div class=how><b>How to test:</b> Start a channel with a backup source. In the Failover panel pick Force slate: within about 5 s the output shows the slate and the QC log shows the change with your name. Pick Backup: the backup source is on air. Pick Auto: back to the primary. Restart the channel: it starts in Auto.</div>
+    <div class=note>Test tool: open <b>“Channel &gt; Failover panel”</b> in your artifacts gallery.</div>
+    <div class=actions>
+         <button class="btn ok" data-approve="Switch source and force slate on cloud encoders">✓ Approve as working</button>
+         <button class="btn warn" data-changes="Switch source and force slate on cloud encoders">Request changes</button>
        </div>
     
   </div><div class=card data-status="in_review" data-app="full">

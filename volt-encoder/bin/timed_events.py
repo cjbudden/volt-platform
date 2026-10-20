@@ -69,7 +69,11 @@ def _dur_sec(v):
 class TriggerFeed:
     """Polls the control plane for this stream's triggers and holds the last good list."""
 
-    def __init__(self, url, token=None, poll_sec=5, log=None, clock=time.time, fetch=None):
+    def __init__(self, url, token=None, poll_sec=5, log=None, clock=time.time, fetch=None, on_control=None):
+        # on_control(dict): the operator's source control that rides on the same
+        # response (`control`, services/failoverControl.ts), handed over on every
+        # good poll so the encoder can apply a switch or a forced slate.
+        self.on_control = on_control
         self.url = url
         self.token = token
         self.poll_sec = max(2, int(poll_sec or 5))
@@ -100,6 +104,11 @@ class TriggerFeed:
             with self._lock:
                 self._items, self._at = items, self.clock()
             self._warned = False
+            if self.on_control is not None and isinstance(body.get("control"), dict):
+                try:
+                    self.on_control(body["control"])
+                except Exception as e:  # noqa: BLE001  a bad control never stops the triggers
+                    self.log(f"timed events: control not applied ({e})")
             return True
         except Exception as e:  # noqa: BLE001
             if not self._warned:

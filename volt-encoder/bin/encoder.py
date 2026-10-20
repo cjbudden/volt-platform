@@ -1628,7 +1628,8 @@ def start_trigger_feed(cfg):
     if not te.get("url") or _TRIGGERS is not None:
         return
     import timed_events
-    _TRIGGERS = timed_events.TriggerFeed(te["url"], te.get("token"), te.get("poll_sec", 5), log=log).start()
+    _TRIGGERS = timed_events.TriggerFeed(te["url"], te.get("token"), te.get("poll_sec", 5), log=log,
+                                         on_control=apply_remote_control).start()
     log(f"timed events: polling every {_TRIGGERS.poll_sec}s")
 
 
@@ -1716,6 +1717,33 @@ _FILLER_META = None
 def playout_wanted(cfg):
     red = cfg.get("redundancy") or {}
     return bool(red.get("input_failover")) and red.get("input_loss_behavior", "slate") in ("slate", "vod_loop")
+
+
+_REMOTE_MODE = {"mode": None}
+_CONTROL_MODES = ("auto", "primary_down", "backup", "slate", "loop")
+
+
+def apply_remote_control(control):
+    """The operator's source control from the control plane (switch to backup,
+    pretend the primary failed, force the slate or loop, back to auto), received
+    on the timed-events poll. Written to the same `_failover_control.json` the
+    source selector and playout already read, so an encoder on another host
+    (ECS) obeys the Failover panel exactly as a local one does. Only a CHANGE
+    is written, and an unknown mode is ignored rather than guessed at."""
+    mode = str(((control or {}).get("failover") or {}).get("mode") or "auto").lower()
+    if mode not in _CONTROL_MODES or mode == _REMOTE_MODE["mode"]:
+        return False
+    path = os.path.join(BASE_OUT_DIR or OUT_DIR, "_failover_control.json")
+    if mode == "auto" and _REMOTE_MODE["mode"] is None and not os.path.exists(path):
+        _REMOTE_MODE["mode"] = mode       # nothing was ever forced: nothing to undo
+        return False
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump({"mode": mode, "at": ((control or {}).get("failover") or {}).get("at"), "source": "control-plane"}, fh)
+    os.replace(tmp, path)
+    _REMOTE_MODE["mode"] = mode
+    log(f"source control from the control plane: {mode}")
+    return True
 
 
 def _forced_filler():
