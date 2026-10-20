@@ -424,12 +424,12 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     const mins = Math.max(1, Math.round((en - s) / 60000));
     const isNow = nowMs >= s && nowMs < en;
     const state = en <= nowMs ? 'past' : isNow ? 'now' : '';
-    const entry: any = { name: p.title, start: hhmm(s), end: hhmm(en), mins, state };
+    const entry: any = { name: p.title, start: hhmm(s), end: hhmm(en), mins, state, startMs: s, endMs: en };
     if (isNow) { entry.progress = Math.round(((nowMs - s) / (en - s)) * 100); nowObj = { ...entry, elapsedMin: Math.floor((nowMs - s) / 60000) }; }
     return entry;
   });
   const nextRow = progs.find((p: any) => new Date(p.starts_at).getTime() > nowMs);
-  if (nextRow) nextObj = { name: nextRow.title, start: hhmm(new Date(nextRow.starts_at).getTime()) };
+  if (nextRow) nextObj = { name: nextRow.title, start: hhmm(new Date(nextRow.starts_at).getTime()), startMs: new Date(nextRow.starts_at).getTime() };
   const epg = { now: nowObj, next: nextObj, lane };
 
   // viewers — real analytics only; empty until wired/there is live data (no fabrication)

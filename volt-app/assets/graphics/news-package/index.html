@@ -1,0 +1,269 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>News L-bar</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "News L-bar (strap, ticker, clock and weather)",
+  "bbox": [
+    120,
+    850,
+    1690,
+    170
+  ],
+  "fields": [
+    {
+      "id": "tag",
+      "type": "text",
+      "label": "Tag (a name, or BREAKING / LIVE / DEVELOPING)"
+    },
+    {
+      "id": "headline",
+      "type": "text",
+      "label": "Headline"
+    },
+    {
+      "id": "tickerItems",
+      "type": "list",
+      "label": "Ticker headlines"
+    },
+    {
+      "id": "tickerLabel",
+      "type": "text",
+      "label": "Ticker label (optional)"
+    },
+    {
+      "id": "tickerInterval",
+      "type": "number",
+      "label": "Seconds per ticker headline"
+    },
+    {
+      "id": "brand",
+      "type": "text",
+      "label": "Channel name"
+    },
+    {
+      "id": "brandLogo",
+      "type": "image",
+      "label": "Channel logo (instead of the name)"
+    },
+    {
+      "id": "clocks",
+      "type": "list",
+      "label": "Clocks (LABEL|Time/Zone)"
+    },
+    {
+      "id": "weather",
+      "type": "list",
+      "label": "Weather (CODE|icon|temp)"
+    },
+    {
+      "id": "rotateEvery",
+      "type": "number",
+      "label": "Seconds per clock and city"
+    },
+    {
+      "id": "showTicker",
+      "type": "boolean",
+      "label": "Show the ticker"
+    },
+    {
+      "id": "showClock",
+      "type": "boolean",
+      "label": "Show clock and weather"
+    },
+    {
+      "id": "accent",
+      "type": "color",
+      "label": "Tag colour"
+    },
+    {
+      "id": "barColor",
+      "type": "color",
+      "label": "Ticker colour"
+    },
+    {
+      "id": "brandColor",
+      "type": "color",
+      "label": "Channel block colour"
+    }
+  ],
+  "sample": {
+    "tag": "BREAKING",
+    "headline": "Politicians send messages of support to independent MP",
+    "tickerItems": [
+      "Ferries suspended on two routes while ramps are upgraded",
+      "Interest rates held steady at this month's board meeting",
+      "Severe thunderstorm warning for the south-east until 9pm",
+      "Ceasefire talks resume overnight, officials say"
+    ],
+    "tickerLabel": "",
+    "tickerInterval": 7,
+    "brand": "NEWS 24",
+    "brandLogo": "",
+    "clocks": [
+      "NSW|Australia/Sydney",
+      "VIC|Australia/Melbourne",
+      "QLD|Australia/Brisbane",
+      "SA|Australia/Adelaide",
+      "WA|Australia/Perth",
+      "TAS|Australia/Hobart",
+      "NT|Australia/Darwin",
+      "ACT|Australia/Sydney"
+    ],
+    "weather": [
+      "SYD|partly|24",
+      "MEL|showers|17",
+      "BNE|storm|31",
+      "ADL|sun|26",
+      "PER|sun|29",
+      "HBA|cloud|15",
+      "DRW|storm|33",
+      "CBR|wind|19"
+    ],
+    "rotateEvery": 6,
+    "showTicker": true,
+    "showClock": true,
+    "accent": "#c1121f",
+    "barColor": "#0a2350",
+    "brandColor": "#123a7a"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+
+:root{--accent:#c1121f;--bar:#0a2350;--bar2:#123a7a;--paper:#f4f5f7;--ink:#0b1220}
+.strap{position:absolute;left:120px;top:862px;width:1440px;height:84px;display:flex;border-radius:3px;overflow:hidden;
+  box-shadow:0 6px 18px rgba(0,0,0,.35);clip-path:inset(0 100% 0 0);transition:clip-path .55s cubic-bezier(.2,.8,.2,1)}
+.on .strap{clip-path:inset(0 0 0 0)}
+.tag{flex:none;display:flex;align-items:center;gap:12px;padding:0 30px;background:var(--accent);color:#fff;font:700 36px/1 "Volt Sans";letter-spacing:.02em;text-transform:uppercase;white-space:nowrap;transition:background .3s}
+.tag:empty{display:none}
+.tag .chev{display:none;width:0;height:0;border-top:11px solid transparent;border-bottom:11px solid transparent;border-left:13px solid #fff}
+.tag.alert .chev{display:block;animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+.head{flex:1;min-width:0;position:relative;background:var(--paper);color:var(--ink)}
+.head div{position:absolute;inset:0;display:flex;align-items:center;padding:0 30px;font:600 46px/1 "Volt Serif";white-space:nowrap;overflow:hidden;transition:transform .45s cubic-bezier(.2,.8,.2,1),opacity .45s}
+.head div.out{transform:translateY(-100%);opacity:0}
+.head div.in{transform:translateY(100%);opacity:0}
+.ticker{position:absolute;left:120px;top:954px;width:1440px;height:52px;display:flex;background:var(--bar);border-radius:3px;overflow:hidden;
+  box-shadow:0 6px 18px rgba(0,0,0,.35);transform:translateY(90px);opacity:0;transition:transform .5s cubic-bezier(.2,.8,.2,1) .15s,opacity .3s .15s}
+.on .ticker{transform:none;opacity:1}
+.ticker .lbl{flex:none;display:flex;align-items:center;padding:0 22px;background:var(--accent);font:700 26px/1 "Volt Sans";letter-spacing:.06em;text-transform:uppercase}
+.ticker .lbl:empty{display:none}
+.ticker .track{flex:1;min-width:0;position:relative}
+.ticker .track div{position:absolute;inset:0;display:flex;align-items:center;padding:0 26px;font:400 31px/1 "Volt Serif";white-space:nowrap;overflow:hidden;transition:transform .5s cubic-bezier(.2,.8,.2,1),opacity .5s}
+.ticker .track div.out{transform:translateY(-100%);opacity:0}
+.ticker .track div.in{transform:translateY(100%);opacity:0}
+.block{position:absolute;left:1572px;top:862px;width:228px;height:144px;display:flex;flex-direction:column;gap:8px;
+  transform:translateX(60px);opacity:0;transition:transform .5s cubic-bezier(.2,.8,.2,1) .1s,opacity .35s .1s}
+.on .block{transform:none;opacity:1}
+.brandbox{height:84px;background:var(--bar2);border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.brand{font:700 36px/1 "Volt Sans";letter-spacing:.03em;text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.brand img{max-height:40px;max-width:190px;display:none}
+.brand.logo img{display:block}.brand.logo span{display:none}
+.clock{font:500 25px/1 "Volt Sans";margin-top:6px;letter-spacing:.02em;transition:opacity .35s}
+.clock b{font-weight:500;font-size:18px;margin-left:6px;opacity:.85}
+.wx{height:52px;background:var(--bar);border-radius:3px;display:flex;align-items:center;justify-content:center;gap:10px;font:500 25px/1 "Volt Sans";box-shadow:0 6px 18px rgba(0,0,0,.35);transition:opacity .35s}
+.wx .t{font-weight:700;font-size:28px}
+.fade{opacity:0!important}
+.noticker .ticker,.noclock .block{display:none}
+</style>
+</head>
+<body>
+<div class="strap"><div class="tag" id="tag"></div><div class="head" id="head"></div></div><div class="ticker"><div class="lbl" id="tlbl"></div><div class="track" id="track"></div></div><div class="block"><div class="brandbox"><div class="brand" id="brand"><img id="brandimg" alt=""><span id="brandtxt">NEWS</span></div><div class="clock" id="clock"></div></div><div class="wx" id="wx"></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+
+var ICON={
+ sun:'<circle cx="24" cy="24" r="8" fill="#ffc53d" stroke="none"/><g stroke="#ffc53d"><path d="M24 6v6M24 36v6M6 24h6M36 24h6M11.3 11.3l4.2 4.2M32.5 32.5l4.2 4.2M11.3 36.7l4.2-4.2M32.5 15.5l4.2-4.2"/></g>',
+ clear_night:'<path d="M30 9a15 15 0 1 0 9 22A12 12 0 0 1 30 9z"/>',
+ partly:'<g stroke="#ffc53d"><circle cx="18" cy="17" r="6" fill="#ffc53d" stroke="none"/><path d="M18 4v4M5 17h4M8.8 7.8l2.8 2.8M27.2 7.8l-2.8 2.8"/></g><path d="M16 38h20a7 7 0 0 0 0-14 10 10 0 0 0-19 3 6 6 0 0 0-1 11z" fill="#0e1b33"/>',
+ cloud:'<path d="M13 37h23a8 8 0 0 0 0-16 11 11 0 0 0-21 3 7 7 0 0 0-2 13z"/>',
+ showers:'<path d="M13 30h23a8 8 0 0 0 0-16 11 11 0 0 0-21 3 7 7 0 0 0-2 13z"/><path d="M17 35l-2 5M25 35l-2 5M33 35l-2 5"/>',
+ rain:'<path d="M13 28h23a8 8 0 0 0 0-16 11 11 0 0 0-21 3 7 7 0 0 0-2 13z"/><path d="M15 33l-3 7M22 33l-3 7M29 33l-3 7M36 33l-3 7"/>',
+ storm:'<path d="M13 28h23a8 8 0 0 0 0-16 11 11 0 0 0-21 3 7 7 0 0 0-2 13z"/><path d="M25 30l-5 8h7l-4 7" stroke="#ffc53d"/>',
+ fog:'<path d="M13 25h23a8 8 0 0 0 0-16 11 11 0 0 0-21 3 7 7 0 0 0-2 13z"/><path d="M10 32h28M14 38h24"/>',
+ wind:'<path d="M6 18h24a5 5 0 1 0-5-5M6 26h32a5 5 0 1 1-5 5M6 34h16"/>',
+ snow:'<path d="M13 28h23a8 8 0 0 0 0-16 11 11 0 0 0-21 3 7 7 0 0 0-2 13z"/><path d="M17 34v6M14 37h6M30 34v6M27 37h6"/>'
+};
+var ICON_ALIAS={sunny:'sun',clear:'sun',fine:'sun',mostly_sunny:'partly',partly_cloudy:'partly',partlycloudy:'partly',cloudy:'cloud',overcast:'cloud',shower:'showers',drizzle:'showers',thunder:'storm',thunderstorm:'storm',storms:'storm',mist:'fog',haze:'fog',windy:'wind',night:'clear_night'};
+function iconSvg(name,size){var k=String(name||'').toLowerCase().replace(/[\s-]+/g,'_');k=ICON_ALIAS[k]||k;var body=ICON[k]||ICON.cloud;return '<svg viewBox="0 0 48 48" width="'+(size||40)+'" height="'+(size||40)+'" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+body+'</svg>'}
+// "SYD|partly|24" or {code,icon,temp}
+function weatherItem(x){if(typeof x==='string'){var p=x.split('|');return {code:(p[0]||'').trim(),icon:(p[1]||'').trim(),temp:(p[2]||'').trim()}}x=x||{};return {code:x.code||x.city||'',icon:x.icon||x.condition||'',temp:x.temp!=null?x.temp:(x.max!=null?x.max:'')}}
+// "NSW|Australia/Sydney"
+function clockItem(x){if(typeof x==='string'){var p=x.split('|');return {label:(p[0]||'').trim(),tz:(p[1]||'').trim()}}x=x||{};return {label:x.label||x.code||'',tz:x.tz||x.timeZone||''}}
+function clockText(tz){try{return new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',hourCycle:'h23',timeZone:tz||undefined}).format(new Date())}catch(e){return new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())}}
+
+// Two-slot flipper: the outgoing line slides up and out, the incoming slides up and in.
+function Flipper(box){this.box=box;this.cur=null;}
+Flipper.prototype.show=function(text){
+  text=text==null?'':String(text);
+  if(this.cur&&this.cur.textContent===text)return;
+  var n=document.createElement('div');n.className='in';n.textContent=text;this.box.appendChild(n);
+  var o=this.cur;this.cur=n;void n.offsetWidth;n.className='';
+  fit(n);requestAnimationFrame(function(){fit(n)});
+  if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){fit(n)});
+  if(o){o.className='out';setTimeout(function(){o.remove()},600)}
+};
+// Shrink a single line until it fits, down to 72% of its size: long headlines stay readable.
+function fit(el){el.style.fontSize='';var s=parseFloat(getComputedStyle(el).fontSize),min=s*0.72;
+  while(el.scrollWidth>el.clientWidth+1&&s>min){s-=1;el.style.fontSize=s+'px'}}
+
+var data={},items=[],ti=-1,tickTimer=null,clocks=[],ci=0,wx=[],wi=0,rot=null,playing=false;
+var head=new Flipper($('head'));
+var tick=new Flipper($('track'));
+function nextItem(){if(!items.length){tick.show('');return}ti=(ti+1)%items.length;tick.show(txt(items[ti]))}
+function startTicker(){clearInterval(tickTimer);var s=Math.max(3,Number(data.tickerInterval)||7);if(items.length>1&&playing)tickTimer=setInterval(nextItem,s*1000)}
+function showClock(){var c=clocks[ci%Math.max(1,clocks.length)]||{label:'',tz:''};$('clock').innerHTML=clockText(c.tz)+(c.label?'<b>'+c.label.replace(/</g,'')+'</b>':'')}
+function showWx(){var w=wx[wi%Math.max(1,wx.length)];if(!w){$('wx').style.visibility='hidden';return}$('wx').style.visibility='';
+  $('wx').innerHTML='<span>'+String(w.code).replace(/</g,'')+'</span>'+iconSvg(w.icon,36)+'<span class="t">'+String(w.temp).replace(/</g,'')+(w.temp!==''&&!/°/.test(String(w.temp))?'°':'')+'</span>'}
+function swap(el,fn){el.classList.add('fade');setTimeout(function(){fn();el.classList.remove('fade')},350)}
+function rotate(){clearInterval(rot);var s=Math.max(3,Number(data.rotateEvery)||6)*1000;rot=setInterval(function(){
+  if(clocks.length>1){ci++;swap($('clock'),showClock)}else showClock();
+  setTimeout(function(){if(wx.length>1){wi++;swap($('wx'),showWx)}},s/2)},s)}
+setInterval(function(){showClock()},10000);
+function update(raw){
+  var d=parse(raw);for(var k in d)data[k]=d[k];
+  var root=document.documentElement.style;
+  if(d.accent)root.setProperty('--accent',d.accent);
+  if(d.barColor)root.setProperty('--bar',d.barColor);
+  if(d.brandColor)root.setProperty('--bar2',d.brandColor);
+  if('tag' in d){var t=String(d.tag||'');var tag=$('tag');tag.innerHTML=t?'<i class="chev"></i><span></span>':'';if(t)tag.querySelector('span').textContent=t;
+    tag.classList.toggle('alert',['BREAKING','LIVE','DEVELOPING','JUST IN','EXCLUSIVE','UPDATE','ALERT'].indexOf(t.trim().toUpperCase())>=0)}
+  if('headline' in d)head.show(d.headline);
+  if('tickerLabel' in d)setText($('tlbl'),d.tickerLabel||'');
+  if('tickerItems' in d||'items' in d){items=asList('tickerItems' in d?d.tickerItems:d.items);ti=-1;nextItem();startTicker()}
+  if('tickerInterval' in d)startTicker();
+  if('showTicker' in d)document.body.classList.toggle('noticker',d.showTicker===false||d.showTicker==='false');
+  if('brand' in d)setText($('brandtxt'),d.brand||'');
+  if('brandLogo' in d){var im=$('brandimg');im.src=d.brandLogo||'';$('brand').classList.toggle('logo',!!d.brandLogo)}
+  if('clocks' in d){clocks=asList(d.clocks).map(clockItem);ci=0;showClock()}
+  if('weather' in d){wx=asList(d.weather).map(weatherItem);wi=0;showWx()}
+  if('rotateEvery' in d)rotate();
+  if('showClock' in d)document.body.classList.toggle('noclock',d.showClock===false||d.showClock==='false');
+}
+function play(){playing=true;document.body.classList.add('on');startTicker();rotate();}
+function stop(){playing=false;document.body.classList.remove('on');clearInterval(tickTimer);}
+function next(){nextItem();startTicker();}
+</script>
+</body>
+</html>

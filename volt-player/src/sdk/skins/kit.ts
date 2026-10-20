@@ -8,12 +8,19 @@
 //  menu()      a popover list (quality, subtitles, audio, speed)
 //  slider()    a scrubber / volume slider that works with mouse, touch and keys
 //  fmtTime, fmtClock, fmtIn   time formatting
+//  skipButton() the Skip intro / recap / credits button (on-demand only)
+//  upNextCard() THE UP NEXT / COMING UP TEMPLATE every built-in skin uses, and a
+//               custom skin can too: one place that decides what the card says
+//               and how its progress runs, whatever drives it (the stream's own
+//               trigger, a fetched guide, or the end of a playlist item)
 //
 //  The stylesheet is injected once per page and scoped under .vp, so a host
 //  page's CSS and the player's do not fight. Colours come only from the
 //  theme's CSS variables.
 // ============================================================================
 export { fmtTime, fmtClock, fmtIn } from '../schedule';
+import { fmtClock as clockOf, fmtIn as inOf } from '../schedule';
+import type { PlayerState, SkinContext, UpNext } from '../types';
 
 const P: Record<string, string> = {
   play: 'M8 5.14v13.72a1 1 0 0 0 1.52.85l10.8-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14z',
@@ -176,6 +183,116 @@ export function autoHide(root: HTMLElement, isPlaying: () => boolean, ms = 3000)
   return () => { evs.forEach((e) => root.removeEventListener(e, wake)); if (t) clearTimeout(t); };
 }
 
+// ---------------------------------------------------------------- up next
+/**
+ * The Up next / Coming up card.
+ *
+ *   overlay  floats over a picture (the video and event skins): bottom right,
+ *            artwork, "Starts in 2 min", the title, Play now / Cancel.
+ *   banner   sits inside an audio layout: slides in under the station's own
+ *            panel, "Coming up in 2 min · 18:30", the title, a dismiss button.
+ *
+ * Both show the same facts the same way:
+ *   - a programme says when it starts ("Starts in 2 min", and the clock time when
+ *     known), an item says when it plays ("Next in 8 s") or just "Up next";
+ *   - the bar runs over the card's own life when the stream times the card
+ *     (shownMs / totalMs), else over the countdown (1 - inMs / totalMs).
+ *
+ * Diffed, so update() is cheap on every state change.
+ */
+export interface UpNextCard { el: HTMLElement; update(st: PlayerState): void }
+
+export function upNextProgress(u: UpNext): number {
+  const f = u.shownMs != null ? u.shownMs / Math.max(1, u.totalMs) : 1 - u.inMs / Math.max(1, u.totalMs);
+  return Math.max(0, Math.min(1, f));
+}
+
+export function upNextKicker(u: UpNext, t: SkinContext['t'], variant: 'overlay' | 'banner' = 'overlay'): string {
+  if (u.kind === 'item') return u.autoAdvance ? t('nextIn', { time: inOf(u.inMs) }) : t('upNext');
+  if (variant === 'banner') return u.inMs > 0 ? t('comingUpIn', { time: inOf(u.inMs) }) : t('comingUp');
+  return u.inMs > 0 ? t('startsIn', { time: inOf(u.inMs) }) : t('upNext');
+}
+
+export function upNextCard(c: SkinContext, variant: 'overlay' | 'banner' = 'overlay'): UpNextCard {
+  const k = c.commands;
+  const img = el('img', undefined, { alt: '' });
+  const kick = el('small'); const title = el('b'); const sub = el('span'); const at = el('time');
+  const fill = el('i');
+  const stop = (e: Event) => e.stopPropagation();
+  let root: HTMLElement;
+  let go: HTMLButtonElement | null = null;
+  if (variant === 'overlay') {
+    go = el('button', 'go', { type: 'button' }, c.t('playNow'));
+    go.addEventListener('click', (e) => { stop(e); k.next(); });
+    const cancel = el('button', undefined, { type: 'button' }, c.t('cancel'));
+    cancel.addEventListener('click', (e) => { stop(e); k.cancelUpNext(); });
+    root = el('div', 'vpv-up', { role: 'status', 'aria-live': 'polite' },
+      el('div', 'vpv-up-b', undefined, img, el('div', undefined, undefined, kick, title, sub, at)),
+      el('div', 'vpv-up-a', undefined, go, cancel),
+      el('div', 'vpv-up-p', undefined, fill));
+  } else {
+    const x = button('close', c.t('dismiss'), (e) => { stop(e); k.cancelUpNext(); }, 'vp-btn vpx-up-x', 18);
+    root = el('div', 'vpx-up', { role: 'status', 'aria-live': 'polite' },
+      img, el('div', 'vpx-up-t', undefined, kick, title, sub), at, x,
+      el('div', 'vpx-up-p', undefined, fill));
+  }
+  root.addEventListener('click', stop);
+  root.hidden = true;
+  let lastKey = '';
+  return {
+    el: root,
+    update(st) {
+      const u = st.upNext;
+      show(root, !!u);
+      root.classList.toggle('in', !!u);
+      if (!u) { lastKey = ''; return; }
+      text(kick, upNextKicker(u, c.t, variant));
+      fill.style.width = `${(upNextProgress(u) * 100).toFixed(1)}%`;
+      const key = `${u.title}|${u.subtitle ?? ''}|${u.artworkUrl ?? ''}|${u.startsAt ?? ''}|${u.kind}`;
+      if (key === lastKey) return;
+      lastKey = key;
+      text(title, u.title);
+      text(sub, u.subtitle ?? ''); show(sub, !!u.subtitle);
+      text(at, u.startsAt ? clockOf(u.startsAt) : ''); show(at, !!u.startsAt);
+      if (u.startsAt) at.setAttribute('datetime', new Date(u.startsAt).toISOString());
+      const im = img as HTMLImageElement;
+      if (u.artworkUrl) { if (im.getAttribute('src') !== u.artworkUrl) im.src = u.artworkUrl; im.hidden = false; } else im.hidden = true;
+      if (go) show(go, u.kind === 'item');
+    },
+  };
+}
+
+// ---------------------------------------------------------------- skip
+/**
+ * "Skip intro" / "Skip recap" / "Skip credits": shown while the playhead is in
+ * a stretch the asset's markers call skippable (state.skip, on-demand only),
+ * one press jumps past it. Hidden while an Up next card is up, which already
+ * offers the way on.
+ */
+export function skipButton(c: SkinContext): { el: HTMLButtonElement; update(st: PlayerState): void } {
+  const b = el('button', 'vp-skip', { type: 'button' });
+  const lab = el('span');
+  b.append(lab, icon('next', 16));
+  b.addEventListener('click', (e) => { e.stopPropagation(); c.commands.skip(); });
+  b.hidden = true;
+  let shown = '';
+  return {
+    el: b,
+    update(st) {
+      const sk = st.skip;
+      const on = !!sk && !st.upNext && !st.live;
+      show(b, on);
+      if (!on || !sk) { shown = ''; return; }
+      if (shown !== sk.id) {
+        shown = sk.id;
+        const key = sk.kind === 'intro' ? 'skipIntro' : sk.kind === 'recap' ? 'skipRecap' : sk.kind === 'credits' ? 'skipCredits' : 'skip';
+        text(lab, c.t(key));
+        b.setAttribute('aria-label', c.t(key));
+      }
+    },
+  };
+}
+
 let styled = false;
 export function injectBaseStyles(): void {
   if (styled || typeof document === 'undefined') return;
@@ -198,6 +315,7 @@ const CSS = `
 .vp .shaka-text-container span.shaka-text-wrapper{background:rgba(8,10,14,.78);padding:.08em .4em;border-radius:4px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
 .vp:is([data-skin=video],[data-skin=event]):not(.vp-idle) .shaka-text-container{bottom:max(6%,92px)}
 .vp .vp-stage{container-type:inline-size}
+.vp .vp-gfx{position:absolute;overflow:hidden;pointer-events:none;z-index:1}
 .vp .vp-watermark{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;color:rgba(255,255,255,.16);font-size:clamp(14px,3.2vw,28px);font-weight:800;transform:rotate(-18deg);white-space:nowrap;z-index:2}
 .vp .vp-btn{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:999px;position:relative;flex:none;transition:background .15s}
 .vp .vp-btn:hover,.vp .vp-btn:focus-visible{background:rgba(255,255,255,.14)}
@@ -265,6 +383,13 @@ const CSS = `
 .vpv-up small{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--vp-primary)}
 .vpv-up b{display:block;font-size:14px;line-height:1.3;max-height:2.6em;overflow:hidden}
 .vpv-up span{font-size:12px;color:rgba(255,255,255,.65)}
+.vp .vp-skip{position:absolute;right:16px;bottom:84px;z-index:7;display:inline-flex;align-items:center;gap:6px;padding:10px 14px 10px 18px;border-radius:999px;background:rgba(14,16,22,.82);border:1px solid rgba(255,255,255,.28);color:#fff;font-weight:700;font-size:14px;letter-spacing:.01em;backdrop-filter:blur(6px);box-shadow:0 8px 28px rgba(0,0,0,.35);animation:vp-skip-in .25s ease-out}
+.vp .vp-skip:hover,.vp .vp-skip:focus-visible{background:#fff;color:#0b0d12;border-color:#fff}
+.vp .vp-skip svg{width:16px;height:16px}
+@keyframes vp-skip-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.vp .vp-skip{animation:none}}
+.vpa .vp-skip{bottom:14px;right:14px;padding:7px 12px 7px 14px;font-size:13px}
+.vpv-up time{display:block;font-size:11px;color:rgba(255,255,255,.5);font-variant-numeric:tabular-nums;margin-top:2px}
 .vpv-up-a{display:flex;gap:8px;padding:0 12px 12px}
 .vpv-up-a button{flex:1;padding:8px;border-radius:8px;background:rgba(255,255,255,.12);font-weight:700;font-size:13px}
 .vpv-up-a button.go{background:var(--vp-primary);color:var(--vp-primary-ink)}
@@ -396,4 +521,43 @@ const CSS = `
 .vpx-li time{font-size:12px;color:var(--vp-muted);font-variant-numeric:tabular-nums}
 .vpx-empty{font-size:13px;color:var(--vp-muted)}
 .vp[data-skin^=audio]{container-type:inline-size}
+
+/* the Coming up banner (kit.upNextCard 'banner'), inside the audio layouts */
+.vpx-up{position:relative;display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:12px;padding:10px 10px 12px 12px;border-radius:calc(var(--vp-radius) - 4px);background:color-mix(in srgb,var(--vp-primary) 14%,var(--vp-bg));border:1px solid color-mix(in srgb,var(--vp-primary) 40%,transparent);overflow:hidden;animation:vpx-up-in .35s ease-out}
+@keyframes vpx-up-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.vpx-up{animation:none}}
+.vpx-up img{width:52px;height:52px;border-radius:6px;object-fit:cover;background:rgba(127,127,127,.2)}
+.vpx-up-t{min-width:0}
+.vpx-up small{display:block;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--vp-primary)}
+.vpx-up b{display:block;font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vpx-up span{display:block;font-size:12px;color:var(--vp-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vpx-up time{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--vp-text)}
+.vpx-up .vpx-up-x{width:30px;height:30px;color:var(--vp-muted)}
+.vpx-up-p{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(127,127,127,.18)}
+.vpx-up-p i{display:block;height:100%;background:var(--vp-primary);transition:width .5s linear}
+
+/* RADIO (audio_radio): a station player. Header, on-air panel with the
+   programme's progress, controls with a waveform, Coming up, then later. */
+.vpx.rd{padding:16px;display:flex;flex-direction:column;gap:14px}
+.vpx.rd .vpx-rd-h{display:flex;align-items:center;gap:10px;min-height:28px}
+.vpx.rd .vpx-rd-h img{max-height:28px;max-width:140px;object-fit:contain}
+.vpx.rd .vpx-rd-h .vpx-station{font-weight:800;font-size:15px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vpx.rd .vpx-rd-m{display:grid;grid-template-columns:clamp(84px,24cqw,150px) 1fr;gap:16px;align-items:center}
+.vpx.rd .vpx-rd-m>.vpx-art{aspect-ratio:1/1;border-radius:calc(var(--vp-radius) - 4px)}
+.vpx.rd .vpx-kick{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--vp-primary);display:flex;align-items:center;gap:6px}
+.vpx.rd .vpx-kick i{width:7px;height:7px;border-radius:50%;background:currentColor;animation:vpx-pulse 1.6s ease-in-out infinite}
+@keyframes vpx-pulse{50%{opacity:.35}}
+.vpx.rd .vpx-t b{font-size:clamp(17px,4.4cqw,24px);white-space:normal;line-height:1.2;margin-top:4px}
+.vpx.rd .vpx-t span{font-size:14px;margin-top:2px}
+.vpx.rd .vpx-rd-prog{margin-top:10px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px;font-size:12px;color:var(--vp-muted);font-variant-numeric:tabular-nums}
+.vpx.rd .vpx-rd-bar{height:4px;border-radius:2px;background:rgba(127,127,127,.25);overflow:hidden}
+.vpx.rd .vpx-rd-bar i{display:block;height:100%;background:var(--vp-primary);transition:width 1s linear}
+.vpx.rd .vpx-rd-left{font-size:12px;color:var(--vp-muted);margin-top:4px}
+.vpx.rd .vpx-rd-c{display:flex;align-items:center;gap:10px}
+.vpx.rd .vpx-rd-c canvas{flex:1;min-width:0;height:36px;display:block}
+.vpx.rd .vpx-rd-c .vpv-vol .vp-sl{width:80px;opacity:1}
+.vpx.rd .vpx-rd-next{font-size:13px;color:var(--vp-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vpx.rd .vpx-rd-next b{color:var(--vp-text);font-weight:600}
+.vpx.rd h4{margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--vp-muted)}
+@container (max-width:420px){.vpx.rd .vpx-rd-m{grid-template-columns:72px 1fr;gap:12px}.vpx.rd .vpx-rd-c .vpv-vol{display:none}.vpx-up{grid-template-columns:auto 1fr auto}.vpx-up time{display:none}}
 `;

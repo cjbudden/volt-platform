@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type ReactElement } from 'react'
-import { api, setSession, clearSession, noteActivity, setUnauthorizedHandler, isMfaStep, ensureImageSigning, type SearchHit, type Me, type MfaStep, type Session } from './api'
+import { api, setSession, clearSession, getToken, accessExpiresIn, noteActivity, setUnauthorizedHandler, isMfaStep, ensureImageSigning, type SearchHit, type Me, type MfaStep, type Session } from './api'
 import { useImageSigning } from './imageSigning'
 import { SignInSecondStep } from './security'
 import AccountPage from './pages/Account'
@@ -55,6 +55,7 @@ import NotificationBell from './NotificationBell'
 import NotificationsPage from './pages/Notifications'
 import SocialAccountsPage from './pages/SocialAccounts'
 import WorkflowsPage from './pages/Workflows'
+import GraphicsPage from './graphics/Graphics'
 
 const BOLT = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 1 3.5 14H11zM10 23 20.5 10H13z" /></svg>
 
@@ -83,6 +84,8 @@ const I = {
   review: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>,
   // Branching flow: the base path with an add-on stepping off it.
   workflows: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="5" cy="6" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="19" cy="18" r="2" /><path d="M7 6h10M12 6v8a4 4 0 004 4h1" /></svg>,
+  // A frame with a lower third in it: HTML graphics.
+  graphics: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M6 15h8M6 12h5" /></svg>,
   storage: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5" /><path d="M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6" /></svg>,
 }
 
@@ -91,7 +94,7 @@ const I = {
 const NAV_FEATURE: Record<string, string> = {
   dashboard: 'monitoring', live: 'monitoring', monitoring: 'monitoring', multiview: 'monitoring',
   fleet: 'fleet', workflows: 'settings',
-  channels: 'channels', radio: 'radio', events: 'events', epg: 'epg', loops: 'media', fast: 'channels',
+  channels: 'channels', radio: 'radio', events: 'events', epg: 'epg', loops: 'media', graphics: 'graphics', fast: 'channels',
   recordings: 'recordings', vod: 'vod', images: 'media', analytics: 'analytics',
   review: 'vod', watchfolders: 'media', storage: 'media',
   encoding: 'settings', groups: 'settings', plan: 'settings', 'account-settings': 'settings', permissions: 'access',
@@ -122,6 +125,7 @@ const NAV: NavGroup[] = [
     { key: 'fast', label: 'FAST', icon: I.fast },
     { key: 'epg', label: 'EPG', icon: I.epg },
     { key: 'loops', label: 'Loops & Fillers', icon: I.loops },
+    { key: 'graphics', label: 'Graphics', icon: I.graphics },
   ] },
   { group: 'Media', items: [
     { key: 'recordings', label: 'Recordings', icon: I.rec },
@@ -252,6 +256,36 @@ export default function App() {
   // ACCESS: one map from /auth/me drives the menu, the deep-link guard and
   // every button (access.tsx). FAIL CLOSED: nothing is shown until it answers.
   const access = makeAccess(me, meLoaded)
+
+  // SESSION HAND-OFF TO THE GRAPHICS LIVE CONTROL WINDOW. Sessions live in
+  // memory only (api.ts), so a window opened with window.open starts signed
+  // out. The pop-out asks its opener, same origin only, and gets the current
+  // ACCESS token, never the refresh token: two windows rotating one refresh
+  // token would sign each other out. It asks again every four minutes and
+  // whenever it finds itself signed out; the opener keeps itself fresh.
+  const isGfxPopout = route.path.startsWith('/graphics/live') && new URLSearchParams(window.location.search).has('popout')
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin || !e.data || typeof e.data !== 'object') return
+      if (e.data.type === 'volt-session-request' && authed && getToken() && e.source) {
+        (e.source as Window).postMessage({ type: 'volt-session', access: getToken(), expiresIn: accessExpiresIn() }, window.location.origin)
+      }
+      if (e.data.type === 'volt-session' && isGfxPopout && e.source === window.opener && typeof e.data.access === 'string') {
+        if (authed) setSession({ access: e.data.access, expiresIn: e.data.expiresIn })
+        else finishSignIn({ access: e.data.access, expiresIn: e.data.expiresIn } as any)
+      }
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, isGfxPopout])
+  useEffect(() => {
+    if (!isGfxPopout || !window.opener) return
+    const ask = () => { try { window.opener.postMessage({ type: 'volt-session-request' }, window.location.origin) } catch { /* opener gone */ } }
+    if (!authed) ask()
+    const h = setInterval(ask, 240_000)
+    return () => clearInterval(h)
+  }, [authed, isGfxPopout])
   const isAdmin = access.isAdminTier
   const sectionAllowed = (key: string): boolean => {
     if (!me) return false
@@ -333,6 +367,12 @@ export default function App() {
         )}
       </div>
     )
+  }
+
+  // GRAPHICS LIVE CONTROL IN ITS OWN WINDOW: the operator's second screen,
+  // no navigation around it. Same session, same access map.
+  if (section === 'graphics' && route.path.startsWith('/graphics/live') && new URLSearchParams(window.location.search).has('popout') && meLoaded) {
+    return <AccessProvider value={access}><PageNoticesProvider key="gfx-popout"><GraphicsPage /></PageNoticesProvider></AccessProvider>
   }
 
   return (
@@ -419,6 +459,8 @@ export default function App() {
             ? (channelId
                 ? <ChannelDetail key={channelId} id={channelId} onBack={() => navigate('/channels')} />
                 : <Channels createOpen={createOpen} setCreateOpen={setCreateOpen} onOpen={openChannel} />)
+            : section === 'graphics'
+            ? <GraphicsPage />
             : section === 'images'
             ? <ImageLibrary />
             : section === 'watchfolders'

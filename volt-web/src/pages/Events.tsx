@@ -178,6 +178,7 @@ export default function Events() {
   }
   function menuFor(ev: EventRow): MenuItem[] {
     const items: MenuItem[] = [{ key: 'view', label: canManage ? 'View and edit settings' : 'View', icon: canManage ? Icons.settings : Icons.view, onSelect: () => setEditing(ev) }]
+    items.push({ key: 'graphics', label: 'Graphics rundown', icon: Icons.view, onSelect: () => navigate(`/graphics/rundown/${ev.id}`) })
     if (canManage) items.push({ key: 'remove', label: 'Remove', icon: Icons.remove, danger: true, separator: true,
       disabledReason: ev.status === 'live' ? 'Stop the event first' : null, onSelect: () => setConfirm({ kind: 'remove', rows: [ev] }) })
     return items

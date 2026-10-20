@@ -56,6 +56,8 @@ COPY --from=build /app/dist ./dist
 COPY volt-app/migrations ./migrations
 COPY volt-app/scripts ./scripts
 COPY volt-app/public ./public
+# Volt default graphics templates, seeded into the library at boot (services/graphics/defaults.ts)
+COPY volt-app/assets ./assets
 # The console, where config.webDistDir looks for it by default.
 COPY --from=web /w/volt-web/dist ./web
 # the embed bundle, found by config.player.bundleDir at <cwd>/player

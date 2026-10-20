@@ -20,6 +20,9 @@
     "api:capture": "bash api/capture_api.sh",
     "api:verify": "bash api/verify.sh",
     "test:images": "tsx test/images.check.ts",
+    "test:graphics": "tsx test/graphics-pure.check.ts",
+    "test:graphics:db": "tsx test/graphics.check.ts",
+    "test:graphics:player": "tsx test/player-overlay.check.ts",
     "test:images:api": "bash test/images-api.check.sh",
     "test:images:s3": "tsx test/images-s3.check.ts",
     "images:sdk-sync": "node ../packages/image-url/scripts/sync.js"

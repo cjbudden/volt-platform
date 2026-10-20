@@ -6,6 +6,7 @@ import { ClipProvenancePanel } from '../ClipProvenance'
 import { navigate } from '../router'
 import { Notice, PageError, useNotify, usePageNotice } from '../notices'
 import MediaPreview from '../MediaPreview'
+import SkipMarkers from '../SkipMarkers'
 import { RuleEditor } from '../RuleEditor'
 import { MetadataForm, TypePicker } from '../ContentTypeFields'
 import type { AssetAvailability } from '../api'
@@ -111,7 +112,7 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   const [d, setD] = useState<any>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
-  const [tab, setTab] = useState<'play' | 'sources' | 'publishing' | 'availability' | 'metadata'>('play')
+  const [tab, setTab] = useState<'play' | 'markers' | 'sources' | 'publishing' | 'availability' | 'metadata'>('play')
   const [composeOpen, setComposeOpen] = useState(false)
   const [socialKey, setSocialKey] = useState(0)
   async function load() {
@@ -155,11 +156,11 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   return (
     <div style={{ padding: '8px 2px 14px' }}>
       <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 12 }}>
-        {(['play', 'metadata', 'availability', 'sources', 'publishing'] as const).map(t => (
+        {(['play', 'markers', 'metadata', 'availability', 'sources', 'publishing'] as const).map(t => (
           <button key={t} className={`btn ${tab === t ? 'primary' : 'ghost'}`}
             style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }}
             onClick={() => setTab(t)}>
-            {t === 'play' ? 'Preview' : t === 'metadata' ? 'Metadata' : t === 'availability' ? 'Availability' : t === 'sources' ? 'Where it came from' : 'Where it went'}
+            {t === 'play' ? 'Preview' : t === 'markers' ? 'Skip markers' : t === 'metadata' ? 'Metadata' : t === 'availability' ? 'Availability' : t === 'sources' ? 'Where it came from' : 'Where it went'}
           </button>
         ))}
         <AvailabilityBadge state={d.availability_state} until={d.available_until} />
@@ -235,6 +236,8 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
           </div>
         </div>
       )}
+
+      {tab === 'markers' && <SkipMarkers asset={d} />}
 
       {tab === 'sources' && <ClipProvenancePanel assetId={d.id} />}
 

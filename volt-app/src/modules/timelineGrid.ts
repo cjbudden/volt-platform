@@ -4,7 +4,9 @@
 //  The Live Streams page's Timeline view: every stream the caller may see as one
 //  row on a shared clock, with what went to air on the left of now, what is on
 //  now across it, and what is scheduled on the right. TIMELINE_MODE.md is the
-//  spec; this is phase 1 (read-only).
+//  spec. Phase 1 (read-only rows), phase 2 (outage markers from the status
+//  event log; GET /selection checks a dragged range before it becomes a clip)
+//  and phase 3 (programme clashes on each row).
 //
 //  ONE CALL FOR THE WHOLE GRID. The data already exists per owner (/api/epg,
 //  /api/channels/:id/coverage, /api/monitoring/live), and a grid of twenty
@@ -33,7 +35,7 @@ import { can } from '../auth/roles';
 import { asyncHandler, badRequest } from '../util/http';
 import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { loadChannelHealthLite } from '../services/channelDetail';
-import { resolveRange, type Resolution } from '../services/clips/resolve';
+import { resolveRange, assessRange, type Resolution } from '../services/clips/resolve';
 import { isAudioOnly } from '../services/localRecordingIndex';
 import { programmeVodShape } from '../services/epgVod';
 
@@ -156,6 +158,89 @@ export function eventBlock(e: any, nowMs: number) {
     source: 'event' as const,
   };
 }
+
+// ---------------------------------------------------------------- outages
+export type OutageKind = 'source' | 'filler' | 'packager' | 'stopped';
+export interface Outage { kind: OutageKind; start: string; end: string | null; label: string; reason: string | null }
+
+/** A channel.stop that was not asked for: the encoder died, the source vanished for good. */
+const UNEXPECTED_STOP = /exit|error|fail|rc=|crash|killed|unreachable|refused/i;
+const PLANNED_STOP = /server_window_closed|stopped by|operator|requested|desired|source ended \(rc=0\)|schedule/i;
+
+const reasonOf = (d: any): string | null => {
+  if (!d || typeof d !== 'object') return null;
+  const v = d.reason ?? d.detail ?? d.message ?? d.error ?? null;
+  return v == null ? null : String(v).slice(0, 240);
+};
+
+/**
+ * OUTAGES FROM THE STATUS EVENT LOG (stream_events, what the encoders report):
+ *
+ *   source     source.down  ->  source.up of the same source  (no input)
+ *   filler     filler.engaged -> filler.cleared               (viewers saw the slate or loop)
+ *   packager   packager.down -> packager.up                   (no output being made)
+ *   stopped    channel.stop with a failure reason -> the next channel.start
+ *
+ * A channel.stop closes whatever was open: a stream that has ended is not "still
+ * without a source". Something still open at the end runs to now (end null).
+ * `events` must be in time order and should start a little before the window,
+ * so an outage that began earlier is still drawn from the window's edge.
+ */
+export function outagesFrom(events: Array<{ type: string; detail: any; ts: number }>, from: number, to: number): Outage[] {
+  const out: Array<{ kind: OutageKind; s: number; e: number | null; label: string; reason: string | null }> = [];
+  const src = new Map<string, { s: number; reason: string | null }>();
+  let filler: { s: number; reason: string | null } | null = null;
+  let pack: { s: number; reason: string | null } | null = null;
+  let stopped: { s: number; reason: string | null } | null = null;
+  const srcLabel = (g: string) => (g === 'primary' || !g ? 'No source' : `No ${g} source`);
+  for (const ev of events) {
+    const d = ev.detail ?? {};
+    switch (ev.type) {
+      case 'source.down': {
+        const g = String(d.source ?? 'primary');
+        if (!src.has(g)) src.set(g, { s: ev.ts, reason: reasonOf(d) });
+        break;
+      }
+      case 'source.up': {
+        const g = String(d.source ?? 'primary');
+        const o = src.get(g);
+        if (o) { out.push({ kind: 'source', s: o.s, e: ev.ts, label: srcLabel(g), reason: o.reason }); src.delete(g); }
+        break;
+      }
+      case 'filler.engaged': if (!filler) filler = { s: ev.ts, reason: reasonOf(d) }; break;
+      case 'filler.cleared': if (filler) { out.push({ kind: 'filler', s: filler.s, e: ev.ts, label: 'On filler', reason: filler.reason }); filler = null; } break;
+      case 'packager.down': if (!pack) pack = { s: ev.ts, reason: reasonOf(d) }; break;
+      case 'packager.up': if (pack) { out.push({ kind: 'packager', s: pack.s, e: ev.ts, label: 'Packager down', reason: pack.reason }); pack = null; } break;
+      case 'channel.stop': {
+        for (const [g, o] of src) out.push({ kind: 'source', s: o.s, e: ev.ts, label: srcLabel(g), reason: o.reason });
+        src.clear();
+        if (filler) { out.push({ kind: 'filler', s: filler.s, e: ev.ts, label: 'On filler', reason: filler.reason }); filler = null; }
+        if (pack) { out.push({ kind: 'packager', s: pack.s, e: ev.ts, label: 'Packager down', reason: pack.reason }); pack = null; }
+        const why = reasonOf(d) ?? '';
+        if (!stopped && UNEXPECTED_STOP.test(why) && !PLANNED_STOP.test(why)) stopped = { s: ev.ts, reason: why };
+        break;
+      }
+      case 'channel.start':
+        if (stopped) { out.push({ kind: 'stopped', s: stopped.s, e: ev.ts, label: 'Stopped unexpectedly', reason: stopped.reason }); stopped = null; }
+        break;
+      default: break;
+    }
+  }
+  for (const [g, o] of src) out.push({ kind: 'source', s: o.s, e: null, label: srcLabel(g), reason: o.reason });
+  if (filler) out.push({ kind: 'filler', s: filler.s, e: null, label: 'On filler', reason: filler.reason });
+  if (pack) out.push({ kind: 'packager', s: pack.s, e: null, label: 'Packager down', reason: pack.reason });
+  if (stopped) out.push({ kind: 'stopped', s: stopped.s, e: null, label: 'Stopped unexpectedly', reason: stopped.reason });
+  return out
+    .filter((o) => o.s < to && (o.e == null || o.e > from))
+    .sort((a, b) => a.s - b.s)
+    .map((o) => ({ kind: o.kind, start: iso(o.s), end: o.e == null ? null : iso(o.e), label: o.label, reason: o.reason }));
+}
+
+/** How far back the log is read so an outage that began before the window still shows. */
+const OUTAGE_LOOKBACK_MS = 24 * 3_600_000;
+
+// ---------------------------------------------------------------- clashes
+export interface Clash { start: string; end: string; a: { id: string; title: string }; b: { id: string; title: string } }
 
 function retentionMsOf(o: any): number | null {
   if (o.recording_retention_sec != null) return Number(o.recording_retention_sec) * 1000;
@@ -290,6 +375,37 @@ timelineGridRouter.get('/grid', asyncHandler(async (req: Request, res) => {
   );
   const recsBy = byOwner(recs, (r) => r.channel_id ?? r.event_id);
 
+  // ---- outages (phase 2): the status event log for the whole page in ONE
+  // query, read from a day before the window so a long outage still shows.
+  // Past only: the future has no events.
+  const evs = !hasPast || allIds.length === 0 ? [] : await query<any>(
+    `SELECT channel_id, event_id, type, detail, ts
+       FROM stream_events
+      WHERE (channel_id = ANY($1::uuid[]) OR event_id = ANY($1::uuid[]))
+        AND type IN ('source.down','source.up','filler.engaged','filler.cleared','packager.down','packager.up','channel.stop','channel.start')
+        AND ts >= $2::timestamptz AND ts < $3::timestamptz
+      ORDER BY ts
+      LIMIT 20000`,
+    [allIds, iso(from - OUTAGE_LOOKBACK_MS), iso(pastTo)]
+  );
+  const evsBy = byOwner(evs, (e) => e.channel_id ?? e.event_id);
+
+  // ---- clashes (phase 3): overlapping programmes on one owner, the overlap
+  // /api/epg/conflicts reports, for every channel on the page in ONE query.
+  const clashRows = channelIds.length === 0 ? [] : await query<any>(
+    `SELECT a.channel_id, a.id AS a_id, a.title AS a_title, b.id AS b_id, b.title AS b_title,
+            GREATEST(a.starts_at, b.starts_at) AS overlap_start, LEAST(a.ends_at, b.ends_at) AS overlap_end
+       FROM programmes a JOIN programmes b
+         ON a.channel_id = b.channel_id AND a.id < b.id AND a.span && b.span
+      WHERE a.channel_id = ANY($1::uuid[])
+        AND a.span && tstzrange($2::timestamptz, $3::timestamptz, '[)')
+        AND b.span && tstzrange($2::timestamptz, $3::timestamptz, '[)')
+      ORDER BY overlap_start
+      LIMIT 2000`,
+    [channelIds, iso(from), iso(to)]
+  );
+  const clashesBy = byOwner(clashRows, (c) => c.channel_id);
+
   const out = await Promise.all(page.map(async (o) => {
     const ownerKind = o.kind === 'event' ? 'event' : 'channel';
     const health = await loadChannelHealthLite(
@@ -329,6 +445,11 @@ timelineGridRouter.get('/grid', asyncHandler(async (req: Request, res) => {
       recordings: (recsBy.get(o.id) ?? []).map((r) => ({
         id: r.id, start: iso(Number(r.start_epoch_ms)), end: r.end_epoch_ms == null ? null : iso(Number(r.end_epoch_ms)),
       })),
+      outages: outagesFrom((evsBy.get(o.id) ?? []).map((e) => ({ type: e.type, detail: e.detail, ts: new Date(e.ts).getTime() })), from, pastTo + 1),
+      clashes: (clashesBy.get(o.id) ?? []).map((c): Clash => ({
+        start: iso(new Date(c.overlap_start).getTime()), end: iso(new Date(c.overlap_end).getTime()),
+        a: { id: c.a_id, title: c.a_title }, b: { id: c.b_id, title: c.b_title },
+      })),
       links: linksFor(o, from, to),
     };
   }));
@@ -349,4 +470,73 @@ timelineGridRouter.get('/grid', asyncHandler(async (req: Request, res) => {
   });
 }));
 
-export const __testing = { parseWindow, allowedKinds, mediaFrom, programmeBlock, eventBlock, GRID_MAX_WINDOW_MS };
+// ---------------------------------------------------------------- selection
+/**
+ * A RANGE DRAGGED ON A ROW, checked before it becomes a clip (phase 2).
+ *
+ * The same question the workbench asks (resolveRange + assessRange: media
+ * measured from disk, gaps named), plus what the grid needs to offer the clip
+ * flow: the one recording that holds the whole range (the clip API cuts from a
+ * recording), and a title from the programme that fills most of it.
+ */
+const SELECTION_MAX_MS = 6 * 3_600_000;
+timelineGridRouter.get('/selection', asyncHandler(async (req: Request, res) => {
+  const kind = String(req.query.kind ?? '');
+  const id = String(req.query.id ?? '');
+  if (!(ALL_KINDS as string[]).includes(kind) || kind === 'loop') throw badRequest('kind must be channel, radio or event');
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw badRequest('id must be a uuid');
+  // A stream the role cannot view is absent here, as it is from the grid.
+  if (!can(req, FEATURE[kind as GridKind], 'view')) return res.status(404).json({ error: 'Not found' });
+  const nowMs = Date.now();
+  const from = parseInstant(req.query.from, 'from'), toRaw = parseInstant(req.query.to, 'to');
+  if (from == null || toRaw == null) throw badRequest('from and to are required');
+  const to = Math.min(toRaw, nowMs);
+  if (to <= from) throw badRequest('The range must end after it starts, and before now: only what has aired can be clipped.');
+  if (to - from > SELECTION_MAX_MS) throw badRequest(`A selection is at most ${SELECTION_MAX_MS / 3_600_000} hours.`);
+
+  const owner = (await query<any>(
+    kind === 'event'
+      ? `SELECT e.id, e.name FROM events e JOIN groups g ON g.id = e.group_id WHERE e.id = $1 AND g.account_id = $2`
+      : `SELECT c.id, c.name FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1 AND g.account_id = $2`,
+    [id, accountId(req)]))[0];
+  if (!owner) return res.status(404).json({ error: 'Not found' });
+
+  const mediaKind = kind === 'radio' || isAudioOnly(id) ? 'audio' : 'video';
+  const resolution = resolveRange(id, from, to, mediaKind);
+  const verdict = assessRange(resolution);
+  const col = kind === 'event' ? 'event_id' : 'channel_id';
+  const recs = await query<any>(
+    `SELECT id, start_epoch_ms, end_epoch_ms FROM recordings
+      WHERE ${col} = $1 AND start_epoch_ms < $3 AND COALESCE(end_epoch_ms, $4) > $2
+      ORDER BY start_epoch_ms LIMIT 50`, [id, from, to, nowMs]);
+  const holder = recs.find((r) => Number(r.start_epoch_ms) <= from && (r.end_epoch_ms == null ? nowMs : Number(r.end_epoch_ms)) >= to) ?? null;
+  const progs = await query<any>(
+    `SELECT id, title, COALESCE(actual_start, starts_at) AS s, COALESCE(actual_end, ends_at) AS e
+       FROM programmes WHERE ${col} = $1 AND span && tstzrange($2::timestamptz, $3::timestamptz, '[)')
+      ORDER BY starts_at LIMIT 200`, [id, iso(from), iso(to)]);
+  let best: any = null, bestMs = 0;
+  for (const p of progs) {
+    const ov = Math.min(to, new Date(p.e).getTime()) - Math.max(from, new Date(p.s).getTime());
+    if (ov > bestMs) { bestMs = ov; best = p; }
+  }
+  const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16);
+  res.json({
+    kind, id, name: owner.name,
+    range: { from: iso(from), to: iso(to), ms: to - from, clampedToNow: toRaw > nowMs },
+    coveragePct: resolution.coveragePct,
+    coveredMs: resolution.coveredMs,
+    gaps: resolution.gaps.map((g) => ({ start: iso(g.fromMs), end: iso(g.toMs), ms: g.ms, reason: g.reason })),
+    clippable: verdict.ok,
+    reason: verdict.ok ? null : { code: verdict.code, message: verdict.message },
+    recording: holder ? { id: holder.id, start: iso(Number(holder.start_epoch_ms)), end: holder.end_epoch_ms == null ? null : iso(Number(holder.end_epoch_ms)) } : null,
+    recordingCount: recs.length,
+    suggestedTitle: best ? best.title : `${owner.name} ${hhmm(from)}`,
+    programmes: progs.map((p) => ({ id: p.id, title: p.title, start: iso(new Date(p.s).getTime()), end: iso(new Date(p.e).getTime()) })),
+    links: {
+      clip: holder ? `/api/recordings/${holder.id}/clip` : null,
+      workbench: holder ? `/recordings/${holder.id}?from=${from}&to=${to}` : `/recordings/source/${id}`,
+    },
+  });
+}));
+
+export const __testing = { parseWindow, allowedKinds, mediaFrom, programmeBlock, eventBlock, outagesFrom, GRID_MAX_WINDOW_MS };

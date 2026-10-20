@@ -67,6 +67,9 @@ export function setSession(s: { access: string; refresh?: string; expiresIn?: nu
   lastInputAt = Date.now()
 }
 
+/** Seconds left on the access token (0 when unknown). Used to hand the
+ *  session to the graphics live-control window, which never holds a refresh token. */
+export function accessExpiresIn(): number { return accessExpiresAt ? Math.max(0, Math.floor((accessExpiresAt - Date.now()) / 1000)) : 0 }
 export function clearSession() { token = ''; refreshToken = ''; accessExpiresAt = 0; platformToken = ''; platformExpiresAt = 0; setImageSigning(null); signingLoad = null }
 
 /** The refresh token, for the logout call that revokes it server-side. */
@@ -350,7 +353,7 @@ export interface ChannelDetail extends Channel {
   /** Packaging: the single fallback source is transcoded up to every rendition. */
   fallback_transcode?: boolean
   viewers: { current: number; peak: number; peakAt: string; trendPct: number; series: { t: number; v: number }[] }
-  epg: { now: any; next: { name: string; start: string } | null; lane: any[] }
+  epg: { now: any; next: { name: string; start: string; startMs?: number } | null; lane: any[] }
   statusBoard: { output: string; activeSource: string; fallback: string; packager: string; inputs: any[] }
   log: { ts: string; level: string; title: string; detail: string }[]
   health: PipelineHealth
@@ -1664,6 +1667,17 @@ export const api = {
   vodAssets: (published?: boolean): Promise<VodAssetRow[]> =>
     req(`/vod${published === undefined ? '' : `?published=${published}`}`),
   vodAsset: (id: string): Promise<any> => req(`/vod/${id}`),
+  // Skip markers (intro, recap, credits): editable any time, written into the
+  // on-demand playlists when they are served.
+  vodMarkers: (id: string): Promise<VodMarkersView> => req(`/vod/${id}/markers`),
+  setVodMarker: (id: string, kind: VodMarkerKind, startMs: number, endMs: number): Promise<VodMarker> =>
+    req(`/vod/${id}/markers/${kind}`, { method: 'PUT', body: JSON.stringify({ startMs, endMs }) }),
+  acceptVodMarker: (id: string, kind: VodMarkerKind): Promise<VodMarker> =>
+    req(`/vod/${id}/markers/${kind}/accept`, { method: 'POST' }),
+  deleteVodMarker: (id: string, kind: VodMarkerKind): Promise<void> =>
+    req(`/vod/${id}/markers/${kind}`, { method: 'DELETE' }),
+  detectVodMarkers: (id: string): Promise<{ queued: boolean }> =>
+    req(`/vod/${id}/markers/detect`, { method: 'POST' }),
   patchVodAsset: (id: string, b: { title?: string; published?: boolean; schemaId?: string | null; metadata?: Record<string, any> }): Promise<any> =>
     req(`/vod/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   publishToPortal: (id: string): Promise<any> =>
@@ -1682,6 +1696,8 @@ export const api = {
   liveBoard: (): Promise<LiveBoard> => req('/monitoring/live'),
   /** The Live Streams Timeline view: every visible stream on one clock, one
    *  page of up to 50 rows per call (TIMELINE_MODE.md). Follow `next` for more. */
+  timelineSelection: (kind: TimelineGridKind, id: string, fromMs: number, toMs: number): Promise<TimelineSelection> =>
+    req(`/timeline/selection?kind=${kind}&id=${encodeURIComponent(id)}&from=${Math.round(fromMs)}&to=${Math.round(toMs)}`),
   timelineGrid: (p: TimelineGridQuery): Promise<TimelineGrid> => {
     const q = new URLSearchParams({ from: p.from, to: p.to })
     if (p.kinds?.length) q.set('kinds', p.kinds.join(','))
@@ -3069,7 +3085,27 @@ export interface TimelineGridRow {
   media: { runs: TimelineGridSpan[]; gaps: (TimelineGridSpan & { reason: string })[]; coveragePct: number | null }
   clips: (TimelineGridSpan & { id: string; title: string | null })[]
   recordings: { id: string; start: string; end: string | null }[]
+  /** Phase 2: outages from the status event log (past only). end null = still going. */
+  outages?: TimelineOutage[]
+  /** Phase 3: overlapping programmes on this row, as /api/epg/conflicts reports them. */
+  clashes?: TimelineClash[]
   links: { self: string; detail: string; workbench: string; epg: string; programmes: string; coverage?: string; timeline?: string }
+}
+export interface TimelineOutage { kind: 'source' | 'filler' | 'packager' | 'stopped'; start: string; end: string | null; label: string; reason: string | null }
+export interface TimelineClash { start: string; end: string; a: { id: string; title: string }; b: { id: string; title: string } }
+/** GET /api/timeline/selection: a dragged range, checked before it becomes a clip. */
+export interface TimelineSelection {
+  kind: TimelineGridKind; id: string; name: string
+  range: { from: string; to: string; ms: number; clampedToNow: boolean }
+  coveragePct: number; coveredMs: number
+  gaps: { start: string; end: string; ms: number; reason: string }[]
+  clippable: boolean
+  reason: { code: string; message: string } | null
+  recording: { id: string; start: string; end: string | null } | null
+  recordingCount: number
+  suggestedTitle: string
+  programmes: { id: string; title: string; start: string; end: string }[]
+  links: { clip: string | null; workbench: string }
 }
 export interface TimelineGrid {
   window: { from: string; to: string; now: string }
@@ -3077,6 +3113,23 @@ export interface TimelineGrid {
   rows: TimelineGridRow[]
   next: string | null
   links: { self: string; next: string | null; live: string; status: string }
+}
+
+export type VodMarkerKind = 'intro' | 'recap' | 'credits'
+export interface VodMarker {
+  kind: VodMarkerKind
+  startMs: number
+  endMs: number
+  source: 'auto' | 'manual'
+  status: 'active' | 'suggested'
+  confidence: number | null
+  detail: { comparedWith?: number; agreed?: number; peers?: string[]; at?: string }
+  updatedAt: string
+}
+export interface VodMarkersView {
+  markers: VodMarker[]
+  durationMs: number
+  detection: { group: string | null; at: string | null; note: string | null; running: boolean }
 }
 
 /** The authenticated request helper, for feature clients kept in their own

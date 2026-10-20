@@ -41,6 +41,8 @@ import { Notice } from './notices'
 const MIN_WINDOW_MS = 60_000              // one minute
 const MAX_WINDOW_MS = 30 * 86_400_000     // thirty days: under the API's 32-day cap
 
+/** Where the lanes' drawing box starts: label 54 + gap 8 + the lane's 1px border. */
+const TRACK_LEFT = 63
 const ZOOMS: { label: string; ms: number }[] = [
   { label: '1m', ms: 60_000 },
   { label: '5m', ms: 5 * 60_000 },
@@ -82,6 +84,12 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
   const { tileAt } = useStoryboard(channelId, win?.from ?? null, win?.to ?? null)
   const waveRef = useRef<HTMLCanvasElement | null>(null)
   const railRef = useRef<HTMLDivElement | null>(null)
+  /* THE TRACK: the strip the lanes draw in, to the right of the lane labels.
+     Every time <-> pixel conversion uses IT, not the whole rail. Measuring the
+     rail (labels and gap included) put the selection, the hover line and a
+     dragged range up to 62px off the lanes, worst at the right-hand end, and
+     let the highlight run past the edge. */
+  const trackRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ mode: 'select' | 'pan'; x: number; from: number; to: number } | null>(null)
 
   const zone = tz ?? feed?.clock.tz ?? 'Europe/London'
@@ -279,11 +287,14 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
 
   // ---- geometry -----------------------------------------------------------
   const spanMs = win ? win.to - win.from : 1
-  const pxToMs = (px: number) => {
-    const el = railRef.current
+  /** The instant under a pointer, from the track's own box. */
+  const msAt = (clientX: number) => {
+    const el = trackRef.current
     if (!el || !win) return 0
-    return win.from + (px / el.clientWidth) * spanMs
+    const r = el.getBoundingClientRect()
+    return win.from + ((clientX - r.left) / Math.max(1, r.width)) * spanMs
   }
+  const trackWidth = () => trackRef.current?.getBoundingClientRect().width ?? 1
   const msToPct = (ms: number) => win ? ((ms - win.from) / spanMs) * 100 : 0
   const clampWindow = (from: number, to: number) => {
     let ms = Math.max(MIN_WINDOW_MS, Math.min(MAX_WINDOW_MS, to - from))
@@ -296,6 +307,26 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
     const centre = sel ? (sel.fromMs + sel.toMs) / 2 : (win.from + win.to) / 2
     setWin(clampWindow(centre - ms / 2, centre + ms / 2))
   }
+  /** Move the window by a share of its width: negative is earlier. */
+  function panBy(share: number) {
+    if (!win) return
+    const d = Math.round(spanMs * share)
+    setWin({ from: win.from + d, to: win.to + d })
+  }
+  function zoomBy(factor: number) {
+    if (!win) return
+    const next = Math.max(MIN_WINDOW_MS, Math.min(MAX_WINDOW_MS, spanMs * factor))
+    const mid = (win.from + win.to) / 2
+    setWin({ from: Math.round(mid - next / 2), to: Math.round(mid + next / 2) })
+  }
+  function onKeyDown(e: React.KeyboardEvent) {
+    if ((e.target as HTMLElement).closest('input, select, textarea, button')) return
+    if (e.key === 'ArrowLeft') { panBy(e.shiftKey ? -1 : -0.25); e.preventDefault() }
+    else if (e.key === 'ArrowRight') { panBy(e.shiftKey ? 1 : 0.25); e.preventDefault() }
+    else if (e.key === '+' || e.key === '=') { zoomBy(0.5); e.preventDefault() }
+    else if (e.key === '-' || e.key === '_') { zoomBy(2); e.preventDefault() }
+    else if (e.key === 'Escape' && sel) { setSel(null); e.preventDefault() }
+  }
   function fitAll() {
     if (!feed?.media.runs.length) return
     const a = Math.min(...feed.media.runs.map(r => r.startMs))
@@ -307,10 +338,9 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
   // Wheel zooms around the pointer, which is the behaviour every timeline in
   // every edit tool has; anything else feels broken to someone who edits.
   function onWheel(e: React.WheelEvent) {
-    if (!win || !railRef.current) return
+    if (!win || !trackRef.current) return
     e.preventDefault()
-    const rect = railRef.current.getBoundingClientRect()
-    const at = pxToMs(e.clientX - rect.left)
+    const at = msAt(e.clientX)
     const factor = e.deltaY > 0 ? 1.25 : 0.8
     const next = Math.max(MIN_WINDOW_MS, Math.min(MAX_WINDOW_MS, spanMs * factor))
     const ratio = (at - win.from) / spanMs
@@ -318,9 +348,11 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
   }
 
   function onPointerDown(e: React.PointerEvent) {
-    if (!win || !railRef.current) return
-    const rect = railRef.current.getBoundingClientRect()
-    const at = pxToMs(e.clientX - rect.left)
+    if (!win || !trackRef.current) return
+    // A press on the lane labels is not a time: it does nothing.
+    if (e.clientX < trackRef.current.getBoundingClientRect().left) return
+    railRef.current?.focus({ preventScroll: true })
+    const at = msAt(e.clientX)
     // Alt or middle drag pans; a plain drag marks a range. Same convention as
     // the clipping surface, so the two do not have to be learned separately.
     const mode = e.altKey || e.button === 1 ? 'pan' : 'select'
@@ -329,17 +361,19 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
   }
   function onPointerMove(e: React.PointerEvent) {
-    if (!railRef.current || !win) return
-    const rect = railRef.current.getBoundingClientRect()
-    setHover(pxToMs(e.clientX - rect.left))
+    if (!trackRef.current || !win) return
+    const tr = trackRef.current.getBoundingClientRect()
+    const inTrack = e.clientX >= tr.left && e.clientX <= tr.right
+    setHover(inTrack ? msAt(e.clientX) : null)
     const d = dragRef.current
     if (!d) return
     if (d.mode === 'pan') {
       const dx = e.clientX - d.x
-      const shift = (dx / rect.width) * (d.to - d.from)
+      const shift = (dx / trackWidth()) * (d.to - d.from)
       setWin({ from: Math.round(d.from - shift), to: Math.round(d.to - shift) })
     } else {
-      const at = pxToMs(e.clientX - rect.left)
+      // a range is never dragged past what is on screen
+      const at = Math.max(win.from, Math.min(win.to, msAt(e.clientX)))
       setSel((s) => s ? { fromMs: Math.min(s.fromMs, at), toMs: Math.max(s.fromMs, at) } : s)
     }
   }
@@ -371,6 +405,11 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
           {feed.clock.tz} · day opens {String(feed.clock.anchorHour).padStart(2, '0')}:00
         </span>
         <div className="flex-1" />
+        <button className="btn ghost" style={{ padding: '3px 9px', fontSize: 'var(--fs-sm)' }} onClick={() => panBy(-0.5)}
+          title="Earlier (← moves a quarter, Shift+← a whole view)" aria-label="Earlier">‹ Earlier</button>
+        <button className="btn ghost" style={{ padding: '3px 9px', fontSize: 'var(--fs-sm)' }} onClick={() => panBy(0.5)}
+          title="Later (→ moves a quarter, Shift+→ a whole view)" aria-label="Later">Later ›</button>
+        <span style={{ width: 6 }} />
         {ZOOMS.map(z => (
           <button key={z.label} className="btn ghost" style={{ padding: '3px 9px', fontSize: 'var(--fs-sm)' }}
             onClick={() => zoomTo(z.ms)}>{z.label}</button>
@@ -379,10 +418,11 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
           onClick={fitAll} disabled={!feed.media.runs.length}>Fit</button>
       </div>
 
-      <div ref={railRef}
-        onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+      <div ref={railRef} tabIndex={0} className="src-tl-rail"
+        aria-label="Recording timeline. Drag to mark a range, arrow keys to move earlier or later, plus and minus to zoom."
+        onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onKeyDown={onKeyDown}
         onPointerUp={onPointerUp} onPointerLeave={() => setHover(null)}
-        style={{ position: 'relative', userSelect: 'none', cursor: 'crosshair', touchAction: 'none' }}>
+        style={{ position: 'relative', userSelect: 'none', cursor: 'crosshair', touchAction: 'none', outline: 'none' }}>
 
         {/* ---------------- LANE 1: media ----------------
              For audio this is the WAVEFORM, which is the whole point of the lane
@@ -497,31 +537,39 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
         {/* ---- ruler ---- */}
         <Ruler win={win} msToPct={msToPct} fmtClock={fmtClock} />
 
-        {/* ---- selection, drawn across ALL lanes so they read as one axis ---- */}
-        {sel && sel.toMs > sel.fromMs && (
-          <div style={{
-            position: 'absolute', top: 0, bottom: 18,
-            left: `${msToPct(sel.fromMs)}%`, width: `${msToPct(sel.toMs) - msToPct(sel.fromMs)}%`,
-            background: 'rgba(63,123,255,.16)', border: '1px solid rgba(63,123,255,.7)',
-            borderRadius: 2, pointerEvents: 'none',
-          }} />
-        )}
-        {atCursor != null && (
-          <div style={{
-            position: 'absolute', top: 0, bottom: 18, left: `${msToPct(atCursor)}%`,
-            borderLeft: '1px solid rgba(226,232,240,.55)', pointerEvents: 'none',
-          }} />
-        )}
-        {atCursor != null && isVideo && (() => {
-          const t = tileAt(atCursor)
-          if (!t) return null
-          return (
-            <div style={{ position: 'absolute', bottom: '100%', marginBottom: 6, zIndex: 4, pointerEvents: 'none',
-              left: `clamp(0px, calc(${msToPct(atCursor)}% - 88px), calc(100% - 176px))` }}>
-              <StoryTile tile={t} width={176} label={fmtFull.format(atCursor)} />
-            </div>
-          )
-        })()}
+        {/* ---- the track overlay: exactly the lanes' drawing box (after the
+             54px labels, the 8px gap and the lane's 1px border), so a
+             percentage here is the same instant as a percentage in a lane. */}
+        <div ref={trackRef} style={{ position: 'absolute', top: 0, bottom: 18, left: TRACK_LEFT, right: 1, pointerEvents: 'none' }}>
+          {/* clipped: a selection or line outside the window is masked, not drawn over the card */}
+          <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+            {/* the selection, across ALL lanes so they read as one axis */}
+            {sel && sel.toMs > sel.fromMs && (
+              <div style={{
+                position: 'absolute', top: 0, bottom: 0,
+                left: `${msToPct(sel.fromMs)}%`, width: `${msToPct(sel.toMs) - msToPct(sel.fromMs)}%`,
+                background: 'color-mix(in srgb, var(--brand) 16%, transparent)', border: '1px solid color-mix(in srgb, var(--brand) 70%, transparent)',
+                borderRadius: 2,
+              }} />
+            )}
+            {atCursor != null && (
+              <div style={{
+                position: 'absolute', top: 0, bottom: 0, left: `${msToPct(atCursor)}%`,
+                borderLeft: '1px solid rgba(226,232,240,.55)',
+              }} />
+            )}
+          </div>
+          {atCursor != null && isVideo && (() => {
+            const t = tileAt(atCursor)
+            if (!t) return null
+            return (
+              <div style={{ position: 'absolute', bottom: '100%', marginBottom: 6, zIndex: 4,
+                left: `clamp(0px, calc(${msToPct(atCursor)}% - 88px), calc(100% - 176px))` }}>
+                <StoryTile tile={t} width={176} label={fmtFull.format(atCursor)} />
+              </div>
+            )
+          })()}
+        </div>
       </div>
 
       {/* ---- readout ---- */}
@@ -547,7 +595,7 @@ export function SourceTimeline({ channelId, tz, onSelect, onClock, initialWindow
             <button className="btn ghost" style={{ padding: '3px 9px' }} onClick={() => setSel(null)}>Clear</button>
           </>
         ) : (
-          <span style={{ color: 'var(--faint)' }}>drag to mark a range · alt-drag to pan · wheel to zoom</span>
+          <span style={{ color: 'var(--faint)' }}>drag to mark a range · ← → or Earlier / Later to move · wheel or + − to zoom</span>
         )}
       </div>
     </div>
@@ -660,7 +708,8 @@ function Ruler({ win, msToPct, fmtClock }: {
   return (
     <div style={{ display: 'flex', gap: 8 }}>
       <div style={{ width: 54, flex: 'none' }} />
-      <div style={{ position: 'relative', flex: 1, minWidth: 0, height: 18 }}>
+      {/* 1px in from each side: the lanes' border, so a tick sits on the lanes' instant */}
+      <div style={{ position: 'relative', flex: 1, minWidth: 0, height: 18, margin: '0 1px', overflow: 'hidden' }}>
         {ticks.map(t => (
           <div key={t} style={{ position: 'absolute', left: `${msToPct(t)}%`, top: 0 }}>
             <div style={{ width: 1, height: 4, background: 'var(--border-2)' }} />

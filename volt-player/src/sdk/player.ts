@@ -11,7 +11,7 @@
 // ============================================================================
 import type {
   Commands, PlayerEventName, PlayerState, PlaylistItem, Programme, ResolvedTheme, Skin, SkinFactory,
-  StreamGraphic, Theme, VoltPlayerSdkOptions,
+  SkipOffer, StreamGraphic, Theme, VoltPlayerSdkOptions,
 } from './types';
 import { Engine, isApple, readableError } from './engine';
 import { Beacons } from './beacons';
@@ -22,6 +22,7 @@ import { defaultApiBase, fetchEvent, fetchNowPlaying, fetchSchedule, fillUrl, Ga
 import { getSkin } from './skins';
 import { STRINGS, format } from './strings';
 import { injectBaseStyles } from './skins/kit';
+import { GraphicsOverlay, snapshotAt, mergeSnapshots, cameOn, feedUrl, type OverlayDef, type OverlaySnapshot } from './overlay';
 import { activeAt, adBreakAt, fromDashRegion, fromHlsRegions, fromNativeCues, mergeGraphics, upNextFromGraphic } from './triggers';
 import type { TriggerReport } from './engine';
 
@@ -39,7 +40,7 @@ export function initialState(): PlayerState {
     programme: null, nextProgramme: null, schedule: [], canStartOver: false,
     volume: 1, muted: false, rate: 1,
     qualities: [], quality: 'auto', activeQuality: null, textTracks: [], textTrack: null, audioTracks: [], audioTrack: null,
-    items: [], index: -1, item: null, upNext: null, graphics: [], adBreak: null,
+    items: [], index: -1, item: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null,
     nowPlaying: null, history: [], nextTrack: null,
     cast: { available: false, state: 'none', device: null },
     airplay: { available: false, active: false },
@@ -72,6 +73,14 @@ export class VoltPlayer {
   /** In-stream graphic triggers seen so far for this item, by id (sdk/triggers.ts). */
   private streamGraphics = new Map<string, StreamGraphic>();
   private activeGraphicIds = '';
+  /** HTML graphics from the console (sdk/overlay.ts): the layer, its graphics, their state over time. */
+  private overlay: GraphicsOverlay | null = null;
+  private gfxDefs: OverlayDef[] = [];
+  private gfxSnaps: OverlaySnapshot[] = [];
+  private gfxStream: string | null = null;
+  private gfxTimer: ReturnType<typeof setTimeout> | null = null;
+  private gfxOn = new Set<string>();
+  private gfxSession = `gfx-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   private lastProgrammeId: string | null = null;
   private analyser: AnalyserNode | null = null;
   private freq: Uint8Array | null = null;
@@ -158,6 +167,8 @@ export class VoltPlayer {
   async destroy(): Promise<void> {
     this.destroyed = true;
     this.beacons?.destroy();
+    if (this.gfxTimer) clearTimeout(this.gfxTimer);
+    this.overlay?.destroy();
     if (this.tick) clearInterval(this.tick);
     if (this.eventTimer) clearTimeout(this.eventTimer);
     for (const t of this.timers) clearInterval(t);
@@ -170,6 +181,13 @@ export class VoltPlayer {
 
   // --------------------------------------------------------------- public API
   getState(): PlayerState { return this.s; }
+  /**
+   * Every in-stream graphic the manifests have announced and the player still
+   * holds (past, on screen and upcoming), in media time, oldest first. Whatever
+   * showGraphics says: this is for checking a stream (the share page's "In-stream
+   * graphics" panel), not for drawing.
+   */
+  getStreamGraphics(): StreamGraphic[] { return [...this.streamGraphics.values()].sort((a, b) => a.start - b.start); }
   on(name: PlayerEventName, fn: (d?: unknown) => void): () => void {
     if (!this.listeners.has(name)) this.listeners.set(name, new Set());
     this.listeners.get(name)!.add(fn);
@@ -295,7 +313,19 @@ export class VoltPlayer {
       : inband ? { id: inband.data.id || inband.id, title: inband.data.title || '', subtitle: inband.data.subtitle ?? null, description: null,
           imageUrl: inband.data.image ?? null, startsAt: e.presentationStart! + inband.start * 1000,
           endsAt: inband.end != null ? e.presentationStart! + inband.end * 1000 : Number.POSITIVE_INFINITY } : null;
-    const nextProgramme = sched.length ? programmeAfter(sched, programme ? programme.endsAt - 1 : (wallClock ?? Date.now())) : null;
+    const guideNext = sched.length ? programmeAfter(sched, programme ? programme.endsAt - 1 : (wallClock ?? Date.now())) : null;
+    // No guide: the stream announces the next programme's marker shortly before it
+    // starts (90 s look-ahead), which is enough for a skin's "Next" line. Display
+    // only: Up next itself still comes from the stream's own up-next trigger, so a
+    // channel that turned Up next off is not given one by this.
+    let nextProgramme = guideNext;
+    if (!sched.length && inband && e.presentationStart != null) {
+      let nx: StreamGraphic | undefined;
+      for (const g of this.streamGraphics.values()) if (g.graphic === 'programme' && g.start > inband.start && (!nx || g.start < nx.start)) nx = g;
+      if (nx) nextProgramme = { id: nx.data.id || nx.id, title: nx.data.title || '', subtitle: nx.data.subtitle ?? null, description: null,
+        imageUrl: nx.data.image ?? null, startsAt: e.presentationStart + nx.start * 1000,
+        endsAt: nx.end != null ? e.presentationStart + nx.end * 1000 : Number.POSITIVE_INFINITY };
+    }
     const item = this.s.item;
     const dismissKey = programme ? `p:${programme.id}` : `i:${this.s.index}`;
     // The stream's own Up next wins over one worked out from a fetched guide: it is
@@ -305,11 +335,36 @@ export class VoltPlayer {
     const upNext = hideForBreak ? null : this.theme.controls.upNext && upG && this.dismissedFor !== `g:${upG.id}` ? upNextFromGraphic(upG, currentTime, wallClock)
       : this.theme.controls.upNext ? upNextFor({
       hasNextItem: this.s.index + 1 < this.s.items.length, nextItem: this.s.items[this.s.index + 1] ?? null,
-      currentTime, duration: e.duration, live: e.live, programme, nextProgramme, playheadClock: wallClock,
+      currentTime, duration: e.duration, live: e.live, programme, nextProgramme: guideNext, playheadClock: wallClock,
       seconds: this.theme.upNextSeconds, autoAdvance: this.theme.autoAdvance, dismissed: this.dismissedFor === dismissKey,
     }) : null;
+    // SKIP (intro, recap, credits): on-demand only, from the asset's skip markers,
+    // whatever showGraphics says (it is a control, not a graphic). Gone in the
+    // last half second so a button never offers to skip what has just ended.
+    let skip: SkipOffer | null = null;
+    if (!e.live && this.theme.controls.skip !== false) {
+      for (const g of this.streamGraphics.values()) {
+        if (!g.graphic.startsWith('skip-') || g.end == null) continue;
+        if (currentTime >= g.start && currentTime < g.end - 0.5) { skip = { kind: g.data.kind || g.graphic.slice(5), from: g.start, to: g.end, id: g.id }; break; }
+      }
+    }
     if (programme?.id !== this.lastProgrammeId) { this.lastProgrammeId = programme?.id ?? null; if (programme) this.emit('programmechange', programme); }
     if (upNext && !this.s.upNext) this.emit('upnext', upNext);
+    // HTML GRAPHICS (sdk/overlay.ts): the state in force at the playhead's wall
+    // clock, hidden when graphics are off, during a break, or with no picture.
+    let overlays = this.s.overlays;
+    if (this.overlay) {
+      const at = wallClock ?? (e.live ? Date.now() : null);
+      const snap = at != null ? snapshotAt(this.gfxSnaps, at) : null;
+      const on = this.overlay.apply(snap?.state ?? null, graphicsOn && !adBreak && m.videoWidth > 0);
+      const fresh = cameOn(this.gfxOn, on);
+      this.gfxOn = on;
+      overlays = this.gfxDefs.filter((d) => on.has(d.id)).map((d) => ({ id: d.id, name: d.name, kind: d.kind }));
+      if (fresh.length) {
+        for (const id of fresh) { const d = this.gfxDefs.find((x) => x.id === id); this.emit('graphic', { id, graphic: 'html', start: currentTime, end: null, data: { name: d?.name ?? '', kind: d?.kind ?? '' } }); }
+        this.reportImpressions(fresh);
+      }
+    }
     const ids = graphics.map((g) => g.id).join('|');
     if (ids !== this.activeGraphicIds) {
       const before = new Set(this.activeGraphicIds.split('|'));
@@ -318,7 +373,7 @@ export class VoltPlayer {
     }
     this.set({
       currentTime, behindLive, atLiveEdge: !e.live || behindLive < 8, wallClock: e.live ? wallClock : null,
-      programme, nextProgramme, upNext, graphics,
+      programme, nextProgramme, upNext, skip, graphics, overlays,
       adBreak: adBreak ? { id: adBreak.data.break || adBreak.id, endsAt: adBreak.end != null && e.presentationStart != null ? e.presentationStart + adBreak.end * 1000 : null } : null,
       canStartOver: this.theme.controls.startOver && canStartOver(programme, e.presentationStart, e.seekable, e.live),
       seekable: e.seekable,
@@ -362,6 +417,50 @@ export class VoltPlayer {
   }
   private eventTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * The console's HTML graphics for this stream (GET /api/player/graphics).
+   * Polled every 2 s while the stream has graphics for the player, every 30 s
+   * while it has none, and not at all for what is not a channel or event (404).
+   * Asks from a little before the playhead's wall clock, so the snapshot in
+   * force there is always in hand.
+   */
+  private startGraphicsFeed(streamId: string | null) {
+    if (this.gfxTimer) { clearTimeout(this.gfxTimer); this.gfxTimer = null; }
+    this.gfxStream = streamId; this.gfxDefs = []; this.gfxSnaps = []; this.gfxOn = new Set();
+    this.overlay?.setDefs([]);
+    if (!streamId || !this.o.appKey || this.o.showGraphics === false) return;
+    const run = async () => {
+      if (this.destroyed || this.gfxStream !== streamId) return;
+      let next = 2000;
+      try {
+        const since = (this.s.wallClock ?? Date.now()) - 15_000;
+        const r = await fetch(feedUrl(this.api, this.o.appKey!, streamId, since), { credentials: 'omit' });
+        if (r.status === 404 || r.status === 401 || r.status === 403) return;   // not a stream with graphics, or not allowed here
+        if (r.ok) {
+          const f: any = await r.json();
+          if (this.destroyed || this.gfxStream !== streamId) return;
+          const defs: OverlayDef[] = Array.isArray(f.graphics) ? f.graphics : [];
+          this.gfxDefs = defs;
+          if (defs.length && !this.overlay) this.overlay = new GraphicsOverlay(this.stage, this.media, this.api);
+          this.overlay?.setDefs(defs);
+          this.gfxSnaps = mergeSnapshots(this.gfxSnaps, Array.isArray(f.snapshots) ? f.snapshots : [], since - 60_000);
+          if (!defs.length) next = 30_000;
+        }
+      } catch { next = 5000; /* a feed problem never touches playback */ }
+      this.gfxTimer = setTimeout(run, next);
+    };
+    void run();
+  }
+
+  /** A graphic came on screen for this viewer (REQ FR-17). Fire and forget. */
+  private reportImpressions(ids: string[]) {
+    if (!this.gfxStream || !this.o.appKey || this.o.beacons === false) return;
+    try {
+      const body = JSON.stringify({ appKey: this.o.appKey, streamId: this.gfxStream, sessionId: this.beacons?.sessionId ?? this.gfxSession, items: ids.map((id) => ({ id, at: Date.now() })) });
+      void fetch(`${this.api}/api/player/graphics/impressions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: true, credentials: 'omit' }).catch(() => {});
+    } catch { /* */ }
+  }
+
   /** A signed-in viewer (after a purchase or sign-in): ask the gate again with them. */
   setViewerToken(token: string | null): void {
     this.o = { ...this.o, viewerToken: token };
@@ -378,7 +477,8 @@ export class VoltPlayer {
     this.activeGraphicIds = '';
     let item = this.s.items[index];
     if (!item) return;
-    this.set({ index, item, status: 'loading', error: null, errorCode: null, upNext: null, graphics: [], adBreak: null, hasPicture: false, audioOnly: false, qualities: [], textTracks: [], audioTracks: [],
+    this.startGraphicsFeed(item.assetId ?? null);
+    this.set({ index, item, status: 'loading', error: null, errorCode: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null, hasPicture: false, audioOnly: false, qualities: [], textTracks: [], audioTracks: [],
       access: { mode: null, message: null, products: [] } });
     this.emit('itemchange', { index, item });
     try {
@@ -604,6 +704,14 @@ export class VoltPlayer {
       if (this.s.index > 0) void this.load(this.s.index - 1, true);
     },
     playItem: (i) => { if (i >= 0 && i < this.s.items.length) void this.load(i, true); },
+    skip: () => {
+      const sk = this.s.skip;
+      if (!sk) return;
+      // Credits at the end of a playlist item: the next item is what "skip" means.
+      if (sk.kind === 'credits' && this.s.index + 1 < this.s.items.length && (!Number.isFinite(this.s.duration) || sk.to >= this.s.duration - 2)) { this.cmd.next(); return; }
+      this.cmd.seek(sk.to + 0.05);
+      this.set({ skip: null });
+    },
     cancelUpNext: () => {
       const g = this.s.graphics.find((x) => x.graphic === 'up-next');
       this.dismissedFor = g ? `g:${g.id}` : this.s.programme ? `p:${this.s.programme.id}` : `i:${this.s.index}`;

@@ -35,6 +35,7 @@ The Volt player is the same player everywhere Volt plays: your websites and apps
 | `audio_square` | A square tile: artwork, track, play |
 | `audio_wave` | A strip: artwork, track and a live waveform |
 | `audio_nowplaying` | Large artwork, track details, the last five tracks and what is coming up |
+| `audio_radio` | A station player: the programme on air and how far through it is, a waveform, and a Coming up banner before the next programme |
 
 The audio skins show, best first: the track now playing (with artwork), otherwise the programme on air, otherwise the item's own title and artwork.
 

@@ -32,9 +32,23 @@ AHEAD_SEC = 90           # include triggers starting this soon after the window 
 SCHEME_PREFIX = "urn:com:boomlabs:volt:"
 
 
+_OFFSET = re.compile(r"([+-])(\d{2})(\d{2})$")
+_FRACTION = re.compile(r"\.(\d+)")
+
+
 def _parse_iso(s):
+    """ISO 8601 to epoch seconds, or None.
+
+    PYTHON 3.10 IS THE ONE THAT SHIPS (Ubuntu 22.04, the radio and encoder
+    images), and its fromisoformat only takes "+10:00" and 3 or 6 fraction
+    digits. ffmpeg writes PROGRAM-DATE-TIME as "...47.592+1000" (and "+0000" in
+    a UTC container), which 3.10 rejects: every radio playlist then had no
+    window and so no triggers. Normalised here rather than trusted."""
     try:
-        return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
+        t = str(s).strip().replace("Z", "+00:00")
+        t = _OFFSET.sub(r"\1\2:\3", t)
+        t = _FRACTION.sub(lambda m: "." + (m.group(1) + "000000")[:6], t, count=1)
+        return datetime.fromisoformat(t).timestamp()
     except Exception:  # noqa: BLE001
         return None
 

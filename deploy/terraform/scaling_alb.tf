@@ -33,7 +33,8 @@ locals {
     ["/api/availability", "/api/availability/*", "/api/access/*", "/api/player/*", "/api/analytics/beacon*"],
     ["/live/*", "/share/*", "/api/share/*", "/xmltv/*", "/img/*"],
     ["/library/*", "/player", "/player/*", "/clips/*", "/api/payments/verify"],
-    ["/api/public/*"],
+    # /gfx/*: graphics template files the player loads (modules/graphics.ts)
+    ["/api/public/*", "/gfx/*"],
   ]
 }
 

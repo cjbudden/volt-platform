@@ -42,7 +42,7 @@ The key is a **publishable** key (`pk_live_...`). It is meant to be public: it w
 |---|---|
 | `data-app-key` | Your app's publishable key. Required. |
 | `data-asset-id` | A channel, event or on-demand asset id |
-| `data-skin` | `video`, `event`, `audio_square`, `audio_wave` or `audio_nowplaying`. See the [player SDK](player-sdk.md#skins). |
+| `data-skin` | `video`, `event`, `audio_square`, `audio_wave`, `audio_nowplaying` or `audio_radio`. See the [player SDK](player-sdk.md#skins). |
 | `data-primary-color` | Your brand colour for buttons, progress and the live dot |
 | `data-event-id` | An event, for the `event` skin |
 | `data-purchase-url`, `data-sign-in-url` | Your checkout and sign-in pages, for paid or members-only events |

@@ -7,6 +7,7 @@ import { startWorker } from './services/jobs/worker';
 import { registerClipHandlers } from './services/jobs/handlers/clipExtract';
 import { registerQcHandlers } from './services/jobs/handlers/qcRun';
 import { registerVodEncodeHandlers } from './services/jobs/handlers/vodEncode';
+import { registerVodMarkerHandlers } from './services/jobs/handlers/vodMarkers';
 import { registerFillerHandlers } from './services/fillerPrep';
 import { registerRemoteIngestHandlers } from './services/jobs/handlers/remoteIngest';
 import { backfillContainers } from './services/containers';
@@ -20,6 +21,7 @@ import { startScale, stopScale, runsSchemaWork, waitForSchema, withBootLock } fr
 import { markBooted, setLeaderCheck } from './scale/health';
 import { startPrewarm } from './scale/prewarm';
 import { startMetrics } from './scale/metrics';
+import { startGraphicsRuntime } from './services/graphics/runtime';
 
 const app = createServer();
 
@@ -125,6 +127,11 @@ async function boot(): Promise<void> {
     // Default admin roles for every account (auth/defaultRoles.ts). Idempotent.
     const n = await (await import('./auth/defaultRoles')).ensureDefaultRoles();
     if (n) console.log(`[access] default roles created or refreshed: ${n}`);
+    // Volt's shipped graphics templates (assets/graphics), read-only in every account.
+    // Inside the boot lock so two instances starting together add them once.
+    await (await import('./services/graphics/defaults')).ensureDefaultTemplates()
+      .then((g) => { if (g) console.log(`[graphics] default templates added or updated: ${g}`); })
+      .catch((e) => console.error('[graphics] default templates not loaded', e));
   });
   // Give existing recordings their broadcast-day container. Additive and
   // idempotent: it only fills container_id where it is NULL, and no row's
@@ -171,7 +178,9 @@ boot().then(async () => {
       const stopSched = startScheduler();
       const stopPrewarm = startPrewarm();
       const stopMetrics = startMetrics();
-      return () => { stopSched(); stopPrewarm(); stopMetrics(); };
+      // Graphics: feed polling, timed take-offs, rundown cues (services/graphics/runtime.ts).
+      const stopGraphics = startGraphicsRuntime();
+      return () => { stopSched(); stopPrewarm(); stopMetrics(); stopGraphics(); };
     });
     setLeaderCheck(() => !!leadership?.isLeader());
   }
@@ -182,6 +191,7 @@ boot().then(async () => {
     registerQcHandlers();
     registerVodEncodeHandlers();
     (await import('./services/jobs/handlers/adCondition')).registerAdConditionHandlers();
+    registerVodMarkerHandlers();
     registerRemoteIngestHandlers();
     (await import('./services/workflows/runs')).registerAddonHandlers();
     await registerFillerHandlers();

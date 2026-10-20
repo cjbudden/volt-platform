@@ -27,7 +27,7 @@ function perms(p: Record<string, Level>): Perms {
 
 const CONTENT_VIEW: Record<string, Level> = {
   monitoring: 'view', channels: 'view', radio: 'view', events: 'view', epg: 'view',
-  recordings: 'view', vod: 'view', media: 'view', sharing: 'view',
+  recordings: 'view', vod: 'view', media: 'view', sharing: 'view', graphics: 'view',
 };
 
 export const DEFAULT_ROLES: DefaultRole[] = [
@@ -46,7 +46,14 @@ export const DEFAULT_ROLES: DefaultRole[] = [
     description: 'Creates, schedules and runs events, their EPG and recordings, and publishes the results.',
     permissions: perms({
       monitoring: 'view', events: 'manage', epg: 'manage', recordings: 'manage', vod: 'operate',
-      media: 'manage', sharing: 'manage', analytics: 'view', channels: 'view',
+      media: 'manage', sharing: 'manage', analytics: 'view', channels: 'view', graphics: 'manage',
+    }),
+  },
+  {
+    key: 'graphics_operator', name: 'Graphics Operator', tier: 'operator',
+    description: 'Runs graphics live: takes them on and off, changes scores and names, works event rundowns. Cannot change templates or setups.',
+    permissions: perms({
+      monitoring: 'view', channels: 'view', events: 'view', epg: 'view', media: 'view', graphics: 'operate',
     }),
   },
   {

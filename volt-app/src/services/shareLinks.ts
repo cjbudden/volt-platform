@@ -41,6 +41,11 @@ function liveOutputFresh(resourceId: string): boolean {
         try { const m = statSync(join(dir, f)).mtimeMs; if (m > newest) newest = m; } catch { /* ignore */ }
       }
     }
+    // A radio run writes its master once and advances audio/index.m3u8 (and
+    // dash/manifest.mpd), so those are its heartbeat.
+    for (const f of ['audio/index.m3u8', 'dash/manifest.mpd']) {
+      try { const m = statSync(join(dir, f)).mtimeMs; if (m > newest) newest = m; } catch { /* not a radio run */ }
+    }
     return newest > 0 && (Date.now() - newest) < 15000;
   } catch { return false; }
 }
@@ -145,9 +150,20 @@ export async function requestShareEmailCode(raw: string, email: string, nowMs = 
 const cdn = () => config.aws.cdnBaseUrl.replace(/\/$/, '');
 
 /** Manifest URLs for a resource. VOD uses its master_key; live uses kind/id. */
-export function manifestUrls(kind: ShareResourceKind, resourceId: string, masterKey?: string, formats?: { hls?: boolean; dash?: boolean }) {
+export function manifestUrls(kind: ShareResourceKind, resourceId: string, masterKey?: string, formats?: { hls?: boolean; dash?: boolean }, radio = false) {
   if (kind === 'vod') {
-    const base = `${cdn()}/${(masterKey ?? '').replace(/^\//, '')}`;
+    const key = masterKey ?? '';
+    // master_key IS the playlist (/clips/<id>/hls/index.m3u8 for a clip,
+    // /clips/vod/<id>/master.m3u8 for an encode). Appending /master.m3u8 to it,
+    // as this did, gave every on-demand share a URL that did not exist.
+    // /clips/ is served by the control plane, with the skip markers written in.
+    if (/\.m3u8$/i.test(key)) {
+      const hls = key.startsWith('/clips/') ? key : `${cdn()}/${key.replace(/^\//, '')}`;
+      // An encode has its MPD beside master.m3u8; a clip has no DASH.
+      const dash = formats?.dash && /\/master\.m3u8$/i.test(hls) ? hls.replace(/master\.m3u8$/i, 'manifest.mpd') : null;
+      return { hls: formats?.hls !== false ? hls : null, dash };
+    }
+    const base = `${cdn()}/${key.replace(/^\//, '')}`;
     return {
       hls: formats?.hls !== false ? `${base}/master.m3u8` : null,
       dash: formats?.dash ? `${base}/manifest.mpd` : null,
@@ -159,7 +175,20 @@ export function manifestUrls(kind: ShareResourceKind, resourceId: string, master
   // local: the STABLE /live/ url — it follows the current run across restarts, so a
   // share link created before a restart keeps playing after it.
   const base = useCdn ? `${cdn()}/${kind}/${resourceId}` : liveUrlBase(resourceId);
-  return { hls: `${base}/master.m3u8`, dash: `${base}/manifest.mpd` };
+  // Radio: the master leads to the delivered copy (radio.py), DASH is under dash/.
+  if (radio) return { hls: `${base}/master.m3u8`, dash: `${base}/dash/manifest_cc.mpd` };
+  // TV and events: THE DELIVERED COPIES, as the public player gets
+  // (publicLive.ts). They carry the wall clock and the in-stream triggers (Up
+  // next, programme markers); the packager's own master has neither, so a share
+  // preview of it could never show or check them. The encoder writes them for
+  // every video stream; locally, fall back while a run has not written them yet.
+  if (useCdn) return { hls: `${base}/master_cc.m3u8`, dash: `${base}/manifest_cc.mpd` };
+  const dir = liveDirFor(resourceId);
+  const has = (f: string) => { try { return existsSync(join(dir, f)); } catch { return false; } };
+  return {
+    hls: `${base}/${has('master_cc.m3u8') ? 'master_cc.m3u8' : 'master.m3u8'}`,
+    dash: `${base}/${has('manifest_cc.mpd') ? 'manifest_cc.mpd' : 'manifest.mpd'}`,
+  };
 }
 
 /** Load the shared resource's view model (title/metadata/manifest), scoped to the account. */
@@ -189,8 +218,9 @@ export async function loadResource(kind: ShareResourceKind, resourceId: string, 
     [resourceId, accountId]
   );
   if (!r) return null;
-  const m = manifestUrls(kind, r.id);
-  return { kind, id: r.id, title: r.name ?? 'Live', durationMs: 0, metadata: r.metadata ?? {}, hls: m.hls, dash: m.dash };
+  const radio = kind === 'channel' && r.kind === 'radio';
+  const m = manifestUrls(kind, r.id, undefined, undefined, radio);
+  return { kind, id: r.id, title: r.name ?? 'Live', durationMs: 0, metadata: r.metadata ?? {}, hls: m.hls, dash: m.dash, radio };
 }
 
 export interface CreateShareInput {
@@ -351,6 +381,8 @@ export async function openShare(raw: string, opts: { pin?: string; email?: strin
     view: {
       title: resource.title,
       kind: resource.kind,
+      // A radio station plays in the radio layout, not a video frame.
+      radio: !!resource.radio,
       live: resource.kind !== 'vod',
       // live preview is only watchable while the source is active and output is being
       // created; VOD is always available. The page shows a waiting state otherwise.

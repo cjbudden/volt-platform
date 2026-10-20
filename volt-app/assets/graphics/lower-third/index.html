@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Name super</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Name super (who is speaking)",
+  "bbox": [
+    120,
+    830,
+    1100,
+    180
+  ],
+  "fields": [
+    {
+      "id": "name",
+      "type": "text",
+      "label": "Name"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title or role"
+    },
+    {
+      "id": "accent",
+      "type": "color",
+      "label": "Role bar colour"
+    }
+  ],
+  "sample": {
+    "name": "Helen Carter",
+    "title": "Political correspondent, Canberra",
+    "accent": "#c1121f"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+
+:root{--accent:#c1121f;--bar:#0a2350}
+#ns{position:absolute;left:120px;top:842px;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.name,.role{clip-path:inset(0 100% 0 0);transition:clip-path .5s cubic-bezier(.2,.8,.2,1);border-radius:3px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.name{background:#f4f5f7;color:#0b1220;font:600 52px/1 "Volt Serif";padding:16px 30px 18px;display:flex;align-items:center;gap:18px}
+.role{background:var(--accent);color:#fff;font:500 30px/1 "Volt Sans";letter-spacing:.04em;text-transform:uppercase;padding:12px 30px;transition-delay:.12s}
+.role:empty{display:none}
+.on .name,.on .role{clip-path:inset(0 0 0 0)}
+</style>
+</head>
+<body>
+<div id="ns"><div class="name"><span id="name"></span></div><div class="role" id="title"></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+
+function update(raw){var d=parse(raw);var r=document.documentElement.style;
+  if('name' in d)setText($('name'),d.name);if('title' in d)setText($('title'),d.title);
+  if(d.accent)r.setProperty('--accent',d.accent);if(d.barColor)r.setProperty('--bar',d.barColor)}
+function play(){document.body.classList.add('on')}
+function stop(){document.body.classList.remove('on')}
+function next(){}
+</script>
+</body>
+</html>

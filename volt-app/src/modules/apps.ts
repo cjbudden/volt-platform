@@ -368,6 +368,8 @@ interface AssetMeta {
   title: string | null; description: string | null; artworkUrl: string | null;
   durationMs: number | null; live: boolean; kind: string; radio?: boolean;
   manifests?: { hls: string | null; dash: string | null };
+  /** On-demand only: the skippable stretches (intro, recap, credits), seconds into the asset. */
+  skip?: Array<{ kind: string; from: number; to: number }>;
 }
 
 const imageUrl = (v: unknown): string | null => typeof v === 'string' && /^(https?:\/\/|\/(?!\/))/.test(v) ? v : null;
@@ -392,7 +394,11 @@ function assetMeta(acct: string, kind: string, id: string): Promise<AssetMeta | 
         const cdn = config.aws.cdnBaseUrl.replace(/\/$/, '');
         return { title: a.title ?? null, description: a.metadata?.description ?? null,
           artworkUrl: a.poster_key ? `${cdn}/${String(a.poster_key).replace(/^\//, '')}` : imageUrl(a.metadata?.image),
-          durationMs: a.duration_ms != null ? Number(a.duration_ms) : null, live: false, kind: 'vod', manifests: { hls: m.hls, dash: m.dash } };
+          durationMs: a.duration_ms != null ? Number(a.duration_ms) : null, live: false, kind: 'vod', manifests: { hls: m.hls, dash: m.dash },
+          // Skip markers, for apps that draw their own Skip button. The same ranges
+          // are in the manifests (services/vodMarkers.ts); seconds into the asset.
+          skip: (await (await import('../services/vodMarkers')).listMarkers(a.id))
+            .filter((x) => x.status === 'active').map((x) => ({ kind: x.kind, from: x.startMs / 1000, to: x.endMs / 1000 })) };
       }
       const table = kind === 'event' ? 'events' : 'channels';
       const r = await one<any>(

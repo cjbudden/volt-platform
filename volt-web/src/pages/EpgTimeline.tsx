@@ -22,8 +22,11 @@ const MIN_GAP_MS = 5 * 60_000
 /* Pixels per hour. The top levels are for short-form guides: at 360 a 5-minute
    programme is 30 px (title and time on one line), at 720 it is 60 px (title,
    time and duration). From 200 up the grid shows quarter hours and clicks snap
-   to 5 minutes; from 360 up it also draws 5-minute lines. */
-const ZOOMS = [40, 64, 110, 200, 360, 720] as const
+   to 5 minutes; from 360 up it also draws 5-minute lines. The two closest
+   (1200 and 2000: a 5-minute programme is 100 and 167 px, room for its tags
+   and description) label every 5 minutes and draw a line each minute. */
+const ZOOMS = [40, 64, 110, 200, 360, 720, 1200, 2000] as const
+const FINEST = 1200
 const FINE = 200
 const snapMinOf = (zoom: number) => (zoom >= FINE ? 5 : 15)
 
@@ -173,15 +176,17 @@ export function EpgTimeline({ day, progs, vod, overlapsById, ownerWord, onEdit, 
       </div>
 
       <div className="epg-tl-body" ref={body}>
-        <div className={`epg-tl-grid${zoom >= FINE ? ' fine' : ''}${zoom >= 360 ? ' finer' : ''}`}
-          style={{ height: 24 * zoom, ['--hour' as any]: `${zoom}px`, ['--quarter' as any]: `${zoom / 4}px`, ['--five' as any]: `${zoom / 12}px` }}>
+        <div className={`epg-tl-grid${zoom >= FINE ? ' fine' : ''}${zoom >= 360 ? ' finer' : ''}${zoom >= FINEST ? ' finest' : ''}`}
+          style={{ height: 24 * zoom, ['--hour' as any]: `${zoom}px`, ['--quarter' as any]: `${zoom / 4}px`, ['--five' as any]: `${zoom / 12}px`, ['--minute' as any]: `${zoom / 60}px` }}>
           <div className="epg-tl-hours" aria-hidden>
             {Array.from({ length: 24 }, (_, h) => (
               <span key={h} style={{ top: h * zoom }}>{h === 0 ? '00:00' : `${p2(h)}:00`}</span>
             ))}
-            {zoom >= FINE && Array.from({ length: 24 * 3 }, (_, i) => {
-              const h = Math.floor(i / 3), m = (i % 3 + 1) * 15
-              return <span key={`q${i}`} className="q" style={{ top: (h + m / 60) * zoom }}>{p2(h)}:{p2(m)}</span>
+            {zoom >= FINE && Array.from({ length: 24 * (zoom >= FINEST ? 11 : 3) }, (_, i) => {
+              // quarter hours, or every 5 minutes at the closest zooms
+              const per = zoom >= FINEST ? 11 : 3, step = zoom >= FINEST ? 5 : 15
+              const h = Math.floor(i / per), m = (i % per + 1) * step
+              return <span key={`q${i}`} className={`q${m % 15 ? ' f' : ''}`} style={{ top: (h + m / 60) * zoom }}>{p2(h)}:{p2(m)}</span>
             })}
           </div>
 

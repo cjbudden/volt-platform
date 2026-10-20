@@ -242,10 +242,96 @@ def redact_icecast_url(t):
     return f"{scheme}://{t['username']}:***@{t['host']}:{t['port']}{mount}"
 
 
-def master_playlist(kbps):
+def master_playlist(kbps, media="audio/index.m3u8"):
     bw = (clamp_bitrate(kbps) + 8) * 1000
     return ("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n"
-            f"#EXT-X-STREAM-INF:BANDWIDTH={bw},CODECS=\"mp4a.40.2\"\naudio/index.m3u8\n")
+            f"#EXT-X-STREAM-INF:BANDWIDTH={bw},CODECS=\"mp4a.40.2\"\n{media}\n")
+
+
+# ---------------------------------------------------------------------------
+# In-stream graphic triggers (Up next), the same standard as television.
+#
+# The control plane owns the schedule and formats the tags
+# (volt-app/src/services/graphicTriggers.ts); timed_events.py places them. A
+# radio run has no packager to rewrite, so this keeps DELIVERED COPIES beside
+# ffmpeg's own files, refreshed every second:
+#
+#   audio/index_cc.m3u8   ffmpeg's playlist (which already carries
+#                         PROGRAM-DATE-TIME) plus EXT-X-DATERANGE
+#   dash/manifest_cc.mpd  ffmpeg's MPD plus an EventStream
+#
+# and, once the first copy is on disk, rewrites the run's master.m3u8 to point
+# at index_cc.m3u8. So the public HLS URL is unchanged: the master a player
+# already loads simply leads to the copy with the triggers in it. Until then,
+# and whenever a cycle finds ffmpeg's file mid-write, the last good copy stands.
+#
+# FAILS OPEN like timed_events.py: no control plane means a copy without
+# triggers, never a missing or late playlist.
+# ---------------------------------------------------------------------------
+def _atomic_write(path, text):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
+
+
+def _complete_playlist(text):
+    lines = [x for x in text.splitlines() if x.strip()]
+    return bool(lines) and lines[0].startswith("#EXTM3U") and (
+        lines[-1].startswith("#") or lines[-1].endswith((".m4s", ".mp4", ".ts")))
+
+
+def refresh_delivered(paths, outs, kbps, triggers, state):
+    """One cycle. Returns what it wrote, for the tests."""
+    import timed_events
+    wrote = []
+    if outs.get("hls"):
+        src = os.path.join(paths["audio"], "index.m3u8")
+        try:
+            text = open(src).read()
+        except OSError:
+            text = ""
+        if _complete_playlist(text):
+            _atomic_write(os.path.join(paths["audio"], "index_cc.m3u8"), timed_events.inject_hls(text, triggers))
+            wrote.append("audio/index_cc.m3u8")
+            if not state.get("master_cc"):
+                _atomic_write(os.path.join(paths["run"], "master.m3u8"), master_playlist(kbps, "audio/index_cc.m3u8"))
+                state["master_cc"] = True
+                wrote.append("master.m3u8")
+    if outs.get("dash"):
+        src = os.path.join(paths["dash"], "manifest.mpd")
+        try:
+            mpd = open(src).read()
+        except OSError:
+            mpd = ""
+        if "</MPD>" in mpd:
+            _atomic_write(os.path.join(paths["dash"], "manifest_cc.mpd"), timed_events.inject_mpd(mpd, triggers))
+            wrote.append("dash/manifest_cc.mpd")
+    return wrote
+
+
+def start_delivered_copies(cfg, paths, outs, interval=1.0):
+    te = cfg.get("timed_events") or {}
+    if not te.get("url") or not (outs.get("hls") or outs.get("dash")):
+        return None
+    import timed_events
+    feed = timed_events.TriggerFeed(te["url"], te.get("token"), te.get("poll_sec", 5), log=log).start()
+    state = {}
+
+    def loop():
+        warned = False
+        while not _stopping:
+            try:
+                refresh_delivered(paths, outs, cfg.get("bitrate_kbps"), feed.current(), state)
+                warned = False
+            except Exception as e:  # noqa: BLE001  (one bad cycle must not end the copies)
+                if not warned:
+                    log(f"delivered copies: {e}")
+                    warned = True
+            time.sleep(interval)
+    threading.Thread(target=loop, name="delivered", daemon=True).start()
+    log("timed events: delivered copies every 1s (audio/index_cc.m3u8, dash/manifest_cc.mpd)")
+    return feed
 
 
 def probe_audio_codec(url):
@@ -542,6 +628,11 @@ def main():
 
     if not is_local(cfg):
         _uploader = start_uploader(cfg, paths["run"])
+
+    try:
+        start_delivered_copies(cfg, paths, outs)
+    except Exception as e:  # noqa: BLE001
+        log(f"timed events: not started ({e}); playlists carry no triggers")
 
     _events.channel_start(workflow="package" if is_mp3_copy(cfg) else "transcode",
                           renditions=1)

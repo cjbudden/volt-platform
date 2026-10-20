@@ -16,7 +16,7 @@ import type { SkinFactory } from '../types';
 import { videoSkin } from './video';
 import { eventSkin } from './event';
 import { adminSkin } from './admin';
-import { audioNowPlayingSkin, audioSquareSkin, audioWaveSkin } from './audio';
+import { audioNowPlayingSkin, audioRadioSkin, audioSquareSkin, audioWaveSkin } from './audio';
 
 const SKINS: Record<string, SkinFactory> = {
   video: videoSkin,
@@ -24,10 +24,11 @@ const SKINS: Record<string, SkinFactory> = {
   audio_square: audioSquareSkin,
   audio_wave: audioWaveSkin,
   audio_nowplaying: audioNowPlayingSkin,
+  audio_radio: audioRadioSkin,
   admin: adminSkin,
 };
 
-export const BUILT_IN_SKINS = ['video', 'event', 'audio_square', 'audio_wave', 'audio_nowplaying', 'admin'] as const;
+export const BUILT_IN_SKINS = ['video', 'event', 'audio_square', 'audio_wave', 'audio_nowplaying', 'audio_radio', 'admin'] as const;
 
 export function getSkin(name: string): SkinFactory {
   return SKINS[name] ?? SKINS.video;

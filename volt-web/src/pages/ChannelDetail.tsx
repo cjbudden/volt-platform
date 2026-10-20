@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type ReactElement, type SetStateAction } from 'react'
 import { api, originUrl, thumbUrl, type AccessCheck, type ChannelDetail as CD, type ChannelSettingsPatch, type WatermarkCfg, type FailoverMode, type FailoverTestState } from '../api'
 import { navigate } from '../router'
 import { TypePicker, MetadataForm } from '../ContentTypeFields'
@@ -512,14 +512,14 @@ function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefr
 
         {/* the real logs behind the gates */}
         <h3 style={{ margin: '10px 0 6px' }}>Real logs <span style={{ color: 'var(--faint)', fontWeight: 400, fontSize: 'var(--fs-sm)' }}>· encoder + pipeline events</span></h3>
-        <div style={{ maxHeight: 320, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+        <div style={{ maxHeight: 320, overflowY: 'auto', overflowX: 'hidden', border: '1px solid var(--border)', borderRadius: 10 }}>
           {(d.log || []).length === 0 && <div style={{ padding: 14, color: 'var(--faint)' }}>No log lines yet.</div>}
           {(d.log || []).map((l, i) => (
-            <div key={i} style={{ display: 'flex', gap: 10, padding: '7px 12px', borderTop: i ? '1px solid var(--border)' : undefined, fontSize: 'var(--fs-sm)' }}>
-              <span className={`dot-s ${l.level}`} style={{ marginTop: 5 }} />
+            <div key={i} style={{ display: 'flex', gap: 10, padding: '7px 12px', borderTop: i ? '1px solid var(--border)' : undefined, fontSize: 'var(--fs-sm)', minWidth: 0 }}>
+              <span className={`dot-s ${l.level}`} style={{ marginTop: 5, flexShrink: 0 }} />
               <span style={{ color: 'var(--faint)', width: 62, flexShrink: 0 }}>{l.ts}</span>
-              <span style={{ fontWeight: 600, width: 96, flexShrink: 0, color: l.level === 'down' ? '#fca5a5' : 'var(--muted)' }}>{l.title}</span>
-              <span style={{ color: 'var(--muted)', wordBreak: 'break-word' }}>{l.detail}</span>
+              <span title={l.title} style={{ fontWeight: 600, width: 96, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: l.level === 'down' ? '#fca5a5' : 'var(--muted)' }}>{l.title}</span>
+              <LogDetail text={l.detail} style={{ color: 'var(--muted)' }} />
             </div>
           ))}
         </div>
@@ -2057,13 +2057,90 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
   )
 }
 
+/* LOG LINES WRAP, AND LONG ONES FOLD. Encoder and pipeline lines carry URLs,
+   paths and JSON with no spaces in them, which pushed the panel sideways. A
+   line now breaks anywhere, shows at most three lines, and a click opens it. */
+function LogDetail({ text, small, style }: { text?: string | null; small?: boolean; style?: CSSProperties }) {
+  const [open, setOpen] = useState(false)
+  if (!text) return null
+  const long = text.length > 180
+  const Tag = small ? 'small' : 'span'
+  return (
+    <Tag className={`log-detail${long && !open ? ' clamp' : ''}${long ? ' long' : ''}`} style={style}
+      title={long && !open ? 'Click to show the whole line' : undefined}
+      onClick={long ? () => setOpen((o) => !o) : undefined}>{text}</Tag>
+  )
+}
+
 /* --------------------------------------------------------------------- EPG */
+/* Durations in words, never "1:00 / 5:00", which reads as clock times.
+   Seconds only while they matter (under 10 minutes). */
+function fmtSpan(ms: number) {
+  const t = Math.max(0, Math.round(ms / 1000))
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60
+  if (h) return `${h} h${m ? ` ${m} min` : ''}`
+  if (t >= 600) return `${m} min`
+  return m ? `${m} min${s ? ` ${s} s` : ''}` : `${s} s`
+}
+/* A COUNTDOWN THAT DOES NOT MOVE THE TEXT AROUND IT. As the seconds tick,
+   "9 s" becomes "10 s" and "1 min" becomes "1 min 5 s", so everything after a
+   counter used to slide, and the right-aligned Up next line jumped as a whole.
+   Each counter now sits in a slot as wide as the widest value its range can
+   show (an invisible copy in the same grid cell), right-aligned, with the
+   seconds padded to two digits and tabular figures. The slot only changes
+   size when the range does (under 10 min, under an hour, hours), which is at
+   most a couple of times a programme. */
+function steady(ms: number): { text: string; ghost: string } {
+  const t = Math.max(0, Math.round(ms / 1000))
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60
+  const p2 = (n: number) => String(n).padStart(2, '0')
+  if (h) return { text: `${h} h ${p2(m)} min`, ghost: `${h >= 10 ? '00' : '0'} h 00 min` }
+  if (t >= 600) return { text: `${m} min`, ghost: '00 min' }
+  return { text: m ? `${m} min ${p2(sec)} s` : `${sec} s`, ghost: '0 min 00 s' }
+}
+function Count({ ms, strong }: { ms: number; strong?: boolean }) {
+  const v = steady(ms)
+  const Tag = strong ? 'b' : 'span'
+  return (
+    <Tag className="epg-count">
+      <span aria-hidden className="ghost">{v.ghost}</span>
+      <span>{v.text}</span>
+    </Tag>
+  )
+}
+const clockOf = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
+
 function EpgStrip({ d, onAddEpg, onHideEpg }: { d: CD; onAddEpg: () => void; onHideEpg: () => void }) {
+  // The page refreshes every 6 s; the strip keeps its own second hand so the
+  // marker, the progress and "left" move smoothly and the on-air card changes
+  // the moment a programme ends, not at the next refresh.
+  const [t, setT] = useState(Date.now())
+  useEffect(() => { const iv = setInterval(() => setT(Date.now()), 1000); return () => clearInterval(iv) }, [])
+
+  const raw: any[] = d.epg.lane ?? []
+  const lane = raw.map((p: any) => {
+    if (typeof p.startMs !== 'number' || typeof p.endMs !== 'number') return p   // an older server
+    const state = p.endMs <= t ? 'past' : p.startMs <= t ? 'now' : ''
+    return { ...p, state, progress: state === 'now' ? ((t - p.startMs) / (p.endMs - p.startMs)) * 100 : undefined }
+  })
+  const nowIdx = lane.findIndex((p: any) => p.state === 'now')
+  const cur = nowIdx >= 0 ? lane[nowIdx] : null
+  const next = lane.find((p: any) => typeof p.startMs === 'number' && p.startMs > t) ?? null
+
+  // Keep the on-air card in view: one finished programme to its left for context.
+  // Follows the change of programme, but leaves a viewer who scrolled alone until then.
+  const laneRef = useRef<HTMLDivElement>(null)
+  const anchor = nowIdx >= 0 ? nowIdx : lane.findIndex((p: any) => p.state !== 'past')
+  useEffect(() => {
+    const el = laneRef.current
+    if (!el || anchor < 0) return
+    const card = el.querySelectorAll<HTMLElement>('.epg-prog')[Math.max(0, anchor - 1)]
+    if (card) el.scrollTo({ left: Math.max(0, el.scrollLeft + card.getBoundingClientRect().left - el.getBoundingClientRect().left - 16), behavior: 'smooth' })
+  }, [anchor, raw.length])
+
   // Hidden entirely when the channel has the guide turned off (Settings).
   if (d.epgEnabled === false) return null
-
-  const now = d.epg.now
-  const hasEpg = (d.epg.lane?.length ?? 0) > 0
+  const hasEpg = raw.length > 0
 
   // No programmes: don't show a dead "ON NOW —" strip. Offer a call to action to
   // add a guide, or to hide the panel for this channel.
@@ -2081,22 +2158,43 @@ function EpgStrip({ d, onAddEpg, onHideEpg }: { d: CD; onAddEpg: () => void; onH
     )
   }
 
+  // Elapsed and remaining in words. Falls back to the server's minute figures.
+  const now = cur ?? d.epg.now
+  let timing: ReactElement | null = null
+  if (now && typeof now.startMs === 'number') {
+    const total = now.endMs - now.startMs, done = t - now.startMs
+    timing = (
+      <span className="epg-elapsed" title={`${now.start} to ${now.end}`}>
+        <span className="epg-mini" aria-hidden><span style={{ width: `${Math.min(100, (done / total) * 100)}%` }} /></span>
+        {/* Time left is the Up next countdown on the right, so it is not repeated here. */}
+        <span className="epg-in"><Count ms={done} strong /> in, of {fmtSpan(total)}</span>
+      </span>
+    )
+  } else if (now) {
+    timing = <span className="epg-elapsed"><span className="epg-in"><b>{now.elapsedMin} min</b> in, of {now.mins} min</span></span>
+  }
+  const nx = next ?? d.epg.next
+
   return (
     <div className="card" style={{ marginBottom: 18 }}>
       <div className="epg-head">
         <span className="tag live"><span className="dot-s live" />ON NOW</span>
         <b>{now?.name || '—'}</b>
-        {now && <span className="epg-elapsed">{now.elapsedMin}:00 <span>/ {now.mins}:00</span></span>}
+        {timing}
         <div className="spacer" />
-        {d.epg.next && <span className="epg-next">Up next · <b>{d.epg.next.name}</b> · {d.epg.next.start}</span>}
+        {nx && <span className="epg-next">Up next · <b>{nx.name}</b> · {nx.start}{typeof nx.startMs === 'number' && nx.startMs > t && <> · in <Count ms={nx.startMs - t} /></>}</span>}
       </div>
-      <div className="epg-lane">
+      <div className="epg-lane" ref={laneRef}>
         <div className="epg-track">
-          {d.epg.lane.map((p: any, i: number) => (
-            <div key={i} className={`epg-prog ${p.state || ''}`}>
-              {p.state === 'now' && <><span className="fill" style={{ width: `${p.progress}%` }} /><span className="nowdot" style={{ left: `${p.progress}%` }} /></>}
+          {lane.map((p: any, i: number) => (
+            <div key={p.startMs ?? i} className={`epg-prog ${p.state || ''}`} aria-current={p.state === 'now' ? 'true' : undefined}>
+              {p.state === 'now' && <>
+                <span className="fill" style={{ width: `${p.progress}%` }} />
+                <span className="nowline" style={{ left: `${p.progress}%` }}><span className="nowlbl">Now {clockOf(t)}</span></span>
+                <span className="epg-onair">ON AIR</span>
+              </>}
               <div className="pnm">{p.name}</div>
-              <div className="ptm">{p.start} – {p.end} · {p.mins}m{p.state === 'now' ? ` · ${p.progress}%` : ''}</div>
+              <div className="ptm">{p.start} – {p.end} · {p.mins} min</div>
             </div>
           ))}
         </div>
@@ -2188,7 +2286,7 @@ function EventLog({ d }: { d: CD }) {
       <div className="card-b" style={{ padding: '8px 18px' }}>
         <div className="log">
           {d.log.map((l, i) => (
-            <div className="logrow" key={i}><span className="ts">{l.ts}</span><span className="ic" style={{ background: LOG_COLOR[l.level] || 'var(--sched)' }} /><span className="tx">{l.title}<small>{l.detail}</small></span></div>
+            <div className="logrow" key={i}><span className="ts">{l.ts}</span><span className="ic" style={{ background: LOG_COLOR[l.level] || 'var(--sched)' }} /><span className="tx">{l.title}<LogDetail text={l.detail} small /></span></div>
           ))}
         </div>
       </div>
@@ -2565,6 +2663,10 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           </div>
 
           <GraphicsSettings value={gfx} onChange={setGfx} hasGuide={epgOn} />
+          <div className="toggle-row">
+            <div><div className="tt">HTML graphics</div><div className="td">Scorebugs, lower thirds, tickers and bugs on this channel: always on, by rule or on a trigger.</div></div>
+            <button type="button" className="btn ghost sm" style={{ marginLeft: 'auto' }} onClick={() => navigate(`/graphics/channel/${d.id}`)}>Open</button>
+          </div>
 
           <div className={locked ? 'locked-zone' : undefined} aria-disabled={locked || undefined}>
           <div className="sec-label">Subtitles</div>

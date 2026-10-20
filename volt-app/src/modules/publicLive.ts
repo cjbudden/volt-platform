@@ -182,12 +182,18 @@ export async function resolveLiveManifest(id: string, file: 'master.m3u8' | 'man
     // ...and, since in-stream graphic triggers (services/graphicTriggers.ts), on
     // every video channel: the delivered copies are where the encoder writes the
     // wall clock and the triggers, and the packager's own files carry neither.
-    const useCc = ch.kind !== 'radio';
-    const out = useCc ? (file === 'master.m3u8' ? 'master_cc.m3u8' : 'manifest_cc.mpd') : file;
+    // Radio: its master.m3u8 is rewritten by radio.py to lead to the delivered
+    // copy (audio/index_cc.m3u8), and its DASH lives under dash/, where the
+    // delivered copy is manifest_cc.mpd.
+    const out = ch.kind === 'radio'
+      ? (file === 'master.m3u8' ? 'master.m3u8' : 'dash/manifest_cc.mpd')
+      : (file === 'master.m3u8' ? 'master_cc.m3u8' : 'manifest_cc.mpd');
     return { ok: true, url: `${cdn.replace(/\/$/, '')}/channel/${id}/${out}` };
   }
   // Radio packages DASH under the run's dash/ dir; HLS master sits at the run root.
   let path = ch.kind === 'radio' && file === 'manifest.mpd' ? 'dash/manifest.mpd' : file;
+  // The radio DASH copy with the triggers in it, once radio.py has written one.
+  if (ch.kind === 'radio' && file === 'manifest.mpd' && existsSync(join(liveDirFor(id), 'dash/manifest_cc.mpd'))) path = 'dash/manifest_cc.mpd';
   // THE DELIVERED MASTER. When the encoder writes master_cc.m3u8 (subtitles, and/or
   // the playout splice that covers a lost source with the channel's loop), that is
   // what a viewer must get: the packager's own master has neither, and a viewer

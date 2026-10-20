@@ -7,7 +7,7 @@
 //  live) instead of "HD". Audio-only streams collapse to the bar alone.
 // ============================================================================
 import type { PlayerState, Skin, SkinContext } from '../types';
-import { button, el, fmtTime, label, menu, setIcon, show, slider, text, type MenuItem } from './kit';
+import { button, el, fmtTime, label, menu, setIcon, show, skipButton, slider, text, type MenuItem } from './kit';
 
 export function adminSkin(): Skin {
   let c!: SkinContext;
@@ -16,6 +16,7 @@ export function adminSkin(): Skin {
   let prog!: ReturnType<typeof slider>;
   let vol!: ReturnType<typeof slider>;
   let stats = false;
+  let skip!: ReturnType<typeof skipButton>;
 
   function mount(ctx: SkinContext) {
     c = ctx;
@@ -29,7 +30,10 @@ export function adminSkin(): Skin {
     p.ov = el('div', 'vpa-ov', undefined, p.spin, p.err);
     p.stats = el('div', 'vpa-stats');
     p.stats.hidden = true;
-    top.append(p.ov, p.stats);
+    // The same Skip button viewers get, so an operator checking an asset's
+    // markers sees exactly what a viewer will.
+    skip = skipButton(ctx);
+    top.append(p.ov, p.stats, skip.el);
 
     prog = slider('vpa-sl', 'Seek', (f, final) => {
       if (!s || !final) return;
@@ -76,6 +80,7 @@ export function adminSkin(): Skin {
   }
 
   function update(st: PlayerState) {
+    skip.update(st);
     s = st;
     const t = c.t;
     p.root.classList.toggle('audio', st.audioOnly && !st.hasPicture);

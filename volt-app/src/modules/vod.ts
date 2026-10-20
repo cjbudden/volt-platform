@@ -549,6 +549,73 @@ vodRouter.post('/:id/publish', asyncHandler(async (req, res) => {
   }
 }));
 
+// ---------------------------------------------------------------- skip markers
+// Intro, recap and credits (services/vodMarkers.ts). Any change reaches the
+// on-demand playlists on the next fetch: they are annotated when served.
+const markerKind = z.enum(['intro', 'recap', 'credits']);
+
+vodRouter.get('/:id/markers', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  const { listMarkers } = await import('../services/vodMarkers');
+  const job = await one<any>(
+    `SELECT state, progress_note FROM jobs WHERE type = 'vod.markers' AND payload->>'vodAssetId' = $1 ORDER BY created_at DESC LIMIT 1`,
+    [asset.id]).catch(() => null);
+  res.json({
+    markers: await listMarkers(asset.id),
+    durationMs: Number(asset.duration_ms) || 0,
+    detection: {
+      group: asset.marker_group ?? null, at: asset.markers_detected_at ?? null, note: asset.markers_note ?? null,
+      running: !!job && ['queued', 'running'].includes(String(job.state)),
+    },
+  });
+}));
+
+vodRouter.put('/:id/markers/:kind', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  const kind = markerKind.parse(req.params.kind);
+  const b = z.object({ startMs: z.number().int().min(0), endMs: z.number().int().positive() }).parse(req.body ?? {});
+  const { setMarker } = await import('../services/vodMarkers');
+  try {
+    const m = await setMarker(asset.id, kind, b.startMs, b.endMs, actorId(req));
+    { const who = actor(req); await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label, action: 'update', entityType: 'vod_asset', entityId: asset.id, changes: { [`marker_${kind}`]: { from: null, to: { startMs: m.startMs, endMs: m.endMs } } } }).catch(() => {}); }
+    res.json(m);
+  } catch (e: any) {
+    if (e?.status === 400) throw badRequest(e.message);
+    throw e;
+  }
+}));
+
+vodRouter.post('/:id/markers/:kind/accept', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  const kind = markerKind.parse(req.params.kind);
+  const { acceptMarker } = await import('../services/vodMarkers');
+  const m = await acceptMarker(asset.id, kind, actorId(req));
+  if (!m) throw notFound('no such marker');
+  { const who = actor(req); await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label, action: 'update', entityType: 'vod_asset', entityId: asset.id, changes: { [`marker_${kind}`]: { from: 'suggested', to: 'active' } } }).catch(() => {}); }
+  res.json(m);
+}));
+
+vodRouter.delete('/:id/markers/:kind', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  const kind = markerKind.parse(req.params.kind);
+  const { deleteMarker } = await import('../services/vodMarkers');
+  const gone = await deleteMarker(asset.id, kind);
+  if (gone) { const who = actor(req); await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label, action: 'update', entityType: 'vod_asset', entityId: asset.id, changes: { [`marker_${kind}`]: { from: 'set', to: null } } }).catch(() => {}); }
+  res.status(gone ? 204 : 404).end();
+}));
+
+vodRouter.post('/:id/markers/detect', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  const { queueMarkerDetection } = await import('../services/jobs/handlers/vodMarkers');
+  await queueMarkerDetection(asset.id, { channelId: asset.channel_id, eventId: asset.event_id });
+  res.status(202).json({ queued: true });
+}));
+
 vodRouter.post('/:id/withdraw', asyncHandler(async (req, res) => {
   const asset = await fetchOwned(req.params.id, accountId(req));
   if (!asset) throw notFound('VOD asset not found');

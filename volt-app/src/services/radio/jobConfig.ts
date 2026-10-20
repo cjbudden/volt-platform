@@ -108,5 +108,14 @@ export async function buildRadioJobConfig(ctx: RadioJobCtx): Promise<Record<stri
       url: `${config.internalApiBaseUrl}/api/streams/${ctx.channelId}/report`,
       token: config.ingestToken,
     },
+    // In-stream graphic triggers (Up next), the same standard as television
+    // (services/graphicTriggers.ts). radio.py keeps delivered copies of its
+    // playlists with the triggers written in and points master.m3u8 at them.
+    // A station is a channel row, so kind=channel finds its guide and settings.
+    timed_events: {
+      url: `${config.internalApiBaseUrl}/api/streams/${ctx.channelId}/timed-events?kind=channel`,
+      token: config.ingestToken,
+      poll_sec: 5,
+    },
   };
 }

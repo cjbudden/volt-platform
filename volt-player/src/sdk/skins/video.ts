@@ -10,7 +10,7 @@
 //  Up next appears bottom right before the end of an item or a programme.
 // ============================================================================
 import type { PlayerState, Programme, Skin, SkinContext } from '../types';
-import { autoHide, button, el, fmtClock, fmtIn, fmtTime, label, menu, setIcon, show, slider, text, type MenuItem } from './kit';
+import { autoHide, button, el, fmtClock, fmtTime, label, menu, setIcon, show, skipButton, slider, text, upNextCard, type MenuItem, type UpNextCard } from './kit';
 
 export function videoSkin(): Skin {
   let c!: SkinContext;
@@ -20,6 +20,8 @@ export function videoSkin(): Skin {
   let vol!: ReturnType<typeof slider>;
   let tip!: HTMLElement;
   let unhide = () => {};
+  let up!: UpNextCard;
+  let skip!: ReturnType<typeof skipButton>;
   let panelOpen = false;
   let lastPanelKey = '';
 
@@ -48,19 +50,13 @@ export function videoSkin(): Skin {
     parts.msg = el('div', 'vpv-msg', undefined, parts.msgText, parts.retry);
     parts.center = el('div', 'vpv-center', undefined, parts.big, parts.spin, parts.msg);
 
-    // Up next
-    parts.upImg = el('img', undefined, { alt: '' });
-    parts.upKick = el('small'); parts.upTitle = el('b'); parts.upSub = el('span');
-    parts.upGo = el('button', 'go', { type: 'button' }, t('playNow'));
-    parts.upGo.addEventListener('click', (e) => { e.stopPropagation(); k.next(); });
-    parts.upCancel = el('button', undefined, { type: 'button' }, t('cancel'));
-    parts.upCancel.addEventListener('click', (e) => { e.stopPropagation(); k.cancelUpNext(); });
-    parts.upFill = el('i');
-    parts.up = el('div', 'vpv-up', { role: 'status' },
-      el('div', 'vpv-up-b', undefined, parts.upImg, el('div', undefined, undefined, parts.upKick, parts.upTitle, parts.upSub)),
-      el('div', 'vpv-up-a', undefined, parts.upGo, parts.upCancel),
-      el('div', 'vpv-up-p', undefined, parts.upFill));
-    parts.up.addEventListener('click', (e) => e.stopPropagation());
+    // Up next: the shared template (kit.upNextCard), the same card whatever drives
+    // it: the stream's own trigger, the guide, or the end of a playlist item.
+    up = upNextCard(ctx, 'overlay');
+    parts.up = up.el;
+    // Skip intro / credits (on-demand only), where Up next would sit.
+    skip = skipButton(ctx);
+    parts.skip = skip.el;
 
     // Bar
     tip = el('div', 'vpv-tip'); tip.hidden = true;
@@ -109,7 +105,7 @@ export function videoSkin(): Skin {
     parts.panel.hidden = true;
     parts.panel.addEventListener('click', (e) => e.stopPropagation());
 
-    root.append(parts.shade, parts.top, parts.logo, parts.center, parts.up, parts.bar, parts.panel);
+    root.append(parts.shade, parts.top, parts.logo, parts.center, parts.up, parts.skip, parts.bar, parts.panel);
     ctx.root.appendChild(root);
     parts.root = root;
     applyLogo();
@@ -246,18 +242,9 @@ export function videoSkin(): Skin {
     show(parts.big, showBig);
     setIcon(parts.big, st.status === 'ended' ? 'replay' : 'play');
 
-    // Up next
-    const u = st.upNext;
-    show(parts.up, !!u);
-    if (u) {
-      text(parts.upKick, u.kind === 'item' ? (u.autoAdvance ? t('nextIn', { time: fmtIn(u.inMs) }) : t('upNext')) : t('startsIn', { time: fmtIn(u.inMs) }));
-      text(parts.upTitle, u.title);
-      text(parts.upSub, u.subtitle ?? '');
-      const img = parts.upImg as HTMLImageElement;
-      if (u.artworkUrl) { if (img.getAttribute('src') !== u.artworkUrl) img.src = u.artworkUrl; img.hidden = false; } else img.hidden = true;
-      show(parts.upGo, u.kind === 'item');
-      parts.upFill.style.width = `${Math.max(0, Math.min(100, (1 - u.inMs / u.totalMs) * 100))}%`;
-    }
+    // Up next, and Skip
+    up.update(st);
+    skip.update(st);
 
     // Bar
     setIcon(parts.play, st.playing ? 'pause' : st.status === 'ended' ? 'replay' : 'play');

@@ -15,6 +15,8 @@ import {
   fromHlsRegions, fromDashRegion, fromNativeCues, mergeGraphics, activeAt, upNextFromGraphic, xmlUnescape,
 } from '../../volt-player/src/sdk/triggers';
 import { resolveTheme } from '../../volt-player/src/sdk/theme';
+import { upNextProgress, upNextKicker } from '../../volt-player/src/sdk/skins/kit';
+import { STRINGS, format } from '../../volt-player/src/sdk/strings';
 import type { StreamGraphic } from '../../volt-player/src/sdk/types';
 
 let pass = 0, fail = 0;
@@ -84,6 +86,28 @@ check('counts down to the next programme\'s start by the playhead clock', card.i
 check('lasts as long as the trigger', card.totalMs, 12000);
 check('names it', [card.title, card.subtitle, card.kind, card.autoAdvance], ['Evening Bulletin', 'Live from the harbour', 'programme', false]);
 check('without a wall clock it counts to the card\'s own end', upNextFromGraphic(up[0], 80, null).inMs, 3700);
+check('it knows when the programme starts (for "18:30")', card.startsAt, Date.parse('2026-10-20T18:30:00.000Z'));
+check('and that the stream timed it', card.source, 'stream');
+
+console.log('\n== the card template (kit.upNextCard), shared by every skin ==');
+const tr = (k: string, v?: Record<string, string | number>) => format(STRINGS[k] ?? k, v);
+// THE BUG THIS FIXES: the bar was 1 - inMs / totalMs, a two-minute countdown over
+// a twelve-second card, so it sat at zero for the whole card.
+check('a trigger card\'s bar starts empty', upNextProgress(upNextFromGraphic(up[0], 71.7, wall - 300)), 0);
+check('is half full half way through the card', upNextProgress(upNextFromGraphic(up[0], 77.7, wall + 6000)), 0.5);
+check('and full at its end', upNextProgress(upNextFromGraphic(up[0], 83.7, wall + 12000)), 1);
+check('a guide or playlist card still runs over its countdown', upNextProgress({ kind: 'item', title: 'B', inMs: 2500, totalMs: 10000, autoAdvance: true }), 0.75);
+check('the video card says when it starts, in words', upNextKicker(card, tr), 'Starts in 2 min');
+check('the radio banner says Coming up', upNextKicker(card, tr, 'banner'), 'Coming up in 2 min');
+check('seconds in the last minute', upNextKicker({ ...card, inMs: 40000 }, tr, 'banner'), 'Coming up in 40 s');
+check('an item that plays by itself', upNextKicker({ kind: 'item', title: 'B', inMs: 8000, totalMs: 10000, autoAdvance: true }, tr), 'Next in 8 s');
+
+console.log('\n== skip markers (on-demand) ==');
+const sk = fromHlsRegions(hls('com.boomlabs.volt.skip', 55.07, 94.94, { 'X-ID': 'skip-intro:a1', 'X-GRAPHIC': 'skip-intro', 'X-KIND': 'intro', 'X-TO': '94.942' }));
+check('an HLS skip marker is a skip-intro graphic', [sk[0]?.graphic, sk[0]?.data.kind, sk[0]?.end], ['skip-intro', 'intro', 94.94]);
+const skd = fromDashRegion({ schemeIdUri: 'urn:com:boomlabs:volt:skip:2026', value: 'skip', startTime: 55.066, endTime: 94.942, id: '1',
+  eventNode: { attributes: { messageData: '{&quot;graphic&quot;:&quot;skip-credits&quot;,&quot;kind&quot;:&quot;credits&quot;,&quot;to&quot;:&quot;94.942&quot;}' } } });
+check('a DASH one too', [skd?.graphic, skd?.data.kind], ['skip-credits', 'credits']);
 
 console.log('\n== the switch ==');
 check('graphics are on by default', resolveTheme().showGraphics, true);

@@ -94,6 +94,12 @@ export const CATALOGUE: FeatureDef[] = [
   { key: 'epg', label: 'EPG & schedules', area: 'content', prefixes: ['/api/epg'],
     operate: [new RegExp(`^/api/epg/import/sources/${ID}/(run|test)$`)],
     operateMeans: 'Run and test XMLTV imports' },
+  // HTML graphics (docs/REQ_graphics_overlays.md). Manage = templates, setups,
+  // data sources, assignments and rundowns; operate = drive them live.
+  { key: 'graphics', label: 'Graphics', area: 'content', prefixes: ['/api/graphics'],
+    operate: [new RegExp(`^/api/graphics/assignments/${ID}/(state|air)$`), new RegExp(`^/api/graphics/sources/${ID}/push$`),
+      new RegExp(`^/api/graphics/rundowns/${ID}/(take|take-off)$`), new RegExp(`^/api/graphics/rundowns/${ID}/items/${ID}/(skip|restore)$`)],
+    operateMeans: 'Take graphics on and off, change their values, run event rundowns' },
   { key: 'recordings', label: 'Recordings & clips', area: 'content', prefixes: ['/api/recordings', '/api/scheduled-clips'],
     operate: [new RegExp(`^/api/recordings/${ID}/publish$`)], operateMeans: 'Publish recordings' },
   { key: 'vod', label: 'Media library & publishing', area: 'content', prefixes: ['/api/vod', '/api/publications', '/api/social'],

@@ -21,7 +21,7 @@ import type { ControlToggles, ResolvedTheme, Theme } from './types';
 export const DEFAULT_CONTROLS: ControlToggles = {
   title: true, seekButtons: true, volume: true, quality: true, subtitles: true,
   audioTracks: true, speed: false, pip: true, fullscreen: true, cast: true,
-  airplay: true, startOver: true, schedule: true, upNext: true, history: true,
+  airplay: true, startOver: true, schedule: true, upNext: true, history: true, skip: true,
 };
 
 export const DEFAULT_THEME: Theme = {

@@ -212,6 +212,9 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
     console.error(`[clip.extract] ${p.vodAssetId}: QC not queued:`, e);
   }
 
+  // Skip markers: the intro and credits, against the other episodes of its series.
+  await (await import('./vodMarkers')).queueMarkerDetection(p.vodAssetId, { channelId: asset.channel_id, eventId: asset.event_id });
+
   // THE RULES MAY PUBLISH IT NOW. After the files and the ladder are in
   // place; a rule that says manual, or a gate that says no, simply leaves it.
   const auto = await import('../../availability').then((m) => m.autoPublishOnBuild(p.vodAssetId)).catch((e) => {

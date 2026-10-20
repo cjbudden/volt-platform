@@ -1,0 +1,125 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Weather</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Weather panel (cities)",
+  "fields": [
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title"
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "label": "Subtitle (the day, the region)"
+    },
+    {
+      "id": "cities",
+      "type": "list",
+      "label": "Cities (City|icon|max|min|summary)"
+    },
+    {
+      "id": "panelColor",
+      "type": "color",
+      "label": "Panel colour"
+    }
+  ],
+  "sample": {
+    "title": "Weather",
+    "subtitle": "Tomorrow, capital cities",
+    "cities": [
+      "Sydney|partly|24|16|Partly cloudy",
+      "Melbourne|showers|17|11|Showers easing",
+      "Brisbane|storm|31|21|Afternoon storm",
+      "Adelaide|sun|26|13|Sunny",
+      "Perth|sun|29|15|Sunny",
+      "Hobart|cloud|15|8|Cloudy",
+      "Darwin|storm|33|25|Storms likely",
+      "Canberra|wind|19|6|Windy"
+    ],
+    "panelColor": "#08142d"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+
+:root{--accent:#c1121f;--panel:rgba(8,20,45,.93)}
+#wp{position:absolute;left:192px;top:180px;width:1536px;background:var(--panel);border-radius:4px;box-shadow:0 20px 60px rgba(0,0,0,.45);
+  padding:44px 56px;box-sizing:border-box;opacity:0;transform:translateY(24px);transition:opacity .45s,transform .55s cubic-bezier(.2,.8,.2,1)}
+.on #wp{opacity:1;transform:none}
+.hd{display:flex;align-items:baseline;gap:24px;border-bottom:2px solid rgba(255,255,255,.15);padding-bottom:22px;margin-bottom:30px}
+.hd h1{margin:0;font:600 64px/1 "Volt Serif"}
+.hd p{margin:0;font:500 32px/1 "Volt Sans";color:#c9d3e6;letter-spacing:.02em}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}
+.c{background:rgba(255,255,255,.06);border-radius:4px;padding:22px 24px 24px;display:flex;flex-direction:column;gap:10px;opacity:0;transform:translateY(16px);transition:opacity .4s,transform .45s}
+.on .c{opacity:1;transform:none}
+.c .city{font:700 32px/1 "Volt Sans";text-transform:uppercase;letter-spacing:.03em}
+.c .row{display:flex;align-items:center;gap:16px}
+.c .max{font:600 66px/1 "Volt Serif"}
+.c .min{font:500 30px/1 "Volt Sans";color:#9fb0cf}
+.c .sum{font:500 26px/1.2 "Volt Sans";color:#dbe3f2}
+</style>
+</head>
+<body>
+<div id="wp"><div class="hd"><h1 id="title"></h1><p id="subtitle"></p></div><div class="grid" id="grid"></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+
+var ICON={
+ sun:'<circle cx="24" cy="24" r="8" fill="#ffc53d" stroke="none"/><g stroke="#ffc53d"><path d="M24 6v6M24 36v6M6 24h6M36 24h6M11.3 11.3l4.2 4.2M32.5 32.5l4.2 4.2M11.3 36.7l4.2-4.2M32.5 15.5l4.2-4.2"/></g>',
+ clear_night:'<path d="M30 9a15 15 0 1 0 9 22A12 12 0 0 1 30 9z"/>',
+ partly:'<g stroke="#ffc53d"><circle cx="18" cy="17" r="6" fill="#ffc53d" stroke="none"/><path d="M18 4v4M5 17h4M8.8 7.8l2.8 2.8M27.2 7.8l-2.8 2.8"/></g><path d="M16 38h20a7 7 0 0 0 0-14 10 10 0 0 0-19 3 6 6 0 0 0-1 11z" fill="#0e1b33"/>',
+ cloud:'<path d="M13 37h23a8 8 0 0 0 0-16 11 11 0 0 0-21 3 7 7 0 0 0-2 13z"/>',
+ showers:'<path d="M13 30h23a8 8 0 0 0 0-16 11 11 0 0 0-21 3 7 7 0 0 0-2 13z"/><path d="M17 35l-2 5M25 35l-2 5M33 35l-2 5"/>',
+ rain:'<path d="M13 28h23a8 8 0 0 0 0-16 11 11 0 0 0-21 3 7 7 0 0 0-2 13z"/><path d="M15 33l-3 7M22 33l-3 7M29 33l-3 7M36 33l-3 7"/>',
+ storm:'<path d="M13 28h23a8 8 0 0 0 0-16 11 11 0 0 0-21 3 7 7 0 0 0-2 13z"/><path d="M25 30l-5 8h7l-4 7" stroke="#ffc53d"/>',
+ fog:'<path d="M13 25h23a8 8 0 0 0 0-16 11 11 0 0 0-21 3 7 7 0 0 0-2 13z"/><path d="M10 32h28M14 38h24"/>',
+ wind:'<path d="M6 18h24a5 5 0 1 0-5-5M6 26h32a5 5 0 1 1-5 5M6 34h16"/>',
+ snow:'<path d="M13 28h23a8 8 0 0 0 0-16 11 11 0 0 0-21 3 7 7 0 0 0-2 13z"/><path d="M17 34v6M14 37h6M30 34v6M27 37h6"/>'
+};
+var ICON_ALIAS={sunny:'sun',clear:'sun',fine:'sun',mostly_sunny:'partly',partly_cloudy:'partly',partlycloudy:'partly',cloudy:'cloud',overcast:'cloud',shower:'showers',drizzle:'showers',thunder:'storm',thunderstorm:'storm',storms:'storm',mist:'fog',haze:'fog',windy:'wind',night:'clear_night'};
+function iconSvg(name,size){var k=String(name||'').toLowerCase().replace(/[\s-]+/g,'_');k=ICON_ALIAS[k]||k;var body=ICON[k]||ICON.cloud;return '<svg viewBox="0 0 48 48" width="'+(size||40)+'" height="'+(size||40)+'" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+body+'</svg>'}
+// "SYD|partly|24" or {code,icon,temp}
+function weatherItem(x){if(typeof x==='string'){var p=x.split('|');return {code:(p[0]||'').trim(),icon:(p[1]||'').trim(),temp:(p[2]||'').trim()}}x=x||{};return {code:x.code||x.city||'',icon:x.icon||x.condition||'',temp:x.temp!=null?x.temp:(x.max!=null?x.max:'')}}
+// "NSW|Australia/Sydney"
+function clockItem(x){if(typeof x==='string'){var p=x.split('|');return {label:(p[0]||'').trim(),tz:(p[1]||'').trim()}}x=x||{};return {label:x.label||x.code||'',tz:x.tz||x.timeZone||''}}
+function clockText(tz){try{return new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',hourCycle:'h23',timeZone:tz||undefined}).format(new Date())}catch(e){return new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())}}
+
+function cityItem(x){if(typeof x==='string'){var p=x.split('|');return {city:p[0]||'',icon:p[1]||'',max:p[2]||'',min:p[3]||'',summary:p[4]||''}}x=x||{};return {city:x.city||x.name||'',icon:x.icon||'',max:x.max!=null?x.max:'',min:x.min!=null?x.min:'',summary:x.summary||x.condition||''}}
+function deg(v){v=String(v);return v===''?'':(/°/.test(v)?v:v+'°')}
+function update(raw){var d=parse(raw);
+  if('title' in d)setText($('title'),d.title);if('subtitle' in d)setText($('subtitle'),d.subtitle);
+  if(d.panelColor){var h=d.panelColor.replace('#','');if(h.length===6){var n=parseInt(h,16);document.documentElement.style.setProperty('--panel','rgba('+(n>>16)+','+((n>>8)&255)+','+(n&255)+',.93)')}}
+  if('cities' in d){var g=$('grid');g.innerHTML='';asList(d.cities).slice(0,8).map(cityItem).forEach(function(c,i){
+    var el=document.createElement('div');el.className='c';el.style.transitionDelay=(0.15+i*0.06)+'s';
+    el.innerHTML='<div class="city"></div><div class="row">'+iconSvg(c.icon,72)+'<div class="max"></div></div><div class="min"></div><div class="sum"></div>';
+    el.querySelector('.city').textContent=c.city;el.querySelector('.max').textContent=deg(c.max);
+    el.querySelector('.min').textContent=c.min!==''?'Low '+deg(c.min):'';el.querySelector('.sum').textContent=c.summary;g.appendChild(el)})}}
+function play(){document.body.classList.add('on')}
+function stop(){document.body.classList.remove('on')}
+function next(){}
+</script>
+</body>
+</html>

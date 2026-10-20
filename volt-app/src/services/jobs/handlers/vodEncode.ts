@@ -230,6 +230,8 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
   );
 
   fireHook('vod.encoded', 'vod_asset', p.vodAssetId, { renditions: fit.kept.length });
+  // Skip markers: the intro and credits, against the other episodes of its series.
+  await (await import('./vodMarkers')).queueMarkerDetection(p.vodAssetId);
 
   return {
     vodAssetId: p.vodAssetId,

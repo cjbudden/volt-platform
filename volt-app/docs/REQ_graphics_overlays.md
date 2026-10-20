@@ -295,3 +295,109 @@ than aspirations.
 - **No graphics on package-only channels.** Their source encoder handles graphics. Advanced graphics (live HTML burn-in) are offered on the transcode workflow only. A burned binding on a package-only channel is not offered in the UI and is refused by the API.
 - **FAST / VOD-to-live channel branding: proposed, awaiting decision.** Keep VOD-to-live transcode-free by burning the channel brand into the asset renditions at ingest (the existing "encode on the live ladder" job, about +2 to 4 % on an encode that already runs), one branded variant per asset per brand version, created when an asset is first scheduled on a branded channel. Ads and the ad slate stay unbranded. A live-transcode FAST mode (dynamic graphics, tickers) would be a premium option priced per channel-hour.
 - **Player graphics via in-stream triggers: BUILT 20 Oct 2026** (first graphic: Up next). The standard trigger path for player-side graphics, see `DESIGN_stream_graphics_triggers.md`. Live HTML burn-in remains a separate, transcode-only path.
+
+
+---
+
+## 12. Decisions of 20 Oct 2026 and what is built
+
+Agreed with Christian against the sample views (Volt Graphics management canvas), then built.
+
+**Customer HTML is in release 1** (reverses section 11). Uploaded and pasted templates run sandboxed:
+served from `/gfx/<version>/` with `Content-Security-Policy: sandbox allow-scripts` and `connect-src` limited to the
+template's own package,
+in an iframe without `allow-same-origin`, so they reach no network, no cookies and no Volt session. Everything
+a template needs is inside its package; the publish checks refuse a template that loads from the internet.
+
+**A fifth object, the SETUP**, sits between template and binding (section 3): a pinned template version plus
+where each field's content comes from (fixed text, Image Library, a data feed path, the guide, the operator,
+the API), and position, size and layer. A setup is built once and assigned to any number of channels and
+events. What section 3 calls a binding is an ASSIGNMENT of a setup.
+
+**Channels and events run graphics differently.**
+
+* Channels run on their own: each assignment is *always*, *by rule* (genre, title, days, time window, in the
+  channel's time zone), *on a trigger* (N s after each programme starts, or N s before it ends) or *by hand*,
+  and optionally cleared for ad breaks. The day strip shows from the guide when each one will be on.
+* Events are operated from a **graphics rundown**: an ordered list of graphics by segment, each with its own
+  content, how long it stays, and a cue: manual (Take next), a clock time, an offset from the start, a change
+  of a data feed value (a try), or a repeat. Automatic cues show in the list as Armed and can be skipped.
+  A rundown can be imported from CSV or copied from another event.
+
+**Live control is its own window** for a second screen, opened from the console. Sessions live in memory,
+so the window asks its opener (same origin) for the current access token, never the refresh token.
+
+**Moving a setup to a new version is the explicit upgrade.** Publishing never changes what is on air; moving
+a setup does, at once, for every channel and event using it.
+
+**Data feeds are polled only while something live reads them**, and feed URLs on private networks are refused
+(`GRAPHICS_ALLOW_PRIVATE_FEEDS=1` for local testing).
+
+| Built 20 Oct | Where |
+|---|---|
+| Schema (templates, frozen versions + files, sources, setups, assignments, state + log, rundown) | `migrations/0064_graphics.sql` |
+| API, files serving, bridge | `src/modules/graphics.ts` |
+| Package reader, manifest, checks | `src/services/graphics/zip.ts`, `templatePackage.ts` |
+| Run modes, day plan | `src/services/graphics/schedule.ts` |
+| Value resolution | `src/services/graphics/values.ts` |
+| Rundown cues, CSV | `src/services/graphics/rundown.ts` |
+| Live state, feeds, tick (leader, every second) | `src/services/graphics/runtime.ts` |
+| Volt default templates | `assets/graphics/*`, `src/services/graphics/defaults.ts` |
+| Console | `volt-web/src/graphics/*` |
+| Checks | `test/graphics-pure.check.ts`, `test/graphics.check.ts` |
+
+**Still to build:** the
+burn-in sidecar in the encoder, reading the same live state; intro and outro on VOD (W4); SSE for live
+control (it polls each second, inside FR-8's two seconds); per-viewer addressable state (FR-16).
+
+
+---
+
+## 13. The player overlay (built 20 Oct 2026)
+
+Graphics assigned with *Shown in: player* (or both) are drawn by Volt players over the picture.
+
+**Feed, not manifests.** Second-by-second values do not belong in manifest triggers
+(DESIGN_stream_graphics_triggers.md), so players read `GET /api/player/graphics?appKey=&streamId=&since=`:
+the graphics (template URL, canvas, placement, layer) and the state over time as **snapshots**. The scheduler
+leader records a snapshot whenever a live stream's player graphics change (at most once a second, and at once
+after an operator's change); they are kept 48 hours (migration 0066). Off-air graphics carry no values, so
+nothing is sent before it is shown. Same key rules as every player route, cached per stream for a second, so
+the cost does not grow with the audience.
+
+**In step with the picture.** The player applies the snapshot in force at its playhead's wall clock
+(PROGRAM-DATE-TIME), never at the viewer's own clock. A viewer 40 s behind live sees the score change when the
+try is scored on their screen; one scrubbing the DVR sees what was on screen then. Verified in Chromium against
+a live HLS stream.
+
+**Drawing.** `volt-player/src/sdk/overlay.ts`: one sandboxed iframe per graphic (no `allow-same-origin`, CSP
+sandbox, `connect-src` limited to its own package, from `/gfx/`), driven through the same postMessage bridge as the console
+preview, laid out at the template canvas and scaled to the picture's box (letterboxing respected). Hidden when
+graphics are off (`showGraphics`), during an ad break, or when there is no picture. `state.overlays` lists what
+is on screen and the `graphic` event fires with `graphic: 'html'` as each comes on.
+
+**Impressions (FR-17).** `POST /api/player/graphics/impressions` once per graphic per appearance, scoped to the
+stream's own assignments; the console shows views in the last 24 hours per graphic.
+
+**Public tier.** `/gfx/` is in the default `PUBLIC_PATH_PREFIXES` and the ALB public rule; `/api/player/` was already.
+
+**Still open:** a viewer who joins after a graphic last changed and scrubs back further than the snapshots
+reach sees the earliest one; snapshots only exist while the stream is live.
+
+---
+
+## 14. EBU OGraf packages (built 20 Oct 2026)
+
+Volt imports EBU OGraf v1 packages (a `*.ograf.json` manifest plus a Web Component module) alongside CasparCG,
+SPX and Loopic templates. The schema gives the fields (enums as dropdowns), the render requirements give the
+canvas, and `/gfx/<version>/index.html` is a host page generated from the manifest that maps update, play,
+next and stop onto updateAction, playAction (goto 0, then delta 1) and stopAction behind `load()`. Nothing else
+in Volt changes: setups, assignments, live control, rundowns and the player overlay drive an OGraf graphic exactly
+like any other. Edit code opens the graphic's main module and keeps the other files.
+
+Templates may now `fetch()` files from their own package (`connect-src` is the template's own `/gfx/<version>/`
+path), which OGraf's Lottie-based examples need; they still reach no network, no other template and no Volt API.
+
+Details, mapping and checks: `GRAPHICS_TEMPLATE_STANDARD.md` section 7. Not yet: custom actions in live control,
+non-real-time rendering for burn-in.
+

@@ -52,14 +52,16 @@ const REPL_LABEL = { none: '—', slate: 'Slate', loop: 'Loop', vod: 'VOD' } as 
    distinction between "converted" and "convertible" has to survive a
    colourblind reader and a greyscale print of the schedule.
    ------------------------------------------------------------------------ */
-const VOD_UI: Record<VodState, { label: string; color: string; hint: string }> = {
-  manual:      { label: 'Manual',      color: 'var(--faint)',        hint: 'No automatic conversion. It can still be converted after it airs.' },
-  scheduled:   { label: 'Auto on end', color: 'var(--brand,#7c9cff)',hint: 'Will be converted to a VOD asset when the slot finishes airing.' },
-  converting:  { label: 'Converting',  color: 'var(--warn,#e2b64f)', hint: 'The conversion is running now.' },
-  converted:   { label: 'VOD ready',   color: 'var(--ok,#3fbf6f)',   hint: 'A VOD asset exists for this slot.' },
-  failed:      { label: 'Failed',      color: 'var(--down,#f87171)', hint: 'The automatic conversion errored. It can be retried.' },
-  convertible: { label: 'Recorded',    color: 'var(--warn,#e2b64f)', hint: 'Aired and still on disk. Convert it before retention removes it.' },
-  unavailable: { label: 'Not on disk', color: 'var(--faint)',        hint: 'Aired, but no recording covers this slot any more.' },
+// `tone` is the status pill's state class (.tag / .dot-s): state is carried by
+// the pill's dot and word, on a neutral card, never by a coloured edge bar.
+const VOD_UI: Record<VodState, { label: string; color: string; tone: 'idle' | 'sched' | 'warn' | 'live' | 'down'; hint: string }> = {
+  manual:      { label: 'Manual',      color: 'var(--faint)',        tone: 'idle',  hint: 'No automatic conversion. It can still be converted after it airs.' },
+  scheduled:   { label: 'Auto on end', color: 'var(--brand,#7c9cff)',tone: 'sched', hint: 'Will be converted to a VOD asset when the slot finishes airing.' },
+  converting:  { label: 'Converting',  color: 'var(--warn,#e2b64f)', tone: 'warn',  hint: 'The conversion is running now.' },
+  converted:   { label: 'VOD ready',   color: 'var(--ok,#3fbf6f)',   tone: 'live',  hint: 'A VOD asset exists for this slot.' },
+  failed:      { label: 'Failed',      color: 'var(--down,#f87171)', tone: 'down',  hint: 'The automatic conversion errored. It can be retried.' },
+  convertible: { label: 'Recorded',    color: 'var(--warn,#e2b64f)', tone: 'warn',  hint: 'Aired and still on disk. Convert it before retention removes it.' },
+  unavailable: { label: 'Not on disk', color: 'var(--faint)',        tone: 'idle',  hint: 'Aired, but no recording covers this slot any more.' },
 }
 
 /** Days until a date, floored. Negative means it has already passed. */
@@ -429,8 +431,8 @@ function VodSummary({ vod }: { vod: Record<string, ProgrammeVod> }) {
 
 /* ---------------------------------------------------- programme drawer */
 /** Exported so the Live Streams timeline opens the same drawer for a future slot. */
-export function ProgrammeDrawer({ owner, day, programme: p, initialStart, vod, converting, onConvert, onClose, onDone }: {
-  owner: EpgOwner; day: Date; programme: ProgrammeRow | null; initialStart?: string
+export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initialEnd, vod, converting, onConvert, onClose, onDone }: {
+  owner: EpgOwner; day: Date; programme: ProgrammeRow | null; initialStart?: string; initialEnd?: string
   vod?: ProgrammeVod; converting?: boolean; onConvert?: () => void
   onClose: () => void; onDone: (msg?: string, batchId?: string | null) => void
 }) {
@@ -446,7 +448,7 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, vod, c
   const [rating, setRating] = useState(p?.metadata?.rating ?? '')
   const timeOf = (iso: string) => { const d = new Date(iso); return `${p2(d.getHours())}:${p2(d.getMinutes())}` }
   const [startT, setStartT] = useState(p ? timeOf(p.starts_at) : (initialStart ?? '09:00'))
-  const [endT, setEndT] = useState(p ? timeOf(p.ends_at) : '')
+  const [endT, setEndT] = useState(p ? timeOf(p.ends_at) : (initialEnd ?? ''))
   const [autoVod, setAutoVod] = useState(p?.auto_vod ?? false)
   const [geoMode, setGeoMode] = useState<'worldwide' | 'allow' | 'block'>(p?.geo_mode ?? 'worldwide')
   const [geoCountries, setGeoCountries] = useState((p?.geo_countries ?? []).join(', '))
@@ -477,7 +479,10 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, vod, c
   const [series, setSeries] = useState<EpgSeriesInfo | null>(null)
   useEffect(() => { if (p?.series_id) api.epgSeries(p.series_id).then(setSeries).catch(() => setSeries(null)) }, [p?.series_id])
   const startIso = isoAt(startT)
-  const endIso = endT.trim() ? isoAt(endT) : null
+  // An end at or before the start is the next day (23:30 to 00:30), not an error.
+  const endSameDay = endT.trim() ? isoAt(endT) : null
+  const endIso = endSameDay && startIso && Date.parse(endSameDay) <= Date.parse(startIso)
+    ? new Date(Date.parse(endSameDay) + 86_400_000).toISOString() : endSameDay
   const repeatRule = !isSeries && !isImported ? toRule(repeat, day) : null
   const repeatErr = repeatRule && 'error' in repeatRule ? repeatRule.error
     : repeatRule && !endIso ? 'Set an end time so every repeat has a length' : ''
@@ -511,9 +516,9 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, vod, c
     if (!title.trim()) { setErr('Give the programme a title'); return }
     const startsAt = isoAt(startT)
     if (!startsAt) { setErr('Start time must be HH:MM'); return }
-    const endsAt = endT.trim() ? isoAt(endT) : undefined
-    if (endT.trim() && !endsAt) { setErr('End time must be HH:MM'); return }
-    if (endsAt && Date.parse(endsAt) <= Date.parse(startsAt)) { setErr('End must be after start'); return }
+    if (endT.trim() && !endSameDay) { setErr('End time must be HH:MM'); return }
+    const endsAt = endIso ?? undefined
+    if (endsAt && Date.parse(endsAt) - Date.parse(startsAt) > 24 * 3_600_000) { setErr('A programme is at most 24 hours'); return }
     if (replKind !== 'none' && !replRef.trim()) { setErr('Pick the replacement asset'); return }
     if (repeatErr) { setErr(repeatErr); return }
     const body: ProgrammeBody = {
@@ -678,10 +683,10 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, vod, c
           {isEdit && vod && (
             <div style={{
               border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginTop: 10,
-              borderLeft: `3px solid ${VOD_UI[vod.state].color}`,
+              background: 'var(--panel-2)',
             }}>
               <div className="flex items-center" style={{ gap: 10 }}>
-                <strong style={{ color: VOD_UI[vod.state].color }}>{VOD_UI[vod.state].label}</strong>
+                <span className={`tag ${VOD_UI[vod.state].tone}`}><span className={`dot-s ${VOD_UI[vod.state].tone}`} />{VOD_UI[vod.state].label}</span>
                 <span className="spacer" />
                 {(vod.state === 'convertible' || vod.state === 'failed') && onConvert && (
                   <button type="button" className="btn" disabled={!!converting} onClick={onConvert}>

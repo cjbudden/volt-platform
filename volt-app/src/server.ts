@@ -68,6 +68,7 @@ import { imagesPublicRouter, imagesApiRouter, imageService } from './modules/ima
 import { thumbnailsRouter } from './modules/thumbnails';
 import { auditDeletes } from './services/deleteAudit';
 import { auditRouter } from './modules/audit';
+import { graphicsRouter, graphicsFilesRouter, graphicsPlayerRouter } from './modules/graphics';
 import { reportsRouter } from './modules/reports';
 import { planRouter } from './modules/plan';
 import { isBootReconciled } from './services/orchestrator';
@@ -111,8 +112,37 @@ export function createServer() {
 
   // Local test console (same-origin, no CORS): visit /console
   app.use(express.static('public'));
-  // Generated clips and their renditions, served like origin. Immutable once
-  // written, so unlike origin they may be cached hard.
+  // ON-DEMAND PLAYLISTS, WITH THEIR SKIP MARKERS (services/vodMarkers.ts).
+  //
+  // Intro and credits markers can be moved at any time, so they are written into
+  // the playlists when a player asks rather than baked in at build time: HLS
+  // media playlists get EXT-X-DATERANGE (and the PROGRAM-DATE-TIME it needs),
+  // MPDs an EventStream. That is also why playlists here are no longer cached
+  // for a year like the segments are: a marker edit has to reach a viewer who
+  // already loaded the asset once. Segments keep the long cache below.
+  //
+  // FAILS OPEN: anything unexpected falls through to the plain file.
+  app.get(/^\/clips\/.+\.(m3u8|mpd)$/, async (req, res, next) => {
+    try {
+      const { assetIdFromClipsPath, playlistContext, annotateHls, annotateMpd } = await import('./services/vodMarkers');
+      const rel = decodeURIComponent(req.path.slice('/clips'.length));
+      const file = join(config.clips.dir, rel);
+      if (!file.startsWith(config.clips.dir) || rel.includes('..')) return next();
+      const id = assetIdFromClipsPath(rel);
+      const { readFile } = await import('node:fs/promises');
+      const text = await readFile(file, 'utf8');
+      const ctx = id ? await playlistContext(id) : null;
+      const isMpd = req.path.endsWith('.mpd');
+      const out = !ctx || !ctx.markers.length ? text
+        : isMpd ? annotateMpd(text, ctx.markers, id!) : annotateHls(text, ctx.markers, ctx.anchorMs, id!);
+      res.setHeader('Content-Type', isMpd ? 'application/dash+xml' : 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'public, max-age=10');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.end(out);
+    } catch { next(); }
+  });
+  // Generated clips and their renditions, served like origin. Segments are
+  // immutable once written, so unlike origin they may be cached hard.
   app.use('/clips', express.static(config.clips.dir, {
     setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'),
   }));
@@ -247,6 +277,8 @@ export function createServer() {
   // Public live delivery (NO admin auth): /live/:id/master.m3u8|manifest.mpd. Only
   // serves when the channel is on air with valid content; off air returns 404.
   app.use(publicLiveRouter);
+  // Graphics template files: public by version id, sandboxed, immutable once published.
+  app.use(graphicsFilesRouter);
   // Source preview relay: token-addressed, so it is mounted before any requireAuth (modules/sourcePreview.ts).
   app.use('/api/source-preview', sourcePreviewRouter);
 
@@ -298,6 +330,8 @@ export function createServer() {
   app.use('/img', imagesPublicRouter());
   app.use('/api/images', imagesApiRouter);  // sign, signing-key, config, stats
   app.use('/api/audit', auditRouter);  // the account's audit log: who did what, deletes included (admins)
+  // HTML graphics: templates, setups, assignments, live state, rundowns (docs/REQ_graphics_overlays.md)
+  app.use('/api/graphics', graphicsRouter);
   app.use('/api/thumbnails', thumbnailsRouter);  // encoder stills, sprite sheets, hover + clip VTTs
 
   // Serve image-library bytes from the store (local dir or S3). Public read so <img>
@@ -378,6 +412,8 @@ export function createServer() {
   // JWT: this is called from a browser on somebody else's website. Mounted
   // beside the other publishable-key routes rather than under the authed /api
   // tree, because a stray requireAuth here would break every embed silently.
+  // Graphics drawn by viewers' players: feed + impressions (modules/graphics.ts), before the player router.
+  app.use('/api/player/graphics', graphicsPlayerRouter);
   app.use('/api/player', playerRouter);
   // ---- THE PUBLIC API (/api/public/*): viewers and anonymous visitors only.
   // See modules/publicApi.ts and ACCESS_CONTROL.md. The older public paths

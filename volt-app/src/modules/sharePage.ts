@@ -10,6 +10,12 @@
  * Casting and AirPlay are off: a private preview stays on the device it was
  * opened on. If the bundle is not there (a dev box that has not built it) the
  * page falls back to hls.js, as before.
+ *
+ * A RADIO STATION plays in the radio layout (audio_radio), not a video frame,
+ * and every live preview has an "In-stream graphics" panel: what the stream's
+ * manifests announced (Up next and the programme marker), when, and whether it
+ * is upcoming, on screen or done. That is how a broadcaster checks the triggers
+ * before the channel goes public (docs/DESIGN_stream_graphics_triggers.md).
  */
 export function sharePageHtml(token: string): string {
   // JSON.stringify escapes quotes and backslashes. It does NOT escape `<`, so
@@ -48,6 +54,19 @@ export function sharePageHtml(token: string): string {
   .player video{width:100%;height:100%;display:block;background:#000}
   .player #vp{position:absolute;inset:0}
   .player #vp>.vp{height:100%;aspect-ratio:auto;border-radius:0}
+  .player.audio{aspect-ratio:auto;background:transparent;overflow:visible;min-height:120px}
+  .player.audio #vp{position:relative;inset:auto}
+  .player.audio #vp>.vp{height:auto;border-radius:14px}
+  .player.audio .state{border-radius:14px;min-height:240px}
+  .gfx .line{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--muted);margin-bottom:10px}
+  .gfx .line b{color:var(--ink)}
+  .gfx .g{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:10px 0;border-top:1px solid var(--line);font-size:13px}
+  .gfx .g .st{grid-row:span 3;align-self:start;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:3px 7px;border-radius:6px;background:#f1f5f9;color:var(--muted);white-space:nowrap}
+  .gfx .g .st.on{background:#dcfce7;color:#166534}
+  .gfx .g .st.soon{background:var(--accent);color:var(--accent-ink)}
+  .gfx .g .t{font-weight:700;color:var(--ink)}
+  .gfx .g .w{color:var(--muted);font-variant-numeric:tabular-nums}
+  .gfx .empty{font-size:13px;color:var(--muted)}
   .player .badge{pointer-events:none}
   .badge{position:absolute;top:12px;left:12px;background:rgba(15,23,42,.82);color:#fff;font-size:12px;font-weight:700;letter-spacing:.08em;padding:6px 10px;border-radius:7px;z-index:3}
   .dur{position:absolute;bottom:12px;right:12px;background:rgba(15,23,42,.82);color:#fff;font-size:12px;padding:4px 8px;border-radius:6px;z-index:3}
@@ -149,7 +168,7 @@ function pinPrompt(wrong){
 function render(d){
   applyBrand(d.brand);
   const md=d.metadata||{};
-  const cat=md.category||md.Category||d.kind.toUpperCase();
+  const cat=md.category||md.Category||(d.radio?'RADIO':d.kind.toUpperCase());
   const dt=md.date||md.Date||'';
   const fmt=md.format||md.Format||'';
   const ref=md.reference||md.Reference||'';
@@ -164,12 +183,13 @@ function render(d){
   '<div class="infobar"><div>Secure preview shared with you · access expires in <b>'+daysLeft(d.expiresAt)+'</b> ('+fmtDate(d.expiresAt)+')</div>'+(d.sharedBy?'<div>Shared by '+esc(d.sharedBy)+' · '+esc(d.brand.account||'')+'</div>':'')+'</div>'+
   '<h1>'+esc(d.title)+'</h1>'+
   '<p class="sub">'+esc(d.brand.account||'')+' · '+esc(cat)+(dt?' · '+esc(dt):'')+(d.durationMs?' · Duration '+fmtDur(d.durationMs):'')+'</p>'+
-  '<div class="player"><span class="badge">'+(d.live?'LIVE PREVIEW':'PREVIEW')+'</span>'+(SDK?'<div id="vp"></div>':wm+'<video id="v" controls playsinline preload="metadata"></video>')+(d.live&&!d.available?'<div class="state" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#cbd5e1;background:#0b0f16;z-index:3"><h1 style="color:#fff;font-size:22px;margin:0 0 6px">Preview not live right now</h1><p style="margin:0 0 14px">The stream is not currently being produced. This preview will play when the source is active.</p><button class="btn primary" id="retry">Check again</button></div>':'')+(d.durationMs&&!SDK?'<span class="dur">'+fmtDur(d.durationMs)+'</span>':'')+'</div>'+
-  '<div class="under"><div class="cap">Streaming preview'+(d.watermark?' · watermarked to your link':'')+'</div><div class="btns">'+metaBtn+hiresBtn+'</div></div>'+
+  '<div class="player'+(d.radio&&SDK?' audio':'')+'">'+(d.radio&&SDK?'':'<span class="badge">'+(d.live?'LIVE PREVIEW':'PREVIEW')+'</span>')+(SDK?'<div id="vp"></div>':wm+'<video id="v" controls playsinline preload="metadata"></video>')+(d.live&&!d.available?'<div class="state" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#cbd5e1;background:#0b0f16;z-index:3"><h1 style="color:#fff;font-size:22px;margin:0 0 6px">Preview not live right now</h1><p style="margin:0 0 14px">The stream is not currently being produced. This preview will play when the source is active.</p><button class="btn primary" id="retry">Check again</button></div>':'')+(d.durationMs&&!SDK?'<span class="dur">'+fmtDur(d.durationMs)+'</span>':'')+'</div>'+
+  '<div class="under"><div class="cap">'+(d.radio?'Live radio preview':'Streaming preview')+(d.watermark&&!d.radio?' · watermarked to your link':'')+'</div><div class="btns">'+metaBtn+hiresBtn+'</div></div>'+
   '<div class="grid"><div>'+
     (md.description||md.about?'<div class="card"><h3>About this asset</h3><div class="about">'+esc(md.description||md.about)+'</div></div>':'')+
     (d.message?'<div class="card note"><div class="who"><div class="avatar">'+esc((d.sharedBy||'?').slice(0,2).toUpperCase())+'</div><div><b>'+esc(d.sharedBy||'Shared')+'</b><div class="cap">'+esc(d.brand.account||'')+'</div></div></div><div>“'+esc(d.message)+'”</div></div>':'')+
   '</div><div>'+
+    (d.live&&SDK?'<div class="card gfx" id="gfx"><h3>In-stream graphics</h3><div class="empty">Waiting for the stream…</div></div>':'')+
     '<div class="card"><h3>Details</h3>'+detailRows.map(r=>'<div class="row"><span class="k">'+esc(r[0])+'</span><span class="v">'+esc(r[1])+'</span></div>').join('')+'</div>'+
     '<div class="card access"><h3>Your access</h3><ul>'+accessItems.map(i=>'<li>'+i+'</li>').join('')+'</ul></div>'+
   '</div></div>';
@@ -205,13 +225,49 @@ function playWithSdk(d){
   const wmText=d.watermark?((d.sharedBy||(d.brand&&d.brand.account)||'preview')+' • do not distribute'):null;
   const b=d.brand||{};
   if(PLAYER){try{PLAYER.destroy()}catch(e){} PLAYER=null}
+  const primary=/^#[0-9a-f]{6}$/i.test(b.primary||'')?b.primary:'#2563eb';
+  // In-stream graphics are always on here: this page is where they get checked.
+  const theme=d.radio
+    ? { primary:primary, secondary:'#0f172a', radius:14, logoUrl:b.logo||null, logoPosition:b.logo?'top-left':'none', showGraphics:true, controls:{ schedule:true, upNext:true } }
+    : { primary:primary, secondary:'#0f172a', radius:0, logoPosition:'none', showGraphics:true, controls:{ title:false, schedule:false, upNext:true } };
   VoltPlayer.VoltPlayer.create({
-    el:'#vp', skin:'video', apiBase:location.origin,
-    theme:{ primary:/^#[0-9a-f]{6}$/i.test(b.primary||'')?b.primary:'#2563eb', secondary:'#0f172a', radius:0, logoPosition:'none', controls:{ title:false, schedule:false } },
+    el:'#vp', skin:d.radio?'audio_radio':'video', apiBase:location.origin,
+    theme:theme, showGraphics:true,
     item:{ id:TOKEN, title:d.title, live:!!d.live, source:{ hls:d.hls||null, dash:d.dash||null }, playbackToken:d.playbackToken||null, durationMs:d.durationMs||null },
-    watermark:wmText, autoplay:!!d.live, muted:!!d.live,
+    watermark:d.radio?null:wmText, autoplay:!!d.live, muted:!!d.live&&!d.radio,
     beacons:{ prefix:'share' }, cast:false, airplay:false,
-  }).then(p=>{PLAYER=p}).catch(e=>console.error('[share] player failed',e));
+  }).then(p=>{PLAYER=p;startGfx()}).catch(e=>console.error('[share] player failed',e));
+}
+// IN-STREAM GRAPHICS PANEL: what the manifests announced, read from the player
+// (getStreamGraphics, media times) and placed on the wall clock by the stream's
+// own PROGRAM-DATE-TIME. Upcoming, on screen, or shown; and the programme the
+// stream's marker says is on. A second hand, so the states change on time.
+let GFX=null;
+function clk(ms){try{return new Date(ms).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch(e){return ''}}
+function words(ms){const s=Math.max(0,Math.round(ms/1000));return s<60?s+' s':Math.round(s/60)+' min'}
+function startGfx(){ if(GFX)clearInterval(GFX); GFX=setInterval(gfxPanel,1000); gfxPanel(); }
+function gfxPanel(){
+  const box=$('#gfx'); if(!box||!PLAYER||!PLAYER.getStreamGraphics)return;
+  const st=PLAYER.getState(), all=PLAYER.getStreamGraphics(), t=st.currentTime;
+  const wall=m=>st.wallClock!=null?st.wallClock+(m-t)*1000:null;
+  const prog=all.filter(g=>g.graphic==='programme'&&t>=g.start&&(g.end==null||t<g.end)).pop();
+  const cards=all.filter(g=>g.graphic!=='programme');
+  const keep=cards.filter(g=>g.end==null||g.end>t-900).slice(-5);
+  let h='<h3>In-stream graphics</h3><div class="line"><span>Programme marker</span><b>'+(prog?esc(prog.data.title||'?'):'none yet')+'</b></div>';
+  if(!keep.length){
+    h+='<div class="empty">'+(all.length?'No cards in the last 15 minutes.':'Nothing announced yet.')+' Up next is written into the stream shortly before each programme change, when the next programme follows on.</div>';
+  }
+  for(const g of keep){
+    const on=t>=g.start&&(g.end==null||t<g.end), soon=t<g.start;
+    const ws=wall(g.start), we=g.end!=null?wall(g.end):null;
+    const label=g.graphic==='up-next'?'Up next':g.graphic;
+    const starts=g.data.starts?Date.parse(g.data.starts):NaN;
+    h+='<div class="g"><span class="st '+(on?'on':soon?'soon':'')+'">'+(on?'On screen':soon?'In '+words((g.start-t)*1000):'Shown')+'</span>'+
+      '<span class="t">'+esc(label)+': '+esc(g.data.title||'')+'</span>'+
+      '<span class="w">'+(ws?clk(ws):'')+(we?' to '+clk(we):'')+(g.end!=null?' · '+words((g.end-g.start)*1000):'')+'</span>'+
+      '<span class="w">'+(isFinite(starts)?'Programme starts '+clk(starts):'')+'</span></div>';
+  }
+  if(box.innerHTML!==h)box.innerHTML=h;
 }
 function loadHls(){return window.Hls?Promise.resolve():new Promise(ok=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js';s.onload=ok;s.onerror=ok;document.head.appendChild(s)})}
 function beacon(ev, extra, last){

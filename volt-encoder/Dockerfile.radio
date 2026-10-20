@@ -36,6 +36,8 @@ RUN ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx icecast \
 WORKDIR /app
 COPY bin/radio.py /app/bin/radio.py
 COPY bin/events.py /app/bin/events.py
+# In-stream graphic triggers (Up next) in the delivered playlists: radio.py imports it.
+COPY bin/timed_events.py /app/bin/timed_events.py
 COPY bin/s3-uploader.sh /app/bin/s3-uploader.sh
 RUN chmod +x /app/bin/s3-uploader.sh
 

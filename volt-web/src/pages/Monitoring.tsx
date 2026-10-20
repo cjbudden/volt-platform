@@ -107,9 +107,10 @@ function Tile({ label, value, tone, sub }: {
 }
 
 // ---------------------------------------------------------------------------
-//  One alert. Severity is carried by a left rule and a word, never by colour
-//  alone: the whole point of the page is that it still works for someone who
-//  cannot separate amber from red.
+//  One alert. Severity is carried by a pill with a dot and a word, never by
+//  colour alone: the whole point of the page is that it still works for
+//  someone who cannot separate amber from red. No coloured edge bar (brand
+//  book: separate with tone and a 1px line, no coloured edge bars on cards).
 // ---------------------------------------------------------------------------
 function AlertRow({ a }: { a: FleetAlert }) {
   const s = SEV[a.severity]
@@ -117,15 +118,13 @@ function AlertRow({ a }: { a: FleetAlert }) {
     <div style={{
       display: 'flex', gap: 12, alignItems: 'flex-start',
       padding: '11px 13px', marginBottom: 8, borderRadius: 10,
-      background: s.bg, borderLeft: `3px solid ${s.color}`,
-      border: '1px solid var(--border)', borderLeftWidth: 3, borderLeftColor: s.color,
+      background: 'var(--panel-2)', border: '1px solid var(--border)',
     }}>
-      <div style={{ minWidth: 66, flex: 'none' }}>
-        <div style={{
-          fontSize: 'var(--fs-micro)', fontWeight: 700, color: s.color,
-          textTransform: 'uppercase', letterSpacing: 'var(--ls-label)',
-        }}>{s.label}</div>
-        <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', marginTop: 2 }}>
+      <div style={{ minWidth: 86, flex: 'none' }}>
+        <span className="tag" style={{ background: s.bg, color: s.color }}>
+          <span className="dot-s" style={{ background: s.color }} />{s.label}
+        </span>
+        <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', marginTop: 4 }}>
           {SOURCE_LABEL[a.source] ?? a.source}
         </div>
       </div>

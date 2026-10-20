@@ -466,7 +466,7 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 const configSchema = z.object({
   channelId: z.string().uuid().nullable().optional(),
   name: z.string().min(1).max(80).optional(),
-  layout: z.enum(['card', 'bar', 'hero', 'stage', 'video', 'event', 'audio_square', 'audio_wave', 'audio_nowplaying']).optional(),
+  layout: z.enum(['card', 'bar', 'hero', 'stage', 'video', 'event', 'audio_square', 'audio_wave', 'audio_nowplaying', 'audio_radio']).optional(),
   primaryColor: z.string().regex(HEX, 'colour must be #rrggbb').optional(),
   secondaryColor: z.string().regex(HEX, 'colour must be #rrggbb').optional(),
   options: z.record(z.any()).optional(),
@@ -586,6 +586,8 @@ export const LAYOUTS = [
     detail: 'A strip with artwork, the track and a live waveform.' },
   { id: 'audio_nowplaying', name: 'Now playing', sdk: true,
     detail: 'Big artwork and track details, the last five tracks and what is coming up.' },
+  { id: 'audio_radio', name: 'Radio', sdk: true,
+    detail: 'A station player: logo and name, the programme on air and how far through it is, a waveform, and a Coming up banner before the next programme.' },
   { id: 'video', name: 'Video', sdk: true,
     detail: 'The full video player: quality and subtitles, schedule, start over, up next, Chromecast and AirPlay.' },
 ];

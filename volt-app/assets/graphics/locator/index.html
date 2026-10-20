@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Locator</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Locator (LIVE and place)",
+  "bbox": [
+    96,
+    50,
+    700,
+    80
+  ],
+  "fields": [
+    {
+      "id": "status",
+      "type": "text",
+      "label": "Status (LIVE, REPLAY, EARLIER, EXCLUSIVE)"
+    },
+    {
+      "id": "place",
+      "type": "text",
+      "label": "Place"
+    },
+    {
+      "id": "detail",
+      "type": "text",
+      "label": "Detail (optional, a time or a source)"
+    },
+    {
+      "id": "statusColor",
+      "type": "color",
+      "label": "Status colour"
+    },
+    {
+      "id": "barColor",
+      "type": "color",
+      "label": "Place colour"
+    }
+  ],
+  "sample": {
+    "status": "LIVE",
+    "place": "Canberra",
+    "detail": "",
+    "statusColor": "#ffb000",
+    "barColor": "#0a2350"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+
+:root{--status:#ffb000;--statusInk:#111;--bar:#0a2350}
+#loc{position:absolute;left:96px;top:58px;display:flex;height:64px;border-radius:3px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.35);
+  clip-path:inset(0 100% 0 0);transition:clip-path .5s cubic-bezier(.2,.8,.2,1)}
+.on #loc{clip-path:inset(0 0 0 0)}
+.st{display:flex;align-items:center;padding:0 20px;background:var(--status);color:var(--statusInk);font:700 38px/1 "Volt Sans";letter-spacing:.03em;text-transform:uppercase}
+.st:empty{display:none}
+.pl{display:flex;align-items:center;gap:14px;padding:0 26px 0 20px;background:var(--bar);font:700 38px/1 "Volt Sans";letter-spacing:.03em;text-transform:uppercase}
+.pl:empty{display:none}
+.pl:before{content:"";width:0;height:0;border-top:10px solid transparent;border-bottom:10px solid transparent;border-left:12px solid #fff}
+.sub{display:flex;align-items:center;padding:0 22px;background:rgba(10,20,45,.85);font:500 30px/1 "Volt Sans"}
+.sub:empty{display:none}
+</style>
+</head>
+<body>
+<div id="loc"><div class="st" id="status"></div><div class="pl" id="place"></div><div class="sub" id="detail"></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+
+function update(raw){var d=parse(raw);var r=document.documentElement.style;
+  if('status' in d)setText($('status'),d.status);if('place' in d)setText($('place'),d.place);if('detail' in d)setText($('detail'),d.detail);
+  if(d.statusColor)r.setProperty('--status',d.statusColor);if(d.barColor)r.setProperty('--bar',d.barColor)}
+function play(){document.body.classList.add('on')}
+function stop(){document.body.classList.remove('on')}
+function next(){}
+</script>
+</body>
+</html>

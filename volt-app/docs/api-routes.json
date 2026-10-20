@@ -1486,6 +1486,222 @@
  },
  {
   "method": "GET",
+  "path": "/api/fast-playout/:id/timeline",
+  "api": "machine",
+  "credential": "X-Volt-Ingest-Token",
+  "access": "encoder / thumbnailer report",
+  "viewerTier": false,
+  "group": "/api/fast-playout"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fast/ad-servers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "POST",
+  "path": "/api/fast/ad-servers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/fast/ad-servers/:sid",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/fast/ad-servers/:sid",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "POST",
+  "path": "/api/fast/ad-servers/:sid/test",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fast/channels",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "POST",
+  "path": "/api/fast/channels",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fast/channels/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fast/channels/:id/ad-report",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fast/channels/:id/ads",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/fast/channels/:id/ads",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "POST",
+  "path": "/api/fast/channels/:id/breaks/:bid/decide",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "POST",
+  "path": "/api/fast/channels/:id/lineups",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fast/library",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/fast/lineups/:lid",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fast/lineups/:lid",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/fast/lineups/:lid",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "POST",
+  "path": "/api/fast/lineups/:lid/activate",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "POST",
+  "path": "/api/fast/lineups/:lid/apply",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "POST",
+  "path": "/api/fast/lineups/:lid/preview",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fast/streams/:kind/:id/breaks",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "POST",
+  "path": "/api/fast/streams/:kind/:id/breaks",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/fast/streams/:kind/:id/breaks/:bid",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "GET",
   "path": "/api/files",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -1645,6 +1861,402 @@
   "access": "fleet: view",
   "viewerTier": false,
   "group": "/api/fleet"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/assignments",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/assignments",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/graphics/assignments/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/graphics/assignments/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/assignments/:id/air",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: operate",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/assignments/:id/state",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/graphics/assignments/:id/state",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: operate",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/live",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/log",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/plan",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/rundowns/:eventId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/rundowns/:eventId/copy-from",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/rundowns/:eventId/import-csv",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/rundowns/:eventId/items",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/graphics/rundowns/:eventId/items/:itemId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/graphics/rundowns/:eventId/items/:itemId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/rundowns/:eventId/items/:itemId/:action(skip|restore)",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: operate",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/rundowns/:eventId/reorder",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/rundowns/:eventId/take",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: operate",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/rundowns/:eventId/take-off",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: operate",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/setups",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/setups",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/graphics/setups/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/setups/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/graphics/setups/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/sources",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/sources",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/graphics/sources/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/graphics/sources/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/sources/:id/push",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: operate",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/sources/:id/test",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/templates",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/templates",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/graphics/templates/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/templates/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/graphics/templates/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/graphics/templates/:id/draft",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/graphics/templates/:id/draft",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/templates/:id/draft/publish",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/templates/:id/duplicate",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/templates/:id/versions/:vid/download",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/templates/:id/versions/:vid/files",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/graphics/templates/:id/versions/:vid/source",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: view",
+  "viewerTier": false,
+  "group": "/api/graphics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/graphics/templates/import",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "graphics: manage",
+  "viewerTier": false,
+  "group": "/api/graphics"
  },
  {
   "method": "GET",
@@ -2633,6 +3245,24 @@
   "api": "public",
   "credential": "publishable key or player token",
   "access": "public (legacy alias of /api/public/player/events)",
+  "viewerTier": true,
+  "group": "/api/player"
+ },
+ {
+  "method": "GET",
+  "path": "/api/player/graphics",
+  "api": "public",
+  "credential": "publishable key or player token",
+  "access": "public (legacy alias of /api/public/player/graphics)",
+  "viewerTier": true,
+  "group": "/api/player"
+ },
+ {
+  "method": "POST",
+  "path": "/api/player/graphics/impressions",
+  "api": "public",
+  "credential": "publishable key or player token",
+  "access": "public (legacy alias of /api/public/player/graphics/impressions)",
   "viewerTier": true,
   "group": "/api/player"
  },
@@ -3942,6 +4572,15 @@
   "group": "/api/timeline"
  },
  {
+  "method": "GET",
+  "path": "/api/timeline/selection",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/timeline"
+ },
+ {
   "method": "OPTIONS",
   "path": "/api/tus",
   "api": "admin",
@@ -4303,6 +4942,51 @@
  },
  {
   "method": "GET",
+  "path": "/api/vod/:id/markers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/vod/:id/markers/:kind",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/vod/:id/markers/:kind",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/markers/:kind/accept",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/markers/detect",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
   "path": "/api/vod/:id/provenance",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -4570,6 +5254,24 @@
   "access": "settings: view",
   "viewerTier": false,
   "group": "/api/workflows"
+ },
+ {
+  "method": "GET",
+  "path": "/fast/:id/s/:sid/:file",
+  "api": "delivery",
+  "credential": "admin session or internal",
+  "access": "preview / internal",
+  "viewerTier": false,
+  "group": "/fast"
+ },
+ {
+  "method": "GET",
+  "path": "/gfx/:versionId/*",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/gfx"
  },
  {
   "method": "GET",

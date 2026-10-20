@@ -1,6 +1,6 @@
 # Timeline mode (Past · Now · Next)
 
-Status: approved for build, phase 1 first. Concept screens: the "Volt Past Now Next concepts" design canvas (board 7, "As a view mode in today's app", is the phase 1 target; boards 1 to 3 show where it goes later).
+Status: phases 1, 2 and 3 built (20 Oct 2026); phase 4 not started. Concept screens: the "Volt Past Now Next concepts" design canvas (board 7, "As a view mode in today's app", is the phase 1 target; boards 1 to 3 show where it goes later).
 
 ## What it is
 
@@ -67,12 +67,37 @@ Today the data exists per owner (`/api/epg?channelId|eventId&from&to`, `/api/epg
 
 ## Tests
 
-- `test/timeline-grid.check.ts`: window cap, permission filtering (a viewer without radio rights gets no radio rows), cursor paging, as-run preferred over scheduled, gaps reported from coverage not from declared windows, events placed from their window.
+- `test/timeline-grid.check.ts` (88 checks): window cap, permission filtering (a viewer without radio rights gets no radio rows), cursor paging, as-run preferred over scheduled, gaps reported from coverage not from declared windows, events placed from their window; outages from the log (pure and on a row), clashes, and the selection endpoint (no media, holder, title, workbench link, cut at now, future and over-6-hour ranges refused, permission 404).
 - Add the route to the Postman collection and the API docs (`npm run docs:routes`, `docs:openapi`).
 - `npm run typecheck` clean for `volt-app` and `volt-web`.
 
+## Phase 2: past actions (built)
+
+- **Drag to clip.** Press on a row's track and drag (5 px before it counts as a drag, so a click still opens a block). The range snaps to 5 minutes. Over the past it opens a tray at the foot of the grid, which asks `GET /api/timeline/selection?kind&id&from&to`:
+  - the same coverage check the workbench uses (`resolveRange` + `assessRange`), so the verdict and its gaps match the workbench exactly;
+  - the recording that holds the whole range (a clip is cut from one recording), how many recordings it touches, and a title from the programme that fills most of it;
+  - links: the clip endpoint, and the workbench at the range (`/recordings/<id>?from=&to=`, which RecordingDetail now opens marked).
+  - 6 hours at most; the end is cut at now; a stream the role cannot view is a 404.
+- The tray offers **Make clip**, **Make clip, skipping the gaps** when the range has gaps, and **Open in the workbench** (or **Open the source** when no single recording holds the range). With nothing on disk it says so and offers nothing.
+- **Outage markers.** Each row carries `outages` derived from `stream_events` (one batched query, 24 h lookback so an outage that began before the window still shows):
+  - `source`: source.down → source.up, per named source;
+  - `filler`: filler.engaged → filler.cleared;
+  - `packager`: packager.down → packager.up;
+  - `stopped`: a channel.stop whose reason reads as a failure → the next channel.start. Operator and scheduled stops are not outages.
+  - A stop closes whatever was open; anything still open runs to now. Drawn as a thin band under the blocks, with the label and reason on hover.
+- Migration `0063_stream_events_time.sql` adds the `(channel_id, ts)` and `(event_id, ts)` indexes the lookup needs.
+
+## Phase 3: next actions (built)
+
+- **Clash overlay.** Rows carry `clashes`, from the same overlap SQL as `/api/epg/conflicts` (one batched query). The overlap is shaded and both blocks get a dashed `--warn` outline.
+- **Drag to create.** A drag over future time opens the programme drawer the EPG pages use, with start and end filled in from the range. An end at or before the start is read as the next day; 24 hours at most.
+
+## Recording source timeline fixes (same build)
+
+- The highlight for a clicked programme now lines up with the programme block: pointer positions are measured from the track's own box, not the rail's, which had put the labels' width into every reading.
+- The selection and the cursor line are masked to the track, so a range running off either edge is clipped, not drawn over the card.
+- Panning: ←/→ move a quarter of the view, Shift+←/→ a whole view, +/− zoom, Esc clears; plus **‹ Earlier** and **Later ›** buttons that move half a view.
+
 ## Later phases
 
-2. Past actions: drag across a row to select, hand off to the existing clip flow (coverage verdict `clippable` guards it); outage markers from the status event log.
-3. Next actions: clash overlay from `/api/epg/conflicts`; drag on empty time to create an event (the EPG timeline already does click-to-add).
 4. FAST drop-to-schedule (needs FAST scheduled playout), searching inside captions (needs a caption index), mobile layout, Timeline as an optional home screen.

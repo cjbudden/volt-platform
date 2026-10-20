@@ -79,6 +79,48 @@ clock. `publicLive.ts` hands out the delivered copies for every TV channel and e
 3. **Timing:** the card appeared within 0.1–0.2 s of its scheduled wall-clock moment as seen by the viewer's
    playhead, and stayed 11.6 of 12 s, on both HLS and DASH. With `showGraphics` off, nothing showed.
 
+## Radio (built 20 Oct 2026)
+
+Same triggers, same standard. A station is a channel row, so `graphicTriggers.ts` already builds its
+schedule; what radio lacked was something to write them into its manifests. `radio.py` has no packager to
+rewrite, so it now keeps **delivered copies** beside ffmpeg's own files, every second:
+
+- `audio/index_cc.m3u8`: ffmpeg's playlist (which already carries `PROGRAM-DATE-TIME`) plus `EXT-X-DATERANGE`;
+- `dash/manifest_cc.mpd`: ffmpeg's MPD plus the `EventStream`;
+- once the first copy exists, the run's `master.m3u8` is rewritten to point at `audio/index_cc.m3u8`, so the
+  public HLS URL does not change. The public DASH URL is `dash/manifest_cc.mpd` (`publicLive.ts`).
+
+Fails open like the TV path: no control plane means a copy without triggers; a playlist caught mid-write keeps
+the last good copy. Job config: `timed_events` in `services/radio/jobConfig.ts`. Image: `Dockerfile.radio`
+copies `timed_events.py`. Check: `volt-encoder/bin/test_radio_triggers.py`. Run for real on 20 Oct: a live
+station through `radio.py`, Shaka in Chromium, the banner on screen at the trigger's wall-clock second for
+its 20 s (Opus in the test because headless Chromium has no AAC; only the codec differed).
+
+**Found by running the check on the Mac:** ffmpeg writes `PROGRAM-DATE-TIME` as `...47.592+1000` (`+0000` in a
+UTC container), and Python 3.10, the version Ubuntu 22.04 ships in the images, rejects that offset form. The
+playlist then had no window and every radio copy went out without triggers. `timed_events._parse_iso` now
+normalises the offset and the fraction (covered in `test_radio_triggers.py`). The TV copies were unaffected:
+the encoder writes its own PDT with `Z`.
+
+## The card template and the radio layout
+
+- `kit.upNextCard(ctx, 'overlay' | 'banner')` is the one Up next / Coming up card. The video skin, the
+  `audio_nowplaying` skin and the new `audio_radio` skin all use it; custom skins can.
+- **Fixed with it:** a stream-timed card's progress bar sat at zero for its whole life (it divided the
+  two-minute countdown by the twelve-second card). It now runs over the card's own time on screen
+  (`UpNext.shownMs`); `UpNext.startsAt` gives the "18:30".
+- `audio_radio` (migration 0061): station logo and name, the programme on air with start, end, a progress bar
+  and the time left in words, a waveform, the Coming up banner, a quiet "Next" line between banners (from the
+  guide, or with no guide from the stream's next programme marker), and Later from the guide.
+
+## Checking it: the share page
+
+`/share/<token>` plays the delivered copies for TV and events (it played the packager's own master, which has no
+wall clock or triggers, so a share preview could never show Up next) and the radio layout for a station. Every
+live preview has an **In-stream graphics** panel: the programme marker on now, and each card the manifests
+announced with its wall-clock window and state (In 4 min, On screen, Shown). Read from
+`player.getStreamGraphics()`.
+
 ## Next graphics
 
 New graphic types are a new `graphic` value and rule in `buildTriggers`, plus a renderer in the player. Candidates:

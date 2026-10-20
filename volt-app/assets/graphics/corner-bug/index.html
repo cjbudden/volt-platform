@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Corner bug</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Corner bug (logo or sponsor)",
+  "bbox": [
+    1500,
+    50,
+    340,
+    100
+  ],
+  "fields": [
+    {
+      "id": "logo",
+      "type": "image",
+      "label": "Logo"
+    },
+    {
+      "id": "caption",
+      "type": "text",
+      "label": "Caption (optional)"
+    },
+    {
+      "id": "opacity",
+      "type": "number",
+      "label": "Opacity (0 to 1)"
+    }
+  ],
+  "sample": {
+    "logo": "",
+    "caption": "Presented by Sponsor",
+    "opacity": 0.94
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+
+#cb{position:absolute;right:96px;top:58px;display:flex;align-items:center;gap:14px;background:rgba(244,245,247,.94);border-radius:3px;padding:12px 18px;opacity:0;transition:opacity .45s}
+#cb.on{opacity:var(--o,.94)}
+#logo{height:64px;max-width:240px;object-fit:contain}
+#logo[src=""]{display:none}
+#caption{font:700 22px/1.15 "Volt Sans";letter-spacing:.06em;text-transform:uppercase;color:#0b1220;max-width:280px}
+#caption:empty{display:none}
+</style>
+</head>
+<body>
+<div id="cb"><img id="logo" src="" alt=""><div id="caption"></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+
+function update(raw){var d=parse(raw);if('logo' in d)$('logo').setAttribute('src',d.logo||'');if('caption' in d)setText($('caption'),d.caption);
+  if(d.opacity!=null)$('cb').style.setProperty('--o',String(d.opacity))}
+function play(){$('cb').classList.add('on')}
+function stop(){$('cb').classList.remove('on')}
+function next(){}
+</script>
+</body>
+</html>

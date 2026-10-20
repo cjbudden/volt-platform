@@ -36,7 +36,8 @@ React wrapper). Tests: `volt-app/test/player-sdk.check.ts` (47, the rules),
 | `event` | An event's whole life: promo (poster, the two teams or the line-up), countdown, postponed / cancelled, the paywall's passes with Buy, the replay afterwards; the `video` player while it is live | yes |
 | `audio_square` | A square tile: artwork, track, play | yes |
 | `audio_wave` | A strip: artwork, track, a live waveform (from the audio itself when the browser allows, a gentle idle motion otherwise) | yes |
-| `audio_nowplaying` | Big artwork, track details, the last five tracks, what is coming up | yes |
+| `audio_nowplaying` | Big artwork, track details, the last five tracks, what is coming up, and the Coming up banner | yes |
+| `audio_radio` | A station player: logo and name, the programme on air with its progress and time left, a waveform, the Coming up banner the stream raises before the next programme, then Next and Later | yes |
 | `admin` | The console's player: no branding or casting, the bar under the picture, what is actually playing (resolution, bitrate, buffer, distance from live), a stats overlay | no (console only) |
 
 The four original station layouts (`card`, `bar`, `hero`, `stage`) remain. A
@@ -200,6 +201,25 @@ The guide comes from `GET /api/player/epg?appKey=&channelId=` (programmes from
 minutes). The programme shown is the one **at the playhead**: a viewer three
 minutes behind live sees the change three minutes later.
 
+**The Up next / Coming up card is one template** (`kit.upNextCard`, exported for
+custom skins as `VoltPlayer.kit.upNextCard(ctx, 'overlay' | 'banner')`): the video
+skins use the overlay (bottom right of the picture), the audio skins the banner.
+Whatever drives it (the stream's own trigger, a fetched guide, or the end of a
+playlist item) it says the same things the same way: "Starts in 2 min" or
+"Coming up in 40 s", the title, the subtitle, the start time when known. When the
+stream times the card, its bar runs over the card's own time on screen; otherwise
+over the countdown. With no guide loaded, the stream's programme markers name what
+is on and, about 90 s ahead, what is next.
+
+**Skip intro / recap / credits** (on-demand only): `state.skip` is the stretch at the playhead from the asset's
+skip markers (docs/DESIGN_vod_skip_markers.md), `commands.skip()` jumps past it (credits on a playlist: the next
+item). The video and admin skins show the button (`kit.skipButton`); `controls.skip: false` turns it off. Never
+offered live.
+
+`player.getStreamGraphics()` returns every trigger the manifests have announced
+(past, on screen, upcoming) in media time, whatever `showGraphics` says: for
+checking a stream, not drawing.
+
 Start over needs the stream's wall clock (HLS PROGRAM-DATE-TIME, which the Volt
 packager writes) and a DVR window that reaches back to the programme's start.
 The button only appears when both are true, so it never promises a beginning
@@ -220,7 +240,7 @@ console.
 
 | Page | Skin | Notes |
 |---|---|---|
-| Share preview (`/share/<token>`) | `video` in the account's primary colour | watermark inside the picture (stays in full screen); beacons filed as "Share link"; falls back to hls.js only if the bundle is missing |
+| Share preview (`/share/<token>`) | `video` in the account's primary colour; `audio_radio` for a radio station | watermark inside the picture (stays in full screen); beacons filed as "Share link"; plays the delivered copies (`master_cc` / `manifest_cc`), so in-stream graphics show; an **In-stream graphics** panel lists what the stream announced and when, to check triggers before a channel goes public; falls back to hls.js only if the bundle is missing |
 | Recording page | `admin` | playlists under `/api/` carry the operator's token |
 | Media library (video preview) | `admin` | |
 | Player setup preview (radio) | the chosen skin, in demo mode | exactly what embeds will render |
@@ -259,3 +279,21 @@ for line, and `test/player-sdk.check.ts`'s cases become each SDK's unit tests.
 
 Migrations `0055_player_sdk_skins.sql` and `0056_player_event_skin.sql` let a
 config name the SDK skins.
+
+## HTML graphics from the console (20 Oct 2026)
+
+Scorebugs, lower thirds, tickers and bugs set up under Graphics with *Shown in: player* (or both) are drawn by
+the SDK over the picture, for any item with an `assetId` (channel or event) and an `appKey`. Nothing to
+configure: `showGraphics: false` (or the theme's) turns them off with the in-stream graphics.
+
+* Feed: `GET /api/player/graphics?appKey=&streamId=&since=`, polled every 2 s while the stream has player
+  graphics, every 30 s while it has none, never after a 404.
+* Timing: the state applied is the one in force at the playhead's wall clock, so they stay with the picture
+  behind live and in the DVR.
+* Each graphic is a sandboxed iframe (`.vp-gfx` layer in the stage, below the watermark); a template cannot
+  reach the host page.
+* `state.overlays`: `{ id, name, kind }[]` on screen now. Event `graphic` with `graphic: 'html'` as each comes on.
+* Hidden during ad breaks and without a picture. Impressions go to `POST /api/player/graphics/impressions`
+  unless `beacons: false`.
+
+Source: `volt-player/src/sdk/overlay.ts`; server `src/services/graphics/playerFeed.ts`; REQ_graphics_overlays.md section 13.

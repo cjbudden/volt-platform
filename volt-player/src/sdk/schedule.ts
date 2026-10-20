@@ -73,7 +73,7 @@ export function upNextFor(i: UpNextInput): UpNext | null {
     if (left > 0 && left <= windowMs) {
       const n = i.nextItem;
       return { kind: 'item', title: n?.title ?? 'Next', subtitle: n?.subtitle ?? null, artworkUrl: n?.artworkUrl ?? null,
-        inMs: Math.max(0, Math.round(left)), autoAdvance: i.autoAdvance, totalMs: windowMs };
+        inMs: Math.max(0, Math.round(left)), autoAdvance: i.autoAdvance, totalMs: windowMs, source: 'playlist' };
     }
     return null;
   }
@@ -83,7 +83,8 @@ export function upNextFor(i: UpNextInput): UpNext | null {
     if (i.nextProgramme.startsAt - i.programme.endsAt > 5 * 60_000) return null;
     if (left > 0 && left <= windowMs) {
       return { kind: 'programme', title: i.nextProgramme.title, subtitle: i.nextProgramme.subtitle ?? null,
-        artworkUrl: i.nextProgramme.imageUrl ?? null, inMs: Math.round(left), autoAdvance: false, totalMs: windowMs };
+        artworkUrl: i.nextProgramme.imageUrl ?? null, inMs: Math.round(left), autoAdvance: false, totalMs: windowMs,
+        startsAt: i.nextProgramme.startsAt, source: 'guide' };
     }
   }
   return null;

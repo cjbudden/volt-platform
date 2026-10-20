@@ -123,6 +123,11 @@ export function upNextFromGraphic(g: StreamGraphic, t: number, wallClock: number
     inMs: Math.round(inMs),
     autoAdvance: false,
     totalMs: Math.round(((g.end ?? g.start + 12) - g.start) * 1000),
+    // The card's progress is its own time on screen. Comparing the countdown to
+    // the programme (minutes) with the card's length (seconds) left the bar empty.
+    shownMs: Math.max(0, Math.round((t - g.start) * 1000)),
+    startsAt: Number.isFinite(starts) ? starts : null,
+    source: 'stream',
   };
 }
 

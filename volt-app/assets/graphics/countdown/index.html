@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Starting soon</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Starting soon countdown",
+  "fields": [
+    {
+      "id": "heading",
+      "type": "text",
+      "label": "Heading"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title"
+    },
+    {
+      "id": "startsAt",
+      "type": "text",
+      "label": "Counts down to (date and time)"
+    },
+    {
+      "id": "background",
+      "type": "color",
+      "label": "Background"
+    }
+  ],
+  "sample": {
+    "heading": "Starting soon",
+    "title": "Live coverage",
+    "startsAt": "",
+    "background": "#0a1730"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+
+#slate{position:absolute;inset:0;background:#0a1730;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;opacity:0;transition:opacity .5s}
+#slate.on{opacity:1}
+#heading{font:700 38px/1 "Volt Sans";letter-spacing:.32em;color:#9db8ff;text-transform:uppercase}
+#count{font:600 230px/1 "Volt Serif";letter-spacing:-4px;font-variant-numeric:tabular-nums}
+#title{font:500 46px/1.2 "Volt Sans";color:#d6deef;text-align:center;max-width:1500px}
+</style>
+</head>
+<body>
+<div id="slate"><div id="heading">Starting soon</div><div id="count">--:--</div><div id="title"></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+
+var target=null;function pad(n){return(n<10?'0':'')+n}
+function tick(){var el=$('count');if(!target){el.textContent='--:--';return}var s=Math.max(0,Math.round((target-Date.now())/1000));
+  el.textContent=(s>=3600?Math.floor(s/3600)+':'+pad(Math.floor(s%3600/60)):pad(Math.floor(s/60)))+':'+pad(s%60)}
+function update(raw){var d=parse(raw);if('heading' in d)setText($('heading'),d.heading);if('title' in d)setText($('title'),d.title);
+  if('startsAt' in d){var t=new Date(d.startsAt).getTime();target=isNaN(t)?null:t;tick()}if(d.background)$('slate').style.background=d.background}
+function play(){$('slate').classList.add('on')}
+function stop(){$('slate').classList.remove('on')}
+function next(){}
+setInterval(tick,250);
+</script>
+</body>
+</html>

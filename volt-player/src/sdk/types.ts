@@ -144,6 +144,16 @@ export interface UpNext {
   autoAdvance: boolean;
   /** The countdown length, so a skin can draw progress (inMs / totalMs). */
   totalMs: number;
+  /**
+   * How long the card has been on screen, when it is timed by the stream (an
+   * in-stream trigger). Then the card's own life is totalMs and its progress is
+   * shownMs / totalMs, while inMs still counts down to the programme.
+   */
+  shownMs?: number | null;
+  /** Wall-clock start of what is coming up (epoch ms), when known: "Starts at 18:30". */
+  startsAt?: number | null;
+  /** Where it came from: the stream's own trigger, a fetched guide, or the playlist. */
+  source?: 'stream' | 'guide' | 'playlist';
 }
 
 /**
@@ -151,6 +161,14 @@ export interface UpNext {
  * a DASH EventStream; see sdk/triggers.ts). Times are media times, the clock of
  * `currentTime`.
  */
+/** What a Skip button offers: the stretch, in media seconds, and what it is. */
+export interface SkipOffer {
+  kind: 'intro' | 'recap' | 'credits' | string;
+  from: number;
+  to: number;
+  id: string;
+}
+
 export interface StreamGraphic {
   id: string;
   /** 'up-next', 'programme', 'ad', or any graphic a later server sends. */
@@ -210,8 +228,15 @@ export interface PlayerState {
   index: number;
   item: PlaylistItem | null;
   upNext: UpNext | null;
+  /**
+   * A skippable stretch at the playhead (intro, recap, credits), from the
+   * asset's skip markers in its manifest. ON-DEMAND ONLY: always null live.
+   */
+  skip: SkipOffer | null;
   /** In-stream graphics on screen now. Empty unless graphics are on (theme.showGraphics / options.showGraphics). */
   graphics: StreamGraphic[];
+  /** HTML graphics from the console drawn by this player now (sdk/overlay.ts): scorebugs, lower thirds... */
+  overlays: { id: string; name: string; kind: string }[];
   /**
    * An ad break the stream has signalled is playing (FAST breaks, a live
    * channel's SCTE-35 or an operator's Go to break). While it is set the
@@ -264,6 +289,8 @@ export interface Commands {
   playItem(index: number): void;
   /** Dismiss the up-next card for this item (and cancel its auto-advance). */
   cancelUpNext(): void;
+  /** Jump past the skippable stretch at the playhead (credits on a playlist: the next item). */
+  skip(): void;
   toggleFullscreen(): void;
   togglePip(): void;
   /** Open the Chromecast device picker, or stop casting when connected. */
@@ -299,6 +326,8 @@ export interface ControlToggles {
   schedule: boolean;
   upNext: boolean;
   history: boolean;
+  /** Skip intro / recap / credits on on-demand items, from the asset's markers. Default on. */
+  skip?: boolean;
 }
 
 /**

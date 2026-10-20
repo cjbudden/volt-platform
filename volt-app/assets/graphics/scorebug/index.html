@@ -1,0 +1,119 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Scorebug</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Scorebug",
+  "bbox": [
+    96,
+    50,
+    760,
+    80
+  ],
+  "fields": [
+    {
+      "id": "home",
+      "type": "text",
+      "label": "Home team"
+    },
+    {
+      "id": "away",
+      "type": "text",
+      "label": "Away team"
+    },
+    {
+      "id": "homeScore",
+      "type": "number",
+      "label": "Home score"
+    },
+    {
+      "id": "awayScore",
+      "type": "number",
+      "label": "Away score"
+    },
+    {
+      "id": "clock",
+      "type": "text",
+      "label": "Clock"
+    },
+    {
+      "id": "period",
+      "type": "text",
+      "label": "Period (optional)"
+    },
+    {
+      "id": "homeColor",
+      "type": "color",
+      "label": "Home colour"
+    },
+    {
+      "id": "awayColor",
+      "type": "color",
+      "label": "Away colour"
+    }
+  ],
+  "sample": {
+    "home": "HOME",
+    "away": "AWAY",
+    "homeScore": 0,
+    "awayScore": 0,
+    "clock": "00:00",
+    "period": "1ST HALF",
+    "homeColor": "#0b1f4d",
+    "awayColor": "#7a1f1f"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+
+#bug{position:absolute;left:96px;top:58px;height:64px;display:flex;align-items:stretch;border-radius:3px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.35);
+  font:700 36px/64px "Volt Sans";letter-spacing:.02em;clip-path:inset(0 100% 0 0);transition:clip-path .5s cubic-bezier(.2,.8,.2,1)}
+#bug.on{clip-path:inset(0 0 0 0)}
+.team{padding:0 22px;min-width:110px;text-align:center;text-transform:uppercase;background:#0b1f4d}
+.score{background:#f4f5f7;color:#0b1220;width:66px;text-align:center;font-family:"Volt Serif";font-weight:600;font-size:38px}
+.score+.score{border-left:2px solid #c8cfdc}
+.score.flash{animation:flash .9s ease-out}
+@keyframes flash{0%{background:#ffb000}100%{background:#f4f5f7}}
+.clock{background:#13254d;padding:0 20px;font-weight:500;font-variant-numeric:tabular-nums}
+.period{background:#ffb000;color:#111;padding:0 16px;font-size:26px}
+.period:empty{display:none}
+</style>
+</head>
+<body>
+<div id="bug"><div class="team" id="home">HOME</div><div class="score" id="homeScore">0</div><div class="score" id="awayScore">0</div><div class="team" id="away">AWAY</div><div class="clock" id="clock">00:00</div><div class="period" id="period"></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+
+function score(id,v){var el=$(id);if(String(el.textContent)!==String(v)){el.textContent=v;el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash')}}
+function update(raw){var d=parse(raw);
+  if('home' in d)setText($('home'),d.home);if('away' in d)setText($('away'),d.away);
+  if('homeScore' in d)score('homeScore',d.homeScore);if('awayScore' in d)score('awayScore',d.awayScore);
+  if('clock' in d)setText($('clock'),d.clock);if('period' in d)setText($('period'),d.period);
+  if(d.homeColor)$('home').style.background=d.homeColor;if(d.awayColor)$('away').style.background=d.awayColor}
+function play(){$('bug').classList.add('on')}
+function stop(){$('bug').classList.remove('on')}
+function next(){}
+update({homeColor:'#0b1f4d',awayColor:'#7a1f1f'});
+</script>
+</body>
+</html>

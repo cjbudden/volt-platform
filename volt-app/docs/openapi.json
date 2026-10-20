@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "Volt API",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The Volt API: the **Public API** for apps, players and their audience, and the **Admin API** for your own staff and servers.\n\nEvery route Volt serves to customers is listed here. Routes with a captured example show a real request and response from a test account.\n\nGuides: Using the API, Authentication and Errors in the docs sidebar."
  },
  "servers": [
@@ -28547,6 +28547,208 @@
    "patch": {
     "operationId": "patchVODByIDAvailability",
     "summary": "Update a VOD asset's availability",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/markers": {
+   "get": {
+    "operationId": "getVODByIDMarkers",
+    "summary": "Get a VOD asset's markers",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/markers/{kind}": {
+   "delete": {
+    "operationId": "deleteVODByIDMarkersByKind",
+    "summary": "Delete a marker",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "kind",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putVODByIDMarkersByKind",
+    "summary": "Replace a marker",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "kind",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/markers/{kind}/accept": {
+   "post": {
+    "operationId": "postVODByIDMarkersByKindAccept",
+    "summary": "Accept (marker)",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "kind",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/markers/detect": {
+   "post": {
+    "operationId": "postVODByIDMarkersDetect",
+    "summary": "Markers: detect",
     "tags": [
      "VOD"
     ],

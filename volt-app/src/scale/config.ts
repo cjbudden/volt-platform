@@ -167,7 +167,7 @@ export const scaleConfig = {
    * previews; the public radio URL is /live/:id/stream.mp3.
    */
   publicPrefixes: (process.env.PUBLIC_PATH_PREFIXES ??
-    '/health,/live/,/share/,/api/share/,/xmltv/,/img/,/library/,/player,/clips/,' +
+    '/health,/live/,/share/,/api/share/,/xmltv/,/img/,/library/,/player,/clips/,/gfx/,' +
     '/api/public/,/api/availability,/api/access,/api/player/,/api/analytics/beacon,/api/payments/verify')
     .split(',').map((s) => s.trim()).filter(Boolean),
 };

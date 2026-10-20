@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { KeyboardEvent as RKeyboardEvent, MouseEvent as RMouseEvent, PointerEvent as RPointerEvent } from 'react'
 import {
   api, type EpgOwner, type ProgrammeRow, type ProgrammeVod,
-  type TimelineGridBlock, type TimelineGridRow,
+  type TimelineGridBlock, type TimelineGridRow, type TimelineSelection,
 } from './api'
 import { navigate } from './router'
 import { StatusPill } from './scaffold'
@@ -18,7 +18,15 @@ import { ProgrammeDrawer } from './pages/EpgDetail'
    current-time line is what went to air (programmes that aired, with the media
    actually recorded underneath and gaps hatched), the programme on now
    straddles the line, and what is scheduled sits to the right as outlined
-   blocks. TIMELINE_MODE.md is the spec; this is phase 1, read-only.
+   blocks. TIMELINE_MODE.md is the spec.
+
+   PHASE 2 (the past): drag across a row to select a stretch that aired; the
+   server checks it (GET /api/timeline/selection: the clip flow's own coverage
+   verdict) and the tray offers Make clip or the workbench with the marks set.
+   Outages from the status event log sit along the bottom of each row.
+
+   PHASE 3 (the future): programmes that overlap are marked as a clash, and a
+   drag on future time opens the programme drawer with that slot filled in.
 
    ONE REQUEST PER WINDOW, NOT PER ROW. Everything comes from
    GET /api/timeline/grid, which composes the EPG, coverage and health services
@@ -42,6 +50,10 @@ const LABEL_W = 248
 const ROW_H = 48
 const HEAD_H = 34
 const OVERSCAN = 6
+/** A press that moves less than this is a click, not a drag. */
+const DRAG_PX = 5
+/** New programmes snap to five minutes. */
+const SNAP_MS = 5 * MIN
 
 const PRESETS = [
   { value: '1-2', label: '−1h / +2h', back: 1, ahead: 2 },
@@ -73,6 +85,15 @@ function writeLs(key: string, v: unknown) {
 const p2 = (n: number) => String(n).padStart(2, '0')
 const fmtT = (ms: number) => { const d = new Date(ms); return `${p2(d.getHours())}:${p2(d.getMinutes())}` }
 const fmtDay = (ms: number) => new Date(ms).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })
+const fmtTs = (ms: number) => { const d = new Date(ms); return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}` }
+/** Lengths in words: "29 min 35 s", "1 h 5 min". */
+function fmtLen(ms: number) {
+  const s = Math.max(0, Math.round(ms / 1000))
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
+  if (h) return `${h} h${m ? ` ${m} min` : ''}`
+  return m ? `${m} min${sec ? ` ${sec} s` : ''}` : `${sec} s`
+}
+const OUTAGE_CLS: Record<string, string> = { source: 'down', packager: 'down', stopped: 'down', filler: 'filler' }
 function fmtDur(ms: number) {
   const m = Math.round(ms / MIN)
   return m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}` : `${m}m`
@@ -276,8 +297,88 @@ export default function TimelineGrid() {
   }
 
   // ---- click-through ---------------------------------------------------------
-  const [drawer, setDrawer] = useState<{ owner: EpgOwner; day: Date; p: ProgrammeRow; vod?: ProgrammeVod } | null>(null)
+  const [drawer, setDrawer] = useState<{ owner: EpgOwner; day: Date; p: ProgrammeRow | null; vod?: ProgrammeVod; start?: string; end?: string } | null>(null)
   const [converting, setConverting] = useState(false)
+
+  // ---- drag on a row: select the past (a clip) or the future (a programme) --
+  type Sel = { row: TimelineGridRow; a: number; b: number; mode: 'clip' | 'create'; done: boolean }
+  const [sel, setSel] = useState<Sel | null>(null)
+  const [selInfo, setSelInfo] = useState<TimelineSelection | null>(null)
+  const [selErr, setSelErr] = useState('')
+  const [clipTitle, setClipTitle] = useState('')
+  const [clipBusy, setClipBusy] = useState(false)
+  const press = useRef<{ row: TimelineGridRow; x0: number; t0: number; el: HTMLDivElement; id: number; moved: boolean } | null>(null)
+  /** A drag must not also count as a click on whatever it started over. */
+  const swallowClick = useRef(false)
+  const timeAt = (el: HTMLElement, clientX: number) => startMs + (clientX - el.getBoundingClientRect().left) * msPerPx
+  const snap = (t: number) => Math.round(t / SNAP_MS) * SNAP_MS
+
+  function onTrackDown(e: RPointerEvent<HTMLDivElement>, r: TimelineGridRow) {
+    if (e.button !== 0) return
+    press.current = { row: r, x0: e.clientX, t0: timeAt(e.currentTarget, e.clientX), el: e.currentTarget, id: e.pointerId, moved: false }
+  }
+  function onTrackMove(e: RPointerEvent<HTMLDivElement>) {
+    const pr = press.current
+    if (!pr) return
+    if (!pr.moved) {
+      if (Math.abs(e.clientX - pr.x0) < DRAG_PX) return
+      pr.moved = true
+      try { pr.el.setPointerCapture(pr.id) } catch { /* the press already ended */ }
+    }
+    const t = timeAt(pr.el, e.clientX)
+    const past = pr.t0 < now
+    if (past) {
+      const a = Math.min(pr.t0, t), b = Math.min(now, Math.max(pr.t0, t))
+      setSel({ row: pr.row, a, b, mode: 'clip', done: false })
+    } else {
+      const lo = Math.max(now, Math.min(pr.t0, t)), hi = Math.max(pr.t0, t)
+      const a = Math.max(snap(now + SNAP_MS / 2), snap(lo)), b = Math.max(a + SNAP_MS, snap(hi))
+      setSel({ row: pr.row, a, b, mode: 'create', done: false })
+    }
+  }
+  function onTrackUp() {
+    const pr = press.current
+    press.current = null
+    if (!pr?.moved) return
+    swallowClick.current = true
+    setTimeout(() => { swallowClick.current = false }, 0)
+    setSel(cur => {
+      if (!cur) return cur
+      if (cur.mode === 'create') { openCreate(cur.row, cur.a, cur.b); return null }
+      if (cur.b - cur.a < 2000) return null
+      checkSelection(cur)
+      return { ...cur, done: true }
+    })
+  }
+  async function checkSelection(s: Sel) {
+    setSelInfo(null); setSelErr(''); setClipTitle('')
+    try {
+      const info = await api.timelineSelection(s.row.kind, s.row.id, s.a, s.b)
+      setSelInfo(info); setClipTitle(info.suggestedTitle)
+    } catch (e: any) { setSelErr(e.message) }
+  }
+  function clearSel() { setSel(null); setSelInfo(null); setSelErr('') }
+  async function makeClip(acceptGapsMs?: number) {
+    if (!sel || !selInfo?.recording) return
+    setClipBusy(true)
+    try {
+      const a = Date.parse(selInfo.range.from), b = Date.parse(selInfo.range.to)
+      await api.clipRecording(selInfo.recording.id, { title: clipTitle.trim() || selInfo.suggestedTitle, startMs: a, endMs: b, ...(acceptGapsMs ? { acceptGapsMs } : {}) })
+      notify({ kind: 'ok', message: `Clip "${clipTitle.trim() || selInfo.suggestedTitle}" is being made. It appears in the Media Library and as a tick on this row.` })
+      clearSel(); reload()
+    } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setClipBusy(false) }
+  }
+  /** Future: the programme drawer, with the dragged slot filled in. */
+  function openCreate(r: TimelineGridRow, a: number, b: number) {
+    const day = new Date(a); day.setHours(0, 0, 0, 0)
+    setDrawer({ owner: ownerOf(r), day, p: null, start: fmtT(a), end: fmtT(b) })
+  }
+  useEffect(() => {
+    if (!sel?.done) return
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') clearSel() }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [sel?.done])
 
   /** Past: the recording workbench at that moment. */
   function openPast(r: TimelineGridRow, at: number) {
@@ -301,6 +402,7 @@ export default function TimelineGrid() {
   }
   function openBlock(e: RMouseEvent<HTMLButtonElement>, r: TimelineGridRow, b: TimelineGridBlock) {
     e.stopPropagation()
+    if (swallowClick.current) return
     const s = Date.parse(b.start), en = Date.parse(b.end)
     // A pointer click lands at a time; Enter on a focused block has no position.
     const rect = e.currentTarget.getBoundingClientRect()
@@ -310,13 +412,15 @@ export default function TimelineGrid() {
     else openFuture(r, b)
   }
   function onTrackClick(e: RMouseEvent<HTMLDivElement>, r: TimelineGridRow) {
+    if (swallowClick.current) return
+    if (sel?.done) { clearSel(); return }
     const rect = e.currentTarget.getBoundingClientRect()
     const at = startMs + (e.clientX - rect.left) * msPerPx
     if (at < now - MIN) openPast(r, at)
     else if (at <= now + MIN) navigate(r.links.detail)
   }
   async function convert() {
-    if (!drawer) return
+    if (!drawer?.p) return
     setConverting(true)
     try { await api.convertProgramme(drawer.p.id); notify({ kind: 'ok', message: 'Conversion started' }); setDrawer(null); reload() }
     catch (e: any) { notify({ kind: 'error', message: e.message }) }
@@ -359,7 +463,8 @@ export default function TimelineGrid() {
             <svg viewBox="0 0 24 24" fill={pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2"><path d="M12 17v5M9 3h6l-1 6 4 4H6l4-4z" /></svg>
           </button>
         </div>
-        <div className="tlg-track" role="gridcell" onClick={e => onTrackClick(e, r)}>
+        <div className="tlg-track" role="gridcell" onClick={e => onTrackClick(e, r)}
+          onPointerDown={e => onTrackDown(e, r)} onPointerMove={onTrackMove} onPointerUp={onTrackUp} onPointerCancel={() => { press.current = null; setSel(s => (s && !s.done ? null : s)) }}>
           {r.media.gaps.filter(g => inView(Date.parse(g.start), Date.parse(g.end))).map(g => {
             const s = Date.parse(g.start), e = Date.parse(g.end)
             return <div key={`g${s}`} className="tlg-gap" style={{ left: clampX(s), width: Math.max(1, clampX(e) - clampX(s)) }}
@@ -370,20 +475,36 @@ export default function TimelineGrid() {
             return <div key={`m${s}`} className="tlg-run" style={{ left: clampX(s), width: Math.max(1, clampX(e) - clampX(s)) }}
               title={`Recorded ${fmtT(s)} to ${fmtT(e)}`} />
           })}
+          {(r.clashes ?? []).filter(c => inView(Date.parse(c.start), Date.parse(c.end))).map(c => {
+            const s = Date.parse(c.start), e = Date.parse(c.end)
+            return <div key={`c${c.a.id}${c.b.id}`} className="tlg-clash" style={{ left: clampX(s), width: Math.max(2, clampX(e) - clampX(s)) }} aria-hidden />
+          })}
           {r.programmes.filter(b => inView(Date.parse(b.start), Date.parse(b.end))).map(b => {
             const s = Date.parse(b.start), e = Date.parse(b.end)
             const when = e <= now ? 'past' : s <= now ? 'now' : 'next'
+            const clash = (r.clashes ?? []).filter(c => c.a.id === b.id || c.b.id === b.id)
             const left = clampX(s), w = Math.max(3, clampX(e) - left - 1)
             const verb = when === 'past' ? 'Open the recording' : when === 'now' ? 'Open the stream' : 'Open the programme'
             return (
-              <button key={b.id} type="button" className={`tlg-block ${when}`} style={{ left, width: w }}
+              <button key={b.id} type="button" className={`tlg-block ${when}${clash.length ? ' clash' : ''}`} style={{ left, width: w }}
                 onClick={ev => openBlock(ev, r, b)}
-                title={`${b.title}\n${fmtT(s)} to ${fmtT(e)} · ${fmtDur(e - s)}${b.asRun ? ' · as run' : ''}\n${verb}`}>
+                title={`${b.title}\n${fmtT(s)} to ${fmtT(e)} · ${fmtDur(e - s)}${b.asRun ? ' · as run' : ''}${clash.map(c => `\nClash: overlaps "${c.a.id === b.id ? c.b.title : c.a.title}" ${fmtT(Date.parse(c.start))} to ${fmtT(Date.parse(c.end))}`).join('')}\n${verb}`}>
                 {w > 34 && <span className="tlg-bt">{b.title}</span>}
                 {w > 110 && <span className="tlg-bs">{fmtT(s)}</span>}
               </button>
             )
           })}
+          {(r.outages ?? []).filter(o => inView(Date.parse(o.start), o.end ? Date.parse(o.end) : now)).map(o => {
+            const s = Date.parse(o.start), e = o.end ? Date.parse(o.end) : now
+            return <div key={`o${o.kind}${s}`} className={`tlg-out ${OUTAGE_CLS[o.kind] ?? 'down'}`}
+              style={{ left: clampX(s), width: Math.max(3, clampX(e) - clampX(s)) }}
+              title={`${o.label} ${fmtT(s)} to ${o.end ? fmtT(e) : 'now'} · ${fmtLen(e - s)}${o.reason ? `\n${o.reason}` : ''}`} />
+          })}
+          {sel && sel.row.id === r.id && (
+            <div className={`tlg-sel ${sel.mode}`} style={{ left: clampX(sel.a), width: Math.max(2, clampX(sel.b) - clampX(sel.a)) }} aria-hidden>
+              <span>{sel.mode === 'clip' ? `${fmtTs(sel.a)} to ${fmtTs(sel.b)} · ${fmtLen(sel.b - sel.a)}` : `New programme ${fmtT(sel.a)} to ${fmtT(sel.b)}`}</span>
+            </div>
+          )}
           {r.clips.filter(c => inView(Date.parse(c.start), Date.parse(c.start) + 1)).map(c => (
             <span key={c.id} className="tlg-clip" style={{ left: xOf(Date.parse(c.start)) }} title={`Clip${c.title ? `: ${c.title}` : ''} at ${fmtT(Date.parse(c.start))}`} />
           ))}
@@ -401,7 +522,7 @@ export default function TimelineGrid() {
         <label className="tlg-check">
           <input type="checkbox" checked={pinnedFirst} onChange={e => setPinnedFirst(e.target.checked)} /> Pinned first
         </label>
-        <span className="tlg-hint">Drag the ruler or use ← → to move, + and − to zoom, N for now</span>
+        <span className="tlg-hint">Drag the ruler to move · drag on a row: the past makes a clip, the future adds a programme</span>
         <span className="tlg-status">{loading ? 'Loading…' : rows ? `${rows.length} stream${rows.length === 1 ? '' : 's'}` : ''}</span>
         <button type="button" className="btn ghost" onClick={reload}>Refresh</button>
       </div>
@@ -445,8 +566,58 @@ export default function TimelineGrid() {
         </div>
       </div>
 
+      {sel?.done && sel.mode === 'clip' && (
+        <div className="tlg-tray" role="region" aria-label="Clip from the selection">
+          <div className="tlg-tray-h">
+            <b>Clip from {sel.row.name}</b>
+            <span className="tlg-tray-t">{fmtTs(sel.a)} to {fmtTs(sel.b)} · {fmtLen(sel.b - sel.a)}</span>
+            <span className="spacer" />
+            <button type="button" className="btn ghost sm" onClick={clearSel}>Cancel</button>
+          </div>
+          {selErr ? <div className="tlg-tray-msg bad">{selErr}</div>
+            : !selInfo ? <div className="tlg-tray-msg">Checking what was recorded…</div>
+            : (
+              <>
+                <div className={`tlg-tray-msg${selInfo.clippable ? '' : ' warn'}`}>
+                  {selInfo.clippable
+                    ? (selInfo.coveragePct >= 99.9 ? 'Fully recorded.' : `${selInfo.coveragePct}% recorded.`)
+                    : selInfo.reason?.code === 'coverage_gap'
+                      ? `${fmtLen(selInfo.gaps.reduce((n, g) => n + g.ms, 0))} of this is missing (${selInfo.gaps.length} gap${selInfo.gaps.length === 1 ? '' : 's'}). The clip can skip ${selInfo.gaps.length === 1 ? 'it' : 'them'}; the sound jumps at each.`
+                      : selInfo.reason?.code === 'no_media'
+                        ? 'Nothing was recorded in this stretch, so there is nothing to clip.'
+                        : selInfo.reason?.message}
+                  {selInfo.range.clampedToNow && ' The selection was cut at now: only what has aired can be clipped.'}
+                </div>
+                {!selInfo.recording && selInfo.reason?.code !== 'no_media' && (
+                  <div className="tlg-tray-msg warn">
+                    {selInfo.recordingCount === 0
+                      ? 'This was captured but no recording holds it, and a clip is cut from a recording. Start a recording to keep what follows.'
+                      : `This stretch spans ${selInfo.recordingCount} recordings, and a clip is cut from one. Open the source to choose.`}
+                  </div>
+                )}
+                {selInfo.reason?.code !== 'no_media' && <div className="tlg-tray-row">
+                  <label className="tlg-tray-field">Title
+                    <input value={clipTitle} onChange={e => setClipTitle(e.target.value)} placeholder={selInfo.suggestedTitle} />
+                  </label>
+                  {selInfo.recording && selInfo.clippable && (
+                    <button type="button" className="btn primary" disabled={clipBusy} onClick={() => makeClip()}>{clipBusy ? 'Making…' : 'Make clip'}</button>
+                  )}
+                  {selInfo.recording && !selInfo.clippable && selInfo.reason?.code === 'coverage_gap' && (
+                    <button type="button" className="btn primary" disabled={clipBusy}
+                      onClick={() => makeClip(Math.max(...selInfo.gaps.map(g => g.ms)) + 1)}>{clipBusy ? 'Making…' : 'Make clip, skipping the gaps'}</button>
+                  )}
+                  {selInfo.reason?.code !== 'no_media' && <button type="button" className="btn ghost" onClick={() => navigate(selInfo.links.workbench)}>
+                    {selInfo.recording ? 'Open in the workbench' : 'Open the source'}
+                  </button>}
+                </div>}
+              </>
+            )}
+        </div>
+      )}
+
       {drawer && (
         <ProgrammeDrawer owner={drawer.owner} day={drawer.day} programme={drawer.p} vod={drawer.vod}
+          initialStart={drawer.start} initialEnd={drawer.end}
           converting={converting} onConvert={convert}
           onClose={() => setDrawer(null)}
           onDone={(msg) => { setDrawer(null); if (msg) notify({ kind: 'ok', message: msg }); reload() }} />

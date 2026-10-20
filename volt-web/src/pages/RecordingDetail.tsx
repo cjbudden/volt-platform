@@ -84,6 +84,13 @@ function LoadStatus({ parts }: { parts: Record<LoadPart, LoadInfo> }) {
 
 export default function RecordingDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const initialQuery = useMemo(() => new URLSearchParams(window.location.search).get('q') || '', [])
+  // DEEP LINKS from the Live Streams timeline: ?from=&to= (epoch ms) opens with
+  // those marks set, ?t= opens at that moment. Read once, on arrival.
+  const deepLink = useMemo(() => {
+    const q = new URLSearchParams(window.location.search)
+    const n = (k: string) => { const v = Number(q.get(k)); return Number.isFinite(v) && v > 0 ? v : null }
+    return { from: n('from'), to: n('to'), t: n('t') }
+  }, [])
   const [rec, setRec] = useState<Rec | null>(null)
   const [tl, setTl] = useState<RecordingTimeline | null>(null)
   const [err, setErr] = useState('')
@@ -172,6 +179,20 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   // context to scrub in), default marks on the last 5 minutes
   useEffect(() => {
     if (!tl || !tl.spans.length || loaded) return
+    if (deepLink.from != null && deepLink.to != null && deepLink.to > deepLink.from) {
+      // the marks as given, with a little context either side to scrub in
+      const pad = Math.min(15 * 60_000, Math.max(60_000, (deepLink.to - deepLink.from) / 2))
+      loadRange(deepLink.from - pad, deepLink.to + pad)
+      setSelFrom(deepLink.from); setSelTo(deepLink.to)
+      setPlayheadMs(deepLink.from)
+      return
+    }
+    if (deepLink.t != null) {
+      loadRange(deepLink.t - 10 * 60_000, deepLink.t + 20 * 60_000)
+      setSelFrom(deepLink.t); setSelTo(deepLink.t + 5 * 60_000)
+      setPlayheadMs(deepLink.t)
+      return
+    }
     const last = tl.spans[tl.spans.length - 1]
     const from = Math.max(tl.spans[0].startMs, last.endMs - 2 * 3600_000)
     loadRange(from, last.endMs)
@@ -183,6 +204,14 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   // starts where the work usually is instead of squashed across days.
   useEffect(() => {
     if (!domain || view) return
+    // A deep link opens on its moment, not on the most recent material.
+    const at = deepLink.from ?? deepLink.t
+    if (at != null) {
+      const until = deepLink.to ?? at + 5 * 60_000
+      const pad = Math.max(2 * 60_000, (until - at) * 0.25)
+      setView({ start: Math.max(domain.start, at - pad), end: Math.min(domain.end, until + pad) })
+      return
+    }
     const end = domain.end
     const start = Math.max(domain.start, end - 30 * 60_000)
     setView({ start, end })

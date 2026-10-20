@@ -89,6 +89,34 @@ function pure() {
   check('the gap is the resolver gap', m.gaps[0].start, new Date(now - H).toISOString());
   check('with its reason', m.gaps[0].reason, 'between-runs');
   check('no resolution means no lane, not "nothing recorded"', __testing.mediaFrom(null).gaps.length, 0);
+
+  console.log('\n== outages from the stream log ==');
+  const M = 60_000, t0 = now - 3 * H;
+  const sev = (type: string, ts: number, detail: any = {}) => ({ type, ts, detail });
+  const o = __testing.outagesFrom([
+    sev('source.down', t0, { reason: 'no packets' }),
+    sev('filler.engaged', t0 + M),
+    sev('filler.cleared', t0 + 10 * M),
+    sev('source.up', t0 + 20 * M),
+    sev('source.down', t0 + 30 * M, { source: 'backup' }),
+    sev('channel.stop', t0 + 40 * M, { reason: 'ffmpeg exited (rc=1)' }),
+    sev('channel.start', t0 + 45 * M),
+    sev('channel.stop', t0 + 60 * M, { reason: 'stopped by operator' }),
+    sev('channel.start', t0 + 70 * M),
+    sev('packager.down', t0 + 80 * M),
+  ], t0 - H, now);
+  check('five outages: source, filler, backup source, stop, packager', o.map((x) => x.kind).join(','), 'source,filler,source,stopped,packager');
+  check('a source outage runs down to up', [o[0].start, o[0].end].join(' '), `${new Date(t0).toISOString()} ${new Date(t0 + 20 * M).toISOString()}`);
+  check('with the reason it went down', o[0].reason, 'no packets');
+  check('a named source is labelled by name', o[2].label, 'No backup source');
+  check('a stop closes what was open', o[2].end, new Date(t0 + 40 * M).toISOString());
+  check('a failed stop is an outage until the next start', o[3].end, new Date(t0 + 45 * M).toISOString());
+  check('an operator stop is not an outage', o.filter((x) => x.kind === 'stopped').length, 1);
+  check('something still open runs to now', o[4].end, null);
+  check('outages outside the window are left out',
+    __testing.outagesFrom([sev('source.down', t0), sev('source.up', t0 + M)], t0 + 2 * M, now).length, 0);
+  check('one that began before the window is kept',
+    __testing.outagesFrom([sev('source.down', t0), sev('source.up', t0 + 10 * M)], t0 + 5 * M, now).length, 1);
 }
 
 // ---------------------------------------------------------------- integration
@@ -241,6 +269,48 @@ async function integration() {
     check('starting at its actual start', ev?.programmes?.[0]?.start, at(now - 50 * 60_000));
     check('ending at its scheduled end', ev?.programmes?.[0]?.end, at(now + H));
     check('the block is the event, not a programme', ev?.programmes?.[0]?.source, 'event');
+
+    console.log('\n== outages and clashes on a row ==');
+    await query(
+      `INSERT INTO stream_events(channel_id,type,detail,ts) VALUES
+         ($1,'source.down','{"reason":"no packets"}',$2), ($1,'source.up','{}',$3),
+         ($1,'channel.stop','{"reason":"ffmpeg exited (rc=1)"}',$4), ($1,'channel.start','{}',$5)`,
+      [TV2, at(now - 90 * 60_000), at(now - 80 * 60_000), at(now - 40 * 60_000), at(now - 35 * 60_000)]);
+    await query(
+      `INSERT INTO programmes(channel_id,title,starts_at,ends_at,status) VALUES
+         ($1,'Overlap A',$2,$3,'scheduled'), ($1,'Overlap B',$4,$5,'scheduled')`,
+      [TV3, at(now + H), at(now + 2 * H), at(now + 90 * 60_000), at(now + 150 * 60_000)]);
+    const marks = await grid(`?${win}`);
+    const bravo = marks.body.rows.find((r: any) => r.id === TV2);
+    check('a row carries its outages', bravo?.outages?.map((x: any) => x.kind).join(','), 'source,stopped');
+    check('a source outage is drawn down to up', bravo?.outages?.[0]?.end, at(now - 80 * 60_000));
+    const charlie = marks.body.rows.find((r: any) => r.id === TV3);
+    check('two overlapping programmes are one clash', charlie?.clashes?.length, 1);
+    check('the clash is the overlap', [charlie?.clashes?.[0]?.start, charlie?.clashes?.[0]?.end].join(' '),
+      `${at(now + 90 * 60_000)} ${at(now + 2 * H)}`);
+
+    console.log('\n== a dragged selection ==');
+    const sel = async (qs: string, token = owner) => {
+      const r = await fetch(`${API}/api/timeline/selection?${qs}`, { headers: { authorization: 'Bearer ' + token } });
+      return { status: r.status, body: await r.json().catch(() => null) as any };
+    };
+    const s1 = await sel(`kind=channel&id=${TV1}&from=${now - 80 * 60_000}&to=${now - 40 * 60_000}`);
+    check('a past range is answered', s1.status, 200);
+    check('nothing on disk is not clippable', s1.body?.clippable, false);
+    check('and says why', s1.body?.reason?.code, 'no_media');
+    check('the recording that holds the range is named', s1.body?.recording?.id, REC);
+    check('the title comes from the programme that fills most of it', s1.body?.suggestedTitle, 'Morning news');
+    check('the workbench link opens the recording at the range', s1.body?.links?.workbench,
+      `/recordings/${REC}?from=${now - 80 * 60_000}&to=${now - 40 * 60_000}`);
+    const s2 = await sel(`kind=channel&id=${TV1}&from=${now - 10 * 60_000}&to=${now + H}`);
+    check('a range running into the future is cut at now', s2.body?.range?.clampedToNow, true);
+    check('no recording holds the stretch after the recording ended', s2.body?.recording, null);
+    const s3 = await sel(`kind=channel&id=${TV1}&from=${now + H}&to=${now + 2 * H}`);
+    check('a range wholly in the future is a 400', s3.status, 400);
+    const s4 = await sel(`kind=channel&id=${TV1}&from=${now - 8 * H}&to=${now - H}`);
+    check('more than six hours is a 400', s4.status, 400);
+    const s5 = await sel(`kind=radio&id=${RD1}&from=${now - H}&to=${now - 30 * 60_000}`, tvOnly);
+    check('a stream the role cannot view is not found', s5.status, 404);
   } finally {
     await query(`DELETE FROM users WHERE id=$1`, [U]).catch(() => {});
     await query(`DELETE FROM accounts WHERE id=$1`, [A]).catch(() => {});
