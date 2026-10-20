@@ -7,7 +7,7 @@
 //  TV channel get one each (RadioStation / TelevisionChannel, with the
 //  BroadcastService fields), events get a family (BroadcastEvent as the base,
 //  and a town hall, a worship service, a sports match and a multi-sport event
-//  extending it), and on-demand assets get Clip and Episode.
+//  extending it), and on-demand assets get Clip, Episode and Movie.
 //
 //  RULES the rest of the platform leans on:
 //   - a radio station, a TV channel and an event ALWAYS have a type. Create
@@ -188,6 +188,29 @@ export const STANDARD_TYPES: StandardType[] = [
       f('description', 'Description', 'text', { epg: 'description', schemaOrg: 'description' }),
       f('genre', 'Genre', 'enum', { options: GENRES, multiple: true, epg: 'category', schemaOrg: 'genre' }),
       f('image', 'Image', 'url', { epg: 'icon', schemaOrg: 'image' }),
+      // Added 20 Oct 2026 for the library's target metadata. Accounts seeded
+      // before then keep their copy; the library reports the field as "not on
+      // this type" rather than missing (services/vodLibrary.ts).
+      f('rating', 'Content rating', 'string', { schemaOrg: 'contentRating' }),
+    ],
+  },
+  {
+    // Named like the other on-demand types ("Clip / highlight", "Programme /
+    // episode") and not plain "Movie", which accounts have created for
+    // themselves: the name is unique per account.
+    key: 'movie', name: 'Movie / feature film',
+    description: 'A feature film or one-off programme that is not part of a series. schema.org Movie.',
+    schemaOrgType: 'Movie', targetKind: 'vod', appliesTo: ['vod'], domain: 'ondemand',
+    fields: [
+      f('title', 'Title', 'string', { required: true, epg: 'title', schemaOrg: 'name' }),
+      f('description', 'Synopsis', 'text', { epg: 'description', schemaOrg: 'description' }),
+      f('year', 'Year', 'number', { schemaOrg: 'copyrightYear' }),
+      f('genre', 'Genre', 'enum', { options: GENRES, multiple: true, epg: 'category', schemaOrg: 'genre' }),
+      f('cast', 'Cast', 'tags', { epg: 'credits.actor', schemaOrg: 'actor' }),
+      f('director', 'Director', 'string', { epg: 'credits.director', schemaOrg: 'director' }),
+      f('rating', 'Content rating', 'string', { schemaOrg: 'contentRating' }),
+      f('language', 'Language', 'string', { epg: 'language', schemaOrg: 'inLanguage' }),
+      f('image', 'Poster', 'url', { epg: 'icon', schemaOrg: 'image' }),
     ],
   },
 ];

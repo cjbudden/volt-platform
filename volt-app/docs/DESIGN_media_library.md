@@ -284,3 +284,140 @@ Answered 5 Sep: rules and defaults are client-account level; publishing points
 are the client's registered apps and its configured social accounts only;
 rules form a ladder: account default, then by content type, then per channel /
 event / station, then per asset (most specific wins, resolved per field).
+
+## 7. Library views, filters and target metadata (BUILT 20 Oct 2026)
+
+The Media Library screen (`/vod`, `volt-web/src/pages/Vod.tsx` and `pages/vod/`)
+now has a grid and a list view, server-side filters by content type, target
+metadata per type with a completeness measure, EPG auto-fill, and the encode
+settings of each asset.
+
+### 7.1 Views
+
+- **List | Grid** toggle (icons and labels) in the toolbar, remembered in this
+  browser (`volt.list.vod.view`). Both views share the selection, the bulk bar,
+  the sort, the paging and the asset detail.
+- **Grid card:** keyscreen through the image service (480x270, lazy), length
+  and top rendition on the image, title, content type (with its schema.org
+  type on hover), availability pill, metadata completeness, encode summary
+  (top rendition, codec, renditions). The checkbox and the card are separate
+  controls, so Tab reaches both and Enter opens the card in a drawer.
+- **Table:** the existing columns, plus optional ones chosen under
+  **Columns** and remembered: Content type and Metadata (on by default), Top
+  rendition, Codec, Renditions, Source blocks.
+- **Paging** on the server: 48 a page with a total, Previous and Next.
+- **Bulk actions:** Fill from EPG (empty fields only, clear matches only) and
+  Publish.
+
+### 7.2 Filters (all server side, all in the URL)
+
+| Filter | Page URL | API (`GET /api/vod`, list standard) |
+|---|---|---|
+| Content type, multi-select with counts | `type=<id>,<id>` | `schema_id=<id>,<id>` (also `schema_key=episode,movie`, `schema_org_type=Episode`) |
+| Availability | `avail=available,scheduled` | `availability_state=...` |
+| Source | `origin=clip,upload` | `origin=recording,clip,upload,watchfolder` |
+| Missing required metadata | `missing=1` | `metadata_missing_required=true` |
+| Completeness | | `metadata_completeness[lt]=50`, `sort=metadata_completeness` |
+| Top resolution | `res=2160,1080` | `top_height=2160,1080` or `top_height[gte]=1080` |
+| Codec | `codec=h264` | `video_codec=h264` |
+| Review, stale copy | `review=needs`, `stale=1` | `review_state=...`, `has_stale_publication=true` |
+| Date added | `from=2026-10-01&to=2026-10-18` | `created_at[gte]=2026-10-01&created_at[lt]=2026-10-19` |
+| Duration (minutes) | `dmin=5&dmax=60` | `duration_ms[gte]=300000&duration_ms[lte]=3600000` |
+| Text | `q=harbour` | `q=harbour` (title, file name, source, type, description) |
+
+Filters combine (AND across filters, any-of within one). `GET /api/vod/facets`
+takes the same query and returns the count for each choice with every other
+filter applied (`types`, `availability`, `origins`, `resolutions`, `codecs`,
+`metadata`, and `total`).
+
+New list fields: `schema_key`, `schema_org_type`, `origin`,
+`metadata_completeness` (0 to 100, null with no type),
+`metadata_missing_required`, `top_height`, `video_codec`, `rendition_count`.
+
+Indexes (migration 0071): `schema_id, created_at`, `top_height`,
+`video_codec`, `duration_ms`, the millisecond `created_at, id` keyset, and
+`programmes(clip_asset_id)`. `top_height` and `video_codec` are columns kept
+by a trigger (`trg_vod_assets_encode_facts`) from `encode_result.kept` for a
+file, or from the live output profile for a recording-derived asset, so the
+two encode filters are indexable.
+
+### 7.3 Target metadata per content type
+
+Defined in `services/vodLibrary.ts` (`TARGETS`) over the existing standard
+types' own field keys. Required first, then recommended.
+
+| Type (schema.org) | Required | Recommended |
+|---|---|---|
+| Programme / episode (Episode) | title, series, episodeNumber, description | season, genre, rating, image |
+| Movie / feature film (Movie, new) | title, description, year | genre, cast, director, rating, image |
+| Clip / highlight (VideoObject) | headline, description | keywords, thumbnail |
+| Song (MusicRecording) | title, artist | album, genre, released, artwork |
+| Interview (Interview) | title, guests | interviewer, topic, description, image |
+| Sports match (SportsEvent) | name, sport, competition, homeTeam, awayTeam | venue, round, description, image |
+| Multi-sport event (SportsEvent) | name, sports | edition, venues, description, image |
+| Broadcast event (BroadcastEvent) | name, description | category, organizer, location, image |
+| Town hall, worship service | name | their own fields, description |
+| TV channel, radio station (inherited by a clip) | name | description, genre, logo |
+| A client's own type | the fields it marks required | all its fields |
+
+- A field the schema itself marks required is always required.
+- An asset with no content type counts as missing required metadata.
+- A target key the account's copy of a type does not have (seeded before the
+  field existed, or edited out) is reported as "not on this type", not as
+  missing. Episode gained `rating` and the Movie type was added on 20 Oct;
+  existing accounts get Movie on their next seed and keep their Episode copy.
+- The asset page's Metadata tab shows the target fields, filled or empty,
+  required, and an EPG marker on any value filled from the guide.
+- `GET /api/vod/:id/target-metadata` returns the type, the target fields,
+  the completeness and the provenance.
+
+### 7.4 Fill metadata from the EPG
+
+`services/epgFill.ts`.
+
+- **Match:** the programme whose auto-VOD made the asset
+  (`programmes.clip_asset_id`) wins. Otherwise programmes of the same channel
+  or event overlapping the asset's window, using as-run times when the guide
+  has them, ranked by overlap. A match is clear when the best programme
+  covers half the asset (or the asset is inside it) and the runner-up overlaps
+  less than half as much. An uploaded file has no window and gets no
+  suggestions, and says so. A deployment with no guide tables gets none either.
+- **Suggestions:** title (the sub-title for an episode, as XMLTV puts the
+  series in the title), series, season, episode number (also read from
+  "S2E5"), synopsis, genre (only values the type's options allow), rating,
+  image, year, cast, director, teams, competition, venue, language, keywords.
+  A content type is suggested when the programme says what it is (an episode,
+  a film, a fixture), with the values that would not carry over listed.
+- **Never overwrite:** empty fields are ticked, filled ones are shown as a
+  conflict and only replaced when their own Replace box is ticked
+  (`overwrite` in the API). Bulk fill has no overwrite and uses clear matches
+  only.
+- **Provenance:** `vod_assets.metadata_provenance` holds, per field, the
+  programme id and title, when and by whom. A hand edit of that field drops
+  its entry. Every fill is written to the audit log as a `vod_asset` update
+  with the programme id and the fields.
+- Routes: `GET /api/vod/:id/epg-fill` (preview, `?programmeId=` to choose),
+  `POST /api/vod/:id/epg-fill` (`fields`, `overwrite`, `applyType`,
+  `title`), `POST /api/vod/epg-fill` (bulk, `ids` up to 200).
+
+### 7.5 Encode settings
+
+`GET /api/vod/:id/encode` and the asset page's **Encode** tab: workflow
+(transcode or package only), ladder profile, renditions (resolution, bitrate,
+codec, profile, frame rate) and the rungs not encoded with the reason, audio
+tracks, captions and subtitles, segment duration, packaging (HLS, DASH, MP4),
+container, DRM and the source or mezzanine.
+
+Each value says where it came from: stored, derived from the encoder's fixed
+settings (marked "derived"), or not recorded. Gaps today, listed on the tab:
+
+- audio tracks are not recorded per asset (shown from the encoder contract:
+  AAC 128 kb/s, stereo, 48 kHz per source track), and their languages are not
+  recorded at all
+- the video profile (High, Main) is not recorded
+- caption tracks of file encodes are not recorded
+- file encodes are packaged without DRM
+- a package-only source does not declare its codec or audio
+
+Recording-derived assets read the live output profile of their stream's group
+(rungs, packaging, workflow, segment length, DRM systems, caption languages).

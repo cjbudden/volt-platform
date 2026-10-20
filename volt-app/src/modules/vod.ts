@@ -21,7 +21,9 @@ import { actor, writeAudit } from '../services/audit';
 import { publish, withdraw, republish, NotPublishable } from '../services/availability';
 import { resolveForAsset } from '../services/publishingRules';
 import { cleanSettings } from './publishingRules';
-import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage } from '../util/listQuery';
+import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage, onlyIdParam } from '../util/listQuery';
+import { ORIGIN_SQL, ORIGINS, completenessPctSql, missingRequiredCountSql, completeness as metadataCompleteness, targetFields, encodeDetails } from '../services/vodLibrary';
+import { previewFill, applyFill, pruneProvenance, typeOf } from '../services/epgFill';
 
 /**
  * VOD Library — assets DERIVED from a recording (auto-published, clips, exports).
@@ -55,6 +57,21 @@ const OWNED = `
 
 /** The account that owns the asset, whichever way it got here. */
 const OWNER_ACCOUNT = `COALESCE(g.account_id, v.account_id)`;
+
+/**
+ * THE LIBRARY VIEW COLUMNS (services/vodLibrary.ts): the asset's content type
+ * with its parent's fields (the list joins `ms` and its parent `msp`), the
+ * target-metadata completeness, where the asset came from, and the encode
+ * summary. Trusted SQL, used both as list fields and in the SELECT.
+ */
+const EFFECTIVE_FIELDS = `(CASE WHEN ms.id IS NULL THEN NULL ELSE COALESCE(msp.fields, '[]'::jsonb) || COALESCE(ms.fields, '[]'::jsonb) END)`;
+const MISSING_REQUIRED_SQL = missingRequiredCountSql(EFFECTIVE_FIELDS, 'ms.standard_key', 'v.metadata');
+const COMPLETENESS_SQL = completenessPctSql(EFFECTIVE_FIELDS, 'ms.standard_key', 'v.metadata');
+const RENDITION_COUNT_SQL = `COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(v.encode_result->'kept') = 'array' THEN v.encode_result->'kept' END),
+  (SELECT jsonb_array_length(op.rungs) FROM output_profiles op WHERE op.id = g.output_profile_id AND jsonb_typeof(op.rungs) = 'array'))`;
+const LIBRARY_JOINS = `
+       LEFT JOIN metadata_schemas ms ON ms.id = v.schema_id
+       LEFT JOIN metadata_schemas msp ON msp.id = ms.extends_id`;
 
 /**
  * THE LIBRARY LIST, searchable, filterable, sortable and paged the standard
@@ -92,6 +109,15 @@ const VOD_LIST = defineList({
     duration_ms: { sql: 'v.duration_ms', type: 'number' },
     source_bytes: { sql: 'v.source_bytes', type: 'number' },
     source_coverage_pct: { sql: 'v.source_coverage_pct', type: 'number' },
+    // Library views (DESIGN_media_library.md, "Library views, filters and target metadata")
+    schema_key: { sql: 'ms.standard_key', type: 'string', doc: 'Standard content type key (episode, movie, clip, sports-match ...)' },
+    schema_org_type: { sql: 'ms.schema_org_type', type: 'string', doc: 'schema.org type of the content type (Episode, Movie, VideoObject, SportsEvent ...)' },
+    origin: { sql: ORIGIN_SQL, type: 'enum', values: ORIGINS, doc: 'recording, clip, upload or watchfolder' },
+    metadata_completeness: { sql: COMPLETENESS_SQL, type: 'number', doc: 'Target metadata filled, 0 to 100' },
+    metadata_missing_required: { sql: `(${MISSING_REQUIRED_SQL} > 0)`, type: 'boolean', doc: 'A required target field is empty, or the asset has no content type' },
+    top_height: { sql: 'v.top_height', type: 'number', doc: 'Height of the top rendition (2160, 1080, 720 ...)' },
+    video_codec: { sql: 'v.video_codec', type: 'string', doc: 'h264, hevc or av1' },
+    rendition_count: { sql: RENDITION_COUNT_SQL, type: 'number', sort: false },
     has_stale_publication: { sql: 'EXISTS (SELECT 1 FROM publications p WHERE p.vod_asset_id = v.id AND p.stale)', type: 'boolean', doc: 'A published copy is older than this asset' },
     publication_count: { sql: '(SELECT count(*) FROM publications p WHERE p.vod_asset_id = v.id)::int', type: 'number' },
     encode_state: { sql: 'j.state', type: 'enum', values: ['queued', 'running', 'succeeded', 'failed', 'cancelled'] },
@@ -113,8 +139,7 @@ vodRouter.get(
   asyncHandler(async (req, res) => {
     const params: unknown[] = [accountId(req)];
     const pl = parseList(VOD_LIST, req.query, params);
-    const from = `${OWNED}
-       LEFT JOIN metadata_schemas ms ON ms.id = v.schema_id
+    const from = `${OWNED}${LIBRARY_JOINS}
        LEFT JOIN jobs j ON j.id = v.encode_job_id
        WHERE COALESCE(g.account_id, v.account_id) = $1`;
     const fromCount = from + countWhereSql(pl);  // totals ignore the cursor
@@ -132,13 +157,179 @@ vodRouter.get(
               -- yet is not broken, it is still being made, and the list has to
               -- be able to say which.
               j.state AS encode_state, j.progress_pct AS encode_pct,
-              j.progress_note AS encode_note, j.last_error AS encode_error
+              j.progress_note AS encode_note, j.last_error AS encode_error,
+              -- THE LIBRARY VIEW: content type, completeness, origin, encode summary.
+              ms.standard_key AS schema_key, ms.schema_org_type,
+              ${ORIGIN_SQL} AS origin,
+              ${COMPLETENESS_SQL} AS metadata_completeness,
+              (${MISSING_REQUIRED_SQL} > 0) AS metadata_missing_required,
+              ${RENDITION_COUNT_SQL} AS rendition_count
        ${fromPage}
        ${pageSql(pl)}`,
       params
     );
     const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${fromCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
     res.json(finishPage(req, res, pl, rows as any[], total));
+  })
+);
+
+/**
+ * FACETS FOR THE LIBRARY FILTERS: how many assets each choice would show.
+ *
+ * Takes the same query as the list. Each facet is counted with every OTHER
+ * filter applied and its own left out, so a chip's number is what ticking it
+ * (alone, on top of the rest) would show. Declared before '/:id'.
+ */
+const FACET_PARAMS: Record<string, string[]> = {
+  types: ['schema_id', 'schema_key', 'schema_org_type', 'schema_name'],
+  availability: ['availability_state', 'published'],
+  origins: ['origin', 'source_kind', 'kind'],
+  resolutions: ['top_height'],
+  codecs: ['video_codec'],
+  metadata: ['metadata_missing_required', 'metadata_completeness'],
+};
+const FACET_SQL: Record<string, { select: string; group: string }> = {
+  types: { select: `ms.id AS id, ms.name AS name, ms.standard_key AS key, ms.schema_org_type AS schema_org_type`, group: 'ms.id, ms.name, ms.standard_key, ms.schema_org_type' },
+  availability: { select: `v.availability_state AS value`, group: 'v.availability_state' },
+  origins: { select: `${ORIGIN_SQL} AS value`, group: '1' },
+  resolutions: { select: `v.top_height AS value`, group: 'v.top_height' },
+  codecs: { select: `v.video_codec AS value`, group: 'v.video_codec' },
+  metadata: { select: `(${MISSING_REQUIRED_SQL} > 0) AS value`, group: '1' },
+};
+
+vodRouter.get(
+  '/facets',
+  asyncHandler(async (req, res) => {
+    const strip = (keys: string[]) => {
+      const q: Record<string, any> = { ...req.query };
+      for (const k of [...keys, 'cursor', 'offset', 'limit', 'count', 'sort']) delete q[k];
+      return q;
+    };
+    const out: Record<string, any[]> = {};
+    for (const [name, keys] of Object.entries(FACET_PARAMS)) {
+      const params: unknown[] = [accountId(req)];
+      const pl = parseList(VOD_LIST, strip(keys) as any, params);
+      const f = FACET_SQL[name];
+      const groupBy = f.group === '1' ? '1' : f.group;
+      out[name] = await query(
+        `SELECT ${f.select}, count(*)::int AS n
+           FROM vod_assets v
+           LEFT JOIN channels c ON c.id = v.channel_id
+           LEFT JOIN events   e ON e.id = v.event_id
+           LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)${LIBRARY_JOINS}
+           LEFT JOIN jobs j ON j.id = v.encode_job_id
+          WHERE COALESCE(g.account_id, v.account_id) = $1 ${countWhereSql(pl)}
+          GROUP BY ${groupBy} ORDER BY n DESC`, countParams(pl, params));
+    }
+    const allParams: unknown[] = [accountId(req)];
+    const all = parseList(VOD_LIST, strip([]) as any, allParams);
+    const total = await one<{ n: number }>(
+      `SELECT count(*)::int AS n ${OWNED}${LIBRARY_JOINS} LEFT JOIN jobs j ON j.id = v.encode_job_id
+        WHERE COALESCE(g.account_id, v.account_id) = $1 ${countWhereSql(all)}`, countParams(all, allParams));
+    res.json({ total: total?.n ?? 0, facets: out });
+  })
+);
+
+/**
+ * BULK EPG FILL. For each asset, the confident programme match only, empty
+ * fields only: a bulk action never overwrites anything and never guesses
+ * between two programmes. Reports per asset what it did and why not.
+ */
+vodRouter.post(
+  '/epg-fill',
+  asyncHandler(async (req, res) => {
+    const b = z.object({
+      ids: z.array(z.string().uuid()).min(1).max(200),
+      title: z.boolean().default(false),
+      applyType: z.boolean().default(false),
+    }).parse(req.body);
+    const acct = accountId(req);
+    const who = actor(req);
+    const results = [];
+    for (const id of b.ids) {
+      const a = await fetchOwned(id, acct);
+      if (!a) { results.push({ assetId: id, applied: [], skipped: [], programmeId: null, typeChanged: false, titleChanged: false, reason: 'not found' }); continue; }
+      results.push(await applyFill(a, acct, who, { requireConfident: true, title: b.title, applyType: b.applyType, overwrite: [] }));
+    }
+    res.json({
+      results,
+      filled: results.filter((r) => r.applied.length || r.titleChanged || r.typeChanged).length,
+      unchanged: results.filter((r) => !r.applied.length && !r.titleChanged && !r.typeChanged).length,
+    });
+  })
+);
+
+/** The asset's content type, its target fields, completeness and where filled values came from. */
+vodRouter.get(
+  '/:id/target-metadata',
+  onlyIdParam,
+  asyncHandler(async (req, res) => {
+    const a = await fetchOwned(req.params.id, accountId(req));
+    if (!a) throw notFound('VOD asset not found');
+    const type = await typeOf(a.schema_id, accountId(req));
+    const tf = type ? targetFields(type.fields, type.standardKey) : { fields: [], notOnType: [] };
+    res.json({
+      type: type ? { id: type.id, name: type.name, key: type.standardKey, schemaOrgType: type.schemaOrgType } : null,
+      fields: tf.fields.map((f) => ({ key: f.key, label: f.label ?? f.key, type: f.type, required: f.required, options: f.options, multiple: f.multiple, schemaOrg: f.schemaOrg ?? null, epg: f.epg ?? null })),
+      completeness: metadataCompleteness(type?.fields ?? null, type?.standardKey, a.metadata),
+      provenance: a.metadata_provenance ?? {},
+    });
+  })
+);
+
+/** Encode settings for the asset page: stored where stored, derived and marked where not. */
+vodRouter.get(
+  '/:id/encode',
+  onlyIdParam,
+  asyncHandler(async (req, res) => {
+    const a = await fetchOwned(req.params.id, accountId(req));
+    if (!a) throw notFound('VOD asset not found');
+    const ladderGroup = a.ladder_group_id
+      ? await one<any>(`SELECT name, packaging, codec_backend, segment_dur FROM encode_ladder_groups WHERE id = $1`, [a.ladder_group_id]).catch(() => null)
+      : null;
+    const outputProfile = (a.channel_id || a.event_id) ? await one<any>(
+      `SELECT op.name, op.rungs, op.packaging::text AS packaging, op.workflow_type::text AS workflow_type, op.codec_backend::text AS codec_backend,
+              op.segment_dur, op.drm_enabled, dc.systems AS drm_systems, op.captions_enabled, op.caption_source_lang, op.caption_targets
+         FROM groups g JOIN output_profiles op ON op.id = g.output_profile_id
+         LEFT JOIN drm_configs dc ON dc.id = op.drm_config_id
+        WHERE g.id = COALESCE((SELECT group_id FROM channels WHERE id = $1), (SELECT group_id FROM events WHERE id = $2))`,
+      [a.channel_id, a.event_id]) : null;
+    res.json(encodeDetails(a, { ladderGroup, outputProfile }));
+  })
+);
+
+/** Preview: the matching programme(s) and what they would fill. Nothing is written. */
+vodRouter.get(
+  '/:id/epg-fill',
+  onlyIdParam,
+  asyncHandler(async (req, res) => {
+    const a = await fetchOwned(req.params.id, accountId(req));
+    if (!a) throw notFound('VOD asset not found');
+    const pid = typeof req.query.programmeId === 'string' && req.query.programmeId ? req.query.programmeId : null;
+    res.json(await previewFill(a, accountId(req), pid));
+  })
+);
+
+/**
+ * Apply: the fields the operator ticked. A field that already holds a value
+ * is changed only when it is named in `overwrite`. Audited with the programme id.
+ */
+vodRouter.post(
+  '/:id/epg-fill',
+  onlyIdParam,
+  asyncHandler(async (req, res) => {
+    const b = z.object({
+      programmeId: z.string().uuid().optional(),
+      fields: z.array(z.string()).max(100).optional(),
+      overwrite: z.array(z.string()).max(100).default([]),
+      applyType: z.boolean().default(false),
+      title: z.boolean().default(false),
+    }).parse(req.body ?? {});
+    const a = await fetchOwned(req.params.id, accountId(req));
+    if (!a) throw notFound('VOD asset not found');
+    const r = await applyFill(a, accountId(req), actor(req), b);
+    if (!r.programmeId) throw badRequest(r.reason ?? 'No programme to fill from.');
+    res.json(r);
   })
 );
 
@@ -381,6 +572,10 @@ vodRouter.put(
       ]
     );
     if (!row) throw notFound('VOD asset not found');
+    // A field changed by hand is no longer the EPG's value: drop its provenance.
+    if (cleanMeta !== undefined || body.title != null) {
+      await pruneProvenance(row.id, asset.metadata, cleanMeta ?? asset.metadata, asset.title, body.title ?? asset.title);
+    }
     res.json(row);
   })
 );
