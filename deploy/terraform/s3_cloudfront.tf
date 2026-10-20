@@ -104,6 +104,14 @@ resource "aws_cloudfront_distribution" "cdn" {
     cached_methods         = ["GET", "HEAD"]
     cache_policy_id        = aws_cloudfront_cache_policy.manifest.id
     compress               = true
+    # edge_rights.tf: per-stream geo and blackout, decided per manifest request
+    dynamic "function_association" {
+      for_each = var.edge_rights_enabled ? [1] : []
+      content {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.rights[0].arn
+      }
+    }
   }
 
   # DASH manifests — short TTL.
@@ -115,6 +123,14 @@ resource "aws_cloudfront_distribution" "cdn" {
     cached_methods         = ["GET", "HEAD"]
     cache_policy_id        = aws_cloudfront_cache_policy.manifest.id
     compress               = true
+    # edge_rights.tf: per-stream geo and blackout, decided per manifest request
+    dynamic "function_association" {
+      for_each = var.edge_rights_enabled ? [1] : []
+      content {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.rights[0].arn
+      }
+    }
   }
 
   restrictions {

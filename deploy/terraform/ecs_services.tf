@@ -197,6 +197,8 @@ resource "aws_ecs_task_definition" "fast" {
 locals {
   control_plane_env = [
     { name = "PORT", value = "8080" },
+    # edge_rights.tf: the KeyValueStore the rights function reads; empty = off
+    { name = "EDGE_RIGHTS_KVS_ARN", value = var.edge_rights_enabled ? aws_cloudfront_key_value_store.rights[0].arn : "" },
     { name = "S3_BUCKET", value = aws_s3_bucket.origin.id },
     { name = "CDN_BASE_URL", value = "https://${aws_cloudfront_distribution.cdn.domain_name}" },
     { name = "AWS_REGION", value = var.region },

@@ -143,6 +143,22 @@ export function startScheduler(): () => void {
     () => fleetPass().catch((e) => console.error('[fleet] pass error', e)),
     o.fleetTickSeconds * 1000
   );
+  // EDGE RIGHTS (services/edgeRights.ts): keep the CloudFront KeyValueStore the
+  // manifest function reads in step with geo settings and programme
+  // blackouts. Every minute, and only what changed is written (memo). Off
+  // unless EDGE_RIGHTS_KVS_ARN is set (Terraform output edge_rights_kvs_arn).
+  const kvsArn = process.env.EDGE_RIGHTS_KVS_ARN || '';
+  const edgeMemo = new Map<string, string | null>();
+  const edgeRights = kvsArn ? setInterval(() => {
+    (async () => {
+      const er = await import('../edgeRights');
+      const store = await er.cloudFrontKvsStore(kvsArn);
+      const r = await er.syncEdgeRights(store, await er.allStreams(), undefined, edgeMemo);
+      if (r.put || r.deleted || r.failed) console.log(`[edge-rights] ${r.put} written, ${r.deleted} removed, ${r.failed} failed`);
+    })().catch((e) => console.error('[edge-rights] sync error', e));
+  }, 60_000) : null;
+  edgeRights?.unref?.();
+
   // Prune telemetry on the same schedule as retention; the ledger is never
   // pruned, because it is the billable record.
   const prune = setInterval(
@@ -237,6 +253,7 @@ export function startScheduler(): () => void {
     clearInterval(sweep); clearInterval(avail);
     clearInterval(fleet);
     clearInterval(prune);
+    if (edgeRights) clearInterval(edgeRights);
     clearInterval(watch);
     if (thumbs) clearInterval(thumbs);
     if (resume) clearInterval(resume);

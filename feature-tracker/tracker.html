@@ -29,8 +29,8 @@
  <h1><svg class="vmark" viewBox="0 0 24 24" width="1em" height="1em" style="vertical-align:-0.12em" aria-hidden="true"><defs><linearGradient id="vmk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b8cff"/><stop offset="1" stop-color="#4f46e5"/></linearGradient></defs><path fill="url(#vmk)" d="M14 1 3.5 14H11zM10 23 20.5 10H13z"/></svg> Volt — Product Feature Tracker</h1>
  <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-20.</div>
  <div class=sub>Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>55</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>1</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>42</b> 📱 In app</span><span class=chip><b>15</b> 📱 Partial</span><span class=chip><b>1</b> ⚙︎ Backend only</span><span class=chip><b>4</b> — no UI</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>55</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>2</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>42</b> 📱 In app</span><span class=chip><b>15</b> 📱 Partial</span><span class=chip><b>2</b> ⚙︎ Backend only</span><span class=chip><b>4</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>Media Library: grid view, filters by content type, target metadata, EPG fill, encode details</div>
@@ -824,6 +824,16 @@
     <div class=meta>Hooks built 12 Oct. Fake-vendor tests in test/workflows.check.ts (encode only, full, stop, liveness, rollback, webhook normalisation).</div>
     <div class=how><b>How to test:</b> API only for now: GET /api/engines lists builtin (installed) and the three planned vendors with capabilities. POST /api/engines/medialive/validate with a profileId shows what would and would not work. Read ENGINES.md for adding an adapter.</div>
     <div class=note>Test tool: open <b>“ENGINES.md”</b> in your artifacts gallery.</div>
+    
+    
+  </div><div class=card data-status="building" data-app="none">
+    <div class=top><div class=name>Geo and blackouts enforced at the CDN, same play URL</div>
+      <span class=pill style="background:#64748b">🔨 Building</span>
+      <span class=apill style="border-color:#6b7280;color:#6b7280">⚙︎ Backend only — not in app</span></div>
+    <div class=summary>WHY: in production viewers read playlists from the CDN, so geo rules and programme blackouts must be enforced there, not only when a play URL is handed out. WHAT: a CloudFront Function checks each playlist request against the account, channel and programme rules and answers 451 to a blocked viewer, on the same URL that opens again when the blackout ends.</div>
+    <div class=meta></div>
+    <div class=how><b>How to test:</b> Run test/edge-rights.check.ts. After deployment: set a channel to allow only GB, request its master_cc.m3u8 through CloudFront from another country (or with a VPN): 451. Put a programme blackout for your country on now: 451 for its duration, then the same URL plays again.</div>
+    
     
     
   </div>

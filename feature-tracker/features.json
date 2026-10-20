@@ -898,6 +898,23 @@
         ]
       },
       "feedback": []
+    },
+    {
+      "id": "edge-rights",
+      "name": "Geo and blackouts enforced at the CDN, same play URL",
+      "summary": "WHY: in production viewers read playlists from the CDN, so geo rules and programme blackouts must be enforced there, not only when a play URL is handed out. WHAT: a CloudFront Function checks each playlist request against the account, channel and programme rules and answers 451 to a blocked viewer, on the same URL that opens again when the blackout ends.",
+      "status": "building",
+      "app_surface": "none",
+      "test": {
+        "how": "Run test/edge-rights.check.ts. After deployment: set a channel to allow only GB, request its master_cc.m3u8 through CloudFront from another country (or with a VPN): 451. Put a programme blackout for your country on now: 451 for its duration, then the same URL plays again.",
+        "artifact": "",
+        "checks": [
+          "Allow list enforced at the CDN",
+          "Programme blackout on and off on the same URL",
+          "Segments are not slowed"
+        ]
+      },
+      "feedback": []
     }
   ],
   "note": "Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set."
