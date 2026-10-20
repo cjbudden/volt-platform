@@ -34,7 +34,8 @@ locals {
     ["/live/*", "/share/*", "/api/share/*", "/xmltv/*", "/img/*"],
     ["/library/*", "/player", "/player/*", "/clips/*", "/api/payments/verify"],
     # /gfx/*: graphics template files the player loads (modules/graphics.ts)
-    ["/api/public/*", "/gfx/*"],
+    # /fast/*: the FAST ad stitcher's per-viewer playlists (modules/fast.ts)
+    ["/api/public/*", "/gfx/*", "/fast/*"],
   ]
 }
 

@@ -57,3 +57,7 @@
 .fast-detail{display:grid;grid-template-columns:120px 1fr;gap:6px 12px;font-size:var(--fs-sm)}
 .fast-detail .k{color:var(--faint)}
 .fast-seg{display:inline-flex;gap:4px;flex-wrap:wrap}
+.fast-ready{display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid var(--border)}
+.fast-ready .nm{font-weight:600;font-size:var(--fs-body);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fast-ready .meta{color:var(--faint);font-size:var(--fs-xs);margin-top:2px}
+.fast-ready .tag{margin-left:auto;flex:none}

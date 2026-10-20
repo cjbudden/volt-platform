@@ -39,4 +39,6 @@ npx tsx -e "import {hashPassword} from './src/auth/password'; import {query,pool
 BASE="http://localhost:$PORT" npx tsx test/fast.http.ts
 rc=$?
 kill $API 2>/dev/null; wait $API 2>/dev/null
+# npx leaves the server itself running; left behind, it keeps the scheduler lock
+fuser -k "$PORT"/tcp 2>/dev/null
 exit $rc

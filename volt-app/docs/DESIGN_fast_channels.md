@@ -1,6 +1,6 @@
 # FAST channels (VOD to live) and server-side ads
 
-**Status: built 20 Oct 2026, phase 1.** A FAST channel is a live channel built from the library: a run order
+**Status: built 20 Oct 2026; production deployment (ECS playout, S3, shared stitcher state) the same day, section 10.** A FAST channel is a live channel built from the library: a run order
 of films and series that loops, the guide written from it, played out as live HLS and DASH from media that is
 already packaged, with ad breaks that any FAST platform can replace, or that Volt stitches per viewer from a
 commercial ad server, with house spots when the ad server fails.
@@ -17,10 +17,12 @@ commercial ad server, with house spots when the ad server fails.
 | API | `src/modules/fast.ts` | `test/fast.check.sh` |
 | Creative conditioning job | `src/services/jobs/handlers/adCondition.ts` | `test/fast.check.sh` (queued) |
 | Graphics hidden in breaks | `src/services/graphicTriggers.ts`, `volt-player/src/sdk/triggers.ts` | `test/fast-graphics.check.ts` 15/15 |
-| Playout (no encoder) | `volt-encoder/bin/fast_playout.py` | `volt-encoder/bin/test_fast_playout.py` 26/26 (29 with real media) |
+| Playout (no encoder) | `volt-encoder/bin/fast_playout.py`, image `volt-encoder/Dockerfile.fast` | `volt-encoder/bin/test_fast_playout.py` 32/32 (S3 output with moto) |
+| Playout supervision, heartbeat, state | `src/services/fast/playoutRunner.ts`, `migrations/0067_fast_playouts.sql` | `dev/fast-prod-e2e.sh` |
+| Public URL, stitcher session store, library media in S3, media preparation | `src/services/fast/delivery.ts`, `sessionStore.ts`, `vodStore.ts`, `prepare.ts` | `dev/fast-prod-e2e.sh` 23/23 |
 | Builder UI | `volt-web/src/pages/Fast.tsx` | looked at in Chromium |
 | Schema | `migrations/0065_fast_channels.sql` | |
-| End to end in a browser | `dev/fast-e2e.ts` | see "Measured" |
+| End to end in a browser | `dev/fast-e2e.ts`; production shape `dev/fast-prod-e2e.sh` | see "Measured" and section 10 |
 
 ## 1. What a FAST channel is here
 
@@ -132,7 +134,8 @@ then slate), and grid pads.
   `CUE-OUT-CONT` / `CUE-IN`, and Volt's graphics-hide attributes. DASH has one Period per part, an
   `urn:scte:scte35:2014:xml+bin` EventStream on the break's first Period, and the graphics-hide event on every
   Period of the break (a player clips an event to its Period).
-* `state.json` keeps the counters, so a restart carries the media sequence on.
+* The counters are sent to the control plane with every heartbeat (and kept in `state.json` locally), so a
+  restart, on this server or another, carries the media sequence on.
 
 ### What the media must be
 
@@ -143,8 +146,8 @@ then slate), and grid pads.
   restores the old offset), which lines the two grids up to within one AAC frame, so **any newly encoded asset
   can go on a FAST channel as it is**. Assets encoded before 20 Oct 2026 should be re-encoded before they go on
   one.
-* The **slate** in 1 second segments (above). The UI says so; conditioning a chosen slate automatically is a
-  next step.
+* The **slate** in 1 second segments (above). Activation prepares it, and re-encodes older assets and
+  un-normalised house spots, when their source is still there (section 10).
 * The channel brand burned into the FAST copies (decision of 20 Oct 2026, branded copies tracked against the
   original). Ads are separate media, so they are clean of the bug without anything having to switch it off.
 
@@ -216,9 +219,9 @@ sequence number, segment count and item count, and the pod's, and shifts every l
 difference. It never makes a pod longer than the break (content resumes on the channel's clock), and anything
 it cannot read is passed through unchanged.
 
-**In production** this is the same code in a small stateless service in front of the CDN for `/fast/*/s/*`
-playlist requests, with the session state in Redis (a few hundred bytes per session) and decisions cached per
-(session, break). Locally it runs in the control plane with the state in memory.
+**In production** it runs on the api-public tier (`/fast/` is routed there), stateless per task: the session state
+(a few hundred bytes per track) and the decided pods are in Valkey, so any task answers any refresh (section 10).
+Without `REDIS_URL` the state is kept in the process.
 
 **Later, the cheaper alternative:** server-guided ad insertion with HLS Interstitials (`CLASS=
 "com.apple.hls.interstitial"` with an asset list URL) and DASH alternative content, where the shared, cacheable
@@ -237,7 +240,7 @@ playlists. Worth adding once player support is solid across the target devices.
 | **Guide / EPG** | A programme's slot includes its breaks; the guide lists programmes only. XMLTV out unchanged. | built |
 | **Captions** | Content subtitles stay with their parts. Ads, spots and slate have none, so a FAST channel with subtitles needs empty WebVTT segments for those parts. | next |
 | **DRM** | Ads are usually clear while content is encrypted: the key changes at a discontinuity, which players handle; settle per platform. | next |
-| **Loudness** | Ads and spots must match the channel's loudness (EBU R128 / A/85). Add loudness normalisation to conditioning. | next |
+| **Loudness** | Ads and house spots are brought to EBU R128 (-23 LUFS, -1 dBTP) when conditioned or prepared. | built |
 | **Tracking** | Impressions and quartiles are not fired yet. Server-side, from the session's playlist progress, or client-side from the ad DATERANGE. | next |
 | **Analytics** | `ad_decisions` gives fill, fallbacks and latency; ad segments in the CDN logs are the delivered-impression proxy. | decisions built |
 | **Recording / clipping** | A FAST channel does not record; clip the asset. | by design |
@@ -248,7 +251,9 @@ playlists. Worth adding once player support is solid across the target devices.
 | | |
 |---|---|
 | `GET/POST /api/fast/channels` | list; create a playlist channel (plan and group checks as any channel) with a draft lineup |
-| `GET /api/fast/channels/:id` | channel, lineups, ads |
+| `GET /api/fast/channels/:id` | channel, lineups, ads, playout health, URLs |
+| `GET /api/fast/channels/:id/readiness`, `POST .../prepare` | is every asset the channel uses ready to air; queue the encodes that fix it |
+| `POST /api/fast/channels/:id/on-air` | `{on}`: public or private |
 | `GET /api/fast/library?q=` | assets and series |
 | `POST /api/fast/channels/:id/lineups` | new draft (copy of the active one by default) |
 | `GET/PUT/DELETE /api/fast/lineups/:lid` | a lineup; the active one cannot be edited |
@@ -261,6 +266,7 @@ playlists. Worth adding once player support is solid across the target devices.
 | `POST /api/fast/channels/:id/breaks/:bid/decide` | decide a break as the stitcher would (logged) |
 | `GET /api/fast/channels/:id/ad-report` | fill, fallbacks, latency, creatives |
 | `GET /api/fast-playout/:id/timeline` | the playout's timeline (ingest token) |
+| `POST /api/fast-playout/:id/heartbeat`, `GET .../state` | the playout's heartbeat with its state; a new task's starting state (ingest token) |
 | `GET /fast/:id/s/:session/(master\|v<h>\|audio).m3u8` | a viewer's stitched playlists (public) |
 
 ## 7. Measured (20 Oct 2026)
@@ -290,15 +296,84 @@ volt-app$ npx tsx test/fast-lineup.check.ts && npx tsx test/fast-ads.check.ts &&
 volt-encoder$ python3 bin/test_fast_playout.py                          # FAST_LAB=<clips dir> for real media
 volt-app$ BASE=... FAST_LAB=<clips dir> CHROME=<chromium> npx tsx dev/fast-e2e.ts   # API running with CLIPS_DIR/ORIGIN_DIR
 volt-app$ BASE=... EMAIL=... PASSWORD=... npx tsx dev/fast-demo-seed.ts # two demo channels with realistic lengths
+volt-app$ DATABASE_URL=... FAST_LAB=<VP9 lab> SLATE_SRC=<mp4> CHROME=... PACKAGER_BIN=... bash dev/fast-prod-e2e.sh
+                                                                        # production shape, 23 checks (section 10)
 ```
 
 ## 9. Next
 
-1. The playout under ECS / docker (a task per channel, or one task for many: it is a few kilobytes of text a
-   second) with S3 output. With the local launcher the control plane already runs one per channel with an active
-   lineup and restarts it (`services/fast/playoutRunner.ts`); other launchers log that it runs separately.
-2. Condition the chosen slate to 1 s segments automatically; loudness normalisation in conditioning.
-3. Impression and quartile beacons; SCTE-35 from live sources; captions across ad parts.
-4. Day-of-week rules on a slot (weekend marathons), a series start point and season limits in the console.
-5. Drag to reorder in the run order; drop titles from the library onto the week view.
-6. HLS Interstitials / SGAI mode.
+1. Impression and quartile beacons from the stitcher (the decisions already hold the tracking URLs).
+2. S3 retention for `channel/<id>/fast/` after a channel is deleted (the playlists are a few kilobytes; the
+   library media under `vod/<id>/` follows the asset's own deletion).
+3. FairPlay / Widevine for FAST channels (the playlists carry no keys yet).
+4. SCTE-35 from live sources; captions across ad parts.
+5. Day-of-week rules on a slot (weekend marathons), a series start point and season limits in the console.
+6. Drag to reorder in the run order; drop titles from the library onto the week view.
+7. HLS Interstitials / SGAI mode; the stitcher for DASH.
+
+## 10. Production (20 Oct 2026)
+
+```
+ console ──activate──▶ control plane ──RunTask──▶ ECS task "volt-fast" (one per channel, 0.125 vCPU, 256 MiB, Spot first)
+                          ▲    │                     │  fast_playout.py, FAST_CONFIG_JSON
+             heartbeat 5 s│    │ state back           │  reads library playlists from s3://<origin>/vod/<asset>/
+         (state, sequence)│    ▼ on restart           ▼  writes s3://<origin>/channel/<id>/fast/*.m3u8, manifest.mpd
+                       fast_playouts ◀────────────────┘  segment URLs absolute on the CDN
+ viewer ──/live/<id>/master.m3u8──▶ api-public ──302──▶ CDN playlist (no ads stitched)
+                                                 └─302──▶ /fast/<id>/s/<session>/master.m3u8 (stitched, never cached)
+                                                          any api-public task; session state in Valkey
+```
+
+**The playout is its own task.** The control plane launches one ECS task of the `volt-fast` image per channel with
+an active lineup (`EcsTaskLauncher.launchFast`, task definition `FAST_TASK_DEF`). The image is Python and boto3
+(`volt-encoder/Dockerfile.fast`): the playout writes text and never touches media. It is configured entirely by
+`FAST_CONFIG_JSON` (channel, API, token, bucket and prefix, CDN prefix, DVR length).
+
+**State lives in the control plane, not the task.** Every 5 s the playout posts a heartbeat
+(`POST /api/fast-playout/<id>/heartbeat`, ingest token) with its state (the channel's media and discontinuity
+sequence, what it has published), and a replacement task starts by asking for it (`GET .../state`). A Spot
+interruption or a crash therefore never restarts the channel's numbering; players carry on. SIGTERM sends a last
+heartbeat before the task exits.
+
+**Supervision** (`reconcilePlayouts`, every 30 s on the scheduler leader): launch what is missing, relaunch a task
+ECS reports dead, replace one that is alive but has been silent for 3 minutes, stop playouts whose channel has no
+active lineup. The console's On air tab shows it: where it runs, when it was last heard from, restarts, segments
+published, titles it could not read.
+
+**The public URL trusts the heartbeat.** `/live/<id>/...` answers only while the channel is public (on air) and the
+playout's heartbeat is younger than `FAST_STALE_SEC` (30 s); otherwise 503 `no_valid_content`, never a playlist
+that has stopped moving. A channel without stitched ads redirects to its playlists on the CDN. A stitched channel
+gives each viewer a new session on the stitcher, marked no-store.
+
+**The stitcher scales out.** api-public serves `/fast/` (ALB rule and `PUBLIC_PATH_PREFIXES`). A viewer's refreshes
+land on any task, so the session's state is in Valkey (`services/fast/sessionStore.ts`): the stitch numbering per
+track, the decided pod per break, and a 30 s lock so only one task asks the ad server for a given break. Without
+`REDIS_URL` it is kept in the process (one task, a laptop). A Valkey error is a miss, and a miss is house fill.
+
+**Library media lives in the bucket** (`VOD_STORE=s3`, the default on ECS): an encode uploads the packaged folder to
+`vod/<id>/` (segments first, playlists last; segments immutable, playlists 60 s) and `master_key` becomes that key.
+Before, it stayed on the control plane task's disk, which a FAST task on another server cannot read and which goes
+with the task.
+
+**Media is prepared on activation** (`services/fast/prepare.ts`, also `POST /api/fast/channels/<id>/prepare` and the
+On air tab's Prepare button). Each title, house spot and slate the channel uses is checked: packaged with aligned
+audio and video (`encode_result.zeroStart`), house spots at broadcast loudness (EBU R128, -23 LUFS, `loudnorm`),
+the slate in 1 s segments. What is not is re-encoded from its source with the account's default ladder; an asset
+whose source file is gone is reported (No source), not guessed at.
+
+**Terraform** (`deploy/terraform`): ECR repository `volt-fast`; task definition `<name>-fast` (EC2, awsvpc, the
+encoder's task role: origin bucket read/write, so PassRole is unchanged); control-plane settings `FAST_TASK_DEF`,
+`FAST_OUTPUT=s3`, `VOD_STORE=s3` and `PUBLIC_BASE_URL` (variable `public_base_url`, else the first API edge alias,
+else the API edge, else the ALB); `/fast/*` routed to api_public. The image build is in the Terraform README.
+
+**Checked** (`dev/fast-prod-e2e.sh`): moto as the bucket, a signing proxy in front of it as CloudFront with origin
+access control, redis as Valkey, two API processes (ROLE=all and ROLE=api-public), the playout configured exactly as
+its ECS task. 23 checks: library in the bucket; the slate prepared to 1 s, zero-start, into the bucket on
+activation; playlists in the bucket with their content types and no-store; segment URLs on the CDN; private until on
+air; a session per viewer, not cached; DASH to the CDN MPD; Chromium playing the channel's HLS and DASH from the CDN
+and a stitched session for 90 s with no stalls and every segment from the CDN; one session refreshed 92 times
+alternately on the two API processes with no inconsistency, gap or hole, carrying the ad server's ad; the playout
+killed and replaced with its media sequence carried on; deactivation stopping it and the public URL answering 503.
+
+Found on the way: `vod_encoder.py`'s GPU check named its result `probe`, which hid the `probe()` function in
+`main()`, so every probe step (the first step of every library encode) failed with UnboundLocalError. Renamed.

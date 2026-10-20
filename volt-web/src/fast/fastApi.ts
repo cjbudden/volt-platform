@@ -51,12 +51,18 @@ export interface AdServer { id: string; name: string; vendor: string; tag_templa
 export interface AdTest { request: string; elapsedMs: number; requests: number; problems: { code: number; message: string }[]; ads: { id: string; sequence: number | null; title: string | null; adSystem: string | null; durationSec: number; creativeKey: string; mediaFiles: number }[]; adSec: number }
 export interface AdReport { decisions: number; fillRate: number | null; houseShare: number | null; slateShare: number | null; timeouts: number; errors: number; empty: number; notConditioned: number; p95Ms: number | null; creatives: { creative_key: string; title: string | null; ad_system: string | null; plays: number; status: string; last_seen_at: string }[] }
 
+export interface Playout {
+  launcher: string; status: 'starting' | 'running' | 'stopped' | 'failed'; started_at: string | null; last_seen_at: string | null
+  last_pdt: string | null; media_sequence: number | null; restarts: number; error: string | null; unreadable: string[]; fresh: boolean
+}
+export interface ReadinessRow { assetId: string; title: string; role: 'content' | 'house' | 'slate'; state: 'ready' | 'preparing' | 'needs-prepare' | 'no-source'; why: string | null }
+
 const J = (b: unknown) => ({ body: JSON.stringify(b) })
 
 export const fastApi = {
   channels: (): Promise<{ items: FastChannelRow[] }> => apiReq('/fast/channels'),
   createChannel: (b: { name: string; groupId: string; zone: string }): Promise<{ channel: any; lineup: Lineup }> => apiReq('/fast/channels', { method: 'POST', ...J(b) }),
-  channel: (id: string): Promise<{ channel: { id: string; name: string; status: string; origin: string; groupId: string }; lineups: Lineup[]; ads: ChannelAds; urls?: { hls: string; dash: string; session: string } }> => apiReq(`/fast/channels/${id}`),
+  channel: (id: string): Promise<{ channel: { id: string; name: string; status: string; origin: string; groupId: string; onAir: boolean }; lineups: Lineup[]; ads: ChannelAds; playout: Playout | null; urls?: { hls: string; dash: string; session: string } }> => apiReq(`/fast/channels/${id}`),
   library: (q = ''): Promise<{ assets: LibAsset[]; series: LibSeries[] }> => apiReq(`/fast/library${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   newDraft: (channelId: string, copyFrom?: string): Promise<Lineup> => apiReq(`/fast/channels/${channelId}/lineups`, { method: 'POST', ...J(copyFrom ? { copyFrom } : {}) }),
   saveLineup: (id: string, b: Partial<Pick<Lineup, 'name' | 'zone' | 'slots' | 'settings'>>): Promise<Lineup> => apiReq(`/fast/lineups/${id}`, { method: 'PUT', ...J(b) }),
@@ -69,5 +75,8 @@ export const fastApi = {
   adServers: (): Promise<{ items: AdServer[] }> => apiReq('/fast/ad-servers'),
   addAdServer: (b: { name: string; vendor: string; tagTemplate: string; timeoutMs: number }): Promise<AdServer> => apiReq('/fast/ad-servers', { method: 'POST', ...J(b) }),
   testAdServer: (id: string, durationSec: number): Promise<AdTest> => apiReq(`/fast/ad-servers/${id}/test`, { method: 'POST', ...J({ durationSec }) }),
+  readiness: (channelId: string): Promise<{ items: ReadinessRow[] }> => apiReq(`/fast/channels/${channelId}/readiness`),
+  prepare: (channelId: string): Promise<{ queued: string[]; skipped: ReadinessRow[] }> => apiReq(`/fast/channels/${channelId}/prepare`, { method: 'POST', body: '{}' }),
+  setOnAir: (channelId: string, on: boolean): Promise<{ onAir: boolean }> => apiReq(`/fast/channels/${channelId}/on-air`, { method: 'POST', ...J({ on }) }),
   adReport: (channelId: string, days = 7): Promise<AdReport> => apiReq(`/fast/channels/${channelId}/ad-report?days=${days}`),
 }

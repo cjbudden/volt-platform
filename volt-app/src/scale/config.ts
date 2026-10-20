@@ -164,10 +164,11 @@ export const scaleConfig = {
    * first. Override with PUBLIC_PATH_PREFIXES (comma separated). A prefix
    * ending in '/' matches below it; one without also matches itself.
    * Not here on purpose: /radio/:id/stream.mp3 and /origin are the PRIVATE
-   * previews; the public radio URL is /live/:id/stream.mp3.
+   * previews; the public radio URL is /live/:id/stream.mp3. /fast/ is the
+   * FAST ad stitcher's per-viewer playlists (modules/fast.ts fastPublicRouter).
    */
   publicPrefixes: (process.env.PUBLIC_PATH_PREFIXES ??
-    '/health,/live/,/share/,/api/share/,/xmltv/,/img/,/library/,/player,/clips/,/gfx/,' +
+    '/health,/live/,/share/,/api/share/,/xmltv/,/img/,/library/,/player,/clips/,/gfx/,/fast/,' +
     '/api/public/,/api/availability,/api/access,/api/player/,/api/analytics/beacon,/api/payments/verify')
     .split(',').map((s) => s.trim()).filter(Boolean),
 };

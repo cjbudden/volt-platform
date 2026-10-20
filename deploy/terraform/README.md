@@ -74,11 +74,16 @@ docker push $(terraform output -json ecr_repositories | jq -r '."volt-encoder"')
 docker tag volt-encoder $(terraform output -json ecr_repositories | jq -r '."volt-thumbnailer"'):latest
 docker push $(terraform output -json ecr_repositories | jq -r '."volt-thumbnailer"'):latest
 
+# FAST playout (one small task per FAST channel; writes its playlists to the bucket)
+docker build -t volt-fast -f ../../volt-encoder/Dockerfile.fast ../../volt-encoder
+docker tag volt-fast $(terraform output -json ecr_repositories | jq -r '."volt-fast"'):latest
+docker push $(terraform output -json ecr_repositories | jq -r '."volt-fast"'):latest
+
 # roll the control-plane service onto the new image
 aws ecs update-service --cluster $(terraform output -raw ecs_cluster) \
   --service $(terraform output -raw ecs_cluster)-* --force-new-deployment 2>/dev/null || true
 ```
-(Encoder and thumbnailer task defs point at `:latest`; the orchestrator picks
+(Encoder, thumbnailer and FAST playout task defs point at `:latest`; the orchestrator picks
 them up on the next RunTask — no service to roll.)
 
 ## 4. Migrate the database (once)

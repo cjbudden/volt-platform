@@ -40,6 +40,10 @@ export interface VodEncodePayload {
   sourcePath: string;
   /** Named explicitly, or resolved from the account default when absent. */
   ladderGroupId?: string | null;
+  /** Override the ladder's segment length (a FAST slate is packaged in 1 s segments). */
+  segmentSeconds?: number | null;
+  /** Bring the audio to broadcast loudness (ads and house spots on FAST channels). */
+  loudnorm?: boolean;
 }
 
 /** Where a file-sourced asset's media lives. Under clips/, not origin/, for the
@@ -152,8 +156,9 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
     input: p.sourcePath,
     out_dir: outDir,
     work_dir: join(outDir, '.enc'),
-    segment_seconds: ladder.segmentSeconds,
+    segment_seconds: p.segmentSeconds ?? ladder.segmentSeconds,
     fps: fit.fps,
+    loudnorm: !!p.loudnorm,
     gpu: ladder.codecBackend === 'nvenc',
     packaging: ladder.packaging,
     has_audio: probe.hasAudio !== false,
@@ -194,7 +199,11 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
   await ctx.progress(95, 'recording what was produced');
   const encodeResult = {
     ladder: { groupId: ladder.groupId, name: ladder.groupName, origin: ladder.origin },
-    segmentSeconds: ladder.segmentSeconds,
+    segmentSeconds: p.segmentSeconds ?? ladder.segmentSeconds,
+    // from vod_encoder.py: the audio and video segment grids line up, so the
+    // asset can be cut at an ad break on a FAST channel (DESIGN_fast_channels.md)
+    zeroStart: result?.zero_start === true,
+    loudnorm: result?.loudnorm === true,
     fps: fit.fps,
     kept: fit.kept,
     dropped: fit.dropped,
@@ -212,6 +221,18 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
   let bytes: number | null = null;
   try { bytes = (await stat(p.sourcePath)).size; } catch { /* not fatal */ }
 
+  // PRODUCTION: the packaged media goes to the origin bucket, so it is served
+  // by the CDN and readable by a FAST playout on another server, instead of
+  // living on this task's disk (services/fast/vodStore.ts).
+  let storedMaster = master, storedMpd = mpd;
+  const { vodStore, uploadVodDir } = await import('../../fast/vodStore');
+  if (vodStore() === 's3') {
+    await ctx.progress(97, 'uploading to the origin');
+    const up = await uploadVodDir(outDir, p.vodAssetId);
+    storedMaster = master ? up.master : null;
+    storedMpd = mpd ? up.mpd : null;
+  }
+
   await query(
     `UPDATE vod_assets
         SET master_key = COALESCE($2, master_key),
@@ -224,9 +245,9 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
             thumb_status = 'ready',
             updated_at = now()
       WHERE id = $1`,
-    [p.vodAssetId, master, probe.durationMs ?? null, bytes,
+    [p.vodAssetId, storedMaster, probe.durationMs ?? null, bytes,
      JSON.stringify(encodeResult),
-     JSON.stringify({ hls: !!master, dash: !!mpd, progressive: false })]
+     JSON.stringify({ hls: !!storedMaster, dash: !!storedMpd, progressive: false })]
   );
 
   fireHook('vod.encoded', 'vod_asset', p.vodAssetId, { renditions: fit.kept.length });

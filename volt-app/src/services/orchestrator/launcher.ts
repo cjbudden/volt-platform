@@ -319,6 +319,16 @@ export class EcsTaskLauncher implements TaskLauncher {
       CAPTIONS_CONFIG_JSON: JSON.stringify(job),
     }, hints);
   }
+  /**
+   * A FAST channel's playout (volt-fast image, bin/fast_playout.py). Not on the
+   * TaskLauncher interface: it is not a stream the orchestrator runs, it is
+   * supervised by services/fast/playoutRunner.ts, and only ECS has a task for
+   * it (local runs it as a child process). A playout writes text, so the
+   * reservation is a sliver of a server: an eighth of a vCPU, 256 MiB.
+   */
+  launchFast(channelId: string, job: Record<string, any>, taskDef: string) {
+    return this.run(taskDef, 'fast', { FAST_CONFIG_JSON: JSON.stringify(job) }, { cpuUnits: 128, memoryMib: 256 });
+  }
   async stopTask(taskArn: string, reason: string): Promise<void> {
     const { StopTaskCommand } = await import('@aws-sdk/client-ecs');
     const ecs = await this.client();

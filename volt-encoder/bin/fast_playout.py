@@ -591,10 +591,22 @@ def master_playlist(assets_any, tracks):
 
 # ---------------------------------------------------------------------- IO loop
 
-def _get(url, token, timeout=5):
-    req = urllib.request.Request(url, headers={"X-Volt-Ingest-Token": token, "Accept": "application/json"})
+def _http(url, token=None, timeout=5, data=None):
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["X-Volt-Ingest-Token"] = token
+    body = None
+    if data is not None:
+        body = json.dumps(data).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, headers=headers, data=body, method="POST" if data is not None else "GET")
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+        raw = r.read().decode()
+        return json.loads(raw) if raw and r.headers.get_content_type() == "application/json" else raw
+
+
+def _get(url, token, timeout=5):
+    return _http(url, token, timeout)
 
 
 def _write(path, text):
@@ -604,39 +616,153 @@ def _write(path, text):
     os.replace(tmp, path)
 
 
-def load_asset(master_key, clips_dir, url_prefix):
-    """master_key '/clips/vod/<id>/master.m3u8' -> AssetMedia, reading the local copy."""
-    rel = master_key[len("/clips"):] if master_key.startswith("/clips") else master_key
-    d = os.path.dirname(clips_dir.rstrip("/") + rel)
-    url_base = url_prefix + os.path.dirname(master_key) + "/"
-    master = open(os.path.join(d, os.path.basename(rel))).read()
+CONTENT_TYPES = {".m3u8": "application/vnd.apple.mpegurl", ".mpd": "application/dash+xml", ".json": "application/json"}
+
+
+class LocalSink:
+    """Playlists into a directory the control plane serves (/origin/<id>/fast/)."""
+    def __init__(self, out_dir):
+        self.dir = out_dir
+        os.makedirs(out_dir, exist_ok=True)
+
+    def put(self, name, text):
+        _write(os.path.join(self.dir, name), text)
+
+
+class S3Sink:
+    """Playlists straight into the origin bucket CloudFront serves.
+
+    put_object per changed file, no-cache, the right content type (the encoder's
+    sync sidecar labels an MPD as an HLS playlist; a DASH player that checks the
+    type refuses it). Unchanged files are not re-sent: master.m3u8 is written
+    once, the media playlists and MPD once a second.
+    """
+    def __init__(self, bucket, prefix, endpoint=None, region=None, client=None):
+        self.bucket, self.prefix = bucket, prefix.strip("/")
+        self.last = {}
+        if client is not None:
+            self.s3 = client
+        else:
+            try:
+                import boto3
+                self.s3 = boto3.client("s3", endpoint_url=endpoint or None, region_name=region or os.environ.get("AWS_REGION"))
+            except ImportError:  # the encoder image has botocore (through awscli) but not boto3
+                import botocore.session
+                self.s3 = botocore.session.get_session().create_client("s3", endpoint_url=endpoint or None, region_name=region or os.environ.get("AWS_REGION"))
+
+    def put(self, name, text):
+        h = hash(text)
+        if self.last.get(name) == h:
+            return
+        ext = os.path.splitext(name)[1]
+        self.s3.put_object(Bucket=self.bucket, Key=f"{self.prefix}/{name}", Body=text.encode(),
+                           ContentType=CONTENT_TYPES.get(ext, "text/plain"), CacheControl="no-cache, no-store, max-age=0")
+        self.last[name] = h
+
+
+class MediaReader:
+    """Reads an asset's VOD playlists wherever the library keeps them.
+
+    master_key '/clips/vod/<id>/master.m3u8'  the control plane's disk (local runs)
+    master_key 'vod/<id>/master.m3u8'         the origin bucket (production): S3
+                                              GetObject when a client is given, else
+                                              HTTP from `media_base` (the CDN)
+    """
+    def __init__(self, clips_dir="clips", s3=None, bucket=None, media_base=None):
+        self.clips_dir, self.s3, self.bucket, self.media_base = clips_dir, s3, bucket, (media_base or "").rstrip("/")
+
+    def read(self, key):
+        if key.startswith("/clips/"):
+            with open(self.clips_dir.rstrip("/") + key[len("/clips"):]) as f:
+                return f.read()
+        k = key.lstrip("/")
+        if self.s3 is not None and self.bucket:
+            return self.s3.get_object(Bucket=self.bucket, Key=k)["Body"].read().decode()
+        if self.media_base:
+            with urllib.request.urlopen(f"{self.media_base}/{k}", timeout=10) as r:
+                return r.read().decode()
+        raise OSError(f"no way to read {key}: not under /clips and no S3 or media base configured")
+
+    def exists(self, key):
+        try:
+            self.read(key)
+            return True
+        except Exception:
+            return False
+
+
+def load_asset(master_key, clips_dir="clips", url_prefix="", reader=None):
+    """An asset's tracks from its master playlist key. Segment URLs come out
+    root-relative to the key's folder (`/clips/vod/<id>/...` or `/vod/<id>/...`),
+    prefixed with `url_prefix` (the CDN, in production) so a playlist works from
+    any host, including the per-viewer stitcher."""
+    reader = reader or MediaReader(clips_dir)
+    folder = os.path.dirname("/" + master_key.lstrip("/"))
+    url_base = url_prefix.rstrip("/") + folder + "/"
+    master = reader.read(master_key)
     variants, audio = parse_master(master)
     media = {}
     for u in [v["uri"] for v in variants] + ([audio] if audio else []):
-        media[u] = open(os.path.join(d, u)).read()
+        media[u] = reader.read(f"{folder}/{u}")
     mpd = None
-    if os.path.exists(os.path.join(d, "manifest.mpd")):
-        mpd = open(os.path.join(d, "manifest.mpd")).read()
+    try:
+        mpd = reader.read(f"{folder}/manifest.mpd")
+    except Exception:
+        mpd = None
     return AssetMedia(master, media, url_base, mpd)
 
 
-def main():
+def config_from_env_and_args():
+    """Arguments, or FAST_CONFIG_JSON (how the ECS task is configured), or both
+    (arguments win)."""
     import argparse
+    env = json.loads(os.environ.get("FAST_CONFIG_JSON") or "{}")
+    s3 = env.get("s3") or {}
     ap = argparse.ArgumentParser(description="Volt FAST playout: a live channel from packaged VOD")
-    ap.add_argument("--channel", required=True)
-    ap.add_argument("--api", default=os.environ.get("VOLT_API", "http://localhost:3000"))
-    ap.add_argument("--token", default=os.environ.get("INGEST_TOKEN", "dev-ingest-token"))
-    ap.add_argument("--out", required=True, help="output dir (origin/<channel>/fast)")
-    ap.add_argument("--clips-dir", default=os.environ.get("CLIPS_DIR", "clips"))
-    ap.add_argument("--url-prefix", default="", help="prefix for segment URLs (a CDN origin), default same-origin")
-    ap.add_argument("--dvr", type=float, default=120.0)
+    ap.add_argument("--channel", default=env.get("channel_id"))
+    ap.add_argument("--api", default=env.get("api") or os.environ.get("VOLT_API", "http://localhost:3000"))
+    ap.add_argument("--token", default=env.get("token") or os.environ.get("INGEST_TOKEN", "dev-ingest-token"))
+    ap.add_argument("--out", default=env.get("out_dir"), help="local output dir (origin/<channel>/fast)")
+    ap.add_argument("--s3-bucket", default=s3.get("bucket"))
+    ap.add_argument("--s3-prefix", default=s3.get("prefix"))
+    ap.add_argument("--s3-endpoint", default=s3.get("endpoint") or os.environ.get("AWS_ENDPOINT_URL"))
+    ap.add_argument("--media-base", default=env.get("media_base"), help="HTTP base for library media when not read from S3")
+    ap.add_argument("--clips-dir", default=env.get("clips_dir") or os.environ.get("CLIPS_DIR", "clips"))
+    ap.add_argument("--url-prefix", default=env.get("url_prefix", ""), help="prefix for segment URLs (the CDN), default root-relative")
+    ap.add_argument("--dvr", type=float, default=float(env.get("dvr_seconds", 120)))
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--timeline-file", help="read the timeline from a file instead of the API (tests)")
     a = ap.parse_args()
-    os.makedirs(a.out, exist_ok=True)
-    state_path = os.path.join(a.out, "state.json")
-    state = json.load(open(state_path)) if os.path.exists(state_path) else None
-    assets, play, tl, tl_at, trig, trig_at = {}, None, None, 0, [], 0
+    if not a.channel:
+        raise SystemExit("--channel (or FAST_CONFIG_JSON.channel_id) is required")
+    if not a.out and not a.s3_bucket:
+        raise SystemExit("an output is required: --out <dir> or --s3-bucket")
+    return a
+
+
+def main():
+    import signal
+    a = config_from_env_and_args()
+    sink = S3Sink(a.s3_bucket, a.s3_prefix or f"channel/{a.channel}/fast", a.s3_endpoint) if a.s3_bucket else LocalSink(a.out)
+    reader = MediaReader(a.clips_dir, getattr(sink, "s3", None), a.s3_bucket, a.media_base)
+    api_ok = not a.timeline_file
+
+    # STATE comes from the control plane first: a restarted task on another
+    # server has no disk of its own, and the media sequence must carry on.
+    state = None
+    if api_ok:
+        try:
+            r = _http(f"{a.api}/api/fast-playout/{a.channel}/state", a.token)
+            state = (r or {}).get("state") if isinstance(r, dict) else None
+        except Exception as e:
+            print(f"[fast] no saved state from the control plane ({e}); starting fresh", file=sys.stderr)
+    if state is None and a.out and os.path.exists(os.path.join(a.out, "state.json")):
+        state = json.load(open(os.path.join(a.out, "state.json")))
+
+    stopping = {"now": False}
+    signal.signal(signal.SIGTERM, lambda *_: stopping.__setitem__("now", True))
+
+    assets, play, tl, tl_at, trig, trig_at, beat_at, unreadable = {}, None, None, 0, [], 0, 0, set()
     while True:
         now = time.time()
         try:
@@ -649,23 +775,25 @@ def main():
                 for it in tl["items"]:
                     for ref in [it] + it.get("fill", []):
                         aid, mk = ref.get("assetId"), ref.get("master")
-                        if aid and mk and aid not in assets:
+                        if aid and mk and aid not in assets and aid not in unreadable:
                             try:
-                                assets[aid] = load_asset(mk, a.clips_dir, a.url_prefix)
-                            except OSError as e:
+                                assets[aid] = load_asset(mk, a.clips_dir, a.url_prefix, reader)
+                            except Exception as e:
+                                unreadable.add(aid)
                                 print(f"[fast] asset {aid} not readable: {e}", file=sys.stderr)
                 if play is None:
                     first = next((assets[i["assetId"]] for i in tl["items"] if i["kind"] == "content" and i.get("assetId") in assets), None)
                     if first is None:
                         print("[fast] nothing playable in the timeline yet", file=sys.stderr)
-                        time.sleep(2)
+                        unreadable.clear()
+                        time.sleep(5)
                         tl = None
                         continue
                     tracks = [f"v{h}" for h in sorted(first.video, reverse=True)] + (["audio"] if first.audio else [])
                     play = Playout(tracks, dvr_sec=a.dvr, seg_sec=float(tl.get("segmentSec", 2)), state=state)
-                    _write(os.path.join(a.out, "master.m3u8"), master_playlist(first, tracks))
+                    sink.put("master.m3u8", master_playlist(first, tracks))
                 play.schedule(expand_parts(tl["items"], assets, play.seg), assets, now)
-            if not a.timeline_file and now - trig_at > 5:
+            if api_ok and now - trig_at > 5:
                 try:
                     trig = _get(f"{a.api}/api/streams/{a.channel}/timed-events?from={iso(now - a.dvr)}&to={iso(now + 120)}", a.token).get("triggers", [])
                 except Exception:
@@ -675,14 +803,27 @@ def main():
             for n in play.tracks:
                 txt = play.hls(n, trig)
                 if txt:
-                    _write(os.path.join(a.out, f"{n}.m3u8"), txt)
+                    sink.put(f"{n}.m3u8", txt)
             mpd = play.dash(assets, now, trig)
             if mpd:
-                _write(os.path.join(a.out, "manifest.mpd"), mpd)
-            _write(state_path, json.dumps(play.state()))
+                sink.put("manifest.mpd", mpd)
+            if a.out:
+                _write(os.path.join(a.out, "state.json"), json.dumps(play.state()))
+            if api_ok and (now - beat_at > 5 or stopping["now"]):
+                lead = play.t[play.tracks[0]]
+                last = lead["pub"][-1] if lead["pub"] else None
+                try:
+                    _http(f"{a.api}/api/fast-playout/{a.channel}/heartbeat", a.token, data={
+                        "state": play.state(), "lastPdt": iso(last["pdt"] + last["dur"]) if last else None,
+                        "mediaSequence": lead["msn"], "tracks": play.tracks, "unreadable": sorted(unreadable),
+                        "stopping": stopping["now"],
+                    })
+                except Exception as e:
+                    print(f"[fast] heartbeat failed: {e}", file=sys.stderr)
+                beat_at = now
         except Exception as e:  # never die on one bad tick; the last good playlists stay up
             print(f"[fast] tick failed: {e}", file=sys.stderr)
-        if a.once:
+        if a.once or stopping["now"]:
             break
         time.sleep(1.0)
 

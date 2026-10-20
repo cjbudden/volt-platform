@@ -1,6 +1,6 @@
 # Container registries for the three images the platform ships.
 locals {
-  ecr_repos = ["volt-control-plane", "volt-encoder", "volt-thumbnailer"]
+  ecr_repos = ["volt-control-plane", "volt-encoder", "volt-thumbnailer", "volt-fast"]
 }
 
 resource "aws_ecr_repository" "repo" {

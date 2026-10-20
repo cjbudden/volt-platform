@@ -64,7 +64,7 @@ export async function handleAdCondition(ctx: JobContext): Promise<Record<string,
      JSON.stringify({ kind: 'ad', creativeKey: c.creative_key, adSystem: c.ad_system ?? null, title: c.title ?? null })]);
   await query(`UPDATE ad_creatives SET vod_asset_id = $2 WHERE id = $1`, [c.id, asset.id]);
   const { enqueue } = await import('../queue');
-  await enqueue({ type: 'vod.encode', payload: { vodAssetId: asset.id, accountId: p.accountId, sourcePath: src }, dedupeKey: `vodenc:${asset.id}`, channelId: p.channelId ?? null });
+  await enqueue({ type: 'vod.encode', payload: { vodAssetId: asset.id, accountId: p.accountId, sourcePath: src, loudnorm: true }, dedupeKey: `vodenc:${asset.id}`, channelId: p.channelId ?? null });
   return { vodAssetId: asset.id };
 }
 

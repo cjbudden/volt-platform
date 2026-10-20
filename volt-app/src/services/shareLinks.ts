@@ -219,7 +219,10 @@ export async function loadResource(kind: ShareResourceKind, resourceId: string, 
   );
   if (!r) return null;
   const radio = kind === 'channel' && r.kind === 'radio';
-  const m = manifestUrls(kind, r.id, undefined, undefined, radio);
+  // A FAST channel's preview is its playout's playlists (services/fast/media.ts).
+  const m = kind === 'channel' && r.origin === 'playlist'
+    ? await import('./fast/media').then((f) => ({ hls: f.channelPlaylistUrl(r.id, 'master.m3u8'), dash: f.channelPlaylistUrl(r.id, 'manifest.mpd') }))
+    : manifestUrls(kind, r.id, undefined, undefined, radio);
   return { kind, id: r.id, title: r.name ?? 'Live', durationMs: 0, metadata: r.metadata ?? {}, hls: m.hls, dash: m.dash, radio };
 }
 

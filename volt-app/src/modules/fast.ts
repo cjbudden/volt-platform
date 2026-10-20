@@ -33,6 +33,8 @@ import {
 import { resolve as resolveVast, expandTag } from '../services/fast/vast';
 import { stitchHls, type SessionState, type PodRendition } from '../services/fast/stitch';
 import { isTimeZone } from '../services/epgRepeat';
+import { sessionStore } from '../services/fast/sessionStore';
+import { fastConfig, channelPlaylistUrl, readKey, readChannelPlaylist, assetUrlBase } from '../services/fast/media';
 
 export const fastRouter = Router();
 fastRouter.use(requireAuth);
@@ -102,8 +104,37 @@ fastRouter.get('/channels/:id', asyncHandler(async (req, res) => {
   const ch = await ownChannel(req, String(req.params.id));
   const lineups = await query<any>(`SELECT * FROM fast_lineups WHERE channel_id = $1 ORDER BY (status = 'active') DESC, updated_at DESC LIMIT 20`, [ch.id]);
   const ads = await adsFor(ch.id);
-  res.json({ channel: { id: ch.id, name: ch.name, status: ch.status, origin: ch.origin, groupId: ch.group_id }, lineups, ads,
-    urls: { hls: `/origin/${ch.id}/fast/master.m3u8`, dash: `/origin/${ch.id}/fast/manifest.mpd`, session: `/fast/${ch.id}/s/{session}/master.m3u8` } });
+  const playout = await one<any>(
+    `SELECT launcher, status, started_at, last_seen_at, last_pdt, media_sequence, restarts, error, unreadable,
+            (last_seen_at > now() - make_interval(secs => $2)) AS fresh
+       FROM fast_playouts WHERE channel_id = $1`, [ch.id, fastConfig.staleSec]);
+  res.json({ channel: { id: ch.id, name: ch.name, status: ch.status, origin: ch.origin, groupId: ch.group_id, onAir: !!ch.on_air }, lineups, ads, playout,
+    urls: { hls: channelPlaylistUrl(ch.id, 'master.m3u8'), dash: channelPlaylistUrl(ch.id, 'manifest.mpd'), session: `/fast/${ch.id}/s/{session}/master.m3u8` } });
+}));
+
+/** Is every asset the channel uses ready to air (packaged, splice-aligned, loudness, 1 s slate)? */
+fastRouter.get('/channels/:id/readiness', asyncHandler(async (req, res) => {
+  const ch = await ownChannel(req, String(req.params.id));
+  const { readiness } = await import('../services/fast/prepare');
+  res.json({ items: await readiness(ch.id) });
+}));
+/** Queue the encodes that make them ready. */
+fastRouter.post('/channels/:id/prepare', asyncHandler(async (req, res) => {
+  const ch = await ownChannel(req, String(req.params.id));
+  const { prepare } = await import('../services/fast/prepare');
+  res.json(await prepare(ch.id));
+}));
+
+/**
+ * PUBLIC OR PRIVATE. The same switch as any channel (channels.on_air): off, the
+ * playout still runs and the console previews it, but the public URL and the
+ * player's play gate give nothing.
+ */
+fastRouter.post('/channels/:id/on-air', asyncHandler(async (req, res) => {
+  const ch = await ownChannel(req, String(req.params.id));
+  const on = req.body?.on === true;
+  await query(`UPDATE channels SET on_air = $2, updated_at = now() WHERE id = $1`, [ch.id, on]);
+  res.json({ onAir: on });
 }));
 
 // ------------------------------------------------------------------ library
@@ -248,9 +279,11 @@ fastRouter.post('/lineups/:lid/activate', asyncHandler(async (req, res) => {
   if (!(l.slots ?? []).length) throw badRequest('The lineup has no slots yet.');
   const r = await activateLineup(l.id);
   const applied = await applyLineup(l.id, { days: l.settings?.horizonDays ?? DEFAULT_HORIZON_DAYS });
+  // anything not ready to air is prepared now (splice-aligned re-encodes, loudness, the 1 s slate)
+  const prepared = await import('../services/fast/prepare').then((m) => m.prepare(l.channel_id)).catch(() => null);
   const { startPlayout } = await import('../services/fast/playoutRunner');
-  const playing = startPlayout(l.channel_id);
-  res.json({ ...r, applied, playout: playing ? 'running' : 'run separately', urls: { hls: `/origin/${l.channel_id}/fast/master.m3u8`, dash: `/origin/${l.channel_id}/fast/manifest.mpd` } });
+  const playout = await startPlayout(l.channel_id).catch((e: any) => `could not start: ${e?.message ?? e}`);
+  res.json({ ...r, applied, playout, prepared, urls: { hls: channelPlaylistUrl(l.channel_id, 'master.m3u8'), dash: channelPlaylistUrl(l.channel_id, 'manifest.mpd') } });
 }));
 
 const applyBody = z.object({ days: z.number().int().min(1).max(14).optional(), dryRun: z.boolean().optional() });
@@ -416,6 +449,22 @@ fastRouter.post('/channels/:id/breaks/:bid/decide', asyncHandler(async (req, res
 
 export const fastPlayoutRouter = Router();
 fastPlayoutRouter.use(requireIngestToken);
+/** The playout's heartbeat: its state (carried across restarts), what it last published. */
+fastPlayoutRouter.post('/:id/heartbeat', asyncHandler(async (req, res) => {
+  const id = String(req.params.id);
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw badRequest('id must be a uuid');
+  const { heartbeat } = await import('../services/fast/playoutRunner');
+  await heartbeat(id, req.body ?? {});
+  res.status(204).end();
+}));
+/** What a starting playout carries on from (null: start fresh). */
+fastPlayoutRouter.get('/:id/state', asyncHandler(async (req, res) => {
+  const id = String(req.params.id);
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw badRequest('id must be a uuid');
+  const { savedState } = await import('../services/fast/playoutRunner');
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ state: await savedState(id) });
+}));
 fastPlayoutRouter.get('/:id/timeline', asyncHandler(async (req, res) => {
   const id = String(req.params.id);
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw badRequest('id must be a uuid');
@@ -433,32 +482,22 @@ fastPlayoutRouter.get('/:id/timeline', asyncHandler(async (req, res) => {
 // the production form is the same functions in a small stateless service with
 // the state in Redis (DESIGN_fast_channels.md, "Stitcher in production").
 
-interface Session {
-  channelId: string;
-  started: number;
-  seen: number;
-  tracks: Record<string, SessionState>;
-  pods: Map<string, Promise<any> | any>;
-  ctx: { ip?: string | null; userAgent?: string | null; country?: string | null };
-}
-const sessions = new Map<string, Session>();
-const SESSION_TTL_MS = 10 * 60_000;
 const LOOKAHEAD_MS = 60_000;
-setInterval(() => { const now = Date.now(); for (const [k, s] of sessions) if (now - s.seen > SESSION_TTL_MS) sessions.delete(k); }, 60_000).unref?.();
 
 const assetTracks = new Map<string, { at: number; tracks: Record<string, { init: string; segs: { uri: string; dur: number }[] }> }>();
 /** An asset's segments per channel track name (v<height> / audio), from its VOD playlists. */
 async function tracksOf(master: string) {
   const hit = assetTracks.get(master);
   if (hit && Date.now() - hit.at < 3600_000) return hit.tracks;
-  const rel = master.startsWith('/clips') ? master.slice('/clips'.length) : master;
-  const dir = join(config.clips.dir, rel.replace(/\/[^/]+$/, ''));
-  const base = master.replace(/\/[^/]+$/, '/');
-  const text = await readFile(join(config.clips.dir, rel), 'utf8');
+  // local '/clips/vod/<id>/...' or production 'vod/<id>/...' (media.ts), and
+  // the segment URLs exactly as the playout writes them (absolute on the CDN in production)
+  const folder = master.replace(/\/[^/]+$/, '');
+  const base = assetUrlBase(master);
+  const text = await readKey(master);
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const out: Record<string, { init: string; segs: { uri: string; dur: number }[] }> = {};
   const media = async (uri: string) => {
-    const t = await readFile(join(dir, uri), 'utf8');
+    const t = await readKey(`${folder}/${uri}`);
     let init = '', pend: number | null = null;
     const segs: { uri: string; dur: number }[] = [];
     for (const l of t.split(/\r?\n/)) {
@@ -515,39 +554,37 @@ fastPublicRouter.get('/:id/s/:sid/:file', asyncHandler(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 'no-store');
   res.type('application/vnd.apple.mpegurl');
-  const dir = join(config.testStream.originDir, id, 'fast');
-  const text = await readFile(join(dir, file), 'utf8').catch(() => null);
+  const text = await readChannelPlaylist(id, file);
   if (text == null) throw notFound('The channel is not playing');
   if (file === 'master.m3u8') return res.send(text); // relative media URIs resolve under this session's path
-  let s = sessions.get(sid);
-  if (!s) {
-    s = { channelId: id, started: Date.now(), seen: Date.now(), tracks: {}, pods: new Map(), ctx: { ip: req.ip, userAgent: req.header('user-agent') ?? null, country: req.header('cloudfront-viewer-country') ?? null } };
-    sessions.set(sid, s);
-  }
-  s.seen = Date.now();
+  // SESSION STATE IS SHARED (sessionStore.ts): refreshes land on any API task.
+  const ctx = await sessionStore.context(sid, () => ({ channelId: id, ip: req.ip, userAgent: req.header('user-agent') ?? null, country: req.header('cloudfront-viewer-country') ?? null }));
   const track = file.replace(/\.m3u8$/, '');
   // PRE-FETCH: decide breaks that start in the next minute, without waiting
   const ads = await adsFor(id);
+  const recent = await query<any>(
+    `SELECT id, starts_at FROM stream_breaks WHERE channel_id = $1 AND status = 'scheduled'
+        AND starts_at BETWEEN now() - interval '10 minutes' AND now() + make_interval(secs => $2)`, [id, LOOKAHEAD_MS / 1000]);
+  const decisionSid = ads.scope === 'channel' ? `channel-${id}` : sid;
   if (ads.mode === 'stitched') {
-    const upcoming = await query<any>(
-      `SELECT id FROM stream_breaks WHERE channel_id = $1 AND status = 'scheduled' AND starts_at BETWEEN now() - interval '10 seconds' AND now() + make_interval(secs => $2)`,
-      [id, LOOKAHEAD_MS / 1000]);
-    for (const b of upcoming) {
-      if (s.pods.has(b.id)) continue;
-      const p = decideBreak({ channelId: id, breakId: b.id, sessionId: ads.scope === 'channel' ? `channel:${id}` : sid, ctx: s.ctx })
-        .then((plan) => { s!.pods.set(b.id, plan); return plan; })
-        .catch(() => { s!.pods.set(b.id, null); return null; });
-      s.pods.set(b.id, p);
+    for (const b of recent) {
+      if (new Date(b.starts_at).getTime() < Date.now() - 10_000) continue;      // already started: too late to stitch
+      if ((await sessionStore.pod(decisionSid, b.id)) !== undefined) continue;   // decided
+      if (!(await sessionStore.claim(decisionSid, b.id))) continue;              // another task is deciding
+      decideBreak({ channelId: id, breakId: b.id, sessionId: decisionSid, ctx: ctx as any })
+        .then((plan) => sessionStore.savePod(decisionSid, b.id, plan))
+        .catch(() => sessionStore.savePod(decisionSid, b.id, null));
     }
   }
   const slate = ads.policy.slateAssetId ? (await one<any>(`SELECT master_key FROM vod_assets WHERE id = $1`, [ads.policy.slateAssetId]))?.master_key ?? null : null;
   const podCache = new Map<string, PodRendition | null>();
-  for (const [bid, plan] of s.pods) {
-    if (!plan || typeof (plan as any).then === 'function') continue;
-    podCache.set(`brk:${bid}`, await podSegments(plan, track, slate).catch(() => null));
+  for (const b of recent) {
+    const plan = await sessionStore.pod<any>(decisionSid, b.id);
+    if (plan) podCache.set(`brk:${b.id}`, await podSegments(plan, track, slate).catch(() => null));
   }
-  const st = (s.tracks[track] ??= { startedMs: s.started, breaks: {} });
+  const st = (await sessionStore.track<SessionState>(sid, track)) ?? { startedMs: Number((ctx as any).started ?? Date.now()), breaks: {} };
   // the channel playlist names a break brk:<id>; the pod is looked up by that
   const out = stitchHls(text, st, (breakId) => podCache.get(breakId) ?? null).replace(/#loop\d+/g, '');
+  await sessionStore.saveTrack(sid, track, st);
   res.send(out);
 }));

@@ -207,3 +207,9 @@ variable "api_edge_price_class" {
   default     = "PriceClass_All"
   description = "Edge locations for the API distribution. PriceClass_All covers APAC viewers best."
 }
+
+variable "public_base_url" {
+  description = "Origin viewers use for the API (PUBLIC_BASE_URL). Empty: the first api_edge_aliases entry, else the API edge, else the ALB."
+  type        = string
+  default     = ""
+}

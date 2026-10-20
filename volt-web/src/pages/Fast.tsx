@@ -5,9 +5,11 @@ import { navigate } from '../router'
 import { Notice, usePageNotice, useNotify } from '../notices'
 import {
   fastApi, type FastChannelRow, type LibAsset, type LibSeries, type Lineup, type Slot, type SeriesSlot,
-  type LineupSettings, type Preview, type PlannedProgramme, type ChannelAds, type AdServer, type AdTest, type AdReport,
+  type LineupSettings, type Preview, type PlannedProgramme, type ChannelAds, type AdServer, type AdTest, type AdReport, type Playout, type ReadinessRow,
 } from '../fast/fastApi'
 import '../fast/fast.css'
+import VoltPlayerView from '../VoltPlayerView'
+import { pressable } from '../a11y'
 
 /* ============================================================================
    FAST channels: a live channel built from the library.
@@ -134,11 +136,11 @@ function CreateDialog({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
 // ============================================================================ builder
 
-type Tab = 'order' | 'week' | 'repeats' | 'ads'
+type Tab = 'order' | 'week' | 'repeats' | 'ads' | 'air'
 
 function FastBuilder({ id }: { id: string }) {
   const notify = useNotify()
-  const [ch, setCh] = useState<{ id: string; name: string; status: string } | null>(null)
+  const [ch, setCh] = useState<{ id: string; name: string; status: string; onAir: boolean } | null>(null)
   const [urls, setUrls] = useState<{ hls: string; dash: string } | null>(null)
   const [lineups, setLineups] = useState<Lineup[]>([])
   const [work, setWork] = useState<Lineup | null>(null)   // the lineup being edited (a draft, or the active one read-only)
@@ -215,7 +217,7 @@ function FastBuilder({ id }: { id: string }) {
     try {
       if (dirty) await fastApi.saveLineup(w.id, { slots, settings, zone })
       const r = await fastApi.activate(w.id)
-      notify({ kind: 'ok', title: 'On air.', message: `${r.applied.inserted} programmes and ${r.applied.breaks} ad breaks written to the guide${r.applied.conflicts.length ? `; ${r.applied.conflicts.length} programme(s) entered by hand overlap it` : ''}. Series and the run order carry on from where they were.` })
+      notify({ kind: 'ok', title: 'On air.', message: `${r.applied.inserted} programmes and ${r.applied.breaks} ad breaks written to the guide${r.applied.conflicts.length ? `; ${r.applied.conflicts.length} programme(s) entered by hand overlap it` : ''}. Series and the run order carry on from where they were.${(r as any).prepared?.queued?.length ? ` ${(r as any).prepared.queued.length} title(s) are being prepared for air.` : ''}` })
       await load(w.id)
     } catch (e: any) { notify({ kind: 'error', title: "Couldn't activate.", message: e.message }) } finally { setBusy('') }
   }
@@ -280,7 +282,7 @@ function FastBuilder({ id }: { id: string }) {
       </div>
 
       <div className="filters" role="tablist" aria-label="Builder sections">
-        {([['order', 'Run order'], ['week', 'Week'], ['repeats', 'Repeats'], ['ads', 'Ads']] as [Tab, string][]).map(([k, l]) => (
+        {([['order', 'Run order'], ['week', 'Week'], ['repeats', 'Repeats'], ['ads', 'Ads'], ['air', 'On air']] as [Tab, string][]).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={`chip${tab === k ? ' active' : ''}`} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
@@ -320,6 +322,7 @@ function FastBuilder({ id }: { id: string }) {
       {tab === 'week' && <WeekView p={preview} />}
       {tab === 'repeats' && <Repeats p={preview} />}
       {tab === 'ads' && <AdsTab channelId={id} lib={lib} />}
+      {tab === 'air' && <AirTab channelId={id} hasActive={!!active} onAirChange={(on) => setCh(c => c ? { ...c, onAir: on } : c)} />}
     </>
   )
 }
@@ -757,6 +760,124 @@ function AdsTab({ channelId, lib }: { channelId: string; lib: { assets: LibAsset
           </>}
         </div>
       </div>}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- on air
+
+const ROLE: Record<ReadinessRow['role'], string> = { content: 'Programme', house: 'House spot', slate: 'Slate' }
+const READY: Record<ReadinessRow['state'], { label: string; cls: string }> = {
+  ready: { label: 'Ready', cls: 'live' }, preparing: { label: 'Preparing', cls: 'sched' },
+  'needs-prepare': { label: 'Needs preparing', cls: 'warn' }, 'no-source': { label: 'No source', cls: 'down' },
+}
+const ago = (iso: string | null) => {
+  if (!iso) return 'never'
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+}
+
+/**
+ * What the channel is doing now: the playout (is it writing the channel, how
+ * often has it been restarted, what could it not read), a preview of its own
+ * playlists, the public switch, and whether every title it uses is ready to air.
+ */
+function AirTab({ channelId, hasActive, onAirChange }: { channelId: string; hasActive: boolean; onAirChange: (on: boolean) => void }) {
+  const notify = useNotify()
+  const [playout, setPlayout] = useState<Playout | null>(null)
+  const [onAir, setOnAir] = useState(false)
+  const [hls, setHls] = useState<string | null>(null)
+  const [stitched, setStitched] = useState(false)
+  const [ready, setReady] = useState<ReadinessRow[] | null>(null)
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+
+  const load = async () => {
+    try {
+      const [c, r] = await Promise.all([fastApi.channel(channelId), fastApi.readiness(channelId)])
+      setPlayout(c.playout); setOnAir(c.channel.onAir); setHls(c.urls?.hls ?? null); setStitched(c.ads.mode === 'stitched'); setReady(r.items); setErr('')
+    } catch (e: any) { setErr(e.message) }
+  }
+  useEffect(() => { load(); const t = window.setInterval(load, 10_000); return () => window.clearInterval(t) }, [channelId])
+
+  const toggle = async () => {
+    setBusy('air')
+    try {
+      const r = await fastApi.setOnAir(channelId, !onAir)
+      setOnAir(r.onAir); onAirChange(r.onAir)
+      notify({ kind: 'ok', title: r.onAir ? 'The channel is public.' : 'The channel is private.', message: r.onAir ? 'Viewers can play it from its public URL and the player.' : 'The playout keeps running; only the console can preview it.' })
+    } catch (e: any) { notify({ kind: 'error', title: "Couldn't change it.", message: e.message }) } finally { setBusy('') }
+  }
+  const prepare = async () => {
+    setBusy('prep')
+    try {
+      const r = await fastApi.prepare(channelId)
+      notify({ kind: r.queued.length ? 'ok' : 'info', title: r.queued.length ? `Preparing ${r.queued.length} title(s).` : 'Nothing to prepare.',
+        message: r.skipped.length ? `${r.skipped.length} title(s) cannot be prepared: their source file is no longer here. Upload them again.` : undefined })
+      await load()
+    } catch (e: any) { notify({ kind: 'error', title: "Couldn't prepare.", message: e.message }) } finally { setBusy('') }
+  }
+
+  if (err) return <Notice kind="error" title="Couldn't load the channel's status." message={err} />
+  if (!ready) return <div className="loading">Loading…</div>
+  const healthy = !!playout?.fresh && playout.status === 'running'
+  const state = !hasActive ? { label: 'No active lineup', cls: 'idle' }
+    : healthy ? { label: 'Playing', cls: 'live' }
+    : playout?.status === 'failed' ? { label: 'Failed to start', cls: 'down' }
+    : playout?.status === 'starting' || !playout ? { label: 'Starting', cls: 'sched' }
+    : { label: 'Not responding', cls: 'warn' }
+  const toFix = ready.filter(r => r.state === 'needs-prepare').length
+
+  return (
+    <div className="grid-2">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+        <div className="card">
+          <div className="card-h"><h3>Preview</h3><span className="sub">{stitched ? "the channel's own feed, with house spots in its breaks; viewers get their own ads" : "the channel's own feed"}</span></div>
+          <div className="card-b">
+            {healthy && hls ? <VoltPlayerView src={hls} live autoplay={false} skin="admin" />
+              : <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)' }}>{hasActive ? 'The preview starts once the playout is writing the channel.' : 'Activate a lineup to start the channel.'}</div>}
+          </div>
+        </div>
+        <div className={`big-toggle${onAir ? '' : ' offair'}`}>
+          <div className="txt">
+            <div className="t">{onAir ? 'Public' : 'Private'}</div>
+            <div className="d">{onAir ? 'Viewers can play the channel from its public URL and the player.' : 'Only the console can preview it. Turn it on to give viewers the channel.'}</div>
+          </div>
+          <div className={`switch${onAir ? '' : ' off'}`} role="switch" aria-checked={onAir} aria-label="Public" aria-disabled={!!busy}
+            {...pressable(() => { if (!busy) toggle() })}><i /></div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+        <div className="card">
+          <div className="card-h"><h3>Playout</h3><span className="spacer" /><span className={`tag ${state.cls}`}>{state.label}</span></div>
+          <div className="card-b">
+            {playout?.error && <Notice kind="error" variant="compact" message={playout.error} />}
+            <div className="kv"><span className="k">Runs on</span><span className="v">{playout ? (playout.launcher === 'ecs' ? 'Its own task (ECS)' : playout.launcher === 'local' ? 'This server' : playout.launcher) : '—'}</span></div>
+            <div className="kv"><span className="k">Last heard from</span><span className="v">{ago(playout?.last_seen_at ?? null)}</span></div>
+            <div className="kv"><span className="k">Running since</span><span className="v">{ago(playout?.started_at ?? null)}</span></div>
+            <div className="kv"><span className="k">Restarts</span><span className="v">{playout?.restarts ?? 0}</span></div>
+            <div className="kv"><span className="k">Segments published</span><span className="v">{playout?.media_sequence != null ? playout.media_sequence.toLocaleString() : '—'}</span></div>
+            {!!playout?.unreadable?.length && (
+              <Notice kind="warn" variant="compact" message={`${playout.unreadable.length} title(s) could not be read and are being skipped. Check the Media list below.`} />
+            )}
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-h"><h3>Media</h3><span className="sub">every title, house spot and slate the channel uses</span><span className="spacer" />
+            {toFix > 0 && <button className="btn ghost" onClick={prepare} disabled={!!busy}>{busy === 'prep' ? 'Queuing…' : `Prepare ${toFix}`}</button>}</div>
+          {ready.length === 0 ? <div className="card-b" style={{ color: 'var(--muted)' }}>The lineup uses no titles yet.</div>
+            : ready.map(r => (
+              <div key={r.assetId} className="fast-ready">
+                <div style={{ minWidth: 0 }}>
+                  <div className="nm">{r.title}</div>
+                  <div className="meta">{ROLE[r.role]}{r.why ? ` · ${r.why}` : ''}</div>
+                </div>
+                <span className={`tag ${READY[r.state].cls}`}>{READY[r.state].label}</span>
+              </div>
+            ))}
+        </div>
+      </div>
     </div>
   )
 }

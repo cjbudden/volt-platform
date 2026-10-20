@@ -146,6 +146,41 @@ resource "aws_ecs_task_definition" "thumbnailer" {
   }])
 }
 
+# ---- FAST playout task definition (one per FAST channel; launched by the control plane)
+# volt-encoder/Dockerfile.fast. Writes the channel's live playlists to the origin
+# bucket (channel/<id>/fast/) and heartbeats to INTERNAL_API_BASE_URL. Small:
+# it only reads playlists and writes text, the media is never touched.
+# Same task role as the encoder (origin bucket read/write), so PassRole is unchanged.
+resource "aws_ecs_task_definition" "fast" {
+  family                   = "${local.name}-fast"
+  requires_compatibilities = ["EC2"]
+  network_mode             = "awsvpc"
+  cpu                      = "128"
+  memory                   = "256"
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.encoder_task.arn
+
+  container_definitions = jsonencode([{
+    name      = "fast"
+    image     = "${aws_ecr_repository.repo["volt-fast"].repository_url}:latest"
+    essential = true
+    # SIGTERM: final heartbeat with its state, then exit (fast_playout.py)
+    stopTimeout = 10
+    environment = [
+      { name = "AWS_DEFAULT_REGION", value = var.region },
+      { name = "S3_BUCKET", value = aws_s3_bucket.origin.id },
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.encoder.name
+        "awslogs-region"        = var.region
+        "awslogs-stream-prefix" = "fast"
+      }
+    }
+  }])
+}
+
 # ---- Control-plane settings shared by every role ------------------------------
 locals {
   control_plane_env = [
@@ -157,6 +192,13 @@ locals {
     { name = "ORCH_LAUNCHER", value = "ecs" },
     { name = "ENCODER_TASK_DEF", value = "${local.name}-encoder" },
     { name = "THUMBNAILER_TASK_DEF", value = "${local.name}-thumbnailer" },
+    # FAST channels (services/fast): playouts on ECS writing to the bucket, library
+    # media packaged to the bucket so any task can read it, and the origin viewers
+    # reach the ad stitcher on (per-viewer playlists, never cached).
+    { name = "FAST_TASK_DEF", value = "${local.name}-fast" },
+    { name = "FAST_OUTPUT", value = "s3" },
+    { name = "VOD_STORE", value = "s3" },
+    { name = "PUBLIC_BASE_URL", value = local.public_base_url },
     { name = "ECS_SPOT_PROVIDER", value = aws_ecs_capacity_provider.spot.name },
     { name = "ECS_ONDEMAND_PROVIDER", value = aws_ecs_capacity_provider.ondemand.name },
     # Placement (services/fleet): small and large pools, chosen per stream from its load.

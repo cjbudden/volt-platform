@@ -205,6 +205,12 @@ def build_encode_cmd(cfg, work_dir):
     audio_path = None
     if cfg.get("has_audio", True):
         cmd += audio_track_args(0)
+        # LOUDNESS: ads and house spots go between programmes, so they are
+        # brought to the broadcast target (EBU R128: -23 LUFS integrated, -1 dBTP)
+        # when the job asks. One-pass loudnorm; the content itself is left alone.
+        if cfg.get("loudnorm"):
+            target = float(cfg.get("loudnorm_lufs", -23))
+            cmd += ["-af", f"loudnorm=I={target}:TP=-1:LRA=11"]
         audio_path = os.path.join(work_dir, "audio.ts")
         cmd += ZERO_START + ["-f", "mpegts", audio_path]
 
@@ -275,10 +281,11 @@ def main():
     if cfg.get("gpu"):
         # same rule as the live encoder: a profile asking for NVENC on a machine
         # without an NVIDIA GPU encodes on the CPU rather than failing outright
-        probe = subprocess.run([FFMPEG_BIN, "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+        # (not called `probe`: that name in main() would hide probe() below)
+        nvenc = subprocess.run([FFMPEG_BIN, "-hide_banner", "-loglevel", "error", "-f", "lavfi",
                                 "-i", "color=s=256x144:d=0.1", "-frames:v", "1",
                                 "-c:v", "h264_nvenc", "-f", "null", "-"], capture_output=True)
-        if probe.returncode != 0:
+        if nvenc.returncode != 0:
             log("GPU (NVENC) requested but not available here; encoding with x264 instead")
             cfg["gpu"] = False
 
@@ -323,6 +330,10 @@ def main():
         "renditions": [{"label": p["label"], "height": p["height"],
                         "bitrate_kbps": p["bitrate_kbps"]} for p in parts],
         "has_audio": audio_path is not None,
+        # audio and video segment grids line up (see ZERO_START): the asset can be cut at a break
+        "zero_start": bool(ZERO_START),
+        "segment_seconds": cfg["segment_seconds"],
+        "loudnorm": bool(cfg.get("loudnorm")),
         "master": os.path.join(out_dir, "master.m3u8") if cfg.get("packaging", "both") in ("hls", "both") else None,
         "mpd": os.path.join(out_dir, "manifest.mpd") if cfg.get("packaging", "both") in ("dash", "both") else None,
     }

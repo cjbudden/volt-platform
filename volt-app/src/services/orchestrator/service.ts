@@ -1073,7 +1073,9 @@ export class Orchestrator {
 
   async reconcileStreamStatus(): Promise<number> {
     const live = await query<any>(
-      `SELECT c.id, c.name, 'channel' AS kind FROM channels c WHERE c.status = 'live'
+      // A FAST channel (origin = playlist) has no instance to ask about; its
+      // playout is supervised by services/fast/playoutRunner.ts, which owns its status.
+      `SELECT c.id, c.name, 'channel' AS kind FROM channels c WHERE c.status = 'live' AND COALESCE(c.origin, 'live') <> 'playlist'
        UNION ALL
        SELECT e.id, e.name, 'event' AS kind FROM events e WHERE e.status = 'live'`
     );

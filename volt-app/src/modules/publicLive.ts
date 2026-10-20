@@ -156,6 +156,14 @@ publicLiveRouter.get(
 export async function resolveLiveManifest(id: string, file: 'master.m3u8' | 'manifest.mpd'):
   Promise<{ ok: true; url: string } | { ok: false; status: 404 | 503; reason: string }> {
   const ch = await channelDelivery(id);
+  // A FAST CHANNEL (origin = playlist): its playout's playlists, while the
+  // playout's heartbeat is fresh; the per-viewer stitched URL when its ads are
+  // stitched (HLS; DASH viewers get the channel's own breaks). services/fast/delivery.ts
+  if (ch && ch.on_air) {
+    const { fastManifest } = await import('../services/fast/delivery');
+    const f = await fastManifest(id, file);
+    if (f) return f;
+  }
   // Off air: the public URL exposes nothing. This is the whole point of "On means
   // available to the public" — private previews never leak here.
   if (!ch || !ch.on_air) return { ok: false, status: 404, reason: 'not_on_air' };
@@ -242,8 +250,10 @@ publicLiveRouter.get(
     const r = await resolveLiveManifest(id, file as 'master.m3u8' | 'manifest.mpd');
     // The answer is the same for every viewer of the channel, so the edge may
     // hold it for a couple of seconds: a million viewers then cost the API a
-    // request per edge location every 2 s, not a request each.
-    edgeCache(res, scaleConfig.edge.liveRedirectMaxAgeSec);
+    // request per edge location every 2 s, not a request each. Except a
+    // per-viewer URL (a FAST channel with stitched ads), which must never be shared.
+    if (r.ok && (r as any).perViewer) noStore(res);
+    else edgeCache(res, scaleConfig.edge.liveRedirectMaxAgeSec);
     if (!r.ok) {
       res.status(r.status).json({ available: false, reason: r.reason });
       return;

@@ -1,0 +1,16 @@
+# Volt FAST playout: a live channel built from packaged VOD (bin/fast_playout.py).
+#
+# No ffmpeg, no packager: the playout writes playlists, it never touches media.
+# So the image is Python and boto3 and nothing else, a few tens of megabytes,
+# and a task needs a fraction of a vCPU. Configured by FAST_CONFIG_JSON
+# (the control plane sets it at RunTask, services/fast/playoutRunner.ts).
+#
+#   docker build -f Dockerfile.fast -t volt-fast .
+FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1
+RUN pip install --no-cache-dir boto3==1.35.36
+WORKDIR /app
+COPY bin/fast_playout.py /app/bin/fast_playout.py
+# The playout handles SIGTERM itself: a last heartbeat (its state) to the
+# control plane, then exit, so the next task carries the media sequence on.
+CMD ["python3", "/app/bin/fast_playout.py"]

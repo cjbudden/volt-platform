@@ -32,6 +32,13 @@ provider "aws" {
 
 locals {
   edge = var.enable_api_edge ? 1 : 0
+
+  # Where viewers reach the API (PUBLIC_BASE_URL: share links, the FAST stitcher's
+  # session URLs). The alias when one is set, else the edge, else the ALB.
+  public_base_url = var.public_base_url != "" ? var.public_base_url : (
+    length(var.api_edge_aliases) > 0 ? "https://${var.api_edge_aliases[0]}" : (
+      var.enable_api_edge ? "https://${aws_cloudfront_distribution.api[0].domain_name}" : "http://${aws_lb.cp.dns_name}"
+  ))
 }
 
 data "aws_cloudfront_cache_policy" "disabled" {

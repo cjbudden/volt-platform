@@ -189,5 +189,47 @@ if assets["filmA"].dash:
 else:
     ok(mpd is not None, "DASH: written (synthetic assets have no MPD; run with FAST_LAB for the full DASH checks)")
 
+# ---- production IO: playlists into S3, library media read from S3 ----------------
+try:
+    from moto import mock_aws
+    import boto3
+except ImportError:
+    mock_aws = None
+if mock_aws:
+    from fast_playout import S3Sink, MediaReader
+    with mock_aws():
+        c = boto3.client("s3", region_name="us-east-1")
+        c.create_bucket(Bucket="origin")
+        sink = S3Sink("origin", "channel/ch1/fast", client=c)
+        sink.put("v720.m3u8", "#EXTM3U\n")
+        sink.put("manifest.mpd", "<MPD/>")
+        o = c.get_object(Bucket="origin", Key="channel/ch1/fast/v720.m3u8")
+        ok(o["ContentType"] == "application/vnd.apple.mpegurl" and "no-cache" in o["CacheControl"], "S3: playlist with its type and no-cache")
+        ok(c.get_object(Bucket="origin", Key="channel/ch1/fast/manifest.mpd")["ContentType"] == "application/dash+xml", "S3: the MPD as DASH, not as HLS")
+        calls = []
+        orig = c.put_object
+        c.put_object = lambda **k: (calls.append(k["Key"]), orig(**k))[1]
+        sink.put("v720.m3u8", "#EXTM3U\n")
+        ok(not calls, "S3: an unchanged playlist is not sent again")
+        # an asset in the bucket under vod/<id>/
+        src = assets["filmA"]
+        def media(tr, prefix):
+            L = ["#EXTM3U", f'#EXT-X-MAP:URI="{prefix}/init.mp4"']
+            for sg in tr.segs:
+                L += [f"#EXTINF:{sg['dur']:.3f},", f"{prefix}/seg_{sg['index'] + 1}.m4s"]
+            return "\n".join(L + ["#EXT-X-ENDLIST"])
+        c.put_object(Bucket="origin", Key="vod/a1/master.m3u8", Body=("#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,URI=\"stream_2.m3u8\",GROUP-ID=\"audio\"\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=2600000,RESOLUTION=1280x720,AUDIO=\"audio\"\nstream_1.m3u8\n").encode())
+        c.put_object(Bucket="origin", Key="vod/a1/stream_1.m3u8", Body=media(src.video[720], "720p").encode())
+        c.put_object(Bucket="origin", Key="vod/a1/stream_2.m3u8", Body=media(src.audio, "audio").encode())
+        rd = MediaReader(s3=c, bucket="origin")
+        a1 = load_asset("vod/a1/master.m3u8", url_prefix="https://cdn.example.net", reader=rd)
+        ok(720 in a1.video and a1.audio is not None and a1.video[720].segs[0]["uri"] == "https://cdn.example.net/vod/a1/720p/seg_1.m4s", "S3: an asset read from the bucket, segment URLs on the CDN")
+        ok(a1.dash is None, "S3: no MPD in the bucket is not an error")
+        a2 = load_asset("vod/a1/master.m3u8", reader=rd)
+        ok(a2.video[720].init == "/vod/a1/720p/init.mp4", "S3: root-relative without a CDN prefix")
+else:
+    print("SKIP S3 checks (pip install moto boto3)")
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
