@@ -2692,6 +2692,42 @@
  },
  {
   "method": "GET",
+  "path": "/api/live-streams/:kind/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/live-streams"
+ },
+ {
+  "method": "GET",
+  "path": "/api/live-streams/:kind/:id/provider",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/live-streams"
+ },
+ {
+  "method": "GET",
+  "path": "/api/live-streams/:kind/:id/schema.org",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/live-streams"
+ },
+ {
+  "method": "GET",
+  "path": "/api/live-streams/presets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "monitoring: view",
+  "viewerTier": false,
+  "group": "/api/live-streams"
+ },
+ {
+  "method": "GET",
   "path": "/api/metadata-schemas/:id/effective-fields",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

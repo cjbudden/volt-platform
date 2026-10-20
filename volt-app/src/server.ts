@@ -55,6 +55,7 @@ import { notificationsRouter, notificationTemplatesRouter } from './modules/noti
 import { shareLinksRouter, publicShareRouter } from './modules/shareLinks';
 import { publicLiveRouter } from './modules/publicLive';
 import { hypermediaRouter } from './modules/hypermedia';
+import { liveStreamsRouter } from './modules/liveStreams';
 import { hypermediaNegotiation } from './middleware/hypermedia';
 import { heartbeat } from './services/statusHub';
 import { INGEST_PROTOCOLS } from './services/ingestProtocols';
@@ -362,6 +363,7 @@ export function createServer() {
   app.use('/api/player-config', playerAdminRouter);
   app.use('/api/streams', ingestRouter);  // encoder -> POST /api/streams/:id/report
   app.use('/api/media', mediaIngestRouter); // thumbnailer -> POST /api/media/thumbnails
+  app.use('/api/live-streams', liveStreamsRouter);  // the stream aggregate: planes, preset, provider tiers (services/streamModel.ts)
   app.use('/api/recordings', recordingsRouter);         // recordings library (+ publish/clip)
   app.use('/api/jobs', jobsRouter);                     // long-running work: progress, reasons, retry
   // Timeline, coverage and dayparts hang off a channel, so they mount UNDER the

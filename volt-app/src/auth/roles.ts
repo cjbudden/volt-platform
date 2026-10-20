@@ -81,7 +81,7 @@ export interface FeatureDef {
 
 const ID = '[^/]+';
 export const CATALOGUE: FeatureDef[] = [
-  { key: 'monitoring', label: 'Live & monitoring', area: 'content', prefixes: ['/api/status', '/api/monitoring', '/api/timeline'] },
+  { key: 'monitoring', label: 'Live & monitoring', area: 'content', prefixes: ['/api/status', '/api/monitoring', '/api/timeline', '/api/live-streams'] },
   { key: 'channels', label: 'TV channels', area: 'content', prefixes: ['/api/channels', '/api/daypart-presets'],
     operate: [new RegExp(`^/api/channels/${ID}/(start|stop|air|auto-connect|test-stream|failover-test|reset-health)$`)],
     operateMeans: 'Start/stop, on/off air, auto connect, test streams, clear QC' },

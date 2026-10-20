@@ -933,6 +933,24 @@
         ]
       },
       "feedback": []
+    },
+    {
+      "id": "stream-aggregate",
+      "name": "Stream aggregate API: planes, presets, provider contract, BroadcastEvent",
+      "summary": "WHY: a partner or an app should understand a stream from one place: what produces it, what describes it, and what it can consume in which standard. WHAT: one read endpoint per channel or event with its production and distribution planes, its preset, the provider contract per tier, and schema.org JSON-LD for the live broadcast.",
+      "status": "ready_to_test",
+      "app_surface": "none",
+      "test": {
+        "how": "GET /api/live-streams/channel/<id> for a running channel: inputs, profile, placement, on air, geo and the six provider tiers. GET /api/live-streams/event/<id>/schema.org for a sports event: a BroadcastEvent with the match as broadcastOfEvent.",
+        "artifact": "",
+        "checks": [
+          "Planes match the channel's settings",
+          "Preset correct for channel, event and FAST",
+          "Provider tiers have working links",
+          "JSON-LD validates (schema.org validator)"
+        ]
+      },
+      "feedback": []
     }
   ],
   "note": "Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set."

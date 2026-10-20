@@ -563,6 +563,15 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | GET | `/api/metadata-schemas` | admin session (Bearer) or account secret key | settings: any signed-in admin user (lookup for forms) |  |
+### `/api/live-streams`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/live-streams/:kind/:id` | admin session (Bearer) or account secret key | monitoring: view |  |
+| GET | `/api/live-streams/:kind/:id/provider` | admin session (Bearer) or account secret key | monitoring: view |  |
+| GET | `/api/live-streams/:kind/:id/schema.org` | admin session (Bearer) or account secret key | monitoring: view |  |
+| GET | `/api/live-streams/presets` | admin session (Bearer) or account secret key | monitoring: view |  |
+
 | POST | `/api/metadata-schemas` | admin session (Bearer) or account secret key | settings: manage |  |
 | DELETE | `/api/metadata-schemas/:id` | admin session (Bearer) or account secret key | settings: manage |  |
 | GET | `/api/metadata-schemas/:id` | admin session (Bearer) or account secret key | settings: any signed-in admin user (lookup for forms) |  |
