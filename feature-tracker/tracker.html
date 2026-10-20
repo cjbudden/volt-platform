@@ -29,8 +29,8 @@
  <h1><svg class="vmark" viewBox="0 0 24 24" width="1em" height="1em" style="vertical-align:-0.12em" aria-hidden="true"><defs><linearGradient id="vmk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b8cff"/><stop offset="1" stop-color="#4f46e5"/></linearGradient></defs><path fill="url(#vmk)" d="M14 1 3.5 14H11zM10 23 20.5 10H13z"/></svg> Volt — Product Feature Tracker</h1>
  <div class=sub>Separate from the build status. This is what you can test and sign off. Updated 2026-10-20.</div>
  <div class=sub>Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set.</div>
- <div class=chips><span class=chip style="border-color:#0891b2"><b>55</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>2</b> 🔨 Building</span></div>
- <div class=chips style="margin-bottom:12px"><span class=chip><b>42</b> 📱 In app</span><span class=chip><b>15</b> 📱 Partial</span><span class=chip><b>2</b> ⚙︎ Backend only</span><span class=chip><b>4</b> — no UI</span></div>
+ <div class=chips><span class=chip style="border-color:#0891b2"><b>56</b> 🧪 Ready to test</span><span class=chip style="border-color:#6366f1"><b>3</b> 👀 In review</span><span class=chip style="border-color:#16a34a"><b>3</b> ✅ Approved</span><span class=chip style="border-color:#64748b"><b>2</b> 🔨 Building</span></div>
+ <div class=chips style="margin-bottom:12px"><span class=chip><b>42</b> 📱 In app</span><span class=chip><b>16</b> 📱 Partial</span><span class=chip><b>2</b> ⚙︎ Backend only</span><span class=chip><b>4</b> — no UI</span></div>
  <div class=how-to><b>How this works:</b> features marked <b>Ready to test</b> have a way to try them (below each). When one works, click <b>Approve</b> (it copies a short message — paste it to me in chat) or just tell me “<i>&lt;feature&gt; passed</i>”. If something’s off, click <b>Request changes</b> or tell me what’s wrong. The second badge row shows <b>app surfacing</b>: <b>In app</b> = usable in the new app now; <b>Backend only</b> = built + tested at the API level but not yet wired into the app (tracked so it isn’t lost). I keep this current as we build, and if we ever formally drop something I remove it here and in the build status.</div>
  <div class=card data-status="ready_to_test" data-app="full">
     <div class=top><div class=name>Media Library: grid view, filters by content type, target metadata, EPG fill, encode details</div>
@@ -745,6 +745,19 @@
     <div class=actions>
          <button class="btn ok" data-approve="API navigation by links (JSON-LD + Hydra): every list, record and operation">✓ Approve as working</button>
          <button class="btn warn" data-changes="API navigation by links (JSON-LD + Hydra): every list, record and operation">Request changes</button>
+       </div>
+    
+  </div><div class=card data-status="ready_to_test" data-app="partial">
+    <div class=top><div class=name>EPG: plan against as-run</div>
+      <span class=pill style="background:#0891b2">🧪 Ready to test</span>
+      <span class=apill style="border-color:#7c3aed;color:#7c3aed">📱 Partial in app</span></div>
+    <div class=summary>WHY: operators and rights holders need to know what actually aired, not only what was planned. WHAT: every programme records its actual start and end from the channel's own runs; a report compares plan and as-run with on-air, source and filler time and whether it aired, partly aired or was missed.</div>
+    <div class=meta></div>
+    <div class=how><b>How to test:</b> Give a running channel a guide, stop it for a few minutes in the middle of a programme, then start it again. Call GET /api/epg/as-run?channelId=&lt;id&gt;: that programme is partial with the outage missing from its on-air time; earlier programmes aired; the timeline shows the actual times.</div>
+    
+    <div class=actions>
+         <button class="btn ok" data-approve="EPG: plan against as-run">✓ Approve as working</button>
+         <button class="btn warn" data-changes="EPG: plan against as-run">Request changes</button>
        </div>
     
   </div><div class=card data-status="in_review" data-app="full">

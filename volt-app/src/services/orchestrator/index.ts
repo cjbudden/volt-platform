@@ -159,6 +159,16 @@ export function startScheduler(): () => void {
   }, 60_000) : null;
   edgeRights?.unref?.();
 
+  // PLAN VS AS-RUN (services/asRun.ts): stamp what actually aired onto the
+  // guide, from the encoders' run and splice events, for TV channels that ran
+  // in the last six hours. Writes only rows that changed.
+  const asRun = setInterval(() => {
+    import('../asRun').then((m) => m.asRunPass())
+      .then((r) => { if (r.changed) console.log(`[as-run] ${r.changed} programme(s) updated across ${r.channels} channel(s)`); })
+      .catch((e) => console.error('[as-run] pass error', e));
+  }, 60_000);
+  asRun.unref?.();
+
   // Prune telemetry on the same schedule as retention; the ledger is never
   // pruned, because it is the billable record.
   const prune = setInterval(
@@ -254,6 +264,7 @@ export function startScheduler(): () => void {
     clearInterval(fleet);
     clearInterval(prune);
     if (edgeRights) clearInterval(edgeRights);
+    clearInterval(asRun);
     clearInterval(watch);
     if (thumbs) clearInterval(thumbs);
     if (resume) clearInterval(resume);

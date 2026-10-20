@@ -340,6 +340,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/epg/:id` | admin session (Bearer) or account secret key | epg: view |  |
 | PATCH | `/api/epg/:id` | admin session (Bearer) or account secret key | epg: manage |  |
 | POST | `/api/epg/:id/convert` | admin session (Bearer) or account secret key | epg: manage |  |
+| GET | `/api/epg/as-run` | admin session (Bearer) or account secret key | epg: view |  |
 | POST | `/api/epg/batches/:id/undo` | admin session (Bearer) or account secret key | epg: manage |  |
 | GET | `/api/epg/channels` | admin session (Bearer) or account secret key | epg: view |  |
 | PUT | `/api/epg/channels/:id/guide-icon` | admin session (Bearer) or account secret key | epg: manage |  |

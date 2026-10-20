@@ -1098,6 +1098,15 @@
   "group": "/api/epg"
  },
  {
+  "method": "GET",
+  "path": "/api/epg/as-run",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "epg: view",
+  "viewerTier": false,
+  "group": "/api/epg"
+ },
+ {
   "method": "POST",
   "path": "/api/epg/batches/:id/undo",
   "api": "admin",

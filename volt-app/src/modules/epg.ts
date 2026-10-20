@@ -161,6 +161,28 @@ epgRouter.get(
 );
 
 /**
+ * PLAN VS AS-RUN for a channel's guide (services/asRun.ts): each programme's
+ * planned and actual times, on-air, source and filler seconds, and whether it
+ * aired, partly aired or was missed. Computed from the encoder's own run and
+ * splice events, so it is current even between the scheduler's passes.
+ * Window: `from` / `to` (default the last 24 hours), at most 7 days.
+ */
+epgRouter.get(
+  '/as-run',
+  asyncHandler(async (req, res) => {
+    const id = String(req.query.channelId ?? req.query.channel_id ?? '');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw badRequest('channelId required');
+    if (!(await ownOwner('channel', id, accountId(req)))) throw notFound('Channel not found');
+    const now = Date.now();
+    const t = (v: unknown, d: number) => { const x = v ? Date.parse(String(v)) : NaN; return Number.isFinite(x) ? x : d; };
+    const from = t(req.query.from, now - 24 * 3600_000), to = t(req.query.to, now);
+    if (!(to > from) || to - from > 7 * 86400_000) throw badRequest('window must be positive and at most 7 days');
+    const { asRunReport } = await import('../services/asRun');
+    res.json(await asRunReport(id, from, to, now));
+  })
+);
+
+/**
  * One item by id: the canonical "self" link that the JSON-LD + Hydra layer
  * (services/hypermedia.ts) gives every member, so a deep link resolves.
  * Same tenant scoping as the list. (20 Oct 2026)

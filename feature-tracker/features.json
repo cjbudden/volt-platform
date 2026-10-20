@@ -915,6 +915,24 @@
         ]
       },
       "feedback": []
+    },
+    {
+      "id": "epg-as-run",
+      "name": "EPG: plan against as-run",
+      "summary": "WHY: operators and rights holders need to know what actually aired, not only what was planned. WHAT: every programme records its actual start and end from the channel's own runs; a report compares plan and as-run with on-air, source and filler time and whether it aired, partly aired or was missed.",
+      "status": "ready_to_test",
+      "app_surface": "partial",
+      "test": {
+        "how": "Give a running channel a guide, stop it for a few minutes in the middle of a programme, then start it again. Call GET /api/epg/as-run?channelId=<id>: that programme is partial with the outage missing from its on-air time; earlier programmes aired; the timeline shows the actual times.",
+        "artifact": "",
+        "checks": [
+          "Actual start and end recorded",
+          "Outage shows as partial",
+          "A programme with no air time is missed",
+          "Loop time counted as filler"
+        ]
+      },
+      "feedback": []
     }
   ],
   "note": "Reconciled 10 Oct 2026 against VOLT_BUILD_STATUS.md and the code. Later on 10 Oct: settings lock, source check, notifications, XMLTV import and social publishing were built and moved to Ready to test. Social publishing is proven against local stand-ins for each platform and still needs a first real post per platform once app credentials are set."
