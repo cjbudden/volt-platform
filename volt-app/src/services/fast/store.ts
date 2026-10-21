@@ -15,6 +15,7 @@
 //  are reported as conflicts, never deleted.
 // ============================================================================
 import { query, one, tx } from '../../db';
+import { existsSync } from 'node:fs';
 import { planLineup, rebase, type AssetInfo, type Lineup, type Slot, type PlannedProgramme } from './lineup';
 import { resolveAdPolicy, type AdPolicy } from './adPlan';
 import { houseFill, fillBreak, type HouseAd, type PodPlan } from './pod';
@@ -26,11 +27,41 @@ const SEGMENT_SEC = Number(process.env.FAST_SEGMENT_SEC ?? 2);
 
 // ---------------------------------------------------------------- library
 
+/** A FAST channel carries video or audio (channels.fast_media). */
+export type FastMedia = 'video' | 'audio';
+
+/** A library asset as the builder sees it: the engine's shape, plus what it is and whether it can air. */
+export interface LibraryAsset extends AssetInfo {
+  /** Audio only (same test as the Media Library's audio badge), else video. */
+  media: FastMedia;
+  /**
+   * Can it go on a channel? Packaged with audio and video aligned for splicing,
+   * or its source file is still on this server so activation can prepare it.
+   * False is the readiness check's "No source" (services/fast/prepare.ts).
+   */
+  sourceOk: boolean;
+}
+
+/** Audio only: the Media Library's test (services/media/assetImage.ts isAudioAsset), kept here so the FAST store does not pull in sharp. */
+export function isAudioRow(a: any): boolean {
+  if (a.channel_kind === 'radio') return true;
+  if (a.ingest?.probe && a.ingest.probe.hasVideo === false) return true;
+  return !!(a.export_mp3_key || a.export_m4a_key) && !a.top_height && !a.progressive_key;
+}
+
+/** The source file is on this server (the encoder reads a local path only). */
+export function sourceOnServer(key: string | null | undefined): boolean {
+  if (!key || String(key).startsWith('s3://')) return false;
+  try { return existsSync(String(key)); } catch { return false; }
+}
+
 /** Every playable on-demand asset the account owns, in the engine's shape. */
-export async function libraryFor(accountId: string): Promise<Map<string, AssetInfo>> {
+export async function libraryFor(accountId: string): Promise<Map<string, LibraryAsset>> {
   const rows = await query<any>(
     `SELECT v.id, v.title, v.duration_ms, v.metadata, v.master_key, v.available_from, v.available_until,
-            v.availability_state, v.break_cues_ms, v.poster_key
+            v.availability_state, v.break_cues_ms, v.poster_key,
+            v.source_key, v.encode_result, v.ingest, v.export_mp3_key, v.export_m4a_key, v.top_height, v.progressive_key,
+            c.kind AS channel_kind
        FROM vod_assets v
        LEFT JOIN channels c ON c.id = v.channel_id
        LEFT JOIN events   e ON e.id = v.event_id
@@ -41,9 +72,21 @@ export async function libraryFor(accountId: string): Promise<Map<string, AssetIn
         AND v.availability_state <> 'withdrawn'
       ORDER BY v.created_at DESC
       LIMIT 20000`, [accountId]);
-  const m = new Map<string, AssetInfo>();
-  for (const r of rows) m.set(String(r.id), assetFromRow(r));
+  const m = new Map<string, LibraryAsset>();
+  for (const r of rows) {
+    const spliceReady = !!r.master_key && r.encode_result?.zeroStart === true;
+    m.set(String(r.id), {
+      ...assetFromRow(r),
+      media: isAudioRow(r) ? 'audio' : 'video',
+      sourceOk: spliceReady || sourceOnServer(r.source_key),
+    });
+  }
   return m;
+}
+
+/** The assets a channel of this media may use: the right kind, and able to air. */
+export function libraryForMedia(lib: Map<string, LibraryAsset>, media: FastMedia): Map<string, LibraryAsset> {
+  return new Map([...lib].filter(([, a]) => a.media === media && a.sourceOk));
 }
 
 export function assetFromRow(r: any): AssetInfo {

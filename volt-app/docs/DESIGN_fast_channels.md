@@ -114,6 +114,17 @@ not stored state; they fall out of walking the passes from the epoch.
 * Nothing that has started, aired, or was entered by hand is deleted. Programmes entered by hand that overlap
   the lineup are reported as conflicts.
 
+### Video or audio (22 Oct 2026)
+
+A FAST channel is a **video** or an **audio** channel (`channels.fast_media`, migration 0075), chosen when it is
+made and fixed after. The builder's library shows only that media: an audio channel lists audio assets (the Media
+Library's audio test: a radio recording, a probe with no video, or an MP3/M4A export with no video rung), a video
+channel lists video assets. Either lists only assets that **can air**: packaged with audio and video aligned for
+splicing (`encode_result.zeroStart`), or with the source file still on this server so activation can prepare it.
+That is the readiness check's "No source" applied up front. The library says how many it left out and why. Saving
+a lineup with a title, backfill or series of the other media is refused (400). Not yet run end to end: an audio-only
+channel through `fast_playout.py`.
+
 ## 3. The playout (no encoder)
 
 `fast_playout.py` reads the timeline (`GET /api/fast-playout/<id>/timeline`, ingest token) and each asset's own
@@ -254,7 +265,7 @@ playlists. Worth adding once player support is solid across the target devices.
 | `GET /api/fast/channels/:id` | channel, lineups, ads, playout health, URLs |
 | `GET /api/fast/channels/:id/readiness`, `POST .../prepare` | is every asset the channel uses ready to air; queue the encodes that fix it |
 | `POST /api/fast/channels/:id/on-air` | `{on}`: public or private |
-| `GET /api/fast/library?q=` | assets and series |
+| `GET /api/fast/library?channel=&q=` | assets and series; with `channel`, only that channel's media that can air, plus `hidden` counts and `inUse` (titles its lineups use that the filter leaves out) |
 | `POST /api/fast/channels/:id/lineups` | new draft (copy of the active one by default) |
 | `GET/PUT/DELETE /api/fast/lineups/:lid` | a lineup; the active one cannot be edited |
 | `POST /api/fast/lineups/:lid/preview` | plan a window from unsaved slots: programmes, notices, repeat report, rotation maths, ad load |

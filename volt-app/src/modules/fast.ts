@@ -28,7 +28,7 @@ import {
 } from '../services/fast/lineup';
 import { achievedLoad, resolveAdPolicy } from '../services/fast/adPlan';
 import {
-  libraryFor, lineupFromRow, adsFor, applyLineup, activateLineup, timelineFor, decideBreak, adReport, wireProgramme, DEFAULT_HORIZON_DAYS,
+  libraryFor, libraryForMedia, type FastMedia, lineupFromRow, adsFor, applyLineup, activateLineup, timelineFor, decideBreak, adReport, wireProgramme, DEFAULT_HORIZON_DAYS,
 } from '../services/fast/store';
 import { resolve as resolveVast, expandTag } from '../services/fast/vast';
 import { stitchHls, type SessionState, type PodRendition } from '../services/fast/stitch';
@@ -59,7 +59,7 @@ const uuid = z.string().uuid();
 
 fastRouter.get('/channels', asyncHandler(async (req, res) => {
   const rows = await query<any>(
-    `SELECT c.id, c.name, c.status, c.group_id, c.origin,
+    `SELECT c.id, c.name, c.status, c.group_id, c.origin, c.fast_media AS media,
             l.id AS lineup_id, l.name AS lineup_name, l.version, l.applied_until, l.zone,
             jsonb_array_length(l.slots) AS slot_count,
             (SELECT title FROM programmes p WHERE p.channel_id = c.id AND p.starts_at <= now() AND p.ends_at > now() ORDER BY starts_at DESC LIMIT 1) AS on_air,
@@ -76,6 +76,8 @@ const createChannel = z.object({
   name: z.string().trim().min(1).max(120),
   groupId: uuid,
   zone: z.string().default('UTC'),
+  /** Video or audio: fixed for the channel, it decides what the library offers. */
+  media: z.enum(['video', 'audio']).default('video'),
 });
 fastRouter.post('/channels', asyncHandler(async (req, res) => {
   const b = createChannel.parse(req.body);
@@ -89,8 +91,8 @@ fastRouter.post('/channels', asyncHandler(async (req, res) => {
     // A playlist channel has no source, no recording (the media is already in
     // the library) and no encoder; the FAST playout writes its playlists.
     const ch = (await c.query(
-      `INSERT INTO channels (group_id, name, origin, recording_enabled, created_by, updated_by)
-       VALUES ($1, $2, 'playlist', false, $3, $3) RETURNING *`, [b.groupId, b.name, actorId(req)])).rows[0];
+      `INSERT INTO channels (group_id, name, origin, fast_media, recording_enabled, created_by, updated_by)
+       VALUES ($1, $2, 'playlist', $4, false, $3, $3) RETURNING *`, [b.groupId, b.name, actorId(req), b.media])).rows[0];
     const l = (await c.query(
       `INSERT INTO fast_lineups (channel_id, name, epoch, zone, created_by) VALUES ($1, 'Main lineup', now(), $2, $3) RETURNING *`,
       [ch.id, b.zone, actorId(req)])).rows[0];
@@ -108,7 +110,7 @@ fastRouter.get('/channels/:id', asyncHandler(async (req, res) => {
     `SELECT launcher, status, started_at, last_seen_at, last_pdt, media_sequence, restarts, error, unreadable,
             (last_seen_at > now() - make_interval(secs => $2)) AS fresh
        FROM fast_playouts WHERE channel_id = $1`, [ch.id, fastConfig.staleSec]);
-  res.json({ channel: { id: ch.id, name: ch.name, status: ch.status, origin: ch.origin, groupId: ch.group_id, onAir: !!ch.on_air }, lineups, ads, playout,
+  res.json({ channel: { id: ch.id, name: ch.name, status: ch.status, origin: ch.origin, groupId: ch.group_id, onAir: !!ch.on_air, media: (ch.fast_media ?? 'video') as FastMedia }, lineups, ads, playout,
     urls: { hls: channelPlaylistUrl(ch.id, 'master.m3u8'), dash: channelPlaylistUrl(ch.id, 'manifest.mpd'), session: `/fast/${ch.id}/s/{session}/master.m3u8` } });
 }));
 
@@ -139,8 +141,20 @@ fastRouter.post('/channels/:id/on-air', asyncHandler(async (req, res) => {
 
 // ------------------------------------------------------------------ library
 
+/**
+ * THE BUILDER'S LIBRARY. With ?channel=<id> it is that channel's library: an
+ * audio channel sees audio assets only, a video channel video assets only, and
+ * either sees only what can air (packaged for splicing, or a source file on
+ * this server to prepare it from). `hidden` says how many were left out and
+ * why, so an empty list can explain itself. Without a channel: everything.
+ */
 fastRouter.get('/library', asyncHandler(async (req, res) => {
-  const lib = await libraryFor(accountId(req));
+  const all = await libraryFor(accountId(req));
+  const chId = req.query.channel ? String(req.query.channel) : null;
+  const media: FastMedia | null = chId ? ((await ownChannel(req, chId)).fast_media ?? 'video') : null;
+  const lib = media ? libraryForMedia(all, media) : all;
+  let otherMedia = 0, noSource = 0;
+  if (media) for (const a of all.values()) { if (a.media !== media) otherMedia++; else if (!a.sourceOk) noSource++; }
   const q = String(req.query.q ?? '').trim().toLowerCase();
   const assets = [...lib.values()].filter((a) => !q || a.title.toLowerCase().includes(q) || (a.series ?? '').toLowerCase().includes(q));
   const series = new Map<string, { name: string; episodes: number; seasons: Set<number>; durationSec: number }>();
@@ -151,7 +165,21 @@ fastRouter.get('/library', asyncHandler(async (req, res) => {
     s.episodes++; s.durationSec += a.durationSec; if (a.season != null) s.seasons.add(a.season);
     series.set(k, s);
   }
+  // Titles the channel's lineups already use but the filter leaves out keep
+  // their names in the run order (and show up as wrong there, not as "Missing").
+  let inUse: typeof assets = [];
+  if (chId) {
+    const used = new Set<string>();
+    for (const l of await query<any>(`SELECT slots, settings FROM fast_lineups WHERE channel_id = $1 AND status <> 'archived'`, [chId])) {
+      for (const sl of (l.slots ?? []) as Slot[]) if (sl.kind === 'title') for (const p of sl.pool) if ('assetId' in p) used.add(p.assetId);
+      for (const b of l.settings?.backfill ?? []) used.add(String(b));
+    }
+    inUse = [...used].filter((u) => !lib.has(u) && all.has(u)).map((u) => all.get(u)!);
+  }
   res.json({
+    media,
+    hidden: { otherMedia, noSource },
+    inUse,
     assets: assets.slice(0, 2000),
     series: [...series.values()].map((s) => ({ name: s.name, episodes: s.episodes, seasons: [...s.seasons].sort((x, y) => x - y), durationSec: Math.round(s.durationSec) }))
       .sort((a, b) => a.name.localeCompare(b.name)),
@@ -181,6 +209,26 @@ const lineupBody = z.object({
   settings: settingsSchema.optional(),
 });
 
+/**
+ * A lineup draws only on its channel's media: no video title on an audio
+ * channel or the other way round (the playout's tracks are the channel's).
+ */
+async function checkMedia(req: Request, channelId: string, slots: Slot[] | undefined, backfill: string[] | undefined) {
+  if (!slots?.length && !backfill?.length) return;
+  const ch = await ownChannel(req, channelId);
+  const media: FastMedia = ch.fast_media ?? 'video';
+  const lib = await libraryFor(accountId(req));
+  const wrong = new Set<string>();
+  const ids = [...(slots ?? []).flatMap((s) => s.kind === 'title' ? s.pool.flatMap((p) => 'assetId' in p ? [p.assetId] : []) : []), ...(backfill ?? [])];
+  for (const id of ids) { const a = lib.get(id); if (a && a.media !== media) wrong.add(a.title); }
+  for (const s of slots ?? []) {
+    if (s.kind !== 'series' || s.encoreOf) continue;
+    const eps = [...lib.values()].filter((a) => a.series?.trim().toLowerCase() === s.series.trim().toLowerCase());
+    if (eps.length && !eps.some((a) => a.media === media)) wrong.add(`${s.series} (series)`);
+  }
+  if (wrong.size) throw badRequest(`This is ${media === 'audio' ? 'an audio' : 'a video'} channel, so it cannot use ${[...wrong].slice(0, 5).join(', ')}${wrong.size > 5 ? ` and ${wrong.size - 5} more` : ''}.`);
+}
+
 function checkSlots(slots: Slot[]) {
   const ids = new Set<string>();
   for (const s of slots) {
@@ -196,6 +244,7 @@ fastRouter.post('/channels/:id/lineups', asyncHandler(async (req, res) => {
   const src = b.copyFrom ? await ownLineup(req, b.copyFrom) : await one<any>(`SELECT * FROM fast_lineups WHERE channel_id = $1 AND status = 'active'`, [ch.id]);
   const slots = b.slots ?? src?.slots ?? [];
   checkSlots(slots as Slot[]);
+  if (b.slots || b.settings?.backfill) await checkMedia(req, ch.id, b.slots as Slot[] | undefined, b.settings?.backfill);
   const zone = b.zone ?? src?.zone ?? 'UTC';
   if (!isTimeZone(zone)) throw badRequest(`Unknown time zone: ${zone}`);
   const row = await one<any>(
@@ -214,6 +263,7 @@ fastRouter.put('/lineups/:lid', asyncHandler(async (req, res) => {
   const b = lineupBody.parse(req.body ?? {});
   if (b.slots) checkSlots(b.slots as Slot[]);
   if (b.zone && !isTimeZone(b.zone)) throw badRequest(`Unknown time zone: ${b.zone}`);
+  await checkMedia(req, l.channel_id, b.slots as Slot[] | undefined, b.settings?.backfill);
   if (l.status === 'active' && (b.slots || b.settings || b.zone || b.epoch)) {
     throw conflict('The active lineup is on air. Edit a draft and activate it: the run order and every series carry on from where they are.');
   }

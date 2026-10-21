@@ -4,12 +4,17 @@ import { apiRequest as apiReq } from '../api'
 export interface FastChannelRow {
   id: string; name: string; status: string; group_id: string; origin: string
   lineup_id: string | null; lineup_name: string | null; version: number | null; applied_until: string | null; zone: string | null
-  slot_count: number | null; on_air: string | null; ads_mode: 'off' | 'markers' | 'stitched'
+  slot_count: number | null; on_air: string | null; ads_mode: 'off' | 'markers' | 'stitched'; media: FastMedia
 }
+/** A FAST channel carries video or audio; set when it is made, it decides what the library offers. */
+export type FastMedia = 'video' | 'audio'
 export interface LibAsset {
   id: string; title: string; durationSec: number; series: string | null; season: number | null; episode: number | null
   availableFrom: string | null; availableUntil: string | null; ready: boolean; genre: string | null; breakCuesSec: number[]
+  media: FastMedia; sourceOk: boolean
 }
+/** The builder's library for one channel: only its media, only what can air. */
+export interface ChannelLibrary { media: FastMedia | null; hidden: { otherMedia: number; noSource: number }; inUse: LibAsset[]; assets: LibAsset[]; series: LibSeries[] }
 export interface LibSeries { name: string; episodes: number; seasons: number[]; durationSec: number }
 export type PoolRef = { assetId: string } | { skip: true }
 export interface TitleSlot { id: string; kind: 'title'; pool: PoolRef[]; every?: number; phase?: number; label?: string }
@@ -61,9 +66,12 @@ const J = (b: unknown) => ({ body: JSON.stringify(b) })
 
 export const fastApi = {
   channels: (): Promise<{ items: FastChannelRow[] }> => apiReq('/fast/channels'),
-  createChannel: (b: { name: string; groupId: string; zone: string }): Promise<{ channel: any; lineup: Lineup }> => apiReq('/fast/channels', { method: 'POST', ...J(b) }),
-  channel: (id: string): Promise<{ channel: { id: string; name: string; status: string; origin: string; groupId: string; onAir: boolean }; lineups: Lineup[]; ads: ChannelAds; playout: Playout | null; urls?: { hls: string; dash: string; session: string } }> => apiReq(`/fast/channels/${id}`),
-  library: (q = ''): Promise<{ assets: LibAsset[]; series: LibSeries[] }> => apiReq(`/fast/library${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  createChannel: (b: { name: string; groupId: string; zone: string; media: FastMedia }): Promise<{ channel: any; lineup: Lineup }> => apiReq('/fast/channels', { method: 'POST', ...J(b) }),
+  channel: (id: string): Promise<{ channel: { id: string; name: string; status: string; origin: string; groupId: string; onAir: boolean; media: FastMedia }; lineups: Lineup[]; ads: ChannelAds; playout: Playout | null; urls?: { hls: string; dash: string; session: string } }> => apiReq(`/fast/channels/${id}`),
+  library: (channelId?: string, q = ''): Promise<ChannelLibrary> => {
+    const p = new URLSearchParams(); if (channelId) p.set('channel', channelId); if (q) p.set('q', q)
+    const qs = p.toString(); return apiReq(`/fast/library${qs ? `?${qs}` : ''}`)
+  },
   newDraft: (channelId: string, copyFrom?: string): Promise<Lineup> => apiReq(`/fast/channels/${channelId}/lineups`, { method: 'POST', ...J(copyFrom ? { copyFrom } : {}) }),
   saveLineup: (id: string, b: Partial<Pick<Lineup, 'name' | 'zone' | 'slots' | 'settings'>>): Promise<Lineup> => apiReq(`/fast/lineups/${id}`, { method: 'PUT', ...J(b) }),
   deleteLineup: (id: string): Promise<null> => apiReq(`/fast/lineups/${id}`, { method: 'DELETE' }),

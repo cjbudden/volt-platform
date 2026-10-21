@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api'
 import { PageHead, NewButton, EntityCell, StatusTag } from '../scaffold'
 import { navigate } from '../router'
 import { Notice, usePageNotice, useNotify } from '../notices'
 import {
-  fastApi, type FastChannelRow, type LibAsset, type LibSeries, type Lineup, type Slot, type SeriesSlot,
+  fastApi, type FastChannelRow, type FastMedia, type ChannelLibrary, type LibAsset, type LibSeries, type Lineup, type Slot, type SeriesSlot,
   type LineupSettings, type Preview, type PlannedProgramme, type ChannelAds, type AdServer, type AdTest, type AdReport, type Playout, type ReadinessRow,
 } from '../fast/fastApi'
 import '../fast/fast.css'
@@ -49,6 +49,11 @@ const Ico = {
   dup: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" /></svg>,
   film: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 4v16M17 4v16M3 9h4M17 9h4M3 15h4M17 15h4" /></svg>,
   series: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><rect x="3" y="6" width="14" height="12" rx="2" /><path d="M7 3h12a2 2 0 0 1 2 2v10" /></svg>,
+  audio: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>,
+}
+const MEDIA: Record<FastMedia, { label: string; icon: ReactNode; hint: string }> = {
+  video: { label: 'Video', icon: Ico.film, hint: 'Films, shows and series. The library offers video assets only.' },
+  audio: { label: 'Audio', icon: Ico.audio, hint: 'Music, podcasts and audio programmes. The library offers audio assets only.' },
 }
 
 export default function FastPage({ path }: { path: string }) {
@@ -84,7 +89,7 @@ function FastList() {
             <tbody>
               {rows.map((r, i) => (
                 <tr key={r.id} onClick={() => navigate(`/fast/${r.id}`)} style={{ cursor: 'pointer' }}>
-                  <td><EntityCell name={r.name} sub={r.zone ?? undefined} index={i} /></td>
+                  <td><EntityCell name={r.name} sub={[MEDIA[r.media ?? 'video'].label, r.zone].filter(Boolean).join(' · ')} index={i} /></td>
                   <td style={{ color: 'var(--muted)' }}>{r.lineup_id ? `${r.lineup_name} · v${r.version} · ${r.slot_count} slot${r.slot_count === 1 ? '' : 's'}` : 'No active lineup'}</td>
                   <td>{r.on_air ? <StatusTag label={r.on_air} cls="live" /> : <span style={{ color: 'var(--faint)' }}>—</span>}</td>
                   <td style={{ color: 'var(--muted)' }}>{r.applied_until ? new Date(r.applied_until).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
@@ -105,19 +110,28 @@ function CreateDialog({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [groups, setGroups] = useState<{ id: string; name: string }[]>([])
   const [groupId, setGroupId] = useState('')
   const [zone, setZone] = useState(tzNow())
+  const [media, setMedia] = useState<FastMedia>('video')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   useEffect(() => { api.groups().then((g: any[]) => { setGroups(g); const d = g.find((x: any) => x.is_default) ?? g[0]; if (d) setGroupId(d.id) }).catch(() => {}) }, [])
   const go = async () => {
     if (!name.trim()) { setErr('Give the channel a name'); return }
     setBusy(true); setErr('')
-    try { const r = await fastApi.createChannel({ name: name.trim(), groupId, zone }); onCreated(r.channel.id) } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+    try { const r = await fastApi.createChannel({ name: name.trim(), groupId, zone, media }); onCreated(r.channel.id) } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
   return (
     <div className="drawer-scrim" onClick={onClose} style={{ alignItems: 'center', justifyContent: 'center' }}>
       <div className="card" onClick={e => e.stopPropagation()} role="dialog" aria-label="New FAST channel" style={{ width: 460, maxWidth: '95vw', padding: 20 }}>
         <h3 style={{ margin: '0 0 12px' }}>New FAST channel</h3>
         <div className="field"><label htmlFor="fn">Name</label><input id="fn" className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="Movies Plus" autoFocus /></div>
+        <div className="field"><label id="fm">Channel type</label>
+          <div className="fast-seg" role="radiogroup" aria-labelledby="fm">
+            {(['video', 'audio'] as FastMedia[]).map(m => (
+              <button key={m} type="button" role="radio" aria-checked={media === m} className={`chip${media === m ? ' active' : ''}`}
+                style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setMedia(m)}>{MEDIA[m].icon}{MEDIA[m].label}</button>
+            ))}
+          </div>
+          <div className="hintxt">{MEDIA[media].hint} It cannot be changed later.</div></div>
         <div className="field"><label htmlFor="fg">Group</label>
           <select id="fg" className="inp" value={groupId} onChange={e => setGroupId(e.target.value)}>{groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
           <div className="hintxt">Counts towards the group's share of the plan, like any channel.</div></div>
@@ -140,7 +154,7 @@ type Tab = 'order' | 'week' | 'repeats' | 'ads' | 'air'
 
 function FastBuilder({ id }: { id: string }) {
   const notify = useNotify()
-  const [ch, setCh] = useState<{ id: string; name: string; status: string; onAir: boolean } | null>(null)
+  const [ch, setCh] = useState<{ id: string; name: string; status: string; onAir: boolean; media: FastMedia } | null>(null)
   const [urls, setUrls] = useState<{ hls: string; dash: string } | null>(null)
   const [lineups, setLineups] = useState<Lineup[]>([])
   const [work, setWork] = useState<Lineup | null>(null)   // the lineup being edited (a draft, or the active one read-only)
@@ -148,7 +162,7 @@ function FastBuilder({ id }: { id: string }) {
   const [settings, setSettings] = useState<LineupSettings>({})
   const [zone, setZone] = useState('UTC')
   const [dirty, setDirty] = useState(false)
-  const [lib, setLib] = useState<{ assets: LibAsset[]; series: LibSeries[] }>({ assets: [], series: [] })
+  const [lib, setLib] = useState<ChannelLibrary>({ media: null, hidden: { otherMedia: 0, noSource: 0 }, inUse: [], assets: [], series: [] })
   const [preview, setPreview] = useState<Preview | null>(null)
   const [previewErr, setPreviewErr] = useState('')
   const [tab, setTab] = useState<Tab>('order')
@@ -159,7 +173,8 @@ function FastBuilder({ id }: { id: string }) {
   const active = lineups.find(l => l.status === 'active') ?? null
   const draft = lineups.find(l => l.status === 'draft') ?? null
   const readOnly = !!work && work.status !== 'draft'
-  const assetById = useMemo(() => new Map(lib.assets.map(a => [a.id, a])), [lib])
+  // the run order names titles it already uses even when the library filter leaves them out
+  const assetById = useMemo(() => new Map([...lib.inUse, ...lib.assets].map(a => [a.id, a])), [lib])
 
   const load = async (keep?: string) => {
     try {
@@ -169,7 +184,7 @@ function FastBuilder({ id }: { id: string }) {
       setWork(w); setSlots(w?.slots ?? []); setSettings(w?.settings ?? {}); setZone(w?.zone ?? 'UTC'); setDirty(false); setErr('')
     } catch (e: any) { setErr(e.message) }
   }
-  useEffect(() => { load(); fastApi.library().then(setLib).catch(() => {}) }, [id])
+  useEffect(() => { load(); fastApi.library(id).then(setLib).catch(() => {}) }, [id])
   usePageNotice('fast-builder', err ? { kind: 'error', title: "Couldn't load this channel.", message: err, actions: [{ label: 'Retry', onClick: () => load() }] } : null)
 
   // PREVIEW follows every edit (debounced), from the unsaved run order
@@ -269,7 +284,7 @@ function FastBuilder({ id }: { id: string }) {
       <div className="page-head">
         <div>
           <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 4 }}><a href="/fast" onClick={e => { e.preventDefault(); navigate('/fast') }} style={{ color: 'inherit' }}>FAST channels</a> /</div>
-          <h1>{ch.name}</h1>
+          <h1>{ch.name} <span className="tag type" style={{ verticalAlign: 'middle', display: 'inline-flex', alignItems: 'center', gap: 4 }}>{MEDIA[ch.media ?? 'video'].icon}{MEDIA[ch.media ?? 'video'].label}</span></h1>
           <p>{statusLine}{dirty ? ' · unsaved changes' : ''}
             {active && urls && <> · output <a href={urls.hls} target="_blank" rel="noreferrer" style={{ color: 'var(--muted)' }}>HLS</a> / <a href={urls.dash} target="_blank" rel="noreferrer" style={{ color: 'var(--muted)' }}>DASH</a></>}</p>
         </div>
@@ -330,7 +345,7 @@ function FastBuilder({ id }: { id: string }) {
 // ---------------------------------------------------------------- library panel
 
 function Library({ lib, picking, onTitle, onSeries, onDonePicking, assetById }: {
-  lib: { assets: LibAsset[]; series: LibSeries[] }; picking: Slot | null | undefined; onTitle: (a: LibAsset) => void; onSeries: (s: LibSeries) => void
+  lib: ChannelLibrary; picking: Slot | null | undefined; onTitle: (a: LibAsset) => void; onSeries: (s: LibSeries) => void
   onDonePicking: () => void; assetById: Map<string, LibAsset>
 }) {
   const [q, setQ] = useState('')
@@ -338,6 +353,12 @@ function Library({ lib, picking, onTitle, onSeries, onDonePicking, assetById }: 
   const k = q.trim().toLowerCase()
   const titles = lib.assets.filter(a => !k || a.title.toLowerCase().includes(k) || (a.series ?? '').toLowerCase().includes(k))
   const series = lib.series.filter(s => !k || s.name.toLowerCase().includes(k))
+  const media: FastMedia = lib.media ?? 'video'
+  const noun = media === 'audio' ? 'audio' : 'video'
+  const hiddenNote = [
+    lib.hidden.otherMedia ? `${lib.hidden.otherMedia} ${media === 'audio' ? 'video' : 'audio'} asset${lib.hidden.otherMedia === 1 ? '' : 's'}` : '',
+    lib.hidden.noSource ? `${lib.hidden.noSource} ${noun} asset${lib.hidden.noSource === 1 ? '' : 's'} with no usable source` : '',
+  ].filter(Boolean).join(' and ')
   const pickName = picking && picking.kind === 'title' ? assetById.get((picking.pool.find(p => 'assetId' in p) as any)?.assetId)?.title ?? 'this slot' : null
   return (
     <div className="card fast-lib">
@@ -347,13 +368,18 @@ function Library({ lib, picking, onTitle, onSeries, onDonePicking, assetById }: 
           <button className={`chip${kind === 'series' ? ' active' : ''}`} style={{ padding: '4px 10px' }} onClick={() => setKind('series')}>Series</button>
         </div>
       </div>
-      <div style={{ padding: '10px 14px' }}><input className="inp" placeholder="Search the library" value={q} onChange={e => setQ(e.target.value)} aria-label="Search the library" /></div>
+      <div style={{ padding: '10px 14px' }}>
+        <input className="inp" placeholder={`Search ${noun} in the library`} value={q} onChange={e => setQ(e.target.value)} aria-label="Search the library" />
+        <div className="hintxt" style={{ marginTop: 6 }} title="A title can air when it is packaged for splicing, or its source file is still here to prepare it from.">
+          {media === 'audio' ? 'Audio channel: audio assets that can air.' : 'Video channel: video assets that can air.'}{hiddenNote ? ` Not shown: ${hiddenNote}.` : ''}
+        </div>
+      </div>
       {pickName && <div className="mode">Click titles to add them as alternates to “{pickName}”.<span className="spacer" style={{ flex: 1 }} /><button className="btn ghost sm" onClick={onDonePicking}>Done</button></div>}
       <div className="list">
         {kind === 'titles' ? titles.map(a => (
           <div key={a.id} className="row" onClick={() => onTitle(a)} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') onTitle(a) }}
             title={a.ready ? 'Add to the run order' : 'Not packaged yet: it can be planned, and is prepared before it airs'}>
-            {Ico.film}
+            {MEDIA[a.media ?? media].icon}
             <span className="nm">{a.title}</span>
             <span className="meta">{a.series ? `S${a.season ?? '?'}E${a.episode ?? '?'} · ` : ''}{fmtDur(a.durationSec)}{a.availableUntil ? ` · until ${new Date(a.availableUntil).toLocaleDateString([], { day: '2-digit', month: 'short' })}` : ''}</span>
           </div>
@@ -364,7 +390,7 @@ function Library({ lib, picking, onTitle, onSeries, onDonePicking, assetById }: 
             <span className="meta">{s.episodes} ep{s.episodes === 1 ? '' : 's'}{s.seasons.length ? ` · ${s.seasons.length} season${s.seasons.length === 1 ? '' : 's'}` : ''}</span>
           </div>
         ))}
-        {kind === 'titles' && !titles.length && <div className="hintxt" style={{ padding: 14 }}>No titles match. Upload media in the Media Library; anything packaged there can go on a FAST channel.</div>}
+        {kind === 'titles' && !titles.length && <div className="hintxt" style={{ padding: 14 }}>{k ? 'No titles match.' : `No ${noun} assets can air yet.`} Upload {noun} in the Media Library; anything packaged there, or with its source still here, can go on this channel.</div>}
         {kind === 'series' && !series.length && <div className="hintxt" style={{ padding: 14 }}>No series yet. Give episodes a Series, Season and Episode number in their metadata and they group here.</div>}
       </div>
     </div>
