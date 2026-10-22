@@ -34,7 +34,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { extract, plan, smartEligible, probeSource, probeDurationMs } from '../src/services/clips/extract';
+import { extract, plan, smartEligible, probeSource, probeDurationMs, seamFault } from '../src/services/clips/extract';
 import type { Resolution, ResolvedBlock, ResolvedSegment } from '../src/services/clips/resolve';
 
 let pass = 0, fail = 0;
@@ -70,39 +70,40 @@ function frames(path: string): { n: number; pts: number[] } {
  * segment boundary (-g 100 at 25 fps) is what a live run has, and is what lets
  * the middle be copied at all.
  */
-function makeMedia(): void {
-  mkdirSync(MEDIA, { recursive: true });
+function makeMedia(dir = MEDIA, fps = 25, x264: string[] = ['-preset', 'ultrafast']): void {
+  mkdirSync(dir, { recursive: true });
+  const gop = String(fps * SEG_MS / 1000);
   const r = spawnSync('ffmpeg', [
     '-hide_banner', '-loglevel', 'error', '-y',
-    '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25:duration=24',
+    '-f', 'lavfi', '-i', `testsrc2=size=640x360:rate=${fps}:duration=24`,
     '-f', 'lavfi', '-i', 'sine=frequency=440:duration=24',
     '-map', '0:v', '-map', '1:a',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
-    '-g', '100', '-keyint_min', '100', '-sc_threshold', '0',
+    '-c:v', 'libx264', ...x264, '-pix_fmt', 'yuv420p',
+    '-g', gop, '-keyint_min', gop, '-sc_threshold', '0',
     '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
     '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-start_number', '0',
     '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4',
-    '-hls_segment_filename', join(MEDIA, 'seg_%05d.m4s'),
-    join(MEDIA, 'index.m3u8'),
+    '-hls_segment_filename', join(dir, 'seg_%05d.m4s'),
+    join(dir, 'index.m3u8'),
   ], { encoding: 'utf8' });
   if (r.status !== 0) console.log('ffmpeg: ' + (r.stderr || r.error));
 }
 
-function seg(i: number, takeFromMs: number, takeToMs: number): ResolvedSegment {
+function seg(i: number, takeFromMs: number, takeToMs: number, dir = MEDIA): ResolvedSegment {
   const startMs = i * SEG_MS;
   return {
     runId: 'run-1', rendition: 'audio', file: `seg_${String(i).padStart(5, '0')}.m4s`,
     seq: i, startMs, endMs: startMs + SEG_MS,
-    path: join(MEDIA, `seg_${String(i).padStart(5, '0')}.m4s`),
+    path: join(dir, `seg_${String(i).padStart(5, '0')}.m4s`),
     takeFromMs, takeToMs,
     partial: takeFromMs > 0 || takeToMs < SEG_MS,
   };
 }
 
-function resolution(segs: ResolvedSegment[], fromMs: number, toMs: number): Resolution {
+function resolution(segs: ResolvedSegment[], fromMs: number, toMs: number, dir = MEDIA): Resolution {
   const block: ResolvedBlock = {
     runId: 'run-1', blockIndex: 0, rendition: 'audio',
-    initPath: join(MEDIA, 'init.mp4'),
+    initPath: join(dir, 'init.mp4'),
     segments: segs, startMs: segs[0].startMs, endMs: segs[segs.length - 1].endMs,
   };
   return {
@@ -192,6 +193,58 @@ function resolution(segs: ResolvedSegment[], fromMs: number, toMs: number): Reso
   const smartDur = await probeDurationMs(smartMp4);
   near('the durations agree', smartDur ?? -1, fullDur ?? -2, 40);
   near('and both are the 15s that was asked for', smartDur ?? -1, 15000, 80);
+
+  // ---- the seams themselves -----------------------------------------------
+  // Item 1.5. The PTS comparison above found the tail seam (frame 338 one step
+  // late) because the concat demuxer started each part at its file's length,
+  // which runs to the end of the AAC, not of the picture. These look at the
+  // seams directly: packet timestamps, sorted, every step one frame.
+  console.log('\n== no gap and no overlap at either seam ==');
+  check('the smart render has no gap or overlap anywhere', await seamFault(smartMp4, 'ffprobe', 40), null);
+  check('nor does the full render it is compared with', await seamFault(fullMp4, 'ffprobe', 40), null);
+  const S338 = S.pts[338] - S.pts[337];
+  check('the step across the tail seam (frames 337 to 338) is one frame', S338, 40);
+  const S37 = S.pts[38] - S.pts[37];
+  check('and so is the step across the head seam (frames 37 to 38)', S37, 40);
+
+  // THE CHECK MUST BE ABLE TO FAIL. A file with a 23ms jump in it, the size of
+  // the old seam, is reported, so a pass above means something.
+  const gapped = join(OUT, 'gapped.mp4');
+  spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
+    '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=25:duration=2',
+    // A millisecond time base first, or the 23ms rounds away into 1/25s ticks.
+    '-vf', 'settb=1/1000,setpts=PTS+gte(N\\,20)*23', '-fps_mode', 'passthrough', '-enc_time_base', '1/1000',
+    '-c:v', 'libx264', '-preset', 'ultrafast', gapped], { encoding: 'utf8' });
+  const g = await seamFault(gapped, 'ffprobe', 40);
+  check('a 23ms jump planted at frame 20 is caught', /^gap of 23\.0ms before frame 20/.test(g ?? ''), true);
+  if (g) console.log('     ' + g);
+
+  // ---- a second source: 50fps with B-frames ------------------------------
+  // The live encoder's own shape, not the fixture's: B-frames reorder the
+  // picture, so presentation order differs from packet order and the first
+  // picture does not sit at the start of its file. A cut on different frame
+  // boundaries at each end, so neither seam lands where the first one did.
+  console.log('\n== the same at 50fps with B-frames, cut elsewhere ==');
+  const MEDIA50 = MEDIA + '-50b';
+  if (!existsSync(join(MEDIA50, 'init.mp4'))) makeMedia(MEDIA50, 50, ['-preset', 'veryfast', '-bf', '3']);
+  const F50 = 1300, T50 = 14700;
+  const segs50 = [seg(0, 1300, 4000, MEDIA50), seg(1, 0, 4000, MEDIA50), seg(2, 0, 4000, MEDIA50), seg(3, 0, 2700, MEDIA50)];
+  const r50 = resolution(segs50, F50, T50, MEDIA50);
+  const full50 = await extract({ resolution: r50, outDir: join(OUT, 'full50'), formats: ['mp4'], smartRender: false });
+  const smart50 = await extract({ resolution: r50, outDir: join(OUT, 'smart50'), formats: ['mp4'], smartRender: true });
+  check('the full render ran', full50.strategyPerBlock[0], 'full-render');
+  check('the smart render ran, rather than falling back', smart50.strategyPerBlock[0], 'smart-render');
+  if (smart50.smartRenderSkipped.length) console.log('     skipped: ' + smart50.smartRenderSkipped.join('; '));
+  const F5 = frames(join(OUT, 'full50', 'clip.mp4')), S5 = frames(join(OUT, 'smart50', 'clip.mp4'));
+  check('13.4s at 50fps is 670 frames, in the full render', F5.n, 670);
+  check('and in the smart render', S5.n, 670);
+  let diff50 = -1;
+  for (let i = 0; i < Math.min(F5.pts.length, S5.pts.length); i++) {
+    if (Math.abs(F5.pts[i] - S5.pts[i]) > 1) { diff50 = i; break; }
+  }
+  check('every presentation timestamp matches the full render', diff50, -1);
+  if (diff50 >= 0) console.log(`     first divergence at frame ${diff50}: full=${F5.pts[diff50]}ms smart=${S5.pts[diff50]}ms`);
+  check('and there is no gap or overlap at any seam', await seamFault(join(OUT, 'smart50', 'clip.mp4'), 'ffprobe', 20), null);
 
   // ---- the saving ----------------------------------------------------------
   console.log('\n== the saving is real, and is reported rather than assumed ==');

@@ -69,27 +69,24 @@ export interface ExtractRequest {
   ffmpegBin?: string;
   ffprobeBin?: string;
   /**
-   * OPT IN TO SMART RENDER. Default off, deliberately, and the reason is a
-   * measurement rather than caution.
+   * OPT IN TO SMART RENDER. Default off, and no caller turns it on yet.
    *
    * The path works: the gate holds, the Annex-B join carries each part's own
-   * parameter sets, the head is now frame-identical to the full render, and it
-   * is roughly 2x faster on the fixture (1,052ms against 2,068ms) with the
-   * saving growing as the clip lengthens, because the middle is never decoded.
+   * parameter sets, and it is roughly 2x faster on the fixture with the saving
+   * growing as the clip lengthens, because the middle is never decoded.
    *
-   * WHAT IS NOT DONE is the seam. The middle currently starts ~74ms late — the
-   * concat demuxer offsets the next part by the previous file's CONTAINER
-   * duration (1.541s) while its picture ends at 1.520s, and mid.ts keeps a
-   * small internal start offset of its own. The clip comes out six frames short.
+   * THE SEAM IS FIXED (build queue 1.5, 22 Oct 2026). The concat demuxer used
+   * to start each part at the previous file's CONTAINER duration, which runs to
+   * the end of the AAC rather than of the picture, so the part after a copied
+   * middle landed 23ms late (30ms at 50fps). Each part's length is now given to
+   * the demuxer from its picture (`concatListByPicture`), and the output is
+   * checked for a gap or overlap at every frame (`seamFault`) as well as for
+   * its duration, because a duration check cannot see a seam: a 15,082ms
+   * render against a 15,000ms request once passed it while six frames short.
+   * `test/clip-smart-render.check.ts` now passes frame for frame at 25fps and
+   * at 50fps with B-frames.
    *
-   * AND THE RUNTIME VERIFY DOES NOT CATCH IT, which is the finding that decided
-   * this flag. A 15,082ms measurement against a 15,000ms request is inside any
-   * sane duration tolerance, and the render was still six frames short: a
-   * duration check cannot see a seam. Until `test/clip-smart-render.check.ts`
-   * passes frame-for-frame, a duration-gated smart render would ship silently
-   * wrong cuts into an editorial tool whose entire premise is frame accuracy.
-   *
-   * So: built, measured, tested, and off. Turn it on when the suite is green.
+   * Still off by default: turning it on for real clips is Christian's call.
    */
   smartRender?: boolean;
 }
@@ -469,7 +466,7 @@ async function smartRenderBlock(opts: {
   // Video is COPIED across the join; audio is re-encoded ONCE over the whole
   // thing, which is what removes the per-part AAC priming seams. See the header.
   const listPath = tag('concat.txt');
-  writeFileSync(listPath, parts.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join('\n'));
+  writeFileSync(listPath, await concatListByPicture(parts, ffprobe, frameMs(probe)));
   const dest = join(work, `part-${index}.mp4`);
   await opts.report('joining without re-encoding the middle');
   await runFfmpeg(ffmpeg, [
@@ -511,7 +508,106 @@ async function smartRenderBlock(opts: {
   if (Math.abs(got - wantMs) > tolerance) {
     throw new Error(`smart render: video ${Math.round(got)}ms, expected ${Math.round(wantMs)}ms (±${tolerance})`);
   }
+  // A DURATION CHECK CANNOT SEE A SEAM, so look at the seams. Every picture must
+  // follow the one before it by exactly one frame time: a gap or an overlap at a
+  // join is a cut that plays and is wrong, and it goes to the full render instead.
+  const seam = await seamFault(dest, ffprobe, frameMs(probe));
+  if (seam) throw new Error(`smart render: ${seam}`);
   return dest;
+}
+
+/** One part's picture, as the concat demuxer will see it. */
+interface PartTiming {
+  /** The file's start_time: the concat demuxer measures everything from here. */
+  fileStartSec: number;
+  /** The video stream's own start_time. */
+  videoStartSec: number;
+  /** How long the picture lasts: last frame's end minus first frame's start. */
+  videoDurSec: number;
+  /** Video packets in the part. */
+  frames: number;
+}
+
+async function partTiming(path: string, ffprobe: string): Promise<PartTiming> {
+  const raw = await runCapture(ffprobe, [
+    '-v', 'error', '-count_packets',
+    '-show_entries', 'format=start_time:stream=codec_type,start_time,duration,nb_read_packets',
+    '-print_format', 'json', path,
+  ]);
+  const j = JSON.parse(raw);
+  const v = (j.streams ?? []).find((x: any) => x.codec_type === 'video');
+  const t = {
+    fileStartSec: Number(j.format?.start_time),
+    videoStartSec: Number(v?.start_time),
+    videoDurSec: Number(v?.duration),
+    frames: Number(v?.nb_read_packets),
+  };
+  if (!v || !Object.values(t).every(Number.isFinite)) throw new Error(`could not read the timing of ${path}`);
+  return t;
+}
+
+/**
+ * The concat list, with each part's length set from its PICTURE.
+ *
+ * THE SEAM, FIXED. Left to itself the concat demuxer starts the next part at the
+ * previous file's CONTAINER duration, which runs to whichever stream ends last.
+ * In a part whose AAC outlasts the picture (every copied middle does: 12.000s of
+ * video, 12.022s of file) the next part lands that difference late, a gap of
+ * 23ms that is half a frame at 50fps and pushed the tail of the fixture a whole
+ * PTS step off the full render. Telling the demuxer each part's `duration`
+ * replaces that guess with the number that matters: where this part's last
+ * picture ends, measured in the same clock the demuxer uses for the next part
+ * (its first picture, relative to its own file start).
+ *
+ * The picture's length is checked against its frame count before it is
+ * trusted: a part whose timestamps do not add up to whole frames is not one we
+ * can join exactly, and throwing sends the block to the full render.
+ */
+export async function concatListByPicture(parts: string[], ffprobe: string, frameMsValue: number): Promise<string> {
+  const t: PartTiming[] = [];
+  for (const p of parts) t.push(await partTiming(p, ffprobe));
+  const lines: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const me = t[i];
+    const byCount = (me.frames * frameMsValue) / 1000;
+    if (Math.abs(byCount - me.videoDurSec) > (frameMsValue / 2) / 1000) {
+      throw new Error(`part ${i + 1}: ${me.frames} frames do not make ${(me.videoDurSec * 1000).toFixed(1)}ms of picture`);
+    }
+    lines.push(`file '${parts[i].replace(/'/g, "'\\''")}'`);
+    if (i < parts.length - 1) {
+      const next = t[i + 1];
+      // Where this picture ends, relative to this file's start, less where the
+      // next picture starts, relative to the next file's start.
+      const dur = (me.videoStartSec - me.fileStartSec) + me.videoDurSec
+        - (next.videoStartSec - next.fileStartSec);
+      if (!(dur > 0)) throw new Error(`part ${i + 1}: no room for its picture (${dur.toFixed(6)}s)`);
+      lines.push(`duration ${dur.toFixed(6)}`);
+    }
+  }
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Is there a gap or an overlap anywhere in the picture? Reads packet
+ * timestamps (no decode), sorts them into presentation order and checks every
+ * step is one frame time. Returns a description of the first fault, or null.
+ */
+export async function seamFault(path: string, ffprobe: string, frameMsValue: number): Promise<string | null> {
+  const raw = await runCapture(ffprobe, [
+    '-v', 'error', '-select_streams', 'v:0',
+    '-show_entries', 'packet=pts_time', '-of', 'csv=p=0', path,
+  ]);
+  const pts = raw.split('\n').map((l) => parseFloat(l)).filter(Number.isFinite)
+    .map((x) => x * 1000).sort((a, b) => a - b);
+  if (pts.length < 2) return 'no picture to check';
+  // One millisecond either way: the MP4 timescale rounds, a seam does not.
+  for (let i = 1; i < pts.length; i++) {
+    const step = pts[i] - pts[i - 1];
+    if (Math.abs(step - frameMsValue) > 1) {
+      return `${step > frameMsValue ? 'gap' : 'overlap'} of ${(step - frameMsValue).toFixed(1)}ms before frame ${i} (${pts[i].toFixed(1)}ms)`;
+    }
+  }
+  return null;
 }
 
 /**
