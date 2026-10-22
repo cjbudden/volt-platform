@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "Volt API",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "The Volt API: the **Public API** for apps, players and their audience, and the **Admin API** for your own staff and servers.\n\nEvery route Volt serves to customers is listed here. Routes with a captured example show a real request and response from a test account.\n\nGuides: Using the API, Authentication and Errors in the docs sidebar."
  },
  "servers": [

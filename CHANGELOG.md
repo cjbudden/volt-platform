@@ -2,6 +2,19 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.3.0 (2026-10-22)
+
+### Product (in customer release notes)
+
+- added · API: New event routes matching the channel ones: GET /api/events/{id}/access-check, GET /api/events/{id}/inputs/{inputId}/preview and POST /api/events/{id}/health/reset.
+- fixed · Events: On the event page, 'View as a viewer in' now answers for the event instead of showing Could not check, and an HLS source that blocks playback from other sites now previews through Volt.
+- fixed · Events: The event page no longer goes blank once a live event's output starts playing.
+- added · Events: The event page now has Clear QC, like the channel page: it resets the event's health after an earlier fault, and the fault stays in the event log.
+
+### Internal
+
+- added: Check suite event-routes.check.sh for the three event routes (tenancy, shape parity with channels, token binding, Clear QC effects, role).
+
 ## 0.2.1 (2026-10-22)
 
 ### Product (in customer release notes)
