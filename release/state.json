@@ -1,20 +1,25 @@
 {
-  "version": "0.3.0",
+  "version": "0.4.0",
   "date": "2026-10-22",
-  "commit": "ff0d4163ada0f2ee6f122e4dc57f58987d369d6a",
+  "commit": "b3e8635c12f27cbbe0d5193e76712cf1d0ff2533",
   "previous": {
-    "version": "0.2.1",
+    "version": "0.3.0",
     "date": "2026-10-22",
-    "commit": "c9c0ccf45e35d1954d27a63b1b77bf491aea89de",
+    "commit": "ff0d4163ada0f2ee6f122e4dc57f58987d369d6a",
     "previous": {
-      "version": "0.2.0",
+      "version": "0.2.1",
       "date": "2026-10-22",
-      "commit": "fb282862daf7a87546c2bb604ed42020744c67eb",
+      "commit": "c9c0ccf45e35d1954d27a63b1b77bf491aea89de",
       "previous": {
-        "version": "0.1.0",
-        "date": "2026-10-18",
-        "commit": "7879905d5423d957dd6086e4205fb4e88a161527",
-        "note": "Baseline when release tooling was introduced. No release had been cut before this."
+        "version": "0.2.0",
+        "date": "2026-10-22",
+        "commit": "fb282862daf7a87546c2bb604ed42020744c67eb",
+        "previous": {
+          "version": "0.1.0",
+          "date": "2026-10-18",
+          "commit": "7879905d5423d957dd6086e4205fb4e88a161527",
+          "note": "Baseline when release tooling was introduced. No release had been cut before this."
+        }
       }
     }
   }

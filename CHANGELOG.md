@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.4.0 (2026-10-22)
+
+### Product (in customer release notes)
+
+- added · Account: A new Captions page under Admin turns live captions on for the account, picks the engine (self-hosted Whisper or the Gladia service), and sets each output profile's caption languages, the language spoken, the delay that keeps captions in step with the picture, and the Whisper model. A profile used by a running stream is shown locked until that stream stops.
+
+### Internal
+
+- added: Captions settings API (/api/account-settings/captions) with its check suite, captions-settings.check.sh (38 assertions); the caption language list now lives in one module the API validates against.
+
 ## 0.3.0 (2026-10-22)
 
 ### Product (in customer release notes)
