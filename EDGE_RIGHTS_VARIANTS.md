@@ -90,6 +90,31 @@ A **Rights preview** on the channel and event pages (and an API for it):
 1.2) already answers the play-gate side for a country and viewer type; the
 preview adds the edge decision and the playable variant beside it.
 
+## On the Mac first (single server), then the cloud
+
+Christian, 22 Oct: this has to be testable on the Mac before the AWS setup.
+
+- **Local edge.** There is no CloudFront on the Mac, so the API's public route
+  (`/live/<id>/<file>`, `modules/publicLive.ts`) runs the same decision
+  (`services/edgeRights.ts`) and serves the variant from the same manifest
+  service. Only the place the decision runs differs; the variants are identical.
+- **Pretend to be a viewer.** In development only (never in production), the
+  public route accepts a test country and rights class
+  (`?as=AU&rc=standard`, or the `X-Volt-Test-Country` / `X-Volt-Test-Rights`
+  headers), so two browser tabs can play the AU and MY versions side by side.
+  Production ignores them and uses `CloudFront-Viewer-Country` and the signed
+  claim.
+- **Pretend it is a different time.** Also development only: `&at=<ISO time>`
+  evaluates the rules as of that time, so a 20:00 window can be tested at 15:00.
+  The Rights preview uses the same parameter through its admin-only path.
+- **Same parity fixtures.** The parity test runs the edge function file itself
+  (loaded in Node with a stubbed `cloudfront` module), so the Mac path and the
+  CloudFront path are proven to decide the same way before anything is
+  deployed.
+- The Mac end-to-end run sheet (queue 1.15) includes a rights step: AU at a
+  replace time gets the loop, MY gets the normal stream, the recording is
+  unchanged.
+
 ## What stays the same
 
 - Segment paths, the encoder, recordings, DVR, clipping: untouched.
