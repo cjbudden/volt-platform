@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.5.0 (2026-10-22)
+
+### Product (in customer release notes)
+
+- improved · Media Library: The Encode tab now shows what each asset actually carries, read from its own files: the video profile and level of every rendition, each audio track with its codec, channels, sample rate and language, and, for a package-only stream, the codec and audio the contributor sent. File encodes also say which of the source's audio tracks was used, that subtitle tracks in the file are not carried yet, and that the result is not DRM protected.
+
+### Internal
+
+- added: Media facts for VOD assets: vod_assets.media_facts (migration 0077) from ffprobe of the delivered init segments, written by vod.encode and read once for recording-derived assets; vod_encoder.py probe lists every audio and subtitle track. vod-library.check.ts grows to 79 assertions and vod-library-pure.check.ts to 154.
+
 ## 0.4.0 (2026-10-22)
 
 ### Product (in customer release notes)
