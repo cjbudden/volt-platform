@@ -7,6 +7,7 @@ seven-Period DASH MPD written by the playout splice. Usage:
     python3 volt-encoder/bin/test_timed_events.py
 """
 import os
+import re
 import sys
 import xml.etree.ElementTree as ET
 
@@ -108,6 +109,96 @@ plain = open(os.path.join(HERE, "manifest.mpd")).read()
 m4 = te.inject_mpd(plain, [t43], now=te._parse_iso("2026-10-17T04:27:30Z"))
 check("a single-Period packager MPD works too", m4.count("<Event "), 1)
 check("garbage in returns the input", te.inject_mpd("<MPD/>", [t43], now=now), "<MPD/>")
+
+print("\n== ad breaks: SCTE-35 cue lines on the segments, SCTE-35 events in DASH ==")
+# A real splice_insert out (event 0x1234, immediate, 15 s, auto return), as the
+# control plane's breakCue builds it; its bytes are checked in live-scte35.check.ts.
+OUT_HEX = "0xFC302000000000000000FFF00F05000012347FFFFE00149970000000000000F19F09A1"
+
+
+def brk(id_, start_iso, dur, out_hex=OUT_HEX):
+    t = trig(id_, start_iso, dur, cls="com.boomlabs.volt.ad", graphic="ad-break", title="")
+    t["hls"] += f",PLANNED-DURATION={dur:.3f},SCTE35-OUT={out_hex}"
+    t["dash"]["schemeIdUri"] = "urn:com:boomlabs:volt:ad:2026"
+    import base64
+    b64 = base64.b64encode(bytes.fromhex(out_hex[2:])).decode()
+    t["scte35"] = {"eventId": 4660, "out": out_hex, "in": "0x00", "dash": {
+        "schemeIdUri": "urn:scte:scte35:2014:xml+bin", "id": 4660, "start": start_iso, "durationMs": int(dur * 1000),
+        "xml": f'<Signal xmlns="http://www.scte.org/schemas/35/2016"><Binary>{b64}</Binary></Signal>'}}
+    return t
+
+
+def cue_map(text):
+    """segment uri -> cue tags written just before it."""
+    res, held = {}, []
+    for l in text.split("\n"):
+        if l.startswith(("#EXT-X-CUE-OUT", "#EXT-X-CUE-IN")):
+            held.append(l)
+        elif l and not l.startswith("#"):
+            if held:
+                res[l] = held
+            held = []
+    return res
+
+
+b1 = brk("brk:b1", "2026-10-17T04:25:00.000Z", 15)
+o = te.inject_hls(hls, [b1])
+cm = cue_map(o)
+check("the break's DATERANGE carries SCTE35-OUT", any("SCTE35-OUT=0xFC3020" in l for l in o.split("\n") if l.startswith("#EXT-X-DATERANGE:")), True)
+check("CUE-OUT on the first segment mostly inside the break (seg_536, 04:24:58.4)", cm.get("1080p/seg_536.m4s"), ["#EXT-X-CUE-OUT:DURATION=15.000"])
+check("CUE-OUT-CONT with the elapsed time on the next one", cm.get("1080p/seg_537.m4s"), ["#EXT-X-CUE-OUT-CONT:ElapsedTime=2.004,Duration=15.000"])
+check("and on each segment through the break", [bool(cm.get(f"1080p/seg_{n}.m4s")) for n in (538, 539)], [True, True])
+check("CUE-IN on the first segment after it (seg_540, 04:25:12.8, mostly after 04:25:15)", cm.get("1080p/seg_540.m4s"), ["#EXT-X-CUE-IN"])
+check("segments before the break carry nothing", [cm.get(f"1080p/seg_{n}.m4s") for n in (534, 535)], [None, None])
+check("one CUE-OUT and one CUE-IN", (o.count("#EXT-X-CUE-OUT:"), o.count("#EXT-X-CUE-IN")), (1, 1))
+check("no segment is lost or reordered", [l for l in o.split("\n") if l and not l.startswith("#")], [l for l in hls.split("\n") if l and not l.startswith("#")])
+lines = o.split("\n")
+check("every cue line sits directly before an EXTINF", all(lines[i + 1].startswith(("#EXTINF:", "#EXT-X-CUE")) for i, l in enumerate(lines) if l.startswith(("#EXT-X-CUE-OUT", "#EXT-X-CUE-IN"))), True)
+check("idempotent: writing twice does not stack cue lines", te.inject_hls(o, [b1]), o)
+check("the break gone, its cue lines go too", te.inject_hls(o, []).count("#EXT-X-CUE"), 0)
+joined = te.inject_hls(hls, [brk("brk:b0", "2026-10-17T04:24:40.000Z", 30)])
+jm = cue_map(joined)
+check("a window that opens mid-break starts with CUE-OUT-CONT, not CUE-OUT", jm.get("1080p/seg_534.m4s"), ["#EXT-X-CUE-OUT-CONT:ElapsedTime=11.204,Duration=30.000"])
+check("and returns with CUE-IN at the break's end (seg_539)", jm.get("1080p/seg_539.m4s"), ["#EXT-X-CUE-IN"])
+check("a programme or graphic trigger places no cue lines", te.inject_hls(hls, [inside, openp]).count("#EXT-X-CUE"), 0)
+ahead_brk = brk("brk:later", "2026-10-17T04:30:20.000Z", 60)
+la = te.inject_hls(hls, [ahead_brk])
+check("a break just after the window: its DATERANGE is announced ahead", "brk:later" in la, True)
+check("but no segment is marked yet", la.count("#EXT-X-CUE"), 0)
+check("a cue without a duration is not placed", te.inject_hls(hls, [{**b1, "duration": None, "_end": float("inf")}]).count("#EXT-X-CUE"), 0)
+
+bp = brk("brk:p43", "2026-10-17T04:28:00.000Z", 30)
+m5 = te.inject_mpd(mpd, [bp], now=now)
+r5 = ET.fromstring(m5.encode())
+scte = [(per.get("id"), es, ev) for per in r5.iter(ns + "Period") for es in per.iter(ns + "EventStream")
+        if es.get("schemeIdUri") == "urn:scte:scte35:2014:xml+bin" for ev in es.iter(ns + "Event")]
+check("the MPD is still valid XML with a SCTE-35 EventStream", len(scte), 1)
+pid, es, ev = scte[0]
+check("in the Period the break starts in (p43)", pid, "p43")
+check("at the break's wall clock", abs(ast + te._dur_sec(next(p for p in r5.iter(ns + "Period") if p.get("id") == "p43").get("start")) + int(ev.get("presentationTime")) / 1000 - bp["_start"]) < 0.002, True)
+check("for the break's length", ev.get("duration"), "30000")
+check("with the splice_event_id as Event@id", ev.get("id"), "4660")
+sig = ev.find("{http://www.scte.org/schemas/35/2016}Signal")
+binary = sig.find("{http://www.scte.org/schemas/35/2016}Binary") if sig is not None else None
+import base64 as _b64
+check("carrying the cue's bytes as base64 in Signal/Binary", binary is not None and "0x" + _b64.b64decode(binary.text).hex().upper() == OUT_HEX, True)
+check("our ad event is still there beside it", any(e.get("schemeIdUri") == "urn:com:boomlabs:volt:ad:2026" for e in r5.iter(ns + "EventStream")), True)
+cross = brk("brk:cross", "2026-10-17T04:29:30.000Z", 30)          # starts in p43, runs into p44
+mc = te.inject_mpd(mpd, [cross], now=now)
+rc = ET.fromstring(mc.encode())
+where = [per.get("id") for per in rc.iter(ns + "Period") for es in per.iter(ns + "EventStream") if es.get("schemeIdUri") == "urn:scte:scte35:2014:xml+bin"]
+check("a break crossing into the next Period has one SCTE-35 out, where it starts", where, ["p43"])
+check("while our ad event covers each Period it touches (p43, the 9.8 s p44, p45)", sum(1 for per in rc.iter(ns + "Period") for es in per.iter(ns + "EventStream") if es.get("schemeIdUri") == "urn:com:boomlabs:volt:ad:2026"), 3)
+check("idempotent: the SCTE-35 EventStream is replaced, not stacked", te.inject_mpd(m5, [bp], now=now).count("urn:scte:scte35"), 1)
+ps = re.search(r'<Period id="p43"[^>]*>', mpd).group(0)
+foreign = mpd.replace(ps, ps + '<EventStream schemeIdUri="urn:scte:scte35:2014:xml+bin" timescale="90000"><Event id="9" presentationTime="0"/></EventStream>', 1)
+fm = te.inject_mpd(foreign, [bp], now=now)
+check("a SCTE-35 EventStream the packager passed through is left alone", 'timescale="90000"><Event id="9"' in fm, True)
+check("and ours is added beside it", fm.count("urn:scte:scte35"), 2)
+check("and removed again without touching it", te.inject_mpd(fm, [], now=now).count("urn:scte:scte35"), 1)
+evil = brk("brk:evil", "2026-10-17T04:28:00.000Z", 30)
+evil["scte35"]["dash"]["xml"] = '<Signal xmlns="http://www.scte.org/schemas/35/2016"><Binary>"/><x/></Binary></Signal>'
+check("a malformed cue is not written into the MPD", te.inject_mpd(mpd, [evil], now=now).count("urn:scte:scte35"), 0)
 
 print("\n== the feed keeps the last good list, then lets it go ==")
 clock = [1000.0]

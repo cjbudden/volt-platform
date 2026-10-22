@@ -28,6 +28,7 @@
 //  timedMetadata.ts, so the whole grammar is tested in node without Postgres.
 // ============================================================================
 import { quoted, CLASS_PROGRAMME, CLASS_AD } from './timedMetadata';
+import { spliceInsert, toHex, toBase64, eventIdFor } from './fast/scte35';
 
 /** Reverse-DNS, as the spec advises, so the CLASS can never collide with anyone's. */
 export const CLASS_GRAPHIC = 'com.boomlabs.volt.graphic';
@@ -86,6 +87,33 @@ export interface Trigger {
   durationSec: number | null;
   /** Client attributes, without the X- prefix. Values are plain strings. */
   data: Record<string, string>;
+  /** Ad breaks only: the SCTE-35 splice_insert pair, hex, for the HLS tag and the DASH event. */
+  scte35?: { eventId: number; out: string; in: string };
+}
+
+/** The scheme every SCTE-35 reader looks for in an MPD (SCTE 214-1, the binary carriage). */
+export const SCHEME_SCTE35 = 'urn:scte:scte35:2014:xml+bin';
+
+/**
+ * The SCTE-35 cue for a break on a live stream, as the bytes any downstream ad
+ * inserter reads (the same builder FAST playout uses, services/fast/scte35.ts).
+ *
+ * WHY SPLICE IMMEDIATE, NOT A PTS. A FAST channel's media clock is ours, so its
+ * cue can name the exact PTS. A live stream's PTS comes from the source and the
+ * control plane never sees it; a guessed PTS would be wrong by however far the
+ * source clock is from ours. So the cue says "now" and the carrier says when:
+ * START-DATE in HLS and presentationTime in DASH, both on the stream's own wall
+ * clock (PROGRAM-DATE-TIME, availabilityStartTime). That is how HLS and DASH
+ * both define a cue's moment, and the out carries the break length with auto
+ * return, so a reader that only takes the out still knows when the break ends.
+ */
+export function breakCue(id: string, durationSec: number, scteEventId?: number | null) {
+  const eventId = scteEventId != null && Number.isFinite(Number(scteEventId)) ? Number(scteEventId) >>> 0 : eventIdFor(id);
+  return {
+    eventId,
+    out: toHex(spliceInsert({ eventId, out: true, pts: null, durationSec, autoReturn: true })),
+    in: toHex(spliceInsert({ eventId, out: false, pts: null })),
+  };
 }
 
 /**
@@ -102,6 +130,8 @@ export interface BreakWindow {
   source?: string;
   /** Default true. False keeps graphics up (a sponsored break that wants its bug). */
   hideGraphics?: boolean;
+  /** The splice_event_id the break was created with (a source's own cue keeps its id). */
+  scteEventId?: number | null;
 }
 
 export const SCHEME_AD = 'urn:com:boomlabs:volt:ad:2026';
@@ -134,6 +164,7 @@ export function buildTriggers(items: ScheduleItem[], settings: GraphicsSettings,
     out.push({
       id: `brk:${b.id}`, cls: CLASS_AD, graphic: 'ad-break', start: b.start, durationSec: b.durationSec,
       data: { GRAPHIC: 'ad-break', BREAK: b.id, 'HIDE-GRAPHICS': b.hideGraphics === false ? 'none' : 'all', ...(b.source ? { SOURCE: b.source } : {}) },
+      scte35: breakCue(b.id, b.durationSec, b.scteEventId),
     });
   }
   for (const p of list) {
@@ -203,6 +234,12 @@ const attrName = (k: string) => 'X-' + k.toUpperCase().replace(/[^A-Z0-9-]/g, '-
 export function hlsTag(t: Trigger): string {
   const a: string[] = [`ID=${quoted(t.id)}`, `CLASS=${quoted(t.cls)}`, `START-DATE=${quoted(t.start.toISOString())}`];
   if (t.durationSec != null && t.durationSec > 0) a.push(`DURATION=${t.durationSec.toFixed(3)}`);
+  // RFC 8216 4.3.2.7.1: the splice_info_section as an unquoted hex sequence.
+  // PLANNED-DURATION too, which is what most ad decision servers size a break by.
+  if (t.scte35) {
+    if (t.durationSec != null && t.durationSec > 0) a.push(`PLANNED-DURATION=${t.durationSec.toFixed(3)}`);
+    a.push(`SCTE35-OUT=${t.scte35.out}`);
+  }
   // The ID again as a client attribute. Shaka drops the spec's ID when it turns a
   // DATERANGE into metadata, so without this a player cannot tell that a retimed
   // programme REPLACES the copy it already has, and shows both.
@@ -225,9 +262,30 @@ export function dashEvent(t: Trigger): { schemeIdUri: string; value: string; id:
   };
 }
 
-/** What the encoder is handed: the trigger, plus both renderings. */
+/**
+ * The DASH SCTE-35 event for a break: an Event in an MPD EventStream with the
+ * scte35 scheme and the cue as base64 in a Signal/Binary element (SCTE 214-1,
+ * DASH-IF IOP 4.3.3), which dash.js, Shaka and every DASH ad inserter read.
+ * The encoder places it in its Period beside our own events.
+ */
+export function dashScte35(t: Trigger): { schemeIdUri: string; id: number; start: string; durationMs: number | null; xml: string } | null {
+  if (!t.scte35) return null;
+  const bin = toBase64(Uint8Array.from(Buffer.from(t.scte35.out.slice(2), 'hex')));
+  return {
+    schemeIdUri: SCHEME_SCTE35,
+    id: t.scte35.eventId,
+    start: t.start.toISOString(),
+    durationMs: t.durationSec == null ? null : Math.round(t.durationSec * 1000),
+    xml: `<Signal xmlns="http://www.scte.org/schemas/35/2016"><Binary>${bin}</Binary></Signal>`,
+  };
+}
+
+/** What the encoder is handed: the trigger, plus both renderings (and a break's SCTE-35). */
 export function wireFormat(t: Trigger) {
-  return { id: t.id, class: t.cls, graphic: t.graphic, start: t.start.toISOString(), duration: t.durationSec, hls: hlsTag(t), dash: dashEvent(t) };
+  return {
+    id: t.id, class: t.cls, graphic: t.graphic, start: t.start.toISOString(), duration: t.durationSec, hls: hlsTag(t), dash: dashEvent(t),
+    ...(t.scte35 ? { scte35: { eventId: t.scte35.eventId, out: t.scte35.out, in: t.scte35.in, dash: dashScte35(t) } } : {}),
+  };
 }
 
 // ============================================================================
@@ -266,13 +324,13 @@ async function loadBlock(kind: 'channel' | 'event', id: string, blockStart: numb
       const owner = await one<any>(`SELECT graphics FROM ${kind === 'channel' ? 'channels' : 'events'} WHERE id = $1`, [id]).catch(() => null);
       // Ad breaks (migration 0064). A database without the table yet has none.
       const brk = await query<any>(
-        `SELECT id, starts_at, duration_ms, source, hide_graphics FROM stream_breaks
+        `SELECT id, starts_at, duration_ms, source, hide_graphics, scte_event_id FROM stream_breaks
           WHERE ${kind === 'channel' ? 'channel_id' : 'event_id'} = $1 AND status <> 'cancelled'
             AND starts_at < $3::timestamptz AND starts_at + make_interval(secs => duration_ms / 1000.0) > $2::timestamptz
           ORDER BY starts_at LIMIT 2000`,
         [id, from.toISOString(), to.toISOString()]).catch(() => [] as any[]);
       return {
-        breaks: brk.map((b) => ({ id: String(b.id), start: new Date(b.starts_at).toISOString(), durationSec: Number(b.duration_ms) / 1000, source: b.source, hideGraphics: b.hide_graphics !== false })),
+        breaks: brk.map((b) => ({ id: String(b.id), start: new Date(b.starts_at).toISOString(), durationSec: Number(b.duration_ms) / 1000, source: b.source, hideGraphics: b.hide_graphics !== false, scteEventId: b.scte_event_id == null ? null : Number(b.scte_event_id) })),
         graphics: owner?.graphics ?? {},
         items: rows.map((r) => {
           const m = r.metadata ?? {};

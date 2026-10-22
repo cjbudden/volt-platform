@@ -13,6 +13,12 @@ stream_*_cc.m3u8, manifest_cc.mpd) every second, places them:
   DASH  an EventStream per scheme in each Period, presentationTime relative to
         that Period's wall-clock start (availabilityStartTime + Period@start).
 
+AD BREAKS ALSO CARRY SCTE-35, the signal every downstream ad inserter and FAST
+distributor reads: SCTE35-OUT on the break's DATERANGE (built by the control
+plane), EXT-X-CUE-OUT / CUE-OUT-CONT / CUE-IN on the segments the break covers
+(placed here, because only this process knows the segments), and in DASH an
+EventStream with the scte35 scheme whose Event carries the cue as base64.
+
 FAILS OPEN, ALWAYS. A control plane that cannot be reached means the last good
 list for up to ten minutes and then none. A manifest is never withheld, delayed
 or broken because of a trigger: every function here returns its input untouched
@@ -30,6 +36,12 @@ from datetime import datetime, timezone
 STALE_SEC = 600          # keep the last good list this long when the control plane is away
 AHEAD_SEC = 90           # include triggers starting this soon after the window ends
 SCHEME_PREFIX = "urn:com:boomlabs:volt:"
+SCHEME_SCTE35 = "urn:scte:scte35:2014:xml+bin"
+# Our SCTE-35 EventStreams carry this @value so a rewrite replaces ours and never
+# touches one a source or packager passed through. The scheme leaves @value to
+# the writer; readers key on schemeIdUri.
+SCTE35_VALUE = "com.boomlabs.volt"
+_CUE = ("#EXT-X-CUE-OUT", "#EXT-X-CUE-IN")   # also matches #EXT-X-CUE-OUT-CONT
 
 
 _OFFSET = re.compile(r"([+-])(\d{2})(\d{2})$")
@@ -159,6 +171,72 @@ def select(triggers, lo, hi, ahead=AHEAD_SEC):
     return [t for t in triggers if t["_end"] > lo and t["_start"] < hi + ahead]
 
 
+def _breaks(triggers):
+    """(start, end, duration) of each ad break that carries SCTE-35."""
+    out = []
+    for t in triggers:
+        if isinstance(t.get("scte35"), dict) and t.get("duration") and t["_end"] != float("inf") and t["_end"] > t["_start"]:
+            out.append((t["_start"], t["_end"], float(t["duration"])))
+    return sorted(out)
+
+
+def place_cues(lines, triggers):
+    """EXT-X-CUE-OUT / CUE-OUT-CONT / CUE-IN on the segments an ad break covers.
+
+    A segment is in a break when its midpoint is: a live source is not cut at
+    the break, so the edge falls inside a segment, and the midpoint puts that
+    segment on whichever side holds most of it. The first segment of the window
+    gets CUE-OUT-CONT when the break began before it (a sliding window, or a
+    viewer joining mid-break), so a reader joining here still knows it is in a
+    break and how far in. Each tag goes on the line before the segment's EXTINF."""
+    brk = _breaks(triggers)
+    if not brk:
+        return lines
+    segs = []          # (index of EXTINF, start, duration)
+    cur = None
+    pending = None
+    for i, l in enumerate(lines):
+        if l.startswith("#EXT-X-PROGRAM-DATE-TIME:"):
+            t = _parse_iso(l.split(":", 1)[1].strip())
+            if t is not None:
+                cur = t
+        elif l.startswith("#EXTINF:"):
+            try:
+                pending = (i, float(l[8:].split(",", 1)[0]))
+            except ValueError:
+                pending = None
+        elif l and not l.startswith("#") and pending is not None:
+            if cur is not None:
+                segs.append((pending[0], cur, pending[1]))
+                cur += pending[1]
+            pending = None
+    if not segs:
+        return lines
+    at = {}
+    prev = None
+    for n, (idx, st, d) in enumerate(segs):
+        mid = st + d / 2.0
+        b = next((x for x in brk if x[0] <= mid < x[1]), None)
+        tags = []
+        if prev is not None and b != prev:
+            tags.append("#EXT-X-CUE-IN")
+        if b is not None:
+            el = st - b[0]
+            if b == prev or (n == 0 and el > d / 2.0):
+                tags.append(f"#EXT-X-CUE-OUT-CONT:ElapsedTime={max(0.0, el):.3f},Duration={b[2]:.3f}")
+            else:
+                tags.append(f"#EXT-X-CUE-OUT:DURATION={b[2]:.3f}")
+        if tags:
+            at[idx] = tags
+        prev = b
+    out = []
+    for i, l in enumerate(lines):
+        if i in at:
+            out.extend(at[i])
+        out.append(l)
+    return out
+
+
 def inject_hls(text, triggers, ahead=AHEAD_SEC):
     """Replace any DATERANGE in a media playlist with the triggers its window covers.
 
@@ -169,15 +247,21 @@ def inject_hls(text, triggers, ahead=AHEAD_SEC):
         win = playlist_window(text)
         if win is None:
             return text
-        lines = [l for l in text.split("\n") if not l.startswith("#EXT-X-DATERANGE:")]
-        tags = [t["hls"] for t in select(triggers, win[0], win[1], ahead)
+        lines = [l for l in text.split("\n") if not l.startswith("#EXT-X-DATERANGE:") and not l.startswith(_CUE)]
+        chosen = select(triggers, win[0], win[1], ahead)
+        tags = [t["hls"] for t in chosen
                 if t.get("hls", "").startswith("#EXT-X-DATERANGE:") and "\n" not in t["hls"]]
         if not tags:
             return "\n".join(lines)
         at = next((i for i, l in enumerate(lines) if l.startswith("#EXTINF:")), len(lines))
         while at > 0 and lines[at - 1].startswith("#EXT-X-PROGRAM-DATE-TIME:"):
             at -= 1
-        return "\n".join(lines[:at] + tags + lines[at:])
+        lines = lines[:at] + tags + lines[at:]
+        try:
+            lines = place_cues(lines, chosen)
+        except Exception:  # noqa: BLE001  the DATERANGE still stands without the cue lines
+            pass
+        return "\n".join(lines)
     except Exception:  # noqa: BLE001
         return text
 
@@ -196,6 +280,25 @@ def _event_id(s):
 
 
 _OUR_STREAMS = re.compile(r'<EventStream[^>]*schemeIdUri="' + re.escape(SCHEME_PREFIX) + r'[^"]*"[^>]*>.*?</EventStream>', re.S)
+_OUR_SCTE = re.compile(r'<EventStream schemeIdUri="' + re.escape(SCHEME_SCTE35) + r'" value="' + re.escape(SCTE35_VALUE) + r'"[^>]*>.*?</EventStream>', re.S)
+_B64 = re.compile(r"^[A-Za-z0-9+/=]+$")
+
+
+def _scte_event(t, lo, hi, p_lo):
+    """One SCTE-35 Event (the cue as base64 in Signal/Binary), or None when the
+    trigger carries no usable cue. Only at the break's start: the out with its
+    break duration and auto return is the whole instruction."""
+    sc = t.get("scte35")
+    d = sc.get("dash") if isinstance(sc, dict) else None
+    if not isinstance(d, dict) or abs(lo - t["_start"]) > 0.001:
+        return None
+    m = re.fullmatch(r'<Signal xmlns="http://www\.scte\.org/schemas/35/2016"><Binary>([^<]+)</Binary></Signal>', str(d.get("xml", "")))
+    if not m or not _B64.match(m.group(1)):
+        return None
+    ev = f'<Event id="{int(d.get("id") or _event_id(t.get("id"))) & 0xFFFFFFFF}" presentationTime="{int(round((lo - p_lo) * 1000))}"'
+    if hi != float("inf"):
+        ev += f' duration="{max(1, int(round((t["_end"] - t["_start"]) * 1000)))}"'
+    return ev + ">" + m.group(0) + "</Event>"
 
 
 def inject_mpd(mpd, triggers, now=None, ahead=AHEAD_SEC):
@@ -208,7 +311,7 @@ def inject_mpd(mpd, triggers, now=None, ahead=AHEAD_SEC):
     window opens, starting before `ahead` seconds from now."""
     try:
         now = time.time() if now is None else now
-        mpd = _OUR_STREAMS.sub("", mpd)
+        mpd = _OUR_SCTE.sub("", _OUR_STREAMS.sub("", mpd))
         ast_m = re.search(r'availabilityStartTime="([^"]+)"', mpd)
         if not ast_m:
             return mpd
@@ -241,9 +344,12 @@ def inject_mpd(mpd, triggers, now=None, ahead=AHEAD_SEC):
                     ev += f' duration="{max(1, int(round((hi - lo) * 1000)))}"'
                 ev += f' messageData="{_xml_attr(d.get("messageData", "{}"))}"/>'
                 groups.setdefault((d.get("schemeIdUri", ""), d.get("value", "")), []).append(ev)
+                sev = _scte_event(t, lo, hi, p_lo)
+                if sev:
+                    groups.setdefault((SCHEME_SCTE35, SCTE35_VALUE), []).append(sev)
             block = "".join(
                 f'<EventStream schemeIdUri="{_xml_attr(s)}" value="{_xml_attr(v)}" timescale="1000">{"".join(evs)}</EventStream>'
-                for (s, v), evs in sorted(groups.items()) if s.startswith(SCHEME_PREFIX))
+                for (s, v), evs in sorted(groups.items()) if s.startswith(SCHEME_PREFIX) or (s, v) == (SCHEME_SCTE35, SCTE35_VALUE))
             out.append(mpd[pos:m.end()])
             out.append(block)
             pos = m.end()
