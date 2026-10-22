@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.6.0 (2026-10-22)
+
+### Product (in customer release notes)
+
+- added · Channels: Ad breaks on live channels and events now carry SCTE-35 in the delivered streams: an SCTE-35 cue on the break in HLS, cue out and cue in on the segments it covers, and an SCTE-35 event in DASH. Downstream ad insertion and distribution partners see every break you start, schedule or send through the API.
+
+### Internal
+
+- added · Encoder: New check suite live-scte35 (break row to encoder poll to the real encoder placement, cues decoded back) and SCTE-35 placement cases in test_timed_events.py.
+
 ## 0.5.1 (2026-10-22)
 
 ### Internal
