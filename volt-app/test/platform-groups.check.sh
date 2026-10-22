@@ -18,19 +18,28 @@ q(){ psql "$DATABASE_URL" -tA -c "$1"; }
 jget(){ python3 -c "import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1]))" "$1"; }
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q <<SQL
-INSERT INTO accounts(id,name) VALUES ('$ACC','PackOnlyCo') ON CONFLICT (id) DO NOTHING;
+-- Room in the plan for a second group: since plan allocation (services/plan.ts)
+-- a new group's channel cap has to fit what the plan has not given out yet.
+INSERT INTO accounts(id,name,max_channels,max_concurrent_sources) VALUES ('$ACC','PackOnlyCo',20,10) ON CONFLICT (id) DO NOTHING;
 INSERT INTO users(id,account_id,email,password_hash,role,status,display_name) VALUES
   ('0000000b-0000-0000-0000-0000000007d1','$ACC','owner@packonly.example','x','owner','active','Owner') ON CONFLICT (id) DO NOTHING;
 INSERT INTO output_profiles(id,account_id,name,rungs,workflow_type) VALUES ('0000000c-0000-0000-0000-0000000007d1','$ACC','Pack','[{"height":1080,"bitrate_kbps":5000}]','package_only') ON CONFLICT (id) DO NOTHING;
 INSERT INTO groups(id,account_id,name,output_profile_id) VALUES ('0000000d-0000-0000-0000-0000000007d1','$ACC','Main','0000000c-0000-0000-0000-0000000007d1') ON CONFLICT (id) DO NOTHING;
-UPDATE users SET platform_role='saas_admin' WHERE email='root@adminco.example';
+-- The SaaS admin is this suite's own fixture. It used to borrow
+-- root@adminco.example, which only exists when admin.check.sh ran first
+-- against the same database, so on its own database the suite never signed in.
+INSERT INTO accounts(id,name) VALUES ('0000000a-0000-0000-0000-0000000007d2','PlatformOpsCo') ON CONFLICT (id) DO NOTHING;
+INSERT INTO users(id,account_id,email,password_hash,role,status,platform_role) VALUES
+  ('0000000b-0000-0000-0000-0000000007d2','0000000a-0000-0000-0000-0000000007d2','saas@platformops.example','x','owner','active','saas_admin') ON CONFLICT (id) DO NOTHING;
 SQL
-npx tsx -e "import {hashPassword} from './src/auth/password'; import {query,pool} from './src/db'; (async()=>{const h=await hashPassword('volt1234'); await query(\"UPDATE users SET password_hash=\$1 WHERE email='owner@packonly.example'\",[h]); await pool.end();})()" >/dev/null 2>&1
+npx tsx -e "import {hashPassword} from './src/auth/password'; import {query,pool} from './src/db'; (async()=>{const h=await hashPassword('volt1234'); await query(\"UPDATE users SET password_hash=\$1 WHERE email IN ('owner@packonly.example','saas@platformops.example')\",[h]); await pool.end();})()" >/dev/null 2>&1
 npx tsx src/index.ts >/tmp/platform_groups_api.log 2>&1 &
 API=$!
 for i in $(seq 1 60); do curl -sf "http://localhost:$PORT/health" >/dev/null && break; sleep 0.25; done
 login(){ curl -s -X POST "$B/auth/login" -H "$J" -d "{\"email\":\"$1\",\"password\":\"volt1234\"}" | sed -n 's/.*"access":"\([^"]*\)".*/\1/p'; }
-S="authorization: Bearer $(login root@adminco.example)"; O="authorization: Bearer $(login owner@packonly.example)"
+# /api/platform takes a platform session (password + authenticator code).
+. test/lib/platform-session.sh
+S="authorization: Bearer $(platform_session "$B" "$(login saas@platformops.example)")"; O="authorization: Bearer $(login owner@packonly.example)"
 
 G=$(curl -s "$B/platform/accounts/$ACC/groups" -H "$S")
 ok "the client starts with one packaging group" '[ "$(echo "$G" | jget "[(g[\"name\"], g[\"workflow_type\"]) for g in d]")" = "[('"'"'Main'"'"', '"'"'package_only'"'"')]" ]'

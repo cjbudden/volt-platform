@@ -191,7 +191,10 @@ const openRows = async (id: string) =>
       if (!f.name.endsWith('.ts')) continue;
       if (p.endsWith('services/airSessions.ts')) continue;   // the owner
       const src = readFileSync(p, 'utf8');
-      if (/SET\s+on_air\s*=/i.test(src)) offenders.push(p.replace(root, 'src'));
+      // channels.on_air only. gfx_state has an on_air column of its own (a
+      // graphic taken to air), which is not a stream going public and has no
+      // ledger; matching every "SET on_air" flagged the graphics runtime.
+      if (/UPDATE\s+channels\s+SET[^;`]*\bon_air\s*=/i.test(src)) offenders.push(p.replace(root, 'src'));
     }
   };
   walk(root);

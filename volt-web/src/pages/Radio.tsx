@@ -244,16 +244,26 @@ export default function Radio() {
                 {shown.map((r, i) => {
                   const live = r.status === 'live'
                   const outs = [r.outputs.mp3 && 'MP3', r.outputs.hls && 'HLS', r.outputs.dash && 'DASH'].filter(Boolean).join(' · ')
+                  // The server's resolved line (services/radio/nowPlaying.ts), as on
+                  // the station page: "Untitled break" only for a source that can
+                  // send titles. An HLS source with none would otherwise read as a
+                  // metadata fault. no_metadata shows the dash: its text is the
+                  // station name, already in the next column. The raw title is the
+                  // fallback for an older API that sends no view.
+                  const nowView = r.nowPlayingView
+                  const nowText = nowView
+                    ? (nowView.kind === 'no_metadata' || nowView.kind === 'off' ? null : nowView.text)
+                    : (r.nowPlaying != null ? (r.nowPlaying || 'Untitled break') : null)
                   return (
                     <tr key={r.id} className={sel.sel.has(r.id) ? 'selected' : undefined} onClick={() => open(r)} style={{ cursor: 'pointer' }}>
                       <SelectCell on={sel.sel.has(r.id)} onToggle={() => sel.toggle(r.id)} label={`Select ${r.name}`} />
                       <td><EntityCell name={r.name} sub={r.group_name} index={i}
                         imgUrl={r.brand_ref ? thumbUrl(r.brand_ref, 80, 80, 'cover') : undefined} /></td>
                       <td style={{ maxWidth: 230 }}>
-                        {live && r.nowPlaying != null ? (
+                        {live && nowText != null ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.nowPlaying || 'Untitled break'}</span>
-                            <ClassChip cls={r.nowPlayingClass} />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nowText}</span>
+                            <ClassChip cls={nowView && nowView.kind !== 'icy' ? null : r.nowPlayingClass} />
                           </div>
                         ) : <span style={{ color: 'var(--faint)' }}>—</span>}
                       </td>

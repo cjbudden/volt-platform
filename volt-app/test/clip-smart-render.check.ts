@@ -33,6 +33,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { extract, plan, smartEligible, probeSource, probeDurationMs } from '../src/services/clips/extract';
 import type { Resolution, ResolvedBlock, ResolvedSegment } from '../src/services/clips/resolve';
 
@@ -44,7 +45,11 @@ const check = (m: string, got: unknown, want: unknown) =>
 const near = (m: string, got: number, want: number, tol: number) =>
   Math.abs(got - want) <= tol ? ok(m) : bad(m, `expected ~${want} (±${tol}) got ${got}`);
 
-const MEDIA = join(__dirname, '../media/audio');
+// The suite makes its own media. It used to read volt-app/media/audio, which
+// nothing in the repo generates, so on any machine but the one it was written
+// on it stopped at "test media missing" and proved nothing. VOLT_SMART_MEDIA
+// still points it at hand-made media when someone wants to try a real capture.
+const MEDIA = process.env.VOLT_SMART_MEDIA || join(tmpdir(), 'volt-smart-render-media');
 const OUT = join(__dirname, '../out');
 const SEG_MS = 4000;
 
@@ -57,6 +62,30 @@ function frames(path: string): { n: number; pts: number[] } {
   const pts = (r.stdout || '').split('\n').map((l) => l.trim()).filter(Boolean)
     .map((v) => Math.round(parseFloat(v) * 1000)).filter((v) => Number.isFinite(v));
   return { n: pts.length, pts };
+}
+
+/**
+ * Five-plus whole 4 s segments of 25 fps H.264 + AAC in fMP4, named the way the
+ * recorder names them (init.mp4, seg_00000.m4s ...). A keyframe on every
+ * segment boundary (-g 100 at 25 fps) is what a live run has, and is what lets
+ * the middle be copied at all.
+ */
+function makeMedia(): void {
+  mkdirSync(MEDIA, { recursive: true });
+  const r = spawnSync('ffmpeg', [
+    '-hide_banner', '-loglevel', 'error', '-y',
+    '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25:duration=24',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=24',
+    '-map', '0:v', '-map', '1:a',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    '-g', '100', '-keyint_min', '100', '-sc_threshold', '0',
+    '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
+    '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-start_number', '0',
+    '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4',
+    '-hls_segment_filename', join(MEDIA, 'seg_%05d.m4s'),
+    join(MEDIA, 'index.m3u8'),
+  ], { encoding: 'utf8' });
+  if (r.status !== 0) console.log('ffmpeg: ' + (r.stderr || r.error));
 }
 
 function seg(i: number, takeFromMs: number, takeToMs: number): ResolvedSegment {
@@ -85,8 +114,9 @@ function resolution(segs: ResolvedSegment[], fromMs: number, toMs: number): Reso
 }
 
 (async () => {
+  if (!existsSync(join(MEDIA, 'init.mp4'))) makeMedia();
   if (!existsSync(join(MEDIA, 'init.mp4'))) {
-    console.log('FATAL test media missing; generate it first'); process.exit(1);
+    console.log('FATAL test media missing and ffmpeg could not make it'); process.exit(1);
   }
   rmSync(OUT, { recursive: true, force: true });
 

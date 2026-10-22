@@ -146,7 +146,7 @@ const titlesOn = async (date: string) => (await query<any>(
   ok(endR.status === 200 && (await count(`AND series_id=$1 AND series_date >= $2`, [daySeries, addDays(W, 14)])) === 0, 'stop repeating from a date');
 
   // ---- Events repeat too ------------------------------------------------------
-  const ev = await one<any>(`INSERT INTO events(group_id,name,scheduled_start,scheduled_end) VALUES ('0000000d-0000-0000-0000-0000000000b1','Repeat Event', now()+interval '2 day', now()+interval '2 day 4 hours') RETURNING id`);
+  const ev = await one<any>(`INSERT INTO events(group_id,name,scheduled_start,scheduled_end) VALUES ('0000000d-0000-0000-0000-0000000000e7','Repeat Event', now()+interval '2 day', now()+interval '2 day 4 hours') RETURNING id`);
   const ep = (await api('POST', '/api/epg', { eventId: ev.id, title: 'Keynote', startsAt: at(D, '10:00'), endsAt: at(D, '11:00') })).j;
   const er = await api('POST', '/api/epg/repeat', { programmeId: ep.id, rule: { freq: 'weekdays' }, until: addDays(D, 6), policy: 'replace', tz: TZ });
   ok(er.status === 201 && er.j.summary.added >= 3, `event programmes repeat (${er.j.summary?.added})`);

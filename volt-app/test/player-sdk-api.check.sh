@@ -99,7 +99,8 @@ ok "the SDK skin is accepted and saved" '[ "$(echo "$S" | jget "d[\"layout\"]")"
 ok "the theme is kept in options.theme" '[ "$(echo "$S" | jget "d[\"options\"][\"theme\"][\"radius\"]")" = 6 ]'
 ok "the station handshake carries it to the embed" '[ "$(curl -s -X POST "$B/player/session" -H "$J" -d "{\"appKey\":\"$K\",\"channelId\":\"$RD\"}" | jj "[d[\"config\"][\"layout\"], d[\"config\"][\"options\"][\"theme\"][\"radius\"]]")" = '\''["audio_nowplaying",6]'\''  ]'
 ok "the console's admin skin cannot be saved" '[ "$(code -X PUT "$B/player-config/$RD" -H "$A" -H "$J" -d "{\"layout\":\"admin\"}")" = 422 ]'
-ok "the layouts list offers the SDK skins" '[ "$(curl -s "$B/player-config/$RD" -H "$A" | jj "sorted(l[\"id\"] for l in d[\"layouts\"] if l.get(\"sdk\"))")" = '\''["audio_nowplaying","audio_square","audio_wave","video"]'\''  ]'
+# audio_radio joined the SDK skins after this list was written (volt-player/src/sdk/skins/audio.ts).
+ok "the layouts list offers the SDK skins" '[ "$(curl -s "$B/player-config/$RD" -H "$A" | jj "sorted(l[\"id\"] for l in d[\"layouts\"] if l.get(\"sdk\"))")" = '\''["audio_nowplaying","audio_radio","audio_square","audio_wave","video"]'\''  ]'
 
 echo "-- events: the event skin's data"
 EVJ=$(curl -s "$B/player/event?appKey=$K&eventId=$EV1")

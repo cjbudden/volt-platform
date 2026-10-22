@@ -131,7 +131,12 @@ async function main() {
   check('a fully covered range resolves to one block per run', r.blocks.length, r.runCount);
 
   const plan1 = plan(r);
-  check('an off-grid range plans a full render', plan1.strategy, 'full-render');
+  // A render, not a copy. Which render is plan()'s call since smart render
+  // landed: a 20 s off-grid range has whole segments in the middle, so it plans
+  // 'smart-render' (clip-smart-render.check.ts owns that path). This used to
+  // insist on 'full-render', which was true only before smart render existed.
+  truthy('an off-grid range plans a render, never a copy',
+    plan1.strategy === 'full-render' || plan1.strategy === 'smart-render');
   check('exactly two segments would need re-encoding under smart render',
     plan1.smartRenderSegments, 2);
 
@@ -160,7 +165,7 @@ async function main() {
     check('every requested format was produced', res.files.length, formats.length);
     truthy('progress was reported', seen.length >= 2);
     truthy('progress ends at 100', seen[seen.length - 1] === 100);
-    check('the strategy is recorded', res.strategy, 'full-render');
+    truthy('the strategy is recorded', res.strategy === 'full-render' || res.strategy === 'smart-render');
 
     for (const f of res.files) {
       truthy(`${f.format} exists on disk`, existsSync(f.path));

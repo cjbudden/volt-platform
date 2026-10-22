@@ -10,19 +10,22 @@ fuser -k "$PORT"/tcp 2>/dev/null; sleep 0.4
 npx tsx src/index.ts >/tmp/epg_repeat_api.log 2>&1 &
 API=$!
 for i in $(seq 1 60); do curl -sf "http://localhost:$PORT/health" >/dev/null && break; sleep 0.25; done
+# Fixture ids end in e7. They used to end in b1, the ids scripts/seed-check.ts
+# gives root@adminco.example, so in the seeded check database the user insert
+# was skipped by ON CONFLICT and the suite could never sign in.
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q <<'SQL'
-INSERT INTO accounts(id,name) VALUES ('0000000a-0000-0000-0000-0000000000b1'::uuid,'RepeatCo') ON CONFLICT (id) DO NOTHING;
+INSERT INTO accounts(id,name) VALUES ('0000000a-0000-0000-0000-0000000000e7'::uuid,'RepeatCo') ON CONFLICT (id) DO NOTHING;
 INSERT INTO users(id,account_id,email,password_hash,role,status,display_name) VALUES
-  ('0000000b-0000-0000-0000-0000000000b1'::uuid,'0000000a-0000-0000-0000-0000000000b1'::uuid,'rep@repeatco.example','x','owner','active','Rep Admin')
+  ('0000000b-0000-0000-0000-0000000000e7'::uuid,'0000000a-0000-0000-0000-0000000000e7'::uuid,'rep@repeatco.example','x','owner','active','Rep Admin')
   ON CONFLICT (id) DO NOTHING;
 INSERT INTO output_profiles(id,account_id,name,rungs,workflow_type) VALUES
-  ('0000000c-0000-0000-0000-0000000000b1'::uuid,'0000000a-0000-0000-0000-0000000000b1'::uuid,'HD','[{"height":360,"bitrate_kbps":800}]','transcode')
+  ('0000000c-0000-0000-0000-0000000000e7'::uuid,'0000000a-0000-0000-0000-0000000000e7'::uuid,'HD','[{"height":360,"bitrate_kbps":800}]','transcode')
   ON CONFLICT (id) DO NOTHING;
 INSERT INTO groups(id,account_id,name,output_profile_id) VALUES
-  ('0000000d-0000-0000-0000-0000000000b1'::uuid,'0000000a-0000-0000-0000-0000000000b1'::uuid,'G','0000000c-0000-0000-0000-0000000000b1'::uuid)
+  ('0000000d-0000-0000-0000-0000000000e7'::uuid,'0000000a-0000-0000-0000-0000000000e7'::uuid,'G','0000000c-0000-0000-0000-0000000000e7'::uuid)
   ON CONFLICT (id) DO NOTHING;
 INSERT INTO channels(id,group_id,name,status,tz) VALUES
-  ('0000000e-0000-0000-0000-0000000000bb'::uuid,'0000000d-0000-0000-0000-0000000000b1'::uuid,'Repeat Channel','ended','Australia/Sydney')
+  ('0000000e-0000-0000-0000-0000000000bb'::uuid,'0000000d-0000-0000-0000-0000000000e7'::uuid,'Repeat Channel','ended','Australia/Sydney')
   ON CONFLICT (id) DO NOTHING;
 DELETE FROM programmes WHERE channel_id='0000000e-0000-0000-0000-0000000000bb'::uuid;
 DELETE FROM programme_series WHERE channel_id='0000000e-0000-0000-0000-0000000000bb'::uuid;

@@ -53,7 +53,10 @@ async function seed() {
   await query(`INSERT INTO recordings(id,kind,channel_id,title,status,start_epoch_ms,end_epoch_ms,duration_ms,day_utc)
     VALUES ($1,'channel_day',$2,'Evening news','complete',1000,1801000,1800000,current_date)`, [REC, CH]);
   await query(`DELETE FROM users WHERE id=$1`, [U]).catch(() => {});
-  await query(`INSERT INTO users(id,account_id,email,password_hash,role) VALUES ($1,$2,'wf@test.local','x','admin')`, [U, A]).catch((e) => console.log('note: users seed', e.message));
+  // status 'active': a new users row defaults to 'invited', and an invited
+  // user's token is refused (auth/roles.ts resolveAccess), so every API case
+  // below failed with "disabled or no longer exists".
+  await query(`INSERT INTO users(id,account_id,email,password_hash,role,status) VALUES ($1,$2,'wf@test.local','x','admin','active')`, [U, A]).catch((e) => console.log('note: users seed', e.message));
 }
 
 // ---------------------------------------------------------------------------

@@ -66,16 +66,16 @@ ok "me: full feature access" '[ "$(J "$ME" features.channels)" = manage ] && [ "
 ok "me: account + access model served" '[ "$(J "$ME" account.name)" = AdminCo ] && [ -n "$(J "$ME" model.levels.0)" ]'
 
 # ---- users CRUD + role guards --------------------------------------------------
-mkuser(){ curl -s -X POST "$B/users" -H "$AO" -H 'content-type:application/json' -d "{\"email\":\"$1\",\"password\":\"volt1234\",\"role\":\"$2\"}"; }
+mkuser(){ curl -s -X POST "$B/users" -H "$AO" -H 'content-type:application/json' -d "{\"email\":\"$1\",\"password\":\"volt123456\",\"role\":\"$2\"}"; }
 AD=$(mkuser admin@adminco.example admin);   ADID=$(J "$AD" id)
 OP=$(mkuser op@adminco.example operator);   OPID=$(J "$OP" id)
 VW=$(mkuser view@adminco.example viewer);   VWID=$(J "$VW" id)
 ok "create admin/operator/viewer" '[ -n "$ADID" ] && [ -n "$OPID" ] && [ -n "$VWID" ]'
-ok "duplicate email rejected" '[ "$(code -X POST "$B/users" -H "$AO" -H "content-type:application/json" -d "{\"email\":\"op@adminco.example\",\"password\":\"volt1234\"}")" = 400 ]'
+ok "duplicate email rejected" '[ "$(code -X POST "$B/users" -H "$AO" -H "content-type:application/json" -d "{\"email\":\"op@adminco.example\",\"password\":\"volt123456\"}")" = 400 ]'
 
-AT=$(J "$(login admin@adminco.example volt1234)" access); AA="authorization: Bearer $AT"
-OT=$(J "$(login op@adminco.example volt1234)" access);    OA="authorization: Bearer $OT"
-VT=$(J "$(login view@adminco.example volt1234)" access);  VA="authorization: Bearer $VT"
+AT=$(J "$(login admin@adminco.example volt123456)" access); AA="authorization: Bearer $AT"
+OT=$(J "$(login op@adminco.example volt123456)" access);    OA="authorization: Bearer $OT"
+VT=$(J "$(login view@adminco.example volt123456)" access);  VA="authorization: Bearer $VT"
 ok "all three can sign in" '[ -n "$AT" ] && [ -n "$OT" ] && [ -n "$VT" ]'
 
 ok "viewer: content read allowed" '[ "$(code "$B/channels" -H "$VA")" = 200 ]'
@@ -86,7 +86,7 @@ ok "operator: user management 403" '[ "$(code "$B/users" -H "$OA")" = 403 ]'
 ok "operator: admin read-open surface (groups) 200" '[ "$(code "$B/groups" -H "$OA")" = 200 ]'
 ok "operator: admin surface write 403" '[ "$(code -X POST "$B/groups" -H "$OA" -H "content-type:application/json" -d "{\"name\":\"nope\"}")" = 403 ]'
 ok "admin: user list 200" '[ "$(code "$B/users" -H "$AA")" = 200 ]'
-ok "admin cannot create an owner" '[ "$(code -X POST "$B/users" -H "$AA" -H "content-type:application/json" -d "{\"email\":\"o2@adminco.example\",\"password\":\"volt1234\",\"role\":\"owner\"}")" = 403 ]'
+ok "admin cannot create an owner" '[ "$(code -X POST "$B/users" -H "$AA" -H "content-type:application/json" -d "{\"email\":\"o2@adminco.example\",\"password\":\"volt123456\",\"role\":\"owner\"}")" = 403 ]'
 OWNID=$(psql "$DATABASE_URL" -tA -c "SELECT id FROM users WHERE email='root@adminco.example'" | head -1 | tr -cd 'a-f0-9-')
 ok "admin cannot touch an owner" '[ "$(code -X PATCH "$B/users/$OWNID" -H "$AA" -H "content-type:application/json" -d "{\"role\":\"viewer\"}")" = 403 ]'
 
@@ -100,15 +100,21 @@ ok "operator: epg hidden by group (403)" '[ "$(code "$B/epg/owners" -H "$OA")" =
 ok "operator: channels still allowed" '[ "$(code "$B/channels" -H "$OA")" = 200 ]'
 ok "group patch epg->view applies immediately" '[ "$(code -X PATCH "$B/user-groups/$G1ID" -H "$AO" -H "content-type:application/json" -d "{\"permissions\":{\"channels\":\"manage\",\"epg\":\"view\"}}")" = 200 ] && [ "$(code "$B/epg/owners" -H "$OA")" = 200 ]'
 ok "operator: epg write still blocked at view level" '[ "$(code -X POST "$B/epg" -H "$OA" -H "content-type:application/json" -d "{}")" = 403 ]'
-ok "viewer in manage-group still capped at view" '[ "$(code -X PATCH "$B/users/$VWID" -H "$AO" -H "content-type:application/json" -d "{\"userGroupId\":\"$G1ID\"}")" = 200 ] && [ "$(code -X POST "$B/channels" -H "$VA" -H "content-type:application/json" -d "{}")" = 403 ]'
+# Since the roles model (migration 0047) a role change re-derives the tier from
+# the roles, so the viewer tier is asked for explicitly: the cap is what is tested.
+ok "viewer in manage-group still capped at view" '[ "$(code -X PATCH "$B/users/$VWID" -H "$AO" -H "content-type:application/json" -d "{\"userGroupId\":\"$G1ID\",\"role\":\"viewer\"}")" = 200 ] && [ "$(code -X POST "$B/channels" -H "$VA" -H "content-type:application/json" -d "{}")" = 403 ]'
 CB=$(code -X POST "$B/user-groups" -H "$AO" -H 'content-type:application/json' -d '{"name":"bad","permissions":{"nonsense":"manage"}}')
 ok "bad permission key rejected" '[ "$CB" = 400 ] || [ "$CB" = 422 ]'
 
 # ---- last-owner guard + disable -------------------------------------------------
-ok "last active owner cannot be demoted" '[ "$(code -X PATCH "$B/users/$OWNID" -H "$AO" -H "content-type:application/json" -d "{\"role\":\"admin\"}")" = 400 ]'
+# The only owner can only be reached by themselves, and changing your own
+# access is refused outright (403) before the last-owner guard (400) is consulted.
+# Either refusal keeps the account owned.
+LO=$(code -X PATCH "$B/users/$OWNID" -H "$AO" -H "content-type:application/json" -d "{\"role\":\"admin\"}")
+ok "last active owner cannot be demoted ($LO)" '[ "$LO" = 400 ] || [ "$LO" = 403 ]'
 ok "disable operator" '[ "$(code -X PATCH "$B/users/$OPID" -H "$AO" -H "content-type:application/json" -d "{\"status\":\"disabled\"}")" = 200 ]'
-ok "disabled user cannot sign in" '[ -z "$(J "$(login op@adminco.example volt1234)" access)" ]'
-ok "re-enable restores sign-in" '[ "$(code -X PATCH "$B/users/$OPID" -H "$AO" -H "content-type:application/json" -d "{\"status\":\"active\"}")" = 200 ] && [ -n "$(J "$(login op@adminco.example volt1234)" access)" ]'
+ok "disabled user cannot sign in" '[ -z "$(J "$(login op@adminco.example volt123456)" access)" ]'
+ok "re-enable restores sign-in" '[ "$(code -X PATCH "$B/users/$OPID" -H "$AO" -H "content-type:application/json" -d "{\"status\":\"active\"}")" = 200 ] && [ -n "$(J "$(login op@adminco.example volt123456)" access)" ]'
 
 # ---- apps & API keys -------------------------------------------------------------
 SK=$(curl -s -X POST "$B/apps/secret-keys" -H "$AO"); SKRAW=$(J "$SK" key); SKID=$(J "$SK" id)
@@ -132,22 +138,26 @@ ok "revoked secret key stops working" '[ "$(code -X DELETE "$B/apps/keys/$SKID" 
 # ---- platform: system-admin client account creation ------------------------------
 ok "non-platform user gets 403 on /platform" '[ "$(code "$B/platform/accounts" -H "$AA")" = 403 ]'
 psql "$DATABASE_URL" -q -c "UPDATE users SET platform_role='saas_admin' WHERE email='root@adminco.example'"
-ok "saas_admin sees the tenant list" '[ "$(code "$B/platform/accounts" -H "$AO")" = 200 ]'
-NEW=$(curl -s -X POST "$B/platform/accounts" -H "$AO" -H 'content-type:application/json' \
-  -d '{"name":"NewClient Co","planTier":"pro","maxChannels":10,"ownerEmail":"newowner@client.example","ownerPassword":"client1234"}')
+# /api/platform wants a platform session (password + authenticator), not the
+# owner's ordinary token: test/lib/platform-session.sh steps up the way the console does.
+. test/lib/platform-session.sh
+PT=$(platform_session "$B" "$TOK"); PO="authorization: Bearer $PT"
+ok "saas_admin sees the tenant list" '[ "$(code "$B/platform/accounts" -H "$PO")" = 200 ]'
+NEW=$(curl -s -X POST "$B/platform/accounts" -H "$PO" -H 'content-type:application/json' \
+  -d '{"name":"NewClient Co","planTier":"pro","maxChannels":10,"ownerEmail":"newowner@client.example","ownerPassword":"client123456"}')
 NEWID=$(J "$NEW" account.id)
-ok "client account created with credentials shown once" '[ -n "$NEWID" ] && [ "$(J "$NEW" credentials.password)" = client1234 ]'
-NT=$(J "$(login newowner@client.example client1234)" access); NA="authorization: Bearer $NT"
+ok "client account created with credentials shown once" '[ -n "$NEWID" ] && [ "$(J "$NEW" credentials.password)" = client123456 ]'
+NT=$(J "$(login newowner@client.example client123456)" access); NA="authorization: Bearer $NT"
 ok "new primary owner can sign in" '[ -n "$NT" ]'
 NME=$(curl -s "$B/auth/me" -H "$NA")
 ok "new owner lands in the new tenant as owner" '[ "$(J "$NME" account.name)" = "NewClient Co" ] && [ "$(J "$NME" role)" = owner ]'
 ok "new account got default group + HD profile" '[ "$(psql "$DATABASE_URL" -tA -c "SELECT count(*) FROM groups WHERE account_id='"'"'$NEWID'"'"'" | head -1)" = 1 ] && [ "$(psql "$DATABASE_URL" -tA -c "SELECT count(*) FROM output_profiles WHERE account_id='"'"'$NEWID'"'"'" | head -1)" = 1 ]'
 SK2=$(curl -s -X POST "$B/apps/secret-keys" -H "$NA"); SK2RAW=$(J "$SK2" key)
 ok "new tenant minted its own secret key" 'case "$SK2RAW" in sk_*) true;; *) false;; esac'
-ok "suspend account" '[ "$(code -X PATCH "$B/platform/accounts/$NEWID" -H "$AO" -H "content-type:application/json" -d "{\"status\":\"suspended\"}")" = 200 ]'
-ok "suspended: login blocked" '[ -z "$(J "$(login newowner@client.example client1234)" access)" ]'
+ok "suspend account" '[ "$(code -X PATCH "$B/platform/accounts/$NEWID" -H "$PO" -H "content-type:application/json" -d "{\"status\":\"suspended\"}")" = 200 ]'
+ok "suspended: login blocked" '[ -z "$(J "$(login newowner@client.example client123456)" access)" ]'
 ok "suspended: account API keys rejected" '[ "$(code "$B/channels" -H "authorization: Bearer $SK2RAW")" = 401 ]'
-ok "reactivate restores login" '[ "$(code -X PATCH "$B/platform/accounts/$NEWID" -H "$AO" -H "content-type:application/json" -d "{\"status\":\"active\"}")" = 200 ] && [ -n "$(J "$(login newowner@client.example client1234)" access)" ]'
+ok "reactivate restores login" '[ "$(code -X PATCH "$B/platform/accounts/$NEWID" -H "$PO" -H "content-type:application/json" -d "{\"status\":\"active\"}")" = 200 ] && [ -n "$(J "$(login newowner@client.example client123456)" access)" ]'
 
 kill $API 2>/dev/null
 echo

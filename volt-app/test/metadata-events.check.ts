@@ -56,8 +56,11 @@ async function throws(fn: () => Promise<any>, label: string) {
 
   // missing required
   await throws(() => validateEntityMetadata(A, soccer.id, { homeTeam: 't1' }, ['event']), 'missing required competition rejected');
-  // unknown field
-  await throws(() => validateEntityMetadata(A, soccer.id, { competition: 'X', bogus: 1 }, ['event']), 'unknown field rejected');
+  // unknown field: KEPT, by design. validateEntityMetadata validates with
+  // 'keep' (modules/metadataSchemas.ts): an owner's own keys survive a type that
+  // does not define them. This used to expect a refusal, written before that rule.
+  const kept = await validateEntityMetadata(A, soccer.id, { competition: 'X', bogus: 1 }, ['event']);
+  ok(kept.metadata.bogus === 1 && kept.metadata.competition === 'X', 'a field the type does not define is kept, not refused');
   // target_kind mismatch (vod schema on an event)
   await throws(() => validateEntityMetadata(A, vodSchema.id, { title: 'x' }, ['event']), 'vod-target schema rejected on event');
   // channel target accepts 'any'? vod schema target vod != channel → reject

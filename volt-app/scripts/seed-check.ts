@@ -22,6 +22,7 @@ import { hashPassword } from '../src/auth/password';
 
 const A = '0000000a-0000-0000-0000-0000000000b1';
 const U = '0000000b-0000-0000-0000-0000000000b1';
+const U_DOCS = '0000000b-0000-0000-0000-0000000000c9';
 const P = '0000000c-0000-0000-0000-0000000000b1';
 const G = '0000000d-0000-0000-0000-0000000000b1';
 const CH = '0000000e-0000-0000-0000-0000000000b1';
@@ -37,6 +38,16 @@ async function main() {
      VALUES ($1,$2,'root@adminco.example',$3,'owner','active')
      ON CONFLICT (id) DO UPDATE SET password_hash = EXCLUDED.password_hash`,
     [U, A, pw]
+  );
+  // The documentation user. docs-session, listStandard and vodOwnership sign in
+  // as admin@volt.test (the address the API reference examples use, override
+  // with DOCS_TEST_EMAIL / DOCS_TEST_PASSWORD) and nothing created it, so all
+  // three stopped at "sign-in failed" on any database but a developer's own.
+  await query(
+    `INSERT INTO users(id,account_id,email,password_hash,role,status)
+     VALUES ($1,$2,'admin@volt.test',$3,'owner','active')
+     ON CONFLICT (id) DO UPDATE SET password_hash = EXCLUDED.password_hash`,
+    [U_DOCS, A, await hashPassword('VoltTest!2026')]
   );
   await query(
     `INSERT INTO output_profiles(id,account_id,name,rungs,workflow_type,packaging,segment_dur,dvr_window_sec)
@@ -77,7 +88,7 @@ async function main() {
     [REC, ST, `radio/${ST}`, startMs, endMs, endMs - startMs]
   );
 
-  console.log('[seed-check] AdminCo fixture ready (root@adminco.example / volt1234)');
+  console.log('[seed-check] AdminCo fixture ready (root@adminco.example / volt1234, admin@volt.test for the docs suites)');
   await pool.end();
 }
 

@@ -27,6 +27,7 @@
 // ============================================================================
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import './lib/react-global';   // first: the console import chain reaches a .tsx
 import { isForeignEdit, mergeChange, describeFields } from '../../volt-web/src/liveRecord';
 
 let pass = 0, fail = 0;
@@ -102,7 +103,9 @@ const audit = join(appSrc, 'services/audit.ts');
 if (existsSync(audit)) {
   const src = readFileSync(audit, 'utf8');
   const frame = /publish\(o\.accountId,\s*'record',\s*\{([\s\S]*?)\}\);/.exec(src)?.[1] ?? '';
-  check('it names the columns that moved', /changed:\s*cols/.test(frame), true);
+  // `reported` since a rename counts as one change (audit.ts diff): still the
+  // keys of what moved, never their values.
+  check('it names the columns that moved', /changed:\s*(cols|reported)\b/.test(frame), true);
   check('the version after the edit', /version:\s*Number\(row\.version\)/.test(frame), true);
   check('and who did it', /by:\s*o\.userId/.test(frame), true);
   // THE ASSERTION WITH TEETH. `set` and `changes` are the new VALUES; if either

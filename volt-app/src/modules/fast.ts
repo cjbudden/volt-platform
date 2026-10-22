@@ -21,6 +21,7 @@ import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest, conflict } from '../util/http';
 import { actorId } from '../util/actor';
+import { actor } from '../services/audit';
 import { assertPlanRoom } from '../services/plan';
 import { requireIngestToken } from './status';
 import {
@@ -135,7 +136,11 @@ fastRouter.post('/channels/:id/prepare', asyncHandler(async (req, res) => {
 fastRouter.post('/channels/:id/on-air', asyncHandler(async (req, res) => {
   const ch = await ownChannel(req, String(req.params.id));
   const on = req.body?.on === true;
-  await query(`UPDATE channels SET on_air = $2, updated_at = now() WHERE id = $1`, [ch.id, on]);
+  // Through the air-session ledger like every other on-air switch, not a bare
+  // UPDATE: a FAST channel's public hours otherwise never reached the
+  // on-air totals and as-run reports (services/airSessions.ts).
+  const { setOnAir } = await import('../services/airSessions');
+  await setOnAir('channel', ch.id, on, { actor: actor(req).label, reason: on ? undefined : 'operator' });
   res.json({ onAir: on });
 }));
 

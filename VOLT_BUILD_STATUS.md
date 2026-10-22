@@ -229,6 +229,7 @@ one box have code and tests but no production exercise.**
 | **Customisable panel layout on channel and station pages (22 Oct 2026)** | 🟡 | **Video + audio. Option A: saved in the browser, per user and page** (`volt.layout.v1.<userId>.<page>` in localStorage). `volt-web/src/panelLayout.tsx`: Customise layout opens an edit mode where each panel can be dragged, moved with up/down buttons (keyboard and touch), moved between Left / Right / Full width on two-column pages, minimised to a slim bar or hidden; Reset to default; Done. Hidden panels are not mounted, so they make no requests. A saved layout is merged with today's panels: removed ones are dropped, new ones land where the default puts them. Fixed, outside the layout: the header and actions, pipeline strip and banners above, Remove at the foot. Channel default: players, failover, programme guide, **Output URLs under the guide** (with its own Minimise button), viewers, status board + event log. Station default: player and output previews left; metadata, QC, event log right; received metadata log full width. The station's `<audio>` element moved outside the panels, since moving or hiding the player card would otherwise orphan playback and the level meter. Checked in a browser against the real API: order, hide, minimise, persistence across navigation, per-user key, reset, radio column moves. **Not yet:** option B (saved to the account so it follows the user across devices), and events, which have no page of their own to arrange |
 | **Event page, first version (22 Oct 2026)** | 🟡 | **Video.** `/events/:id` (`volt-web/src/pages/EventDetail.tsx`); clicking an event in the list or calendar opens it (the row menu still offers the settings drawer). API `GET /api/events/:id/detail`: the channel-detail shape built by the SAME code, `buildStreamDetail(row, now, kind)` in `services/channelDetail.ts` (channels call it with 'channel', unchanged), plus the event row, inputs, instances and its recordings. Events have no on-air switch: published = live AND inside the public window, the rule `publicLive.ts` already applies; DVR defaults to event start; `encoderRunning` is kind-aware. Page: header with phase (Upcoming / In window / Live / Ended), window, Start or Stop event, QC, Share, Embed player, Settings (the existing drawer); recovery and failure banners; five-gate strip; panels under Customise layout (pageKey `event`): **Schedule** (server, event and public windows on one bar with a now marker, warns when the public window misses the start or end), source and output players, Output URLs, realtime viewers, status board + event log, **Recordings** (to the workbench); Delete at the foot when not live. Shared from ChannelDetail.tsx: DualPlayers, StatusBoard, EventLog, ViewersCard, QcPanel, withMeters; SourcePlayer and IdleOutput now word themselves for events (Start event, no test source, no Go live). Checked in a browser against the real API with an upcoming and an in-window event, HLS on disk and a recording. **To refine:** run of show / rundown panel (graphics rundowns exist), countdown and slate before the window, 'view as a viewer in another country' (calls the channel access-check route, shows Could not check), source relay preview for HLS inputs (channel-only route), Clear QC (channel-only route), billing and auto-VOD details |
 | **Loops & Fillers is the one home for fallbacks (22 Oct 2026)** | ✅ | **Video + audio.** Channel, station and event forms pick their slate or loop from Loops & Fillers (`volt-web/src/FillerField.tsx`, picker with inline upload) into `filler_asset_id`, instead of an Image Library address in `filler_slate_ref`. Fixes the Loop picker saving a video in the SLATE field (the encoder treated it as a still). API (`modules/fillerAssets.ts`): `used_by` on list and item; `GET /api/filler-assets/elsewhere` (fallbacks still held as addresses, grouped); `POST /api/filler-assets/copy-from-library` (copies the bytes, relinks every stream on that address in the account, no loop rebuild needed since the picture is identical, audit-logged); DELETE refuses an asset in use with 409 naming the streams unless `force=true` (the FK used to null the link silently). `assertFillerAsset` on channel and event create/patch: same account and ready. Events can now store `fillerAssetId` at all. Loops & Fillers page: Used by column, Fallbacks not in Loops & Fillers yet section. `test/filler-library.check.ts` 33/33 against Postgres + HTTP app; events 16/16, settings-lock 17/17, channel-admin 43/43, filler-prep 15/15, orchestrator 60/60 unchanged. **Also fixed while here:** `asRun.ts` filtered radio on a non-existent `c.audio_only` column, so the as-run pass failed every run (now `c.kind <> 'radio'`); four API services lacked overlay usage statements, which failed the API reference build |
+| **Check suite baseline (22 Oct 2026)** | 🟡 | **Video + audio.** Build queue 1.1. `node scripts/check.js`, own database per suite: **178/179 suites, 5374 assertions, 1 failed** (first run 152/179). Two product faults fixed: FAST on-air now goes through `setOnAir` and the air-session ledger (`modules/fast.ts`); the Radio list paints the server's resolved now-playing line (`pages/Radio.tsx`), checked in a browser. Fourteen suites brought up to date or given their own fixtures and media (`scripts/seed-check.ts`, `test/lib/platform-session.sh`, `test/lib/react-global.ts`). Per-suite table in the *2026-10-22 - check suite baseline* section. **Not yet:** clip-smart-render 23/24 (tail seam, item 1.5); captions-e2e needs faster-whisper; player-sdk-api bundle check needs `npm run build` in volt-player; a run on the Mac to confirm |
 | Custom Live Timeline (vanilla) | ✅ | **React port done** (checked 5 Sep): `volt-web/src/SourceTimeline.tsx` and `volt-web/src/ClipTimeline.tsx`, self-contained and shared, used by `RecordingSource.tsx` and `RecordingDetail.tsx`. Backed by `modules/timeline.ts`, which returns media coverage, broadcast days, daypart strips and what was on air **in one response**, so the three lanes cannot disagree about where a boundary is — which they would if each fetched separately and one was a request behind. Bounded to the visible window, and the window is capped, so zooming out cannot become an unbounded query |
 | **Runnable local test console** (login + all tabs wired to the live API) | ✅ | **Retired (10 Oct check):** `/console` now redirects to the React app and the old file is kept unserved in `volt-app/dev/console.html`; superseded by the row below. Built 3 Aug: `public/console.html` served at `/console`; `run-local.sh` one-command (reset+seed+boot); `TEST_TONIGHT.md`. Verified end-to-end in browser |
 | **New channel form (reworked 10 Oct)** | ✅ | Settings / Metadata / Access tabs like the radio form. The GROUP is now a visible choice: the form used to pick the first group of the chosen type silently and fail at the bottom with "No transcode group set up yet"; a type the account has no group for now says so where the type is chosen, and the form starts on a type that works. Channel logo and watermark (shared `WatermarkFields.tsx`, also used by channel Settings, with a 16:9 placement preview) on create; the EPG name follows the channel name; errors pinned to the footer. System admin > account > **Groups** lists and adds groups (`GET/POST /api/platform/accounts/:id/groups`, SaaS admin only, audited; a transcode group gets its own profile with a 1080/720/480 ladder). `.hintxt` now has a base style outside form fields too. `test/platform-groups.check.sh` 11/11. |
@@ -742,3 +743,227 @@ Open questions:
 - Target fields per type are a code table (TARGETS). If clients should edit them per type, they could move onto the content type as a field flag.
 - `docs/API_ROUTES.md`, `docs/api-routes.json` and `openapi.json` need regenerating for the six new routes (`npm run docs:routes`, `npm run docs:openapi`). Not done here because the hypermedia work has uncommitted changes in the same generated files. The route descriptions are in DESIGN_media_library.md section 7.
 - The app shell itself is not laid out for a phone (the sidebar stays open at 390 px). The library's own grid and filters wrap correctly inside it.
+
+## 2026-10-22 - check suite baseline (build queue 1.1)
+
+`node scripts/check.js`, every suite on its own copy of the template database,
+run in the cloud container on a copy of the whole repo (Postgres 16, ffmpeg,
+icecast2; no GPU, no faster-whisper, no H.264 in its Chromium).
+
+**Result: 178/179 suites pass, 5374 assertions, 1 failed.** The first run was
+152/179 with 69 failed assertions. Of the 27 failing suites, 12 failed only
+because the first copy held volt-app alone; the other 15 were real and are
+fixed below, except the smart render seam, which is queue item 1.5.
+
+Product faults found and fixed:
+
+- **FAST on-air bypassed the air-session ledger.** `POST /api/fast/channels/:id/on-air`
+  (`volt-app/src/modules/fast.ts`) did a bare `UPDATE channels SET on_air`, so a
+  FAST channel's public hours never reached the on-air totals or the as-run
+  report. Now `setOnAir('channel', ...)` like channels and stations. Caught by
+  the structural check in `air-sessions.check.ts` (37/37), which was also
+  narrowed to `channels.on_air` because `gfx_state.on_air` is a graphic, not a stream.
+- **Radio list made its own now-playing decision.** `volt-web/src/pages/Radio.tsx`
+  painted `r.nowPlaying` with its own Untitled break fallback; it now paints the
+  server's `nowPlayingView` (dash for a source that cannot send titles, as the
+  station page). `now-playing.check.ts` 32/32. Checked in a browser against the
+  real API with the station list stubbed to four cases (ICY title, gap, HLS
+  with no titles, schedule): each shows the expected line.
+
+Suites brought up to date with the product (the product had moved, the suite had not):
+admin (10 character passwords, roles model, platform session), platform-groups,
+clip-extract, metadata-events, player-sdk-api, live-record. Fixture faults:
+`scripts/seed-check.ts` now creates `admin@volt.test` (docs-session,
+listStandard, vodOwnership), epg-repeat ids no longer collide with the seed,
+workflows' user is active, and clip-smart-render and ingest-extract make their
+own media. New helpers: `test/lib/platform-session.sh` (step-up with a real
+TOTP code, for suites that call `/api/platform`) and `test/lib/react-global.ts`.
+
+**Not yet / to run on the Mac:** clip-smart-render 23/24 (item 1.5).
+captions-e2e runs with 0 assertions without faster-whisper (`pip install
+faster-whisper`). player-sdk-api skips its bundle check until `cd volt-player &&
+npm run build`. radio-container needs icecast2 (`brew install icecast`); here it
+ran 23/23 once installed. Run `node scripts/check.js` on the Mac once to confirm
+the same 178/179 there.
+
+| Suite | Now | Assertions | First run (if different) | Note |
+|---|---|---|---|---|
+| access-control.check.sh | pass | 17 passed, 0 failed |  |  |
+| access-rules.check.ts | pass | 28 passed, 0 failed |  |  |
+| account-branding.check.sh | pass | 12 passed, 0 failed |  |  |
+| activity-log.check.ts | pass | 24 passed, 0 failed | FAILED | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| admin.check.sh | pass | 47 passed, 0 failed | 17 passed, 30 failed | Updated: 10 character passwords, roles re-derive the tier, own-access refusal (403), platform session via authenticator |
+| agent.check.ts | pass | 19 passed, 0 failed | FAILED | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| air-sessions.check.ts | pass | 37 passed, 0 failed | 36 passed, 1 failed | Product fix: FAST on-air went around the ledger. Check narrowed to channels.on_air (gfx_state has its own) |
+| analytics-retention.check.ts | pass | 33 passed, 0 failed |  |  |
+| apps.check.sh | pass | 8 passed, 0 failed |  |  |
+| as-run.check.ts | pass | 26 passed, 0 failed |  |  |
+| asset-images.check.ts | pass | 114 passed, 0 failed |  |  |
+| auth-boundary.check.ts | pass | 23 passed, 0 failed |  |  |
+| auto-connect.check.ts | pass | 61 passed, 0 failed |  |  |
+| autovod.check.ts | pass | 8 passed, 0 failed |  |  |
+| broadcast-day.check.ts | pass | 35 passed, 0 failed |  |  |
+| captions-e2e.check.sh | pass | 0 passed, 0 failed |  | Not exercised: faster-whisper not installed |
+| captions-lane.check.ts | pass | 19 passed, 0 failed |  |  |
+| captions-orchestration.check.ts | pass | ok (no tally) |  |  |
+| captions-plan.check.ts | pass | 19 passed, 0 failed |  |  |
+| captions-toggle.check.ts | pass | 6 passed, 0 failed |  |  |
+| channel-admin.check.sh | pass | 43 passed, 0 failed |  |  |
+| clip-extract.check.ts | pass | 33 passed, 0 failed | 31 passed, 2 failed | Updated: an off-grid range now plans smart render |
+| clip-provenance.check.ts | pass | ok (no tally) |  |  |
+| clip-smart-render.check.ts | FAIL | 23 passed, 1 failed | FAILED | Product fault, queue item 1.5: the tail seam drifts (frame 338, 13543 vs 13566 ms). Suite now makes its own media (was: test media missing) |
+| console-freshness.check.ts | pass | 13 passed, 0 failed |  |  |
+| console-serving.check.sh | pass | 14 passed, 0 failed | 0 passed, 0 failed |  |
+| consolidation-plan.check.ts | pass | 28 passed, 0 failed |  |  |
+| containers-dayparts.check.sh | pass | 22 passed, 0 failed |  |  |
+| content-types.check.ts | pass | 131 passed, 0 failed |  |  |
+| crash-loop.check.ts | pass | 35 passed, 0 failed |  |  |
+| custom-role.check.sh | pass | 31 passed, 0 failed |  |  |
+| docs-session.check.ts | pass | ok (no tally) | FAILED | Fixed: admin@volt.test added to seed-check |
+| docs.check.sh | pass | ok (no tally) | FAILED | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| edge-rights.check.ts | pass | 37 passed, 0 failed | FAILED | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| edit-audit.check.sh | pass | 23 passed, 0 failed |  |  |
+| encode-ladder.check.ts | pass | 50 passed, 0 failed |  |  |
+| encode-store.check.ts | pass | 24 passed, 0 failed |  |  |
+| epg-extended.check.sh | pass | 18 passed, 0 failed |  |  |
+| epg-pure.check.ts | pass | 7 passed, 0 failed |  |  |
+| epg-repeat-pure.check.ts | pass | 40 passed, 0 failed |  |  |
+| epg-repeat.check.sh | pass | 45 passed, 0 failed | FAILED | Fixed: fixture ids clashed with seed-check |
+| epg-vod.check.ts | pass | 32 passed, 0 failed |  |  |
+| epg.check.sh | pass | 7 passed, 0 failed |  |  |
+| event-delivery.check.ts | pass | 8 passed, 0 failed |  |  |
+| event-promo.check.ts | pass | ok (no tally) |  |  |
+| events.check.sh | pass | 16 passed, 0 failed |  |  |
+| failover-control.check.ts | pass | 14 passed, 0 failed |  |  |
+| failure-diagnosis.check.ts | pass | 49 passed, 0 failed |  |  |
+| fast-ads.check.ts | pass | 48 passed, 0 failed |  |  |
+| fast-graphics.check.ts | pass | 15 passed, 0 failed | FAILED | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| fast-lineup.check.ts | pass | 56 passed, 0 failed |  |  |
+| fast.check.sh | pass | 45 passed, 0 failed |  |  |
+| filler-library.check.ts | pass | 33 passed, 0 failed |  |  |
+| filler-prep.check.ts | pass | 15 passed, 0 failed |  |  |
+| fleet-api.check.sh | pass | 23 passed, 0 failed |  |  |
+| geo-access.check.sh | pass | 15 passed, 0 failed |  |  |
+| geo-rights.check.sh | pass | 7 passed, 0 failed |  |  |
+| graphic-triggers.check.ts | pass | 47 passed, 0 failed |  |  |
+| graphics-pure.check.ts | pass | 152 passed, 0 failed |  |  |
+| graphics.check.ts | pass | 120 passed, 0 failed |  |  |
+| guide-icon.check.sh | pass | 23 passed, 0 failed |  |  |
+| hls-master-pure.check.ts | pass | 20 passed, 0 failed |  |  |
+| hls-master.check.sh | pass | 12 passed, 0 failed |  |  |
+| hypermedia.check.sh | pass | 57 passed, 0 failed |  |  |
+| images-api.check.sh | pass | 22 passed, 0 failed |  |  |
+| images-s3.check.ts | pass | 1 passed, 0 failed |  |  |
+| images.check.ts | pass | 145 passed, 0 failed | 143 passed, 2 failed | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| ingest-core.check.ts | pass | 97 passed, 0 failed |  |  |
+| ingest-extract.check.ts | pass | 7 passed, 0 failed | FAILED | Fixed: makes its own media (was /tmp/ingx by hand) |
+| ingest-providers.check.ts | pass | 21 passed, 0 failed |  |  |
+| ingest-s3.check.ts | pass | 16 passed, 0 failed |  |  |
+| ingest-sources.check.ts | pass | 22 passed, 0 failed |  |  |
+| itemRoutes.check.sh | pass | 18 passed, 0 failed |  |  |
+| jobs.check.ts | pass | 43 passed, 0 failed |  |  |
+| kind-routing.check.ts | pass | 14 passed, 0 failed | FAILED | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| listQuery.check.ts | pass | ok (no tally) |  |  |
+| listStandard.check.ts | pass | ok (no tally) | FAILED | Fixed: admin@volt.test added to seed-check |
+| live-degraded.check.ts | pass | 17 passed, 0 failed |  |  |
+| live-record.check.ts | pass | 24 passed, 0 failed | FAILED | Fixed: React global for the .tsx import chain; frame names `reported` keys |
+| media-library.check.sh | pass | 43 passed, 0 failed |  |  |
+| media-lifecycle.check.ts | pass | 120 passed, 0 failed |  |  |
+| metadata-events.check.ts | pass | 9 passed, 0 failed | 8 passed, 1 failed | Updated: unknown keys are kept by design |
+| metadata-name.check.sh | pass | 10 passed, 0 failed |  |  |
+| meter.check.ts | pass | 80 passed, 0 failed |  |  |
+| mfa-login.check.sh | pass | 8 passed, 0 failed |  |  |
+| monitoring.check.ts | pass | 32 passed, 0 failed |  |  |
+| mp3-gateway.check.ts | pass | 24 passed, 0 failed |  |  |
+| notifications-delivery.check.ts | pass | 24 passed, 0 failed |  |  |
+| notifications.check.sh | pass | 10 passed, 0 failed |  |  |
+| now-playing.check.ts | pass | 32 passed, 0 failed | 30 passed, 0 failed | Product fix: Radio list painted its own Untitled break fallback |
+| orchestrator.check.ts | pass | ok (no tally) |  |  |
+| packager-heartbeat.check.sh | pass | 13 passed, 0 failed |  |  |
+| placement-e2e.check.ts | pass | 21 passed, 0 failed |  |  |
+| placement-planner.check.ts | pass | 26 passed, 0 failed |  |  |
+| plan-groups.check.sh | pass | 32 passed, 0 failed |  |  |
+| platform-groups.check.sh | pass | 11 passed, 0 failed | 2 passed, 9 failed | Updated: own SaaS admin fixture, platform session, plan room for a second group |
+| player-api.check.sh | pass | 32 passed, 0 failed |  |  |
+| player-layouts.check.ts | pass | 12 passed, 0 failed | FAILED | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| player-overlay.check.ts | pass | 14 passed, 0 failed | FAILED | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| player-sdk-api.check.sh | pass | 28 passed, 0 failed | 27 passed, 1 failed | Updated: audio_radio skin. Bundle check skipped until volt-player is built |
+| player-sdk.check.ts | pass | 47 passed, 0 failed | FAILED | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| player-triggers.check.ts | pass | 38 passed, 0 failed | FAILED | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| publishing-rules.check.ts | pass | 28 passed, 0 failed |  |  |
+| qc-reset.check.ts | pass | 8 passed, 0 failed |  |  |
+| radio-args.check.ts | pass | 51 passed, 0 failed |  |  |
+| radio-classify.check.ts | pass | 14 passed, 0 failed |  |  |
+| radio-container-sidecars.check.ts | pass | 8 passed, 0 failed |  |  |
+| radio-container.check.sh | pass | 23 passed, 0 failed | 0 passed, 0 failed | Needs icecast2 installed (was 0 assertions without it) |
+| radio-ingest-protocols.check.sh | pass | 12 passed, 0 failed |  |  |
+| radio-outputs.check.ts | pass | 18 passed, 0 failed |  |  |
+| radio-relay.check.sh | pass | 14 passed, 0 failed |  |  |
+| radio-source-failure.check.sh | pass | 12 passed, 0 failed |  |  |
+| radio-teardown.check.ts | pass | 18 passed, 0 failed |  |  |
+| radio.check.sh | pass | 41 passed, 0 failed |  |  |
+| recordings-counts.check.ts | pass | 29 passed, 0 failed |  |  |
+| recordings-sources.check.sh | pass | 14 passed, 0 failed |  |  |
+| recordings.check.sh | pass | 35 passed, 0 failed | 17 passed, 18 failed | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| recovery-note.check.ts | pass | 35 passed, 0 failed | FAILED | Environment only: the first copy held volt-app alone and the suite reads volt-web, volt-player, volt-agent, packages, deploy or docs-site beside it |
+| rekey-placeholder-ids.check.sh | pass | 13 passed, 0 failed |  |  |
+| relay-fleet.check.ts | pass | 38 passed, 0 failed |  |  |
+| retrim.check.sh | pass | 14 passed, 0 failed |  |  |
+| review-qc.check.ts | pass | 51 passed, 0 failed |  |  |
+| s3Retention.check.ts | pass | 8 passed, 0 failed |  |  |
+| saas.check.sh | pass | 17 passed, 0 failed |  |  |
+| scheduled-clips.check.ts | pass | 15 passed, 0 failed |  |  |
+| segment-placement.check.ts | pass | 17 passed, 0 failed |  |  |
+| server-status.check.ts | pass | 10 passed, 0 failed |  |  |
+| session-refresh.check.ts | pass | 23 passed, 0 failed |  |  |
+| settings-lock.check.sh | pass | 17 passed, 0 failed |  |  |
+| share-links.check.sh | pass | 34 passed, 0 failed |  |  |
+| social-api.check.sh | pass | 20 passed, 0 failed |  |  |
+| social.check.ts | pass | 53 passed, 0 failed |  |  |
+| source-preview.check.sh | pass | 11 passed, 0 failed |  |  |
+| source-probe.check.ts | pass | 16 passed, 0 failed |  |  |
+| source-protocols.check.ts | pass | 31 passed, 0 failed |  |  |
+| source-required.check.ts | pass | 32 passed, 0 failed |  |  |
+| startup-settling.check.ts | pass | 17 passed, 0 failed |  |  |
+| startup-timeline.check.sh | pass | 10 passed, 0 failed |  |  |
+| station-clear.check.ts | pass | 25 passed, 0 failed |  |  |
+| stop-intent.check.ts | pass | 19 passed, 0 failed |  |  |
+| stream-load.check.ts | pass | 31 passed, 0 failed |  |  |
+| stream-metrics.check.sh | pass | 11 passed, 0 failed |  |  |
+| stream-model.check.ts | pass | 25 passed, 0 failed |  |  |
+| stream-report.check.ts | pass | 77 passed, 0 failed |  |  |
+| stuck-recording.check.ts | pass | 29 passed, 0 failed |  |  |
+| tenancy.check.ts | pass | 8 passed, 0 failed |  |  |
+| thumbnails.check.ts | pass | 81 passed, 0 failed |  |  |
+| thumbs.check.ts | pass | 27 passed, 0 failed |  |  |
+| timed-metadata.check.ts | pass | 37 passed, 0 failed |  |  |
+| timeline-grid.check.ts | pass | 88 passed, 0 failed |  |  |
+| totp.check.ts | pass | 9 passed, 0 failed |  |  |
+| track-meta.check.ts | pass | 48 passed, 0 failed |  |  |
+| tus.check.ts | pass | 21 passed, 0 failed |  |  |
+| uploads.check.ts | pass | 49 passed, 0 failed |  |  |
+| viewer-reporting.check.sh | pass | 14 passed, 0 failed |  |  |
+| vod-extractor.check.ts | pass | 16 passed, 0 failed |  |  |
+| vod-library-pure.check.ts | pass | 136 passed, 0 failed |  |  |
+| vod-library.check.ts | pass | 60 passed, 0 failed |  |  |
+| vod-markers.check.ts | pass | 40 passed, 0 failed |  |  |
+| vodOwnership.check.ts | pass | ok (no tally) | FAILED | Fixed: admin@volt.test added to seed-check |
+| watchfolder-api.check.ts | pass | 26 passed, 0 failed |  |  |
+| watchfolder-ingest.check.ts | pass | 70 passed, 0 failed |  |  |
+| watchfolder-rules.check.ts | pass | 43 passed, 0 failed |  |  |
+| watchfolder-scan.check.ts | pass | 33 passed, 0 failed |  |  |
+| watchfolder-video.check.ts | pass | 53 passed, 0 failed |  |  |
+| waveform-cache.check.ts | pass | 13 passed, 0 failed |  |  |
+| waveform-holes.check.ts | pass | 12 passed, 0 failed |  |  |
+| waveform.check.sh | pass | ok (no tally) |  |  |
+| workflow-policy.check.ts | pass | ok (no tally) |  |  |
+| workflows.check.ts | pass | 72 passed, 0 failed | 45 passed, 5 failed | Fixed: test user was left invited |
+| xmltv-import-api-pure.check.ts | pass | 38 passed, 0 failed |  |  |
+| xmltv-import-api.check.sh | pass | 39 passed, 0 failed |  |  |
+| xmltv-import-pure.check.ts | pass | 42 passed, 0 failed |  |  |
+| xmltv-import.check.sh | pass | 35 passed, 0 failed |  |  |
+| xmltv-lineup-pure.check.ts | pass | 20 passed, 0 failed |  |  |
+| xmltv-lineup.check.sh | pass | 26 passed, 0 failed |  |  |
+| xmltv-pure.check.ts | pass | 49 passed, 0 failed |  |  |
+| xmltv-timezone.check.sh | pass | 16 passed, 0 failed |  |  |
+| xmltv.check.sh | pass | 49 passed, 0 failed |  |  |

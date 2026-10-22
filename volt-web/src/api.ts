@@ -2002,7 +2002,7 @@ export interface RadioStationDetail extends RadioStationRow {
 /** The resolved now-playing line. The server makes the four-way decision (see
  *  services/radio/nowPlaying.ts); the console only paints it, so the list, the
  *  detail payload and this poll cannot drift apart the way they did when the
- *  render site did `title || 'Untitled break'`. */
+ *  render site fell back to the words Untitled break on its own. */
 export type NowKind = 'off' | 'icy' | 'epg' | 'gap' | 'no_metadata'
 export interface NowPlayingView { kind: NowKind; text: string; note: string | null }
 /** Everyone receiving the station. `total` is the only figure that carries the
