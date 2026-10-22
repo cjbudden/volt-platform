@@ -9,7 +9,7 @@
 //  every address in it to come back through here, and passes segments
 //  through untouched. It is the same stream, byte for byte.
 //
-//  WHAT IT WILL FETCH. Only an input configured on a channel the caller can
+//  WHAT IT WILL FETCH. Only an input configured on a channel or event the caller can
 //  see (checked when the preview address is issued), and then only addresses
 //  that came out of that input's own playlists: each rewritten address is
 //  signed, so the relay cannot be pointed anywhere else. http and https only,
@@ -33,10 +33,14 @@ const key = () => createHmac('sha256', config.jwt.accessSecret).update('volt-sou
 const sign = (s: string) => createHmac('sha256', key()).update(s).digest('base64url');
 const same = (a: string, b: string) => { const x = Buffer.from(a); const y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
 
-interface Claims { a: string; c: string; i: string; e: number }
+// k: 'event' when the owner is an event (GET /events/:id/inputs/:inputId/preview).
+// Absent means a channel, so tokens issued before events had previews still read.
+interface Claims { a: string; c: string; i: string; e: number; k?: 'event' }
 
-export function mintPreviewToken(accountId: string, channelId: string, inputId: string): string {
-  const body = Buffer.from(JSON.stringify({ a: accountId, c: channelId, i: inputId, e: Date.now() + TTL_MS } satisfies Claims)).toString('base64url');
+export function mintPreviewToken(accountId: string, ownerId: string, inputId: string, kind: 'channel' | 'event' = 'channel'): string {
+  const claims: Claims = { a: accountId, c: ownerId, i: inputId, e: Date.now() + TTL_MS };
+  if (kind === 'event') claims.k = 'event';
+  const body = Buffer.from(JSON.stringify(claims)).toString('base64url');
   return `${body}.${sign(body)}`;
 }
 function readToken(t: string): Claims | null {
@@ -104,8 +108,11 @@ export function rewritePlaylist(text: string, base: string, token: string): stri
 }
 
 async function inputUrl(c: Claims): Promise<string | null> {
+  // The owner table follows the token's kind, so an event's token can never
+  // reach a channel's input of the same id, nor the other way round.
+  const [table, col] = c.k === 'event' ? ['events', 'event_id'] : ['channels', 'channel_id'];
   const row = await one<{ ingest_url: string | null }>(
-    `SELECT si.ingest_url FROM stream_inputs si JOIN channels ch ON ch.id = si.channel_id JOIN groups g ON g.id = ch.group_id
+    `SELECT si.ingest_url FROM stream_inputs si JOIN ${table} ch ON ch.id = si.${col} JOIN groups g ON g.id = ch.group_id
       WHERE si.id = $1 AND ch.id = $2 AND g.account_id = $3`, [c.i, c.c, c.a]);
   return row?.ingest_url ?? null;
 }

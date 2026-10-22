@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**632 routes.** Public API: 61 · Sign-in (no session yet): 7 · Admin API: 511 · Platform API: 21 · Machine-to-machine: 13 · Delivery and previews (outside /api): 11 · Health and discovery: 8
+**636 routes.** Public API: 61 · Sign-in (no session yet): 7 · Admin API: 515 · Platform API: 21 · Machine-to-machine: 13 · Delivery and previews (outside /api): 11 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -386,11 +386,15 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | PATCH | `/api/events/:id` | admin session (Bearer) or account secret key | events: manage |  |
 | PUT | `/api/events/:id` | admin session (Bearer) or account secret key | events: manage |  |
 | POST | `/api/events/:id/:action(start\|stop)` | admin session (Bearer) or account secret key | events: operate |  |
+| GET | `/api/events/:id/access-check` | admin session (Bearer) or account secret key | events: view |  |
 | POST | `/api/events/:id/auto-connect` | admin session (Bearer) or account secret key | events: operate |  |
 | GET | `/api/events/:id/detail` | admin session (Bearer) or account secret key | events: view |  |
 | GET | `/api/events/:id/filler` | admin session (Bearer) or account secret key | events: view |  |
 | POST | `/api/events/:id/filler` | admin session (Bearer) or account secret key | events: manage |  |
+| POST | `/api/events/:id/health/reset` | admin session (Bearer) or account secret key | events: operate |  |
 | GET | `/api/events/:id/history` | admin session (Bearer) or account secret key | events: view |  |
+| GET | `/api/events/:id/inputs/:inputId/preview` | admin session (Bearer) or account secret key | events: view |  |
+| POST | `/api/events/:id/reset-health` | admin session (Bearer) or account secret key | events: operate |  |
 
 ### `/api/fast`
 

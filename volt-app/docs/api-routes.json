@@ -1467,6 +1467,15 @@
   "group": "/api/events"
  },
  {
+  "method": "GET",
+  "path": "/api/events/:id/access-check",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: view",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
   "method": "POST",
   "path": "/api/events/:id/auto-connect",
   "api": "admin",
@@ -1503,11 +1512,38 @@
   "group": "/api/events"
  },
  {
+  "method": "POST",
+  "path": "/api/events/:id/health/reset",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: operate",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
   "method": "GET",
   "path": "/api/events/:id/history",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "events: view",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "GET",
+  "path": "/api/events/:id/inputs/:inputId/preview",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: view",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "POST",
+  "path": "/api/events/:id/reset-health",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: operate",
   "viewerTier": false,
   "group": "/api/events"
  },

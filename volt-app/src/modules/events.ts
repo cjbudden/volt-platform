@@ -5,7 +5,8 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, conflict, badRequest } from '../util/http';
 import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { orchestrator } from '../services/orchestrator';
-import { checkVideoSources } from './channels';
+import { checkVideoSources, accessCheckFor, clearQc } from './channels';
+import { mintPreviewToken } from './sourcePreview';
 import { cleanParams } from '../services/ingestProtocols';
 import { validateEntityMetadata } from './metadataSchemas';
 import { defaultTypeId } from '../services/contentTypes';
@@ -405,6 +406,44 @@ eventsRouter.post(
   })
 );
 
+
+/**
+ * THE THREE CHANNEL PAGE ROUTES, FOR EVENTS (build queue 1.2). The event page
+ * is built from the channel page's parts, and three of them called channel
+ * routes that answer 404 for an event: view as a viewer elsewhere, the source
+ * preview relay and Clear QC. Each is the channel route's own code (shared
+ * from channels.ts), so the answers have the same shape on both pages.
+ */
+const ownedEvent = (id: string, acct: string) => one<any>(
+  `SELECT e.*, g.account_id FROM events e JOIN groups g ON g.id = e.group_id WHERE e.id = $1 AND g.account_id = $2`, [id, acct]);
+
+/** VIEW AS A VIEWER ELSEWHERE: what the play gate gives a viewer in `country` for this event now. */
+eventsRouter.get('/:id/access-check', asyncHandler(async (req, res) => {
+  const e = await ownedEvent(req.params.id, accountId(req));
+  if (!e) throw notFound('Event not found');
+  res.json(await accessCheckFor(e, req.query));
+}));
+
+/** A relayed preview address for one of the event's HLS inputs (modules/sourcePreview.ts). */
+eventsRouter.get('/:id/inputs/:inputId/preview', asyncHandler(async (req, res) => {
+  const row = await one<{ ingest_url: string | null }>(
+    `SELECT si.ingest_url FROM stream_inputs si JOIN events e ON e.id = si.event_id JOIN groups g ON g.id = e.group_id
+      WHERE si.id = $1 AND e.id = $2 AND g.account_id = $3`, [req.params.inputId, req.params.id, accountId(req)]);
+  if (!row) throw notFound('Input not found');
+  if (!/^https?:\/\//i.test(row.ingest_url ?? '')) { res.status(400).json({ error: 'Only an http or https input can be previewed through Volt' }); return; }
+  res.json({ url: `/api/source-preview/${mintPreviewToken(accountId(req), req.params.id, req.params.inputId, 'event')}/index.m3u8`, expiresInSec: 7200 });
+}));
+
+/**
+ * CLEAR QC for an event: a clean slate for its health model; earlier faults
+ * stay in the event log. Also answers at /reset-health, the channel's path,
+ * so a client can call one path for either kind.
+ */
+eventsRouter.post(['/:id/health/reset', '/:id/reset-health'], asyncHandler(async (req, res) => {
+  const e = await ownedEvent(req.params.id, accountId(req));
+  if (!e) throw notFound('Event not found');
+  res.json(await clearQc(req, 'event', e));
+}));
 
 /** What each source is (its stored probe) and the state of the pre-built fallback loop. */
 eventsRouter.get(

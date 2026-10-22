@@ -101,7 +101,7 @@
   {
    "name": "Events",
    "x-displayName": "Events",
-   "description": "Events are scheduled, time-bounded live streams such as a match or a concert, provisioned automatically for their scheduled window.\n\n**Use it to:**\n- Schedule and edit events with `POST /api/events` and `PATCH /api/events/{id}`\n- Start or stop an event by hand with `POST /api/events/{id}/start` and `.../stop`\n- Set filler and auto connect with `POST /api/events/{id}/filler` and `.../auto-connect`\n- Review what happened with `GET /api/events/{id}/history`\n\n**Credential:** admin session (Bearer) or account secret key, with `events: view` to read, `events: operate` to start or stop and `events: manage` to change.\n\n**Good to know:** auto connect only decides whether a running event resumes after a restart. The schedule still decides when it runs."
+   "description": "Events are scheduled, time-bounded live streams such as a match or a concert, provisioned automatically for their scheduled window.\n\n**Use it to:**\n- Schedule and edit events with `POST /api/events` and `PATCH /api/events/{id}`\n- Start or stop an event by hand with `POST /api/events/{id}/start` and `.../stop`\n- Set filler and auto connect with `POST /api/events/{id}/filler` and `.../auto-connect`\n- Review what happened with `GET /api/events/{id}/history`\n- Check what a viewer in another country gets with `GET /api/events/{id}/access-check`, and clear old faults with `POST /api/events/{id}/health/reset`\n\n**Credential:** admin session (Bearer) or account secret key, with `events: view` to read, `events: operate` to start, stop or clear QC and `events: manage` to change.\n\n**Good to know:** auto connect only decides whether a running event resumes after a restart. The schedule still decides when it runs."
   },
   {
    "name": "Fast",
@@ -10436,6 +10436,42 @@
     }
    }
   },
+  "/api/events/{id}/access-check": {
+   "get": {
+    "operationId": "getEventsByIDAccessCheck",
+    "summary": "Check what a viewer elsewhere would get",
+    "tags": [
+     "Events"
+    ],
+    "description": "What the play gate gives a viewer in `country` (two-letter code) for this event right now, and the layer that decided it: the account's geo, the access rules or the programme. `viewer` is `anonymous` (default), `member` or `entitled`. Same answer as `GET /api/channels/{id}/access-check`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** events: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/events/{id}/auto-connect": {
    "post": {
     "operationId": "postEventsByIDAutoConnect",
@@ -10578,6 +10614,42 @@
     }
    }
   },
+  "/api/events/{id}/health/reset": {
+   "post": {
+    "operationId": "postEventsByIDHealthReset",
+    "summary": "Clear QC",
+    "tags": [
+     "Events"
+    ],
+    "description": "Resets the event's health to a clean slate: earlier faults stay in the event log but no longer decide its status, and a stopped event's auto connect give-up is cleared. A fault that is still real is reported again by its next event. Answers with the status before and after. Needs `events: operate`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** events: operate",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/events/{id}/history": {
    "get": {
     "operationId": "getEventsByIDHistory",
@@ -10586,6 +10658,86 @@
      "Events"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** events: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/events/{id}/inputs/{inputId}/preview": {
+   "get": {
+    "operationId": "getEventsByIDInputsByInputIdPreview",
+    "summary": "Preview one of the event's inputs",
+    "tags": [
+     "Events"
+    ],
+    "description": "A relayed preview address for one of the event's http or https inputs, for sources that refuse playback from other sites. The address is a token that expires after two hours and plays that input only. A push input (SRT, RTMP) answers `400`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** events: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "inputId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/events/{id}/reset-health": {
+   "post": {
+    "operationId": "postEventsByIDResetHealth",
+    "summary": "Clear QC (channel path)",
+    "tags": [
+     "Events"
+    ],
+    "description": "The same as `POST /api/events/{id}/health/reset`, at the path channels use, so one path works for either kind.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** events: operate",
     "security": [
      {
       "adminBearer": []

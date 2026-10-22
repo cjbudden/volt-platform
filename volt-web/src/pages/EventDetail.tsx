@@ -72,6 +72,7 @@ export default function EventDetail({ id, onBack }: { id: string; onBack: () => 
   const [shareOpen, setShareOpen] = useState(false)
   const [embedOpen, setEmbedOpen] = useState(false)
   const [qcOpen, setQcOpen] = useState(false)
+  const [resetBusy, setResetBusy] = useState(false)   // Clear QC in flight
 
   async function load() {
     try { setD(await api.eventDetail(id)); setErr('') } catch (e: any) { setErr(e.message) }
@@ -116,6 +117,18 @@ export default function EventDetail({ id, onBack }: { id: string; onBack: () => 
     try { await api.eventStartStop(id, action); await load() }
     catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
+  // CLEAR QC: a clean slate for the health model (POST /events/:id/health/reset),
+  // the same as on the channel page; earlier faults stay in the event log.
+  async function resetQc() {
+    setResetBusy(true)
+    try {
+      const r = await api.resetEventHealth(id)
+      await load()
+      notify(r.primaryError
+        ? { kind: 'warn', message: `QC cleared, but ${r.primaryError.label.toLowerCase()} is still failing now: ${r.primaryError.message}` }
+        : { kind: 'ok', message: r.was === 'error' || r.was === 'degraded' ? 'QC cleared: the earlier errors are in the event log.' : 'QC cleared.' })
+    } catch (e: any) { setErr(e.message) } finally { setResetBusy(false) }
+  }
   async function remove() {
     if (!d) return
     if (!confirm(`Delete "${d.name}"? Its recordings and clips go with it. This can't be undone.`)) return
@@ -153,6 +166,12 @@ export default function EventDetail({ id, onBack }: { id: string; onBack: () => 
           <button className={`btn ghost icon-btn${perr ? ' alert' : ''}`} onClick={() => setQcOpen(true)} data-tip="QC: diagnose the pipeline" aria-label="QC">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.4-7.5 9.5-4.3-1.1-7.5-4.9-7.5-9.5V6L12 3z" /><path d="M8.8 12l2.2 2.2 4.2-4.4" /></svg>
           </button>
+          {canRun && (
+            <button className="btn ghost icon-btn" onClick={resetQc} disabled={resetBusy}
+              data-tip={resetBusy ? 'Clearing…' : 'Clear QC: reset errors and judge the event afresh'} aria-label="Clear QC">
+              <svg className={resetBusy ? 'spin' : undefined} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8" /><path d="M3 3v5h5" /></svg>
+            </button>
+          )}
           {can('sharing', 'manage') && (
             <button className="btn ghost icon-btn" onClick={() => setShareOpen(true)} data-tip="Share a private preview link" aria-label="Share">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v14" /></svg>

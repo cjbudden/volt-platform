@@ -1218,6 +1218,12 @@ export const api = {
     req(`/channels/${id}/reset-health`, { method: 'POST' }),
   /** A relayed preview address for one HLS input (for sources that block playback from other sites). */
   channelInputPreview: (id: string, inputId: string): Promise<{ url: string; expiresInSec: number }> => req(`/channels/${id}/inputs/${inputId}/preview`),
+  /** The event versions of the three above (the event page shares the channel page's panels). */
+  eventAccessCheck: (id: string, country: string, viewer: 'anonymous' | 'member' | 'entitled' = 'anonymous'): Promise<AccessCheck> =>
+    req(`/events/${id}/access-check?country=${encodeURIComponent(country)}&viewer=${viewer}`),
+  resetEventHealth: (id: string): Promise<{ id: string; was: string | null; overall: string | null; primaryError: { gate: string; label: string; message: string } | null }> =>
+    req(`/events/${id}/health/reset`, { method: 'POST' }),
+  eventInputPreview: (id: string, inputId: string): Promise<{ url: string; expiresInSec: number }> => req(`/events/${id}/inputs/${inputId}/preview`),
   updateChannel: (id: string, patch: ChannelSettingsPatch): Promise<any> =>
     req(`/channels/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   testStreamStart: (id: string, opts: { langs?: string[]; dvrSec?: number; dash?: boolean } = {}): Promise<TestStreamStatus> =>

@@ -24,6 +24,22 @@
     "summary": "Open the documentation",
     "description": "Issues a short-lived pass to this documentation site for the signed-in user. Used by the Documentation button in Volt."
   },
+  "GET /api/events/:id/access-check": {
+    "summary": "Check what a viewer elsewhere would get",
+    "description": "What the play gate gives a viewer in `country` (two-letter code) for this event right now, and the layer that decided it: the account's geo, the access rules or the programme. `viewer` is `anonymous` (default), `member` or `entitled`. Same answer as `GET /api/channels/{id}/access-check`."
+  },
+  "GET /api/events/:id/inputs/:inputId/preview": {
+    "summary": "Preview one of the event's inputs",
+    "description": "A relayed preview address for one of the event's http or https inputs, for sources that refuse playback from other sites. The address is a token that expires after two hours and plays that input only. A push input (SRT, RTMP) answers `400`."
+  },
+  "POST /api/events/:id/health/reset": {
+    "summary": "Clear QC",
+    "description": "Resets the event's health to a clean slate: earlier faults stay in the event log but no longer decide its status, and a stopped event's auto connect give-up is cleared. A fault that is still real is reported again by its next event. Answers with the status before and after. Needs `events: operate`."
+  },
+  "POST /api/events/:id/reset-health": {
+    "summary": "Clear QC (channel path)",
+    "description": "The same as `POST /api/events/{id}/health/reset`, at the path channels use, so one path works for either kind."
+  },
   "tags": {
     "_comment": "Usage statement per API service (tag): what it is for, key tasks, credential. Required for every service; npm run docs:openapi -- --check fails without one. hidden: true leaves the service out of the customer reference.",
     "Access": {
@@ -92,7 +108,7 @@
     },
     "Events": {
       "displayName": "Events",
-      "description": "Events are scheduled, time-bounded live streams such as a match or a concert, provisioned automatically for their scheduled window.\n\n**Use it to:**\n- Schedule and edit events with `POST /api/events` and `PATCH /api/events/{id}`\n- Start or stop an event by hand with `POST /api/events/{id}/start` and `.../stop`\n- Set filler and auto connect with `POST /api/events/{id}/filler` and `.../auto-connect`\n- Review what happened with `GET /api/events/{id}/history`\n\n**Credential:** admin session (Bearer) or account secret key, with `events: view` to read, `events: operate` to start or stop and `events: manage` to change.\n\n**Good to know:** auto connect only decides whether a running event resumes after a restart. The schedule still decides when it runs."
+      "description": "Events are scheduled, time-bounded live streams such as a match or a concert, provisioned automatically for their scheduled window.\n\n**Use it to:**\n- Schedule and edit events with `POST /api/events` and `PATCH /api/events/{id}`\n- Start or stop an event by hand with `POST /api/events/{id}/start` and `.../stop`\n- Set filler and auto connect with `POST /api/events/{id}/filler` and `.../auto-connect`\n- Review what happened with `GET /api/events/{id}/history`\n- Check what a viewer in another country gets with `GET /api/events/{id}/access-check`, and clear old faults with `POST /api/events/{id}/health/reset`\n\n**Credential:** admin session (Bearer) or account secret key, with `events: view` to read, `events: operate` to start, stop or clear QC and `events: manage` to change.\n\n**Good to know:** auto connect only decides whether a running event resumes after a restart. The schedule still decides when it runs."
     },
     "Files": {
       "displayName": "Image library",

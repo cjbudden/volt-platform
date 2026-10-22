@@ -281,6 +281,7 @@ export function answers(app: any, path: string): boolean {
  */
 export const PARAMETERISED: Record<string, string[]> = {
   '/api/channels|access-check': ['country', 'viewer'],
+  '/api/events|access-check': ['country', 'viewer'],
   '/api/channels|coverage': ['from', 'to'],
   '/api/channels|timeline': ['from', 'to'],
   '/api/channels|waveform': ['from', 'to', 'buckets'],

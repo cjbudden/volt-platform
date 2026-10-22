@@ -1267,9 +1267,9 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   useEffect(() => {
     if (!direct || p !== 'hls' || !sel) return
     let live = true
-    api.channelInputPreview(d.id, sel.key).then(r => { if (live) setRelay({ key: sel.key, url: r.url }) }).catch(() => {})
+    ;(isEvent ? api.eventInputPreview : api.channelInputPreview)(d.id, sel.key).then(r => { if (live) setRelay({ key: sel.key, url: r.url }) }).catch(() => {})
     return () => { live = false }
-  }, [direct, p, sel?.key, d.id])
+  }, [direct, p, sel?.key, d.id, isEvent])
   const relayUrl = relay && sel && relay.key === sel.key ? relay.url : null
   const fallbacks = direct ? [relayUrl, receiving ? viaOrigin : null].filter((x): x is string => !!x) : []
   const [pv, setPv] = useState<PreviewState>({ s: 'loading' })
@@ -1501,7 +1501,8 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   const [subTracks, setSubTracks] = useState(0)   // subtitle tracks discovered in the manifest
   const [subLangs, setSubLangs] = useState<string[]>([])  // their languages
   // VIEW AS A VIEWER ELSEWHERE: pick a country (and who the viewer is) and the
-  // play gate is asked what they would get (GET /channels/:id/access-check).
+  // play gate is asked what they would get (GET /channels/:id/access-check,
+  // or /events/:id/access-check on the event page).
   const [geoAs, setGeoAs] = useState('')
   const [geoViewer, setGeoViewer] = useState<'anonymous' | 'member' | 'entitled'>('anonymous')
   const [geoRes, setGeoRes] = useState<AccessCheck | null>(null)
@@ -1510,7 +1511,8 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
     setGeoRes(null); setGeoErr('')
     if (!geoAs) return
     let live = true
-    api.channelAccessCheck(d.id, geoAs, geoViewer).then(r => { if (live) setGeoRes(r) }).catch((e: any) => { if (live) setGeoErr(e?.message || 'Could not check') })
+    // The event page shares this panel: an event asks its own route.
+    ;((d as any).kind === 'event' ? api.eventAccessCheck : api.channelAccessCheck)(d.id, geoAs, geoViewer).then(r => { if (live) setGeoRes(r) }).catch((e: any) => { if (live) setGeoErr(e?.message || 'Could not check') })
     return () => { live = false }
   }, [geoAs, geoViewer, d.id, d.version])
   const geoBlocked = !!geoRes && !geoRes.allowed
@@ -1792,7 +1794,9 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   // captions are enabled (it would 404 on the non-existent /subs/<lang>.vtt).
   useEffect(() => {
     if (!subOn || d.captions?.enabled) { setCue(''); return }
-    const url = ts.subtitles[subLang]; if (!url) return
+    // An event's detail has no test stream, so no side subtitles (testStream is
+    // { available: false }): reading into it blanked the live event page.
+    const url = ts?.subtitles?.[subLang]; if (!url) return
     let stop = false
     async function poll() {
       try { const r = await fetch(originUrl(url) + '?_=' + Math.floor(Date.now() / 1000)); cuesRef.current = parseVtt(await r.text()) } catch { /* ignore */ }
@@ -1805,7 +1809,7 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
       setCue(hit?.text || '')
     }, 300)
     return () => { stop = true; clearInterval(iv); clearInterval(tick) }
-  }, [subOn, subLang, ts.subtitles, d.captions?.enabled])
+  }, [subOn, subLang, ts?.subtitles, d.captions?.enabled])
 
   function seekBehind(sec: number) {
     const v = videoRef.current; if (!v || !v.seekable.length) return

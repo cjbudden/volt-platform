@@ -148,14 +148,27 @@ channelsRouter.post('/:id/reset-health', asyncHandler(async (req, res) => {
     `SELECT c.* FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1 AND g.account_id = $2`,
     [req.params.id, accountId(req)]);
   if (!c) throw notFound('Channel not found');
-  const before = await buildChannelDetail(c, Date.now());
+  res.json(await clearQc(req, 'channel', c));
+}));
+
+/**
+ * The body of Clear QC, shared by channels and events (events.ts) so the two
+ * cannot drift: the same qc.reset event, the same give-up clear, the same
+ * stand-down of a stopped stream and the same answer. Only the table, the
+ * stream_events column and the detail builder differ by kind.
+ */
+export async function clearQc(req: any, kind: 'channel' | 'event', c: any) {
+  const { buildStreamDetail } = await import('../services/channelDetail');
+  const detailOf = (row: any) => kind === 'event' ? buildStreamDetail(row, Date.now(), 'event') : buildChannelDetail(row, Date.now());
+  const table = kind === 'event' ? 'events' : 'channels';
+  const before = await detailOf(c);
   const who = actor(req);
   const name = who.userId ? (await one<{ email: string }>('SELECT email FROM users WHERE id = $1', [who.userId]))?.email ?? who.label : who.label;
   const { clearGiveUp } = await import('../services/orchestrator/resume');
-  if (c.status !== 'live') await query(`UPDATE channels SET desired_state = 'stopped', updated_at = now() WHERE id = $1`, [c.id]);
-  await clearGiveUp('channel', c.id);
+  if (c.status !== 'live') await query(`UPDATE ${table} SET desired_state = 'stopped', updated_at = now() WHERE id = $1`, [c.id]);
+  await clearGiveUp(kind, c.id);
   await query(
-    `INSERT INTO stream_events(channel_id, type, detail, ts) VALUES ($1,'qc.reset',$2::jsonb, now())`,
+    `INSERT INTO stream_events(${kind === 'event' ? 'event_id' : 'channel_id'}, type, detail, ts) VALUES ($1,'qc.reset',$2::jsonb, now())`,
     [c.id, JSON.stringify({
       message: before.health?.primaryError ? `QC cleared by ${name}: was ${before.health.primaryError.label} error (${before.health.primaryError.message})` : `QC cleared by ${name}`,
       actor: name, was: before.health?.overall ?? null, error: before.health?.primaryError ?? null,
@@ -163,13 +176,13 @@ channelsRouter.post('/:id/reset-health', asyncHandler(async (req, res) => {
     })]);
   await writeAudit(null, {
     accountId: accountId(req), userId: who.userId, label: who.label,
-    action: 'update', entityType: 'channel', entityId: c.id,
+    action: 'update', entityType: kind, entityId: c.id,
     changes: { health: { from: before.health?.overall ?? null, to: 'reset' } },
   });
-  const after = await one<any>(`SELECT * FROM channels WHERE id = $1`, [c.id]);
-  const detail = await buildChannelDetail(after, Date.now());
-  res.json({ id: c.id, was: before.health?.overall ?? null, overall: detail.health?.overall ?? null, primaryError: detail.health?.primaryError ?? null });
-}));
+  const after = await one<any>(`SELECT * FROM ${table} WHERE id = $1`, [c.id]);
+  const detail = await detailOf(after);
+  return { id: c.id, was: before.health?.overall ?? null, overall: detail.health?.overall ?? null, primaryError: detail.health?.primaryError ?? null };
+}
 
 /**
  * VIEW AS A VIEWER ELSEWHERE: what would someone in this country get from the
@@ -184,9 +197,18 @@ channelsRouter.get('/:id/access-check', asyncHandler(async (req, res) => {
     `SELECT c.id, c.name, c.geo_mode, c.geo_countries, g.account_id FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1 AND g.account_id = $2`,
     [req.params.id, accountId(req)]);
   if (!c) throw notFound('Channel not found');
-  const country = String(req.query.country ?? '').trim().toUpperCase();
+  res.json(await accessCheckFor(c, req.query));
+}));
+
+/**
+ * The answer of VIEW AS A VIEWER ELSEWHERE for any live owner the caller has
+ * already been shown to own (channel or event: evaluateAccess finds which).
+ * Shared with GET /events/:id/access-check so both answer in one shape.
+ */
+export async function accessCheckFor(c: { id: string; account_id: string }, q: any) {
+  const country = String(q.country ?? '').trim().toUpperCase();
   if (!/^[A-Z]{2}$/.test(country)) throw badRequest('country must be a two-letter code');
-  const kind = String(req.query.viewer ?? 'anonymous');
+  const kind = String(q.viewer ?? 'anonymous');
   const { evaluateAccess } = await import('../services/rights');
   const viewerCtx = {
     country,
@@ -200,13 +222,13 @@ channelsRouter.get('/:id/access-check', asyncHandler(async (req, res) => {
     const r = await one<any>(`SELECT id, title FROM vod_assets WHERE id = $1`, [d.replacementAssetId]);
     replacement = r ? { id: r.id, title: r.title } : { id: d.replacementAssetId, title: 'replacement' };
   }
-  res.json({
+  return {
     country, viewer: kind, allowed: !!d.allowed, layer: d.layer ?? 'none', reason: d.reason ?? null,
     via: d.rule?.via ?? null, ruleId: d.rule?.ruleId ?? null,
     products: (d.products ?? []).map((p: any) => ({ name: p.name ?? p.productKey, priceCents: p.priceCents, currency: p.currency })),
     replacement,
-  });
-}));
+  };
+}
 
 // A preview address for one of the channel's HLS inputs, relayed by the
 // control plane for sources that refuse playback from other sites
