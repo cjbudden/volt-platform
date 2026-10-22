@@ -86,7 +86,7 @@ export async function streamMetrics(channelId: string, st: any, kind: OwnerKind 
 }
 
 export interface ChannelDetail {
-  kind: 'channel';
+  kind: 'channel' | 'event';
   metrics: StreamMetricsView | null;
   group: { id: string; name: string } | null;
   profile: any | null;
@@ -277,13 +277,26 @@ export async function loadChannelHealthLite(
 }
 
 export async function buildChannelDetail(channel: any, nowMs: number): Promise<ChannelDetail> {
+  return buildStreamDetail(channel, nowMs, 'channel');
+}
+
+/**
+ * THE DETAIL OF ONE STREAM, channel or event (22 Oct 2026). Channels and events
+ * run the same encoder and report through the same tables keyed by a different
+ * column, so the event page is built by the same code as the channel page
+ * rather than a copy that would drift. What differs is stated where it is
+ * used: events have no on-air switch (they are public while live inside their
+ * public window), no DVR or ladder override, no watermark and no EPG toggle.
+ */
+export async function buildStreamDetail(channel: any, nowMs: number, kind: OwnerKind): Promise<ChannelDetail> {
+  const col = kind === 'event' ? 'event_id' : 'channel_id';
   const group = channel.group_id
     ? await one<any>('SELECT id, name, output_profile_id, account_id FROM groups WHERE id = $1', [channel.group_id])
     : null;
   const profile = group?.output_profile_id
     ? await one<any>('SELECT * FROM output_profiles WHERE id = $1', [group.output_profile_id])
     : null;
-  const sources = await query<any>('SELECT * FROM stream_inputs WHERE channel_id = $1 ORDER BY role', [channel.id]);
+  const sources = await query<any>(`SELECT * FROM stream_inputs WHERE ${col} = $1 ORDER BY role`, [channel.id]);
 
   // effective DVR window: per-channel override wins, else profile default, capped at 4h
   const profDefault = profile?.dvr_window_sec ?? 300;
@@ -293,7 +306,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   const dvr = {
     effective_sec: effective,
     max_sec: DVR_MAX_SEC,
-    mode: channel.dvr_mode || 'sliding',
+    mode: channel.dvr_mode || (kind === 'event' ? 'event_start' : 'sliding'),
     source: (chanOverride != null ? 'channel' : 'profile') as 'channel' | 'profile',
     capped: rawEffective > DVR_MAX_SEC,
   };
@@ -313,11 +326,11 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   // Everything is scoped to the CURRENT run: a freshly launched encoder must not be
   // painted with the previous run's status row, events or log lines (the start-up
   // error flash). runSince also feeds billing below.
-  const runSince = await runningSinceMs(channel.id);
+  const runSince = await runningSinceMs(channel.id, kind);
   const st = scopeStatusToRun(await one<any>(
     `SELECT output_available, active_source, fallback_in_use, filler_in_use, packager_ok, sources, metrics, updated_at
-       FROM stream_status WHERE channel_id = $1`, [channel.id]), runSince);
-  const metrics = channel.status === 'live' ? await streamMetrics(channel.id, st) : null;
+       FROM stream_status WHERE ${col} = $1`, [channel.id]), runSince);
+  const metrics = channel.status === 'live' ? await streamMetrics(channel.id, st, kind) : null;
   const reporting = !!st;
   const outputAvailable = !!st?.output_available;
   const seg = Number(profile?.segment_dur ?? 4).toFixed(1);
@@ -325,7 +338,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
 
   // event log — real stream_events, newest first; empty when none
   const evs = scopeToRun(await query<any>(
-    `SELECT seq, type, detail, ts FROM stream_events WHERE channel_id = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]), runSince);
+    `SELECT seq, type, detail, ts FROM stream_events WHERE ${col} = $1 ORDER BY ts DESC LIMIT 30`, [channel.id]), runSince);
 
   // real encoder-log error lines (newest-first), shared by the log view + health model
   const encTail = encoderLogTail(channel.id);
@@ -334,6 +347,14 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     .map((l) => l.detail)
     .reverse(); // encTail is oldest→newest; health wants newest-first
 
+  // PUBLISHED NOW. A channel has an on-air switch. An event has none: it is
+  // public while it is live and inside its public window, the same rule the
+  // public /live/<id> route applies (modules/publicLive.ts).
+  const publishedNow = kind === 'event'
+    ? channel.status === 'live'
+      && (!channel.public_start || new Date(channel.public_start).getTime() <= nowMs)
+      && (!channel.public_end || new Date(channel.public_end).getTime() > nowMs)
+    : channel.on_air === true;
   // FIVE-GATE HEALTH (server → input → encoder → output → public): the single
   // source of truth for the badge, the primary error banner, and the QC page.
   // ground truth: is the origin manifest advancing right now? (within ~3 segments)
@@ -350,7 +371,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
     packagingLabel: packagingLabel(profile),
     outputFresh,
     outputAgeMs: outMtime > 0 ? (nowMs - outMtime) : null,
-    onAirPublished: channel.on_air === true,
+    onAirPublished: publishedNow,
     recovery: recoveryOf(channel),
     fleet: await fleetContext(),
   });
@@ -364,7 +385,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   const sinceMs = runSince;
   const billing = buildBilling(serverUp, sinceMs, nowMs, recommendInstance(profile?.workflow_type, ladder));
   const server = await serverStatusFor({
-    kind: 'channel', id: channel.id, streamLive: serverUp,
+    kind, id: channel.id, streamLive: serverUp,
     workflow: profile?.workflow_type ?? null, ladder, sources,
     watermark: channel.watermark_enabled === true && !!channel.watermark_ref,
     gpu: profile?.codec_backend === 'nvenc',
@@ -416,7 +437,7 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   // EPG — real programmes around now; empty when the channel has no schedule
   const progs = await query<any>(
     `SELECT id, title, starts_at, ends_at FROM programmes
-       WHERE channel_id = $1 AND ends_at > now() - interval '2 hours' AND starts_at < now() + interval '8 hours'
+       WHERE ${col} = $1 AND ends_at > now() - interval '2 hours' AND starts_at < now() + interval '8 hours'
        ORDER BY starts_at`, [channel.id]);
   let nowObj: any = null; let nextObj: any = null;
   const lane = progs.map((p: any) => {
@@ -433,11 +454,11 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   const epg = { now: nowObj, next: nextObj, lane };
 
   // viewers — real analytics only; empty until wired/there is live data (no fabrication)
-  const viewers = await channelViewers(group?.account_id ?? null, channel.id, 'channel');
+  const viewers = await channelViewers(group?.account_id ?? null, channel.id, kind);
 
   // Public delivery: the on-air state + the public playback URL a viewer/app would use.
   // available = the public URL would actually serve right now (published + valid content).
-  const onAir = channel.on_air === true;
+  const onAir = publishedNow;
   const publicBlock = {
     url: `/live/${channel.id}/master.m3u8`,
     dashUrl: `/live/${channel.id}/manifest.mpd`,
@@ -445,13 +466,13 @@ export async function buildChannelDetail(channel: any, nowMs: number): Promise<C
   };
 
   return {
-    kind: 'channel', group: group ? { id: group.id, name: group.name } : null, profile, dvr, captions,
+    kind, group: group ? { id: group.id, name: group.name } : null, profile, dvr, captions,
     epgEnabled: channel.epg_enabled !== false,
     autoConnect: channel.auto_connect !== false,
     schemaId: channel.schema_id ?? null,
     metadata: (channel.metadata && typeof channel.metadata === 'object') ? channel.metadata : {},
     desiredState: (channel.desired_state ?? 'stopped') as 'running' | 'stopped',
-    encoderRunning: await encoderRunning(channel.id),
+    encoderRunning: await encoderRunning(channel.id, kind),
     lockedWhileRunning: Object.keys(LOCKED_WHILE_RUNNING),
     resumeGaveUpAt: channel.resume_gave_up_at ?? null,
     resumeLastError: channel.resume_last_error ?? null,

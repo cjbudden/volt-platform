@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type EventRow, type Group } from '../api'
 import { useProtocols, SourceInput, hlsChoicePending, sourceFromRow, sourceProblem, sourceToApi, type SourceValue } from '../protocols'
 import { PackageRenditions, pkgFromSources, pkgToSources, type PkgFallback, type PkgRow } from '../PackageRenditions'
-import { ImagePicker } from '../ImagePicker'
 import { PageHead, NewButton, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, splitDuration, DrawerTabs, TabPane, type DrawerTab, type RetUnit } from '../scaffold'
 import { useAccess, ReadOnlyBadge } from '../access'
 import { ShareDrawer } from '../ShareDrawer'
@@ -15,6 +14,7 @@ import { usePref, byName, ChipGroup, GroupFilter, SortSelect, ListToolbar, Clear
 import { RowMenu, Icons, useSelection, SelectCell, SelectAllHead, BulkBar, ConfirmDialog, runBulk, bulkSummary, type MenuItem } from '../listActions'
 import EventCalendar from '../EventCalendar'
 import { navigate, useRoute } from '../router'
+import { FillerField } from '../FillerField'
 
 /* ============================================================================
    Events — one-off broadcasts on the SAME core workflow as channels (sources,
@@ -223,7 +223,7 @@ export default function Events() {
               <span className="tb-sep" aria-hidden="true" />
               {canManage ? <NewButton label="New event" onClick={() => setCreateOpen(true)} /> : <ReadOnlyBadge feature="events" />}
             </>} />
-          {view === 'calendar' ? <EventCalendar events={shown} phaseOf={phaseOf} now={now} onOpen={setEditing} /> : shown.length === 0 ? (
+          {view === 'calendar' ? <EventCalendar events={shown} phaseOf={phaseOf} now={now} onOpen={(ev: EventRow) => navigate(`/events/${ev.id}`)} /> : shown.length === 0 ? (
             <div className="card"><NoMatches what="events" onClear={clearFilters} /></div>
           ) : (<>
           <BulkBar count={picked.length} noun={['event', 'events']} onClear={sel.clear} busy={bulkBusy} actions={[
@@ -245,7 +245,7 @@ export default function Events() {
                   const ph = eventPhase(ev, now)
                   const recOn = ev.recording_enabled !== false
                   return (
-                    <tr key={ev.id} className={sel.sel.has(ev.id) ? 'selected' : undefined} onClick={() => setEditing(ev)} style={{ cursor: 'pointer' }}>
+                    <tr key={ev.id} className={sel.sel.has(ev.id) ? 'selected' : undefined} onClick={() => navigate(`/events/${ev.id}`)} style={{ cursor: 'pointer' }}>
                       <SelectCell on={sel.sel.has(ev.id)} onToggle={() => sel.toggle(ev.id)} label={`Select ${ev.name}`} />
                       <td><EntityCell name={ev.name} sub={groupName(ev.group_id)} index={i} /></td>
                       <td style={{ color: 'var(--muted)' }}>{fmtWindow(ev.scheduled_start, ev.scheduled_end)}</td>
@@ -255,12 +255,12 @@ export default function Events() {
                       <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                         <div className="row-actions">
                         {!canRun
-                          ? <button className="btn act ghost" onClick={() => setEditing(ev)}>Open</button>
+                          ? <button className="btn act ghost" onClick={(e) => { e.stopPropagation(); navigate(`/events/${ev.id}`) }}>Open</button>
                           : ev.status === 'live'
                           ? <button className="btn act ghost" disabled={busy === ev.id} onClick={() => startStop(ev, 'stop')}>{busy === ev.id ? '…' : 'Stop'}</button>
                           : ev.status !== 'ended'
                           ? <button className="btn act primary" disabled={busy === ev.id || !!bulkBusy} onClick={() => startStop(ev, 'start')} title="Start now (ahead of the scheduled window)">{busy === ev.id ? '…' : 'Start'}</button>
-                          : <button className="btn act ghost" onClick={() => setEditing(ev)}>Open</button>}
+                          : <button className="btn act ghost" onClick={(e) => { e.stopPropagation(); navigate(`/events/${ev.id}`) }}>Open</button>}
                           <RowMenu label={`More actions for ${ev.name}`} items={menuFor(ev)} />
                         </div>
                       </td>
@@ -294,7 +294,7 @@ export default function Events() {
 }
 
 /* --------------------------------------------- create / settings drawer */
-function EventDrawer({ groups, event: ev, onClose, onDone }: {
+export function EventDrawer({ groups, event: ev, onClose, onDone }: {
   groups: Group[]; event?: EventRow; onClose: () => void; onDone: () => void
 }) {
   const { can } = useAccess()
@@ -337,7 +337,7 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
   // loss filler
   const [lossBehavior, setLossBehavior] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>((ev?.input_loss_behavior as any) || 'slate')
   const [slateRef, setSlateRef] = useState(ev?.filler_slate_ref || '')
-  const [pickerOpen, setPickerOpen] = useState(false)
+  const [fillerAssetId, setFillerAssetId] = useState<string | null>(ev?.filler_asset_id ?? null)
   // recording + auto-VOD
   const [recOn, setRecOn] = useState(ev ? ev.recording_enabled !== false : true)
   const initRetSec = ev?.recording_retention_sec != null ? Number(ev.recording_retention_sec)
@@ -394,7 +394,8 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
       sources,
       inputFailoverEnabled: sources.some(s => s.role === 'backup'),
       inputLossBehavior: lossBehavior,
-      fillerSlateRef: (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && slateRef.trim() ? slateRef.trim() : null,
+      fillerAssetId: (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && fillerAssetId ? fillerAssetId : null,
+      fillerSlateRef: (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && !fillerAssetId && slateRef.trim() ? slateRef.trim() : null,
       ...(typeId ? { schemaId: typeId, metadata: meta } : {}),
     }
     setBusy(true)
@@ -488,17 +489,9 @@ function EventDrawer({ groups, event: ev, onClose, onDone }: {
             </select>
           </div>
           {(lossBehavior === 'slate' || lossBehavior === 'vod_loop') && (
-            <div className="field"><label>{lossBehavior === 'slate' ? 'Slate image' : 'Loop video'}</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick from library or paste a URL" />
-                <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse…</button>
-              </div>
-            </div>
+            <FillerField behavior={lossBehavior} assetId={fillerAssetId} onAssetId={setFillerAssetId}
+              legacyRef={slateRef} onLegacyRef={setSlateRef} />
           )}
-          <ImagePicker open={pickerOpen} kinds={lossBehavior === 'vod_loop' ? ['loop', 'clip', 'vod', 'other'] : ['slate', 'brand', 'other']}
-            title={lossBehavior === 'vod_loop' ? 'Choose a loop video' : 'Choose or upload a slate image'}
-            uploadKind="slate" uploadFolder="slates" allowUpload={lossBehavior !== 'vod_loop'}
-            onClose={() => setPickerOpen(false)} onPick={(url) => { setSlateRef(url); setPickerOpen(false) }} />
 
           <div className="sec-label">Delivery</div>
           <div className="field"><label>Purchasing mode</label>

@@ -165,6 +165,13 @@ A clip cut from the last few minutes of a live channel may have a short VTT
 when it is built (the hour is still filling). The on-request VTT is complete as
 soon as the pass has caught up.
 
+### Uploaded files
+
+An uploaded or watchfolder file has no stream, so its sprite sheets are made from the file at the end of its encode
+(`services/thumbnails/fileSprites.ts`): the same tile layout, about 200 previews whatever its length, stored under
+`thumbnails/files/<asset>/` and described in `vod_assets.sprite`. `GET /api/thumbnails/vod/:id.vtt` serves them first
+when they exist. Its poster is picked from stills of the file (`docs/ASSET_IMAGES.md`).
+
 ## 6. API
 
 All routes need an admin session or an account secret key, and only answer for

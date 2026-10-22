@@ -10,6 +10,7 @@ import { useAccess, ReadOnlyBadge } from '../access'
 import { RadioDrawer, ClassChip } from './Radio'
 import { ShareDrawer } from '../ShareDrawer'
 import { pressable } from '../a11y'
+import { PanelLayout } from '../panelLayout'
 
 /* ============================================================================
    Radio station detail — the audio-only counterpart of the channel detail
@@ -447,8 +448,15 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           and what the pipeline has been doing.
           minWidth:0 on both columns matters: without it a long monospace URL
           stretches its column and the page breaks out of its width. */}
-      <div className="grid-2" style={{ alignItems: 'start' }}>
-        <div style={{ display: 'grid', gap: 18, minWidth: 0 }}>
+      {/* THE PANELS, in the order this person chose (panelLayout.tsx, saved in this
+          browser). Default: player and output previews on the left; metadata, QC
+          and the event log on the right; the received metadata log full width.
+          The audio element is OUTSIDE the panels on purpose: it is what the
+          player and the level meter attach to, and a panel that is moved,
+          hidden or minimised remounts, which would orphan it. */}
+      <audio ref={audioRef} crossOrigin="anonymous" style={{ display: 'none' }} />
+      <PanelLayout pageKey="radio" twoCol panels={[
+        { id: 'player', zone: 'left', label: 'Player and level meter', node: (<>
         {/* ---- player: visualiser instead of a 16:9 video ---- */}
         <div className="card" style={{ padding: 16, minWidth: 0 }}>
           {/* NOW PLAYING sits WITH the controls and the waveform, because they
@@ -564,9 +572,9 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
               {levels?.lastSampleAt && <span>updated {Math.max(0, Math.round((Date.now() - levels.lastSampleAt) / 1000))}s ago</span>}
             </div>
           )}
-          <audio ref={audioRef} crossOrigin="anonymous" style={{ display: 'none' }} />
         </div>
-
+        </>) },
+        { id: 'outputs', zone: 'left', label: 'Output previews', node: (<>
         {/* ---- OUTPUT PREVIEWS: verify each generated stream on its own ----
              This sits under the player, not in the metadata column, because it
              is playback: the operator checks MP3, then HLS, then DASH without
@@ -613,10 +621,8 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
             </div>
           )}
         </div>
-        </div>
-
-        {/* ---- station metadata, QC and pipeline history ---- */}
-        <div style={{ display: 'grid', gap: 18, minWidth: 0 }}>
+        </>) },
+        { id: 'metadata', zone: 'right', label: 'Station metadata', node: (<>
           <div className="card" style={{ padding: 16, minWidth: 0 }}>
             <div className="sec-label">Station metadata</div>
             {st.icy?.station?.name || np?.station?.name ? (
@@ -657,6 +663,8 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           {/* QC PANEL — the audio equivalent of the channel QC surface.
               Layout here is Tailwind utilities; the card itself stays a
               semantic class. That is the split the design system asks for. */}
+        </>) },
+        { id: 'qc', zone: 'right', label: 'Quality checks', node: (<>
           <div className="card p-4 min-w-0">
             <div className="sec-label">Quality checks</div>
             <div className="flex items-center gap-2 mb-2">
@@ -684,7 +692,8 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
               </div>
             )}
           </div>
-
+        </>) },
+        { id: 'events', zone: 'right', label: 'Event log', node: (<>
         {/* ---- event log: lifecycle, input/encoder errors and QC alarms.
                 It lives in this column, not full width below, because it is read
                 ALONGSIDE the gates and QC when something looks wrong. ---- */}
@@ -720,11 +729,10 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
             </div>
           )}
         </div>
-        </div>
-      </div>
-
+        </>) },
+        { id: 'metalog', zone: 'full', label: 'Received metadata log', node: (<>
       {/* ---- timed metadata log ---- */}
-      <div className="card" style={{ marginTop: 16, padding: 16 }}>
+      <div className="card" style={{ padding: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
           <div style={{ ...SEC, margin: 0 }}>Received metadata log</div>
           {/* FOUR ZEROS AND A SEARCH BOX over a log that structurally cannot
@@ -813,6 +821,8 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           </div>
         )}
       </div>
+        </>) },
+      ]} />
 
       {settingsOpen && (
         <RadioDrawer groups={groups} station={st} onClose={() => setSettingsOpen(false)}

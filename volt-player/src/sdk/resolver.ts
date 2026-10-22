@@ -102,6 +102,7 @@ export async function fetchNowPlaying(apiBase: string, appKey: string, stationId
   const track = (x: any): TrackInfo | null => x && (x.title || x.primary) ? {
     title: String(x.title ?? x.primary), artist: x.artist ?? x.secondary ?? null, album: x.album ?? null,
     year: x.year ?? null, artworkUrl: x.artworkUrl ?? null, startedAt: x.startedAt ?? x.since ?? null,
+    listen: x.listen && typeof x.listen.url === 'string' ? { service: String(x.listen.service ?? 'Apple Music'), url: x.listen.url } : null,
   } : null;
   return {
     nowPlaying: track(j),

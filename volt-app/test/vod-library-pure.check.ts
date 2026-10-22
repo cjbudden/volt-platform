@@ -129,5 +129,16 @@ eq([pkg.workflow.value, pkg.audio.source, pkg.renditions.value[0].codec], ['pack
 const none = encodeDetails({ source_kind: 'recording' });
 ok(none.renditions.value.length === 0 && none.gaps.length > 0 && none.summary.label === '', 'nothing known: empty, with the gap stated');
 
+// Audio: a song cut from a radio recording, HLS and DASH referencing the recording, MP3 asked for and made, M4A not.
+const radio = encodeDetails({ source_kind: 'recording', channel_id: 'r', master_key: 'clips/a/master.m3u8', formats: { hls: true, dash: true, progressive: false }, export_mp3_key: 'clips/a/clip.mp3', duration_ms: 272000 },
+  { audioOnly: true, radioConfig: { bitrateKbps: 96 }, extract: { formats: ['hls', 'mp3'], state: 'done' } });
+eq([radio.kind, radio.audioEncode?.codec, radio.audioEncode?.bitrateKbps, radio.audioEncode?.source], ['audio', 'AAC (HLS, DASH)', 96, 'stored'], 'audio: AAC at the station\'s bitrate');
+eq(radio.deliveries.map((d) => `${d.label}:${d.state}`), ['HLS (audio only):ready', 'DASH (audio only):ready', 'MP3 (progressive):ready', 'AAC .m4a (progressive):not_requested'], 'audio deliveries: HLS and DASH referencing the recording, MP3 made, M4A not asked for');
+ok(/recording's segments/.test(radio.deliveries[0].detail ?? '') && radio.deliveries[1].key === 'clips/a/manifest.mpd', 'the manifests reference the recording');
+ok(!radio.deliveries.some((d) => d.format === 'mp4') && radio.summary.label === 'Audio only · AAC 96 kb/s · HLS, DASH, MP3' && !radio.gaps.some((g) => /Renditions|Video profile/.test(g)), 'no video rows, a summary that says what it is');
+const making = encodeDetails({ source_kind: 'recording', channel_id: 'r', master_key: 'clips/b/master.m3u8', formats: { hls: true } }, { audioOnly: true, extract: { formats: ['hls', 'mp3', 'm4a'], state: 'running' } });
+eq(making.deliveries.filter((d) => d.format === 'mp3' || d.format === 'm4a').map((d) => d.state), ['making', 'making'], 'asked for and still being made');
+eq(live.kind === 'video' && live.deliveries.map((d) => d.format), ['hls', 'dash', 'mp4', 'mp3', 'm4a'], 'video lists MP4 too');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -301,6 +301,23 @@
     ],
     "doc": "tv or radio"
    },
+   "origin": {
+    "type": "enum",
+    "values": [
+     "live",
+     "playlist"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "live (source + encoder) or playlist (FAST)"
+   },
    "status": {
     "type": "enum",
     "values": [

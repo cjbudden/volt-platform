@@ -11,13 +11,14 @@ import { validateEntityMetadata } from './metadataSchemas';
 import { defaultTypeId } from '../services/contentTypes';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
 import { scheduleFillerPrep, FILLER_FIELDS, runFillerPrep, fillerStatus } from '../services/fillerPrep';
+import { assertFillerAsset } from './fillerAssets';
 
 export const eventsRouter = Router();
 eventsRouter.use(requireAuth);
 
 const EVENT_EDITABLE = ['graphics', 'name', 'scheduled_start', 'scheduled_end', 'server_start', 'server_stop',
   'public_start', 'public_end', 'recording_enabled', 'recording_retention_days', 'recording_retention_sec',
-  'auto_vod', 'input_failover_enabled', 'auto_failback', 'input_loss_behavior', 'filler_slate_ref',
+  'auto_vod', 'input_failover_enabled', 'auto_failback', 'input_loss_behavior', 'filler_slate_ref', 'filler_asset_id',
   'schema_id', 'metadata',
   // AUTO CONNECT after a reboot. Separate from the event's SCHEDULE, which
   // still decides when the event runs: this answers only "it was started and
@@ -107,6 +108,32 @@ eventsRouter.get(
   })
 );
 
+/**
+ * THE EVENT PAGE (22 Oct 2026): the same shape the channel page reads, built by
+ * the same code (services/channelDetail.ts buildStreamDetail), so the gates,
+ * status board, event log, viewers and players mean the same thing on both.
+ * Plus what only an event has: its windows and the recordings it made.
+ */
+eventsRouter.get(
+  '/:id/detail',
+  asyncHandler(async (req, res) => {
+    const row = await one<any>(
+      `SELECT e.* FROM events e JOIN groups g ON g.id = e.group_id
+        WHERE e.id = $1 AND g.account_id = $2`,
+      [req.params.id, accountId(req)]
+    );
+    if (!row) throw notFound('Event not found');
+    const { buildStreamDetail } = await import('../services/channelDetail');
+    const [inputs, instances, detail, recordings] = await Promise.all([
+      query('SELECT * FROM stream_inputs WHERE event_id = $1', [req.params.id]),
+      query('SELECT * FROM instances WHERE event_id = $1 AND terminated_at IS NULL', [req.params.id]),
+      buildStreamDetail(row, Date.now(), 'event'),
+      query(`SELECT id, title, status, start_epoch_ms, end_epoch_ms, duration_ms, created_at FROM recordings WHERE event_id = $1 ORDER BY created_at DESC LIMIT 20`, [req.params.id]),
+    ]);
+    res.json({ ...row, inputs, instances, ...detail, recordings, testStream: { available: false } });
+  })
+);
+
 const createSchema = z
   .object({
     groupId: z.string().uuid(),
@@ -130,6 +157,7 @@ const createSchema = z
     autoFailback: z.boolean().optional(),
     inputLossBehavior: z.enum(['none', 'slate', 'vod_loop', 'last_frame', 'black']).optional(),
     fillerSlateRef: z.string().nullable().optional(),
+    fillerAssetId: z.string().uuid().nullable().optional(), // slate/loop in Loops & Fillers (wins over fillerSlateRef)
     schemaId: z.string().uuid().nullable().optional(),      // metadata schema (defined once, harvested to auto-VOD)
     metadata: z.record(z.any()).optional(),
   })
@@ -166,6 +194,7 @@ eventsRouter.post(
       // THE METADATA NAME IS THE EVENT'S NAME, always; it wins over any `name`
       // sent inside metadata (see channels.ts).
       { ...(b.metadata ?? {}), name: b.name }, ['event']);
+    await assertFillerAsset(accountId(req), b.fillerAssetId);
     const who = actor(req);
     const row = await one<any>(
       `INSERT INTO events(group_id, name, scheduled_start, scheduled_end,
@@ -173,8 +202,8 @@ eventsRouter.post(
                           purchasing_mode, resilience_tier,
                           recording_enabled, recording_retention_days, recording_retention_sec, auto_vod,
                           input_failover_enabled, auto_failback, input_loss_behavior, filler_slate_ref,
-                          schema_id, metadata, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21,$21) RETURNING *`,
+                          schema_id, metadata, created_by, updated_by, filler_asset_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21,$21,$22) RETURNING *`,
       [
         b.groupId, b.name, b.scheduledStart, b.scheduledEnd,
         b.serverStart ?? b.scheduledStart, b.serverStop ?? b.scheduledEnd,
@@ -185,6 +214,7 @@ eventsRouter.post(
         b.inputFailoverEnabled ?? false, b.autoFailback ?? true, b.inputLossBehavior ?? 'none',
         b.fillerSlateRef ?? null,
         md.schemaId, JSON.stringify(md.metadata), who.userId,
+        b.fillerAssetId ?? null,
       ]
     );
     if (b.sources?.length) await replaceEventInputs(row.id, b.sources);
@@ -223,6 +253,7 @@ const editEventSchema = z.object({
   autoFailback: z.boolean().optional(),
   inputLossBehavior: z.enum(['none', 'slate', 'vod_loop', 'last_frame', 'black']).optional(),
   fillerSlateRef: z.string().nullable().optional(),
+  fillerAssetId: z.string().uuid().nullable().optional(),
   schemaId: z.string().uuid().nullable().optional(),
   metadata: z.record(z.any()).optional(),
   version: z.number().int().optional(),
@@ -261,6 +292,7 @@ const editEvent = asyncHandler(async (req, res) => {
   if (has('autoFailback')) patch.auto_failback = b.autoFailback;
   if (has('inputLossBehavior')) patch.input_loss_behavior = b.inputLossBehavior;
   if (has('fillerSlateRef')) patch.filler_slate_ref = b.fillerSlateRef ?? null;
+  if (has('fillerAssetId')) { await assertFillerAsset(accountId(req), b.fillerAssetId); patch.filler_asset_id = b.fillerAssetId ?? null; }
   if (has('schemaId') || has('metadata') || has('name')) {
     if (has('schemaId') && b.schemaId == null) throw badRequest('A content type is required. Choose another type instead of clearing it.');
     const md = await validateEntityMetadata(accountId(req), (has('schemaId') ? b.schemaId : current.schema_id) ?? null,

@@ -263,6 +263,17 @@ export const config = {
     enabled: (process.env.TRACK_META ?? 'true') !== 'false',
     musicbrainzBase: process.env.MUSICBRAINZ_BASE ?? 'https://musicbrainz.org/ws/2',
     coverArtBase: process.env.COVERART_BASE ?? 'https://coverartarchive.org',
+    // SONG ASSET LOOKUPS (services/media/musicLookup.ts), tried in order until one
+    // finds the song. Default: musicbrainz (open data), then apple (the iTunes
+    // Search API: free, about 20 calls a minute, and its artwork may be used only
+    // to PROMOTE the song, shown with a link to it on Apple Music; the player API
+    // carries that link as `listen`). deezer has far better coverage of
+    // independent singles, but its free API is NON-COMMERCIAL ONLY
+    // (developers.deezer.com/termsofuse, section IV): switch it on only for a
+    // non-commercial deployment or under an agreement with Deezer.
+    providers: (process.env.MUSIC_PROVIDERS ?? 'musicbrainz,apple').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+    deezerBase: process.env.DEEZER_API_BASE ?? 'https://api.deezer.com',
+    appleBase: process.env.ITUNES_API_BASE ?? 'https://itunes.apple.com',
     userAgent: process.env.TRACK_META_UA
       ?? 'VoltStream/0.1 ( https://github.com/volt-stream )',
     minGapMs: Number(process.env.TRACK_META_MIN_GAP_MS ?? 1100),

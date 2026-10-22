@@ -10,6 +10,10 @@
 // ============================================================================
 import { useEffect, useState } from 'react'
 import { api, type ContentType, type SchemaField } from './api'
+import { ImageRefField } from './ImageRefField'
+
+/** A library folder name: lower case, hyphens, no spaces (the server's libraryPaths.ts slug). */
+export const folderSlug = (s: string) => s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled'
 
 export function TypePicker({ appliesTo, value, onChange, disabled, hint }: {
   appliesTo: 'radio' | 'tv' | 'event' | 'vod'
@@ -47,7 +51,7 @@ export function TypePicker({ appliesTo, value, onChange, disabled, hint }: {
 /** Turn a stored value into what the control shows, and back. */
 const toText = (v: any) => v == null ? '' : Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? (v.name ?? JSON.stringify(v)) : String(v)
 
-export function MetadataForm({ typeId, value, onChange, compact, entityName, hide }: {
+export function MetadataForm({ typeId, value, onChange, compact, entityName, hide, imageFolder }: {
   typeId: string | null
   value: Record<string, any>
   onChange: (v: Record<string, any>) => void
@@ -60,6 +64,8 @@ export function MetadataForm({ typeId, value, onChange, compact, entityName, hid
   entityName?: { value: string; where: string }
   /** Field keys another part of the form already sets (a channel's logo is its Guide icon). */
   hide?: string[]
+  /** Where images added through an image field go in the library (default media/<name>). */
+  imageFolder?: string
 }) {
   const [fields, setFields] = useState<SchemaField[] | null>(null)
   useEffect(() => {
@@ -123,6 +129,14 @@ export function MetadataForm({ typeId, value, onChange, compact, entityName, hid
         if (f.type === 'date') return (
           <div key={f.key} className="field">{label}
             <input className="inp" type="date" value={toText(v).slice(0, 10)} onChange={e => set(f.key, e.target.value)} /></div>)
+        // IMAGE: the library picker, or a web address that the server copies
+        // into the Image Library when the form is saved (libraryImages.ts).
+        if (f.type === 'image') return (
+          <div key={f.key} style={{ gridColumn: '1 / -1' }}>
+            <ImageRefField label={f.label ?? f.key} value={toText(v)} onChange={(x) => set(f.key, x)} pickerTitle={`${f.label ?? f.key}: choose an image`}
+              kinds={['poster', 'brand', 'imported', 'other']} uploadFolder={imageFolder ?? `media/${folderSlug(entityName?.value ?? 'assets')}`}
+              help="Pick from the Image Library, upload, or paste a web address: an address is copied into the library when you save." />
+          </div>)
         // string | url | reference (a reference is entered by name until the entity picker exists)
         return (
           <div key={f.key} className="field">{label}

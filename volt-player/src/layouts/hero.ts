@@ -23,6 +23,7 @@ import {
   scopedStyle, setArtwork, setPlayState, statusLine, volumeSlider,
 } from './shared';
 import { aspectRatio } from '../tokens';
+import { listenEl, setListen, LISTEN_CSS } from './listen';
 import { createPhase, phaseRules } from './phase';
 
 export function heroLayout(): Layout {
@@ -38,6 +39,7 @@ export function heroLayout(): Layout {
   let primary: HTMLElement;
   let secondary: HTMLElement;
   let meta: HTMLElement;
+  let listen: HTMLAnchorElement;
   let live: HTMLElement;
   let btn: HTMLButtonElement;
   let status: HTMLElement;
@@ -74,7 +76,8 @@ export function heroLayout(): Layout {
       primary = el('h2', 'vp-primary');
       secondary = el('div', 'vp-secondary');
       meta = el('div', 'vp-meta');
-      text.append(live, primary, secondary, meta);
+      listen = listenEl();
+      text.append(live, primary, secondary, meta, listen);
 
       controls = el('div', 'vp-controls');
       btn = playButton(c);
@@ -112,6 +115,7 @@ export function heroLayout(): Layout {
       const bits = metaLine(np?.album, np?.year);
       meta.textContent = bits;
       meta.style.display = bits ? '' : 'none';
+      setListen(listen, np);
 
       const url = np?.artworkUrl ?? ctx.station.artworkUrl ?? null;
       setArtwork(cover, url);
@@ -209,5 +213,6 @@ function rules(): string {
 @media (prefers-reduced-motion: reduce) {
 & .vp-cover img { transition: none; }
 }
+${LISTEN_CSS('&')}
 `;
 }

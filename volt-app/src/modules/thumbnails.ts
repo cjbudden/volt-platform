@@ -18,6 +18,7 @@ import { asyncHandler, badRequest, notFound } from '../util/http';
 import { config } from '../config';
 import { buildRangeInBackground, layoutOf, sheetUrl, streamInfo, unitsFor } from '../services/thumbnails/builder';
 import { clipPieces, recordingPieces, vttForRange } from '../services/thumbnails/clips';
+import { fileVttFor } from '../services/thumbnails/fileSprites';
 import { listRuns } from '../services/localRecordingIndex';
 
 export const thumbnailsRouter = Router();
@@ -92,6 +93,9 @@ thumbnailsRouter.get('/recordings/:id.vtt', asyncHandler(async (req, res) => {
 }));
 
 thumbnailsRouter.get('/vod/:id.vtt', asyncHandler(async (req, res) => {
+  // An uploaded file: its own sprite sheets (services/thumbnails/fileSprites.ts).
+  const own = await fileVttFor(req.params.id, accountId(req));
+  if (own) return sendVtt(res, own);
   const c = await clipPieces(req.params.id, accountId(req));
   if (!c) throw notFound('No such VOD asset');
   sendVtt(res, (await vttForRange(c.streamId, c.pieces)).vtt);

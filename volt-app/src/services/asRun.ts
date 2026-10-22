@@ -140,7 +140,7 @@ export async function recordAsRun(channelId: string, fromMs: number, nowMs = Dat
 export async function asRunPass(lookbackMs = 6 * 3600_000, nowMs = Date.now()): Promise<{ channels: number; changed: number }> {
   const chans = await query<any>(
     `SELECT DISTINCT c.id FROM channels c
-      WHERE COALESCE(c.audio_only, false) = false
+      WHERE c.kind <> 'radio'   -- radio is channels.kind, there is no audio_only column
         AND (c.status = 'live' OR EXISTS (SELECT 1 FROM stream_events e WHERE e.channel_id = c.id AND e.type = 'channel.stop' AND e.ts > to_timestamp($1 / 1000.0)))`,
     [nowMs - lookbackMs]);
   let changed = 0;

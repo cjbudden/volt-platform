@@ -2,15 +2,14 @@
 //  MEDIA LIBRARY GRID: one card per asset.
 //
 //  The keyscreen (sized by the image service, loaded lazily), the length and
-//  the top rendition on it, then the title, the content type, availability,
+//  what it is (video, audio, song) on it, then the title, the content type, availability,
 //  how complete the target metadata is, and the encode summary. The checkbox
 //  is the same selection the table uses, so bulk actions work in either view.
 //  The card's title is a button: Tab reaches the checkbox then the card,
 //  Enter or Space opens it.
 // ============================================================================
 import type { LibraryRow } from './libraryApi'
-import { AvailabilityPill, Completeness, EncodeSummary, Keyscreen, TypeLabel, fmtDur } from './LibraryCells'
-import { resLabel } from './libraryQuery'
+import { AvailabilityPill, Completeness, EncodeSummary, KindBadge, Keyscreen, TypeLabel, fmtDur } from './LibraryCells'
 
 export function LibraryGrid({ rows, selected, onToggle, onOpen, openId }: {
   rows: LibraryRow[]; selected: Set<string>; onToggle: (id: string) => void; onOpen: (id: string) => void; openId: string | null
@@ -28,7 +27,7 @@ export function LibraryGrid({ rows, selected, onToggle, onOpen, openId }: {
             <button type="button" className="lib-card-open" onClick={() => onOpen(r.id)} aria-label={`Open ${r.title || 'Untitled'}`}>
               <Keyscreen row={r} w={480} h={270} />
               {dur && <span className="lib-badge lib-badge-dur">{dur}</span>}
-              {r.top_height ? <span className="lib-badge lib-badge-res">{resLabel(r.top_height)}</span> : null}
+              <KindBadge row={r} />
             </button>
             <div className="lib-card-b">
               <div className="lib-card-t" title={r.title || 'Untitled'}>{r.title || 'Untitled'}</div>

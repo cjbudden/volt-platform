@@ -197,7 +197,7 @@ export function valueForField(field: SchemaField, f: ProgrammeFacts): unknown {
   else if (slot === 'description') raw = f.description;
   else if (slot === 'category') raw = f.genres;
   else if (slot === 'episode') raw = f.episodeLabel ?? (f.episodeNumber != null ? String(f.episodeNumber) : null);
-  else if (slot === 'icon' || (field.type === 'url' && /image|thumbnail|artwork|poster/i.test(k))) raw = f.image;
+  else if (slot === 'icon' || field.type === 'image' || (field.type === 'url' && /image|thumbnail|artwork|poster/i.test(k))) raw = f.image;
   else if (slot === 'language') raw = f.language;
   else if (slot.startsWith('credits.')) { const role = slot.slice(8); raw = f.credits.filter((c) => c.role === role).map((c) => c.name); }
   else return undefined;
@@ -217,6 +217,7 @@ function coerce(field: SchemaField, raw: unknown): unknown {
       return field.multiple ? [...new Set(hits)] : hits[0];
     }
     case 'url': { const u = arr[0]; return /^https?:\/\//i.test(u) ? u : undefined; }
+    case 'image': { const u = arr[0]; return /^https?:\/\//i.test(u) || /^\/library\//.test(u) ? u : undefined; }
     case 'date': { const d = arr[0]; return /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : /^\d{4}$/.test(d) ? `${d}-01-01` : undefined; }
     case 'boolean': return undefined;
     case 'reference': return { id: arr[0], name: arr[0] };

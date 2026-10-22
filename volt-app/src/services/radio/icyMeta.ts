@@ -279,6 +279,12 @@ class IcyCapture {
          JSON.stringify({ source: 'icy', class: cls, raw: block.slice(0, 1000), stream_url: streamUrl || null })]
       );
       this.openProgrammeId = row?.id ?? null;
+      // THE COVER, AS EARLY AS POSSIBLE: stored on this guide entry by a job
+      // (jobs/handlers/songArtwork.ts), so the player, the recording's log and
+      // any clip cut from the song have it. Queued, never awaited.
+      if (cls === 'song' && row?.id && config.trackMeta.enabled) {
+        void import('../jobs/handlers/songArtwork').then((m) => m.queueSongArtwork(row.id)).catch(() => { /* never touches the stream */ });
+      }
     } catch (e) {
       console.error('[icy] log insert failed', this.channelId, e);
     }

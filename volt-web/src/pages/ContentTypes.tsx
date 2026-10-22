@@ -16,7 +16,7 @@ import { useNotify, usePageNotice } from '../notices'
 const APPLIES: { key: 'radio' | 'tv' | 'event' | 'vod'; label: string }[] = [
   { key: 'radio', label: 'Radio stations' }, { key: 'tv', label: 'TV channels' }, { key: 'event', label: 'Events' }, { key: 'vod', label: 'On-demand assets' },
 ]
-const FIELD_TYPES: SchemaField['type'][] = ['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'tags', 'reference']
+const FIELD_TYPES: SchemaField['type'][] = ['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'image', 'tags', 'reference']
 const EPG_SLOTS = ['', 'title', 'sub-title', 'description', 'category', 'episode', 'language', 'icon', 'credits.presenter', 'credits.actor', 'credits.commentator', 'credits.producer', 'credits.director', 'credits.guest']
 
 export default function ContentTypesPage() {

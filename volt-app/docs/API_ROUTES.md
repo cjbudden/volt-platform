@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**621 routes.** Public API: 61 · Sign-in (no session yet): 7 · Admin API: 500 · Platform API: 21 · Machine-to-machine: 13 · Delivery and previews (outside /api): 11 · Health and discovery: 8
+**632 routes.** Public API: 61 · Sign-in (no session yet): 7 · Admin API: 511 · Platform API: 21 · Machine-to-machine: 13 · Delivery and previews (outside /api): 11 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -387,6 +387,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | PUT | `/api/events/:id` | admin session (Bearer) or account secret key | events: manage |  |
 | POST | `/api/events/:id/:action(start\|stop)` | admin session (Bearer) or account secret key | events: operate |  |
 | POST | `/api/events/:id/auto-connect` | admin session (Bearer) or account secret key | events: operate |  |
+| GET | `/api/events/:id/detail` | admin session (Bearer) or account secret key | events: view |  |
 | GET | `/api/events/:id/filler` | admin session (Bearer) or account secret key | events: view |  |
 | POST | `/api/events/:id/filler` | admin session (Bearer) or account secret key | events: manage |  |
 | GET | `/api/events/:id/history` | admin session (Bearer) or account secret key | events: view |  |
@@ -446,6 +447,8 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | DELETE | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: manage |  |
 | GET | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: view |  |
 | PATCH | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: manage |  |
+| POST | `/api/filler-assets/copy-from-library` | admin session (Bearer) or account secret key | media: manage |  |
+| GET | `/api/filler-assets/elsewhere` | admin session (Bearer) or account secret key | media: view |  |
 
 ### `/api/fleet`
 
@@ -900,6 +903,10 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/vod/:id/encode` | admin session (Bearer) or account secret key | vod: view |  |
 | GET | `/api/vod/:id/epg-fill` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/:id/epg-fill` | admin session (Bearer) or account secret key | vod: manage |  |
+| GET | `/api/vod/:id/history` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/vod/:id/image` | admin session (Bearer) or account secret key | vod: view |  |
+| PUT | `/api/vod/:id/image` | admin session (Bearer) or account secret key | vod: manage |  |
+| POST | `/api/vod/:id/image/auto` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/markers` | admin session (Bearer) or account secret key | vod: view |  |
 | DELETE | `/api/vod/:id/markers/:kind` | admin session (Bearer) or account secret key | vod: manage |  |
 | PUT | `/api/vod/:id/markers/:kind` | admin session (Bearer) or account secret key | vod: manage |  |
@@ -911,11 +918,15 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/vod/:id/review` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/:id/review` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/schema.org` | admin session (Bearer) or account secret key | vod: view |  |
+| DELETE | `/api/vod/:id/song/details` | admin session (Bearer) or account secret key | vod: manage |  |
+| POST | `/api/vod/:id/song/find` | admin session (Bearer) or account secret key | vod: manage |  |
+| POST | `/api/vod/:id/song/use` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/target-metadata` | admin session (Bearer) or account secret key | vod: view |  |
 | PATCH | `/api/vod/:id/trim` | admin session (Bearer) or account secret key | vod: manage |  |
 | POST | `/api/vod/:id/withdraw` | admin session (Bearer) or account secret key | vod: operate |  |
 | POST | `/api/vod/epg-fill` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/facets` | admin session (Bearer) or account secret key | vod: view |  |
+| POST | `/api/vod/music-lookup` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/review/queue` | admin session (Bearer) or account secret key | vod: view |  |
 
 ### `/api/watchfolders`

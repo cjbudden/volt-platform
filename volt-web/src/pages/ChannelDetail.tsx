@@ -11,7 +11,6 @@ import { useInputChecks, verdictOf, summaryOf, LevelDot, inputName, heightOf, ty
 import { PackageRenditions, pkgFromSources, pkgToSources, type PkgRow, type PkgFallback } from '../PackageRenditions'
 import { WatermarkFields } from '../WatermarkFields'
 import { GraphicsSettings, type GraphicsValue } from '../GraphicsSettings'
-import { ImagePicker } from '../ImagePicker'
 import { ImageRefField, GuideIconField } from '../ImageRefField'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
 import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, type StripGate, GATE_COLOR, RecoveryNote, DiagnosisBlock, DrawerTabs, TabPane, type DrawerTab, type RetUnit } from '../scaffold'
@@ -24,6 +23,9 @@ import { analyserPeak } from '../audioLevel'
 import { ShareDrawer } from '../ShareDrawer'
 import { EmbedDrawer } from '../EmbedDrawer'
 import { pressable } from '../a11y'
+import { FillerField } from '../FillerField'
+import { OutputUrls } from '../OutputUrls'
+import { PanelLayout } from '../panelLayout'
 function fmtOffset(sec: number) {
   if (sec <= 0) return 'LIVE'
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60)
@@ -316,24 +318,32 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         </div>
       )}
 
-      <DualPlayers d={d} captionLangs={captionLangs} sourceUp={sourceUp} onAir={published}
-        onSendSource={() => setConfirmStart(true)} onGoLive={() => setAir(true)} busy={busy} />
-
-      <FailoverTestPanel d={d} sourceUp={sourceUp} />
-
-      <EpgStrip d={d}
-        // ABSOLUTE path. navigate('events') was relative, so the browser resolved it
-        // against /channels/<id> and landed on /channels/events, a channel called
-        // "events" that does not exist. The guide for THIS channel lives here.
-        onAddEpg={() => navigate(`/epg/channel/${encodeURIComponent(d.id)}`)}
-        onHideEpg={async () => { try { await api.updateChannel(d.id, { epgEnabled: false }); await load() } catch (e: any) { setErr(e.message) } }} />
-
-      <ViewersCard d={d} live={live} />
-
-      <div className="grid-2">
-        <StatusBoard d={d} live={live} />
-        <EventLog d={d} />
-      </div>
+      {/* THE PANELS, in the order this person chose (panelLayout.tsx, saved in this
+          browser). Default: players, failover, guide, then the output URLs under
+          the guide, viewers, and status with the event log. The header, the
+          pipeline strip and the banners above, and Remove below, never move. */}
+      <PanelLayout pageKey="channel" panels={[
+        { id: 'players', label: 'Source and output players', node: (
+          <DualPlayers d={d} captionLangs={captionLangs} sourceUp={sourceUp} onAir={published}
+            onSendSource={() => setConfirmStart(true)} onGoLive={() => setAir(true)} busy={busy} />) },
+        { id: 'failover', label: 'Failover control', node: <FailoverTestPanel d={d} sourceUp={sourceUp} /> },
+        { id: 'epg', label: 'Programme guide', node: (
+          <EpgStrip d={d}
+            // ABSOLUTE path. navigate('events') was relative, so the browser resolved it
+            // against /channels/<id> and landed on /channels/events, a channel called
+            // "events" that does not exist. The guide for THIS channel lives here.
+            onAddEpg={() => navigate(`/epg/channel/${encodeURIComponent(d.id)}`)}
+            onHideEpg={async () => { try { await api.updateChannel(d.id, { epgEnabled: false }); await load() } catch (e: any) { setErr(e.message) } }} />) },
+        { id: 'outputs', label: 'Output URLs', node: (
+          <OutputUrls id={d.id} packaging={d.profile?.packaging} captions={!!d.captions?.enabled}
+            publicOpen={!!d.onAir} kindLabel="channel" />) },
+        { id: 'viewers', label: 'Realtime viewers', node: <ViewersCard d={d} live={live} /> },
+        { id: 'status', label: 'Status board and event log', node: (
+          <div className="grid-2">
+            <StatusBoard d={d} live={live} />
+            <EventLog d={d} />
+          </div>) },
+      ]} />
 
       {/* REMOVE, at the foot of the page: never next to Start, QC or Settings,
           so it cannot be hit by accident. The dialog still shows what goes with
@@ -378,7 +388,8 @@ export const fmtBytes = (n: number) => n >= 1e12 ? `${(n / 1e12).toFixed(2)} TB`
  * only while the run is up and only when there is a real reading (absent is
  * shown as nothing, never as 0). See services/channelDetail.ts streamMetrics.
  */
-function withMeters(d: CD): StripGate[] {
+/** Shared with the event page (EventDetail.tsx). */
+export function withMeters(d: CD): StripGate[] {
   const gates: StripGate[] = (d.health?.gates || []).map(g => ({ ...g }))
   const m = d.metrics
   if (!m || d.status !== 'live') return gates
@@ -467,7 +478,8 @@ function CaptionsLaneRow({ lane }: { lane?: { status: string; detail: string; en
   )
 }
 
-function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefresh: () => void }) {
+/** Shared with the event page (EventDetail.tsx). */
+export function QcPanel({ d, onClose, onRefresh }: { d: CD; onClose: () => void; onRefresh: () => void }) {
   const h = d.health
   const gates = h?.gates || []
   return (
@@ -567,7 +579,8 @@ function parseVtt(txt: string): Cue[] {
 // Live preview of the channel watermark, positioned to match the encoder overlay so
 // brand / corner / offset can be validated in the player before (and without) burn-in.
 // Offsets are output pixels; we approximate against a nominal 1080-high frame for preview.
-function DualPlayers({ d, captionLangs, sourceUp, onAir, onSendSource, onGoLive, busy }: {
+/** Shared with the event page (EventDetail.tsx). */
+export function DualPlayers({ d, captionLangs, sourceUp, onAir, onSendSource, onGoLive, busy }: {
   d: CD; captionLangs: string[]; sourceUp: boolean; onAir: boolean; onSendSource: () => void; onGoLive: () => void; busy: boolean
 }) {
   const [subOn, setSubOn] = useState(true)
@@ -594,7 +607,7 @@ function DualPlayers({ d, captionLangs, sourceUp, onAir, onSendSource, onGoLive,
           : <IdleOutput sourceUp={sourceUp} onGoLive={onGoLive}
               warming={d.health?.gates.find(g => g.gate === 'server')?.status === 'healthy'}
               sinceMs={d.billing?.since ?? null}
-              captionsOn={!!d.captions?.enabled} />}
+              captionsOn={!!d.captions?.enabled} isEvent={(d as any).kind === 'event'} />}
     </div>
   )
 }
@@ -1196,7 +1209,10 @@ function ChannelMeter({ levelsRef, channels, active, isMuted, onToggle, onSolo }
 
 
 function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: boolean; onSendSource: () => void; busy: boolean }) {
-  const canRun = useAccess().can('channels', 'operate')
+  // Shared with the event page: an event says "event" and has no test source.
+  const isEvent = (d as any).kind === 'event'
+  const noun = isEvent ? 'event' : 'channel'
+  const canRun = useAccess().can(isEvent ? 'events' : 'channels', 'operate')
   const videoBoxRef = useRef<HTMLDivElement | null>(null)
   const ts = d.testStream
   const isPkg = d.profile?.workflow_type === 'package_only'
@@ -1221,7 +1237,7 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
 
   const proto = (sel?.protocol || d.sources[0]?.protocol || 'SRT').toUpperCase()
   const srcHost = hostOf(ts.sourceUrl || sel?.url)
-  const sendLabel = sel ? 'Start channel' : 'Start with test source'
+  const sendLabel = sel ? `Start ${noun}` : isEvent ? null : 'Start with test source'
   // Reflect the pipeline: when the channel runs, the input gate is the
   // observation of whether bytes arrive, so it decides RECEIVING (see the
   // note in git history: `sourceUp` alone is a claim, not an observation).
@@ -1309,12 +1325,13 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
         )}
         {!showGateError && !playSrc && !sourceUp && (
           <div className="src-overlay">
-            {canRun && (
+            {canRun && sendLabel && (
               <button className="btn primary" onClick={onSendSource} disabled={busy} style={{ transform: 'scale(1.05)' }}>
                 {busy ? 'Starting…' : `▶  ${sendLabel}`}
               </button>
             )}
-            {sel && !direct && <div className="d" style={{ marginTop: 10 }}>{proto} cannot play in a browser. Once the channel is receiving, this pane shows it through Volt's ingest.</div>}
+            {!sel && isEvent && <div className="d">No input source is configured. Set one in Settings to start this event.</div>}
+            {sel && !direct && <div className="d" style={{ marginTop: 10 }}>{proto} cannot play in a browser. Once the {noun} is receiving, this pane shows it through Volt's ingest.</div>}
           </div>
         )}
         {!showGateError && !playSrc && sourceUp && !receiving && (
@@ -1373,10 +1390,12 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   )
 }
 
-function IdleOutput({ sourceUp, onGoLive, warming, sinceMs, captionsOn }: {
+function IdleOutput({ sourceUp, onGoLive, warming, sinceMs, captionsOn, isEvent = false }: {
   sourceUp: boolean; onGoLive: () => void; warming?: boolean; sinceMs?: number | null; captionsOn?: boolean
+  /** An event has no Go live: it is public while live inside its public window. */
+  isEvent?: boolean
 }) {
-  const canRun = useAccess().can('channels', 'operate')
+  const canRun = useAccess().can(isEvent ? 'events' : 'channels', 'operate')
   // Warm-up counter: while the encoder is up but the output is not yet packaged, show
   // how long the warm-up has been running and what wait is NORMAL, so the operator does
   // not read a healthy start as a fault. Live captions (whisper) add a transcription
@@ -1415,12 +1434,14 @@ function IdleOutput({ sourceUp, onGoLive, warming, sinceMs, captionsOn }: {
             </div>
           ) : sourceUp ? (
             <div>
-              {canRun && (
+              {canRun && !isEvent && (
               <button className="btn primary" onClick={onGoLive} style={{ transform: 'scale(1.05)' }}>
                 <span className="dot-s live" style={{ marginRight: 6 }} />Go live
               </button>
               )}
-              <div style={{ marginTop: 12, fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>Source is receiving. Take the output live.</div>
+              <div style={{ marginTop: 12, fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>{isEvent
+                ? 'Source is receiving. The output shows here once it is packaged; viewers can play it inside the public window.'
+                : 'Source is receiving. Take the output live.'}</div>
             </div>
           ) : (
             <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-body)', maxWidth: 300 }}>
@@ -1998,7 +2019,7 @@ function FailoverTestPanel({ d, sourceUp }: { d: CD; sourceUp: boolean }) {
     let ok = true
     api.failoverTestStatus(d.id).then(s => { if (ok) { setCap(s); setMode(s.mode) } }).catch(() => {})
     return () => { ok = false }
-  }, [d.id, d.input_failover_enabled, d.auto_failback, d.input_loss_behavior, d.filler_slate_ref])
+  }, [d.id, d.input_failover_enabled, d.auto_failback, d.input_loss_behavior, d.filler_slate_ref, d.filler_asset_id])
   const real = !!cap?.realFailover
   // Failover acts on the RUNNING encoder's source selector. Before the channel is
   // started there is nothing to switch, so the test/switch actions stay disabled
@@ -2223,7 +2244,8 @@ function EpgStrip({ d, onAddEpg, onHideEpg }: { d: CD; onAddEpg: () => void; onH
 }
 
 /* ----------------------------------------------------------------- viewers */
-function ViewersCard({ d, live }: { d: CD; live: boolean }) {
+/** Shared with the event page (EventDetail.tsx). */
+export function ViewersCard({ d, live }: { d: CD; live: boolean }) {
   const s = d.viewers.series
   const path = useMemo(() => {
     if (!s.length) return { line: '', area: '' }
@@ -2260,7 +2282,8 @@ function ViewersCard({ d, live }: { d: CD; live: boolean }) {
 }
 
 /* ------------------------------------------------------------- status board */
-function StatusBoard({ d, live }: { d: CD; live: boolean }) {
+/** Shared with the event page (EventDetail.tsx). */
+export function StatusBoard({ d, live }: { d: CD; live: boolean }) {
   const ladder = d.ladder.length ? d.ladder : []
   const maxBr = Math.max(...ladder.map(r => r.bitrate_kbps), 1)
   return (
@@ -2298,7 +2321,8 @@ function StatusBoard({ d, live }: { d: CD; live: boolean }) {
 
 /* ----------------------------------------------------------------- the log */
 const LOG_COLOR: Record<string, string> = { live: 'var(--live)', warn: 'var(--warn)', down: 'var(--down)', sched: 'var(--sched)', filler: 'var(--filler)' }
-function EventLog({ d }: { d: CD }) {
+/** Shared with the event page (EventDetail.tsx). */
+export function EventLog({ d }: { d: CD }) {
   return (
     <div className="card">
       <div className="card-h"><h3>Connection issues &amp; event log</h3><div className="spacer" /><span className="tag warn">{d.log.filter(l => l.level === 'warn' || l.level === 'down').length} today</span></div>
@@ -2390,14 +2414,12 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   const setLossBehavior = lockSet(setLossBehaviorRaw)
   const [slateRef, setSlateRefRaw] = useState(d.filler_slate_ref || '')
   const setSlateRef = lockSet(setSlateRefRaw)
+  const [fillerAssetId, setFillerAssetIdRaw] = useState<string | null>(d.filler_asset_id ?? null)
+  const setFillerAssetId = lockSet(setFillerAssetIdRaw)
   const [failover, setFailoverRaw] = useState(!!d.input_failover_enabled)
   const setFailover = lockSet(setFailoverRaw)
   const [autoFailback, setAutoFailbackRaw] = useState(d.auto_failback !== false)
   const setAutoFailback = lockSet(setAutoFailbackRaw)
-  const [pickerOpen, setPickerOpenRaw] = useState(false)
-  const setPickerOpen = lockSet(setPickerOpenRaw)
-  const [loopPickerOpen, setLoopPickerOpenRaw] = useState(false)
-  const setLoopPickerOpen = lockSet(setLoopPickerOpenRaw)
   // watermark / channel brand overlay
   const [wmEnabled, setWmEnabledRaw] = useState(d.watermark?.enabled ?? false)
   const setWmEnabled = lockSet(setWmEnabledRaw)
@@ -2482,7 +2504,8 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
     patch.inputFailoverEnabled = failover
     patch.autoFailback = autoFailback
     patch.inputLossBehavior = lossBehavior
-    patch.fillerSlateRef = (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && slateRef.trim() ? slateRef.trim() : null
+    patch.fillerAssetId = (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && fillerAssetId ? fillerAssetId : null
+    patch.fillerSlateRef = (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && !fillerAssetId && slateRef.trim() ? slateRef.trim() : null
     // watermark / brand overlay
     patch.watermark = {
       enabled: wmEnabled,
@@ -2568,30 +2591,10 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
               <option value="black">Black</option>
             </select>
           </div>
-          {lossBehavior === 'slate' && (
-            <div className="field"><label>Slate image</label>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {slateRef && <img src={thumbUrl(slateRef, 92, 68)} alt="" style={{ width: 46, height: 34, objectFit: 'cover', borderRadius: 6, background: '#000', flex: 'none' }} />}
-                <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick from library, upload, or paste a URL" />
-                <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse / upload…</button>
-              </div>
-            </div>
+          {(lossBehavior === 'slate' || lossBehavior === 'vod_loop') && (
+            <FillerField behavior={lossBehavior} assetId={fillerAssetId} onAssetId={setFillerAssetId}
+              legacyRef={slateRef} onLegacyRef={setSlateRef} />
           )}
-          {lossBehavior === 'vod_loop' && (
-            <div className="field"><label>Loop video</label>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick an existing loop asset or paste a URL" />
-                <button type="button" className="btn ghost" onClick={() => setLoopPickerOpen(true)}>Browse…</button>
-              </div>
-              <div className="td" style={{ marginTop: 6 }}>No loop video? Leave this empty and set a Slate image: the loop is then made from the slate with a gentle scale in/out so it is not a still frame.</div>
-            </div>
-          )}
-          <ImagePicker open={pickerOpen} kinds={['slate', 'brand', 'other']} title="Choose or upload a slate image"
-            uploadKind="slate" uploadFolder="slates"
-            onClose={() => setPickerOpen(false)} onPick={(url) => { setSlateRef(url); setPickerOpen(false) }} />
-          <ImagePicker open={loopPickerOpen} kinds={['loop', 'clip', 'vod', 'other']} title="Choose a loop video"
-            allowUpload={false} uploadHint="Uploading video loops arrives with Broadcast videos; pick an existing asset for now"
-            onClose={() => setLoopPickerOpen(false)} onPick={(url) => { setSlateRef(url); setLoopPickerOpen(false) }} />
 
           <div className="sec-label">DVR / catch-up</div>
           <div className="field"><label>DVR mode</label>

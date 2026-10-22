@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, thumbUrl, type Group, type PlanView } from '../api'
 import { subscribeLive } from '../liveStatus'
 import { useProtocols, SourceInput, hlsChoicePending, sourceProblem, sourceToApi, type SourceValue } from '../protocols'
-import { ImagePicker } from '../ImagePicker'
 import { ImageRefField, GuideIconField } from '../ImageRefField'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
 import DeleteChannelDialog, { BulkRemoveDialog } from '../DeleteChannelDialog'
@@ -18,6 +17,7 @@ import { pressable } from '../a11y'
 import { TypePicker, MetadataForm } from '../ContentTypeFields'
 import { DrawerTabs, TabPane, type DrawerTab } from '../scaffold'
 import { WatermarkFields, wmDefaults, wmPatch, wmProblem, type WmForm } from '../WatermarkFields'
+import { FillerField } from '../FillerField'
 
 type Props = { createOpen: boolean; setCreateOpen: (v: boolean) => void; onOpen?: (id: string) => void }
 
@@ -52,7 +52,8 @@ export default function Channels({ createOpen, setCreateOpen, onOpen }: Props) {
   // fired every six seconds for the life of the tab.
   async function load() {
     try {
-      const [chs, gs] = await Promise.all([api.channels('tv'), api.groups()])
+      // live only: FAST (playlist) channels are listed and run under FAST channels
+      const [chs, gs] = await Promise.all([api.channels('tv', 'live'), api.groups()])
       const gmap = new Map(gs.map(g => [g.id, g]))
       setChannels(chs.map(c => ({ ...c, _g: gmap.get(c.group_id) })))
       setGroups(gs)
@@ -433,8 +434,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
   // filler on total loss (both flows)
   const [lossBehavior, setLossBehavior] = useState<'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'>('slate')
   const [slateRef, setSlateRef] = useState('')
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [loopPickerOpen, setLoopPickerOpen] = useState(false)
+  const [fillerAssetId, setFillerAssetId] = useState<string | null>(null)
 
   // live captions: the spoken language is detected automatically; the operator picks
   // the OUTPUT languages to publish. Applied right after create (captions live on the
@@ -514,7 +514,8 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
         outputLadder, sources,
         inputFailoverEnabled: sources.some(s => s.role === 'backup'),
         inputLossBehavior: lossBehavior,
-        fillerSlateRef: (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && slateRef.trim() ? slateRef.trim() : null,
+        fillerAssetId: (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && fillerAssetId ? fillerAssetId : null,
+        fillerSlateRef: (lossBehavior === 'slate' || lossBehavior === 'vod_loop') && !fillerAssetId && slateRef.trim() ? slateRef.trim() : null,
         fallbackTranscode,
         brandRef: brandRef.trim() || null, guideIconRef: guideIcon.trim() || null,
         // Burned in by the encoder, so transcode only: a packaging channel passes the source through.
@@ -624,31 +625,10 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
               <option value="black">Black</option>
             </select>
           </div>
-          {lossBehavior === 'slate' && (
-            <div className="field"><label>Slate image</label>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {slateRef && <img src={thumbUrl(slateRef, 92, 68)} alt="" style={{ width: 46, height: 34, objectFit: 'cover', borderRadius: 6, background: '#000', flex: 'none' }} />}
-                <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick from library, upload, or paste a URL" />
-                <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse / upload…</button>
-              </div>
-              <div className="hintxt">Browse the Image Library or upload a new slate right here.</div>
-            </div>
+          {(lossBehavior === 'slate' || lossBehavior === 'vod_loop') && (
+            <FillerField behavior={lossBehavior} assetId={fillerAssetId} onAssetId={setFillerAssetId}
+              legacyRef={slateRef} onLegacyRef={setSlateRef} />
           )}
-          {lossBehavior === 'vod_loop' && (
-            <div className="field"><label>Loop video</label>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input className="inp" value={slateRef} onChange={e => setSlateRef(e.target.value)} placeholder="Pick an existing loop asset or paste a URL" />
-                <button type="button" className="btn ghost" onClick={() => setLoopPickerOpen(true)}>Browse…</button>
-              </div>
-              <div className="hintxt">Uploading video loops arrives with Broadcast videos; pick an existing asset for now.</div>
-            </div>
-          )}
-          <ImagePicker open={pickerOpen} kinds={['slate', 'brand', 'other']} title="Choose or upload a slate image"
-            uploadKind="slate" uploadFolder="slates"
-            onClose={() => setPickerOpen(false)} onPick={(url) => { setSlateRef(url); setPickerOpen(false) }} />
-          <ImagePicker open={loopPickerOpen} kinds={['loop', 'clip', 'vod', 'other']} title="Choose a loop video"
-            allowUpload={false} uploadHint="Uploading video loops arrives with Broadcast videos"
-            onClose={() => setLoopPickerOpen(false)} onPick={(url) => { setSlateRef(url); setLoopPickerOpen(false) }} />
 
           <div className="sec-label">Subtitles</div>
           <div className="toggle-row">

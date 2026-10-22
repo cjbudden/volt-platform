@@ -10,6 +10,14 @@ export interface LibraryRow extends VodAssetRow {
   channel_id?: string | null
   event_id?: string | null
   poster_key?: string | null
+  /** square: album cover or station artwork, drawn whole; wide: a video frame (docs/ASSET_IMAGES.md). */
+  poster_shape?: 'wide' | 'square' | null
+  poster_source?: string | null
+  audio_only?: boolean
+  /** The colour key when there is no image (KIND_COLOUR in LibraryCells.tsx). */
+  media_kind?: 'video' | 'audio' | 'music'
+  /** An MP3 file was made for it. */
+  has_mp3?: boolean
   schema_name?: string | null
   schema_key?: string | null
   schema_org_type?: string | null
@@ -60,6 +68,9 @@ export interface EncodeDetails {
   source: { width: number | null; height: number | null; fps: number | null; durationMs: number | null; hasAudio: boolean | null; bytes: number | null; filename: string | null; mime: string | null; origin: string }
   summary: { topHeight: number | null; codec: string | null; renditions: number; label: string }
   gaps: string[]
+  kind?: 'video' | 'audio'
+  audioEncode?: { codec: string; bitrateKbps: number | null; sampleRate: number | null; channels: number | null; source: Prov; note: string | null } | null
+  deliveries?: { format: string; label: string; state: 'ready' | 'making' | 'failed' | 'not_requested'; detail: string | null; key: string | null }[]
 }
 
 export interface EpgCandidate { programmeId: string; title: string; startsAt: string; endsAt: string; overlapMs: number; assetCoverage: number; programmeCoverage: number; linked: boolean }

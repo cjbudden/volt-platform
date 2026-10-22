@@ -233,6 +233,66 @@ export function EncodePanel({ id }: { id: string }) {
   if (err) return <Notice kind="error" variant="compact" title="Couldn't load the encode settings." message={err} />
   if (!e) return <div className="loading">Loading encode settings…</div>
   const Row = ({ k, children }: { k: string; children: React.ReactNode }) => <tr><th scope="row">{k}</th><td>{children}</td></tr>
+  const STATE: Record<string, { t: string; c: string }> = { ready: { t: 'Ready', c: 'ok' }, making: { t: 'Being made', c: 'busy' }, failed: { t: 'Requested, not made', c: 'bad' }, not_requested: { t: 'Not requested', c: 'off' } }
+  const Deliveries = () => e.deliveries?.length ? (
+    <>
+      <div className="sec-label">Deliveries</div>
+      <table className="lib-rend lib-deliv">
+        <thead><tr><th scope="col">Format</th><th scope="col">What it is</th><th scope="col">State</th></tr></thead>
+        <tbody>{e.deliveries.map((d) => (
+          <tr key={d.format} className={d.state === 'not_requested' ? 'off' : ''}>
+            <td>{d.label}</td>
+            <td className="lib-faint">{d.detail ?? '—'}</td>
+            <td><span className={`lib-deliv-st ${STATE[d.state].c}`}>{STATE[d.state].t}</span></td>
+          </tr>))}</tbody>
+      </table>
+    </>
+  ) : null
+
+  // AUDIO (a radio recording, a song, an audio file): what the sound was encoded as and how it is
+  // delivered. No picture, no video renditions.
+  if (e.kind === 'audio') {
+    const ae = e.audioEncode
+    return (
+      <div className="lib-encode">
+        <div className="lib-encode-sum">{LibIcon.audio}<b>{e.summary.label || 'Audio only'}</b></div>
+        <div className="lib-encode-grid">
+          <div>
+            <div className="sec-label">Audio encode <Mark s={ae?.source ?? 'unknown'} /></div>
+            <table className="lib-kv"><tbody>
+              <Row k="Codec">{ae?.codec ?? <NR />}</Row>
+              <Row k="Bitrate">{ae?.bitrateKbps ? `${ae.bitrateKbps} kb/s` : <NR />}</Row>
+              <Row k="Sound">{[ae?.channels === 2 ? 'Stereo' : ae?.channels === 1 ? 'Mono' : ae?.channels ? `${ae.channels} channels` : null, ae?.sampleRate ? `${ae.sampleRate / 1000} kHz` : null].filter(Boolean).join(' · ') || <NR />}</Row>
+              <Row k="Segment duration">{e.segmentSeconds.value != null ? `${e.segmentSeconds.value} s` : <NR />}</Row>
+              <Row k="Container">{e.container.value ?? <NR />}</Row>
+            </tbody></table>
+            {ae?.note && <div className="lib-faint lib-small">{ae.note}</div>}
+          </div>
+          <div>
+            <div className="sec-label">Source</div>
+            <table className="lib-kv"><tbody>
+              <Row k="From">{e.source.origin.replace('the channel or event renditions', 'the station\'s audio')}</Row>
+              {e.source.filename && <Row k="File"><span className="mono">{e.source.filename}</span></Row>}
+              {e.source.durationMs != null && <Row k="Length">{Math.floor(e.source.durationMs / 60000)}:{String(Math.round(e.source.durationMs / 1000) % 60).padStart(2, '0')}</Row>}
+              {e.source.bytes != null && <Row k="Size">{(e.source.bytes / 1e6).toFixed(1)} MB</Row>}
+            </tbody></table>
+          </div>
+        </div>
+        <Deliveries />
+        {e.captions.value.length > 0 && (<>
+          <div className="sec-label">Transcripts and subtitles</div>
+          <ul className="lib-tracks">{e.captions.value.map((c, i) => <li key={i}>{c.kind === 'captions' ? 'Transcript' : 'Subtitles'} · <span className="mono">{c.language}</span> · {c.source}</li>)}</ul>
+        </>)}
+        {e.gaps.length > 0 && (
+          <details className="lib-gaps">
+            <summary>{LibIcon.alert}What is not recorded ({e.gaps.length})</summary>
+            <ul>{e.gaps.map((g, i) => <li key={i}>{g}</li>)}</ul>
+          </details>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="lib-encode">
       <div className="lib-encode-sum">{LibIcon.encode}<b>{e.summary.label || 'Encode not known'}</b></div>
@@ -277,6 +337,7 @@ export function EncodePanel({ id }: { id: string }) {
         </table>
       ) : <NR />}
       {e.dropped.length > 0 && <div className="lib-faint lib-small">Not encoded: {e.dropped.map((d) => `${d.height}p (${d.why})`).join(', ')}.</div>}
+      <Deliveries />
       <div className="lib-encode-grid">
         <div>
           <div className="sec-label">Audio tracks <Mark s={e.audio.source} /></div>

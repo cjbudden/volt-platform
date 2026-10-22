@@ -23,6 +23,7 @@
 //  embed is exactly the kind of component that gets audited.
 // ============================================================================
 import type { Layout, LayoutContext, LayoutState } from '../types';
+import { listenEl, setListen, LISTEN_CSS } from './listen';
 
 let seq = 0;
 
@@ -35,6 +36,7 @@ export function cardLayout(): Layout {
   let primary: HTMLElement;
   let secondary: HTMLElement;
   let meta: HTMLElement;
+  let listen: HTMLAnchorElement;
   let btn: HTMLButtonElement;
   let status: HTMLElement;
   let vol: HTMLInputElement;
@@ -68,7 +70,8 @@ export function cardLayout(): Layout {
       primary = el('div', 'vp-primary');
       secondary = el('div', 'vp-secondary');
       meta = el('div', 'vp-meta');
-      text.append(primary, secondary, meta);
+      listen = listenEl();
+      text.append(primary, secondary, meta, listen);
 
       const controls = el('div', 'vp-controls');
       btn = document.createElement('button');
@@ -112,6 +115,7 @@ export function cardLayout(): Layout {
       const bits = [np?.album, np?.year ? String(np.year) : null].filter(Boolean);
       meta.textContent = bits.join(' · ');
       meta.style.display = bits.length ? '' : 'none';
+      setListen(listen, np);
 
       const url = np?.artworkUrl ?? ctx.station.artworkUrl ?? null;
       if (url && art.getAttribute('src') !== url) { art.style.opacity = '1'; art.src = url; }
@@ -203,5 +207,6 @@ function css(cls: string): string {
 @media (prefers-reduced-motion: reduce) {
   .${cls} .vp-art img { transition: none; }
 }
+${LISTEN_CSS(`.${cls}`)}
 `;
 }

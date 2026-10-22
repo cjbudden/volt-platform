@@ -1477,6 +1477,15 @@
  },
  {
   "method": "GET",
+  "path": "/api/events/:id/detail",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: view",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "GET",
   "path": "/api/events/:id/filler",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -1895,6 +1904,24 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "POST",
+  "path": "/api/filler-assets/copy-from-library",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "GET",
+  "path": "/api/filler-assets/elsewhere",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
   "viewerTier": false,
   "group": "/api/filler-assets"
  },
@@ -5122,6 +5149,42 @@
  },
  {
   "method": "GET",
+  "path": "/api/vod/:id/history",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/:id/image",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/vod/:id/image",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/image/auto",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
   "path": "/api/vod/:id/markers",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -5220,6 +5283,33 @@
   "group": "/api/vod"
  },
  {
+  "method": "DELETE",
+  "path": "/api/vod/:id/song/details",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/song/find",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/song/use",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
   "method": "GET",
   "path": "/api/vod/:id/target-metadata",
   "api": "admin",
@@ -5261,6 +5351,15 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/music-lookup",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
   "viewerTier": false,
   "group": "/api/vod"
  },

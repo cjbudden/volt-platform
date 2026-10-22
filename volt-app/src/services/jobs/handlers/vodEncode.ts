@@ -251,6 +251,17 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
   );
 
   fireHook('vod.encoded', 'vod_asset', p.vodAssetId, { renditions: fit.kept.length });
+  // While the source is on disk: candidate stills to pick the asset's image
+  // from (services/media/assetImage.ts) and the sprite sheets for hover
+  // previews (services/thumbnails/fileSprites.ts). Never fails the encode.
+  try {
+    await ctx.progress(98, 'choosing a thumbnail');
+    const { extractFrames } = await import('../../media/assetImage');
+    await extractFrames(p.vodAssetId, p.accountId, p.sourcePath, probe.durationMs ?? null);
+    await ctx.progress(99, 'building the sprite sheets');
+    await (await import('../../thumbnails/fileSprites')).buildFileSprites(p.vodAssetId, p.accountId, p.sourcePath, probe.durationMs ?? null);
+    await (await import('./vodImage')).queueAssetImage(p.vodAssetId);
+  } catch (e) { console.error(`[vod.encode] ${p.vodAssetId}: no thumbnail candidates:`, e); }
   // Skip markers: the intro and credits, against the other episodes of its series.
   await (await import('./vodMarkers')).queueMarkerDetection(p.vodAssetId);
 

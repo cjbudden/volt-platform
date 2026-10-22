@@ -869,8 +869,10 @@ function AirTab({ channelId, hasActive, onAirChange }: { channelId: string; hasA
             <div className="t">{onAir ? 'Public' : 'Private'}</div>
             <div className="d">{onAir ? 'Viewers can play the channel from its public URL and the player.' : 'Only the console can preview it. Turn it on to give viewers the channel.'}</div>
           </div>
-          <div className={`switch${onAir ? '' : ' off'}`} role="switch" aria-checked={onAir} aria-label="Public" aria-disabled={!!busy}
-            {...pressable(() => { if (!busy) toggle() })}><i /></div>
+          {/* The spread first, so this control's own switch semantics win over
+              pressable's generic button role and label. */}
+          <div {...pressable(() => { if (!busy) toggle() })}
+            className={`switch${onAir ? '' : ' off'}`} role="switch" aria-checked={onAir} aria-label="Public" aria-disabled={!!busy}><i /></div>
         </div>
       </div>
 

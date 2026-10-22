@@ -8,6 +8,7 @@ import { registerClipHandlers } from './services/jobs/handlers/clipExtract';
 import { registerQcHandlers } from './services/jobs/handlers/qcRun';
 import { registerVodEncodeHandlers } from './services/jobs/handlers/vodEncode';
 import { registerVodMarkerHandlers } from './services/jobs/handlers/vodMarkers';
+import { registerVodImageHandlers, startAssetImageSweep } from './services/jobs/handlers/vodImage';
 import { registerFillerHandlers } from './services/fillerPrep';
 import { registerRemoteIngestHandlers } from './services/jobs/handlers/remoteIngest';
 import { backfillContainers } from './services/containers';
@@ -180,6 +181,8 @@ boot().then(async () => {
       const stopMetrics = startMetrics();
       // Graphics: feed polling, timed take-offs, rundown cues (services/graphics/runtime.ts).
       const stopGraphics = startGraphicsRuntime();
+      // Asset images: queue a pick for every asset that has none yet (services/media/assetImage.ts).
+      startAssetImageSweep();
       return () => { stopSched(); stopPrewarm(); stopMetrics(); stopGraphics(); };
     });
     setLeaderCheck(() => !!leadership?.isLeader());
@@ -192,6 +195,8 @@ boot().then(async () => {
     registerVodEncodeHandlers();
     (await import('./services/jobs/handlers/adCondition')).registerAdConditionHandlers();
     registerVodMarkerHandlers();
+    registerVodImageHandlers();
+    (await import('./services/jobs/handlers/songArtwork')).registerSongArtworkHandlers();
     registerRemoteIngestHandlers();
     (await import('./services/workflows/runs')).registerAddonHandlers();
     await registerFillerHandlers();

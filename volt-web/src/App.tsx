@@ -31,6 +31,7 @@ import PlayerSetup from './pages/PlayerSetup'
 import DashboardPage from './pages/Dashboard'
 import MultiviewPage from './pages/Multiview'
 import Events from './pages/Events'
+import EventDetail from './pages/EventDetail'
 import Epg from './pages/Epg'
 import EpgDetail from './pages/EpgDetail'
 import FastPage from './pages/Fast'
@@ -47,6 +48,7 @@ import { useRoute, navigate, hrefFor } from './router'
 import { pressable, openable } from './a11y'
 import { resetLiveBackoff } from './liveStatus'
 import { UploadIndicator } from './uploads'
+import { OnAirButton } from './OnAir'
 import { DocsButton } from './docsLink'
 import { IngestQueue } from './IngestQueue'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -115,8 +117,8 @@ const NAV: NavGroup[] = [
     { key: 'dashboard', label: 'Dashboard', icon: I.dash },
     { key: 'live', label: 'Live Streams', icon: I.live },
     { key: 'monitoring', label: 'Monitoring', icon: I.monitor },
-    { key: 'fleet', label: 'Fleet & Usage', icon: I.fleet },
-    { key: 'workflows', label: 'Workflows', icon: I.workflows },
+    { key: 'multiview', label: 'Multiview', icon: I.multiview },
+    { key: 'analytics', label: 'Analytics', icon: I.analytics },
   ] },
   { group: 'Broadcast', items: [
     { key: 'channels', label: 'Channels', icon: I.channels },
@@ -128,20 +130,52 @@ const NAV: NavGroup[] = [
     { key: 'graphics', label: 'Graphics', icon: I.graphics },
   ] },
   { group: 'Media', items: [
-    { key: 'recordings', label: 'Recordings', icon: I.rec },
     { key: 'vod', label: 'Media Library', icon: I.vod },
+    { key: 'recordings', label: 'Recordings', icon: I.rec },
     { key: 'images', label: 'Image Library', icon: I.images },
-    { key: 'multiview', label: 'Multiview', icon: I.multiview },
     { key: 'review', label: 'Review', icon: I.review },
-    { key: 'watchfolders', label: 'Watchfolders', icon: I.storage },
-    { key: 'encoding', label: 'Encoding Profiles', icon: I.fleet },
-    { key: 'storage', label: 'Storage', icon: I.storage },
-  ] },
-  { group: 'Insight', items: [
-    { key: 'analytics', label: 'Analytics', icon: I.analytics },
-    { key: 'audit', label: 'Audit log', icon: I.shield },
   ] },
 ]
+
+// THE ADMIN AREA (nav restructure, 22 Oct 2026). Setup and account pages left
+// the daily rail: operators were scrolling past twenty of them to reach their
+// channels. Same URLs as before, so every deep link and bookmark still works;
+// landing on one of these simply shows the Admin rail with a way back.
+const ADMIN_NAV: NavGroup[] = [
+  { group: 'Media setup', items: [
+    { key: 'encoding', label: 'Encoding Profiles', icon: I.fleet },
+    { key: 'watchfolders', label: 'Watchfolders', icon: I.storage },
+    { key: 'storage', label: 'Storage', icon: I.storage },
+    { key: 'workflows', label: 'Workflows', icon: I.workflows },
+    { key: 'content-types', label: 'Content Types', icon: I.epg },
+    { key: 'publishing', label: 'Publishing Rules', icon: I.vod },
+    { key: 'ingest', label: 'Ingest Rules', icon: I.vod },
+    { key: 'groups', label: 'Channel Groups', icon: I.channels },
+  ] },
+  { group: 'Account', items: [
+    { key: 'account-settings', label: 'Account settings', icon: I.palette },
+    { key: 'plan', label: 'Plan & limits', icon: I.fleet },
+    { key: 'fleet', label: 'Fleet & Usage', icon: I.fleet },
+    { key: 'payments', label: 'Payments', icon: I.fleet },
+    { key: 'social', label: 'Social accounts', icon: I.vod },
+    { key: 'notifications', label: 'Notifications', icon: I.bell },
+  ] },
+  { group: 'Access', items: [
+    { key: 'users', label: 'Users & Roles', icon: I.users },
+    { key: 'permissions', label: 'Permissions map', icon: I.shield },
+    { key: 'apikeys', label: 'API Keys & Apps', icon: I.key },
+    { key: 'audit', label: 'Audit log', icon: I.shield },
+  ] },
+  { group: 'Platform', items: [
+    { key: 'system', label: 'System Admin', icon: I.shield },
+  ] },
+]
+const ADMIN_KEYS = new Set(ADMIN_NAV.flatMap(g => g.items.map(i => i.key)))
+/** Where "Back" goes from the Admin area: the last daily page, this tab only. */
+const LAST_DAILY_KEY = 'volt.nav.lastDaily'
+const LAST_ADMIN_KEY = 'volt.nav.lastAdmin'
+function readNav(k: string): string | null { try { return sessionStorage.getItem(k) } catch { return null } }
+function writeNav(k: string, v: string) { try { sessionStorage.setItem(k, v) } catch { /* private mode: Back falls back to Dashboard */ } }
 
 export default function App() {
   const [authed, setAuthed] = useState(false)
@@ -207,7 +241,7 @@ export default function App() {
   const who = me?.displayName?.trim() || me?.email || email
   const initials = (who.includes('@') ? who.split('@')[0] : who).split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '·'
   const EXTRA_LABEL: Record<string, string> = { plan: 'Plan & limits', 'account-settings': 'Account settings', permissions: 'Permissions map', 'ui-samples': 'Notices and errors: samples', account: 'My account', groups: 'Channel Groups', apikeys: 'API Keys & Apps', users: 'Users & Roles', system: 'System Admin', 'content-types': 'Content Types', publishing: 'Publishing Rules', ingest: 'Ingest Rules', payments: 'Payments', notifications: 'Notifications', social: 'Social accounts' }
-  const label = NAV.flatMap(g => g.items).find(i => i.key === section)?.label
+  const label = [...NAV, ...ADMIN_NAV].flatMap(g => g.items).find(i => i.key === section)?.label
     || EXTRA_LABEL[section]
     || (section ? section.charAt(0).toUpperCase() + section.slice(1) : 'Channels')
 
@@ -299,37 +333,54 @@ export default function App() {
     const f = NAV_FEATURE[key]
     return f ? access.can(f, 'view') : false
   }
-  const ADMIN_ITEMS: NavItem[] = [
-    { key: 'account-settings', label: 'Account settings', icon: I.palette },
-    { key: 'plan', label: 'Plan & limits', icon: I.fleet },
-    { key: 'groups', label: 'Channel Groups', icon: I.channels },
-    { key: 'content-types', label: 'Content Types', icon: I.epg },
-    { key: 'publishing', label: 'Publishing Rules', icon: I.vod },
-    { key: 'ingest', label: 'Ingest Rules', icon: I.vod },
-    { key: 'payments', label: 'Payments', icon: I.fleet },
-    { key: 'social', label: 'Social accounts', icon: I.vod },
-    { key: 'notifications', label: 'Notifications', icon: I.bell },
-    { key: 'apikeys', label: 'API Keys & Apps', icon: I.key },
-    { key: 'users', label: 'Users & Roles', icon: I.users },
-    { key: 'permissions', label: 'Permissions map', icon: I.shield },
-  ]
-  const nav: NavGroup[] = [
-    ...NAV.map(g => ({ ...g, items: g.items.filter(it => sectionAllowed(it.key)) }))
-      .filter(g => g.items.length > 0),
-    ...[{ group: 'Admin', items: ADMIN_ITEMS.filter(it => sectionAllowed(it.key)) }].filter(g => g.items.length > 0),
-    ...(me?.platformRole ? [{ group: 'System', items: [
-      { key: 'system', label: 'System Admin', icon: I.shield },
-    ] }] : []),
-  ]
+  const nav: NavGroup[] = NAV.map(g => ({ ...g, items: g.items.filter(it => sectionAllowed(it.key)) }))
+    .filter(g => g.items.length > 0)
+  const adminNav: NavGroup[] = ADMIN_NAV.map(g => ({ ...g, items: g.items.filter(it => sectionAllowed(it.key)) }))
+    .filter(g => g.items.length > 0)
+  const adminItems = adminNav.flatMap(g => g.items)
+  // Notifications is everyone's own inbox and the bell already opens it, so it
+  // alone does not earn somebody an Admin entry.
+  const showAdminEntry = adminItems.some(i => i.key !== 'notifications')
+  const inAdmin = ADMIN_KEYS.has(section)
+  // Remember both sides so the Admin entry and Back each return to the page
+  // you left, not to the top of the other area.
+  useEffect(() => {
+    if (!section) return
+    writeNav(inAdmin ? LAST_ADMIN_KEY : LAST_DAILY_KEY, window.location.pathname + window.location.search)
+  }, [route.path, section, inAdmin])
+  const lastAdmin = readNav(LAST_ADMIN_KEY)
+  const adminHref = lastAdmin && adminItems.some(i => lastAdmin.startsWith('/' + i.key)) ? lastAdmin
+    : adminItems[0] ? hrefFor({ section: adminItems[0].key }) : '/account-settings'
+  const backHref = readNav(LAST_DAILY_KEY) || (nav[0]?.items[0] ? hrefFor({ section: nav[0].items[0].key }) : '/dashboard')
+  const backLabel = (() => {
+    const k = backHref.replace(/^\/+/, '').split(/[/?]/)[0] || 'channels'
+    return NAV.flatMap(g => g.items).find(i => i.key === k)?.label || 'console'
+  })()
+  // Pages the ⌘K box can jump to, in the role's own nav.
+  const jumpPages = [...nav, ...adminNav].flatMap(g => g.items.map(i => ({ key: i.key, label: i.label, area: inAdminLabel(g.group) })))
+  function inAdminLabel(group: string) { return ADMIN_NAV.some(a => a.group === group) ? `Admin · ${group}` : group }
   // A deep link to a section the role does not include gets a clear answer
   // rather than a page of failed requests.
   const blocked = !!me && !!section && !sectionAllowed(section)
   // Landing on "/" (Channels) with a role that has no TV: go to the first
   // section the role does include instead of a "no access" page.
-  const firstAllowed = nav[0]?.items[0]?.key
+  const firstAllowed = nav[0]?.items[0]?.key ?? adminItems[0]?.key
   useEffect(() => {
     if (blocked && window.location.pathname === '/' && firstAllowed) navigate('/' + firstAllowed, { replace: true })
   }, [blocked, firstAllowed])
+
+  const navLink = (it: NavItem) => {
+    const href = hrefFor({ section: it.key })
+    return (
+      <a key={it.key} href={href} className={`nav-item ${section === it.key ? 'active' : ''}`}
+        style={{ textDecoration: 'none', color: 'inherit' }}
+        aria-current={section === it.key ? 'page' : undefined}
+        onClick={e => { if (e.metaKey || e.ctrlKey || e.button === 1) return; e.preventDefault(); navigate(href) }}>
+        {it.icon}{it.label}{it.badge && <span className="badge live">{it.badge}</span>}
+      </a>
+    )
+  }
+  const plainNav = (to: string) => (e: React.MouseEvent) => { if (e.metaKey || e.ctrlKey || e.button === 1) return; e.preventDefault(); navigate(to) }
 
   if (!authed) {
     return (
@@ -380,25 +431,43 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="logo">{BOLT}</div>
-          <div><div className="n">Volt Streaming</div><div className="s">Live streaming platform</div></div>
+          <div><div className="n">Volt Streaming</div>{inAdmin ? <span className="area-tag">ADMIN</span> : <div className="s">Live streaming platform</div>}</div>
         </div>
-        <nav className="nav">
-          {nav.map(g => (
-            <div key={g.group}>
-              <div className="nav-group">{g.group}</div>
-              {g.items.map(it => {
-                const href = hrefFor({ section: it.key })
-                return (
-                  <a key={it.key} href={href} className={`nav-item ${section === it.key ? 'active' : ''}`}
-                    style={{ textDecoration: 'none', color: 'inherit' }}
-                    onClick={e => { if (e.metaKey || e.ctrlKey || e.button === 1) return; e.preventDefault(); navigate(href) }}>
-                    {it.icon}{it.label}{it.badge && <span className="badge live">{it.badge}</span>}
-                  </a>
-                )
-              })}
-            </div>
-          ))}
-        </nav>
+        {inAdmin ? (
+          <nav className="nav" aria-label="Admin">
+            <a className="nav-back" href={backHref} onClick={plainNav(backHref)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+              Back to {backLabel}
+            </a>
+            {adminNav.map(g => (
+              <div key={g.group}>
+                <div className="nav-group">{g.group}</div>
+                {g.items.map(navLink)}
+              </div>
+            ))}
+          </nav>
+        ) : (
+          <>
+            <nav className="nav" aria-label="Main">
+              {nav.map(g => (
+                <div key={g.group}>
+                  <div className="nav-group">{g.group}</div>
+                  {g.items.map(navLink)}
+                </div>
+              ))}
+            </nav>
+            {showAdminEntry && (
+              <div className="nav-admin">
+                <a className="nav-item" href={adminHref} onClick={plainNav(adminHref)}
+                  style={{ textDecoration: 'none', color: 'inherit' }}
+                  title="Setup, account, users and access">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" /></svg>
+                  Admin<span className="badge">{adminItems.length} →</span>
+                </a>
+              </div>
+            )}
+          </>
+        )}
         <a className="side-foot" href="/account" title="My account: profile, email, password and two-step sign-in"
           style={{ textDecoration: 'none', color: 'inherit' }}
           onClick={e => { if (e.metaKey || e.ctrlKey || e.button === 1) return; e.preventDefault(); navigate('/account') }}>
@@ -414,8 +483,9 @@ export default function App() {
         <div className="topbar">
           {/* THE TOP BAR IS FOR GLOBAL ACTIONS ONLY: search, uploads, notices, New
               Stream, sign out. The page names itself in its own title. */}
-          <GlobalSearch />
+          <GlobalSearch pages={jumpPages} />
           <div className="top-actions">
+            {access.can('monitoring', 'view') && <OnAirButton />}
             <UploadIndicator />
             <NotificationBell canManage={isAdmin} />
             {/* NEW STREAM asks which kind first (NewStreamChooser), then opens that form. */}
@@ -498,7 +568,7 @@ export default function App() {
             : section === 'multiview'
             ? <MultiviewPage />
             : section === 'events'
-            ? <Events />
+            ? (route.eventId ? <EventDetail key={route.eventId} id={route.eventId} onBack={() => navigate('/events')} /> : <Events />)
             : section === 'fast'
             ? <FastPage path={route.path} />
             : section === 'epg'
@@ -573,8 +643,22 @@ function Placeholder({ title }: { title: string }) {
 
 /* Site-wide search (top panel): account-scoped match across channels, events and
    recordings, with a results dropdown that navigates on click. Debounced. */
-function GlobalSearch() {
+function GlobalSearch({ pages = [] }: { pages?: { key: string; label: string; area: string }[] }) {
   const [q, setQ] = useState('')
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  // ⌘K / Ctrl+K from anywhere puts you in the box.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); inputRef.current?.focus(); inputRef.current?.select(); setOpen(true) }
+      if (e.key === 'Escape' && document.activeElement === inputRef.current) { setOpen(false); inputRef.current?.blur() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  // Page jumps match locally and instantly; the server search adds the records.
+  const needle = q.trim().toLowerCase()
+  const pageHits = needle ? pages.filter(p => p.label.toLowerCase().includes(needle)).slice(0, 5) : []
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
   const [hits, setHits] = useState<SearchHit[] | null>(null)
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement | null>(null)
@@ -591,6 +675,7 @@ function GlobalSearch() {
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
   function go(h: SearchHit) { setOpen(false); setQ(''); setHits(null); navigate(h.href) }
+  function goPage(key: string) { setOpen(false); setQ(''); setHits(null); inputRef.current?.blur(); navigate(hrefFor({ section: key })) }
   // WHAT THE THING IS, and the label has to be right because the row is also a
   // LINK. A radio station used to come back labelled "Channel" and href'd to
   // /channels/<id>, so searching for a station opened the television control
@@ -611,12 +696,22 @@ function GlobalSearch() {
   return (
     <div className="search" ref={boxRef} style={{ position: 'relative' }}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4-4" /></svg>
-      <input placeholder="Search channels, stations, events, recordings…" value={q}
-        onChange={e => { setQ(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)} />
+      <input ref={inputRef} placeholder="Search or jump to a page…" value={q} aria-label="Search channels, stations, events, recordings, or jump to a page"
+        onChange={e => { setQ(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)}
+        onKeyDown={e => { if (e.key === 'Enter' && pageHits.length && (!hits || hits.length === 0)) goPage(pageHits[0].key) }} />
+      {!q && <span className="kbd">{isMac ? '⌘K' : 'Ctrl K'}</span>}
       {open && q.trim() && (
         <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 10, boxShadow: '0 10px 30px rgba(0,0,0,.45)', zIndex: 70, overflow: 'hidden', maxHeight: 360, overflowY: 'auto' }}>
+          {pageHits.map(p => (
+            <div key={'page:' + p.key} {...openable(() => goPage(p.key), p.label)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer', borderTop: '1px solid var(--border)' }}
+              onMouseDown={e => e.preventDefault()}>
+              <span style={{ fontSize: 'var(--fs-micro)', fontWeight: 700, color: 'var(--muted)', width: 68, flex: 'none', textTransform: 'uppercase' }}>Page</span>
+              <span style={{ flex: 1 }}>{p.label}</span>
+              <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>{p.area}</span>
+            </div>
+          ))}
           {hits === null ? <div style={{ padding: '10px 12px', color: 'var(--faint)', fontSize: 'var(--fs-body)' }}>Searching…</div>
-            : hits.length === 0 ? <div style={{ padding: '10px 12px', color: 'var(--faint)', fontSize: 'var(--fs-body)' }}>No matches for “{q.trim()}”.</div>
+            : hits.length === 0 ? (pageHits.length ? null : <div style={{ padding: '10px 12px', color: 'var(--faint)', fontSize: 'var(--fs-body)' }}>No matches for “{q.trim()}”.</div>)
             : hits.map(h => (
               <div key={h.kind + h.id} {...openable(() => go(h), h.name)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer', borderTop: '1px solid var(--border)' }}
                 onMouseDown={e => e.preventDefault()}>

@@ -1,6 +1,6 @@
 // Small pieces shared by the grid cards and the table: the keyscreen, the
 // availability pill, the metadata completeness meter and the encode summary.
-import { useState } from 'react'
+import { useState, type ReactElement } from 'react'
 import { thumbUrl } from '../../api'
 import { LibIcon } from './icons'
 import { codecLabel, resLabel } from './libraryQuery'
@@ -15,20 +15,50 @@ export function fmtDur(ms: number | string | null | undefined) {
 
 /** The keyscreen through the image service, sized for where it is shown. Lazy. */
 export function posterSrc(r: LibraryRow, w: number, h: number): string | null {
-  if (r.poster_key) return thumbUrl(`/${String(r.poster_key).replace(/^\/+/, '')}`, w, h)
+  if (r.poster_key) return thumbUrl(`/${String(r.poster_key).replace(/^\/+/, '')}`, w, h, r.poster_shape === 'square' ? 'inside' : 'cover')
   const m = r.metadata ?? {}
   const img = m.image ?? m.thumbnail ?? m.artwork ?? null
   return typeof img === 'string' && /^(https?:)?\//.test(img) ? (img.startsWith('/library/') ? thumbUrl(img, w, h) : img) : null
 }
 
+/**
+ * THE COLOUR KEY: an asset with no image yet is filled with its kind's colour,
+ * so a grid of placeholders still reads at a glance (legend: KindLegend).
+ */
+export type MediaKind = 'video' | 'audio' | 'music'
+export const KIND_LABEL: Record<MediaKind, string> = { video: 'Video', audio: 'Audio', music: 'Song' }
+export const KIND_ICON: Record<MediaKind, ReactElement> = { video: LibIcon.media, audio: LibIcon.wave, music: LibIcon.audio }
+/** What the asset is, top right of the card: Video, Audio, or Song (audio that is a song). */
+export function KindBadge({ row }: { row: LibraryRow }) {
+  const k = kindOf(row)
+  return <span className={`lib-badge lib-badge-kind kind-${k}`} title={KIND_LABEL[k]}>{KIND_ICON[k]}{KIND_LABEL[k]}</span>
+}
+export const kindOf = (r: LibraryRow): MediaKind => r.media_kind ?? (r.audio_only ? 'audio' : 'video')
+export function KindLegend() {
+  return (
+    <div className="lib-kind-legend" aria-label="Colour key for assets without an image">
+      <span className="lib-faint">No image yet:</span>
+      {(['video', 'audio', 'music'] as MediaKind[]).map((k) => <span key={k} className="lib-kind-key"><i className={`kind-${k}`} />{KIND_LABEL[k]}</span>)}
+    </div>
+  )
+}
+
+/**
+ * Square artwork (an album cover, a station's logo) is drawn whole in the
+ * middle of the 16:9 frame over a blurred, dimmed copy of itself, so a grid
+ * of radio and video assets keeps one card shape and no cover is cropped.
+ */
 export function Keyscreen({ row, w, h, className }: { row: LibraryRow; w: number; h: number; className?: string }) {
-  const src = posterSrc(row, w, h)
+  const square = row.poster_shape === 'square'
+  const src = posterSrc(row, square ? h : w, h)
   const [broken, setBroken] = useState(false)
   return (
-    <div className={`lib-thumb ${className ?? ''}`}>
-      {src && !broken
-        ? <img src={src} alt="" loading="lazy" decoding="async" width={w} height={h} onError={() => setBroken(true)} />
-        : <span className="lib-thumb-ph" aria-hidden="true">{LibIcon.media}</span>}
+    <div className={`lib-thumb ${square ? 'square' : ''} ${className ?? ''}`}>
+      {src && !broken ? (square ? <>
+          <img className="lib-thumb-bg" src={src} alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <img className="lib-thumb-sq" src={src} alt="" loading="lazy" decoding="async" width={h} height={h} onError={() => setBroken(true)} />
+        </> : <img src={src} alt="" loading="lazy" decoding="async" width={w} height={h} onError={() => setBroken(true)} />)
+        : <span className={`lib-thumb-ph kind-${kindOf(row)}`} aria-hidden="true">{KIND_ICON[kindOf(row)]}<span className="lib-thumb-ph-t">{KIND_LABEL[kindOf(row)]}</span></span>}
     </div>
   )
 }
@@ -73,6 +103,8 @@ export function EncodeSummary({ row }: { row: LibraryRow }) {
     return <span className="lib-enc busy">{LibIcon.clock}{row.encode_state === 'queued' ? 'Queued to encode' : `Encoding ${row.encode_pct ?? 0}%`}</span>
   }
   if (row.encode_state === 'failed') return <span className="lib-enc bad">{LibIcon.alert}Encode failed</span>
+  // Audio has no picture to describe: say so (the Encode tab has the bitrate and the deliveries).
+  if (kindOf(row) !== 'video' && !row.top_height) return <span className="lib-enc">{LibIcon.audio}Audio only{row.has_mp3 ? ' · MP3' : ''}</span>
   const parts = [resLabel(row.top_height), codecLabel(row.video_codec), row.rendition_count ? `${row.rendition_count} renditions` : ''].filter(Boolean)
   if (!parts.length) return <span className="lib-enc none">Encode not known</span>
   return <span className="lib-enc">{LibIcon.encode}{parts.join(' · ')}</span>

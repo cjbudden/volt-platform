@@ -9,7 +9,8 @@
 import { one, query } from '../db';
 import type { ImageFacts } from './images/metadata';
 
-export type MediaSource = 'upload' | 'watchfolder' | 'encoder';
+/** auto: chosen or fetched by Volt for an asset (posters, album covers, imported station icons). */
+export type MediaSource = 'upload' | 'watchfolder' | 'encoder' | 'auto';
 
 export interface MediaRowInput {
   accountId: string;

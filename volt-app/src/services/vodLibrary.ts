@@ -192,6 +192,22 @@ export interface EncodeDetails {
   source: { width: number | null; height: number | null; fps: number | null; durationMs: number | null; hasAudio: boolean | null; bytes: number | null; filename: string | null; mime: string | null; origin: string };
   summary: { topHeight: number | null; codec: string | null; renditions: number; label: string };
   gaps: string[];
+  /** Video, or audio (a radio recording, an audio file): the Encode tab shows each its own way. */
+  kind: 'video' | 'audio';
+  /** Audio only: how the sound was encoded for streaming (one rendition; radio is single bitrate). */
+  audioEncode: { codec: string; bitrateKbps: number | null; sampleRate: number | null; channels: number | null; source: Prov; note: string | null } | null;
+  /** Every way the asset is delivered, and whether each was asked for and made. */
+  deliveries: Delivery[];
+}
+
+export interface Delivery {
+  format: 'hls' | 'dash' | 'mp4' | 'mp3' | 'm4a';
+  label: string;
+  /** ready: there; making: requested, being made; failed: requested, not made; not_requested. */
+  state: 'ready' | 'making' | 'failed' | 'not_requested';
+  /** What it is: "audio-only manifest referencing the recording's segments", "progressive file". */
+  detail: string | null;
+  key: string | null;
 }
 
 export interface EncodeContext {
@@ -203,6 +219,12 @@ export interface EncodeContext {
     segment_dur?: number | string | null; drm_enabled?: boolean | null; drm_systems?: string[] | null;
     captions_enabled?: boolean | null; caption_source_lang?: string | null; caption_targets?: string[] | null;
   } | null;
+  /** The station's audio encoder settings (channels.radio_config) for a radio recording. */
+  radioConfig?: { bitrateKbps?: number | null; transcode?: boolean | null; outputs?: Record<string, boolean> } | null;
+  /** The source stream is audio only (a radio station), as the asset page decides it. */
+  audioOnly?: boolean;
+  /** The latest extract job for the asset: the formats asked for, and how it went. */
+  extract?: { formats: string[]; state: string } | null;
 }
 
 const num = (v: unknown): number | null => { const n = Number(v); return v == null || v === '' || !Number.isFinite(n) ? null : n; };
@@ -290,6 +312,39 @@ export function encodeDetails(a: Record<string, any>, ctx: EncodeContext = {}): 
     : fromFile ? { value: [] as string[], source: 'derived' as Prov } : { value: [] as string[], source: 'unknown' as Prov };
   if (fromFile) gaps.push('DRM is not applied to file encodes today; they are packaged in the clear.');
 
+  // ---- what kind, and how it is delivered
+  const audioKind = !!ctx.audioOnly || er?.probe?.hasVideo === false
+    || (!!(a.export_mp3_key || a.export_m4a_key) && !a.top_height && !a.progressive_key && !er?.kept?.length);
+  const asked = new Set((ctx.extract?.formats ?? []).map(String));
+  const xs = ctx.extract?.state ?? null;
+  const fromRec = !fromFile;
+  const deliv = (format: Delivery['format'], label: string, have: boolean, wanted: boolean, detail: string | null, key: string | null): Delivery => ({
+    format, label, detail, key: have ? key : null,
+    state: have ? 'ready' : wanted ? (xs === 'failed' || xs === 'dead' ? 'failed' : 'making') : 'not_requested',
+  });
+  const deliveries: Delivery[] = [];
+  const av = audioKind ? ' (audio only)' : '';
+  deliveries.push(deliv('hls', `HLS${av}`, !!a.master_key, !!fmts?.hls || asked.has('hls'),
+    a.master_key ? (fromRec ? "manifest referencing the recording's segments" : 'packaged renditions') : null, a.master_key ?? null));
+  const dashKey = a.master_key && /master\.m3u8$/.test(a.master_key) ? a.master_key.replace(/master\.m3u8$/, 'manifest.mpd') : null;
+  deliveries.push(deliv('dash', `DASH${av}`, !!fmts?.dash && !!a.master_key, !!fmts?.dash,
+    fmts?.dash ? (fromRec ? "manifest referencing the recording's segments" : 'packaged renditions') : null, dashKey));
+  if (!audioKind) deliveries.push(deliv('mp4', 'MP4 (progressive)', !!a.progressive_key, !!fmts?.progressive || asked.has('mp4'), 'one file, for download and social', a.progressive_key ?? null));
+  deliveries.push(deliv('mp3', 'MP3 (progressive)', !!a.export_mp3_key, asked.has('mp3'), audioKind ? 'one file, for download and podcasts' : 'the sound only, one file', a.export_mp3_key ?? null));
+  deliveries.push(deliv('m4a', 'AAC .m4a (progressive)', !!a.export_m4a_key, asked.has('m4a'), 'one file, for download', a.export_m4a_key ?? null));
+
+  // ---- audio-only encode: one AAC rendition (radio is single bitrate; files take the encoder contract)
+  let audioEncode: EncodeDetails['audioEncode'] = null;
+  if (audioKind) {
+    const rc = ctx.radioConfig ?? null;
+    const kb = num(rc?.bitrateKbps) ?? num(er?.probe?.audioBitrateKbps);
+    audioEncode = fromRec
+      ? { codec: 'AAC (HLS, DASH)', bitrateKbps: kb ?? 128, sampleRate: 48000, channels: 2, source: kb != null ? 'stored' : 'derived',
+          note: rc?.transcode === false ? 'The station\'s MP3 stream is passed through; HLS and DASH always carry AAC.' : null }
+      : { codec: 'AAC', bitrateKbps: 128, sampleRate: 48000, channels: 2, source: 'derived', note: null };
+    if (audioEncode.source === 'derived') gaps.push('The audio bitrate is not recorded for this asset; shown from the encoder default (AAC 128 kb/s stereo).');
+  }
+
   const top = renditions[0] ?? null;
   const topHeight = top?.height ?? num(a.top_height);
   const codec = top?.codec ?? codecLabel(a.video_codec);
@@ -310,7 +365,13 @@ export function encodeDetails(a: Record<string, any>, ctx: EncodeContext = {}): 
       hasAudio: hasAudio ?? null, bytes: num(a.source_bytes), filename: a.original_filename ?? null, mime: a.mime ?? null,
       origin: fromFile ? (a.source_kind === 'watchfolder' ? 'Watch folder file' : 'Uploaded file') : 'Live recording (the channel or event renditions)',
     },
-    summary: { topHeight: topHeight ?? null, codec: codec ?? null, renditions: renditions.length, label: [resLabel(topHeight), codec, renditions.length ? `${renditions.length} rendition${renditions.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ') },
-    gaps,
+    summary: audioKind
+      ? { topHeight: null, codec: 'AAC', renditions: 1, label: ['Audio only', audioEncode?.bitrateKbps ? `AAC ${audioEncode.bitrateKbps} kb/s` : 'AAC', deliveries.filter((d) => d.state === 'ready').map((d) => d.format.toUpperCase()).join(', ')].filter(Boolean).join(' · ') }
+      : { topHeight: topHeight ?? null, codec: codec ?? null, renditions: renditions.length, label: [resLabel(topHeight), codec, renditions.length ? `${renditions.length} rendition${renditions.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ') },
+    // Video gaps (renditions, profiles) say nothing about an audio asset.
+    gaps: audioKind ? gaps.filter((g) => !/^Renditions|Video profile/.test(g)) : gaps,
+    kind: audioKind ? 'audio' : 'video',
+    audioEncode,
+    deliveries,
   };
 }

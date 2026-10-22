@@ -1,11 +1,13 @@
 import { SocialComposer, SocialPanel } from './SocialPublish'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { IngestPanel } from '../IngestPanel'
-import { api } from '../api'
+import { api, apiRequest } from '../api'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import { navigate } from '../router'
 import { Notice, PageError, useNotify, usePageNotice } from '../notices'
 import MediaPreview from '../MediaPreview'
+import { AssetImage } from './vod/AssetImage'
+import { AssetHistory } from './vod/AssetHistory'
 import SkipMarkers from '../SkipMarkers'
 import { RuleEditor } from '../RuleEditor'
 import { MetadataForm, TypePicker } from '../ContentTypeFields'
@@ -15,7 +17,7 @@ import { BulkBar, SelectAllHead, SelectCell, bulkSummary, runBulk, useSelection 
 import { NoMatches, usePref } from '../listFilters'
 import { LibraryFilterPanel, LibraryToolbar } from './vod/LibraryFilters'
 import { LibraryGrid } from './vod/LibraryGrid'
-import { AvailabilityPill, Completeness, Keyscreen, TypeLabel } from './vod/LibraryCells'
+import { AvailabilityPill, Completeness, Keyscreen, KindLegend, TypeLabel } from './vod/LibraryCells'
 import { EncodePanel, TargetMetadataPanel } from './vod/AssetPanels'
 import { libraryApi, type LibraryFacets, type LibraryRow } from './vod/libraryApi'
 import { VIEWS, codecLabel, filtersToApi, filtersToSearch, isFiltered, parseColumns, parseFilters, resLabel, type LibraryFilters, type LibraryView } from './vod/libraryQuery'
@@ -122,7 +124,7 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   const [d, setD] = useState<any>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
-  const [tab, setTab] = useState<'play' | 'markers' | 'sources' | 'publishing' | 'availability' | 'metadata' | 'encode'>('play')
+  const [tab, setTab] = useState<'play' | 'markers' | 'history' | 'availability' | 'metadata' | 'encode'>('play')
   const [composeOpen, setComposeOpen] = useState(false)
   const [socialKey, setSocialKey] = useState(0)
   async function load() {
@@ -166,11 +168,11 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   return (
     <div style={{ padding: '8px 2px 14px' }}>
       <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 12 }}>
-        {(['play', 'markers', 'metadata', 'encode', 'availability', 'sources', 'publishing'] as const).map(t => (
+        {(['play', 'markers', 'metadata', 'encode', 'availability', 'history'] as const).map(t => (
           <button key={t} className={`btn ${tab === t ? 'primary' : 'ghost'}`}
             style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }}
             onClick={() => setTab(t)}>
-            {t === 'play' ? 'Preview' : t === 'markers' ? 'Skip markers' : t === 'metadata' ? 'Metadata' : t === 'encode' ? 'Encode' : t === 'availability' ? 'Availability' : t === 'sources' ? 'Where it came from' : 'Where it went'}
+            {t === 'play' ? 'Preview' : t === 'markers' ? 'Skip markers' : t === 'metadata' ? 'Metadata' : t === 'encode' ? 'Encode' : t === 'availability' ? 'Availability' : 'History'}
           </button>
         ))}
         <AvailabilityBadge state={d.availability_state} until={d.available_until} />
@@ -207,12 +209,26 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
                 Audio only{d.recording_id ? ': cut from an audio source' : ''}.
               </div>
             )}
+            {/* reload THIS drawer too: a song applied from the finder changes the content type and metadata shown below */}
+            <AssetImage id={d.id} onChanged={() => { load(); onChanged() }} />
           </div>
           <div>
             <div className="sec-label">Facts</div>
             <table>
               <tbody>
                 <tr><td style={{ color: 'var(--faint)' }}>Kind</td><td>{d.kind}</td></tr>
+                {(d.source_kind === 'upload' || d.source_kind === 'watchfolder') && <>
+                  {/* THE SOURCE (mezzanine) FILE: kept as uploaded; every rendition is made from it. */}
+                  <tr><td style={{ color: 'var(--faint)' }}>Source file</td>
+                    <td style={{ wordBreak: 'break-all' }}>{d.original_filename ?? '—'}{d.source_bytes ? ` · ${(Number(d.source_bytes) / 1048576).toFixed(Number(d.source_bytes) > 1073741824 ? 0 : 1)} MB` : ''}
+                      {d.ingest?.probe?.width ? ` · ${d.ingest.probe.width}×${d.ingest.probe.height}` : d.encode_result?.probe?.width ? ` · ${d.encode_result.probe.width}×${d.encode_result.probe.height}` : ''}</td></tr>
+                  {d.sha256 && <tr><td style={{ color: 'var(--faint)' }}>SHA-256</td><td className="mono" title={d.sha256}>{String(d.sha256).slice(0, 16)}…</td></tr>}
+                  <tr><td style={{ color: 'var(--faint)' }}>Ladder</td>
+                    <td>{d.encode_result?.ladder?.name ?? '—'}{d.encode_result?.ladder?.origin?.kind === 'tracked' ? ` (tracks the live profile${d.encode_result.ladder.origin.profileName ? ` ${d.encode_result.ladder.origin.profileName}` : ''})` : ''}
+                      {Array.isArray(d.encode_result?.kept) ? ` · ${d.encode_result.kept.map((r: any) => `${r.height}p`).join(', ')}` : ''}</td></tr>
+                  <tr><td style={{ color: 'var(--faint)' }}>Formats</td>
+                    <td>{[d.formats?.hls && 'HLS', d.formats?.dash && 'DASH', d.formats?.progressive && 'MP4'].filter(Boolean).join(' · ') || '—'}</td></tr>
+                </>}
                 <tr><td style={{ color: 'var(--faint)' }}>Duration</td><td>{fmtDur(d.duration_ms)}</td></tr>
                 <tr><td style={{ color: 'var(--faint)' }}>Output</td><td>{d.output_kind ?? 'manifest'}</td></tr>
                 <tr><td style={{ color: 'var(--faint)' }}>Built</td>
@@ -249,12 +265,13 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
 
       {tab === 'markers' && <SkipMarkers asset={d} />}
 
-      {tab === 'sources' && <ClipProvenancePanel assetId={d.id} />}
-
-      {tab === 'publishing' && (
+      {/* HISTORY: what happened to it, newest first; then where it is published; then what it was made from. */}
+      {tab === 'history' && (
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
-            <div className="sec-label" style={{ margin: 0 }}>Publishing points</div>
+          <div className="sec-label" style={{ marginTop: 0 }}>History</div>
+          <AssetHistory id={d.id} refreshKey={socialKey + (Date.parse(d.updated_at ?? '') || 0)} />
+          <div style={{ display: 'flex', alignItems: 'center', margin: '20px 0 10px' }}>
+            <div className="sec-label" style={{ margin: 0 }}>Published to</div>
             <div style={{ flex: 1 }} />
             <button className="btn" onClick={() => setComposeOpen(true)}>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7M12 3v12M7 8l5-5 5 5" /></svg>
@@ -305,6 +322,10 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
           </div>
           <SocialPanel assetId={d.id} refreshKey={socialKey} />
           {composeOpen && <SocialComposer assetId={d.id} onClose={() => setComposeOpen(false)} onPublished={() => { setSocialKey(k => k + 1); load(); onChanged() }} />}
+          <details className="hist-src">
+            <summary>Where it came from: the recordings, files and segments it was made from</summary>
+            <ClipProvenancePanel assetId={d.id} />
+          </details>
         </div>
       )}
 
@@ -347,11 +368,14 @@ function AssetMetadata({ d, onSaved }: { d: any; onSaved: () => void }) {
   const [meta, setMeta] = useState<Record<string, any>>(d.metadata ?? {})
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  // Images added in this form go in the asset's own library folder (docs/ASSET_IMAGES.md section 7).
+  const [imgFolder, setImgFolder] = useState<string | null>(null)
+  useEffect(() => { apiRequest(`/vod/${d.id}/image`).then((r: any) => setImgFolder(r?.folder ?? null)).catch(() => { /* default folder */ }) }, [d.id])
   return (
     <div style={{ maxWidth: 820 }}>
       <TypePicker appliesTo="vod" value={typeId} onChange={(id) => setTypeId(id)}
         hint="Inherited from the channel, station or event it was cut from. Change it to describe this item differently." />
-      <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact />
+      <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact imageFolder={imgFolder ?? undefined} />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <button className="btn primary" disabled={busy} onClick={async () => {
           setBusy(true); setErr('')
@@ -403,7 +427,7 @@ function AvailabilityPanel({ d, onChanged }: { d: any; onChanged: () => void }) 
       <div className="sec-label">What a publish does for this item</div>
       <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 8 }}>
         Resolved from the ladder: account default, then its content type, then its channel / event / station, then this item.
-        {a.applied && ' The values applied at the last publish are shown in "Where it went".'}
+        {a.applied && ' The values applied at the last publish are shown in History, under "Published to".'}
       </div>
       <RuleEditor scopeKind="asset" scopeId={d.id} compact resolveQuery={{ assetId: d.id }} onSaved={() => { load(); onChanged() }} />
 
@@ -543,6 +567,7 @@ export default function VodPage() {
               <input type="checkbox" checked={sel.allOn} ref={(el) => { if (el) el.indeterminate = sel.someOn && !sel.allOn }} onChange={sel.toggleAll} aria-label="Select all shown" />
               Select all shown
             </label>
+            <div style={{ marginLeft: 'auto' }}><KindLegend /></div>
           </div>
           <LibraryGrid rows={rows} selected={sel.sel} onToggle={sel.toggle} onOpen={(id) => setOpen(id)} openId={open} />
           {open && (

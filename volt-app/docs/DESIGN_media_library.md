@@ -192,7 +192,7 @@ platform. Concretely:
   caller's account, and the platform never shows a global list.
 - The DEFAULT PUBLISHING RULE is a client setting (one per account), set up
   by the client's admin. Per-asset override stays inside the client.
-- Publishing links to API Keys & Apps: from an asset's "Where it went",
+- Publishing links to API Keys & Apps: from an asset's History tab ("Published to"),
   each app publication links to the app's registration; from an app, the
   list of assets published to it. Adding an app to a client makes it a
   publishable point immediately, disabling the app (or its keys) withdraws

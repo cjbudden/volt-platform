@@ -40,15 +40,20 @@ export async function validateEntityMetadata(
   account: string,
   schemaId: string | null | undefined,
   metadata: Record<string, any> | undefined,
-  kinds: string[]
+  kinds: string[],
+  imageFolder?: string
 ): Promise<{ schemaId: string | null; metadata: Record<string, any> }> {
   if (!schemaId) return { schemaId: null, metadata: metadata ?? {} };
   const resolved = await resolveEffectiveFields(schemaId, account);
   if (!resolved) throw notFound('metadata schema not found');
   if (resolved.targetKind !== 'any' && !kinds.includes(resolved.targetKind))
     throw new ApiError(422, `schema targets '${resolved.targetKind}', cannot bind to ${kinds.join('/')}`);
+  // Image fields given as a web address are downloaded into the Image Library
+  // first (services/media/libraryImages.ts), under media/<owner name>/.
+  const { internaliseImages, ownerFolder } = await import('../services/media/libraryImages');
+  const withImages = await internaliseImages(account, resolved.fields, metadata ?? {}, imageFolder ?? ownerFolder(kinds[0] ?? 'owner', metadata?.name));
   // Owners keep keys the type does not define (see validateMetadata).
-  return { schemaId, metadata: validateMetadata(resolved.fields, metadata ?? {}, 'keep') };
+  return { schemaId, metadata: validateMetadata(resolved.fields, withImages, 'keep') };
 }
 
 /** Named, typed metadata field sets (Movie, Episode, Clip, …) per tenant. */
@@ -88,7 +93,7 @@ metadataSchemasRouter.get(
 const fieldSchema = z.object({
   key: z.string().min(1),
   label: z.string().optional(),
-  type: z.enum(['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'tags', 'reference']),
+  type: z.enum(['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'tags', 'reference', 'image']),
   required: z.boolean().optional(),
   options: z.array(z.string()).optional(),
   multiple: z.boolean().optional(),

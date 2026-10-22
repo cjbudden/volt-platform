@@ -480,12 +480,12 @@ export function DiagnosisBlock({ diag }: { diag: FailureDiagnosis | null | undef
    the second and third under the first; tabs give each its own page while
    keeping every field mounted, so nothing typed is lost by switching.
    ======================================================================== */
-export type DrawerTab = 'settings' | 'metadata' | 'access'
-export function DrawerTabs({ tab, setTab, labels }: { tab: DrawerTab; setTab: (t: DrawerTab) => void; labels?: Partial<Record<DrawerTab, string>> }) {
-  const L: Record<DrawerTab, string> = { settings: labels?.settings ?? 'Settings', metadata: labels?.metadata ?? 'Metadata', access: labels?.access ?? 'Access' }
+export type DrawerTab = 'settings' | 'metadata' | 'access' | 'outputs'
+export function DrawerTabs({ tab, setTab, labels, tabs = ['settings', 'metadata', 'access'] }: { tab: DrawerTab; setTab: (t: DrawerTab) => void; labels?: Partial<Record<DrawerTab, string>>; tabs?: DrawerTab[] }) {
+  const L: Record<DrawerTab, string> = { settings: labels?.settings ?? 'Settings', metadata: labels?.metadata ?? 'Metadata', access: labels?.access ?? 'Access', outputs: labels?.outputs ?? 'Outputs' }
   return (
     <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', margin: '-8px -20px 16px', padding: '0 20px' }}>
-      {(['settings', 'metadata', 'access'] as DrawerTab[]).map(t => (
+      {tabs.map(t => (
         <button key={t} type="button" onClick={() => setTab(t)}
           style={{ background: 'none', border: 'none', borderBottom: `2px solid ${tab === t ? 'var(--brand,#3f7bff)' : 'transparent'}`, color: tab === t ? 'var(--text)' : 'var(--muted)', padding: '8px 12px', fontWeight: 600, fontSize: 'var(--fs-sm)', cursor: 'pointer' }}>
           {L[t]}

@@ -154,6 +154,8 @@ export interface NowPlaying {
   onAir: boolean;
   raw: string | null;
   since: number | null;
+  /** Where to listen, shown with the cover when its source requires it (Apple artwork: a link to Apple Music). */
+  listen?: { service: string; url: string } | null;
 }
 
 export type PlayerEventName =

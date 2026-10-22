@@ -295,6 +295,8 @@ export interface Channel {
   input_failover_enabled?: boolean
   auto_failback?: boolean
   filler_slate_ref?: string | null
+  /** The slate or loop in Loops & Fillers; wins over filler_slate_ref. */
+  filler_asset_id?: string | null
   pipelineState?: 'idle' | 'starting' | 'ready' | 'onair' | 'degraded' | 'error' | 'stopped'
   billable?: boolean
   serverSince?: number | null
@@ -473,6 +475,7 @@ export interface ChannelSettingsPatch {
   autoFailback?: boolean
   inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
   fillerSlateRef?: string | null
+  fillerAssetId?: string | null
   watermark?: WatermarkPatch
   brandRef?: string | null
   /** Guide icon; null uses brandRef. */
@@ -1085,7 +1088,10 @@ export const api = {
   docsSession: (): Promise<{ url: string; signed: boolean; expiresAt: string | null }> => req('/docs/session'),
   // caption OUTPUT languages the pipeline can deliver (single source of truth for pickers)
   captionLanguages: (): Promise<{ languages: { code: string; label: string }[] }> => req('/caption-languages'),
-  channels: (kind?: 'tv' | 'radio'): Promise<Channel[]> => req('/channels' + (kind ? `?kind=${kind}` : '')),
+  channels: (kind?: 'tv' | 'radio', origin?: 'live' | 'playlist'): Promise<Channel[]> => {
+    const q = [kind && `kind=${kind}`, origin && `origin=${origin}`].filter(Boolean).join('&')
+    return req('/channels' + (q ? `?${q}` : ''))
+  },
   createChannel: (b: {
     groupId: string; name: string; purchasingMode?: string
     resilienceTier?: string; recordingEnabled?: boolean
@@ -1241,6 +1247,8 @@ export const api = {
   // events — same core workflow as channels plus the scheduled window
   events: (): Promise<EventRow[]> => req('/events'),
   event: (id: string): Promise<EventRow> => req(`/events/${id}`),
+  /** The event page: the channel-detail shape plus the event's own row and recordings. */
+  eventDetail: (id: string): Promise<EventDetailData> => req(`/events/${id}/detail`),
   createEvent: (b: EventCreateBody): Promise<EventRow> =>
     req('/events', { method: 'POST', body: JSON.stringify(b) }),
   updateEvent: (id: string, patch: EventPatchBody): Promise<EventRow> =>
@@ -1688,8 +1696,13 @@ export const api = {
     req(`/filler-assets${kind ? `?kind=${kind}` : ''}`),
   patchFillerAsset: (id: string, b: { name?: string }): Promise<FillerAsset> =>
     req(`/filler-assets/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
-  deleteFillerAsset: (id: string): Promise<null> =>
-    req(`/filler-assets/${id}`, { method: 'DELETE' }),
+  deleteFillerAsset: (id: string, force = false): Promise<null> =>
+    req(`/filler-assets/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
+  /** Fallbacks not in Loops & Fillers yet, grouped by address. */
+  fillerElsewhere: (): Promise<{ items: FillerElsewhere[] }> => req('/filler-assets/elsewhere'),
+  /** Copy an Image Library slate into Loops & Fillers and relink every stream using it. */
+  copyFillerFromLibrary: (ref: string, name?: string): Promise<{ asset: FillerAsset; relinked: FillerUser[] }> =>
+    req('/filler-assets/copy-from-library', { method: 'POST', body: JSON.stringify({ ref, ...(name ? { name } : {}) }) }),
 
   // ---- monitoring ----
   /** The whole live board in one request: the fan-out lives on the server. */
@@ -2139,7 +2152,7 @@ export interface EventRow {
   recording_retention_days: number | null; recording_retention_sec?: number | null
   auto_vod?: boolean
   input_failover_enabled?: boolean; auto_failback?: boolean
-  input_loss_behavior?: string; filler_slate_ref?: string | null
+  input_loss_behavior?: string; filler_slate_ref?: string | null; filler_asset_id?: string | null
   version: number; created_at: string
   inputs?: EventSourceRow[]
 }
@@ -2157,9 +2170,17 @@ export interface EventCreateBody {
   inputFailoverEnabled?: boolean; autoFailback?: boolean
   inputLossBehavior?: 'none' | 'slate' | 'vod_loop' | 'last_frame' | 'black'
   fillerSlateRef?: string | null
+  /** Slate or loop in Loops & Fillers; wins over fillerSlateRef. */
+  fillerAssetId?: string | null
   /** Content type (required in practice: omitted = the standard Broadcast event). */
   schemaId?: string
   metadata?: Record<string, any>
+}
+/** GET /events/:id/detail: built by the same code as the channel page (buildStreamDetail). */
+export type EventDetailData = Omit<ChannelDetail, keyof EventRow | 'kind'> & EventRow & {
+  kind: 'event'
+  instances: any[]
+  recordings: { id: string; title: string | null; status: string; start_epoch_ms: number | string; end_epoch_ms: number | string | null; duration_ms: number | string | null; created_at: string }[]
 }
 export interface EventPatchBody extends Partial<Omit<EventCreateBody, 'groupId'>> { version?: number }
 
@@ -2644,6 +2665,16 @@ export interface FillerAsset {
   error: string | null
   created_at: string
   updated_at: string
+  /** The channels, stations and events that fall back to this asset. */
+  used_by?: FillerUser[]
+}
+export interface FillerUser { kind: 'channel' | 'radio' | 'event'; id: string; name: string; href: string }
+/** A fallback still held as a pasted address (usually an Image Library image). */
+export interface FillerElsewhere {
+  ref: string
+  usedBy: FillerUser[]
+  libraryFile: { id: string; name: string; path: string; contentType: string | null; width: number | null; height: number | null } | null
+  canCopy: boolean
 }
 
 export interface VodAssetRow {
@@ -2933,7 +2964,7 @@ export function ensureImageSigning(): Promise<void> {
 // ---- content types ---------------------------------------------------------
 export interface SchemaField {
   key: string; label?: string
-  type: 'string' | 'text' | 'number' | 'boolean' | 'date' | 'enum' | 'url' | 'tags' | 'reference'
+  type: 'string' | 'text' | 'number' | 'boolean' | 'date' | 'enum' | 'url' | 'tags' | 'reference' | 'image'
   required?: boolean; options?: string[]; multiple?: boolean; refDomain?: string
   /** EPG slot: title | sub-title | description | category | episode | language | icon | credits.<role> | custom:<name> */
   epg?: string

@@ -84,11 +84,29 @@ export const NO_META: TrackMeta = {
  * Ochtend" would spend a rate-limit slot on a lookup that cannot succeed, and
  * would put a wrong album cover on screen if it accidentally did.
  */
-export function parseIcyTitle(raw: string | null | undefined): { artist: string; title: string } | null {
+/**
+ * The StreamTitle out of a whole ICY metadata block
+ * ("StreamTitle='Orange Crush – Infinite Lights';StreamUrl='https://…';"), or
+ * the text itself when it is already just the title. Pure; tested.
+ */
+export function icyStreamTitle(raw: string | null | undefined): string {
   const s = String(raw ?? '').trim();
+  const m = /StreamTitle\s*=\s*'([\s\S]*?)';\s*(?:Stream[A-Za-z]+\s*=|$)/i.exec(s) ?? /StreamTitle\s*=\s*'([^']*)'?/i.exec(s);
+  return (m ? m[1] : s).replace(/\s+/g, ' ').trim();
+}
+
+/** The StreamUrl out of a whole ICY metadata block, or null. Pure. */
+export function icyStreamUrl(raw: string | null | undefined): string | null {
+  const m = /StreamUrl\s*=\s*'([^']*)'/i.exec(String(raw ?? ''));
+  return m && m[1].trim() ? m[1].trim() : null;
+}
+
+export function parseIcyTitle(raw: string | null | undefined): { artist: string; title: string } | null {
+  const s = icyStreamTitle(raw);
   if (!s) return null;
-  // A bare title with no separator is not enough to search on.
-  const dash = s.match(/^(.{1,120}?)\s+-{1,2}\s+(.{1,160})$/);
+  // A bare title with no separator is not enough to search on. Stations use a
+  // hyphen, a double hyphen, or an en or em dash ("Orange Crush – Infinite Lights").
+  const dash = s.match(/^(.{1,120}?)\s+(?:-{1,2}|[–—])\s+(.{1,160})$/);
   if (dash) {
     const artist = dash[1].trim();
     const title = dash[2].trim();
@@ -143,6 +161,9 @@ class Gate {
     const next = this.chain.then(async () => {
       const wait = this.minGapMs - (Date.now() - this.last);
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      // And the platform-wide turn: other processes share this IP's budget
+      // (services/rateGate.ts). Waits only when another process just called.
+      await (await import('../rateGate')).takeTurn('musicbrainz', this.minGapMs);
       this.last = Date.now();
       return fn();
     });
@@ -157,6 +178,15 @@ const gate = new Gate(config.trackMeta.minGapMs);
 
 /** Test seam: how many calls the gate has actually let through. */
 let calls = 0;
+/**
+ * Any other MusicBrainz caller (asset lookups, services/media/musicLookup.ts)
+ * goes through the same gate, User-Agent and counter: the limit is per IP for
+ * the whole platform, so there is one budget, not one per feature.
+ */
+export function musicbrainzGet(pathAndQuery: string): Promise<any> {
+  return gate.run(() => { calls++; return getJson(`${config.trackMeta.musicbrainzBase}${pathAndQuery}`, config.trackMeta.timeoutMs); });
+}
+
 export const __testing = {
   callCount: () => calls,
   resetCalls: () => { calls = 0; },

@@ -7,6 +7,8 @@ export const LibIcon = {
   search: <svg {...s}><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.2-4.2" /></svg>,
   filter: <svg {...s}><path d="M4 5h16l-6 7.5V19l-4-2v-4.5z" /></svg>,
   columns: <svg {...s}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M15 4v16" /></svg>,
+  audio: <svg {...s}><path d="M9 18V6l10-2v12" /><circle cx="6.5" cy="18" r="2.5" /><circle cx="16.5" cy="16" r="2.5" /></svg>,
+  wave: <svg {...s}><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10M21 12h0" /></svg>,
   media: <svg {...s}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M10 9.5v5l4.5-2.5z" /></svg>,
   epg: <svg {...s}><rect x="3" y="5" width="18" height="15" rx="2" /><path d="M3 10h18M8 3v4M16 3v4M7 14h4M7 17h7" /></svg>,
   encode: <svg {...s}><path d="M4 7h10M4 12h16M4 17h7" /><circle cx="17" cy="7" r="2" /><circle cx="14" cy="17" r="2" /></svg>,

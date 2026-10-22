@@ -37,6 +37,15 @@ function info(st: PlayerState): Info {
   return { title: item?.title ?? '', sub: item?.subtitle ?? item?.description ?? '', art: item?.artworkUrl ?? null, meta: '' };
 }
 
+/** "Listen on Apple Music": Apple's artwork may be shown only with a link to the song there. */
+function listenLink(l: TrackInfo['listen'], short = false): HTMLAnchorElement | null {
+  if (!l || !/^https:\/\//.test(l.url)) return null;
+  const a = document.createElement('a');
+  a.className = 'vpx-listen'; a.href = l.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+  a.textContent = short ? l.service : `Listen on ${l.service}`;
+  return a;
+}
+
 function setArt(e: HTMLElement, url: string | null) {
   const v = url ? `url("${url.replace(/"/g, '%22')}")` : '';
   if (e.style.backgroundImage !== v) e.style.backgroundImage = v;
@@ -224,7 +233,7 @@ export function audioNowPlayingSkin(): Skin {
   function trackRow(tr: TrackInfo, right: string) {
     const art = el('div', 'vpx-art'); setArt(art, tr.artworkUrl ?? null);
     return el('div', 'vpx-li', undefined, art,
-      el('div', 'vpx-t', undefined, el('b', undefined, undefined, tr.title), tr.artist ? el('span', undefined, undefined, tr.artist) : null),
+      el('div', 'vpx-t', undefined, el('b', undefined, undefined, tr.title), tr.artist ? el('span', undefined, undefined, tr.artist) : null, listenLink(tr.listen, true)),
       right ? el('time', undefined, undefined, right) : null);
   }
 
@@ -263,12 +272,13 @@ export function audioNowPlayingSkin(): Skin {
       p.art = el('div', 'vpx-art');
       p.kick = el('div', 'vpx-kick', undefined, ctx.t('nowPlaying'));
       p.title = el('b'); p.sub = el('span'); p.meta = el('div', 'vpx-meta'); p.err = el('div', 'vpx-err');
+      p.listen = el('div');
       p.hist = el('div'); p.next = el('div');
       p.lists = el('div', 'vpx-lists', undefined, p.hist, p.next);
       up = upNextCard(ctx, 'banner');
       up.el.style.gridColumn = '1 / -1';
       const root = el('div', 'vpx np', undefined, ctx.stage, p.art,
-        el('div', 'vpx-head', undefined, p.kick, el('div', 'vpx-t', undefined, p.title, p.sub), p.meta, p.err,
+        el('div', 'vpx-head', undefined, p.kick, el('div', 'vpx-t', undefined, p.title, p.sub), p.meta, p.listen, p.err,
           el('div', 'vpx-ctl', undefined, pb.el, vo.el, lv.el)),
         up.el, p.lists);
       ctx.root.appendChild(root);
@@ -277,6 +287,8 @@ export function audioNowPlayingSkin(): Skin {
       const i = info(st);
       setArt(p.art, i.art);
       text(p.title, i.title); text(p.sub, i.sub); text(p.meta, i.meta); text(p.err, errorLine(st));
+      const lu = st.nowPlaying?.listen?.url ?? '';
+      if (p.listen.dataset.url !== lu) { p.listen.dataset.url = lu; p.listen.replaceChildren(...[listenLink(st.nowPlaying?.listen)].filter(Boolean) as Node[]); }
       text(p.kick, st.nowPlaying ? c.t('nowPlaying') : st.programme ? c.t('onNow') : st.live ? c.t('live') : c.t('nowPlaying'));
       pb.update(st); lv.update(st); vo.update(st); up.update(st);
       lists(st);

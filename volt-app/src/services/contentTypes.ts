@@ -54,7 +54,7 @@ const BROADCAST_SERVICE: SchemaField[] = [
   f('genre', 'Genre', 'enum', { options: GENRES, multiple: true, epg: 'category', schemaOrg: 'genre' }),
   f('language', 'Language', 'string', { epg: 'language', schemaOrg: 'inLanguage' }),
   f('broadcaster', 'Broadcaster', 'string', { schemaOrg: 'broadcaster' }),
-  f('logo', 'Logo', 'url', { epg: 'icon', schemaOrg: 'logo' }),
+  f('logo', 'Logo', 'image', { epg: 'icon', schemaOrg: 'logo' }),
   f('area', 'Broadcast area', 'string', { schemaOrg: 'areaServed' }),
   f('website', 'Website', 'url', { schemaOrg: 'url' }),
 ];
@@ -84,7 +84,7 @@ export const STANDARD_TYPES: StandardType[] = [
       f('location', 'Location', 'string', { schemaOrg: 'location' }),
       f('performers', 'Performers / presenters', 'tags', { epg: 'credits.presenter', schemaOrg: 'performer' }),
       f('language', 'Language', 'string', { epg: 'language', schemaOrg: 'inLanguage' }),
-      f('image', 'Image', 'url', { epg: 'icon', schemaOrg: 'image' }),
+      f('image', 'Image', 'image', { epg: 'icon', schemaOrg: 'image' }),
     ],
   },
   {
@@ -141,7 +141,7 @@ export const STANDARD_TYPES: StandardType[] = [
       f('headline', 'Headline', 'string', { epg: 'title', schemaOrg: 'headline' }),
       f('description', 'Description', 'text', { epg: 'description', schemaOrg: 'description' }),
       f('keywords', 'Keywords', 'tags', { schemaOrg: 'keywords' }),
-      f('thumbnail', 'Thumbnail', 'url', { epg: 'icon', schemaOrg: 'thumbnailUrl' }),
+      f('thumbnail', 'Thumbnail', 'image', { epg: 'icon', schemaOrg: 'thumbnailUrl' }),
     ],
   },
   {
@@ -156,7 +156,7 @@ export const STANDARD_TYPES: StandardType[] = [
       f('isrc', 'ISRC', 'string', { schemaOrg: 'isrcCode' }),
       f('label', 'Label', 'string', { schemaOrg: 'recordLabel' }),
       f('released', 'Release date', 'date', { schemaOrg: 'datePublished' }),
-      f('artwork', 'Artwork', 'url', { epg: 'icon', schemaOrg: 'image' }),
+      f('artwork', 'Artwork', 'image', { epg: 'icon', schemaOrg: 'image' }),
       f('explicit', 'Explicit', 'boolean'),
     ],
   },
@@ -173,7 +173,7 @@ export const STANDARD_TYPES: StandardType[] = [
       f('keywords', 'Keywords', 'tags', { schemaOrg: 'keywords' }),
       f('language', 'Language', 'string', { epg: 'language', schemaOrg: 'inLanguage' }),
       f('recordedAt', 'Recorded', 'date', { schemaOrg: 'dateCreated' }),
-      f('image', 'Image', 'url', { epg: 'icon', schemaOrg: 'image' }),
+      f('image', 'Image', 'image', { epg: 'icon', schemaOrg: 'image' }),
     ],
   },
   {
@@ -187,7 +187,7 @@ export const STANDARD_TYPES: StandardType[] = [
       f('episodeNumber', 'Episode number', 'number', { epg: 'episode', schemaOrg: 'episodeNumber' }),
       f('description', 'Description', 'text', { epg: 'description', schemaOrg: 'description' }),
       f('genre', 'Genre', 'enum', { options: GENRES, multiple: true, epg: 'category', schemaOrg: 'genre' }),
-      f('image', 'Image', 'url', { epg: 'icon', schemaOrg: 'image' }),
+      f('image', 'Image', 'image', { epg: 'icon', schemaOrg: 'image' }),
       // Added 20 Oct 2026 for the library's target metadata. Accounts seeded
       // before then keep their copy; the library reports the field as "not on
       // this type" rather than missing (services/vodLibrary.ts).
@@ -210,7 +210,7 @@ export const STANDARD_TYPES: StandardType[] = [
       f('director', 'Director', 'string', { epg: 'credits.director', schemaOrg: 'director' }),
       f('rating', 'Content rating', 'string', { schemaOrg: 'contentRating' }),
       f('language', 'Language', 'string', { epg: 'language', schemaOrg: 'inLanguage' }),
-      f('image', 'Poster', 'url', { epg: 'icon', schemaOrg: 'image' }),
+      f('image', 'Poster', 'image', { epg: 'icon', schemaOrg: 'image' }),
     ],
   },
 ];

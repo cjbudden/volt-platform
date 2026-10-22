@@ -104,6 +104,11 @@
    "description": "Events are scheduled, time-bounded live streams such as a match or a concert, provisioned automatically for their scheduled window.\n\n**Use it to:**\n- Schedule and edit events with `POST /api/events` and `PATCH /api/events/{id}`\n- Start or stop an event by hand with `POST /api/events/{id}/start` and `.../stop`\n- Set filler and auto connect with `POST /api/events/{id}/filler` and `.../auto-connect`\n- Review what happened with `GET /api/events/{id}/history`\n\n**Credential:** admin session (Bearer) or account secret key, with `events: view` to read, `events: operate` to start or stop and `events: manage` to change.\n\n**Good to know:** auto connect only decides whether a running event resumes after a restart. The schedule still decides when it runs."
   },
   {
+   "name": "Fast",
+   "x-displayName": "FAST channels",
+   "description": "FAST channels play a scheduled lineup of your media as a continuous linear channel, with ad breaks decided by your ad servers.\n\n**Use it to:**\n- Create and list FAST channels with `POST /api/fast/channels` and `GET /api/fast/channels`\n- Build, preview and activate a lineup with `POST /api/fast/channels/:id/lineups`, `POST /api/fast/lineups/:lid/preview` and `POST /api/fast/lineups/:lid/activate`\n- Prepare a channel and put it on air with `POST /api/fast/channels/:id/prepare` and `POST /api/fast/channels/:id/on-air`\n- Connect VAST ad servers with `POST /api/fast/ad-servers`, check one with `POST /api/fast/ad-servers/:sid/test`, and set a channel's ad mode with `PUT /api/fast/channels/:id/ads`\n- Read how breaks were filled with `GET /api/fast/channels/:id/ad-report`\n\n**Credential:** admin session (Bearer) or account secret key. Reading needs any signed-in admin user, changes need operator tier or above.\n\n**Good to know:** ad decisions are fetched ahead of each break, never while a player is loading the manifest."
+  },
+  {
    "name": "Files",
    "x-displayName": "Image library",
    "description": "The image library stores your account's images (posters, logos, artwork) and reads their embedded metadata so you can find and reuse them.\n\n**Use it to:**\n- Upload, rename, tag and delete images with `POST /api/files`, `PATCH /api/files/{id}` and `DELETE /api/files/{id}`\n- Browse folders with `GET /api/files/folders` and create them with `POST /api/files/folders`\n- Search names, tags, places and descriptions with `GET /api/files/search`\n- Re-read EXIF, IPTC and XMP metadata with `POST /api/files/{id}/metadata/refresh`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `media: manage` is needed to change.\n\n**Good to know:** uploading to a path that already exists answers 409. Render sized versions through the Images service."
@@ -111,12 +116,22 @@
   {
    "name": "Filler Assets",
    "x-displayName": "Slates and loops",
-   "description": "Slates (still images) and loops (short videos) are the filler a channel or event shows when its input is lost.\n\n**Use it to:**\n- List filler assets with `GET /api/filler-assets`\n- Register an asset and get an upload address with `POST /api/filler-assets`\n- Mark it ready or rename it with `PATCH /api/filler-assets/{id}`, and remove it with `DELETE /api/filler-assets/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read and `media: manage` to change.\n\n**Good to know:** upload the bytes to the returned address, then update the asset. Point a channel at it with `POST /api/channels/{id}/filler`."
+   "description": "Slates (still images) and loops (short videos) are what a channel, station or event shows when every source is lost. Loops & Fillers is the one place they are kept.\n\n**Use it to:**\n- List filler assets, each with the streams that use it (`used_by`), with `GET /api/filler-assets`\n- Register an asset and get an upload address with `POST /api/filler-assets`\n- Mark it ready or rename it with `PATCH /api/filler-assets/{id}`, and remove it with `DELETE /api/filler-assets/{id}`\n- Find streams whose fallback is still an Image Library image or a pasted address with `GET /api/filler-assets/elsewhere`\n- Copy an Image Library slate in, moving every stream that uses it, with `POST /api/filler-assets/copy-from-library`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read and `media: manage` to change.\n\n**Good to know:** point a channel or event at an asset with `fillerAssetId` on `PATCH /api/channels/{id}` or `PATCH /api/events/{id}`; it must be a ready asset in the same account. Deleting an asset that streams use is refused with `409` and the streams named, unless you add `force=true`."
   },
   {
    "name": "Fleet",
    "x-displayName": "Fleet and usage",
    "description": "Fleet shows the servers carrying your live work right now and the billable streaming time you have used.\n\n**Use it to:**\n- See running hosts, their streams and latest load with `GET /api/fleet/hosts` and `GET /api/fleet/hosts/{id}/samples`\n- Read usage for today, this month and per period with `GET /api/fleet/usage`\n- Break usage down for one stream with `GET /api/fleet/usage/stream/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `fleet: view`.\n\n**Good to know:** usage is measured in time. Any cost figure is indicative only."
+  },
+  {
+   "name": "Gfx",
+   "x-displayName": "Graphics delivery",
+   "description": "Graphics delivery serves the files of a published graphics template version to the player and overlay that show it.\n\n**Use it to:**\n- Load a template version's files with `GET /gfx/:versionId/*`\n\n**Credential:** none, share token or playback token. These are public delivery files.\n\n**Good to know:** files are served sandboxed and can only connect to the template's own package. Versions never change, so they cache well."
+  },
+  {
+   "name": "Graphics",
+   "x-displayName": "Graphics",
+   "description": "Graphics manages HTML overlay templates (scorebugs, lower thirds, sponsor bugs, tickers) and runs them live on your channels and events.\n\n**Use it to:**\n- Import, edit and publish templates with `POST /api/graphics/templates/import`, `PUT /api/graphics/templates/:id/draft` and `POST /api/graphics/templates/:id/draft/publish`\n- Connect the data that fills them with `POST /api/graphics/sources` and push values with `POST /api/graphics/sources/:id/push`\n- Group templates into setups and assign them to streams with `POST /api/graphics/setups` and `POST /api/graphics/assignments`\n- Take graphics on and off air with `POST /api/graphics/assignments/:id/air`, or run an event's rundown with `POST /api/graphics/rundowns/:eventId/take`\n- See what is live and what changed with `GET /api/graphics/live` and `GET /api/graphics/log`\n\n**Credential:** admin session (Bearer) or account secret key, with `graphics: view` to read, `graphics: operate` to run graphics live and `graphics: manage` to change templates and setups.\n\n**Good to know:** a published template version never changes. Edit the draft and publish again to make a new version."
   },
   {
    "name": "Groups",
@@ -152,6 +167,11 @@
    "name": "Live",
    "x-displayName": "Live playback",
    "description": "Live playback is the public address viewers' players use to watch a live channel or listen to a station.\n\n**Use it to:**\n- Play a channel's HLS or DASH output from `GET /live/{id}/master.m3u8` or `GET /live/{id}/manifest.mpd`\n- Play a radio station's audio from `GET /live/{id}/stream.mp3`\n\n**Credential:** none, or a share or playback token where the content requires one.\n\n**Good to know:** the address only serves when the channel is on air and producing valid output. Expect 404 when off air and 503 when there is no valid content."
+  },
+  {
+   "name": "Live Streams",
+   "x-displayName": "Live streams",
+   "description": "Live streams gives one view of any live channel, radio station or event, whatever kind it is.\n\n**Use it to:**\n- Read a stream as one record, with its production and distribution settings, with `GET /api/live-streams/:kind/:id`\n- Publish it as schema.org JSON-LD (a VideoObject from a BroadcastEvent) for search engines and partners with `GET /api/live-streams/:kind/:id/schema.org`\n- Read what a source provider sends for it with `GET /api/live-streams/:kind/:id/provider`\n- List the stream presets (live channel, live event, FAST channel, premiere, loop) with `GET /api/live-streams/presets`\n\n**Credential:** admin session (Bearer) or account secret key, with `monitoring: view`.\n\n**Good to know:** `:kind` is `channel`, `radio` or `event`. The preset is worked out from the stream's settings and is not stored."
   },
   {
    "name": "Me",
@@ -370,10 +390,12 @@
     "Files",
     "Filler Assets",
     "Fleet",
+    "Graphics",
     "Groups",
     "Images",
     "Ingest",
     "Jobs",
+    "Live Streams",
     "Metadata Schemas",
     "Monitoring",
     "Notification Templates",
@@ -409,6 +431,8 @@
   {
    "name": "Delivery",
    "tags": [
+    "Fast",
+    "Gfx",
     "Image delivery",
     "Library",
     "Live",
@@ -4720,7 +4744,7 @@
     "tags": [
      "Channels"
     ],
-    "description": "Channels for the tenant.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `kind`, `status`, `group_id`, `group_name`, `enabled`, `on_air`, `recording_enabled`, `auto_connect`, `resilience_tier`, `desired_state`, `xmltv_id`, `tz`, `created_at`, `updated_at`.",
+    "description": "Channels for the tenant.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `kind`, `origin`, `status`, `group_id`, `group_name`, `enabled`, `on_air`, `recording_enabled`, `auto_connect`, `resilience_tier`, `desired_state`, `xmltv_id`, `tz`, `created_at`, `updated_at`.",
     "security": [
      {
       "adminBearer": []
@@ -5122,6 +5146,19 @@
       "description": "tv or radio. Filter: `kind=value` (comma list = any of), or `kind[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
      },
      {
+      "name": "origin",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "live",
+        "playlist"
+       ]
+      },
+      "description": "live (source + encoder) or playlist (FAST). Filter: `origin=value` (comma list = any of), or `origin[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
       "name": "status",
       "in": "query",
       "required": false,
@@ -5263,7 +5300,7 @@
        "type": "string",
        "default": "-created_at"
       },
-      "description": "Comma list of: id, name, kind, status, group_id, group_name, enabled, on_air, recording_enabled, auto_connect, resilience_tier, desired_state, xmltv_id, tz, created_at, updated_at. Prefix `-` for descending. Default `-created_at`; ties by id."
+      "description": "Comma list of: id, name, kind, origin, status, group_id, group_name, enabled, on_air, recording_enabled, auto_connect, resilience_tier, desired_state, xmltv_id, tz, created_at, updated_at. Prefix `-` for descending. Default `-created_at`; ties by id."
      },
      {
       "name": "limit",
@@ -8207,6 +8244,40 @@
      }
     }
    },
+   "get": {
+    "operationId": "getEPGByID",
+    "summary": "Get a programme",
+    "tags": [
+     "EPG"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** epg: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
    "patch": {
     "operationId": "patchEPGByID",
     "summary": "Update a programme",
@@ -8263,6 +8334,32 @@
       "schema": {
        "type": "string"
       }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/epg/as-run": {
+   "get": {
+    "operationId": "getEPGAsRun",
+    "summary": "Get EPG as run",
+    "tags": [
+     "EPG"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** epg: view",
+    "security": [
+     {
+      "adminBearer": []
      }
     ],
     "responses": {
@@ -10375,6 +10472,42 @@
     }
    }
   },
+  "/api/events/{id}/detail": {
+   "get": {
+    "operationId": "getEventsByIDDetail",
+    "summary": "Get an event's detail",
+    "tags": [
+     "Events"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** events: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/events/{id}/filler": {
    "get": {
     "operationId": "getEventsByIDFiller",
@@ -10461,6 +10594,918 @@
     "parameters": [
      {
       "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/ad-servers": {
+   "get": {
+    "operationId": "getFastAdServers",
+    "summary": "Get fast ad servers",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postFastAdServers",
+    "summary": "Fast: ad servers",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/ad-servers/{sid}": {
+   "delete": {
+    "operationId": "deleteFastAdServersBySid",
+    "summary": "Delete an ad server",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putFastAdServersBySid",
+    "summary": "Replace an ad server",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/ad-servers/{sid}/test": {
+   "post": {
+    "operationId": "postFastAdServersBySidTest",
+    "summary": "Test (ad server)",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/channels": {
+   "get": {
+    "operationId": "getFastChannels",
+    "summary": "Get fast channels",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postFastChannels",
+    "summary": "Fast: channels",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/channels/{id}": {
+   "get": {
+    "operationId": "getFastChannelsByID",
+    "summary": "Get a channel",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/channels/{id}/ad-report": {
+   "get": {
+    "operationId": "getFastChannelsByIDAdReport",
+    "summary": "Get a channel's ad report",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/channels/{id}/ads": {
+   "get": {
+    "operationId": "getFastChannelsByIDAds",
+    "summary": "Get a channel's ads",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putFastChannelsByIDAds",
+    "summary": "Set a channel's ads",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/channels/{id}/breaks/{bid}/decide": {
+   "post": {
+    "operationId": "postFastChannelsByIDBreaksByBidDecide",
+    "summary": "Decide (break)",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "bid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/channels/{id}/lineups": {
+   "post": {
+    "operationId": "postFastChannelsByIDLineups",
+    "summary": "Lineups (channel)",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/channels/{id}/on-air": {
+   "post": {
+    "operationId": "postFastChannelsByIDOnAir",
+    "summary": "On air (channel)",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/channels/{id}/prepare": {
+   "post": {
+    "operationId": "postFastChannelsByIDPrepare",
+    "summary": "Prepare (channel)",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/channels/{id}/readiness": {
+   "get": {
+    "operationId": "getFastChannelsByIDReadiness",
+    "summary": "Get a channel's readiness",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/library": {
+   "get": {
+    "operationId": "getFastLibrary",
+    "summary": "Get fast library",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/lineups/{lid}": {
+   "delete": {
+    "operationId": "deleteFastLineupsByLid",
+    "summary": "Delete a lineup",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "get": {
+    "operationId": "getFastLineupsByLid",
+    "summary": "Get a lineup",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putFastLineupsByLid",
+    "summary": "Replace a lineup",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/lineups/{lid}/activate": {
+   "post": {
+    "operationId": "postFastLineupsByLidActivate",
+    "summary": "Activate (lineup)",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/lineups/{lid}/apply": {
+   "post": {
+    "operationId": "postFastLineupsByLidApply",
+    "summary": "Apply (lineup)",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/lineups/{lid}/preview": {
+   "post": {
+    "operationId": "postFastLineupsByLidPreview",
+    "summary": "Preview (lineup)",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/streams/{kind}/{id}/breaks": {
+   "get": {
+    "operationId": "getFastStreamsByKindByIDBreaks",
+    "summary": "Get a :kind's breaks",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "kind",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postFastStreamsByKindByIDBreaks",
+    "summary": "Breaks (:kind)",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "kind",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/streams/{kind}/{id}/breaks/{bid}": {
+   "delete": {
+    "operationId": "deleteFastStreamsByKindByIDBreaksByBid",
+    "summary": "Delete a break",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "kind",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "bid",
       "in": "path",
       "required": true,
       "schema": {
@@ -11919,6 +12964,40 @@
      }
     }
    },
+   "get": {
+    "operationId": "getFillerAssetsByID",
+    "summary": "Get a slate or loop",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
    "patch": {
     "operationId": "patchFillerAssetsByID",
     "summary": "Update a slate or loop",
@@ -11939,6 +13018,58 @@
       "schema": {
        "type": "string"
       }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/filler-assets/copy-from-library": {
+   "post": {
+    "operationId": "postFillerAssetsCopyFromLibrary",
+    "summary": "Filler assets: copy from library",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/filler-assets/elsewhere": {
+   "get": {
+    "operationId": "getFillerAssetsElsewhere",
+    "summary": "Get filler assets elsewhere",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
      }
     ],
     "responses": {
@@ -12063,6 +13194,1580 @@
       "schema": {
        "type": "string"
       }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/assignments": {
+   "get": {
+    "operationId": "getGraphicsAssignments",
+    "summary": "Get graphics assignments",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postGraphicsAssignments",
+    "summary": "Graphics: assignments",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/assignments/{id}": {
+   "delete": {
+    "operationId": "deleteGraphicsAssignmentsByID",
+    "summary": "Delete an assignment",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "patch": {
+    "operationId": "patchGraphicsAssignmentsByID",
+    "summary": "Update an assignment",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/assignments/{id}/air": {
+   "post": {
+    "operationId": "postGraphicsAssignmentsByIDAir",
+    "summary": "Air (assignment)",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: operate",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/assignments/{id}/state": {
+   "get": {
+    "operationId": "getGraphicsAssignmentsByIDState",
+    "summary": "Get an assignment's state",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "patch": {
+    "operationId": "patchGraphicsAssignmentsByIDState",
+    "summary": "Update an assignment's state",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: operate",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/live": {
+   "get": {
+    "operationId": "getGraphicsLive",
+    "summary": "Get graphics live",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/log": {
+   "get": {
+    "operationId": "getGraphicsLog",
+    "summary": "Get graphics log",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/plan": {
+   "get": {
+    "operationId": "getGraphicsPlan",
+    "summary": "Get graphics plan",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/rundowns/{eventId}": {
+   "get": {
+    "operationId": "getGraphicsRundownsByEventId",
+    "summary": "Get a rundown",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "eventId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/rundowns/{eventId}/copy-from": {
+   "post": {
+    "operationId": "postGraphicsRundownsByEventIdCopyFrom",
+    "summary": "Copy from (rundown)",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "eventId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/rundowns/{eventId}/import-csv": {
+   "post": {
+    "operationId": "postGraphicsRundownsByEventIdImportCsv",
+    "summary": "Import csv (rundown)",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "eventId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/rundowns/{eventId}/items": {
+   "post": {
+    "operationId": "postGraphicsRundownsByEventIdItems",
+    "summary": "Items (rundown)",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "eventId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/rundowns/{eventId}/items/{itemId}": {
+   "delete": {
+    "operationId": "deleteGraphicsRundownsByEventIdItemsByItemId",
+    "summary": "Delete an item",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "eventId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "itemId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "patch": {
+    "operationId": "patchGraphicsRundownsByEventIdItemsByItemId",
+    "summary": "Update an item",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "eventId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "itemId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/rundowns/{eventId}/items/{itemId}/{action}(skip|restore)": {
+   "post": {
+    "operationId": "postGraphicsRundownsByEventIdItemsByItemIdByActionskiprestore",
+    "summary": "POST a :itemid",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: operate",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "eventId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "itemId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "action",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/rundowns/{eventId}/reorder": {
+   "post": {
+    "operationId": "postGraphicsRundownsByEventIdReorder",
+    "summary": "Reorder (rundown)",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "eventId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/rundowns/{eventId}/take": {
+   "post": {
+    "operationId": "postGraphicsRundownsByEventIdTake",
+    "summary": "Take (rundown)",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: operate",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "eventId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/rundowns/{eventId}/take-off": {
+   "post": {
+    "operationId": "postGraphicsRundownsByEventIdTakeOff",
+    "summary": "Take off (rundown)",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: operate",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "eventId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/setups": {
+   "get": {
+    "operationId": "getGraphicsSetups",
+    "summary": "Get graphics setups",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postGraphicsSetups",
+    "summary": "Graphics: setups",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/setups/{id}": {
+   "delete": {
+    "operationId": "deleteGraphicsSetupsByID",
+    "summary": "Delete a setup",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "get": {
+    "operationId": "getGraphicsSetupsByID",
+    "summary": "Get a setup",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "patch": {
+    "operationId": "patchGraphicsSetupsByID",
+    "summary": "Update a setup",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/sources": {
+   "get": {
+    "operationId": "getGraphicsSources",
+    "summary": "Get graphics sources",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postGraphicsSources",
+    "summary": "Graphics: sources",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/sources/{id}": {
+   "delete": {
+    "operationId": "deleteGraphicsSourcesByID",
+    "summary": "Delete a source",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "patch": {
+    "operationId": "patchGraphicsSourcesByID",
+    "summary": "Update a source",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/sources/{id}/push": {
+   "post": {
+    "operationId": "postGraphicsSourcesByIDPush",
+    "summary": "Push (source)",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: operate",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/sources/{id}/test": {
+   "post": {
+    "operationId": "postGraphicsSourcesByIDTest",
+    "summary": "Test (source)",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/templates": {
+   "get": {
+    "operationId": "getGraphicsTemplates",
+    "summary": "Get graphics templates",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postGraphicsTemplates",
+    "summary": "Graphics: templates",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/templates/{id}": {
+   "delete": {
+    "operationId": "deleteGraphicsTemplatesByID",
+    "summary": "Delete a template",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "get": {
+    "operationId": "getGraphicsTemplatesByID",
+    "summary": "Get a template",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "patch": {
+    "operationId": "patchGraphicsTemplatesByID",
+    "summary": "Update a template",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/templates/{id}/draft": {
+   "delete": {
+    "operationId": "deleteGraphicsTemplatesByIDDraft",
+    "summary": "Remove a template's draft",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putGraphicsTemplatesByIDDraft",
+    "summary": "Set a template's draft",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/templates/{id}/draft/publish": {
+   "post": {
+    "operationId": "postGraphicsTemplatesByIDDraftPublish",
+    "summary": "Draft: publish",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/templates/{id}/duplicate": {
+   "post": {
+    "operationId": "postGraphicsTemplatesByIDDuplicate",
+    "summary": "Duplicate (template)",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/templates/{id}/style": {
+   "post": {
+    "operationId": "postGraphicsTemplatesByIDStyle",
+    "summary": "Style (template)",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/templates/{id}/versions/{vid}/download": {
+   "get": {
+    "operationId": "getGraphicsTemplatesByIDVersionsByVidDownload",
+    "summary": "Get a version's download",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "vid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/templates/{id}/versions/{vid}/files": {
+   "get": {
+    "operationId": "getGraphicsTemplatesByIDVersionsByVidFiles",
+    "summary": "Get a version's files",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "vid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/templates/{id}/versions/{vid}/source": {
+   "get": {
+    "operationId": "getGraphicsTemplatesByIDVersionsByVidSource",
+    "summary": "Get a version's source",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "vid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/templates/{id}/versions/{vid}/style": {
+   "get": {
+    "operationId": "getGraphicsTemplatesByIDVersionsByVidStyle",
+    "summary": "Get a version's style",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "vid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/graphics/templates/import": {
+   "post": {
+    "operationId": "postGraphicsTemplatesImport",
+    "summary": "Templates: import",
+    "tags": [
+     "Graphics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** graphics: manage",
+    "security": [
+     {
+      "adminBearer": []
      }
     ],
     "responses": {
@@ -13937,6 +16642,164 @@
       "schema": {
        "type": "string"
       }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/live-streams/{kind}/{id}": {
+   "get": {
+    "operationId": "getLiveStreamsByKindByID",
+    "summary": "Get a :kind",
+    "tags": [
+     "Live Streams"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** monitoring: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "kind",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/live-streams/{kind}/{id}/provider": {
+   "get": {
+    "operationId": "getLiveStreamsByKindByIDProvider",
+    "summary": "Get a :kind's provider",
+    "tags": [
+     "Live Streams"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** monitoring: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "kind",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/live-streams/{kind}/{id}/schema.org": {
+   "get": {
+    "operationId": "getLiveStreamsByKindByIDSchemaOrg",
+    "summary": "Get a :kind's schema org",
+    "tags": [
+     "Live Streams"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** monitoring: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "kind",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/live-streams/presets": {
+   "get": {
+    "operationId": "getLiveStreamsPresets",
+    "summary": "Get live streams presets",
+    "tags": [
+     "Live Streams"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** monitoring: view",
+    "security": [
+     {
+      "adminBearer": []
      }
     ],
     "responses": {
@@ -16068,6 +18931,52 @@
    "post": {
     "operationId": "postPlayerEvents",
     "summary": "Player: events",
+    "tags": [
+     "Player"
+    ],
+    "description": "**Credential:** publishable key or player token",
+    "security": [
+     {
+      "publishableKey": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   }
+  },
+  "/api/player/graphics": {
+   "get": {
+    "operationId": "getPlayerGraphics",
+    "summary": "Get player graphics",
+    "tags": [
+     "Player"
+    ],
+    "description": "**Credential:** publishable key or player token",
+    "security": [
+     {
+      "publishableKey": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   }
+  },
+  "/api/player/graphics/impressions": {
+   "post": {
+    "operationId": "postPlayerGraphicsImpressions",
+    "summary": "Graphics: impressions",
     "tags": [
      "Player"
     ],
@@ -18865,6 +21774,42 @@
     "x-volt-list": true
    }
   },
+  "/api/publications/{id}": {
+   "get": {
+    "operationId": "getPublicationsByID",
+    "summary": "Get a publication",
+    "tags": [
+     "Publications"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/publications/sync-views": {
    "post": {
     "operationId": "postPublicationsSyncViews",
@@ -19320,6 +22265,40 @@
      "Publish Targets"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "get": {
+    "operationId": "getPublishTargetsByID",
+    "summary": "Get a publishing target",
+    "tags": [
+     "Publish Targets"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
     "security": [
      {
       "adminBearer": []
@@ -22319,6 +25298,40 @@
       "$ref": "#/components/responses/Forbidden"
      }
     }
+   },
+   "get": {
+    "operationId": "getScheduledClipsByID",
+    "summary": "Get a scheduled clip",
+    "tags": [
+     "Scheduled Clips"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** recordings: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
    }
   },
   "/api/search": {
@@ -25019,6 +28032,32 @@
     "x-volt-list": true
    }
   },
+  "/api/timeline/selection": {
+   "get": {
+    "operationId": "getTimelineSelection",
+    "summary": "Get timeline selection",
+    "tags": [
+     "Timeline"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** monitoring: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/tus": {
    "options": {
     "operationId": "optionsUploadstus",
@@ -27168,7 +30207,7 @@
     "tags": [
      "VOD"
     ],
-    "description": "The account's on-demand library: recordings published as VOD, clips, uploads and watch-folder files. Search titles and file names with `q`, filter on any field below (for example `review_state=in_review` or `published=true`), and sort with `sort=-created_at`.\n\nDerived assets. ?published=true|false.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `title`, `kind`, `source_kind`, `source_name`, `channel_id`, `event_id`, `recording_id`, `schema_id`, `schema_name`, `published`, `portal_visible`, `output_kind`, `review_state`, `qc_state`, `availability_state`, `available_from`, `available_until`, `withdrawn_at`, `thumb_status`, `original_filename`, `mime`, `start_epoch_ms`, `end_epoch_ms`, `duration_ms`, `source_bytes`, `source_coverage_pct`, `has_stale_publication`, `publication_count`, `encode_state`, `encode_pct`, `created_at`, `updated_at`, `built_at`, `reviewed_at`.",
+    "description": "The account's on-demand library: recordings published as VOD, clips, uploads and watch-folder files. Search titles and file names with `q`, filter on any field below (for example `review_state=in_review` or `published=true`), and sort with `sort=-created_at`.\n\nDerived assets. ?published=true|false.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `title`, `kind`, `source_kind`, `source_name`, `channel_id`, `event_id`, `recording_id`, `schema_id`, `schema_name`, `published`, `portal_visible`, `output_kind`, `review_state`, `qc_state`, `availability_state`, `available_from`, `available_until`, `withdrawn_at`, `thumb_status`, `original_filename`, `mime`, `start_epoch_ms`, `end_epoch_ms`, `duration_ms`, `source_bytes`, `source_coverage_pct`, `schema_key`, `schema_org_type`, `origin`, `metadata_completeness`, `metadata_missing_required`, `top_height`, `video_codec`, `rendition_count`, `has_stale_publication`, `publication_count`, `encode_state`, `encode_pct`, `created_at`, `updated_at`, `built_at`, `reviewed_at`.",
     "security": [
      {
       "adminBearer": []
@@ -27732,6 +30771,84 @@
       "description": "Filter: `source_coverage_pct=value` (comma list = any of), or `source_coverage_pct[op]=value` with op: `eq` (equals), `ne` (not equal), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
      },
      {
+      "name": "schema_key",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Standard content type key (episode, movie, clip, sports-match ...). Filter: `schema_key=value` (comma list = any of), or `schema_key[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "schema_org_type",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "schema.org type of the content type (Episode, Movie, VideoObject, SportsEvent ...). Filter: `schema_org_type=value` (comma list = any of), or `schema_org_type[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "origin",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "recording",
+        "clip",
+        "upload",
+        "watchfolder"
+       ]
+      },
+      "description": "recording, clip, upload or watchfolder. Filter: `origin=value` (comma list = any of), or `origin[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "metadata_completeness",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "number"
+      },
+      "description": "Target metadata filled, 0 to 100. Filter: `metadata_completeness=value` (comma list = any of), or `metadata_completeness[op]=value` with op: `eq` (equals), `ne` (not equal), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "metadata_missing_required",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "A required target field is empty, or the asset has no content type. Filter: `metadata_missing_required=value`, or `metadata_missing_required[op]=value` with op: `eq` (equals), `ne` (not equal), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "top_height",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "number"
+      },
+      "description": "Height of the top rendition (2160, 1080, 720 ...). Filter: `top_height=value` (comma list = any of), or `top_height[op]=value` with op: `eq` (equals), `ne` (not equal), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "video_codec",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "h264, hevc or av1. Filter: `video_codec=value` (comma list = any of), or `video_codec[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "rendition_count",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "number"
+      },
+      "description": "Filter: `rendition_count=value` (comma list = any of), or `rendition_count[op]=value` with op: `eq` (equals), `ne` (not equal), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
       "name": "has_stale_publication",
       "in": "query",
       "required": false,
@@ -27822,7 +30939,7 @@
        "type": "string",
        "default": "-created_at"
       },
-      "description": "Comma list of: id, title, kind, source_kind, source_name, channel_id, event_id, recording_id, schema_id, schema_name, published, portal_visible, output_kind, review_state, qc_state, availability_state, available_from, available_until, withdrawn_at, thumb_status, original_filename, mime, start_epoch_ms, end_epoch_ms, duration_ms, source_bytes, source_coverage_pct, has_stale_publication, publication_count, encode_state, encode_pct, created_at, updated_at, built_at, reviewed_at. Prefix `-` for descending. Default `-created_at`; ties by id."
+      "description": "Comma list of: id, title, kind, source_kind, source_name, channel_id, event_id, recording_id, schema_id, schema_name, published, portal_visible, output_kind, review_state, qc_state, availability_state, available_from, available_until, withdrawn_at, thumb_status, original_filename, mime, start_epoch_ms, end_epoch_ms, duration_ms, source_bytes, source_coverage_pct, schema_key, schema_org_type, origin, metadata_completeness, metadata_missing_required, top_height, video_codec, has_stale_publication, publication_count, encode_state, encode_pct, created_at, updated_at, built_at, reviewed_at. Prefix `-` for descending. Default `-created_at`; ties by id."
      },
      {
       "name": "limit",
@@ -28579,6 +31696,254 @@
     }
    }
   },
+  "/api/vod/{id}/encode": {
+   "get": {
+    "operationId": "getVODByIDEncode",
+    "summary": "Get a VOD asset's encode",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/epg-fill": {
+   "get": {
+    "operationId": "getVODByIDEPGFill",
+    "summary": "Get a VOD asset's EPG fill",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postVODByIDEPGFill",
+    "summary": "EPG fill (VOD asset)",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/history": {
+   "get": {
+    "operationId": "getVODByIDHistory",
+    "summary": "Get a VOD asset's history",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/image": {
+   "get": {
+    "operationId": "getVODByIDImage",
+    "summary": "Get a VOD asset's image",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putVODByIDImage",
+    "summary": "Set a VOD asset's image",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/image/auto": {
+   "post": {
+    "operationId": "postVODByIDImageAuto",
+    "summary": "Image: auto",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/vod/{id}/markers": {
    "get": {
     "operationId": "getVODByIDMarkers",
@@ -29091,6 +32456,150 @@
     }
    }
   },
+  "/api/vod/{id}/song/details": {
+   "delete": {
+    "operationId": "deleteVODByIDSongDetails",
+    "summary": "Delete song details",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/song/find": {
+   "post": {
+    "operationId": "postVODByIDSongFind",
+    "summary": "Song: find",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/song/use": {
+   "post": {
+    "operationId": "postVODByIDSongUse",
+    "summary": "Song: use",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/target-metadata": {
+   "get": {
+    "operationId": "getVODByIDTargetMetadata",
+    "summary": "Get a VOD asset's target metadata",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/vod/{id}/trim": {
    "patch": {
     "operationId": "patchVODByIDTrim",
@@ -29148,6 +32657,84 @@
       "schema": {
        "type": "string"
       }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/epg-fill": {
+   "post": {
+    "operationId": "postVODEPGFill",
+    "summary": "VOD: EPG fill",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/facets": {
+   "get": {
+    "operationId": "getVODFacets",
+    "summary": "Get VOD facets",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/music-lookup": {
+   "post": {
+    "operationId": "postVODMusicLookup",
+    "summary": "VOD: music lookup",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
      }
     ],
     "responses": {
@@ -30452,6 +34039,72 @@
      },
      "403": {
       "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/fast/{id}/s/{sid}/{file}": {
+   "get": {
+    "operationId": "getFastByIDSBySidByFile",
+    "summary": "Get a :sid",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "file",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/gfx/{versionId}/*": {
+   "get": {
+    "operationId": "getGfxByVersionId",
+    "summary": "Get a gfx's *",
+    "tags": [
+     "Gfx"
+    ],
+    "description": "**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "versionId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
      }
     }
    }

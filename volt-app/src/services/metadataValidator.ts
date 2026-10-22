@@ -5,7 +5,7 @@ import { ApiError } from '../util/http';
  *
  * A schema is a list of typed fields (stored in metadata_schemas.fields):
  *   { key, label?, type, required?, options?, multiple? }
- * Supported types: string | text | number | boolean | date | enum | url | tags.
+ * Supported types: string | text | number | boolean | date | enum | url | tags | image.
  *
  * Validation is strict: required fields must be present, values must match their
  * declared type, enums must be within options, and unknown keys are rejected —
@@ -15,7 +15,8 @@ import { ApiError } from '../util/http';
 export interface SchemaField {
   key: string;
   label?: string;
-  type: 'string' | 'text' | 'number' | 'boolean' | 'date' | 'enum' | 'url' | 'tags' | 'reference';
+  /** image: an Image Library reference (/library/<account>/<path>) or a web address, downloaded into the library on save. */
+  type: 'string' | 'text' | 'number' | 'boolean' | 'date' | 'enum' | 'url' | 'tags' | 'reference' | 'image';
   required?: boolean;
   options?: string[];
   multiple?: boolean;
@@ -45,7 +46,7 @@ export function mergeFields(parent: SchemaField[], child: SchemaField[]): Schema
 export function validateSchemaFields(fields: unknown): SchemaField[] {
   if (!Array.isArray(fields)) throw new ApiError(422, 'schema fields must be an array');
   const seen = new Set<string>();
-  const okTypes = ['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'tags', 'reference'];
+  const okTypes = ['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'image', 'tags', 'reference'];
   for (const f of fields as SchemaField[]) {
     if (!f || typeof f.key !== 'string' || !f.key)
       throw new ApiError(422, 'each field needs a non-empty key');
@@ -68,6 +69,11 @@ function checkOne(field: SchemaField, value: any): any {
       if (typeof value !== 'string') throw new ApiError(422, `${field.key} must be a string`);
       if (field.type === 'url' && value && !/^https?:\/\//i.test(value))
         throw new ApiError(422, `${field.key} must be a URL`);
+      return value;
+    case 'image':
+      if (typeof value !== 'string') throw new ApiError(422, `${field.key} must be an image`);
+      if (value && !/^https?:\/\//i.test(value) && !/^\/library\/[0-9a-f-]{36}\/.+/i.test(value))
+        throw new ApiError(422, `${field.key} must be an image from the Image Library or a web address`);
       return value;
     case 'number':
       if (typeof value !== 'number' || Number.isNaN(value))

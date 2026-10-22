@@ -25,6 +25,7 @@ import { timelineRouter, daypartPresetsRouter } from './modules/timeline';
 import { timelineGridRouter } from './modules/timelineGrid';
 import { storageRouter } from './modules/storage';
 import { vodRouter } from './modules/vod';
+import { vodImageRouter } from './modules/vodImage';
 import { metadataSchemasRouter } from './modules/metadataSchemas';
 import { fillerAssetsRouter } from './modules/fillerAssets';
 import { uploadsRouter, uploadChunksRouter } from './modules/uploads';
@@ -379,6 +380,7 @@ export function createServer() {
   // and what retention will do to it next. NOT /api/media — that prefix is the
   // thumbnailer's ingest callback and belongs to a different concern entirely.
   app.use('/api/storage', storageRouter);
+  app.use('/api/vod', vodImageRouter);                   // the image that represents an asset (before vodRouter's /:id)
   app.use('/api/vod', vodRouter);                        // derived VOD assets + metadata
   app.use('/api/metadata-schemas', metadataSchemasRouter); // named metadata schemas
   app.use('/api/filler-assets', fillerAssetsRouter);     // slates & loops

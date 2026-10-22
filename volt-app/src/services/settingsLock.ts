@@ -56,8 +56,8 @@ const COLUMNS: Record<string, string[]> = {
   radio: ['radio_config'],
 };
 
-export async function encoderRunning(channelId: string): Promise<boolean> {
-  const r = await one(`SELECT 1 FROM instances WHERE channel_id = $1 AND terminated_at IS NULL LIMIT 1`, [channelId]);
+export async function encoderRunning(channelId: string, kind: 'channel' | 'event' = 'channel'): Promise<boolean> {
+  const r = await one(`SELECT 1 FROM instances WHERE ${kind === 'event' ? 'event_id' : 'channel_id'} = $1 AND terminated_at IS NULL LIMIT 1`, [channelId]);
   return !!r;
 }
 

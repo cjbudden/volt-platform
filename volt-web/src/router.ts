@@ -17,6 +17,8 @@ export interface Route {
    *  one source's continuous timeline, /recordings/:id is a single capture. */
   recordingSource: { id: string } | null
   radioId: string | null
+  /** /events/:id, the event's own page (22 Oct 2026). */
+  eventId: string | null
   /** /radio/:id/player — the embed setup page for one station. */
   radioPlayerId: string | null
   /** A guide's owner. 'radio' is a THIRD kind, not a flavour of channel: a
@@ -47,6 +49,7 @@ export function parseRoute(pathname: string, search = ''): Route {
   const base = { channelId: null as string | null, recordingId: null as string | null,
     recordingSource: null as Route['recordingSource'],
     radioId: null as string | null,
+    eventId: null as string | null,
     radioPlayerId: null as string | null,
     epgOwner: null as Route['epgOwner'], create, path: pathname }
   if (parts.length === 0) return { ...base, section: 'channels' }
@@ -54,6 +57,9 @@ export function parseRoute(pathname: string, search = ''): Route {
     if (parts[1] === 'new') return { ...base, section: 'channels', create: true }
     if (parts[1]) return { ...base, section: 'channels', channelId: decodeURIComponent(parts[1]), create: false }
     return { ...base, section: 'channels' }
+  }
+  if (parts[0] === 'events' && parts[1] && parts[1] !== 'new') {
+    return { ...base, section: 'events', eventId: decodeURIComponent(parts[1]) }
   }
   if (parts[0] === 'recordings' && parts[1] === 'source' && parts[2]) {
     return { ...base, section: 'recordings', recordingSource: { id: decodeURIComponent(parts[2]) } }

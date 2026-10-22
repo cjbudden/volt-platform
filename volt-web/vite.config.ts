@@ -32,6 +32,9 @@ export default defineConfig({
       '/clips': 'http://localhost:8080',   // rendered clip outputs
       '/gfx': 'http://localhost:8080',     // graphics template files (previews, player overlay)
       '^/player/': 'http://localhost:8080',  // the embed bundle (Player setup snippet, share pages)
+      // Public playback (/live/<id>/master.m3u8, manifest.mpd, stream.mp3). Only the
+      // file form: plain /live is the console's Live Streams page and must stay here.
+      '^/live/[^/]+/': 'http://localhost:8080',
     },
   },
 })

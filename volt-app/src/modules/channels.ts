@@ -21,6 +21,7 @@ import { FAILOVER_MODES, setFailoverControl, currentFailoverControl } from '../s
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { scheduleFillerPrep, FILLER_FIELDS, runFillerPrep, fillerStatus } from '../services/fillerPrep';
+import { assertFillerAsset } from './fillerAssets';
 
 export const channelsRouter = Router();
 channelsRouter.use(requireAuth);
@@ -63,6 +64,9 @@ const channelList = defineList({
     id: { sql: 'c.id', type: 'uuid' },
     name: { sql: 'c.name', type: 'string' },
     kind: { sql: "COALESCE(c.kind,'tv')", type: 'enum', values: ['tv', 'radio'], doc: 'tv or radio' },
+    // live = fed by a source through an encoder; playlist = a FAST channel built
+    // from the library (managed under /api/fast). The Channels page asks for live.
+    origin: { sql: "COALESCE(c.origin,'live')", type: 'enum', values: ['live', 'playlist'], doc: 'live (source + encoder) or playlist (FAST)' },
     status: { sql: 'c.status', type: 'enum', values: ['scheduled', 'provisioning', 'testing', 'live', 'stopping', 'ended', 'error'] },
     group_id: { sql: 'c.group_id', type: 'uuid' },
     group_name: { sql: 'g.name', type: 'string' },
@@ -346,6 +350,7 @@ channelsRouter.post(
       // which wins over any `name` sent inside metadata.
       { ...(body.metadata ?? {}), name: body.name }, ['channel']);
 
+    await assertFillerAsset(accountId(req), body.fillerAssetId);
     // retention: seconds is the source of truth; derive the coarse day field in sync
     const retSec = body.recordingRetentionSec ?? (body.recordingRetentionDays != null ? body.recordingRetentionDays * 86400 : null);
     const retDays = retSec != null ? Math.max(1, Math.ceil(retSec / 86400)) : null;
@@ -501,7 +506,7 @@ const editChannel = asyncHandler(async (req, res) => {
   if (has('autoFailback')) patch.auto_failback = body.autoFailback;
   if (has('inputLossBehavior')) patch.input_loss_behavior = body.inputLossBehavior;
   if (has('fillerSlateRef')) patch.filler_slate_ref = body.fillerSlateRef ?? null;
-  if (has('fillerAssetId')) patch.filler_asset_id = body.fillerAssetId ?? null;
+  if (has('fillerAssetId')) { await assertFillerAsset(accountId(req), body.fillerAssetId); patch.filler_asset_id = body.fillerAssetId ?? null; }
   if (has('fallbackTranscode')) patch.fallback_transcode = body.fallbackTranscode;
   if (has('watermark') && body.watermark) {
     const w = body.watermark;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, type FillerAsset } from '../api'
+import { api, thumbUrl, ApiError, type FillerAsset, type FillerElsewhere, type FillerUser } from '../api'
+import { navigate } from '../router'
 import {
   cancel, dismiss, initBackground, listResumable,
   resumeWithFile, startUpload, subscribe, type UploadItem,
@@ -192,6 +193,70 @@ function UploadRow({ u, onDone }: { u: UploadItem; onDone: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
+const USER_KIND: Record<string, string> = { channel: 'Channel', radio: 'Station', event: 'Event' }
+
+/** The streams that fall back to an asset, each a link to that stream. */
+function UsedBy({ users }: { users: FillerUser[] | undefined }) {
+  if (!users?.length) return <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Not used</span>
+  return (
+    <div className="lf-used">
+      {users.map(u => (
+        <a key={u.kind + u.id} href={u.href} title={`${USER_KIND[u.kind] ?? u.kind}: ${u.name}`}
+          onClick={e => { if (e.metaKey || e.ctrlKey || e.button === 1) return; e.preventDefault(); navigate(u.href) }}>{u.name}</a>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * FALLBACKS THAT ARE NOT HERE YET. Streams set up before 22 Oct picked their
+ * slate from the Image Library, so this page could not see them. They still
+ * work; this lists them with a one-step copy that also moves the streams over.
+ */
+function Elsewhere({ items, onCopied }: { items: FillerElsewhere[]; onCopied: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const notify = useNotify()
+  if (!items.length) return null
+  return (
+    <div className="card p-4 lf-elsewhere">
+      <div className="sec-label">Fallbacks not in Loops &amp; Fillers yet</div>
+      <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginTop: 0 }}>
+        These streams fall back to an image held somewhere else, usually the Image Library. They still work.
+        Copy one in to manage it here; the streams using it move over with it.
+      </p>
+      <table>
+        <thead><tr><th style={{ width: 130 }}>Preview</th><th>Image</th><th>Used by</th><th /></tr></thead>
+        <tbody>
+          {items.map(it => (
+            <tr key={it.ref}>
+              <td><img src={thumbUrl(it.ref, 224, 126)} alt="" style={{ width: 112, height: 63, objectFit: 'cover', borderRadius: 4, background: '#000' }} /></td>
+              <td>
+                <b>{it.libraryFile?.name ?? it.ref.split('/').pop()}</b>
+                <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-micro)' }}>{it.libraryFile ? `Image Library · ${it.libraryFile.path}` : it.ref}</div>
+              </td>
+              <td><UsedBy users={it.usedBy} /></td>
+              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                {it.canCopy ? (
+                  <button className="btn primary" disabled={busy === it.ref} onClick={async () => {
+                    setBusy(it.ref)
+                    try {
+                      const r = await api.copyFillerFromLibrary(it.ref)
+                      notify({ kind: 'ok', message: `Copied into Loops & Fillers. ${r.relinked.length} stream${r.relinked.length === 1 ? ' now uses' : 's now use'} it.` })
+                      onCopied()
+                    } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy(null) }
+                  }}>{busy === it.ref ? 'Copying…' : 'Copy into Loops & Fillers'}</button>
+                ) : (
+                  <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Not an Image Library file: choose a fallback on the stream</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export default function LoopsPage() {
   const [assets, setAssets] = useState<FillerAsset[] | null>(null)
   const [uploads, setUploads] = useState<UploadItem[]>([])
@@ -207,9 +272,11 @@ export default function LoopsPage() {
   const resumeInput = useRef<HTMLInputElement | null>(null)
   const resumeTarget = useRef<string | null>(null)
 
+  const [elsewhere, setElsewhere] = useState<FillerElsewhere[]>([])
   async function load() {
     try { setAssets(await api.fillerAssets()); setErr('') }
     catch (e: any) { setErr(e.message) }
+    api.fillerElsewhere().then(r => setElsewhere(r.items)).catch(() => setElsewhere([]))
   }
 
   useEffect(() => {
@@ -257,6 +324,8 @@ export default function LoopsPage() {
           already ninety per cent on the server. The file has to be chosen again:
           a browser will not hand a page a file the user did not just pick, and
           no amount of wanting changes that. */}
+      <Elsewhere items={elsewhere} onCopied={load} />
+
       {resumable.length > 0 && (
         <div className="card p-4" style={{ marginBottom: 16 }}>
           <div className="sec-label">Unfinished uploads</div>
@@ -322,7 +391,7 @@ export default function LoopsPage() {
         </div>
         <table>
           <thead>
-            <tr><th style={{ width: 130 }}>Preview</th><th>Name</th><th>Kind</th><th>Size</th><th>Status</th><th>Added</th><th /></tr>
+            <tr><th style={{ width: 130 }}>Preview</th><th>Name</th><th>Kind</th><th>Used by</th><th>Size</th><th>Status</th><th>Added</th><th /></tr>
           </thead>
           <tbody>
             {shown.map(a => (
@@ -367,6 +436,7 @@ export default function LoopsPage() {
                   )}
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{KIND_LABEL[a.kind] ?? a.kind}</td>
+                <td><UsedBy users={a.used_by} /></td>
                 <td style={{ color: 'var(--muted)' }}>{fmtBytes(a.bytes)}</td>
                 <td style={{ color: STATUS_TONE[a.status] ?? 'var(--muted)', fontSize: 'var(--fs-sm)' }}>
                   {a.status}
@@ -379,14 +449,22 @@ export default function LoopsPage() {
                   )}
                   <button className="btn ghost" style={{ marginLeft: 6 }}
                     onClick={async () => {
-                      if (!confirm(`Delete "${a.name}"? Any channel using it falls back to black.`)) return
-                      try { await api.deleteFillerAsset(a.id); load() } catch (ex: any) { fail(ex.message) }
+                      const users = a.used_by ?? []
+                      if (!users.length) {
+                        if (!confirm(`Delete "${a.name}"? This can't be undone.`)) return
+                        try { await api.deleteFillerAsset(a.id); load() } catch (ex: any) { fail(ex.message) }
+                        return
+                      }
+                      // IN USE: the server refuses unless forced, and names the streams.
+                      if (!confirm(`"${a.name}" is the fallback for ${users.map(u => u.name).join(', ')}. Deleting it leaves ${users.length === 1 ? 'that stream' : 'those streams'} with no fallback. Delete anyway?`)) return
+                      try { await api.deleteFillerAsset(a.id, true); load() }
+                      catch (ex: any) { fail(ex instanceof ApiError && ex.body?.message ? ex.body.message : ex.message) }
                     }}>Delete</button>
                 </td>
               </tr>
             ))}
             {shown.length === 0 && (
-              <tr><td colSpan={7} style={{ color: 'var(--faint)' }}>
+              <tr><td colSpan={8} style={{ color: 'var(--faint)' }}>
                 Nothing here yet. Drop a file above to add one.
               </td></tr>
             )}

@@ -37,6 +37,12 @@
 .lib-thumb { position: relative; aspect-ratio: 16 / 9; background: #0b0e14; overflow: hidden; display: grid; place-items: center }
 .lib-thumb img { width: 100%; height: 100%; object-fit: cover; display: block }
 .lib-thumb-ph { color: var(--idle); display: grid }
+.lib-thumb.square .lib-thumb-bg { position: absolute; inset: -12%; width: 124%; height: 124%; object-fit: cover; filter: blur(18px) brightness(.45) saturate(1.2) }
+.lib-thumb.square .lib-thumb-sq { position: absolute; top: 9%; left: 50%; transform: translateX(-50%); height: 82%; width: auto; aspect-ratio: 1; object-fit: contain; border-radius: 4px; box-shadow: 0 6px 22px rgba(0,0,0,.45) }
+.lib-thumb.sm.square .lib-thumb-sq { top: 0; height: 100%; border-radius: 0; box-shadow: none }
+.lib-thumb-audio { position: absolute; right: 8px; top: 8px; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: rgba(8,10,16,.72); color: #e8edf5 }
+.lib-thumb-audio svg { width: 14px; height: 14px }
+.lib-thumb.sm .lib-thumb-audio { display: none }
 .lib-thumb-ph svg { width: 28px; height: 28px }
 .lib-thumb.sm { width: 64px; flex: none; border-radius: 6px }
 .lib-thumb.sm .lib-thumb-ph svg { width: 18px; height: 18px }
@@ -157,3 +163,115 @@
   .lib-search { min-width: 0; flex-basis: 100% }
   .lib-target-l { width: 96px }
 }
+
+/* The asset's image (AssetImage.tsx, docs/ASSET_IMAGES.md) */
+.asset-img { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border) }
+.asset-img-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px }
+.asset-img-src { font-size: var(--fs-xs); color: var(--muted); padding: 2px 8px; border-radius: 999px; background: var(--panel-2) }
+.asset-img-src.manual { color: var(--text) }
+.asset-img-err { color: var(--danger, #f87171); font-size: var(--fs-sm); margin-bottom: 8px }
+.asset-img-main { display: grid; grid-template-columns: 240px 1fr; gap: 14px; align-items: start }
+.asset-img-cur { aspect-ratio: 16 / 9; background: #0b0e14; border-radius: 6px; overflow: hidden; display: grid; place-items: center }
+.asset-img-cur.square { aspect-ratio: 1; width: 160px }
+.asset-img-cur img { width: 100%; height: 100%; object-fit: cover; display: block }
+.asset-img-why { font-size: var(--fs-sm); line-height: 1.5 }
+.asset-img-music { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 8px 0 0; font-size: var(--fs-sm) }
+.asset-img-music dt { color: var(--faint) }
+.asset-img-music dd { margin: 0 }
+.asset-img-cands { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px }
+.asset-img-cand { position: relative; padding: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: #0b0e14; aspect-ratio: 16 / 9; cursor: pointer }
+.asset-img-cand img { width: 100%; height: 100%; object-fit: cover; display: block }
+.asset-img-cand.rej img { opacity: .35; filter: grayscale(1) }
+.asset-img-cand.cur { outline: 2px solid var(--brand); outline-offset: 1px }
+.asset-img-cand .t, .asset-img-cand .s { position: absolute; bottom: 3px; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: rgba(8,10,16,.75); color: #e8edf5 }
+.asset-img-cand .t { left: 3px }
+.asset-img-cand .s { right: 3px }
+@media (max-width: 720px) { .asset-img-main { grid-template-columns: 1fr } }
+.asset-img-sprite { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; font-size: var(--fs-sm); color: var(--muted) }
+
+/* The colour key: a placeholder takes its kind's colour (KIND_LABEL in LibraryCells.tsx).
+   White icons and labels on each pass 4.5:1. */
+.lib-thumb-ph { position: absolute; inset: 0; place-items: center; align-content: center; gap: 6px }
+.lib-thumb-ph.kind-video { background: #364fc7; color: #fff }
+.lib-thumb-ph.kind-audio { background: #0b7285; color: #fff }
+.lib-thumb-ph.kind-music { background: #c2410c; color: #fff }
+.lib-thumb-ph-t { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; opacity: .9 }
+.lib-thumb.sm .lib-thumb-ph-t { display: none }
+.lib-kind-legend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: var(--fs-sm) }
+.lib-kind-key { display: inline-flex; align-items: center; gap: 6px; color: var(--muted) }
+.lib-kind-key i { width: 12px; height: 12px; border-radius: 3px; display: inline-block }
+.lib-kind-key i.kind-video { background: #364fc7 } .lib-kind-key i.kind-audio { background: #0b7285 } .lib-kind-key i.kind-music { background: #c2410c }
+
+.linklike { background: none; border: 0; padding: 0; color: var(--brand); cursor: pointer; font: inherit }
+.linklike:disabled { opacity: .6; cursor: default }
+.asset-img-as { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px }
+.asset-img-as .inp { flex: 1 1 140px }
+.asset-img-check { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border-2); border-radius: 8px; font-size: var(--fs-sm) }
+.asset-img-check-t { width: 100%; border-collapse: collapse }
+.asset-img-check-t th { text-align: left; font-weight: 600; color: var(--faint); padding: 4px 6px }
+.asset-img-check-t td { padding: 6px; vertical-align: top; border-top: 1px solid var(--border) }
+.asset-img-check-t img, .asset-img-check-none { width: 44px; height: 44px; border-radius: 4px; object-fit: cover; display: block; background: var(--panel-2) }
+
+/* Find song details (SongFinder.tsx) */
+.songf { margin-top: 12px; padding: 12px; border: 1px solid var(--border-2); border-radius: 8px; font-size: var(--fs-sm); background: var(--panel) }
+.songf-h { margin-bottom: 10px }
+.songf-t { font-weight: 600; margin-bottom: 2px }
+.songf-q { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end }
+.songf-q label { display: grid; gap: 3px }
+.songf-q label > span { color: var(--faint); font-size: var(--fs-xs) }
+.songf-q label > span em { font-style: normal; color: var(--faint); opacity: .8 }
+.songf-q .wide { grid-column: 1 / -1 }
+.songf-q .btn { justify-self: start }
+.songf-links { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-top: 10px }
+.songf-links a { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap }
+.songf-chosen { margin-top: 10px; padding: 8px 10px; background: var(--panel-2); border-radius: 6px }
+.songf-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; margin-top: 12px }
+.songf-r { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--text); cursor: pointer; font: inherit }
+.songf-r:hover:not(:disabled) { border-color: var(--border-2) }
+.songf-r.sel { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand) }
+.songf-r.off { cursor: default; opacity: .75 }
+.songf-r img, .songf-noimg { width: 56px; height: 56px; flex: none; object-fit: cover; border-radius: 4px; background: var(--panel-3, #1a1f2b); display: grid; place-items: center; color: var(--faint); font-size: 22px }
+.songf-rb { display: grid; gap: 2px; min-width: 0 }
+.songf-src { font-weight: 600 }
+.songf-main { overflow: hidden; text-overflow: ellipsis }
+.songf-terms { font-size: var(--fs-xs); color: var(--warn) }
+.songf-review { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border) }
+.songf-rh { font-weight: 600; margin-bottom: 6px }
+.songf-t { width: 100%; border-collapse: collapse }
+.songf-t th { text-align: left; font-weight: 600; color: var(--faint); padding: 4px 6px }
+.songf-t td { padding: 6px; vertical-align: middle; border-top: 1px solid var(--border) }
+.songf-t td:first-child { width: 28px; text-align: center }
+.songf-t tr.same td { color: var(--faint) }
+.songf-t .inp.sm { padding: 4px 8px; width: 100% }
+.songf-thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 4px; display: block }
+.songf-note { font-size: var(--fs-xs); color: var(--warn) }
+.songf-act { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px }
+@media (max-width: 720px) { .songf-q { grid-template-columns: 1fr } }
+
+/* What the asset is, top right of the card (KindBadge): its colour from the colour key, as a small dot. */
+.lib-badge-kind { right: 8px; top: 8px; display: inline-flex; align-items: center; gap: 5px; font-weight: 600 }
+.lib-badge-kind svg { width: 13px; height: 13px }
+.lib-badge-kind::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--kind, #364fc7) }
+.lib-badge-kind.kind-video { --kind: #5c7cfa } .lib-badge-kind.kind-audio { --kind: #22b8cf } .lib-badge-kind.kind-music { --kind: #f97316 }
+
+/* History tab (AssetHistory.tsx): time, icon, what happened; no side rail. */
+.hist-l { list-style: none; margin: 0 0 8px; padding: 0 }
+.hist-r { display: grid; grid-template-columns: 112px 26px 1fr; gap: 10px; align-items: start; padding: 8px 0; border-top: 1px solid var(--border); font-size: var(--fs-sm) }
+.hist-r:first-child { border-top: 0 }
+.hist-when { display: grid; color: var(--muted); line-height: 1.35 }
+.hist-when b { font-weight: 600; color: var(--text) }
+.hist-ic { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2); color: var(--muted) }
+.hist-r.k-created .hist-ic, .hist-r.k-published .hist-ic { color: var(--brand) }
+.hist-r.k-withdrawn .hist-ic, .hist-r.k-deleted .hist-ic { color: var(--warn) }
+.hist-what { display: grid; gap: 2px; min-width: 0 }
+.hist-t { font-weight: 600 }
+.hist-d { color: var(--muted); overflow-wrap: anywhere }
+.hist-src { margin-top: 18px; font-size: var(--fs-sm) }
+.hist-src > summary { cursor: pointer; color: var(--muted); padding: 6px 0 }
+.hist-src[open] > summary { margin-bottom: 8px }
+@media (max-width: 560px) { .hist-r { grid-template-columns: 26px 1fr } .hist-when { grid-column: 2; grid-row: 2 } .hist-ic { grid-row: 1 } }
+
+/* Encode tab: how the asset is delivered */
+.lib-deliv tr.off td { color: var(--faint) }
+.lib-deliv-st { font-size: var(--fs-xs); padding: 2px 8px; border-radius: 999px; background: var(--panel-2); white-space: nowrap }
+.lib-deliv-st.ok { color: var(--live) } .lib-deliv-st.busy { color: var(--sched) } .lib-deliv-st.bad { color: var(--warn) } .lib-deliv-st.off { color: var(--faint) }

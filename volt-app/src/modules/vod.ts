@@ -163,7 +163,17 @@ vodRouter.get(
               ${ORIGIN_SQL} AS origin,
               ${COMPLETENESS_SQL} AS metadata_completeness,
               (${MISSING_REQUIRED_SQL} > 0) AS metadata_missing_required,
-              ${RENDITION_COUNT_SQL} AS rendition_count
+              ${RENDITION_COUNT_SQL} AS rendition_count,
+              -- AUDIO ONLY, for the grid's square artwork and audio badge
+              -- (same test as services/media/assetImage.ts isAudioAsset).
+              COALESCE(c.kind = 'radio', false) OR COALESCE(v.ingest -> 'probe' ->> 'hasVideo' = 'false', false)
+                OR ((v.export_mp3_key IS NOT NULL OR v.export_m4a_key IS NOT NULL) AND v.top_height IS NULL AND v.progressive_key IS NULL) AS audio_only,
+              -- THE COLOUR KEY when there is no image: music (a song), audio, or video.
+              CASE WHEN ms.standard_key = 'song' OR v.metadata->>'class' = 'song' THEN 'music'
+                   WHEN COALESCE(c.kind = 'radio', false) OR COALESCE(v.ingest -> 'probe' ->> 'hasVideo' = 'false', false)
+                     OR ((v.export_mp3_key IS NOT NULL OR v.export_m4a_key IS NOT NULL) AND v.top_height IS NULL AND v.progressive_key IS NULL) THEN 'audio'
+                   ELSE 'video' END AS media_kind,
+              (v.export_mp3_key IS NOT NULL) AS has_mp3
        ${fromPage}
        ${pageSql(pl)}`,
       params
@@ -294,7 +304,13 @@ vodRouter.get(
          LEFT JOIN drm_configs dc ON dc.id = op.drm_config_id
         WHERE g.id = COALESCE((SELECT group_id FROM channels WHERE id = $1), (SELECT group_id FROM events WHERE id = $2))`,
       [a.channel_id, a.event_id]) : null;
-    res.json(encodeDetails(a, { ladderGroup, outputProfile }));
+    // Audio: the station's encoder settings, and what the clip extract was asked to make (MP3, M4A).
+    const ch = a.channel_id ? await one<any>(`SELECT kind, radio_config FROM channels WHERE id = $1`, [a.channel_id]).catch(() => null) : null;
+    const job = await one<any>(`SELECT payload->'formats' AS formats, state FROM jobs WHERE type = 'clip.extract' AND payload->>'vodAssetId' = $1 ORDER BY created_at DESC LIMIT 1`, [a.id]).catch(() => null);
+    const streamId = a.channel_id ?? a.event_id;
+    res.json(encodeDetails(a, { ladderGroup, outputProfile, radioConfig: ch?.radio_config ?? null,
+      audioOnly: ch?.kind === 'radio' || (streamId ? await Promise.resolve(isAudioOnly(streamId)).catch(() => false) : false),
+      extract: job ? { formats: Array.isArray(job.formats) ? job.formats : [], state: String(job.state) } : null }));
   })
 );
 
@@ -367,6 +383,65 @@ vodRouter.get(
       ? isAudioOnly(streamId)
       : !!(row.export_mp3_key || row.export_m4a_key) && !row.progressive_key;
     res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any) });
+  })
+);
+
+/**
+ * HISTORY: one timeline for the asset's History tab. When and how it was made
+ * (uploaded, cut from a recording, from an event), built or encoded, its image
+ * and song details, review and QC, every place it was published, access
+ * removed, and every change people made (the audit log), newest first.
+ */
+vodRouter.get(
+  '/:id/history',
+  asyncHandler(async (req, res) => {
+    const acct = accountId(req);
+    const row = await one<any>(`SELECT v.*, c.name AS channel_name, c.kind AS channel_kind, e.name AS event_name ${OWNED} WHERE v.id = $1 AND ${OWNER_ACCOUNT} = $2`, [req.params.id, acct]);
+    if (!row) throw notFound('VOD asset not found');
+    type Ev = { at: string; kind: string; title: string; detail?: string | null; by?: string | null; link?: string | null };
+    const ev: Ev[] = [];
+    const t = (v: any) => (v ? new Date(v).toISOString() : null);
+    const clock = (ms: any) => (ms != null ? new Date(Number(ms)).toISOString().slice(11, 19) : null);
+    // Made
+    const how = row.source_kind === 'upload' ? `Uploaded${row.original_filename ? `: ${row.original_filename}` : ''}`
+      : row.source_kind === 'watchfolder' ? `From a watch folder${row.original_filename ? `: ${row.original_filename}` : ''}`
+      : row.event_id ? `Cut from the event ${row.event_name ?? ''}`.trim()
+      : row.channel_id ? `Cut from a recording of ${row.channel_name ?? 'the channel'}` : 'Created';
+    ev.push({ at: t(row.created_at)!, kind: 'created', title: how,
+      detail: row.start_epoch_ms && row.channel_id ? `${new Date(Number(row.start_epoch_ms)).toISOString().slice(0, 10)}, ${clock(row.start_epoch_ms)} to ${clock(row.end_epoch_ms)} UTC` : null });
+    if (row.built_at) ev.push({ at: t(row.built_at)!, kind: 'built', title: 'Built', detail: row.build_strategy ?? null });
+    if (row.encode_result && (row.source_kind === 'upload' || row.source_kind === 'watchfolder')) {
+      const kept = Array.isArray(row.encode_result?.kept) ? row.encode_result.kept.map((k: any) => `${k.height}p`).join(', ') : null;
+      ev.push({ at: t(row.encode_result?.finishedAt ?? row.updated_at)!, kind: 'encoded', title: 'Encoded', detail: [kept, row.encode_result?.ladder?.name].filter(Boolean).join(' · ') || null });
+    }
+    if (row.music_lookup?.at) {
+      const m = row.music_lookup;
+      ev.push({ at: m.at, kind: 'song', title: m.state === 'hit' ? `Song details found (${m.provider ?? 'lookup'})` : m.state === 'error' ? 'Song lookup could not run' : 'Song looked up: no match',
+        detail: m.state === 'hit' ? [m.album, m.released].filter(Boolean).join(' · ') || null : m.reason ?? null });
+    }
+    if (row.poster_picked_at && row.poster_source) ev.push({ at: t(row.poster_picked_at)!, kind: 'image', title: row.poster_locked ? 'Image chosen' : 'Image picked', detail: row.poster_reason ?? null });
+    if (row.reviewed_at) ev.push({ at: t(row.reviewed_at)!, kind: 'review', title: `Review: ${row.review_state ?? 'reviewed'}`, by: row.reviewed_by ?? null });
+    if (row.qc_at) ev.push({ at: t(row.qc_at)!, kind: 'qc', title: `QC: ${row.qc_state ?? 'run'}` });
+    if (row.withdrawn_at) ev.push({ at: t(row.withdrawn_at)!, kind: 'withdrawn', title: 'Access removed', by: row.withdrawn_by ?? null });
+    // Published
+    const pubs = await query<any>(`SELECT platform, external_url, published_at, status, published_by FROM publications WHERE vod_asset_id = $1`, [row.id]);
+    for (const p of pubs) if (p.published_at) ev.push({ at: t(p.published_at)!, kind: 'published', title: `Published to ${p.platform}`, detail: p.status ?? null, by: p.published_by ?? null, link: p.external_url ?? null });
+    // People's changes
+    const audits = await query<any>(
+      `SELECT a.action, a.detail, a.created_at, u.email FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+        WHERE a.entity_type = 'vod_asset' AND a.entity_id = $1 AND (a.account_id = $2 OR a.account_id IS NULL) ORDER BY a.created_at DESC LIMIT 200`, [row.id, acct]);
+    const NAMES: Record<string, string> = { metadata: 'metadata', poster: 'the image', song_details: 'song details', title: 'title', schema_id: 'content type',
+      availability_override: 'availability', published: 'publishing', review_state: 'review', clip_spec: 'the cut' };
+    for (const a of audits) {
+      if (a.action === 'create') continue;   // "Created" is above
+      const keys = Object.keys(a.detail?.changes ?? {});
+      const what = keys.map((k) => NAMES[k] ?? k.replace(/_/g, ' '));
+      ev.push({ at: t(a.created_at)!, kind: a.action === 'delete' ? 'deleted' : 'edit',
+        title: what.length ? `Changed ${what.slice(0, 3).join(', ')}${what.length > 3 ? ` and ${what.length - 3} more` : ''}` : 'Changed',
+        by: a.email ?? (typeof a.detail?.actor === 'string' && !/^[0-9a-f-]{36}$/i.test(a.detail.actor) ? a.detail.actor : null) });
+    }
+    ev.sort((x, y) => (y.at < x.at ? -1 : y.at > x.at ? 1 : 0));
+    res.json({ events: ev });
   })
 );
 
@@ -526,7 +601,26 @@ vodRouter.put(
           [schemaId, accountId(req)]
         );
         if (!schema) throw badRequest('Assigned schema not found');
-        cleanMeta = validateMetadata(schema.fields, values);
+        // Image fields given as a web address go into the Image Library first,
+        // in this asset's folder (services/media/libraryImages.ts).
+        const { internaliseImages } = await import('../services/media/libraryImages');
+        const { assetPlaceFolder } = await import('../services/media/assetImage');
+        const folder = (await assetPlaceFolder(asset.id)) ?? 'media/assets';
+        // CARRIED KEYS. The stored metadata can hold keys the type does not
+        // define: provenance written by other paths (a song cut from a station
+        // recording keeps the stream's ICY block: source, class, raw,
+        // stream_url) or fields of the type it had before. The form sends them
+        // back untouched, so a key already stored with the same value is kept
+        // as it is; only a key this write adds or changes must be on the type.
+        const stored = (asset.metadata ?? {}) as Record<string, any>;
+        const known = new Set(schema.fields.map((f) => f.key));
+        const carried: Record<string, any> = {};
+        const checked: Record<string, any> = {};
+        for (const [k, v] of Object.entries(values as Record<string, any>)) {
+          if (!known.has(k) && k in stored && JSON.stringify(stored[k]) === JSON.stringify(v)) carried[k] = v;
+          else checked[k] = v;
+        }
+        cleanMeta = { ...carried, ...validateMetadata(schema.fields, await internaliseImages(accountId(req), schema.fields, checked, folder)) };
       } else {
         // no schema assigned -> metadata must be empty (strict)
         if (Object.keys(values).length > 0)
@@ -572,6 +666,9 @@ vodRouter.put(
       ]
     );
     if (!row) throw notFound('VOD asset not found');
+    // New metadata can change the asset's image (an image set by hand, a song's
+    // artist or title): pick again unless a person chose the image.
+    if (cleanMeta !== undefined && !row.poster_locked) await (await import('../services/jobs/handlers/vodImage')).queueAssetImage(row.id);
     // A field changed by hand is no longer the EPG's value: drop its provenance.
     if (cleanMeta !== undefined || body.title != null) {
       await pruneProvenance(row.id, asset.metadata, cleanMeta ?? asset.metadata, asset.title, body.title ?? asset.title);

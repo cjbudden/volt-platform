@@ -28,6 +28,7 @@
 //  theirs is answered exactly like one that does not exist, so the endpoint is
 //  not an oracle for guessing ids.
 // ============================================================================
+import { signedImageUrl } from './images';
 import { Router } from 'express';
 import { z } from 'zod';
 import { query, one } from '../db';
@@ -35,7 +36,7 @@ import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest, ApiError } from '../util/http';
 import { verifyKey, checkRestrictions, appForKey } from '../services/apiKeys';
-import { cachedTrackMeta, buildCard } from '../services/radio/trackMeta';
+import { cachedTrackMeta, buildCard, parseIcyTitle } from '../services/radio/trackMeta';
 import { publicMp3Url } from '../services/radio/jobConfig';
 import { icyState } from '../services/radio/icyMeta';
 import { cached } from '../scale/cache';
@@ -233,9 +234,21 @@ playerRouter.post('/now-playing', asyncHandler(async (req, res) => {
     const m = await cachedTrackMeta(r.raw).catch(() => null);
     if (!m || !m.title) continue;
     history.push({ title: m.title, artist: m.artist ?? null, album: m.album ?? null, year: m.year ?? null,
-      artworkUrl: m.artworkUrl ?? null, startedAt: r.startedAt });
+      artworkUrl: libraryArtwork(r.image) ?? m.artworkUrl ?? null, startedAt: r.startedAt, listen: listenLink(r) });
   }
 
+  // The cover stored on the guide entry for the song on air wins over the live
+  // lookup's link: it is ours, resized, and there for every later surface too.
+  const nowEntry = icy?.title ? (await songLog(ch.id).catch(() => []))[0] : null;
+  const stored = nowEntry && nowEntry.raw === icy?.title ? libraryArtwork(nowEntry.image) : null;
+  if (stored) {
+    (card as any).artworkUrl = stored;
+    // Apple's artwork may be shown only with a link to the song on Apple Music: players show `listen` with it.
+    (card as any).listen = listenLink(nowEntry!);
+    // The live lookup missed but the guide entry has the song: show it as a track.
+    const who = card.source === 'station' ? parseIcyTitle(icy!.title) : null;
+    if (who) Object.assign(card, { primary: who.title, secondary: who.artist, source: 'track' });
+  }
   res.json({
     ...card,
     onAir: ch.status === 'live',
@@ -255,18 +268,36 @@ playerRouter.post('/now-playing', asyncHandler(async (req, res) => {
  * not "recently played". Cached for a few seconds, because every listener's
  * player asks the same question.
  */
-function recentTracks(channelId: string, excludeRaw: string | null): Promise<Array<{ raw: string; startedAt: number }>> {
-  return cached(`np-hist:${channelId}`, { ttlSec: 10, tags: [`asset:${channelId}`] }, async () => {
-    const rows = await query<any>(
-      `SELECT title, starts_at FROM programmes
-        WHERE channel_id = $1 AND source_ref LIKE 'icy:%' AND COALESCE(metadata->>'class', 'song') = 'song'
-        ORDER BY starts_at DESC LIMIT 7`, [channelId]);
-    return rows.map((r: any) => ({ raw: r.title as string, startedAt: new Date(r.starts_at).getTime() }));
-  }).then((list) => {
+function recentTracks(channelId: string, excludeRaw: string | null): Promise<SongRow[]> {
+  return songLog(channelId).then((list) => {
     // The newest row is the track playing now: leave it out of the history.
     const out = list.filter((x, i) => !(i === 0 && excludeRaw && x.raw === excludeRaw));
     return out.slice(0, 5);
   });
+}
+
+/** The station's recent songs with the cover stored on each guide entry (jobs/handlers/songArtwork.ts). */
+type SongRow = { raw: string; startedAt: number; image: string | null; provider: string | null; link: string | null };
+
+/** Where to listen, when the cover came from a store that requires the link (Apple). */
+export function listenLink(r: SongRow): { service: string; url: string } | null {
+  return r.image && r.provider === 'apple' && r.link && /^https:\/\/music\.apple\.com\//.test(r.link) ? { service: 'Apple Music', url: r.link } : null;
+}
+
+function songLog(channelId: string): Promise<SongRow[]> {
+  return cached(`np-hist:${channelId}`, { ttlSec: 10, tags: [`asset:${channelId}`] }, async () => {
+    const rows = await query<any>(
+      `SELECT title, starts_at, metadata->>'image' AS image, metadata->'music'->>'provider' AS provider, metadata->'music'->>'link' AS link FROM programmes
+        WHERE channel_id = $1 AND source_ref LIKE 'icy:%' AND COALESCE(metadata->>'class', 'song') = 'song'
+        ORDER BY starts_at DESC LIMIT 7`, [channelId]);
+    return rows.map((r: any) => ({ raw: r.title as string, startedAt: new Date(r.starts_at).getTime(), image: r.image ?? null, provider: r.provider ?? null, link: r.link ?? null }));
+  });
+}
+
+/** A stored library image as a signed URL for a player, or null. */
+function libraryArtwork(ref: string | null | undefined): string | null {
+  if (!ref || !/^\/?library\//.test(ref)) return null;
+  try { return signedImageUrl(ref, '600x600,inside'); } catch { return null; }
 }
 
 // ---------------------------------------------------------------------------

@@ -509,6 +509,8 @@ const CSS = `
 .vpx.np .vpx-kick{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--vp-primary)}
 .vpx.np .vpx-t b{font-size:22px;white-space:normal}.vpx.np .vpx-t span{font-size:15px}
 .vpx.np .vpx-meta{font-size:13px;color:var(--vp-muted)}
+.vpx .vpx-listen{font-size:12px;color:var(--vp-muted);text-decoration:underline;text-underline-offset:2px}
+.vpx .vpx-listen:hover{color:inherit}
 .vpx.np .vpx-ctl{display:flex;align-items:center;gap:8px;margin-top:8px}
 .vpx.np .vpx-ctl .vpv-vol .vp-sl{width:90px;opacity:1}
 .vpx.np .vpx-lists{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:18px}

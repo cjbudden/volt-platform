@@ -68,6 +68,8 @@ export interface TrackInfo {
   year?: number | null;
   artworkUrl?: string | null;
   startedAt?: number | null;
+  /** Where to listen; show it with the artwork when present (Apple artwork must link to Apple Music). */
+  listen?: { service: string; url: string } | null;
 }
 
 export interface Quality {
