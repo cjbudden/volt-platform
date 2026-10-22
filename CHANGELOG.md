@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.5.1 (2026-10-22)
+
+### Internal
+
+- fixed: Clip smart render: the join no longer leaves a gap after the copied middle (23 ms at 25 fps, 30 ms at 50 fps). Each part's length is now taken from its picture, and every render is checked frame by frame for gaps or overlaps before it is used. Smart render stays off by default.
+
 ## 0.5.0 (2026-10-22)
 
 ### Product (in customer release notes)
