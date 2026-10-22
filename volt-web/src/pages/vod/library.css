@@ -153,6 +153,10 @@
 .lib-rend .mono { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums }
 .lib-derived { margin-left: 6px; padding: 0 5px; border-radius: 5px; border: 1px solid var(--border-2); color: var(--faint); font-size: var(--fs-micro); text-transform: none; letter-spacing: 0; font-weight: 500 }
 .lib-tracks { margin: 0; padding-left: 18px; font-size: var(--fs-sm); line-height: 1.7 }
+.lib-notes { list-style: none; margin: 12px 0 0; padding: 0; line-height: 1.6 }
+.lib-notes li { display: flex; align-items: flex-start; gap: 6px }
+.lib-notes svg { width: 14px; height: 14px; flex: none; margin-top: 3px }
+.lib-kv .lib-tracks { padding-left: 16px }
 .lib-gaps { margin-top: 14px; font-size: var(--fs-sm); color: var(--muted) }
 .lib-gaps summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--faint) }
 .lib-gaps summary svg { width: 14px; height: 14px }

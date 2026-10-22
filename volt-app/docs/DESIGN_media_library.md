@@ -409,15 +409,31 @@ tracks, captions and subtitles, segment duration, packaging (HLS, DASH, MP4),
 container, DRM and the source or mezzanine.
 
 Each value says where it came from: stored, derived from the encoder's fixed
-settings (marked "derived"), or not recorded. Gaps today, listed on the tab:
+settings (marked "derived"), or not recorded.
 
-- audio tracks are not recorded per asset (shown from the encoder contract:
-  AAC 128 kb/s, stereo, 48 kHz per source track), and their languages are not
-  recorded at all
-- the video profile (High, Main) is not recorded
-- caption tracks of file encodes are not recorded
-- file encodes are packaged without DRM
-- a package-only source does not declare its codec or audio
+**Read from the files (22 Oct 2026, build queue 1.4).** `vod_assets.media_facts`
+(migration 0077, `services/media/mediaFacts.ts`) holds what ffprobe reads from
+the asset's own init segments, each joined with its first media segment
+because Shaka writes the H.264 parameter sets in band: per rendition the codec,
+profile, level and frame rate, every audio track's codec, channels, sample
+rate and language, and any subtitle tracks.
+
+- A file encode writes it when the encode finishes (`vod.encode`), and
+  `encode_result` now also records the source's full probe (video codec and
+  profile, every audio and subtitle track with its language), the audio track
+  the encode took (track 0, AAC 128 kb/s stereo 48 kHz, with that track's
+  language), `captions: []` (none carried) and `drm: 'clear'`.
+- A recording-derived asset is read the first time its Encode tab is opened,
+  from the init segments of the first recording run in its window, and kept.
+  For a package-only stream this is the only record of the contributor's codec
+  and audio; the Source panel shows them.
+- The tab lists, as notes rather than gaps, that a source had more audio
+  tracks than the one encoded, that its subtitle tracks are not carried, and
+  that a file encode is in the clear.
+
+Still not recorded, and listed on the tab: encodes made before this change
+(re-encode to fill them in), and a recording that is not on the control
+plane's disk (the S3 origin in production) until a reader for S3 is added.
 
 Recording-derived assets read the live output profile of their stream's group
 (rungs, packaging, workflow, segment length, DRM systems, caption languages).

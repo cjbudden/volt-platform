@@ -82,8 +82,12 @@ def probe(path):
     except Exception as e:
         return {"ok": False, "error": f"unreadable ffprobe output: {e}"}
 
-    v = next((s for s in d.get("streams", []) if s.get("codec_type") == "video"), None)
-    a = next((s for s in d.get("streams", []) if s.get("codec_type") == "audio"), None)
+    # Cover art in an MP4 or MP3 is a "video" stream too; it is not the picture.
+    v = next((s for s in d.get("streams", []) if s.get("codec_type") == "video"
+              and not (s.get("disposition") or {}).get("attached_pic")), None)
+    audios = [s for s in d.get("streams", []) if s.get("codec_type") == "audio"]
+    subs = [s for s in d.get("streams", []) if s.get("codec_type") == "subtitle"]
+    a = audios[0] if audios else None
 
     fps = None
     if v:
@@ -121,11 +125,37 @@ def probe(path):
         "durationMs": dur,
         "videoCodec": v.get("codec_name") if v else None,
         "audioCodec": a.get("codec_name") if a else None,
+        "videoProfile": (v.get("profile") if v and v.get("profile") not in (None, "", "unknown") else None),
+        # EVERY TRACK, not just the first. The encoder takes audio track 0 only,
+        # and the Encode tab says so; it can only say so if the others are known.
+        # Languages come from the stream tags; 'und' means none was set.
+        "audioTracks": [_track(s) for s in audios],
+        "subtitleTracks": [{"codec": s.get("codec_name"), "language": _lang(s)} for s in subs],
         # Rotation matters for the cap: a portrait phone clip is often stored
         # landscape with a side-data rotation, so the stored height is the width
         # the viewer sees. Reported, not acted on, so the control plane decides.
         "rotation": _rotation(v) if v else None,
     }
+
+
+def _lang(s):
+    t = (s.get("tags") or {}).get("language")
+    return t if t and t != "und" else None
+
+
+def _int(x):
+    try:
+        v = int(float(x))
+        return v if v > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _track(s):
+    br = _int(s.get("bit_rate"))
+    return {"codec": s.get("codec_name"), "channels": _int(s.get("channels")),
+            "sampleRate": _int(s.get("sample_rate")),
+            "bitrateKbps": round(br / 1000) if br else None, "language": _lang(s)}
 
 
 def _rotation(v):

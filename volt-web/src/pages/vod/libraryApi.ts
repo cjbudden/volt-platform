@@ -57,7 +57,7 @@ export type Prov = 'stored' | 'derived' | 'unknown'
 export interface EncodeDetails {
   workflow: { value: string | null; source: Prov }
   ladder: { value: string | null; source: Prov }
-  renditions: { value: { height: number; width: number | null; bitrateKbps: number | null; codec: string; profile: string | null; fps: number | null }[]; source: Prov }
+  renditions: { value: { height: number; width: number | null; bitrateKbps: number | null; codec: string; profile: string | null; fps: number | null; level?: string | null }[]; source: Prov }
   dropped: { height: number; why: string }[]
   audio: { value: { codec: string; channels: number | null; bitrateKbps: number | null; sampleRate: number | null; language: string | null }[]; source: Prov }
   captions: { value: { language: string; kind: string; source: string }[]; source: Prov }
@@ -65,7 +65,11 @@ export interface EncodeDetails {
   packaging: { value: string[]; source: Prov }
   container: { value: string | null; source: Prov }
   drm: { value: string[]; source: Prov }
-  source: { width: number | null; height: number | null; fps: number | null; durationMs: number | null; hasAudio: boolean | null; bytes: number | null; filename: string | null; mime: string | null; origin: string }
+  source: { width: number | null; height: number | null; fps: number | null; durationMs: number | null; hasAudio: boolean | null; bytes: number | null; filename: string | null; mime: string | null; origin: string
+    videoCodec?: string | null; videoProfile?: string | null
+    audioTracks?: { codec: string | null; channels: number | null; sampleRate: number | null; bitrateKbps: number | null; language: string | null }[] | null
+    subtitleTracks?: { codec: string | null; language: string | null }[] | null }
+  notes?: string[]
   summary: { topHeight: number | null; codec: string | null; renditions: number; label: string }
   gaps: string[]
   kind?: 'video' | 'audio'

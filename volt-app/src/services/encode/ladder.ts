@@ -88,6 +88,11 @@ export interface SourceProbe {
   durationMs?: number | null;
   hasVideo?: boolean;
   hasAudio?: boolean;
+  /** The rest is reported for the record (the Encode tab), not used to fit the ladder. */
+  videoCodec?: string | null;
+  videoProfile?: string | null;
+  audioTracks?: { codec: string | null; channels: number | null; sampleRate: number | null; bitrateKbps: number | null; language: string | null }[];
+  subtitleTracks?: { codec: string | null; language: string | null }[];
 }
 
 export type DropReason =

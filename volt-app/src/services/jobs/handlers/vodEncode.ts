@@ -197,6 +197,24 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
   }
 
   await ctx.progress(95, 'recording what was produced');
+  // WHAT THE FILES CARRY, read back from the packaged init segments while they
+  // are still on this disk (services/media/mediaFacts.ts): the real profile and
+  // level of each rendition and the audio track's codec, channels and rate.
+  // Never fails the encode; an unread answer stays NULL and the tab says so.
+  let mediaFacts: Awaited<ReturnType<typeof import('../../media/mediaFacts').probeFiles>> = null;
+  try {
+    const { probeFiles } = await import('../../media/mediaFacts');
+    mediaFacts = await probeFiles([
+      ...fit.kept.map((r) => ({ label: `${r.height}p`, path: join(outDir, `${r.height}p`, 'init.mp4') })),
+      ...(probe.hasAudio !== false ? [{ label: 'audio', path: join(outDir, 'audio', 'init.mp4') }] : []),
+    ], 'encode');
+  } catch (e) {
+    console.error(`[vod.encode] ${p.vodAssetId}: media facts not read:`, e);
+  }
+  const srcTracks = probe.audioTracks ?? [];
+  // The packager does not copy the source's language tag across, so the one
+  // encoded track takes the language of the source track it was made from.
+  if (mediaFacts) for (const a of mediaFacts.audio) a.language = a.language ?? srcTracks[0]?.language ?? null;
   const encodeResult = {
     ladder: { groupId: ladder.groupId, name: ladder.groupName, origin: ladder.origin },
     segmentSeconds: p.segmentSeconds ?? ladder.segmentSeconds,
@@ -214,7 +232,20 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
       width: probe.width ?? null, height: probe.height ?? null,
       fps: probe.fps ?? null, durationMs: probe.durationMs ?? null,
       hasAudio: probe.hasAudio ?? null,
+      videoCodec: probe.videoCodec ?? null,
+      videoProfile: probe.videoProfile ?? null,
+      audioTracks: srcTracks,
+      subtitleTracks: probe.subtitleTracks ?? [],
     },
+    // WHAT THIS ENCODE DID with the sound, captions and protection, written
+    // down so the Encode tab states it rather than infers it. ladder_args.py
+    // audio_track_args(0): source audio track 0 only, AAC 128 kb/s stereo
+    // 48 kHz. The packager is run without encryption and without text streams,
+    // so a file encode is in the clear and carries no caption tracks; the
+    // source's own subtitle tracks are listed above, not carried.
+    audio: probe.hasAudio === false ? [] : [{ sourceTrack: 0, codec: 'AAC', bitrateKbps: 128, channels: 2, sampleRate: 48000, language: srcTracks[0]?.language ?? null }],
+    captions: [],
+    drm: 'clear',
     summary: describeFit(fit),
   };
 
@@ -242,12 +273,14 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
             source_bytes = COALESCE($4, source_bytes),
             encode_result = $5::jsonb,
             formats = $6::jsonb,
+            media_facts = $7::jsonb,
             thumb_status = 'ready',
             updated_at = now()
       WHERE id = $1`,
     [p.vodAssetId, storedMaster, probe.durationMs ?? null, bytes,
      JSON.stringify(encodeResult),
-     JSON.stringify({ hls: !!storedMaster, dash: !!storedMpd, progressive: false })]
+     JSON.stringify({ hls: !!storedMaster, dash: !!storedMpd, progressive: false }),
+     mediaFacts ? JSON.stringify(mediaFacts) : null]
   );
 
   fireHook('vod.encoded', 'vod_asset', p.vodAssetId, { renditions: fit.kept.length });

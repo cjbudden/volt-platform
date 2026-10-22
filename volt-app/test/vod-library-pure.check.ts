@@ -11,6 +11,7 @@ import { STANDARD_TYPES } from '../src/services/contentTypes';
 import { TARGETS, completeness, targetFields, encodeDetails, isFilled } from '../src/services/vodLibrary';
 import { rankProgrammes, programmeFacts, suggestionsFor, mergeSuggestions, suggestTypeKey, valueForField, type ProgrammeRow } from '../src/services/epgFill';
 import { mergeFields, validateMetadata } from '../src/services/metadataValidator';
+import { parseStreams } from '../src/services/media/mediaFacts';
 
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string, d = '') => { if (c) { pass++; console.log('PASS ' + m); } else { fail++; console.log(`FAIL ${m}${d ? ' -- ' + d : ''}`); } };
@@ -139,6 +140,51 @@ ok(!radio.deliveries.some((d) => d.format === 'mp4') && radio.summary.label === 
 const making = encodeDetails({ source_kind: 'recording', channel_id: 'r', master_key: 'clips/b/master.m3u8', formats: { hls: true } }, { audioOnly: true, extract: { formats: ['hls', 'mp3', 'm4a'], state: 'running' } });
 eq(making.deliveries.filter((d) => d.format === 'mp3' || d.format === 'm4a').map((d) => d.state), ['making', 'making'], 'asked for and still being made');
 eq(live.kind === 'video' && live.deliveries.map((d) => d.format), ['hls', 'dash', 'mp4', 'mp3', 'm4a'], 'video lists MP4 too');
+
+// ---- media facts (build queue 1.4): what the files carry, stored, not derived
+const ps = parseStreams({ streams: [
+  { codec_type: 'video', codec_name: 'h264', profile: 'High', level: 40, width: 1920, height: 1080, avg_frame_rate: '25/1' },
+  { codec_type: 'video', codec_name: 'hevc', profile: 'Main 10', level: 120, width: 1280, height: 720, avg_frame_rate: '0/0', r_frame_rate: '50/1' },
+  { codec_type: 'video', codec_name: 'mjpeg', disposition: { attached_pic: 1 } },
+  { codec_type: 'audio', codec_name: 'aac', channels: 2, sample_rate: '48000', bit_rate: '128000', tags: { language: 'spa' } },
+  { codec_type: 'audio', codec_name: 'ac3', channels: 6, sample_rate: '48000', tags: { language: 'und' } },
+  { codec_type: 'subtitle', codec_name: 'webvtt', tags: { language: 'eng' } },
+] }, '1080p');
+eq(ps.video.map((v) => [v.codec, v.profile, v.level, v.fps]), [['h264', 'High', '4', 25], ['hevc', 'Main 10', '4', 50]], 'parseStreams: profile and level (H.264 /10, HEVC /30), cover art skipped');
+eq(ps.audio.map((a) => [a.codec, a.channels, a.sampleRate, a.bitrateKbps, a.language]), [['aac', 2, 48000, 128, 'spa'], ['ac3', 6, 48000, null, null]], 'parseStreams: audio tracks; und is no language');
+eq(ps.subtitles, [{ codec: 'webvtt', language: 'eng' }], 'parseStreams: subtitle tracks');
+eq(parseStreams(null), { video: [], audio: [], subtitles: [] }, 'parseStreams: nothing in, nothing out');
+
+const enc14 = encodeDetails({ source_kind: 'upload', master_key: 'clips/vod/x/master.m3u8', formats: { hls: true, dash: true, progressive: false },
+  encode_result: { ladder: { name: 'Std' }, segmentSeconds: 4, kept: [{ height: 1080, bitrate_kbps: 6000 }, { height: 720, bitrate_kbps: 3000 }],
+    probe: { height: 1080, hasAudio: true, videoCodec: 'h264', videoProfile: 'High 4:2:2', audioTracks: [{ codec: 'pcm_s24le', channels: 2, sampleRate: 48000, bitrateKbps: 2304, language: 'eng' }, { codec: 'aac', channels: 2, sampleRate: 48000, bitrateKbps: 192, language: 'fra' }],
+      subtitleTracks: [{ codec: 'subrip', language: 'eng' }] },
+    audio: [{ sourceTrack: 0, codec: 'AAC', bitrateKbps: 128, channels: 2, sampleRate: 48000, language: 'eng' }], captions: [], drm: 'clear' },
+  media_facts: { how: 'encode', video: [{ label: '1080p', codec: 'h264', profile: 'High', level: '4', width: 1920, height: 1080, fps: 25 }, { label: '720p', codec: 'h264', profile: 'High', level: '3.1', width: 1280, height: 720, fps: 25 }],
+    audio: [{ label: 'audio', codec: 'aac', channels: 2, sampleRate: 48000, bitrateKbps: null, language: 'eng' }], subtitles: [] } });
+eq(enc14.renditions.value.map((r) => [r.height, r.profile, r.level]), [[1080, 'High', '4'], [720, 'High', '3.1']], 'file encode: profile and level per rendition, read from the files');
+eq([enc14.audio.source, enc14.audio.value], ['stored', [{ codec: 'AAC', channels: 2, sampleRate: 48000, bitrateKbps: 128, language: 'eng' }]], 'file encode: the audio track as delivered, stored, with its language');
+eq([enc14.captions.source, enc14.captions.value.length, enc14.drm.source, enc14.drm.value.length], ['stored', 0, 'stored', 0], 'file encode: no caption tracks and no DRM, both stored');
+ok(!enc14.gaps.some((g) => /Audio tracks|Video profile|Caption|DRM/.test(g)), 'file encode: none of the four is a gap any more', JSON.stringify(enc14.gaps));
+eq([enc14.source.videoCodec, enc14.source.videoProfile, enc14.source.audioTracks?.map((t) => `${t.codec}:${t.language}`), enc14.source.subtitleTracks?.length], ['H.264', 'High 4:2:2', ['PCM:eng', 'AAC:fra'], 1], 'file encode: the source codec and every source track');
+ok(enc14.notes!.some((n) => /2 audio tracks \(eng, fra\); the encode carries the first/.test(n)) && enc14.notes!.some((n) => /1 subtitle track \(eng\)/.test(n)) && enc14.notes!.some((n) => /in the clear/.test(n)), 'file encode: notes say which track was encoded, what was not carried, and that it is clear', JSON.stringify(enc14.notes));
+
+const pkg14 = encodeDetails({ source_kind: 'recording', channel_id: 'p', master_key: 'm', media_facts: { how: 'recording', run: 'r1', runs: 1,
+  video: [{ label: '1080p', codec: 'h264', profile: 'Main', level: '4.1', width: 1920, height: 1080, fps: 50 }, { label: '540p', codec: 'h264', profile: 'Main', level: '3.1', width: 960, height: 540, fps: 50 }],
+  audio: [{ label: 'audio', codec: 'mp2', channels: 2, sampleRate: 48000, bitrateKbps: 192, language: 'spa' }], subtitles: [] } },
+  { outputProfile: { rungs: [], workflow_type: 'package_only', packaging: 'both' } });
+eq(pkg14.renditions.value.map((r) => `${r.height}:${r.codec}:${r.profile}:${r.level}`), ['1080:H.264:Main:4.1', '540:H.264:Main:3.1'], 'package-only: renditions read from the recording when the profile has no rungs');
+eq([pkg14.audio.source, pkg14.audio.value[0]?.codec, pkg14.audio.value[0]?.bitrateKbps, pkg14.audio.value[0]?.language], ['stored', 'MP2', 192, 'spa'], 'package-only: the source audio as passed through, stored');
+eq([pkg14.source.videoCodec, pkg14.source.videoProfile, pkg14.source.audioTracks?.[0]?.codec, pkg14.source.width, pkg14.source.height, pkg14.source.fps], ['H.264', 'Main', 'MP2', 1920, 1080, 50], 'package-only: the source codec, audio and picture on the Source panel');
+eq(enc14.source.subtitleTracks, [{ codec: 'SRT', language: 'eng' }], 'subtitle formats named as people say them');
+ok(!pkg14.gaps.some((g) => /package-only|Video profile|Renditions/.test(g)), 'package-only: no gap left for codec, audio or profile', JSON.stringify(pkg14.gaps));
+ok(pkg.gaps.some((g) => /package-only source passes audio through/.test(g)), 'package-only not yet read: the gap is still stated');
+const old14 = encodeDetails({ source_kind: 'upload', encode_result: { kept: [{ height: 720, bitrate_kbps: 3000 }], probe: { hasAudio: true } } });
+ok(old14.gaps.some((g) => /DRM is not applied/.test(g)) && old14.gaps.some((g) => /Caption and subtitle tracks are not recorded/.test(g)) && old14.audio.source === 'derived', 'an encode from before 1.4 still says what was not recorded');
+const tr14 = encodeDetails({ source_kind: 'recording', channel_id: 'c', master_key: 'x', media_facts: { how: 'recording', video: [{ label: '720p', codec: 'h264', profile: 'High', level: '3.1', width: 1280, height: 720, fps: 25 }], audio: [{ label: 'audio', codec: 'aac', channels: 2, sampleRate: 48000, bitrateKbps: null, language: null }], subtitles: [] } },
+  { outputProfile: { rungs: [{ height: 1080, bitrate_kbps: 5000 }, { height: 720, bitrate_kbps: 3000 }], workflow_type: 'transcode', codec_backend: 'x264', caption_source_lang: 'en', captions_enabled: false } });
+eq(tr14.renditions.value.map((r) => `${r.height}:${r.profile ?? '-'}`), ['1080:-', '720:High'], 'transcoded recording: the profile where the recording was read, nothing invented for the rung it lacks');
+eq([tr14.audio.source, tr14.audio.value[0]?.language, tr14.audio.value[0]?.bitrateKbps], ['stored', 'en', null], 'transcoded recording: audio stored, language from the spoken-language setting, no bitrate made up');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

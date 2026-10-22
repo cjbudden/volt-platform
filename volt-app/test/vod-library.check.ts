@@ -12,6 +12,11 @@ let pass = 0, fail = 0;
 const ok = (c: boolean, m: string, d = '') => { if (c) { pass++; console.log('PASS ' + m); } else { fail++; console.log(`FAIL ${m}${d ? ' -- ' + d : ''}`); } };
 
 (async () => {
+  // The encode and recording fixtures below write media; keep it out of the repo's own folders.
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  process.env.CLIPS_DIR ??= mkdtempSync(`${tmpdir()}/vodlib-clips-`);
+  process.env.ORIGIN_DIR ??= mkdtempSync(`${tmpdir()}/vodlib-origin-`);
   const { createServer } = await import('../src/server');
   const { pool, one, query } = await import('../src/db');
   const { signAccess } = await import('../src/auth/jwt');
@@ -131,6 +136,83 @@ const ok = (c: boolean, m: string, d = '') => { if (c) { pass++; console.log('PA
     r = await api('GET', `/api/vod/${A3}/encode`);
     ok(r.j.renditions.source === 'stored' && r.j.ladder.value === 'Std' && r.j.segmentSeconds.value === 4, 'file encode from encode_result');
     ok((await api('GET', `/api/vod/${A1}/encode`, undefined, tokOther)).status === 404, 'encode route is tenant-scoped');
+    ok((await one<any>(`SELECT media_facts FROM vod_assets WHERE id=$1`, [A1])).media_facts === null, 'no recording on disk: nothing is stored as if it had been read');
+
+    console.log('\n== encode facts read from the files (build queue 1.4) ==');
+    const { spawnSync } = await import('node:child_process');
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const have = (b: string) => spawnSync(b, ['-version'], { stdio: 'ignore' }).status === 0;
+    const packager = process.env.PACKAGER_BIN || 'packager';
+    const hasPackager = spawnSync(packager, ['--version'], { stdio: 'ignore' }).status === 0;
+    if (!have('ffmpeg') || !have('ffprobe')) {
+      console.log('SKIP media facts: ffmpeg and ffprobe are needed (brew install ffmpeg)');
+    } else {
+      const ff = (args: string[]) => { const r = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]); if (r.status !== 0) throw new Error(String(r.stderr)); };
+      const work = mkdtempSync(`${tmpdir()}/vodlib-media-`);
+
+      // A package-only channel: the contributor's own encode (H.264 Main, Spanish AAC), as the recording keeps it.
+      const pprof = (await one<any>(`INSERT INTO output_profiles(account_id, name, rungs, workflow_type, packaging) VALUES ($1,'Passthrough','[]','package_only','both') RETURNING id`, [acct]))!.id;
+      const pg = (await one<any>(`INSERT INTO groups(account_id, name, output_profile_id) VALUES ($1,'PG',$2) RETURNING id`, [acct, pprof]))!.id;
+      const pch = (await one<any>(`INSERT INTO channels(group_id, name) VALUES ($1,'Contributor feed') RETURNING id`, [pg]))!.id;
+      const { config } = await import('../src/config');
+      const run = join(config.testStream.originDir, pch, 'runs', 'r-1');
+      const hlsOut = (dir: string) => { mkdirSync(dir, { recursive: true }); return ['-f', 'hls', '-hls_time', '1', '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', join(dir, 'seg_%d.m4s'), join(dir, 'index.m3u8')]; };
+      ff(['-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=25:d=3', '-c:v', 'libx264', '-profile:v', 'main', '-g', '25', '-pix_fmt', 'yuv420p', ...hlsOut(join(run, '360p'))]);
+      ff(['-f', 'lavfi', '-i', 'sine=f=440:d=3', '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-metadata:s:a:0', 'language=spa', ...hlsOut(join(run, 'audio'))]);
+      const now = Date.now();
+      const P = await asset({ channel_id: pch, title: 'Feed clip', start: now - 3600_000, end: now + 3600_000 });
+      r = await api('GET', `/api/vod/${P}/encode`);
+      ok(r.status === 200 && r.j.workflow.value === 'package_only', `package-only clip (${r.status})`);
+      ok(r.j.renditions.source === 'stored' && r.j.renditions.value[0]?.height === 360 && r.j.renditions.value[0]?.codec === 'H.264' && r.j.renditions.value[0]?.profile === 'Main',
+        `package-only: codec and profile read from the recording (${JSON.stringify(r.j.renditions.value)})`);
+      ok(r.j.audio.source === 'stored' && r.j.audio.value[0]?.codec === 'AAC' && r.j.audio.value[0]?.channels === 2 && r.j.audio.value[0]?.sampleRate === 48000 && r.j.audio.value[0]?.language === 'spa',
+        `package-only: the passed-through audio, stored, with its language (${JSON.stringify(r.j.audio)})`);
+      ok(r.j.source.videoCodec === 'H.264' && r.j.source.videoProfile === 'Main' && r.j.source.audioTracks?.[0]?.codec === 'AAC', 'package-only: the source codec and audio on the Source panel');
+      ok(!r.j.gaps.some((g: string) => /package-only|Video profile|Renditions/.test(g)), `package-only: no "not recorded" left for them (${JSON.stringify(r.j.gaps)})`);
+      const pf = (await one<any>(`SELECT media_facts FROM vod_assets WHERE id=$1`, [P])).media_facts;
+      ok(pf?.how === 'recording' && pf.run === 'r-1' && pf.video?.[0]?.level === '3', `stored on the asset once read (${JSON.stringify(pf?.video)})`);
+      await query(`UPDATE vod_assets SET media_facts = jsonb_set(media_facts, '{audio,0,language}', '"cat"') WHERE id=$1`, [P]);
+      r = await api('GET', `/api/vod/${P}/encode`);
+      ok(r.j.audio.value[0]?.language === 'cat', 'read once: a second visit uses what is stored, it does not probe again');
+      ok((await api('GET', `/api/vod/${P}/encode`, undefined, tokOther)).status === 404, 'still tenant-scoped');
+
+      // The source file's own probe: every audio and subtitle track, with languages.
+      const srt = join(work, 'subs.srt');
+      writeFileSync(srt, '1\n00:00:00,000 --> 00:00:01,500\nHello\n');
+      const src = join(work, 'feature.mkv');
+      ff(['-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=25:d=2', '-f', 'lavfi', '-i', 'sine=f=440:d=2', '-f', 'lavfi', '-i', 'sine=f=660:d=2', '-i', srt,
+        '-map', '0:v', '-map', '1:a', '-map', '2:a', '-map', '3:s', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-c:s', 'srt',
+        '-metadata:s:a:0', 'language=eng', '-metadata:s:a:1', 'language=fra', '-metadata:s:s:0', 'language=eng', src]);
+      const pr = spawnSync(config.testStream.pythonBin, [join(config.testStream.encoderBin, 'vod_encoder.py'), (() => { const j = join(work, 'probe.json'); writeFileSync(j, JSON.stringify({ input: src, out_dir: work, probe_only: true })); return j; })()]);
+      const probed = JSON.parse(String(pr.stdout).trim().split('\n').pop() || '{}');
+      ok(probed.audioTracks?.map((t: any) => t.language).join(',') === 'eng,fra' && probed.subtitleTracks?.[0]?.language === 'eng' && probed.videoProfile === 'High',
+        `vod_encoder.py probe lists every audio and subtitle track (${JSON.stringify({ a: probed.audioTracks, s: probed.subtitleTracks, p: probed.videoProfile })})`);
+
+      if (!hasPackager) {
+        console.log(`SKIP file encode end to end: the packager is needed (${packager}); on the Mac PACKAGER_BIN=../packager-osx-arm64/packager`);
+      } else {
+        // A real file encode, through the job handler: what it stores is what the Encode tab shows.
+        const { ensureTrackingGroup } = await import('../src/services/encode/store');
+        await ensureTrackingGroup(acct, prof, 'Same as live', { makeDefault: true });
+        const F = await asset({ account_id: acct, source_kind: 'upload', kind: 'export', title: 'Two languages', end: 2000 });
+        const { handleVodEncode } = await import('../src/services/jobs/handlers/vodEncode');
+        await handleVodEncode({ job: { payload: { vodAssetId: F, accountId: acct, sourcePath: src } } as any, progress: async () => {}, isCancelled: () => false });
+        const fr = await one<any>(`SELECT encode_result, media_facts FROM vod_assets WHERE id=$1`, [F]);
+        ok(fr.media_facts?.how === 'encode' && fr.media_facts.video?.length >= 1 && fr.media_facts.audio?.length === 1, `the encode stores what its renditions carry (${JSON.stringify(fr.media_facts?.video)})`);
+        ok(fr.encode_result?.drm === 'clear' && Array.isArray(fr.encode_result?.captions) && fr.encode_result.audio?.[0]?.language === 'eng', 'the encode records DRM, captions and the audio track it took');
+        r = await api('GET', `/api/vod/${F}/encode`);
+        const rd = r.j.renditions.value[0];
+        ok(r.status === 200 && rd?.profile === 'High' && !!rd?.level, `file encode: video profile and level stored (${JSON.stringify(rd)})`);
+        ok(r.j.audio.source === 'stored' && r.j.audio.value.length === 1 && r.j.audio.value[0].codec === 'AAC' && r.j.audio.value[0].language === 'eng' && r.j.audio.value[0].bitrateKbps === 128 && r.j.audio.value[0].sampleRate === 48000,
+          `file encode: the audio track stored, with its language (${JSON.stringify(r.j.audio)})`);
+        ok(r.j.captions.source === 'stored' && r.j.captions.value.length === 0, 'file encode: caption tracks stored (none carried)');
+        ok(r.j.drm.source === 'stored' && r.j.drm.value.length === 0, 'file encode: DRM stored as clear');
+        ok(r.j.source.audioTracks?.length === 2 && r.j.source.subtitleTracks?.length === 1 && r.j.source.videoCodec === 'H.264', 'file encode: the source tracks listed');
+        ok(!r.j.gaps.some((g: string) => /Audio tracks|Video profile|Caption|DRM/.test(g)), `file encode: none of them "not recorded" (${JSON.stringify(r.j.gaps)})`);
+        ok(r.j.notes.some((n: string) => /2 audio tracks/.test(n)) && r.j.notes.some((n: string) => /subtitle track/.test(n)) && r.j.notes.some((n: string) => /in the clear/.test(n)), `file encode: the notes say what was taken and what was not (${JSON.stringify(r.j.notes)})`);
+      }
+    }
 
     console.log('\n== EPG auto-fill ==');
     r = await api('GET', `/api/vod/${A1}/epg-fill`);

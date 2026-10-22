@@ -166,6 +166,13 @@ export const ORIGINS = ['recording', 'clip', 'upload', 'watchfolder'] as const;
 //    - a recording-derived asset: the live output profile of its channel or
 //      event's group (rungs, packaging, workflow, codec backend, segment
 //      length, DRM, captions), because the clip is cut from those renditions.
+//    - either kind: vod_assets.media_facts (migration 0077), ffprobe of the
+//      delivered init segments: each rendition's codec, profile and level, the
+//      audio tracks with channels, rate and language, subtitle tracks. For a
+//      package-only stream it is the only record of the source's codec.
+//      encode_result also says what a file encode did with audio (track 0 to
+//      AAC), captions (none carried) and DRM (clear), and lists every source
+//      audio and subtitle track the probe saw.
 //  Values the encoder sets by contract but nothing records (audio is AAC
 //  128 kb/s stereo 48 kHz per source track, video is H.264 from libx264 or
 //  NVENC, segments are fMP4/CMAF) are marked `derived`, and anything nobody
@@ -177,6 +184,8 @@ export interface Fact<T> { value: T | null; source: Prov }
 
 export interface EncodeRendition {
   height: number; width: number | null; bitrateKbps: number | null; codec: string; profile: string | null; fps: number | null;
+  /** H.264/HEVC level, e.g. "4" or "3.1", when read from the file. */
+  level?: string | null;
 }
 export interface EncodeDetails {
   workflow: Fact<'transcode' | 'package_only'>;
@@ -189,7 +198,13 @@ export interface EncodeDetails {
   packaging: { value: string[]; source: Prov };
   container: Fact<string>;
   drm: { value: string[]; source: Prov };
-  source: { width: number | null; height: number | null; fps: number | null; durationMs: number | null; hasAudio: boolean | null; bytes: number | null; filename: string | null; mime: string | null; origin: string };
+  source: { width: number | null; height: number | null; fps: number | null; durationMs: number | null; hasAudio: boolean | null; bytes: number | null; filename: string | null; mime: string | null; origin: string;
+    /** The source's own codec and tracks: a file's probe, or a package-only recording's init segments. */
+    videoCodec?: string | null; videoProfile?: string | null;
+    audioTracks?: { codec: string | null; channels: number | null; sampleRate: number | null; bitrateKbps: number | null; language: string | null }[] | null;
+    subtitleTracks?: { codec: string | null; language: string | null }[] | null };
+  /** Recorded facts worth saying that are not gaps: which source track was encoded, what was not carried. */
+  notes?: string[];
   summary: { topHeight: number | null; codec: string | null; renditions: number; label: string };
   gaps: string[];
   /** Video, or audio (a radio recording, an audio file): the Encode tab shows each its own way. */
@@ -236,6 +251,16 @@ export const codecLabel = (c: string | null | undefined): string | null => {
   if (k === 'av1') return 'AV1';
   return String(c).toUpperCase();
 };
+/** Audio codec names as people say them. */
+export const audioCodecLabel = (c: string | null | undefined): string | null => {
+  if (!c) return null;
+  const k = String(c).toLowerCase();
+  return ({ aac: 'AAC', mp3: 'MP3', mp2: 'MP2', ac3: 'AC-3', eac3: 'E-AC-3', opus: 'Opus', flac: 'FLAC', vorbis: 'Vorbis', pcm_s16le: 'PCM', pcm_s24le: 'PCM' } as Record<string, string>)[k] ?? String(c).toUpperCase();
+};
+/** Subtitle formats as people say them. */
+const subLabel = (c: string | null | undefined): string | null => !c ? null
+  : ({ subrip: 'SRT', webvtt: 'WebVTT', wvtt: 'WebVTT', mov_text: 'MP4 text', ass: 'ASS', ssa: 'SSA', dvb_subtitle: 'DVB', hdmv_pgs_subtitle: 'PGS', dvd_subtitle: 'DVD', eia_608: 'CEA-608', ttml: 'TTML' } as Record<string, string>)[String(c).toLowerCase()] ?? String(c);
+const langList = (ts: { language: string | null }[]) => ts.map((t) => t.language ?? 'no language').join(', ');
 const packList = (p: string | null | undefined): string[] => p === 'both' ? ['HLS', 'DASH'] : p ? [p.toUpperCase()] : [];
 export const resLabel = (h: number | null | undefined): string => !h ? '' : h >= 2160 ? '2160p' : `${h}p`;
 const widthFor = (h: number) => Math.round((h * 16) / 9 / 2) * 2;
@@ -246,6 +271,15 @@ export function encodeDetails(a: Record<string, any>, ctx: EncodeContext = {}): 
   const lg = ctx.ladderGroup ?? null;
   const fromFile = a.source_kind === 'upload' || a.source_kind === 'watchfolder';
   const gaps: string[] = [];
+  const notes: string[] = [];
+  // What the delivered files carry, read from them (null: not read yet).
+  const mf = (a.media_facts && typeof a.media_facts === 'object') ? a.media_facts as {
+    video?: { label: string; codec: string | null; profile: string | null; level: string | null; width: number | null; height: number | null; fps: number | null }[];
+    audio?: { codec: string | null; channels: number | null; sampleRate: number | null; bitrateKbps: number | null; language: string | null }[];
+    subtitles?: { codec: string | null; language: string | null }[];
+  } : null;
+  const mfVideo = mf?.video ?? [];
+  const mfAt = (h: number) => mfVideo.find((v) => v.label === `${h}p`) ?? mfVideo.find((v) => v.height === h) ?? null;
 
   // ---- renditions
   let renditions: EncodeRendition[] = [];
@@ -264,8 +298,24 @@ export function encodeDetails(a: Record<string, any>, ctx: EncodeContext = {}): 
       height: Number(r.height), width: num(r.width) ?? widthFor(Number(r.height)), bitrateKbps: num(r.bitrate_kbps),
       codec: codecLabel(r.codec) ?? codecDefault ?? 'unknown', profile: r.profile ?? null, fps: num(r.fps),
     }));
+  } else if (mfVideo.length) {
+    // A package-only stream has no rungs of its own: the recording's renditions are what it delivers.
+    rendSource = 'stored';
+    renditions = mfVideo.filter((v) => v.height).map((v) => ({
+      height: Number(v.height), width: v.width, bitrateKbps: null, codec: codecLabel(v.codec) ?? 'unknown', profile: null, fps: v.fps,
+    }));
   } else {
     gaps.push('Renditions: no encode result and no live output profile to read them from.');
+  }
+  // The profile, level and codec as the files carry them, over what the settings say.
+  for (const r of renditions) {
+    const f = mfAt(r.height);
+    if (!f) continue;
+    r.profile = f.profile ?? r.profile;
+    r.level = f.level ?? null;
+    r.codec = codecLabel(f.codec) ?? r.codec;
+    r.fps = r.fps ?? f.fps;
+    r.width = f.width ?? r.width;
   }
   renditions.sort((x, y) => y.height - x.height || (y.bitrateKbps ?? 0) - (x.bitrateKbps ?? 0));
   if (renditions.length && renditions.every((r) => !r.profile)) gaps.push('Video profile (High, Main) is not recorded; libx264 and NVENC use High by default.');
@@ -275,14 +325,28 @@ export function encodeDetails(a: Record<string, any>, ctx: EncodeContext = {}): 
     : prof?.workflow_type ? { value: prof.workflow_type as any, source: 'stored' } : { value: null, source: 'unknown' };
 
   // ---- audio
-  const hasAudio = er?.probe?.hasAudio ?? (a.audioOnly ? true : null);
+  const mfAudio = mf?.audio ?? null;
+  const hasAudio = er?.probe?.hasAudio ?? (mf ? (mfAudio?.length ?? 0) > 0 : null) ?? (a.audioOnly ? true : null);
   const audioFromEncoder = workflow.value === 'transcode';
-  const audio = hasAudio === false
+  const spoken = prof?.caption_source_lang && prof.caption_source_lang !== 'auto' ? prof.caption_source_lang : null;
+  const encAudio: any[] | null = Array.isArray(er?.audio) ? er.audio : null;
+  const audio: EncodeDetails['audio'] = hasAudio === false
     ? { value: [], source: 'stored' as Prov }
+    : mfAudio?.length
+      // Read from the delivered audio. The bitrate the encode set is preferred
+      // to the one ffprobe measures over the first segment (126 for a 128 kb/s
+      // target): the measured one is only the fallback, for a recording.
+      ? { value: mfAudio.map((t, i) => ({ codec: audioCodecLabel(t.codec) ?? 'unknown', channels: t.channels, sampleRate: t.sampleRate,
+          bitrateKbps: num(encAudio?.[i]?.bitrateKbps) ?? t.bitrateKbps, language: t.language ?? encAudio?.[i]?.language ?? spoken })), source: 'stored' as Prov }
+    : encAudio
+      ? { value: encAudio.map((t) => ({ codec: String(t.codec ?? 'AAC'), channels: num(t.channels), sampleRate: num(t.sampleRate), bitrateKbps: num(t.bitrateKbps), language: t.language ?? null })), source: 'stored' as Prov }
     : audioFromEncoder
       ? { value: [{ codec: 'AAC', channels: 2, bitrateKbps: 128, sampleRate: 48000, language: prof?.caption_source_lang && prof.caption_source_lang !== 'auto' ? prof.caption_source_lang : null }], source: 'derived' as Prov }
       : { value: [], source: 'unknown' as Prov };
   if (audio.source === 'derived') gaps.push('Audio tracks are not recorded per asset; shown from the encoder contract (AAC 128 kb/s, stereo, 48 kHz per source track). Languages are not recorded.');
+  // A file encode takes source audio track 0 only (ladder_args.audio_track_args(0)): say so when there were more.
+  const srcAudio: any[] | null = Array.isArray(er?.probe?.audioTracks) ? er.probe.audioTracks : null;
+  if (srcAudio && srcAudio.length > 1) notes.push(`The source file has ${srcAudio.length} audio tracks (${langList(srcAudio)}); the encode carries the first one only.`);
   if (audio.source === 'unknown' && hasAudio !== false) gaps.push('Audio tracks: a package-only source passes audio through and nothing records its codec or channels.');
 
   // ---- captions
@@ -294,6 +358,12 @@ export function encodeDetails(a: Record<string, any>, ctx: EncodeContext = {}): 
       caps.push({ language: prof.caption_source_lang || 'auto', kind: 'captions', source: 'live transcription' });
       for (const t of prof.caption_targets ?? []) caps.push({ language: t, kind: 'subtitles', source: 'translation' });
     }
+  } else if (fromFile && Array.isArray(er?.captions)) {
+    // Recorded by the encode: the packager is given no text streams, so none are carried.
+    capSource = 'stored';
+    for (const c of er.captions) caps.push({ language: String(c.language ?? 'und'), kind: c.kind === 'captions' ? 'captions' : 'subtitles', source: String(c.source ?? 'file') });
+    const srcSubs: any[] = Array.isArray(er?.probe?.subtitleTracks) ? er.probe.subtitleTracks : [];
+    if (srcSubs.length) notes.push(`The source file has ${srcSubs.length} subtitle track${srcSubs.length === 1 ? '' : 's'} (${langList(srcSubs)}); file encodes do not carry subtitle tracks yet.`);
   } else if (fromFile) {
     gaps.push('Caption and subtitle tracks are not recorded for file encodes.');
   }
@@ -307,10 +377,13 @@ export function encodeDetails(a: Record<string, any>, ctx: EncodeContext = {}): 
   if (!fmts && a.progressive_key && !packaging.value.includes('MP4')) packaging.value.push('MP4');
   const seg = num(er?.segmentSeconds) ?? num(lg?.segment_dur) ?? num(prof?.segment_dur);
   const segmentSeconds: Fact<number> = seg != null ? { value: seg, source: 'stored' } : { value: null, source: 'unknown' };
-  const drm = prof && prof.drm_enabled != null
+  const drm = er?.drm === 'clear'
+    ? { value: [] as string[], source: 'stored' as Prov }
+    : prof && prof.drm_enabled != null
     ? { value: prof.drm_enabled ? (prof.drm_systems?.length ? prof.drm_systems.map((s) => s[0].toUpperCase() + s.slice(1)) : ['Widevine', 'PlayReady', 'FairPlay']) : [], source: 'stored' as Prov }
     : fromFile ? { value: [] as string[], source: 'derived' as Prov } : { value: [] as string[], source: 'unknown' as Prov };
-  if (fromFile) gaps.push('DRM is not applied to file encodes today; they are packaged in the clear.');
+  if (er?.drm === 'clear') notes.push('Packaged in the clear: file encodes are not DRM protected.');
+  else if (fromFile) gaps.push('DRM is not applied to file encodes today; they are packaged in the clear.');
 
   // ---- what kind, and how it is delivered
   const audioKind = !!ctx.audioOnly || er?.probe?.hasVideo === false
@@ -337,9 +410,10 @@ export function encodeDetails(a: Record<string, any>, ctx: EncodeContext = {}): 
   let audioEncode: EncodeDetails['audioEncode'] = null;
   if (audioKind) {
     const rc = ctx.radioConfig ?? null;
-    const kb = num(rc?.bitrateKbps) ?? num(er?.probe?.audioBitrateKbps);
+    const kb = num(rc?.bitrateKbps) ?? num(er?.probe?.audioBitrateKbps) ?? num(mfAudio?.[0]?.bitrateKbps);
+    const ma = mfAudio?.[0] ?? null;
     audioEncode = fromRec
-      ? { codec: 'AAC (HLS, DASH)', bitrateKbps: kb ?? 128, sampleRate: 48000, channels: 2, source: kb != null ? 'stored' : 'derived',
+      ? { codec: ma?.codec ? `${audioCodecLabel(ma.codec)} (HLS, DASH)` : 'AAC (HLS, DASH)', bitrateKbps: kb ?? 128, sampleRate: ma?.sampleRate ?? 48000, channels: ma?.channels ?? 2, source: kb != null ? 'stored' : 'derived',
           note: rc?.transcode === false ? 'The station\'s MP3 stream is passed through; HLS and DASH always carry AAC.' : null }
       : { codec: 'AAC', bitrateKbps: 128, sampleRate: 48000, channels: 2, source: 'derived', note: null };
     if (audioEncode.source === 'derived') gaps.push('The audio bitrate is not recorded for this asset; shown from the encoder default (AAC 128 kb/s stereo).');
@@ -361,10 +435,21 @@ export function encodeDetails(a: Record<string, any>, ctx: EncodeContext = {}): 
     container: fromFile || er ? { value: 'fMP4 (CMAF)', source: 'derived' } : prof ? { value: 'fMP4 (CMAF)', source: 'derived' } : { value: null, source: 'unknown' },
     drm,
     source: {
-      width: num(er?.probe?.width), height: num(er?.probe?.height), fps: num(er?.probe?.fps), durationMs: num(er?.probe?.durationMs) ?? num(a.duration_ms),
+      // A package-only stream's picture is the contributor's own: its top rendition as recorded.
+      width: num(er?.probe?.width) ?? (workflow.value === 'package_only' ? mfVideo[0]?.width ?? null : null),
+      height: num(er?.probe?.height) ?? (workflow.value === 'package_only' ? mfVideo[0]?.height ?? null : null),
+      fps: num(er?.probe?.fps) ?? (workflow.value === 'package_only' ? mfVideo[0]?.fps ?? null : null), durationMs: num(er?.probe?.durationMs) ?? num(a.duration_ms),
       hasAudio: hasAudio ?? null, bytes: num(a.source_bytes), filename: a.original_filename ?? null, mime: a.mime ?? null,
       origin: fromFile ? (a.source_kind === 'watchfolder' ? 'Watch folder file' : 'Uploaded file') : 'Live recording (the channel or event renditions)',
+      // A file's own probe; for a package-only stream the recording IS the source's encode, passed through.
+      videoCodec: codecLabel(er?.probe?.videoCodec) ?? (workflow.value === 'package_only' ? codecLabel(mfVideo[0]?.codec) : null),
+      videoProfile: er?.probe?.videoProfile ?? (workflow.value === 'package_only' ? mfVideo[0]?.profile ?? null : null),
+      audioTracks: srcAudio ? srcAudio.map((t) => ({ codec: audioCodecLabel(t.codec), channels: num(t.channels), sampleRate: num(t.sampleRate), bitrateKbps: num(t.bitrateKbps), language: t.language ?? null }))
+        : workflow.value === 'package_only' && mfAudio ? mfAudio.map((t) => ({ ...t, codec: audioCodecLabel(t.codec) })) : null,
+      subtitleTracks: (Array.isArray(er?.probe?.subtitleTracks) ? er.probe.subtitleTracks as { codec: string | null; language: string | null }[]
+        : workflow.value === 'package_only' && mf ? (mf.subtitles ?? []) : null)?.map((t) => ({ codec: subLabel(t.codec), language: t.language ?? null })) ?? null,
     },
+    notes,
     summary: audioKind
       ? { topHeight: null, codec: 'AAC', renditions: 1, label: ['Audio only', audioEncode?.bitrateKbps ? `AAC ${audioEncode.bitrateKbps} kb/s` : 'AAC', deliveries.filter((d) => d.state === 'ready').map((d) => d.format.toUpperCase()).join(', ')].filter(Boolean).join(' · ') }
       : { topHeight: topHeight ?? null, codec: codec ?? null, renditions: renditions.length, label: [resLabel(topHeight), codec, renditions.length ? `${renditions.length} rendition${renditions.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ') },

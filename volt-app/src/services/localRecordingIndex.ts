@@ -288,6 +288,22 @@ export function recordingSpans(streamId: string): RunSpan[] {
   return spans;
 }
 
+/**
+ * The init segment of every rendition in the first run overlapping
+ * [fromMs..toMs], for reading what the recording carries (codec, profile,
+ * audio tracks: services/media/mediaFacts.ts). Null when no run overlaps or
+ * the recording is not on this disk (the S3 origin in production).
+ */
+export function initFilesInRange(streamId: string, fromMs: number, toMs: number):
+  { run: string; runs: number; files: { label: string; path: string }[] } | null {
+  const over = recordingSpans(streamId).filter((s) => s.endMs > fromMs && s.startMs < toMs);
+  if (!over.length) return null;
+  const run = over[0].runId;
+  const dir = join(originBaseFor(streamId), 'runs', run);
+  const files = renditionsIn(dir).map((r) => ({ label: r, path: join(dir, r, 'init.mp4') }));
+  return files.length ? { run, runs: over.length, files } : null;
+}
+
 // ---- range playlists --------------------------------------------------------
 function fmtPdt(ms: number): string {
   return new Date(ms).toISOString().replace(/(\.\d{3})\d*Z$/, '$1Z');

@@ -308,6 +308,30 @@ vodRouter.get(
     const ch = a.channel_id ? await one<any>(`SELECT kind, radio_config FROM channels WHERE id = $1`, [a.channel_id]).catch(() => null) : null;
     const job = await one<any>(`SELECT payload->'formats' AS formats, state FROM jobs WHERE type = 'clip.extract' AND payload->>'vodAssetId' = $1 ORDER BY created_at DESC LIMIT 1`, [a.id]).catch(() => null);
     const streamId = a.channel_id ?? a.event_id;
+    // A RECORDING-DERIVED ASSET IS READ ONCE, here, from the recording's own
+    // init segments (services/media/mediaFacts.ts): for a package-only stream
+    // that is the only record of the contributor's codec and audio, and for a
+    // transcoded one it is the real profile and level. Asked lazily, when the
+    // tab is first opened, so assets made before this existed get it too and
+    // making a clip never waits on ffprobe. Kept once read: init segments do
+    // not change. Not on this disk (the S3 origin) leaves it NULL and the tab
+    // says it is not recorded.
+    if (!a.media_facts && streamId && a.source_kind !== 'upload' && a.source_kind !== 'watchfolder'
+        && Number.isFinite(Number(a.start_epoch_ms)) && Number(a.end_epoch_ms) > Number(a.start_epoch_ms)) {
+      try {
+        const { initFilesInRange } = await import('../services/localRecordingIndex');
+        const { probeFiles } = await import('../services/media/mediaFacts');
+        const inits = initFilesInRange(streamId, Number(a.start_epoch_ms), Number(a.end_epoch_ms));
+        const facts = inits ? await probeFiles(inits.files, 'recording') : null;
+        if (facts && inits) {
+          facts.run = inits.run; facts.runs = inits.runs;
+          await query(`UPDATE vod_assets SET media_facts = $2::jsonb WHERE id = $1 AND media_facts IS NULL`, [a.id, JSON.stringify(facts)]);
+          a.media_facts = facts;
+        }
+      } catch (e) {
+        console.error(`[vod.encode] ${a.id}: media facts not read:`, e);
+      }
+    }
     res.json(encodeDetails(a, { ladderGroup, outputProfile, radioConfig: ch?.radio_config ?? null,
       audioOnly: ch?.kind === 'radio' || (streamId ? await Promise.resolve(isAudioOnly(streamId)).catch(() => false) : false),
       extract: job ? { formats: Array.isArray(job.formats) ? job.formats : [], state: String(job.state) } : null }));

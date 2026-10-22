@@ -13,6 +13,7 @@ export const LibIcon = {
   epg: <svg {...s}><rect x="3" y="5" width="18" height="15" rx="2" /><path d="M3 10h18M8 3v4M16 3v4M7 14h4M7 17h7" /></svg>,
   encode: <svg {...s}><path d="M4 7h10M4 12h16M4 17h7" /><circle cx="17" cy="7" r="2" /><circle cx="14" cy="17" r="2" /></svg>,
   check: <svg {...s}><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>,
+  info: <svg {...s}><circle cx="12" cy="12" r="8" /><path d="M12 11v5M12 8h0" /></svg>,
   alert: <svg {...s}><path d="M12 4l9 16H3z" /><path d="M12 10v4M12 17h0" /></svg>,
   empty: <svg {...s}><circle cx="12" cy="12" r="7" strokeDasharray="3 3" /></svg>,
   clock: <svg {...s}><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>,

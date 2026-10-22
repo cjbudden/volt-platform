@@ -249,6 +249,14 @@ export function EncodePanel({ id }: { id: string }) {
     </>
   ) : null
 
+  // Recorded facts that are not gaps: which source track was encoded, what was not carried.
+  const Notes = () => e.notes?.length ? (
+    <ul className="lib-notes lib-faint lib-small">{e.notes.map((n, i) => <li key={i}>{LibIcon.info}{n}</li>)}</ul>
+  ) : null
+  const track = (a: { codec: string | null; channels: number | null; sampleRate: number | null; bitrateKbps: number | null; language: string | null }) =>
+    [a.codec ?? 'unknown codec', a.channels === 2 ? 'stereo' : a.channels === 1 ? 'mono' : a.channels ? `${a.channels} ch` : null,
+      a.bitrateKbps ? `${a.bitrateKbps} kb/s` : null, a.sampleRate ? `${a.sampleRate / 1000} kHz` : null, a.language ?? 'no language set'].filter(Boolean).join(' · ')
+
   // AUDIO (a radio recording, a song, an audio file): what the sound was encoded as and how it is
   // delivered. No picture, no video renditions.
   if (e.kind === 'audio') {
@@ -283,6 +291,7 @@ export function EncodePanel({ id }: { id: string }) {
           <div className="sec-label">Transcripts and subtitles</div>
           <ul className="lib-tracks">{e.captions.value.map((c, i) => <li key={i}>{c.kind === 'captions' ? 'Transcript' : 'Subtitles'} · <span className="mono">{c.language}</span> · {c.source}</li>)}</ul>
         </>)}
+        <Notes />
         {e.gaps.length > 0 && (
           <details className="lib-gaps">
             <summary>{LibIcon.alert}What is not recorded ({e.gaps.length})</summary>
@@ -305,7 +314,7 @@ export function EncodePanel({ id }: { id: string }) {
             <Row k="Segment duration">{e.segmentSeconds.value != null ? `${e.segmentSeconds.value} s` : <NR />}</Row>
             <Row k="Packaging">{e.packaging.value.length ? e.packaging.value.map((x) => <span key={x} className="tag proto lib-proto">{x}</span>) : <NR />}<Mark s={e.packaging.source} /></Row>
             <Row k="Container">{e.container.value ?? <NR />}<Mark s={e.container.source} /></Row>
-            <Row k="DRM">{e.drm.source === 'unknown' ? <NR /> : e.drm.value.length ? e.drm.value.join(', ') : 'None'}<Mark s={e.drm.source} /></Row>
+            <Row k="DRM">{e.drm.source === 'unknown' ? <NR /> : e.drm.value.length ? e.drm.value.join(', ') : 'None (in the clear)'}<Mark s={e.drm.source} /></Row>
           </tbody></table>
         </div>
         <div>
@@ -314,7 +323,11 @@ export function EncodePanel({ id }: { id: string }) {
             <Row k="From">{e.source.origin}</Row>
             {e.source.filename && <Row k="File"><span className="mono">{e.source.filename}</span></Row>}
             <Row k="Picture">{e.source.width && e.source.height ? `${e.source.width}×${e.source.height}` : e.source.height ? `${e.source.height}p` : <NR />}{e.source.fps ? ` · ${e.source.fps} fps` : ''}</Row>
-            <Row k="Audio in source">{e.source.hasAudio == null ? <NR /> : e.source.hasAudio ? 'Yes' : 'No'}</Row>
+            {e.source.videoCodec && <Row k="Video codec">{e.source.videoCodec}{e.source.videoProfile ? ` · ${e.source.videoProfile}` : ''}</Row>}
+            {e.source.audioTracks ? (
+              <Row k="Audio in source">{e.source.audioTracks.length ? <ul className="lib-tracks">{e.source.audioTracks.map((a, i) => <li key={i}>{track(a)}</li>)}</ul> : 'None'}</Row>
+            ) : <Row k="Audio in source">{e.source.hasAudio == null ? <NR /> : e.source.hasAudio ? 'Yes' : 'No'}</Row>}
+            {e.source.subtitleTracks && <Row k="Subtitles in source">{e.source.subtitleTracks.length ? e.source.subtitleTracks.map((t) => `${t.codec ?? 'unknown'} · ${t.language ?? 'no language set'}`).join(', ') : 'None'}</Row>}
             {e.source.bytes != null && <Row k="Size">{(e.source.bytes / 1e9).toFixed(2)} GB</Row>}
           </tbody></table>
         </div>
@@ -329,7 +342,7 @@ export function EncodePanel({ id }: { id: string }) {
                 <td className="mono">{r.width ? `${r.width}×${r.height}` : `${r.height}p`}</td>
                 <td className="mono">{kbps(r.bitrateKbps)}</td>
                 <td>{r.codec}</td>
-                <td>{r.profile ?? <NR />}</td>
+                <td>{r.profile ? `${r.profile}${r.level ? ` · level ${r.level}` : ''}` : <NR />}</td>
                 <td className="mono">{r.fps ? `${r.fps}p` : <NR />}</td>
               </tr>
             ))}
@@ -342,7 +355,7 @@ export function EncodePanel({ id }: { id: string }) {
         <div>
           <div className="sec-label">Audio tracks <Mark s={e.audio.source} /></div>
           {e.audio.value.length ? (
-            <ul className="lib-tracks">{e.audio.value.map((a, i) => <li key={i}>{a.codec} · {a.channels === 2 ? 'stereo' : a.channels ? `${a.channels} ch` : ''}{a.bitrateKbps ? ` · ${a.bitrateKbps} kb/s` : ''}{a.sampleRate ? ` · ${a.sampleRate / 1000} kHz` : ''} · {a.language ?? 'language not recorded'}</li>)}</ul>
+            <ul className="lib-tracks">{e.audio.value.map((a, i) => <li key={i}>{track(a)}</li>)}</ul>
           ) : e.audio.source === 'stored' ? <span>No audio</span> : <NR />}
         </div>
         <div>
@@ -352,6 +365,7 @@ export function EncodePanel({ id }: { id: string }) {
           ) : e.captions.source === 'stored' ? <span>None</span> : <NR />}
         </div>
       </div>
+      <Notes />
       {e.gaps.length > 0 && (
         <details className="lib-gaps">
           <summary>{LibIcon.alert}What is not recorded ({e.gaps.length})</summary>
