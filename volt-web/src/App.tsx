@@ -23,6 +23,7 @@ import NewStreamChooser from './NewStreamChooser'
 import UiSamplesPage from './pages/UiSamples'
 import PlanLimitsPage from './pages/PlanLimits'
 import AccountSettingsPage from './pages/AccountSettings'
+import CaptionsPage from './pages/Captions'
 import PermissionsMapPage from './pages/PermissionsMap'
 import { GlobalNotices, PageNoticesProvider, usePageNotice, Notice } from './notices'
 import LivePage from './pages/Live'
@@ -88,6 +89,7 @@ const I = {
   // Branching flow: the base path with an add-on stepping off it.
   workflows: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="5" cy="6" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="19" cy="18" r="2" /><path d="M7 6h10M12 6v8a4 4 0 004 4h1" /></svg>,
   // A frame with a lower third in it: HTML graphics.
+  captions: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M10 10.5a2 2 0 1 0 0 3M17 10.5a2 2 0 1 0 0 3" /></svg>,
   graphics: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M6 15h8M6 12h5" /></svg>,
   storage: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5" /><path d="M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6" /></svg>,
 }
@@ -100,7 +102,7 @@ const NAV_FEATURE: Record<string, string> = {
   channels: 'channels', radio: 'radio', events: 'events', epg: 'epg', loops: 'media', graphics: 'graphics', fast: 'channels',
   recordings: 'recordings', vod: 'vod', images: 'media', analytics: 'analytics',
   review: 'vod', watchfolders: 'media', storage: 'media',
-  encoding: 'settings', groups: 'settings', plan: 'settings', 'account-settings': 'settings', permissions: 'access',
+  encoding: 'settings', groups: 'settings', captions: 'settings', plan: 'settings', 'account-settings': 'settings', permissions: 'access',
   // Admin sections
   'content-types': 'settings', publishing: 'settings', ingest: 'settings', social: 'settings',
   payments: 'payments', apikeys: 'apps',
@@ -152,6 +154,7 @@ const ADMIN_NAV: NavGroup[] = [
     { key: 'publishing', label: 'Publishing Rules', icon: I.vod },
     { key: 'ingest', label: 'Ingest Rules', icon: I.vod },
     { key: 'groups', label: 'Channel Groups', icon: I.channels },
+    { key: 'captions', label: 'Captions', icon: I.captions },
   ] },
   { group: 'Account', items: [
     { key: 'account-settings', label: 'Account settings', icon: I.palette },
@@ -626,6 +629,8 @@ export default function App() {
             ? <PlanLimitsPage />
             : section === 'account-settings'
             ? <AccountSettingsPage />
+            : section === 'captions'
+            ? <CaptionsPage />
             : section === 'permissions'
             ? <PermissionsMapPage />
             : section === 'system'

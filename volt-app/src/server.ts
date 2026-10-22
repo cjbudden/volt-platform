@@ -1,3 +1,5 @@
+import { captionsSettingsRouter } from './modules/captionsSettings';
+import { CAPTION_LANGUAGES } from './services/captionLanguages';
 import { accountSettingsRouter } from './modules/accountSettings';
 import { sourcePreviewRouter } from './modules/sourcePreview';
 import express from 'express';
@@ -303,6 +305,7 @@ export function createServer() {
   app.use('/api/sources', sourcesRouter);
   app.use('/api/groups', groupsRouter);
   app.use('/api/plan', planRouter);
+  app.use('/api/account-settings/captions', captionsSettingsRouter);  // live captions: provider and per-profile settings (modules/captionsSettings.ts)
   app.use('/api/account-settings', accountSettingsRouter);  // logo and colours (docs/ACCOUNT_SETTINGS.md)  // the account's plan and how groups share it (docs/PLAN_AND_GROUPS.md)
   app.use('/api/events', eventsRouter);
   app.use('/api/output-profiles', profilesRouter);
@@ -312,20 +315,7 @@ export function createServer() {
   // the encoder's translation capability: whisper transcribes ~100 languages and
   // natively translates X->English; every non-English target below is served by the
   // NLLB MT stage and needs a FLORES mapping in volt-encoder/bin/captions.py.
-  app.get('/api/caption-languages', (_req, res) => res.json({
-    languages: [
-      { code: 'en', label: 'English' },
-      { code: 'ms', label: 'Malay' },
-      { code: 'id', label: 'Indonesian' },
-      { code: 'zh', label: 'Chinese (Simplified)' },
-      { code: 'zh-Hant', label: 'Chinese (Traditional)' },
-      { code: 'ta', label: 'Tamil' },
-      { code: 'hi', label: 'Hindi' },
-      { code: 'es', label: 'Spanish' },
-      { code: 'fr', label: 'French' },
-      { code: 'ar', label: 'Arabic' },
-    ],
-  }));
+  app.get('/api/caption-languages', (_req, res) => res.json({ languages: CAPTION_LANGUAGES }));
   app.use('/api/files', mediaFilesRouter);   // image library (file manager)
   app.use('/api/watchfolders', watchfoldersRouter);  // ingest folders, rules, review queue
   app.use('/api/encode-profiles', encodeProfilesRouter);  // renditions + ladder groups

@@ -48,5 +48,7 @@ use NLLB. Adding another language later is a code-map entry, not another install
   the captions provisioning plan + sizing + separate-GPU-task launch/teardown.
   Tests: 33 (sidecar) + 9 (plan) + 6 (account toggle) + orchestration.
 - **To deliver:** the live Gladia websocket adapter (needs key), the GPU captions
-  container image build/push, a live chunked-streaming wrapper for Whisper, and the
-  account/profile captions settings UI.
+  container image build/push and a live chunked-streaming wrapper for Whisper.
+- **Settings screen:** Admin > Captions (22 Oct 2026) sets the account's
+  `captions_provider` and each profile's captions through
+  `/api/account-settings/captions`.

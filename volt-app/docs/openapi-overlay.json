@@ -52,7 +52,7 @@
     },
     "Account Settings": {
       "displayName": "Account settings",
-      "description": "Account settings hold your account's own branding: a logo and a primary and secondary colour shown on outward-facing pages such as share pages.\n\n**Use it to:**\n- Read the current branding with `GET /api/account-settings`\n- Change the logo or colours with `PATCH /api/account-settings`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `settings: manage` is needed to change.\n\n**Good to know:** the logo must be an image-library path or an https address. Every change is recorded in the audit log."
+      "description": "Account settings hold your account's own branding: a logo and a primary and secondary colour shown on outward-facing pages such as share pages.\n\n**Use it to:**\n- Read the current branding with `GET /api/account-settings`\n- Change the logo or colours with `PATCH /api/account-settings`\n- Turn live captions on and choose their engine with `PATCH /api/account-settings/captions`, and set each output profile's caption languages, offset and model with `PATCH /api/account-settings/captions/profiles/{id}`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `settings: manage` is needed to change.\n\n**Good to know:** the logo must be an image-library path or an https address. Every change is recorded in the audit log."
     },
     "Addons": {
       "displayName": "Add-ons",
@@ -343,5 +343,17 @@
   "GET /api/timeline/grid": {
     "summary": "Get the timeline grid (Past, Now, Next)",
     "description": "Every stream the caller can see as one row on a shared clock, for the Live Streams Timeline view: programmes (as-run times preferred over scheduled), the media actually recorded with its gaps (past part of the window only, measured from disk), clip ticks, and the same five-gate status the Live board shows. One call for the whole grid instead of one per stream.\n\n`from` and `to` are ISO 8601 (epoch ms also accepted); the window is capped at 48 hours and a wider one is a 400. `kinds` narrows to `channel,radio,event,loop` (rows of a kind your role cannot view are absent, not empty). Rows page at 50 with the list standard's cursor: follow `next` in the body or the `Link: rel=\"next\"` header."
+  },
+  "GET /api/account-settings/captions": {
+    "summary": "Read the captions settings",
+    "description": "The account's captions engine (`none`, `whisper` or `gladia`) and, for every output profile, whether it captions, the spoken language, the caption languages, the hold-back offset and the whisper model, with the groups and running streams that use it. Also says whether you may change the engine and the profiles, and which languages Volt can deliver."
+  },
+  "PATCH /api/account-settings/captions": {
+    "summary": "Choose the captions engine",
+    "description": "Set `provider` to `none` (captions off for every stream), `whisper` (self-hosted, no per-minute fee) or `gladia` (managed service). Account administrators and owners only. Refused with 409 `locked_while_running` while a stream with captions on is running, because the encoder reads it when a stream starts. Recorded in the audit log."
+  },
+  "PATCH /api/account-settings/captions/profiles/:id": {
+    "summary": "Change a profile's captions",
+    "description": "Any of `enabled`, `sourceLang` (`auto` or a language code), `targets` (languages from `GET /api/caption-languages`), `offsetSec` (0 to 60) and `modelSize` (`tiny`, `base`, `small`, `medium`, `large-v3`; whisper only). Applies to every channel, station and event in the groups that use the profile. Needs `settings: manage`. Refused with 409 `locked_while_running` while one of those streams is running. Recorded in the audit log."
   }
 }

@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "Volt API",
-  "version": "0.0.0",
+  "version": "0.3.0",
   "description": "The Volt API: the **Public API** for apps, players and their audience, and the **Admin API** for your own staff and servers.\n\nEvery route Volt serves to customers is listed here. Routes with a captured example show a real request and response from a test account.\n\nGuides: Using the API, Authentication and Errors in the docs sidebar."
  },
  "servers": [
@@ -31,7 +31,7 @@
   {
    "name": "Account Settings",
    "x-displayName": "Account settings",
-   "description": "Account settings hold your account's own branding: a logo and a primary and secondary colour shown on outward-facing pages such as share pages.\n\n**Use it to:**\n- Read the current branding with `GET /api/account-settings`\n- Change the logo or colours with `PATCH /api/account-settings`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `settings: manage` is needed to change.\n\n**Good to know:** the logo must be an image-library path or an https address. Every change is recorded in the audit log."
+   "description": "Account settings hold your account's own branding: a logo and a primary and secondary colour shown on outward-facing pages such as share pages.\n\n**Use it to:**\n- Read the current branding with `GET /api/account-settings`\n- Change the logo or colours with `PATCH /api/account-settings`\n- Turn live captions on and choose their engine with `PATCH /api/account-settings/captions`, and set each output profile's caption languages, offset and model with `PATCH /api/account-settings/captions/profiles/{id}`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `settings: manage` is needed to change.\n\n**Good to know:** the logo must be an image-library path or an https address. Every change is recorded in the audit log."
   },
   {
    "name": "Addons",
@@ -1562,6 +1562,92 @@
     "security": [
      {
       "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/account-settings/captions": {
+   "get": {
+    "operationId": "getAccountSettingsCaptions",
+    "summary": "Read the captions settings",
+    "tags": [
+     "Account Settings"
+    ],
+    "description": "The account's captions engine (`none`, `whisper` or `gladia`) and, for every output profile, whether it captions, the spoken language, the caption languages, the hold-back offset and the whisper model, with the groups and running streams that use it. Also says whether you may change the engine and the profiles, and which languages Volt can deliver.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: any signed-in admin user (lookup for forms)",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "patch": {
+    "operationId": "patchAccountSettingsCaptions",
+    "summary": "Choose the captions engine",
+    "tags": [
+     "Account Settings"
+    ],
+    "description": "Set `provider` to `none` (captions off for every stream), `whisper` (self-hosted, no per-minute fee) or `gladia` (managed service). Account administrators and owners only. Refused with 409 `locked_while_running` while a stream with captions on is running, because the encoder reads it when a stream starts. Recorded in the audit log.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/account-settings/captions/profiles/{id}": {
+   "patch": {
+    "operationId": "patchAccountSettingsCaptionsProfilesByID",
+    "summary": "Change a profile's captions",
+    "tags": [
+     "Account Settings"
+    ],
+    "description": "Any of `enabled`, `sourceLang` (`auto` or a language code), `targets` (languages from `GET /api/caption-languages`), `offsetSec` (0 to 60) and `modelSize` (`tiny`, `base`, `small`, `medium`, `large-v3`; whisper only). Applies to every channel, station and event in the groups that use the profile. Needs `settings: manage`. Refused with 409 `locked_while_running` while one of those streams is running. Recorded in the audit log.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
      }
     ],
     "responses": {

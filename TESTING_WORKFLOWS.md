@@ -89,7 +89,7 @@ Use `master.m3u8` when captions are off.
 
 ## 3. Captions in the console
 
-1. Account: captions provider `whisper` (Admin, or
+1. Account: captions engine Whisper (Admin, Captions; or
    `UPDATE accounts SET captions_provider='whisper'`).
 2. Channel, Settings, Subtitles: on, **source language English**. `auto` loads
    the slower multilingual model, and `en` loads `base.en`.

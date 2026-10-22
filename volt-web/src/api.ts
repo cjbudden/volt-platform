@@ -446,6 +446,24 @@ export interface AccountSettings {
   geoAccess: { mode: 'block' | 'allow'; countries: string[] } | null
   canEdit: boolean; editReason: string | null
 }
+/** Admin > Captions: the account's engine and every output profile's captions (GET /api/account-settings/captions). */
+export type CaptionsProvider = 'none' | 'whisper' | 'gladia'
+export interface CaptionsProfile {
+  id: string; name: string; workflowType: 'transcode' | 'package_only'
+  enabled: boolean; sourceLang: string; targets: string[]; offsetSec: number; modelSize: string
+  groups: { id: string; name: string }[]; channelCount: number; eventCount: number
+  /** Streams on this profile running now: changes wait until they stop. */
+  running: { kind: 'channel' | 'event'; id: string; name: string }[]
+}
+export interface CaptionsSettings {
+  provider: CaptionsProvider
+  canEditProvider: boolean; providerReason: string | null
+  canEditProfiles: boolean; profilesReason: string | null
+  cpuInEncoder: boolean; cpuSizes: string[]; modelSizes: string[]
+  languages: { code: string; label: string }[]
+  profiles: CaptionsProfile[]
+}
+export interface CaptionsProfilePatch { enabled?: boolean; sourceLang?: string; targets?: string[]; offsetSec?: number; modelSize?: string }
 export interface ChannelSettingsPatch {
   name?: string
   /** In-stream graphics overrides (Up next). See GraphicsSettings.tsx. */
@@ -1071,6 +1089,12 @@ export const api = {
   accountSettings: (): Promise<AccountSettings> => req('/account-settings'),
   patchAccountSettings: (b: { logo?: string | null; primary?: string | null; secondary?: string | null; geoAccess?: { mode: 'block' | 'allow'; countries: string[] } | null }): Promise<AccountSettings> =>
     req('/account-settings', { method: 'PATCH', body: JSON.stringify(b) }),
+  /** Admin > Captions (modules/captionsSettings.ts). */
+  captionsSettings: (): Promise<CaptionsSettings> => req('/account-settings/captions'),
+  patchCaptionsProvider: (provider: CaptionsProvider): Promise<CaptionsSettings> =>
+    req('/account-settings/captions', { method: 'PATCH', body: JSON.stringify({ provider }) }),
+  patchCaptionsProfile: (id: string, b: CaptionsProfilePatch): Promise<CaptionsSettings> =>
+    req(`/account-settings/captions/profiles/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(b) }),
   patchPlan: (b: { planTier?: string; maxChannels?: number; maxConcurrent?: number }): Promise<PlanView> =>
     req('/plan', { method: 'PATCH', body: JSON.stringify(b) }),
   createGroup: (b: { name: string; workflowType: 'transcode' | 'package_only'; outputProfileId?: string; maxChannels: number; maxConcurrent: number; makeDefault?: boolean }): Promise<Group> =>

@@ -90,6 +90,33 @@
   "group": "/api/account-settings"
  },
  {
+  "method": "GET",
+  "path": "/api/account-settings/captions",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/account-settings"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/account-settings/captions",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/account-settings"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/account-settings/captions/profiles/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/account-settings"
+ },
+ {
   "method": "POST",
   "path": "/api/addon-callbacks/runs/:id",
   "api": "machine",
