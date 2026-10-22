@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.2.1 (2026-10-22)
+
+### Product (in customer release notes)
+
+- fixed · FAST: Taking a FAST channel on or off air now counts towards its on-air hours and as-run reports, the same as any other channel. Before, those hours were missing from the totals.
+- fixed · Radio: The Now playing column in the station list now shows the same line as the station page. A station on an HLS source, which cannot send titles, shows a dash instead of Untitled break, and Untitled break is kept for an Icecast station between two titles.
+
+### Internal
+
+- fixed · Tests: Baseline of all 179 check suites, each on its own database: 178 pass. Suites that drifted from the product were brought up to date (10 character passwords, roles model, platform sign-in with an authenticator code, plan allocation, kept metadata keys, smart render, the audio_radio skin). Fixture faults fixed: a docs test user and clashing fixture ids in the check seed, invited test users, and test media that suites now make themselves (smart render, ingest extract). New helpers test/lib/platform-session.sh and test/lib/react-global.ts.
+
 ## 0.2.0 (2026-10-22)
 
 ### Product (in customer release notes)
