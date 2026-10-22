@@ -57,6 +57,23 @@ export async function sendSecurityEmail(to: string, subject: string, text: strin
   console.log(`[security] (dev, no SMTP) email to ${to}: ${subject}\n${text}`);
 }
 
+/** A transactional email with an HTML part (welcome and reset links). Like a
+ *  security code, the body holds a secret (the link), so it is sent directly
+ *  and never stored. In development without SMTP the text part is logged. */
+export async function sendTransactionalEmail(to: string, m: { subject: string; text: string; html?: string }): Promise<void> {
+  const url = process.env.SMTP_URL, from = process.env.NOTIFY_FROM;
+  if (url && from) {
+    try { await sendMail(parseSmtpUrl(url), { from, to, subject: m.subject, text: m.text, html: m.html }); }
+    catch (e: any) {
+      console.error('[mail] delivery failed', to, e?.message);
+      throw new ApiError(502, 'The email could not be sent. Try again in a moment.');
+    }
+    return;
+  }
+  if (prod()) throw new ApiError(503, 'Email is not configured on this deployment (SMTP_URL, NOTIFY_FROM).');
+  console.log(`[mail] (dev, no SMTP) email to ${to}: ${m.subject}\n${m.text}`);
+}
+
 let sns: any = null;
 export async function sendSecuritySms(to: string, text: string): Promise<void> {
   const p = smsProvider();

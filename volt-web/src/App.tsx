@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, type ReactElement } from 'react'
 import { api, setSession, clearSession, getToken, accessExpiresIn, noteActivity, setUnauthorizedHandler, isMfaStep, ensureImageSigning, type SearchHit, type Me, type MfaStep, type Session } from './api'
 import { useImageSigning } from './imageSigning'
 import { SignInSecondStep } from './security'
+import { OnboardingFlow, onboardingKindFor } from './Onboarding'
 import AccountPage from './pages/Account'
 import ChannelGroupsPage from './pages/ChannelGroups'
 import Channels from './pages/Channels'
@@ -382,6 +383,21 @@ export default function App() {
   }
   const plainNav = (to: string) => (e: React.MouseEvent) => { if (e.metaKey || e.ctrlKey || e.button === 1) return; e.preventDefault(); navigate(to) }
 
+  // WELCOME, RESET AND FORGOTTEN-PASSWORD PAGES (Onboarding.tsx): before sign-in,
+  // and also over a signed-in tab, because finishing one signs in as that person.
+  const onboardKind = !step ? onboardingKindFor(route.path) : null
+  if (onboardKind) {
+    const toSignIn = () => navigate('/', { replace: true })
+    return (
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: '24px 0' }}>
+        <OnboardingFlow kind={onboardKind}
+          onSession={(s, next) => { navigate(next === 'invite_team' ? '/users' : '/', { replace: true }); if (authed) clearSession(); finishSignIn(s) }}
+          onMfaStep={(s, em, next) => { navigate(next === 'invite_team' ? '/users' : '/', { replace: true }); if (authed) { clearSession(); setAuthed(false) } if (em) setEmail(em); setPw(''); setStep(s) }}
+          onSignIn={toSignIn} />
+      </div>
+    )
+  }
+
   if (!authed) {
     return (
       <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
@@ -414,6 +430,10 @@ export default function App() {
           {/* outside the shell (no page region): a compact notice in the form */}
           {err && <div style={{ marginBottom: 10 }}><Notice kind="error" variant="compact" message={err} /></div>}
           <button className="btn primary" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }} disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+          <div style={{ textAlign: 'center', marginTop: 12 }}>
+            <a href="/forgot-password" className="hintxt" style={{ color: 'var(--muted)' }}
+              onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate('/forgot-password') }}>Forgot your password?</a>
+          </div>
         </form>
         )}
       </div>

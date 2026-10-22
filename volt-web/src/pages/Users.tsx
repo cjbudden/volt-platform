@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { ConfirmDialog } from '../listActions'
 import { ROLE_TEMPLATES } from '../roleTemplates'
 import {
-  api, type Me, type UserRow, type UserGroupRow, type TenantRole, type AccessLevel, type AccessFeature,
+  api, apiRequest, type Me, type UserRow, type UserGroupRow, type TenantRole, type AccessLevel, type AccessFeature,
   type ViewerRow, type ViewerDetail, type SecurityBrief,
 } from '../api'
 import { navigate } from '../router'
@@ -31,6 +31,7 @@ const LEVELS: AccessLevel[] = ['none', 'view', 'operate', 'manage']
 const RANK: Record<AccessLevel, number> = { none: 0, view: 1, operate: 2, manage: 3 }
 const TIER_LABEL: Record<string, string> = { owner: 'Owner', admin: 'Admin', operator: 'Operator', viewer: 'Viewer' }
 const AREA_LABEL: Record<string, string> = { content: 'Content', insight: 'Insight', admin: 'Administration' }
+interface InviteState { sentAt: string; expiresAt: string; expired: boolean; verified: boolean }
 const fmtDate = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' }) : '—')
 
 /** The access a role gives its members (viewer-tier roles are capped at view). */
@@ -69,7 +70,7 @@ export default function Users() {
   usePageNotice('load', err ? { kind: 'error', title: "Couldn't load users and roles.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
   if (!me) return null
-  const action = tab === 'users' && can('users', 'manage') ? <NewButton label="Add user" onClick={() => setUserOpen('new')} />
+  const action = tab === 'users' && can('users', 'manage') ? <NewButton label="Invite user" onClick={() => setUserOpen('new')} />
     : tab === 'roles' && can('access', 'manage') ? <NewButton label="New role" onClick={() => setRoleOpen('new')} />
     : undefined
 
@@ -134,7 +135,12 @@ function UserDrawer({ me, roles, user, onClose, onDone }: {
   const { can } = useAccess()
   const isEdit = !!user
   const myAccess = me.permissions ?? me.features
-  const [detail, setDetail] = useState<(UserRow & { manageable: boolean; access: Record<string, AccessLevel>; security?: SecurityBrief | null }) | null>(null)
+  const [detail, setDetail] = useState<(UserRow & { manageable: boolean; access: Record<string, AccessLevel>; security?: SecurityBrief | null; invite?: InviteState | null }) | null>(null)
+  // A new user is invited by email by default: they confirm the address with a
+  // code and choose their own password (docs/ONBOARDING.md). Setting one here is
+  // the fallback for an address that cannot receive mail.
+  const [how, setHow] = useState<'invite' | 'password'>('invite')
+  const notify = useNotify()
   const [email, setEmail] = useState(user?.email ?? '')
   const [displayName, setDisplayName] = useState(user?.displayName ?? '')
   const [password, setPassword] = useState('')
@@ -157,6 +163,12 @@ function UserDrawer({ me, roles, user, onClose, onDone }: {
           displayName: displayName.trim() || null,
           ...(status !== (user!.status === 'disabled' ? 'disabled' : 'active') ? { status } : {}),
         })
+      } else if (how === 'invite') {
+        if (!email.trim()) throw new Error('Enter an email')
+        const r = await apiRequest('/users/invite', { method: 'POST', body: JSON.stringify({ email: email.trim(), roleIds: picked, displayName: displayName.trim() || undefined }) })
+        notify(r.invite?.sent
+          ? { kind: 'ok', title: 'Invitation sent.', message: `${r.invite.sentTo} gets a link to confirm their email and choose a password. It expires ${fmtDate(r.invite.expiresAt)}.` }
+          : { kind: 'warn', title: 'User added, but the email did not send.', message: `${r.invite?.error ?? 'The mail server refused it.'} Open the user and choose Send again.` })
       } else {
         if (!email.trim()) throw new Error('Enter an email')
         if (password.length < 10) throw new Error('Password must be at least 10 characters')
@@ -171,6 +183,23 @@ function UserDrawer({ me, roles, user, onClose, onDone }: {
     if (!pw) return
     setBusy(true); setErr('')
     try { await api.setUserPassword(user!.id, pw); window.alert('Password changed.') }
+    catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  async function resendInvite() {
+    setBusy(true); setErr('')
+    try {
+      const r = await apiRequest(`/users/${user!.id}/invite`, { method: 'POST' })
+      if (!r.sent) throw new Error(r.error ?? 'The email could not be sent')
+      notify({ kind: 'ok', title: 'Invitation sent again.', message: `The earlier link no longer works. The new one expires ${fmtDate(r.expiresAt)}.` })
+      setDetail(await api.user(user!.id))
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  async function withdrawInvite() {
+    if (!window.confirm(`Withdraw the invitation for ${user!.email}? The link in their email stops working. You can send a new one later, or delete the user.`)) return
+    setBusy(true); setErr('')
+    try { await apiRequest(`/users/${user!.id}/invite`, { method: 'DELETE' }); setDetail(await api.user(user!.id)) }
     catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
 
@@ -189,7 +218,7 @@ function UserDrawer({ me, roles, user, onClose, onDone }: {
   return (
     <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="">
       <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
-        <div className="drawer-h"><div className="t">{isEdit ? 'Admin user' : 'Add admin user'}</div><button className="xbtn" onClick={onClose}>✕</button></div>
+        <div className="drawer-h"><div className="t">{isEdit ? 'Admin user' : 'Invite admin user'}</div><button className="xbtn" onClick={onClose}>✕</button></div>
         <div className="drawer-b">
           {isEdit && !editable && detail && (
             <div className="hintxt" style={{ marginBottom: 10, color: 'var(--warn,#fbbf24)' }}>
@@ -204,10 +233,42 @@ function UserDrawer({ me, roles, user, onClose, onDone }: {
             <input className="inp" value={displayName} disabled={!editable} onChange={e => setDisplayName(e.target.value)} />
           </div>
           {!isEdit && (
+            <div className="field"><label>How they get in</label>
+              <div role="radiogroup" style={{ display: 'grid', gap: 6 }}>
+                {([['invite', 'Email an invitation', 'They get a link, confirm their address with a 6-digit code and choose their own password. Recommended.'],
+                   ['password', 'Set a password now', 'For an address that cannot receive email. You share the password with them.']] as const).map(([k, t, d]) => (
+                  <label key={k} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', background: how === k ? 'var(--accent-soft, rgba(85,105,242,.10))' : undefined }}>
+                    <input type="radio" name="user-how" checked={how === k} onChange={() => setHow(k)} style={{ marginTop: 3 }} />
+                    <span><b>{t}</b><div className="hintxt" style={{ marginTop: 2 }}>{d}</div></span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          {!isEdit && how === 'password' && (
             <div className="field"><label>Password</label>
               <input className="inp" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 10 characters" />
               <div className="hintxt">Share it securely; they can change it after signing in.</div>
             </div>
+          )}
+
+          {isEdit && detail?.status === 'invited' && (
+            <>
+              <div className="sec-label">Invitation</div>
+              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', lineHeight: 1.6, marginBottom: 8 }}>
+                {detail.invite
+                  ? detail.invite.expired
+                    ? <>The invitation sent {fmtDate(detail.invite.sentAt)} has expired. They have not set up their account.</>
+                    : <>Sent {fmtDate(detail.invite.sentAt)}, expires {fmtDate(detail.invite.expiresAt)}. {detail.invite.verified ? 'They have confirmed their email but not yet chosen a password.' : 'They have not opened it yet.'}</>
+                  : <>No open invitation. They cannot sign in until you send one.</>}
+              </div>
+              {editable && (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                  <button type="button" className="btn ghost" disabled={busy} onClick={resendInvite}>{detail.invite ? 'Send again' : 'Send invitation'}</button>
+                  {detail.invite && !detail.invite.expired && <button type="button" className="btn ghost" disabled={busy} onClick={withdrawInvite}>Withdraw</button>}
+                </div>
+              )}
+            </>
           )}
 
           <div className="sec-label">Roles</div>
@@ -254,9 +315,9 @@ function UserDrawer({ me, roles, user, onClose, onDone }: {
         <div className="drawer-f">
           {isEdit && editable && !isSelf && <button className="btn ghost" style={{ color: 'var(--down,#f87171)', marginRight: 'auto' }} disabled={busy} onClick={remove}>Delete</button>}
           <FormStatus error={err} />
-          {isEdit && editable && !isSelf && <button className="btn ghost" disabled={busy} onClick={resetPassword}>Set password</button>}
+          {isEdit && editable && !isSelf && detail?.status !== 'invited' && <button className="btn ghost" disabled={busy} onClick={resetPassword}>Set password</button>}
           <button className="btn ghost" onClick={onClose}>{editable ? 'Cancel' : 'Close'}</button>
-          {editable && <button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save changes' : 'Add user'}</button>}
+          {editable && <button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save changes' : how === 'invite' ? 'Send invitation' : 'Add user'}</button>}
         </div>
       </div>
     </div>

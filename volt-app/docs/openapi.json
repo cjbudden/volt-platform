@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "Volt API",
-  "version": "0.3.0",
+  "version": "0.0.0",
   "description": "The Volt API: the **Public API** for apps, players and their audience, and the **Admin API** for your own staff and servers.\n\nEvery route Volt serves to customers is listed here. Routes with a captured example show a real request and response from a test account.\n\nGuides: Using the API, Authentication and Errors in the docs sidebar."
  },
  "servers": [
@@ -199,6 +199,10 @@
    "description": "Notifications send messages to your team by email, in-app inbox or push, and keep a record of each delivery.\n\n**Use it to:**\n- Send a notification, optionally from a template, with `POST /api/notifications`, and review sends with `GET /api/notifications`\n- Retry failed deliveries with `POST /api/notifications/deliveries/{id}/retry`\n- Register push devices (iOS, Android, web) with `POST /api/notifications/devices`\n- Read and clear the in-app inbox with `GET /api/notifications/inbox` and `POST /api/notifications/inbox/read-all`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, the operator tier or above is needed to send or change.\n\n**Good to know:** use `POST /api/notifications/test` to check a channel before relying on it."
   },
   {
+   "name": "Onboarding",
+   "description": "Onboarding is how a person gets their first password, or a new one, without anyone else handling it. An invitation, a registration or a forgotten password emails a one-time link; the link asks for a 6-digit code sent to the same address; the code allows a password to be chosen.\n\n**Use it to:**\n- Show who a link is for with `POST /api/onboarding/link`\n- Email the code with `POST /api/onboarding/code` and check it with `POST /api/onboarding/verify`\n- Set the password and sign in with `POST /api/onboarding/complete`\n- Ask for a reset link with `POST /api/onboarding/forgot`\n\n**Credential:** none. The link's token travels in the request body, never the address.\n\n**Good to know:** every link that cannot be used answers 410 with the same message, and a forgotten-password request answers 202 whether or not the address has an account. Invite users from your own account with `POST /api/users/invite`."
+  },
+  {
    "name": "Output Profiles",
    "x-displayName": "Output profiles",
    "description": "Output profiles define how a live stream is delivered: rendition ladder, HLS and/or DASH packaging, transcode or package-only workflow, DVR window and retention.\n\n**Use it to:**\n- List profiles with `GET /api/output-profiles`\n- Create a profile with `POST /api/output-profiles`\n- Delete a profile with `DELETE /api/output-profiles/{id}`\n\n**Credential:** admin session (Bearer) or account secret key. Any signed-in admin user can read, `settings: manage` is needed to change.\n\n**Good to know:** a channel group uses one output profile, so its channels share these settings."
@@ -271,6 +275,10 @@
    "name": "Share Links",
    "x-displayName": "Share links",
    "description": "Share links give someone outside your account a private link to one asset, optionally protected by a PIN or emailed code.\n\n**Use it to:**\n- Create a link with `POST /api/share-links`\n- List links and see their views with `GET /api/share-links` and `GET /api/share-links/{id}`\n- End a link at once with `POST /api/share-links/{id}/revoke`\n\n**Credential:** admin session (Bearer) or account secret key, with `sharing: view` to read and `sharing: manage` to change.\n\n**Good to know:** the link URL is returned once, at creation. Each link reaches exactly one asset."
+  },
+  {
+   "name": "Signup",
+   "description": "Signup registers a new organisation from a website: it creates the client account and its owner, or records the registration for later, depending on how registration is set up.\n\n**Use it to:**\n- Read the plans on offer and whether they can be bought online with `GET /api/signup/config`\n- Register with `POST /api/signup`\n- Check a payment from the return page with `POST /api/signup/checkout-status`\n\n**Credential:** none.\n\n**Good to know:** registration never takes a password. The owner receives a welcome link and sets one through Onboarding, then invites their team."
   },
   {
    "name": "Social",
@@ -368,8 +376,10 @@
     "Auth",
     "Availability",
     "Me",
+    "Onboarding",
     "Payments",
-    "Player"
+    "Player",
+    "Signup"
    ]
   },
   {
@@ -18552,6 +18562,96 @@
     }
    }
   },
+  "/api/onboarding/code": {
+   "post": {
+    "operationId": "postOnboardingCode",
+    "summary": "Onboarding: code",
+    "tags": [
+     "Onboarding"
+    ],
+    "description": "**Credential:** none or per-route",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/api/onboarding/complete": {
+   "post": {
+    "operationId": "postOnboardingComplete",
+    "summary": "Onboarding: complete",
+    "tags": [
+     "Onboarding"
+    ],
+    "description": "**Credential:** none or per-route",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/api/onboarding/forgot": {
+   "post": {
+    "operationId": "postOnboardingForgot",
+    "summary": "Onboarding: forgot",
+    "tags": [
+     "Onboarding"
+    ],
+    "description": "**Credential:** none or per-route",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/api/onboarding/link": {
+   "post": {
+    "operationId": "postOnboardingLink",
+    "summary": "Onboarding: link",
+    "tags": [
+     "Onboarding"
+    ],
+    "description": "**Credential:** none or per-route",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/api/onboarding/password-check": {
+   "post": {
+    "operationId": "postOnboardingPasswordCheck",
+    "summary": "Onboarding: password check",
+    "tags": [
+     "Onboarding"
+    ],
+    "description": "**Credential:** none or per-route",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/api/onboarding/verify": {
+   "post": {
+    "operationId": "postOnboardingVerify",
+    "summary": "Onboarding: verify",
+    "tags": [
+     "Onboarding"
+    ],
+    "description": "**Credential:** none or per-route",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
   "/api/output-profiles": {
    "get": {
     "operationId": "getOutputProfiles",
@@ -25910,6 +26010,66 @@
     }
    }
   },
+  "/api/signup": {
+   "post": {
+    "operationId": "postSignup",
+    "summary": "Create a signup",
+    "tags": [
+     "Signup"
+    ],
+    "description": "**Credential:** none or per-route",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/api/signup/checkout-status": {
+   "post": {
+    "operationId": "postSignupCheckoutStatus",
+    "summary": "Signup: checkout status",
+    "tags": [
+     "Signup"
+    ],
+    "description": "**Credential:** none or per-route",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/api/signup/config": {
+   "get": {
+    "operationId": "getSignupConfig",
+    "summary": "Get signup config",
+    "tags": [
+     "Signup"
+    ],
+    "description": "**Credential:** none or per-route",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/api/signup/webhooks/stripe": {
+   "post": {
+    "operationId": "postSignupWebhooksStripe",
+    "summary": "Webhooks: stripe",
+    "tags": [
+     "Signup"
+    ],
+    "description": "**Credential:** none or per-route",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
   "/api/social/accounts": {
    "get": {
     "operationId": "getSocialAccounts",
@@ -29678,6 +29838,76 @@
     }
    }
   },
+  "/api/users/{id}/invite": {
+   "delete": {
+    "operationId": "deleteUsersByIDInvite",
+    "summary": "Remove a user's invite",
+    "tags": [
+     "Users"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** users: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postUsersByIDInvite",
+    "summary": "Invite (user)",
+    "tags": [
+     "Users"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** users: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/users/{id}/mfa/reset": {
    "post": {
     "operationId": "postUsersByIDMFAReset",
@@ -29735,6 +29965,32 @@
       "schema": {
        "type": "string"
       }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/users/invite": {
+   "post": {
+    "operationId": "postUsersInvite",
+    "summary": "Users: invite",
+    "tags": [
+     "Users"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** users: manage",
+    "security": [
+     {
+      "adminBearer": []
      }
     ],
     "responses": {

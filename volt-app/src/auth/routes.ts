@@ -21,10 +21,17 @@ const registerSchema = z.object({
   password: z.string().min(8),
 });
 
-/** Register creates an account + its first (owner) user. */
+/** Register creates an account + its first (owner) user, with a password and
+ *  no email check. Kept for development, scripts and tests. In production it is
+ *  closed unless ALLOW_DIRECT_REGISTER=1: public registration goes through
+ *  /api/signup, which proves the mailbox before any password exists
+ *  (docs/ONBOARDING.md). */
 authRouter.post(
   '/register',
   asyncHandler(async (req, res) => {
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DIRECT_REGISTER !== '1') {
+      throw Object.assign(new (await import('../util/http')).ApiError(404, 'Not found'), { code: 'not_found' });
+    }
     const { accountName, email, password } = registerSchema.parse(req.body);
     const existing = await one('SELECT id FROM users WHERE email = $1', [email]);
     if (existing) throw badRequest('Email already registered');
@@ -86,7 +93,7 @@ authRouter.post(
 );
 
 /** Access + refresh pair for an admin user. `amr` records how they signed in. */
-async function issueAdminSession(userId: string, amr: string[]) {
+export async function issueAdminSession(userId: string, amr: string[]) {
   const u = await one<any>(`SELECT id, account_id, role FROM users WHERE id=$1`, [userId]);
   if (!u) throw unauthorized('Invalid credentials');
   const access = signAccess({ sub: u.id, account_id: u.account_id, role: u.role }, { amr });

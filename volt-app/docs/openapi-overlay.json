@@ -320,6 +320,12 @@
     "Gfx": {
       "displayName": "Graphics delivery",
       "description": "Graphics delivery serves the files of a published graphics template version to the player and overlay that show it.\n\n**Use it to:**\n- Load a template version's files with `GET /gfx/:versionId/*`\n\n**Credential:** none, share token or playback token. These are public delivery files.\n\n**Good to know:** files are served sandboxed and can only connect to the template's own package. Versions never change, so they cache well."
+    },
+    "Onboarding": {
+      "description": "Onboarding is how a person gets their first password, or a new one, without anyone else handling it. An invitation, a registration or a forgotten password emails a one-time link; the link asks for a 6-digit code sent to the same address; the code allows a password to be chosen.\n\n**Use it to:**\n- Show who a link is for with `POST /api/onboarding/link`\n- Email the code with `POST /api/onboarding/code` and check it with `POST /api/onboarding/verify`\n- Set the password and sign in with `POST /api/onboarding/complete`\n- Ask for a reset link with `POST /api/onboarding/forgot`\n\n**Credential:** none. The link's token travels in the request body, never the address.\n\n**Good to know:** every link that cannot be used answers 410 with the same message, and a forgotten-password request answers 202 whether or not the address has an account. Invite users from your own account with `POST /api/users/invite`."
+    },
+    "Signup": {
+      "description": "Signup registers a new organisation from a website: it creates the client account and its owner, or records the registration for later, depending on how registration is set up.\n\n**Use it to:**\n- Read the plans on offer and whether they can be bought online with `GET /api/signup/config`\n- Register with `POST /api/signup`\n- Check a payment from the return page with `POST /api/signup/checkout-status`\n\n**Credential:** none.\n\n**Good to know:** registration never takes a password. The owner receives a welcome link and sets one through Onboarding, then invites their team."
     }
   },
   "GET /api/vod": {

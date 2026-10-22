@@ -48,6 +48,8 @@ import { attachMp3Listener } from './services/radio/pipeline';
 import { icecastAuthRouter } from './modules/icecastAuth';
 import { analyticsRouter, analyticsBeaconRouter } from './modules/analytics';
 import { platformRouter } from './modules/platform';
+import { onboardingRouter } from './modules/onboarding';
+import { signupRouter, signupWebhookRouter, platformSignupsRouter } from './modules/signup';
 import { fleetPlanRouter } from './modules/fleetPlan';
 import { platformAuthRouter } from './modules/platformAuth';
 import { ticketsRouter, platformTicketsRouter } from './modules/tickets';
@@ -102,6 +104,8 @@ export function createServer() {
   app.use('/api/tus', tusRouter);
   // Vendor encode-engine webhooks: the adapter verifies a signature over the raw bytes.
   app.use('/api/engine-hooks', engineHooksRouter);
+  // SaaS signup payments (Stripe Checkout): signature over the raw bytes.
+  app.use('/api/signup/webhooks', signupWebhookRouter);
   app.use(express.json({ limit: '1mb' }));
   // Add-on callbacks: public, authenticated by the per-run bearer token.
   app.use('/api/addon-callbacks', addonCallbacksRouter);
@@ -292,6 +296,8 @@ export function createServer() {
   app.use('/api', hypermediaRouter); // GET /api (entrypoint), /api/context.jsonld, /api/doc
 
   app.use('/api/auth', authRouter);
+  app.use('/api/onboarding', onboardingRouter);           // welcome + reset links -> code -> password (docs/ONBOARDING.md)
+  app.use('/api/signup', signupRouter);                   // promo site registration: waitlist, trial or paid (docs/ONBOARDING.md)
   app.use('/api/channels', channelsRouter);
   app.use('/api/search', searchRouter);
   app.use('/api/sources', sourcesRouter);
@@ -445,6 +451,7 @@ export function createServer() {
   app.use('/api/share-links', shareLinksRouter);         // admin: create/list/revoke share links
   app.use('/api/platform/auth', platformAuthRouter);     // SaaS-admin 2-step login (password → TOTP)
   app.use('/api/platform/fleet-plan', fleetPlanRouter);   // placement + consolidation advice (read-only)
+  app.use('/api/platform/signups', platformSignupsRouter); // SaaS-admin: promo site registrations
   app.use('/api/platform', platformRouter);              // SaaS-admin cross-tenant dashboard
   app.use('/api/platform/tickets', platformTicketsRouter); // SaaS-admin ticket triage
   app.use('/api/publish-targets', publishTargetsRouter); // social account config

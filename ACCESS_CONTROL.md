@@ -28,6 +28,8 @@ Anonymous visitors (not signed in) can use only the public API, and only with an
 | Path | Who | Notes |
 |---|---|---|
 | `/api/public/auth/*` | anyone with a publishable key | Viewer register, login, refresh, logout, password reset, and token exchange (secret key) |
+| `/api/onboarding/*` | anyone holding an emailed link | Admin users: welcome and reset links, the emailed code, choosing a password, forgot password. See `volt-app/docs/ONBOARDING.md` |
+| `/api/signup/*` | anonymous (promo site) | Register an organisation: waitlist, trial or paid. Stripe webhook verified by signature |
 | `/api/public/me/*` | a signed-in viewer | Their own profile, password, entitlements, purchases, sessions, and deleting their account |
 | `/api/public/availability` | anonymous or viewer | The play gate. `GET` is anonymous and cached at the edge; `POST` is for any viewer |
 | `/api/public/access/check` | anonymous or viewer | Yes/no access answers, without issuing a token |

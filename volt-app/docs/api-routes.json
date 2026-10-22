@@ -3051,6 +3051,60 @@
   "group": "/api/notifications"
  },
  {
+  "method": "POST",
+  "path": "/api/onboarding/code",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/onboarding"
+ },
+ {
+  "method": "POST",
+  "path": "/api/onboarding/complete",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/onboarding"
+ },
+ {
+  "method": "POST",
+  "path": "/api/onboarding/forgot",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/onboarding"
+ },
+ {
+  "method": "POST",
+  "path": "/api/onboarding/link",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/onboarding"
+ },
+ {
+  "method": "POST",
+  "path": "/api/onboarding/password-check",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/onboarding"
+ },
+ {
+  "method": "POST",
+  "path": "/api/onboarding/verify",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/onboarding"
+ },
+ {
   "method": "GET",
   "path": "/api/output-profiles",
   "api": "admin",
@@ -3364,6 +3418,24 @@
   "access": "platform_role (saas_admin / support as the route says)",
   "viewerTier": false,
   "group": "/api/platform/relays"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/signups",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/signups"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/signups/:id/invite",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/signups"
  },
  {
   "method": "GET",
@@ -4410,6 +4482,42 @@
   "group": "/api/share"
  },
  {
+  "method": "POST",
+  "path": "/api/signup",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/signup"
+ },
+ {
+  "method": "POST",
+  "path": "/api/signup/checkout-status",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/signup"
+ },
+ {
+  "method": "GET",
+  "path": "/api/signup/config",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/signup"
+ },
+ {
+  "method": "POST",
+  "path": "/api/signup/webhooks/stripe",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/signup"
+ },
+ {
   "method": "GET",
   "path": "/api/social/accounts",
   "api": "admin",
@@ -5013,6 +5121,24 @@
   "group": "/api/users"
  },
  {
+  "method": "DELETE",
+  "path": "/api/users/:id/invite",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "users: manage",
+  "viewerTier": false,
+  "group": "/api/users"
+ },
+ {
+  "method": "POST",
+  "path": "/api/users/:id/invite",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "users: manage",
+  "viewerTier": false,
+  "group": "/api/users"
+ },
+ {
   "method": "POST",
   "path": "/api/users/:id/mfa/reset",
   "api": "admin",
@@ -5024,6 +5150,15 @@
  {
   "method": "POST",
   "path": "/api/users/:id/password",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "users: manage",
+  "viewerTier": false,
+  "group": "/api/users"
+ },
+ {
+  "method": "POST",
+  "path": "/api/users/invite",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "users: manage",

@@ -143,7 +143,9 @@ const codeHash = (p: Principal, purpose: string, code: string) => hmac(`${p.kind
 const CODE_TTL_MIN = 10;
 const MAX_GUESSES = 5;
 
-type Purpose = 'email_change' | 'email_verify' | 'phone_verify' | 'mfa_login' | 'mfa_enrol_email' | 'mfa_enrol_sms';
+export type Purpose = 'email_change' | 'email_verify' | 'phone_verify' | 'mfa_login' | 'mfa_enrol_email' | 'mfa_enrol_sms'
+  // onboarding (services/onboarding.ts): the code that follows a welcome or reset link
+  | 'invite_accept' | 'password_reset';
 
 const MESSAGES: Record<Purpose, { subject: string; line: string }> = {
   email_change: { subject: 'Confirm your new email address', line: 'Use this code to confirm this as the new email address for your account' },
@@ -152,10 +154,12 @@ const MESSAGES: Record<Purpose, { subject: string; line: string }> = {
   mfa_login: { subject: 'Your sign-in code', line: 'Your sign-in code is' },
   mfa_enrol_email: { subject: 'Turn on sign-in codes by email', line: 'Use this code to turn on two-step sign-in by email' },
   mfa_enrol_sms: { subject: '', line: 'Your Volt code to turn on two-step sign-in by text is' },
+  invite_accept: { subject: 'Your Volt Streaming verification code', line: 'Use this code to confirm your email and finish setting up your account' },
+  password_reset: { subject: 'Your Volt Streaming password reset code', line: 'Use this code to confirm it is you and choose a new password' },
 };
 
 /** Create, store (hashed) and send a code. Returns devCode when SECURITY_CODE_ECHO is on outside production. */
-async function issueCode(p: Principal, purpose: Purpose, channel: 'email' | 'sms', target: string): Promise<{ sentTo: string; devCode?: string }> {
+export async function issueCode(p: Principal, purpose: Purpose, channel: 'email' | 'sms', target: string): Promise<{ sentTo: string; devCode?: string }> {
   await limit(`sec-send:${p.kind}:${p.id}`, 10, 900, 'Too many codes requested. Wait a few minutes and try again.');
   await limit(`sec-send-to:${target.toLowerCase()}`, 10, 900, 'Too many codes requested. Wait a few minutes and try again.');
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
@@ -177,7 +181,7 @@ async function issueCode(p: Principal, purpose: Purpose, channel: 'email' | 'sms
 }
 
 /** Check and consume a code. Returns the target it was sent to. */
-async function useCode(p: Principal, purpose: Purpose, code: string): Promise<string> {
+export async function useCode(p: Principal, purpose: Purpose, code: string): Promise<string> {
   await limit(`sec-guess:${p.kind}:${p.id}`, 20, 900, 'Too many wrong codes. Wait a few minutes and try again.');
   const row = await one<any>(
     `UPDATE security_codes SET attempts = attempts + 1

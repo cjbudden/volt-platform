@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**636 routes.** Public API: 61 · Sign-in (no session yet): 7 · Admin API: 515 · Platform API: 21 · Machine-to-machine: 13 · Delivery and previews (outside /api): 11 · Health and discovery: 8
+**651 routes.** Public API: 71 · Sign-in (no session yet): 7 · Admin API: 518 · Platform API: 23 · Machine-to-machine: 13 · Delivery and previews (outside /api): 11 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -31,6 +31,17 @@ For apps and players. A publishable key (`pk_…`) names the client account. Vie
 |---|---|---|---|---|
 | GET | `/api/availability` | publishable key; viewer session optional | public (legacy alias of /api/public/availability) | ✓ |
 | POST | `/api/availability` | publishable key; viewer session optional | public (legacy alias of /api/public/availability) | ✓ |
+
+### `/api/onboarding`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| POST | `/api/onboarding/code` | none or per-route | open |  |
+| POST | `/api/onboarding/complete` | none or per-route | open |  |
+| POST | `/api/onboarding/forgot` | none or per-route | open |  |
+| POST | `/api/onboarding/link` | none or per-route | open |  |
+| POST | `/api/onboarding/password-check` | none or per-route | open |  |
+| POST | `/api/onboarding/verify` | none or per-route | open |  |
 
 ### `/api/payments`
 
@@ -135,6 +146,15 @@ For apps and players. A publishable key (`pk_…`) names the client account. Vie
 | GET | `/api/share/:token/download/:element` | share link token (path), plus PIN or emailed code when the link has one | public (legacy alias of /api/public/share/:token/download/:element) | ✓ |
 | POST | `/api/share/:token/request-code` | share link token (path), plus PIN or emailed code when the link has one | public (legacy alias of /api/public/share/:token/request-code) | ✓ |
 | POST | `/api/share/:token/resolve` | share link token (path), plus PIN or emailed code when the link has one | public (legacy alias of /api/public/share/:token/resolve) | ✓ |
+
+### `/api/signup`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| POST | `/api/signup` | none or per-route | open |  |
+| POST | `/api/signup/checkout-status` | none or per-route | open |  |
+| GET | `/api/signup/config` | none or per-route | open |  |
+| POST | `/api/signup/webhooks/stripe` | none or per-route | open |  |
 
 ### `/api/source-preview`
 
@@ -878,8 +898,11 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | DELETE | `/api/users/:id` | admin session (Bearer) or account secret key | users: manage |  |
 | GET | `/api/users/:id` | admin session (Bearer) or account secret key | users: view |  |
 | PATCH | `/api/users/:id` | admin session (Bearer) or account secret key | users: manage |  |
+| DELETE | `/api/users/:id/invite` | admin session (Bearer) or account secret key | users: manage |  |
+| POST | `/api/users/:id/invite` | admin session (Bearer) or account secret key | users: manage |  |
 | POST | `/api/users/:id/mfa/reset` | admin session (Bearer) or account secret key | users: manage |  |
 | POST | `/api/users/:id/password` | admin session (Bearer) or account secret key | users: manage |  |
+| POST | `/api/users/invite` | admin session (Bearer) or account secret key | users: manage |  |
 | GET | `/api/users/security-policy` | admin session (Bearer) or account secret key | users: view |  |
 | PUT | `/api/users/security-policy` | admin session (Bearer) or account secret key | users: manage + admin tier |  |
 
@@ -1021,6 +1044,13 @@ Volt staff only. Needs a platform session, minted after the authenticator step.
 | POST | `/api/platform/relays` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
 | PATCH | `/api/platform/relays/:id` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
 | GET | `/api/platform/relays/:id/stations` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+
+### `/api/platform/signups`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/platform/signups` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| POST | `/api/platform/signups/:id/invite` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
 
 ### `/api/platform/tickets`
 

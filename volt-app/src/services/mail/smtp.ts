@@ -59,22 +59,46 @@ const ADDRESS = /^[^\s<>@,;"]+@[^\s<>@,;"]+$/;
 export function validAddress(a: string): boolean { return ADDRESS.test(a.trim()); }
 
 /** The whole message, CRLF line endings, body base64 so no dot-stuffing or 8-bit worries. */
-export function buildMessage(o: { from: string; to: string; subject: string; text: string; date?: Date; messageId?: string }): string {
+export function buildMessage(o: { from: string; to: string; subject: string; text: string; html?: string; date?: Date; messageId?: string }): string {
   const domain = (o.from.split('@')[1] || 'volt.local').replace(/[>\s]/g, '');
   const id = o.messageId ?? `<${Date.now().toString(36)}.${randomBytes(6).toString('hex')}@${domain}>`;
-  const body = Buffer.from(o.text.replace(/\r?\n/g, '\r\n'), 'utf8').toString('base64').replace(/.{1,76}/g, '$&\r\n');
-  return [
+  const b64 = (t: string) => Buffer.from(t.replace(/\r?\n/g, '\r\n'), 'utf8').toString('base64').replace(/.{1,76}/g, '$&\r\n');
+  const head = [
     `From: ${o.from}`,
     `To: ${o.to}`,
     `Subject: ${encodeHeader(o.subject)}`,
     `Date: ${(o.date ?? new Date()).toUTCString().replace('GMT', '+0000')}`,
     `Message-ID: ${id}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    'Content-Transfer-Encoding: base64',
+  ];
+  if (!o.html) {
+    return [...head,
+      'Content-Type: text/plain; charset=utf-8',
+      'Content-Transfer-Encoding: base64',
+      'Auto-Submitted: auto-generated',
+      '',
+      b64(o.text),
+    ].join('\r\n');
+  }
+  // An HTML message always carries the plain text too (multipart/alternative):
+  // clients that block HTML, screen readers and spam filters all read the text part.
+  const boundary = `volt-${randomBytes(12).toString('hex')}`;
+  return [...head,
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
     'Auto-Submitted: auto-generated',
     '',
-    body,
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=utf-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    b64(o.text),
+    `--${boundary}`,
+    'Content-Type: text/html; charset=utf-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    b64(o.html),
+    `--${boundary}--`,
+    '',
   ].join('\r\n');
 }
 
@@ -162,7 +186,7 @@ async function open(t: SmtpTarget, timeoutMs: number): Promise<net.Socket | tls.
 }
 
 /** Send one plain-text message. Throws SmtpError. */
-export async function sendMail(t: SmtpTarget, m: { from: string; to: string; subject: string; text: string }, timeoutMs = 20000): Promise<{ response: string }> {
+export async function sendMail(t: SmtpTarget, m: { from: string; to: string; subject: string; text: string; html?: string }, timeoutMs = 20000): Promise<{ response: string }> {
   if (!validAddress(m.to)) throw new SmtpError(`Not an email address: ${m.to}`, null, true);
   const fromAddr = (/<([^>]+)>/.exec(m.from)?.[1] ?? m.from).trim();
   const c = new Conversation(await open(t, timeoutMs));

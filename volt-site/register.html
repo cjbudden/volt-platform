@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Register · Volt Streaming</title>
+<meta name="description" content="Register your organisation for Volt Streaming.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..800&family=Inter:wght@400..700&family=JetBrains+Mono:wght@400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="logo" href="index.html" aria-label="Volt Streaming home"><img src="assets/volt-lockup-on-dark.svg" alt="Volt Streaming"></a>
+    <nav aria-label="Main"><a href="index.html#platform">Platform</a><a href="index.html#pricing">Pricing</a></nav>
+    <div class="actions"><a class="btn btn-ghost btn-sm" href="#" data-signin>Sign in</a></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="form-page">
+    <div>
+      <p class="eyebrow">Register</p>
+      <h1 class="headline" id="reg-title">Register your interest</h1>
+      <p class="deck" id="reg-lead"></p>
+      <ol class="steps-list">
+        <li><span><b>Register your organisation.</b> This creates your client account in Volt, with you as its owner.</span></li>
+        <li><span><b>Confirm your email.</b> We email a link, then a 6-digit code, so only the person with the mailbox can finish.</span></li>
+        <li><span><b>Choose your password</b> and sign in to the console.</span></li>
+        <li><span><b>Invite your team</b> from Users &amp; Roles. Each person gets their own invitation and their own role.</span></li>
+      </ol>
+    </div>
+
+    <div class="card" id="reg-card">
+      <div id="reg-msg" class="msg" hidden role="status"></div>
+      <form id="reg" novalidate>
+        <div class="field"><label for="name">Your name</label><input class="inp" id="name" name="name" autocomplete="name" maxlength="120" required></div>
+        <div class="field"><label for="email">Work email</label><input class="inp" id="email" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="320" required></div>
+        <div class="field"><label for="company">Organisation name <small>your client account in Volt</small></label><input class="inp" id="company" name="company" autocomplete="organization" maxlength="160" required></div>
+        <div class="field"><label>Plan</label><div class="plan-pick" id="plan-pick"></div></div>
+        <!-- Honeypot: hidden from people, filled in by bots. -->
+        <div class="hp" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
+        <p class="small muted" id="terms">We use your details only to set up and support your account.</p>
+        <button type="submit" class="btn btn-primary" style="width:100%">Register</button>
+      </form>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <img src="assets/volt-short-on-dark.svg" alt="Volt">
+    <span>© <span id="yr"></span> Volt Streaming</span>
+  </div>
+</footer>
+<script src="config.js"></script>
+<script src="site.js"></script>
+<script>document.getElementById('yr').textContent = new Date().getFullYear(); VoltSite.register();</script>
+</body>
+</html>

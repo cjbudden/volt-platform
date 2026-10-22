@@ -10,6 +10,9 @@
  *   GET    /api/users/security-policy   users:view    {requireAdminMfa}
  *   PUT    /api/users/security-policy   users:manage + admin tier  {requireAdminMfa}
  *   POST   /api/users/:id/mfa/reset     users:manage  turn off a locked-out user's two-step sign-in
+ *   POST   /api/users/invite        users:manage  {email, displayName?, roleIds[], role?}  invite by email (docs/ONBOARDING.md)
+ *   POST   /api/users/:id/invite    users:manage  send a fresh welcome link (the old one stops working)
+ *   DELETE /api/users/:id/invite    users:manage  withdraw the welcome link
  *
  * A user's tier (users.role) follows their roles: Administrator makes them
  * `admin`, System Viewer `viewer`, anything else `operator`. An owner stays an
@@ -34,6 +37,7 @@ import { asyncHandler, notFound, badRequest, forbidden } from '../util/http';
 import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { writeAudit } from '../services/audit';
 import { clearMfa, securitySummary } from '../auth/identity';
+import { sendInvite, inviteState, revokeInvites, unusablePasswordHash } from '../services/onboarding';
 
 export const usersRouter = Router();
 usersRouter.use(requireAuth);
@@ -163,6 +167,7 @@ usersRouter.get('/:id', asyncHandler(async (req, res) => {
   const extra = await one<any>(`SELECT display_name, created_at, platform_role IS NOT NULL AS is_platform FROM users WHERE id=$1`, [t.id]);
   res.json({ ...shape({ ...t, ...extra }, t.roles), access: t.perms,
     security: await securitySummary('user', t.id),
+    invite: t.status === 'invited' ? await inviteState(t.id) : null,
     // can the caller change this user? (the console greys the controls out)
     manageable: (() => { try { assertCanManageUser(req.access!, String(req.auth!.sub), t); return true; } catch { return false; } })() });
 }));
@@ -203,6 +208,60 @@ usersRouter.post('/', asyncHandler(async (req, res) => {
   });
   await writeAudit(null, { accountId: acct, userId: req.auth!.sub, label: 'user', action: 'create', entityType: 'user', entityId: row.id, snapshot: { email: b.email, tier, roles: roles.map((r) => r.name) } }).catch(() => {});
   res.status(201).json(shape(row, roles));
+}));
+
+/* ---- INVITE BY EMAIL (docs/ONBOARDING.md) -----------------------------------
+ * The person gets a welcome link; opening it emails them a code; the code lets
+ * them choose their own password. Nobody else ever knows it, and an admin
+ * never has to send one over chat. The user is 'invited' (cannot sign in)
+ * until they finish. Same guard rails as creating a user with a password. */
+const inviteSchema = createSchema.omit({ password: true });
+
+usersRouter.post('/invite', asyncHandler(async (req, res) => {
+  const b = inviteSchema.parse(req.body ?? {});
+  const acct = accountId(req);
+  const me = req.access!;
+  const ids = [...new Set([...(b.roleIds ?? []), ...(b.userGroupId ? [b.userGroupId] : [])])];
+  const roles = await rolesById(acct, ids);
+  const tier = tierFor(roles, b.role ?? null);
+  if (tier === 'owner' && me.role !== 'owner') throw forbidden('Only an owner can invite another owner');
+  if (rankOf(tier) > rankOf(me.role)) throw forbidden('You cannot invite a user with a higher tier than yours');
+  assertCovers(me.perms, accessOf(tier, roles), 'invite a user');
+  const email = b.email.trim().toLowerCase();
+  const dupe = await one('SELECT id FROM users WHERE email=$1', [email]);
+  if (dupe) throw badRequest('That email is already registered');
+  const pw = await unusablePasswordHash();
+  const inviter = req.auth!.sub.startsWith('apikey:') ? null : req.auth!.sub;
+  const row = await tx(async (c) => {
+    const u = (await c.query(
+      `INSERT INTO users(account_id, email, password_hash, role, status, user_group_id, display_name)
+       VALUES ($1,$2,$3,$4::user_role,'invited',$5,$6) RETURNING id, email, display_name, role, status, created_at`,
+      [acct, email, pw, tier, roles[0]?.id ?? null, b.displayName?.trim() || null])).rows[0];
+    for (const r of roles) await c.query(`INSERT INTO user_group_members(user_id, group_id, granted_by) VALUES ($1,$2,$3)`, [u.id, r.id, inviter]);
+    return u;
+  });
+  const sent = await sendInvite(row.id, { createdBy: inviter });
+  await writeAudit(null, { accountId: acct, userId: req.auth!.sub, label: 'user', action: 'create', entityType: 'user', entityId: row.id, snapshot: { email, tier, roles: roles.map((r) => r.name), invited: true, emailed: sent.sent } }).catch(() => {});
+  res.status(201).json({ ...shape(row, roles), invite: sent });
+}));
+
+usersRouter.post('/:id/invite', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const target = await targetAccess(acct, req.params.id);
+  assertCanManageUser(req.access!, String(req.auth!.sub), target);
+  if (target.status !== 'invited') throw badRequest('This user has already set up their account. Use Set password or ask them to use Forgot password.');
+  const sent = await sendInvite(target.id, { createdBy: req.auth!.sub.startsWith('apikey:') ? null : req.auth!.sub });
+  await writeAudit(null, { accountId: acct, userId: req.auth!.sub, label: 'user', action: 'update', entityType: 'user', entityId: target.id, snapshot: { invite: 'resent', emailed: sent.sent } }).catch(() => {});
+  res.json(sent);
+}));
+
+usersRouter.delete('/:id/invite', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const target = await targetAccess(acct, req.params.id);
+  assertCanManageUser(req.access!, String(req.auth!.sub), target);
+  const n = await revokeInvites(target.id);
+  await writeAudit(null, { accountId: acct, userId: req.auth!.sub, label: 'user', action: 'update', entityType: 'user', entityId: target.id, snapshot: { invite: 'withdrawn' } }).catch(() => {});
+  res.json({ revoked: n });
 }));
 
 const patchSchema = z.object({
