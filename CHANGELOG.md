@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.11.0 (2026-10-23)
+
+### Product (in customer release notes)
+
+- added · Player: Every Volt player now has a Playback stats panel: right-click the picture (or press Shift+D) to see the resolution, dropped frames, codecs, bitrate, connection speed, buffer, live latency and the CDN edge that served the stream, and copy it all for a support ticket. In the console it is on the channel output monitor (a Stats button beside HLS / DASH), the source and output previews, and every recording and media preview.
+- added · FAST: Stitched ad breaks now report to your ad server: Volt sends each ad's impression, start, quartile, progress and complete trackers itself as each viewer's player reaches them, so a viewer who leaves halfway counts no complete. The channel's ad report shows impressions, completion and any tracker that failed, and the API gives the same per break.
+
+### Internal
+
+- added: New check suite fast-beacons (51 checks): server-side ad beacons end to end with a local VAST stub and a stand-in playout.
+
 ## 0.10.0 (2026-10-23)
 
 ### Product (in customer release notes)
