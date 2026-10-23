@@ -64,6 +64,57 @@ async function publicGeoGate(id: string, country: string | undefined): Promise<{
 }
 
 /**
+ * THE EDGE RIGHTS DECISION, MADE HERE (EDGE_RIGHTS_VARIANTS.md, "On the Mac
+ * first"). On the Mac there is no CloudFront, so the public route runs the
+ * same decision the viewer-request function makes (services/edgeRights.ts
+ * edgeDecision, proven equal to the function by test/edge-variants.check.ts):
+ * allow, block, or replace:<variant>. Only where it runs differs.
+ *
+ * Outside production, a tester can pretend to be a viewer elsewhere and at
+ * another time: `?as=AU&rc=standard&at=<ISO time>`, or the
+ * X-Volt-Test-Country / X-Volt-Test-Rights headers ("XX" is a viewer whose
+ * country the CDN cannot tell). Production ignores all of them and uses the
+ * CDN's country header and the signed `vrc` claim, exactly as the edge does.
+ */
+export async function publicRightsDecision(req: any, id: string): Promise<{
+  restricted: boolean; decision: string; variant: string | null; cc: string; rc: string; perViewer: boolean;
+}> {
+  const er = await import('../services/edgeRights');
+  const dev = config.env !== 'production';
+  const q = req.query ?? {};
+  const pick = (v: unknown) => (Array.isArray(v) ? v[0] : v) as string | undefined;
+  const testCc = dev ? (pick(q.as) ?? req.get?.('x-volt-test-country')) : undefined;
+  const testRc = dev ? (pick(q.rc) ?? req.get?.('x-volt-test-rights')) : undefined;
+  const testAt = dev ? pick(q.at) : undefined;
+  const atMs = testAt ? Date.parse(testAt) : NaN;
+  const nowSec = Math.floor((Number.isFinite(atMs) ? atMs : Date.now()) / 1000);
+  let rules: import('../services/edgeRights').EdgeRules | null;
+  if (Number.isFinite(atMs)) {
+    // another time: the rules as the sync would have published them then
+    rules = await er.loadEdgeRules('channel', id, nowSec).catch(() => null)
+      ?? await er.loadEdgeRules('event', id, nowSec).catch(() => null);
+  } else {
+    const { rulesFor } = await import('../services/edgeViewAs');
+    rules = await rulesFor(id);
+  }
+  const ccRaw = typeof testCc === 'string' && /^[A-Za-z]{2}$/.test(testCc) ? testCc.toUpperCase() : (viewerGeo(req) ?? '');
+  const cc = ccRaw === 'XX' ? '' : ccRaw;
+  const claim = pick(q.vrc) ?? (String(req.get?.('cookie') ?? '').match(/(?:^|;\s*)vrc=([^;]+)/)?.[1]);
+  const rc = typeof testRc === 'string' && er.RC_RE.test(testRc.toLowerCase())
+    ? testRc.toLowerCase()
+    : claim ? er.verifyRightsClaim(decodeURIComponent(claim), id, Math.floor(Date.now() / 1000)) : '';
+  const d = er.decideFor(rules, cc, rc, nowSec);
+  return {
+    restricted: !!rules,
+    decision: er.edgeDecision(rules, cc, rc, nowSec),
+    // the variant the audience maps to, even before the variant service runs
+    variant: d === 'replace' ? er.variantFor(rules?.vm, cc, rc) : null,
+    cc, rc,
+    perViewer: !!(testCc || testRc || testAt || claim),
+  };
+}
+
+/**
  * PUBLIC RADIO delivery. Same contract as the video surface: nothing is public
  * until the operator takes the station ON AIR, and then only while the output
  * is valid. /radio/:id/stream.mp3 remains the PRIVATE preview (the audio
@@ -247,13 +298,40 @@ publicLiveRouter.get(
     const gate = await publicGeoGate(id, viewerGeo(req));
     if (gate.varies) res.setHeader('Vary', 'CloudFront-Viewer-Country');
     if (gate.blocked) { noStore(res); res.status(451).json({ available: false, reason: 'geo', message: gate.blocked }); return; }
+    // THE PROGRAMME RIGHTS (blackout and replace windows from the guide), the
+    // same decision the edge makes. A stream with rules varies by country; a
+    // tester's pretend country or a signed class is one viewer's answer.
+    if (/^[0-9a-f-]{36}$/i.test(id)) {
+      const rd = await publicRightsDecision(req, id);
+      if (rd.restricted) {
+        res.setHeader('Vary', 'CloudFront-Viewer-Country');
+        res.setHeader('X-Volt-Rights', rd.decision);
+      }
+      if (rd.perViewer) noStore(res);
+      if (rd.decision !== 'allow') {
+        noStore(res);
+        const k = rd.decision.startsWith('replace:') ? rd.decision.slice(8) : null;
+        if (k) {
+          // the variant manifest service (queue item 1.14b) serves it
+          res.redirect(302, `/live/${id}/v/${k}/${file}`);
+          return;
+        }
+        // Blocked, or replaced while no variant service runs yet: never
+        // serve what the rights say this viewer may not see.
+        res.status(451).json({
+          available: false, reason: 'rights', decision: rd.variant ? 'replace' : 'block', variant: rd.variant,
+          message: rd.variant ? 'This programme is replaced where you are' : 'This programme is not available where you are',
+        });
+        return;
+      }
+    }
     const r = await resolveLiveManifest(id, file as 'master.m3u8' | 'manifest.mpd');
     // The answer is the same for every viewer of the channel, so the edge may
     // hold it for a couple of seconds: a million viewers then cost the API a
     // request per edge location every 2 s, not a request each. Except a
     // per-viewer URL (a FAST channel with stitched ads), which must never be shared.
     if (r.ok && (r as any).perViewer) noStore(res);
-    else edgeCache(res, scaleConfig.edge.liveRedirectMaxAgeSec);
+    else if (!/no-store/.test(String(res.getHeader('Cache-Control') ?? ''))) edgeCache(res, scaleConfig.edge.liveRedirectMaxAgeSec);
     if (!r.ok) {
       res.status(r.status).json({ available: false, reason: r.reason });
       return;

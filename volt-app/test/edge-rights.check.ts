@@ -46,7 +46,8 @@ const check = (m: string, got: unknown, want: unknown) => {
   const store: Record<string, string> = {};
   let storeDown = false;
   (globalThis as any).__cf = { kvs: (id: string) => ({ async get(k: string) { if (storeDown) throw new Error('kvs down'); if (id !== 'kvs-test') throw new Error('wrong store'); if (!(k in store)) throw new Error('key not found'); return store[k]; } }) };
-  const body = src.replace("import cf from 'cloudfront';", 'const cf = globalThis.__cf;').replace('${kvs_id}', 'kvs-test');
+  (globalThis as any).__crypto = await import('node:crypto');
+  const body = src.replace("import cf from 'cloudfront';", 'const cf = globalThis.__cf;').replace("import crypto from 'crypto';", 'const crypto = globalThis.__crypto;').replace('${kvs_id}', 'kvs-test');
   const handler = new Function(`${body}\nreturn handler;`)();
   const realNow = Date.now;
   Date.now = () => NOW * 1000;
@@ -73,11 +74,15 @@ const check = (m: string, got: unknown, want: unknown) => {
   check('...DE not yet (its window is later)', outcome(await req(`/channel/${CH}/master_cc.m3u8`, 'DE')), `/channel/${CH}/master_cc.m3u8`);
   Date.now = () => (NOW + 40 * 60) * 1000;
   check('the same URL later: US open again, nothing to change for the viewer', outcome(await req(`/channel/${CH}/master_cc.m3u8`, 'US')), `/channel/${CH}/master_cc.m3u8`);
-  check('a replacement with no replacement playlists is enforced as a block', outcome(await req(`/channel/${CH}/master_cc.m3u8`, 'DE')), 451);
-  const withRp = JSON.parse(store[`s:${CH}`]); withRp.rp = 1; store[`s:${CH}`] = JSON.stringify(withRp);
-  check('with replacement playlists: the master is served as master_rp', outcome(await req(`/channel/${CH}/master_cc.m3u8`, 'DE')), `/channel/${CH}/master_rp.m3u8`);
-  check('...a media playlist as its _rp twin', outcome(await req(`/channel/${CH}/stream_1_cc.m3u8`, 'DE')), `/channel/${CH}/stream_1_rp.m3u8`);
-  check('...the DASH manifest as manifest_rp.mpd', outcome(await req(`/channel/${CH}/manifest_cc.mpd`, 'DE')), `/channel/${CH}/manifest_rp.mpd`);
+  check('a replacement with no variant service yet is enforced as a block', outcome(await req(`/channel/${CH}/master_cc.m3u8`, 'DE')), 451);
+  // EDGE_RIGHTS_VARIANTS.md replaced the single _rp playlist: DE's replace
+  // timeline is one variant, and the function rewrites to it.
+  const deKey = er.variantKey([[NOW + 30 * 60, NOW + 60 * 60, '33333333-3333-3333-3333-333333333333']]);
+  check('the value maps DE to its variant', JSON.parse(store[`s:${CH}`]).vm, { DE: deKey });
+  const withVs = JSON.parse(store[`s:${CH}`]); withVs.vs = 1; store[`s:${CH}`] = JSON.stringify(withVs);
+  check('with the variant service: the master is served from DE\'s variant', outcome(await req(`/channel/${CH}/master_cc.m3u8`, 'DE')), `/channel/${CH}/v/${deKey}/master_cc.m3u8`);
+  check('...a media playlist from the same variant', outcome(await req(`/channel/${CH}/stream_1_cc.m3u8`, 'DE')), `/channel/${CH}/v/${deKey}/stream_1_cc.m3u8`);
+  check('...the DASH manifest too', outcome(await req(`/channel/${CH}/manifest_cc.mpd`, 'DE')), `/channel/${CH}/v/${deKey}/manifest_cc.mpd`);
   check('...other countries get the channel', outcome(await req(`/channel/${CH}/master_cc.m3u8`, 'GB')), `/channel/${CH}/master_cc.m3u8`);
   storeDown = true;
   check('a store that cannot be read fails open (the play gate still enforces)', outcome(await req(`/channel/${CH}/master_cc.m3u8`, 'DE')), `/channel/${CH}/master_cc.m3u8`);

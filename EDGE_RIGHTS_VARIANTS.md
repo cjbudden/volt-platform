@@ -115,6 +115,10 @@ Christian, 22 Oct: this has to be testable on the Mac before the AWS setup.
   replace time gets the loop, MY gets the normal stream, the recording is
   unchanged.
 
+## Built so far
+
+- 23 Oct 2026, queue 1.14a: the reducer, the store value (`vm`, exempt classes, `vs`), the signed rights-class claim (`vrc`, key at `k:rc`), the edge decision and rewrite to `/<kind>/<id>/v/<key>/`, and the same decision on the Mac's public route with `?as`, `&rc` and `&at`. Tests: `volt-app/test/edge-variants.check.ts`. Exempt classes are read from `programmes.metadata.rights_exempt` for now. Until the manifest service (1.14b) runs, a replace is enforced as a block.
+
 ## What stays the same
 
 - Segment paths, the encoder, recordings, DVR, clipping: untouched.

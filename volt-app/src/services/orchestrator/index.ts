@@ -153,6 +153,8 @@ export function startScheduler(): () => void {
     (async () => {
       const er = await import('../edgeRights');
       const store = await er.cloudFrontKvsStore(kvsArn);
+      // the key the function checks rights-class claims with (written once, then only on change)
+      await er.syncClaimKey(store, edgeMemo);
       const r = await er.syncEdgeRights(store, await er.allStreams(), undefined, edgeMemo);
       if (r.put || r.deleted || r.failed) console.log(`[edge-rights] ${r.put} written, ${r.deleted} removed, ${r.failed} failed`);
     })().catch((e) => console.error('[edge-rights] sync error', e));
