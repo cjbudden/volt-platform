@@ -235,7 +235,10 @@ export class VoltPlayer {
     this.skinRoot.innerHTML = '';
     const make = typeof skin === 'function' ? skin : getSkin(skin ?? 'video');
     this.skin = make();
-    this.root.dataset.skin = typeof skin === 'string' ? skin : 'custom';
+    // The skin's styles key off data-skin, so the default must be named too: an
+    // embedder who leaves `skin` out gets the video skin (as documented), and
+    // marking it 'custom' left it without its 16:9 box, a stage 0 px high.
+    this.root.dataset.skin = typeof skin === 'function' ? 'custom' : (skin ?? 'video');
     try {
       this.skin.mount({ root: this.skinRoot, stage: this.stage, theme: this.theme, commands: this.cmd, t: (k, v) => format(this.o.strings?.[k] ?? STRINGS[k] ?? k, v) });
     } catch (e) { console.error('[volt-player] skin failed to mount', e); }

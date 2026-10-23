@@ -105,8 +105,9 @@ export interface PlayerGraphicDef {
 export interface PlayerFeed { streamId: string; serverTime: number; graphics: PlayerGraphicDef[]; snapshots: { at: number; state: SnapState }[] }
 
 /**
- * What a player needs: the graphics it may draw, and the snapshots from the
- * one in force at `since` (its playhead's wall clock, a little earlier) on.
+ * What a player needs: the graphics it may draw (published template versions
+ * only), and the snapshots from the one in force at `since` (its playhead's
+ * wall clock, a little earlier) on.
  */
 export async function feedFor(accountId: string, kind: 'channel' | 'event', streamId: string, since: number): Promise<PlayerFeed> {
   const col = kind === 'channel' ? 'channel_id' : 'event_id';
@@ -115,6 +116,12 @@ export async function feedFor(accountId: string, kind: 'channel' | 'event', stre
        FROM gfx_assignments a JOIN gfx_setups s ON s.id = a.setup_id JOIN gfx_templates t ON t.id = s.template_id
        JOIN gfx_template_versions v ON v.id = s.version_id
       WHERE a.account_id = $1 AND a.${col} = $2 AND a.enabled AND a.targets IN ('player','both')
+        -- Viewers only ever get a PUBLISHED version. A setup may be trying out a
+        -- draft in the console (preview, live control), but a draft can still
+        -- change or carry check errors, and the template standard promises that
+        -- nothing reaches viewers until it is published. Such a setup is simply
+        -- not drawn in players until it is moved to a published version.
+        AND v.status = 'published'
       ORDER BY COALESCE((s.placement->>'layer')::int, 2), a.created_at`, [accountId, streamId]);
   const sinceAt = new Date(Math.max(0, since));
   const base = await one<any>(`SELECT at, state FROM gfx_snapshots WHERE ${col} = $1 AND at <= $2 ORDER BY at DESC LIMIT 1`, [streamId, sinceAt]);
