@@ -255,6 +255,26 @@ ingestRouter.get(
   })
 );
 
+/**
+ * The graphics a stream burns into its picture, and their state now, for the
+ * encoder's graphics renderer (services/graphics/burnFeed.ts,
+ * volt-encoder/gfx/burn_renderer.js). Same ingest token as the report. Polled
+ * about twice a second by the one renderer of a stream that burns graphics.
+ */
+ingestRouter.get(
+  '/:id/burn-graphics',
+  asyncHandler(async (req, res) => {
+    const id = String(req.params.id);
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw badRequest('id must be a uuid');
+    const kind = req.query.kind === 'event' ? 'event' : 'channel';
+    const { burnFeed } = await import('../services/graphics/burnFeed');
+    const feed = await burnFeed(kind, id);
+    if (!feed) throw notFound(`No ${kind} with that id`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(feed);
+  })
+);
+
 // ---------------------------------------------------------------------------
 // Admin reads — user JWT, tenant-scoped.
 // ---------------------------------------------------------------------------

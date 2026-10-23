@@ -50,8 +50,28 @@ RUN if [ "$CAPTIONS_CPU" = "true" ]; then \
       && python3 -c "from transformers import AutoTokenizer, AutoModelForSeq2SeqLM as M; n='facebook/nllb-200-distilled-600M'; AutoTokenizer.from_pretrained(n); M.from_pretrained(n)"; \
     fi
 
+# GRAPHICS BURNED INTO THE PICTURE (optional, build queue 1.10). With
+# GRAPHICS_BURN=true the image carries Node 22, playwright-core and a headless
+# Chromium for gfx/burn_renderer.js, so a transcode stream with graphics set to
+# "Burned into the video" draws them into the encode. Without it the encoder
+# logs that burn-in is not available here and runs the channel without them
+# (bin/gfx_burn.py renderer_problem). Adds about 400 MB to the image.
+#   docker build --build-arg GRAPHICS_BURN=true .
+ARG GRAPHICS_BURN=false
+COPY gfx/package.json gfx/package-lock.json /app/gfx/
+RUN if [ "$GRAPHICS_BURN" = "true" ]; then \
+      curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+      && apt-get install -y --no-install-recommends nodejs fonts-dejavu-core fonts-liberation \
+      && cd /app/gfx && npm ci --omit=dev --no-audit --no-fund \
+      && PLAYWRIGHT_BROWSERS_PATH=/opt/gfx-browsers node node_modules/playwright-core/cli.js install --with-deps chromium \
+      && ln -s "$(ls -d /opt/gfx-browsers/chromium-*/chrome-linux*/chrome | head -1)" /usr/local/bin/gfx-chromium \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+ENV GFX_CHROMIUM_PATH=/usr/local/bin/gfx-chromium
+
 WORKDIR /app
 COPY bin/ /app/bin/
+COPY gfx/burn_renderer.js /app/gfx/
 RUN chmod +x /app/bin/*.sh
 
 # tini reaps the FFmpeg/Shaka/uploader children cleanly on stop.

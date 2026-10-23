@@ -91,6 +91,8 @@ export interface JobConfigCtx {
   inputs: StreamInputRow[];
   drm?: DrmRow | null;
   account?: AccountRow | null;
+  /** Graphics burned into the picture (services/graphics/burnFeed.ts burnPlan), worked out at start. */
+  burn?: { region: [number, number, number, number]; count: number } | null;
 }
 
 function inputUrl(i: StreamInputRow): string {
@@ -309,6 +311,25 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
       offset_y: owner.watermark_offset_y ?? 24,
       opacity: owner.watermark_opacity ?? 100,
       scale: owner.watermark_scale ?? 12,
+    };
+  }
+
+  // GRAPHICS BURNED INTO THE PICTURE (build queue 1.10). Only for our own encoder
+  // on the transcode path: a package-only stream copies the source's picture, and
+  // a vendor engine has no renderer of ours. The encoder starts a renderer that
+  // follows feed_url and composites `region` (canvas px) once before the ladder
+  // splits (volt-encoder/bin/gfx_burn.py). Worked out at start: a graphic
+  // assigned to burn while the stream is running is drawn from its next start.
+  const engineForBurn = (profile as any).encode_engine ?? 'builtin';
+  if (ctx.burn && profile.workflow_type === 'transcode' && engineForBurn === 'builtin') {
+    cfg.graphics_burn = {
+      feed_url: `${config.internalApiBaseUrl}/api/streams/${owner.id}/burn-graphics?kind=${ctx.kind}`,
+      token: config.ingestToken,
+      api_base: config.internalApiBaseUrl,
+      region: ctx.burn.region,
+      canvas: [1920, 1080],
+      fps,
+      poll_ms: 500,
     };
   }
 

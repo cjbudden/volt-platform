@@ -1,0 +1,9 @@
+{
+  "name": "volt-gfx-renderer",
+  "private": true,
+  "description": "Renders a stream's burned-in HTML graphics for the encoder (see burn_renderer.js).",
+  "main": "burn_renderer.js",
+  "dependencies": {
+    "playwright-core": "1.63.0"
+  }
+}

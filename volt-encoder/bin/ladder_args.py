@@ -43,19 +43,27 @@ def gop_for(seg, fps):
     return int(seg * fps)
 
 
-def video_rung_args(r, *, seg, fps, gpu=False, vf=None):
+def video_rung_args(r, *, seg, fps, gpu=False, vf=None, vmap=None):
     """One ladder rung's video encoder arguments, WITHOUT the output target.
 
     `vf` overrides the scale filter (the watermark overlay chain already contains
     its own scale); pass None for a plain rung.
+
+    `vmap` takes the rung's picture from a -filter_complex output label instead
+    (burned-in graphics, gfx_burn.composite_graph: the graph has already scaled
+    it, so there is no -vf). The encoder settings after it are the same.
     """
     gop = gop_for(seg, fps)
     vcodec = ["-c:v", "h264_nvenc", "-preset", "p4"] if gpu else \
              ["-c:v", "libx264", "-preset", "veryfast"]
-    return (["-map", "0:v:0"]
-            # `is not None`, not truthiness: the filter graph is correctness-critical
-            # and must not be defeated by a caller that passes an empty string.
-            + ["-vf", vf if vf is not None else f"scale=-2:{r['height']}"]
+    if vmap is not None:
+        head = ["-map", f"[{vmap}]"]
+    else:
+        head = (["-map", "0:v:0"]
+                # `is not None`, not truthiness: the filter graph is correctness-critical
+                # and must not be defeated by a caller that passes an empty string.
+                + ["-vf", vf if vf is not None else f"scale=-2:{r['height']}"])
+    return (head
             + vcodec
             + ["-b:v", f"{r['bitrate_kbps']}k",
                "-maxrate", f"{int(r['bitrate_kbps']*1.1)}k",

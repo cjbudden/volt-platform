@@ -419,6 +419,14 @@ install_if_needed() {
 
 install_if_needed "$ROOT/volt-app" "API"
 
+# BURNED-IN GRAPHICS (build queue 1.10): the encoder's graphics renderer
+# (volt-encoder/gfx/burn_renderer.js) needs playwright-core next to it; it
+# drives the Mac's own Google Chrome, so nothing else is downloaded. Without
+# it a channel with burned graphics runs without them and its log says why.
+if [ -f "$ROOT/volt-encoder/gfx/package.json" ]; then
+  install_if_needed "$ROOT/volt-encoder/gfx" "graphics renderer"
+fi
+
 # THE PLAYER SDK (volt-player): the embed bundle the API serves at
 # /player/volt-player.js (share pages, customer embeds), and the source the
 # console imports for its own players. Rebuilt when its source is newer than

@@ -2,6 +2,7 @@ import { query, one, tx, pool } from '../../db';
 import { config } from '../../config';
 import { buildEncoderJobConfig, buildThumbnailerJobConfig, JobConfigCtx } from '../jobConfig';
 import { buildRadioJobConfig } from '../radio/jobConfig';
+import { burnPlan } from '../graphics/burnFeed';
 import { resolveCaptionsPlan, buildCaptionsJobConfig } from '../captionsPlan';
 import { estimateEncoderLoad, estimateRadioLoad, estimateWhisperLoad } from '../fleet/streamLoad';
 import { assignStream, recordAssignment, type Assignment } from '../fleet/assign';
@@ -289,6 +290,11 @@ export class Orchestrator {
     // configured push channel whose encoder has not dialled in yet, which is
     // why the check has to be here rather than in whatever notices later.
     assertStartable(ctx.inputs, kind === 'event' ? 'This event' : 'This channel');
+    // Burned-in graphics (build queue 1.10): never blocks a start; on any error
+    // the stream starts without them and the log says why.
+    if (ctx.profile.workflow_type === 'transcode') {
+      ctx.burn = await burnPlan(kind, id).catch((e) => { console.error('[orchestrator] burned graphics plan failed; starting without', e); return null; });
+    }
     const job = buildEncoderJobConfig(ctx);
     // SIZE AND PLACE (services/fleet/assign.ts): the load is worked out from
     // this exact job, and the stream goes on the fullest running server that

@@ -91,6 +91,12 @@ export const K = {
   memDecoder1080: 100,
   memPerRelay: 48,
   memGladia: 64,
+  // Burned-in graphics renderer (headless Chromium, one page per stream), from
+  // the 20 Oct spike: idle about 1 % of a core, a cut a second 6 %, a third of
+  // a core during a 1 s transition, about 200 MB PSS for its own Chromium. The
+  // composite itself is a box blended once before the split: +2 to +4 % encode.
+  gfxRendererCpu: 100,
+  memGfxRenderer: 320,
   muxOverhead: 1.05,      // CMAF/TS container bytes over the elementary bitrate
   audioKbps: 128,         // ladder_args.py: aac 128k per track
   gladiaUpKbps: 256,      // 16 kHz 16-bit mono PCM to the STT service
@@ -212,6 +218,9 @@ export function estimateEncoderLoad(job: Record<string, any>, probe?: SourceProb
     memoryMib: K.memBase,
     netOutBps: kbpsToBps(outTotalKbps),
   }));
+  if (job.graphics_burn && workflow === 'transcode') {
+    lines.push(line('graphics burned into the picture (renderer + one composite)', { cpuUnits: K.gfxRendererCpu, memoryMib: K.memGfxRenderer }));
+  }
   if (job.drm) lines.push(line('DRM encryption', { cpuUnits: K.drmPerMbps * (outTotalKbps / 1000), memoryMib: 16 }));
   if (job.captions?.enabled && job.captions.engine === 'gladia') {
     lines.push(line('live captions (Gladia, in the cloud)', { cpuUnits: K.gladia, memoryMib: K.memGladia, netOutBps: kbpsToBps(K.gladiaUpKbps) }));
@@ -279,6 +288,8 @@ export function encoderSignature(job: Record<string, any>): string {
   return [
     job.workflow === 'package_only' ? 'pkg' : 'tx', job.gpu ? 'gpu' : 'cpu', `fps${job.fps ?? ''}`,
     ladder || inputs, job.watermark ? 'wm' : '', job.captions?.enabled ? `cc-${job.captions.engine}` : '', job.drm ? 'drm' : '',
+    // Appended only when on, so every existing signature (and its history) is unchanged.
+    ...(job.graphics_burn ? ['gfx'] : []),
   ].join('|');
 }
 

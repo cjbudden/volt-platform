@@ -870,6 +870,52 @@ def _nvenc_available():
     return _NVENC_OK
 
 
+_GFX_BURN = {"png": None, "done": False}
+
+
+def prepare_graphics_burn(cfg):
+    """Start burned-in graphics for this run, if the job asks for them.
+
+    Returns the PNG the transcoder composites, or None. None means the encode is
+    built exactly as without graphics: no graphics_burn in the job (nothing is
+    assigned "Burned into the video", or the stream packages only), or this host
+    cannot run the renderer (no Node, Chromium or playwright-core: said once in the
+    log). Never raises: burned graphics must not be the reason a channel is down.
+
+    Order matters: the PNG is seeded BEFORE the transcoder is spawned (ffmpeg will
+    not start on a missing image input), then the renderer is started under the
+    same supervisor as every other child, and the dead-man clears the graphic if
+    the renderer stops refreshing it."""
+    if _GFX_BURN["done"]:
+        return _GFX_BURN["png"]
+    _GFX_BURN["done"] = True
+    gb = cfg.get("graphics_burn") or {}
+    if not gb.get("feed_url") or not gb.get("region") or cfg.get("workflow") == "package_only":
+        return None
+    try:
+        import gfx_burn
+        problem = gfx_burn.renderer_problem()
+        if problem:
+            log(f"graphics burn-in: not available on this host ({problem}); "
+                "the channel runs without its burned-in graphics")
+            return None
+        region = gfx_burn.norm_region(gb["region"])
+        gb["region"] = region
+        png = gfx_burn.seed(os.path.join(WORK_DIR, "gfx", "burn.png"), region)
+        if gb.get("token"):
+            # The renderer reads it from its environment; never on a command line we log.
+            os.environ["VOLT_INGEST_TOKEN"] = gb["token"]
+        spawn_supervised("gfx-renderer", gfx_burn.renderer_cmd(gb, png, cfg.get("channel_id", "")))
+        gfx_burn.DeadMan(png, region, log=log).start()
+        log(f"graphics burn-in: on, region {region} of the 1920x1080 canvas, composited once "
+            f"before the ladder split")
+        _GFX_BURN["png"] = png
+        return png
+    except Exception as e:  # noqa: BLE001
+        log(f"graphics burn-in: not started ({e}); the channel runs without its burned-in graphics")
+        return None
+
+
 def start_transcode(cfg, keys_unused, source_override=None):
     """transcode: one mezzanine -> full ladder, aligned closed GOPs, each
     rendition to its own UDP port. GPU (NVENC) if requested, else x264.
@@ -886,6 +932,7 @@ def start_transcode(cfg, keys_unused, source_override=None):
     wm = cfg.get("watermark") if cfg.get("watermark", {}).get("url") else None
     wm_path = _fetch_watermark(cfg) if wm else None
     tracks = audio_tracks(cfg)  # one AAC elementary stream per source audio track
+    burn_png = prepare_graphics_burn(cfg)  # None unless burned graphics are asked for AND can run here
 
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin"]
     if gpu:
@@ -904,10 +951,23 @@ def start_transcode(cfg, keys_unused, source_override=None):
     # VIDEO: one video-only rendition per ladder rung (audio is carried separately as
     # its own elementary stream below, so Shaka can assign it as a distinct manifest
     # track — the standard demuxed HLS/DASH shape).
-    for i, r in enumerate(ladder):
-        vf = _overlay_vf(r['height'], wm_path, wm) if wm_path else None
-        cmd += video_rung_args(r, seg=seg, fps=fps, gpu=gpu, vf=vf)
-        cmd += ["-f", "mpegts", udp_out(i)]
+    if burn_png:
+        # BURNED-IN GRAPHICS (gfx_burn.py): the renderer's PNG is input 1, and the
+        # picture is composited ONCE (watermark, then graphics) before the ladder
+        # splits, instead of per rung. Audio never enters the graph.
+        import gfx_burn
+        gin, graph, labels = gfx_burn.composite_graph(
+            ladder, cfg["graphics_burn"]["region"], burn_png, fps=fps,
+            wm_path=wm_path, wm=wm)
+        cmd += gin + ["-filter_complex", graph]
+        for i, r in enumerate(ladder):
+            cmd += video_rung_args(r, seg=seg, fps=fps, gpu=gpu, vmap=labels[i])
+            cmd += ["-f", "mpegts", udp_out(i)]
+    else:
+        for i, r in enumerate(ladder):
+            vf = _overlay_vf(r['height'], wm_path, wm) if wm_path else None
+            cmd += video_rung_args(r, seg=seg, fps=fps, gpu=gpu, vf=vf)
+            cmd += ["-f", "mpegts", udp_out(i)]
 
     # AUDIO: transcode EACH source audio track to its own AAC MPEG-TS on a dedicated
     # port. Track 0 always exists; extra tracks (multi-language sources) each get one.

@@ -4815,6 +4815,15 @@
   "group": "/api/storage"
  },
  {
+  "method": "GET",
+  "path": "/api/streams/:id/burn-graphics",
+  "api": "machine",
+  "credential": "X-Volt-Ingest-Token",
+  "access": "encoder / thumbnailer report",
+  "viewerTier": false,
+  "group": "/api/streams"
+ },
+ {
   "method": "POST",
   "path": "/api/streams/:id/report",
   "api": "machine",
