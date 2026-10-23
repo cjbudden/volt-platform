@@ -19,6 +19,7 @@ import { conflict, badRequest, notFound } from '../../util/http';
 import { genresOf, isOn, plan, type AssignmentRun, type Programme } from './schedule';
 import { resolveValues, coerce, pick, type FeedState, type FieldBinding, type GuideNowNext } from './values';
 import { dueAutomatic, feedFired, type Cue } from './rundown';
+import { publishGfx, publishForSource, watchLive } from './livePush';
 
 export interface Target { kind: 'channel' | 'event'; id: string; name: string; workflow: 'transcode' | 'package_only' | null; live: boolean; start: Date | null; end: Date | null }
 
@@ -166,7 +167,7 @@ async function logChange(c: PoolClient, acct: string, assignmentId: string | nul
 }
 
 async function lockState(c: PoolClient, acct: string, assignmentId: string) {
-  const a = await c.query(`SELECT a.id, a.event_id, v.manifest, s.fields AS bindings FROM gfx_assignments a
+  const a = await c.query(`SELECT a.id, a.channel_id, a.event_id, v.manifest, s.fields AS bindings FROM gfx_assignments a
       JOIN gfx_setups s ON s.id = a.setup_id JOIN gfx_template_versions v ON v.id = s.version_id
      WHERE a.id = $1 AND a.account_id = $2`, [assignmentId, acct]);
   if (!a.rows[0]) throw notFound('No graphic assignment with that id');
@@ -181,8 +182,10 @@ async function lockState(c: PoolClient, acct: string, assignmentId: string) {
  * over from the feed until `release` hands it back.
  */
 export async function setValues(acct: string, assignmentId: string, values: Record<string, unknown>, actor: string, release: string[] = []) {
-  return tx(async (c) => {
+  let stream: { channelId: string | null; eventId: string | null } | null = null;
+  const r = await tx(async (c) => {
     const { a, s } = await lockState(c, acct, assignmentId);
+    stream = { channelId: a.channel_id, eventId: a.event_id };
     const fields: { id: string; type: string }[] = a.manifest?.fields ?? [];
     const byId = new Map(fields.map((f) => [f.id, f]));
     const cur: Record<string, unknown> = { ...(s.values ?? {}) };
@@ -207,11 +210,16 @@ export async function setValues(acct: string, assignmentId: string, values: Reco
       [assignmentId, JSON.stringify(cur), [...overrides], actor]);
     return { changed };
   });
+  // Announced after the commit, so a console that re-reads on the frame sees the new value.
+  if (r.changed && stream) publishGfx(acct, stream, 'values', assignmentId);
+  return r;
 }
 
 export async function setAir(acct: string, assignmentId: string, on: boolean, actor: string, opts: { forSec?: number | null } = {}) {
-  return tx(async (c) => {
+  let stream: { channelId: string | null; eventId: string | null } | null = null;
+  const r = await tx(async (c) => {
     const { a, s } = await lockState(c, acct, assignmentId);
+    stream = { channelId: a.channel_id, eventId: a.event_id };
     const offAt = on && opts.forSec ? new Date(Date.now() + opts.forSec * 1000) : null;
     if (s.on_air === on && !offAt) return { changed: 0 };
     await c.query(`UPDATE gfx_state SET on_air = $2, off_at = $3, rundown_item_id = CASE WHEN $2 THEN rundown_item_id ELSE NULL END,
@@ -220,6 +228,8 @@ export async function setAir(acct: string, assignmentId: string, on: boolean, ac
     await logChange(c, acct, assignmentId, a.event_id, actor, on ? 'on' : 'off', null, s.on_air, on);
     return { changed: 1 };
   });
+  if (r.changed && stream) publishGfx(acct, stream, 'air', assignmentId);
+  return r;
 }
 
 // ---- rundowns ---------------------------------------------------------------
@@ -236,7 +246,7 @@ async function assignmentForItem(c: PoolClient, acct: string, target: Target, se
 /** Put one rundown item on air. Another item on the same graphic is finished first. */
 export async function takeItem(acct: string, eventId: string, itemId: string, actor: string) {
   const target = await loadTarget(acct, { eventId });
-  return tx(async (c) => {
+  const r = await tx(async (c) => {
     const it = (await c.query(`SELECT * FROM gfx_rundown_items WHERE id = $1 AND event_id = $2 AND account_id = $3 FOR UPDATE`, [itemId, eventId, acct])).rows[0];
     if (!it) throw notFound('No rundown item with that id on this event');
     if (it.status === 'skipped') throw conflict('This item is skipped. Restore it before taking it.');
@@ -253,12 +263,14 @@ export async function takeItem(acct: string, eventId: string, itemId: string, ac
     await logChange(c, acct, assignmentId, eventId, actor, 'take', null, null, { item: it.id, title: it.title });
     return { assignmentId, itemId: it.id, offAt };
   });
+  publishGfx(acct, { eventId }, 'rundown', r.assignmentId);
+  return r;
 }
 
 /** Take off whatever the rundown has on air (the persistent graphics, run_mode != manual, stay). */
 export async function takeOffRundown(acct: string, eventId: string, actor: string, itemId?: string) {
   await loadTarget(acct, { eventId });
-  return tx(async (c) => {
+  const r = await tx(async (c) => {
     const items = (await c.query(`SELECT id, title FROM gfx_rundown_items WHERE event_id = $1 AND account_id = $2 AND status = 'on_air' ${itemId ? 'AND id = $3' : ''} FOR UPDATE`,
       itemId ? [eventId, acct, itemId] : [eventId, acct])).rows;
     for (const it of items) {
@@ -269,6 +281,8 @@ export async function takeOffRundown(acct: string, eventId: string, actor: strin
     }
     return { takenOff: items.length };
   });
+  if (r.takenOff) publishGfx(acct, { eventId }, 'rundown');
+  return r;
 }
 
 // ---- data sources -----------------------------------------------------------
@@ -326,6 +340,8 @@ export async function acceptPayload(acct: string, sourceId: string, payload: unk
   const items = await query<any>(
     `SELECT i.id, i.event_id, i.cue FROM gfx_rundown_items i JOIN events e ON e.id = i.event_id
       WHERE i.account_id = $1 AND i.cue->>'kind' = 'feed' AND i.cue->>'sourceId' = $2 AND i.status = 'ready' AND e.status = 'live'`, [acct, sourceId]);
+  // A new payload can change what every graphic bound to this source shows.
+  await publishForSource(acct, sourceId);
   let fired = 0;
   for (const i of items) {
     if (feedFired(i.cue as Cue, before.payload, payload, (o, p) => pick(o, p))) {
@@ -386,6 +402,9 @@ export async function tick(now = new Date()): Promise<{ polled: number; offs: nu
     // 4. Player graphics: a snapshot per live stream whose state changed (playerFeed.ts).
     const pf = await import('./playerFeed');
     await pf.recordSnapshots(now);
+    // 5. Consoles: announce live streams whose graphics moved with no write
+    //    (a rule at a programme boundary, a feed going stale), livePush.ts.
+    await watchLive(now);
     if (now.getTime() - lastPrune > 3600_000) { lastPrune = now.getTime(); await pf.pruneSnapshots(); }
   } catch (e) {
     console.error('[graphics] tick failed', e);

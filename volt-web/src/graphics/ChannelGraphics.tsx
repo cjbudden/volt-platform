@@ -9,6 +9,7 @@ import { gfx, type Assignment, type Live, type Plan, type Setup } from './gfxApi
 import { GraphicStage } from './GraphicStage'
 import { AssignDialog } from './AssignDialog'
 import { openLiveControl } from './Graphics'
+import { useGfxLive } from './useGfxLive'
 
 const LANE_COLOR: Record<string, string> = { always: '#3f7bff', rule: '#a78bfa', trigger: '#38bdf8', manual: '#98a1b6' }
 
@@ -70,7 +71,8 @@ export function ChannelGraphics({ channelId }: { channelId: string }) {
   }
   useEffect(load, [channelId, day]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { gfx.setups().then((r) => setSetups(r.items)).catch(() => {}) }, [])
-  useEffect(() => { const h = setInterval(() => gfx.live({ channel_id: channelId }).then(setLive).catch(() => {}), 5000); return () => clearInterval(h) }, [channelId])
+  // On or off now follows the channel's gfx frames instead of a 5 s poll.
+  useGfxLive('channel', channelId, () => { gfx.live({ channel_id: channelId }).then(setLive).catch(() => {}) })
 
   const toggle = async (a: Assignment) => {
     try { await gfx.patchAssignment(a.id, { enabled: !a.enabled }); load() } catch (e: any) { notify({ kind: 'error', message: e.message }) }

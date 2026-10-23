@@ -10,6 +10,7 @@ import { api } from '../api'
 import { gfx, fmtSec, type Live, type LiveItem, type LogRow, type Rundown, type TField } from './gfxApi'
 import { GraphicStage } from './GraphicStage'
 import { FieldInput } from './TemplateDetail'
+import { useGfxLive } from './useGfxLive'
 
 function Control({ item, canOperate, onChange, setErr }: { item: LiveItem; canOperate: boolean; onChange: () => void; setErr: (s: string) => void }) {
   const [draft, setDraft] = useState<Record<string, any>>({})
@@ -97,7 +98,10 @@ export function LiveControl({ channelId, eventId, popout }: { channelId: string 
     gfx.log({ ...q, limit: '30' }).then((r) => setLog(r.items)).catch(() => {})
     if (eventId) gfx.rundown(eventId).then(setRd).catch(() => {})
   }
-  useEffect(() => { load(); const h = setInterval(load, 1000); return () => clearInterval(h) }, [channelId, eventId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Read once, then again only when the control plane says this stream's
+  // graphics changed (a 'gfx' frame on the status stream), not every second.
+  useEffect(() => { load() }, [channelId, eventId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useGfxLive(eventId ? 'event' : channelId ? 'channel' : null, eventId ?? channelId, load)
   useEffect(() => {
     Promise.all([api.channels('tv').catch(() => []), api.events().catch(() => [])]).then(([c, e]: any) => setTargets([
       ...(c as any[]).map((x) => ({ v: `channel_id=${x.id}`, name: x.name, group: 'Channels' })),

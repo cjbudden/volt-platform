@@ -67,6 +67,7 @@ import {
 import { describe as describeRun } from '../services/graphics/schedule';
 import { nextManual, normCue, parseCsv, cueFromText } from '../services/graphics/rundown';
 import { feedFor, recordStream, impressionCounts } from '../services/graphics/playerFeed';
+import { publishGfx, publishForSetup, publishForSource } from '../services/graphics/livePush';
 import { verifyKey, checkRestrictions, appForKey } from '../services/apiKeys';
 import { assetKindFor } from '../services/viewerPath';
 import { cached } from '../scale/cache';
@@ -490,6 +491,7 @@ graphicsRouter.patch('/setups/:id', asyncHandler(async (req, res) => {
   const { userId, label } = actor(req);
   await writeAudit(null, { accountId: acct, userId, label, action: 'update', entityType: 'graphics_setup', entityId: cur.id,
     changes: Object.fromEntries(Object.keys(b).map((k) => [k, { from: k === 'versionId' ? cur.version_id : cur[k], to: (b as any)[k] }])) });
+  await publishForSetup(acct, cur.id);
   res.json({ ...setupJson(await one<any>(`${SETUP_SQL} WHERE s.id = $1`, [cur.id])), droppedFields: dropped });
 }));
 
@@ -545,6 +547,8 @@ graphicsRouter.patch('/sources/:id', asyncHandler(async (req, res) => {
   if (b.url && cur.kind !== 'push') await assertPublicUrl(b.url);
   const r = await one<any>(`UPDATE gfx_data_sources SET name = $2, url = $3, every_sec = $4, on_stale = $5, stale_after_sec = $6, updated_at = now() WHERE id = $1 RETURNING *`,
     [cur.id, b.name ?? cur.name, cur.kind === 'push' ? null : (b.url ?? cur.url), b.everySec ?? cur.every_sec, b.onStale ?? cur.on_stale, b.staleAfterSec ?? cur.stale_after_sec]);
+  // hold or hide on a stale feed changes what its graphics show now
+  if (b.onStale !== undefined || b.staleAfterSec !== undefined) await publishForSource(acct, cur.id);
   res.json(sourceJson(r));
 }));
 
@@ -634,6 +638,7 @@ graphicsRouter.post('/assignments', asyncHandler(async (req, res) => {
     [acct, b.setupId, target.kind === 'channel' ? target.id : null, target.kind === 'event' ? target.id : null, b.targets, b.runMode, JSON.stringify(b.rule), b.clearInAds, b.enabled]);
   const { userId, label } = actor(req);
   await writeAudit(null, { accountId: acct, userId, label, action: 'create', entityType: 'graphics_assignment', entityId: r!.id, snapshot: { setupId: b.setupId, target: target.name, runMode: b.runMode } });
+  publishGfx(acct, { channelId: target.kind === 'channel' ? target.id : null, eventId: target.kind === 'event' ? target.id : null }, 'assignment', r!.id);
   res.status(201).json(assignmentJson(await one<any>(`${ASSIGN_LIST_SQL} WHERE a.id = $1`, [r!.id])));
 }));
 
@@ -648,6 +653,7 @@ graphicsRouter.patch('/assignments/:id', asyncHandler(async (req, res) => {
   const { userId, label } = actor(req);
   await writeAudit(null, { accountId: acct, userId, label, action: 'update', entityType: 'graphics_assignment', entityId: cur.id,
     changes: Object.fromEntries(Object.entries(b).map(([k, v]) => [k, { from: cur[k.replace(/[A-Z]/g, (m) => '_' + m.toLowerCase())], to: v }])) });
+  publishGfx(acct, { channelId: cur.channel_id, eventId: cur.event_id }, 'assignment', cur.id);
   res.json(assignmentJson(await one<any>(`${ASSIGN_LIST_SQL} WHERE a.id = $1`, [cur.id])));
 }));
 
@@ -659,6 +665,7 @@ graphicsRouter.delete('/assignments/:id', asyncHandler(async (req, res) => {
   await query(`DELETE FROM gfx_assignments WHERE id = $1`, [cur.id]);
   const { userId, label } = actor(req);
   await writeAudit(null, { accountId: acct, userId, label, action: 'delete', entityType: 'graphics_assignment', entityId: cur.id, snapshot: { setupId: cur.setup_id } });
+  publishGfx(acct, { channelId: cur.channel_id, eventId: cur.event_id }, 'assignment', cur.id);
   res.status(204).end();
 }));
 
@@ -747,6 +754,12 @@ async function rundownJson(acct: string, eventId: string) {
     items, nextId: nm?.id ?? null, onAir: items.filter((i) => i.status === 'on_air').map((i) => i.id) };
 }
 
+/** A rundown edit: announce it (other operators' rundowns re-read), then answer with the rundown. */
+async function rundownChanged(acct: string, eventId: string) {
+  publishGfx(acct, { eventId }, 'rundown');
+  return rundownJson(acct, eventId);
+}
+
 async function assertSetup(acct: string, setupId: string) {
   const s = await one<any>(`SELECT id FROM gfx_setups WHERE id = $1 AND account_id = $2`, [setupId, acct]);
   if (!s) throw badRequest('No setup with that id in this account');
@@ -772,7 +785,7 @@ graphicsRouter.post('/rundowns/:eventId/items', asyncHandler(async (req, res) =>
     await c.query(`INSERT INTO gfx_rundown_items(account_id, event_id, position, segment, title, setup_id, values, cue, stays_sec)
                    VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9)`, [acct, eventId, pos, b.segment, b.title, b.setupId, JSON.stringify(b.values), JSON.stringify(cue), b.staysSec ?? null]);
   });
-  res.status(201).json(await rundownJson(acct, eventId));
+  res.status(201).json(await rundownChanged(acct, eventId));
 }));
 
 graphicsRouter.patch('/rundowns/:eventId/items/:itemId', asyncHandler(async (req, res) => {
@@ -786,7 +799,7 @@ graphicsRouter.patch('/rundowns/:eventId/items/:itemId', asyncHandler(async (req
   if (cue.kind === 'repeat' && !stays) throw badRequest('A repeating graphic needs how long it stays on.');
   await query(`UPDATE gfx_rundown_items SET segment = $2, title = $3, setup_id = $4, values = $5::jsonb, cue = $6::jsonb, stays_sec = $7, updated_at = now() WHERE id = $1`,
     [cur.id, b.segment ?? cur.segment, b.title ?? cur.title, b.setupId ?? cur.setup_id, JSON.stringify(b.values ?? cur.values), JSON.stringify(cue), stays]);
-  res.json(await rundownJson(acct, eventId));
+  res.json(await rundownChanged(acct, eventId));
 }));
 
 graphicsRouter.delete('/rundowns/:eventId/items/:itemId', asyncHandler(async (req, res) => {
@@ -795,7 +808,7 @@ graphicsRouter.delete('/rundowns/:eventId/items/:itemId', asyncHandler(async (re
   if (!cur) throw notFound('No rundown item with that id');
   if (cur.status === 'on_air') throw conflict('This item is on air. Take it off first.');
   await query(`DELETE FROM gfx_rundown_items WHERE id = $1`, [cur.id]);
-  res.json(await rundownJson(acct, eventId));
+  res.json(await rundownChanged(acct, eventId));
 }));
 
 graphicsRouter.post('/rundowns/:eventId/reorder', asyncHandler(async (req, res) => {
@@ -808,7 +821,7 @@ graphicsRouter.post('/rundowns/:eventId/reorder', asyncHandler(async (req, res) 
       await c.query(`UPDATE gfx_rundown_items SET position = $2, segment = COALESCE($3, segment), updated_at = now() WHERE id = $1`, [id, i + 1, b.segments?.[id] ?? null]);
     }
   });
-  res.json(await rundownJson(acct, eventId));
+  res.json(await rundownChanged(acct, eventId));
 }));
 
 graphicsRouter.post('/rundowns/:eventId/copy-from', asyncHandler(async (req, res) => {
@@ -823,7 +836,7 @@ graphicsRouter.post('/rundowns/:eventId/copy-from', asyncHandler(async (req, res
          FROM gfx_rundown_items WHERE event_id = $2 AND account_id = $4 ORDER BY position`, [eventId, from, base, acct]);
     return r.rowCount ?? 0;
   });
-  res.json({ copied: n, note: n ? 'Clock-time cues were set to manual: check them against this event’s times.' : 'That event has no rundown.', ...(await rundownJson(acct, eventId)) });
+  res.json({ copied: n, note: n ? 'Clock-time cues were set to manual: check them against this event’s times.' : 'That event has no rundown.', ...(await rundownChanged(acct, eventId)) });
 }));
 
 graphicsRouter.post('/rundowns/:eventId/import-csv', express.text({ type: () => true, limit: '1mb' }), asyncHandler(async (req, res) => {
@@ -856,7 +869,7 @@ graphicsRouter.post('/rundowns/:eventId/import-csv', express.text({ type: () => 
                      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9)`, [acct, eventId, pos, it.segment, it.title, it.setupId, JSON.stringify(it.values), JSON.stringify(it.cue), it.stays]);
     }
   });
-  res.status(201).json({ imported: items.length, ...(await rundownJson(acct, eventId)) });
+  res.status(201).json({ imported: items.length, ...(await rundownChanged(acct, eventId)) });
 }));
 
 graphicsRouter.post('/rundowns/:eventId/take', asyncHandler(async (req, res) => {
@@ -885,7 +898,7 @@ graphicsRouter.post('/rundowns/:eventId/items/:itemId/:action(skip|restore)', as
   if (!cur) throw notFound('No rundown item with that id');
   if (cur.status === 'on_air') throw conflict('This item is on air. Take it off first.');
   await query(`UPDATE gfx_rundown_items SET status = $2, updated_at = now() WHERE id = $1`, [cur.id, req.params.action === 'skip' ? 'skipped' : 'ready']);
-  res.json(await rundownJson(acct, eventId));
+  res.json(await rundownChanged(acct, eventId));
 }));
 
 // ---- serving template files (public, sandboxed) ----------------------------------

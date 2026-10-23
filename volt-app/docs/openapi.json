@@ -293,7 +293,7 @@
   {
    "name": "Status",
    "x-displayName": "Stream status",
-   "description": "Status reports the latest state and event log of each live channel and event, by polling or as a live push.\n\n**Use it to:**\n- Poll the status of every stream with `GET /api/status`\n- Read one stream and its event log with `GET /api/status/{kind}/{id}` and `GET /api/status/{kind}/{id}/events`\n- Receive changes within about a second over server-sent events with `GET /api/status/stream`\n\n**Credential:** admin session (Bearer) or account secret key, with `monitoring: view`. The live stream also accepts a `?ticket=` for EventSource.\n\n**Good to know:** open one live stream per viewer screen, not one per channel."
+   "description": "Status reports the latest state and event log of each live channel and event, by polling or as a live push.\n\n**Use it to:**\n- Poll the status of every stream with `GET /api/status`\n- Read one stream and its event log with `GET /api/status/{kind}/{id}` and `GET /api/status/{kind}/{id}/events`\n- Receive changes within about a second over server-sent events with `GET /api/status/stream`: `status` and `event` frames for streams, and `gfx` frames when a channel's or event's graphics change (which stream and why, never the values: read them with `GET /api/graphics/live`)\n\n**Credential:** admin session (Bearer) or account secret key, with `monitoring: view`. The live stream also accepts a `?ticket=` for EventSource, and also opens for `graphics: view`, which receives only the `gfx` frames.\n\n**Good to know:** open one live stream per viewer screen, not one per channel."
   },
   {
    "name": "Storage",

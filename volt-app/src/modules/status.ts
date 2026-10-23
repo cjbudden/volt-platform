@@ -334,11 +334,17 @@ statusRouter.get(
       throw unauthorized('Invalid token');
     }
     // The same standing checks as every other admin request: a disabled user's
-    // token opens no stream, and the live feed needs Live & monitoring.
+    // token opens no stream, and the live feed needs Live & monitoring. Graphics
+    // state changes (gfx frames, services/graphics/livePush.ts) ride the same
+    // stream, so a role with Graphics alone may open it, and then receives only
+    // those; a role without Graphics never receives them.
     const access = await resolveAccess(String(claims.sub), String(claims.role));
-    if (!['monitoring', 'channels', 'radio', 'events'].some((f) => (access.perms[f] ?? 'none') !== 'none')) {
+    const seesLive = ['monitoring', 'channels', 'radio', 'events'].some((f) => (access.perms[f] ?? 'none') !== 'none');
+    const seesGfx = (access.perms.graphics ?? 'none') !== 'none';
+    if (!seesLive && !seesGfx) {
       throw forbidden('Your role does not include live status');
     }
+    const wants = (event: string) => (event === 'gfx' ? seesGfx : seesLive);
 
     // refuse new streams past the cap rather than exhaust memory/FDs
     if (subscriberCount() >= MAX_SSE_CLIENTS) {
@@ -353,7 +359,7 @@ statusRouter.get(
       'X-Accel-Buffering': 'no',
     });
     res.write(`event: ready\ndata: ${JSON.stringify({ ok: true })}\n\n`);
-    const unsubscribe = subscribe(acct, res);
+    const unsubscribe = subscribe(acct, res, wants);
     req.on('close', () => {
       unsubscribe();
       res.end();

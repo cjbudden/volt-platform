@@ -14,17 +14,22 @@ import { onNotify, listenerConnected, notify } from '../scale/notify';
  * instance LISTENs and calls `publish`) — no extra infrastructure, and the
  * public API below does not change. That upgrade is isolated to this file.
  */
-type Client = { res: Response };
+// `wants` decides which frame types this viewer may receive. The stream carries
+// two kinds of news: live status (status, event, record) and graphics state
+// (gfx). A graphics operator whose role has no Live & monitoring still needs the
+// gfx frames to drive live control, and must not receive status snapshots; a
+// viewer without Graphics gets no gfx frames. Absent, every frame goes out.
+type Client = { res: Response; wants?: (event: string) => boolean };
 
 const byAccount = new Map<string, Set<Client>>();
 
-export function subscribe(accountId: string, res: Response): () => void {
+export function subscribe(accountId: string, res: Response, wants?: (event: string) => boolean): () => void {
   let set = byAccount.get(accountId);
   if (!set) {
     set = new Set();
     byAccount.set(accountId, set);
   }
-  const client: Client = { res };
+  const client: Client = { res, wants };
   set.add(client);
   return () => {
     set!.delete(client);
@@ -71,6 +76,7 @@ function publishLocal(accountId: string, event: string, data: unknown): void {
   if (!set || set.size === 0) return;
   const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const c of set) {
+    if (c.wants && !c.wants(event)) continue;
     try {
       c.res.write(frame);
     } catch {

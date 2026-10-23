@@ -14,13 +14,16 @@
 //     rotate), with a short backoff. No per-channel sockets, no leaks.
 //
 //  Keys: 'channel:<id>' | 'event:<id>' for one stream, or '*' for all (list/monitor).
+//  Graphics state changes have their own keys, 'gfx:channel:<id>' | 'gfx:event:<id>'
+//  | 'gfx:*', so a page that refetches a whole channel on any status news is not
+//  also woken by every score change.
 // ============================================================================
 import { getToken } from './api'
 
 export interface LiveMsg {
   kind: string
   id: string
-  type: 'status' | 'event' | 'resync' | 'record'
+  type: 'status' | 'event' | 'resync' | 'record' | 'gfx'
   /** 'record' only: which columns another admin changed. The VALUES are never
    *  sent — the page re-reads through its own credential, so a frame cannot
    *  hand a viewer a field they are not allowed to see. */
@@ -31,6 +34,10 @@ export interface LiveMsg {
   version?: number
   /** 'record' only: the user id behind the edit, or null for a system write. */
   by?: string | null
+  /** 'gfx' only: what changed (values, air, rundown, feed, assignment, setup, tick). */
+  reason?: string
+  /** 'gfx' only: the assignment, when one assignment changed. */
+  assignmentId?: string
 }
 type Listener = (msg: LiveMsg) => void
 
@@ -116,12 +123,29 @@ function connect() {
       });
     } catch { /* ignore malformed frame */ }
   };
+  // GRAPHICS STATE CHANGED on a channel or event (services/graphics/livePush.ts).
+  // Like 'record', it names the stream and the reason, never the values.
+  const onGfx = (e: MessageEvent) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (!d || !d.id || !d.kind) return;
+      const msg: LiveMsg = { kind: String(d.kind), id: String(d.id), type: 'gfx', reason: d.reason ? String(d.reason) : undefined,
+        assignmentId: d.assignmentId ? String(d.assignmentId) : undefined };
+      notify(`gfx:${msg.kind}:${msg.id}`, msg); notify('gfx:*', msg);
+    } catch { /* ignore malformed frame */ }
+  };
   // A connection that actually opened clears the backoff.
   source.addEventListener('open', () => { attempts = 0; resyncAll(); });
   source.addEventListener('status', onData('status') as EventListener);
   source.addEventListener('event', onData('event') as EventListener);
   source.addEventListener('record', onRecord as EventListener);
+  source.addEventListener('gfx', onGfx as EventListener);
   source.onerror = () => { try { source.close(); } catch { /* ignore */ } if (es === source) es = null; scheduleReconnect(); };
+}
+
+/** True while the status stream is open. Pages that rely on it poll only when it is not. */
+export function isLiveUp(): boolean {
+  return !!es && es.readyState === 1;
 }
 
 /** Subscribe to live changes for a key. Returns an unsubscribe fn. */

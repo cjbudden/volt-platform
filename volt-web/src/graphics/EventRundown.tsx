@@ -12,6 +12,7 @@ import { cueText, fmtSec, gfx, type Cue, type DataSource, type Rundown, type Run
 import { GraphicStage } from './GraphicStage'
 import { FieldInput } from './TemplateDetail'
 import { openLiveControl } from './Graphics'
+import { useGfxLive } from './useGfxLive'
 
 const STATUS: Record<RundownItem['status'], [string, string]> = { ready: ['Ready', 'type'], on_air: ['On air', 'live'], done: ['Done', 'idle'], skipped: ['Skipped', 'idle'] }
 
@@ -59,7 +60,8 @@ export function EventRundown({ eventId }: { eventId: string }) {
 
   const load = () => gfx.rundown(eventId).then((r) => { setRd(r); if (r.event.live && mode === 'prepare' && !sel) setMode('run') }).catch((e) => setErr(e.message))
   useEffect(() => { load(); gfx.setups().then((r) => setSetups(r.items)).catch(() => {}); gfx.sources().then((r) => setSources(r.items)).catch(() => {}) }, [eventId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (mode !== 'run') return; const h = setInterval(load, 2000); return () => clearInterval(h) }, [mode, eventId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Running: follow takes, cues and other operators' edits as they happen (gfx frames), not on a 2 s poll.
+  useGfxLive('event', eventId, load, mode === 'run')
   const item = rd?.items.find((i) => i.id === sel) ?? null
   useEffect(() => { if (item && mode === 'prepare') setForm({ ...item }) }, [sel]) // eslint-disable-line react-hooks/exhaustive-deps
 
