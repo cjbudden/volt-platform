@@ -85,6 +85,59 @@ resource "aws_cloudfront_distribution" "cdn" {
     origin_access_control_id = aws_cloudfront_origin_access_control.origin.id
   }
 
+  # The variant manifest service (EDGE_RIGHTS_VARIANTS.md): a replaced
+  # viewer's playlist is made by the control plane from the delivered one,
+  # not stored. The rights function rewrites such a request to
+  # /<kind>/<id>/v/<key>/<file> and picks this origin by its id. Origin
+  # Shield collapses every edge location's misses into one request per
+  # variant playlist per cache period, so the service's load follows the
+  # number of variants, never the audience.
+  dynamic "origin" {
+    for_each = var.edge_rights_enabled ? [1] : []
+    content {
+      domain_name = aws_lb.cp.dns_name
+      origin_id   = "variants"
+      custom_origin_config {
+        http_port                = 80
+        https_port               = 443
+        origin_protocol_policy   = var.alb_origin_protocol
+        origin_ssl_protocols     = ["TLSv1.2"]
+        origin_read_timeout      = 30
+        origin_keepalive_timeout = 60
+      }
+      origin_shield {
+        enabled              = true
+        origin_shield_region = var.region
+      }
+      # Proves to the API the viewer country came from here (TRUST_EDGE_GEO).
+      custom_header {
+        name  = "X-Volt-Edge"
+        value = random_password.edge_shared.result
+      }
+    }
+  }
+
+  # A variant asked for by its own path: the rights function still decides
+  # (only its own audience gets it), the variants origin answers. Listed
+  # before the *.m3u8 and *.mpd behaviours so they never send it to S3.
+  dynamic "ordered_cache_behavior" {
+    for_each = var.edge_rights_enabled ? ["/channel/*/v/*", "/event/*/v/*"] : []
+    content {
+      path_pattern             = ordered_cache_behavior.value
+      target_origin_id         = "variants"
+      viewer_protocol_policy   = "redirect-to-https"
+      allowed_methods          = ["GET", "HEAD", "OPTIONS"]
+      cached_methods           = ["GET", "HEAD"]
+      cache_policy_id          = aws_cloudfront_cache_policy.manifest.id
+      origin_request_policy_id = aws_cloudfront_origin_request_policy.variants[0].id
+      compress                 = true
+      function_association {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.rights[0].arn
+      }
+    }
+  }
+
   # Default: treat as segments (immutable, long cache).
   default_cache_behavior {
     target_origin_id       = "s3-origin"

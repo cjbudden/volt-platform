@@ -35,6 +35,28 @@ resource "aws_cloudfront_function" "rights" {
   key_value_store_associations = [aws_cloudfront_key_value_store.rights[0].arn]
 }
 
+# What the variant manifest service needs from the viewer to re-check the
+# decision itself: the country, and a rights-class claim from the query or
+# the cookie. None of it is in the cache key: the variant key in the path
+# already says which audience the answer is for.
+resource "aws_cloudfront_origin_request_policy" "variants" {
+  count   = var.edge_rights_enabled ? 1 : 0
+  name    = "${local.name}-variants"
+  comment = "Variant manifests: viewer country and rights claim to the control plane"
+  cookies_config {
+    cookie_behavior = "whitelist"
+    cookies { items = ["vrc"] }
+  }
+  headers_config {
+    header_behavior = "whitelist"
+    headers { items = ["CloudFront-Viewer-Country"] }
+  }
+  query_strings_config {
+    query_string_behavior = "whitelist"
+    query_strings { items = ["vrc"] }
+  }
+}
+
 # The control plane writes the keys (SigV4A data API).
 data "aws_iam_policy_document" "edge_rights_writer" {
   count = var.edge_rights_enabled ? 1 : 0

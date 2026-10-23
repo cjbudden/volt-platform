@@ -150,6 +150,14 @@
       "displayName": "Library originals",
       "description": "Serves the original bytes of an image in your account's library by its path.\n\n**Use it to:**\n- Fetch an original image with `GET /library/*`\n- Use it where you need the untouched file rather than a rendered size, for example to download a master\n\n**Credential:** none.\n\n**Good to know:** for display, prefer signed `/img/*` URLs, which are resized and cached at the edge."
     },
+    "Channel": {
+      "hidden": true,
+      "description": "Internal to the CDN: the variant manifests the edge sends replaced viewers to (/channel/{id}/v/{key}/{file}). Players never call it; they keep using the Live playback address."
+    },
+    "Event": {
+      "hidden": true,
+      "description": "Internal to the CDN: the variant manifests of an event (/event/{id}/v/{key}/{file}). Players never call it."
+    },
     "Live": {
       "displayName": "Live playback",
       "description": "Live playback is the public address viewers' players use to watch a live channel or listen to a station.\n\n**Use it to:**\n- Play a channel's HLS or DASH output from `GET /live/{id}/master.m3u8` or `GET /live/{id}/manifest.mpd`\n- Play a radio station's audio from `GET /live/{id}/stream.mp3`\n\n**Credential:** none, or a share or playback token where the content requires one.\n\n**Good to know:** the address only serves when the channel is on air and producing valid output. Expect 404 when off air and 503 when there is no valid content."
@@ -367,5 +375,9 @@
   "GET /api/fast/channels/:id/breaks/:bid/beacons": {
     "summary": "What was reported to the ad server for one break",
     "description": "For one break on a stitched FAST channel: per paid ad in the pod (`podIndex`, counting house spots and slate), per beacon event, how many viewer sessions reached it and how many tracking URLs were answered or failed; plus the latest 100 beacons with the tracker's host, its HTTP status and any error. A URL is sent once per viewer, never retried."
+  },
+  "GET /live/:id/v/:key/:file": {
+    "summary": "Play the version of a live stream your viewer's rights give them",
+    "description": "Where `GET /live/{id}/master.m3u8` (or `manifest.mpd`) sends a viewer whose country, or rights class, has the current programme replaced: the same stream with the channel's loop in place of the programme inside each replace window. `{key}` names the version; `{file}` is `master.m3u8`, `manifest.mpd` or one of the media playlists the master lists. You do not build this address yourself: follow the redirect.\n\nEvery viewer gets their own version whatever `{key}` says, so a version is never a way round a block (451). Outside a window the version is the normal stream. Expect 404 when the stream is off air and 503 when the loop has not been built for it."
   }
 }

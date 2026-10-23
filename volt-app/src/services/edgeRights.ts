@@ -80,8 +80,20 @@ export interface ProgrammeRight {
 /** A rights class: short, lower case, safe in a URL and a store key. */
 export const RC_RE = /^[a-z0-9_-]{1,16}$/;
 
-/** Whether the variant manifest service is running (queue item 1.14b turns it on). */
-export const variantServiceOn = () => process.env.EDGE_VARIANT_SERVICE === '1';
+/**
+ * Whether the variant manifest service answers /v/<key>/ (services/variantManifest.ts).
+ * The app itself is the service, so wherever it serves the public route
+ * (the Mac, development) it is on unless EDGE_VARIANT_SERVICE=0. In
+ * production the CDN must also send /v/ to it (deploy/terraform, the
+ * variants origin), so there it is on only when Terraform sets
+ * EDGE_VARIANT_SERVICE=1.
+ */
+export const variantServiceOn = () => {
+  const v = process.env.EDGE_VARIANT_SERVICE;
+  if (v === '1') return true;
+  if (v === '0') return false;
+  return config.env !== 'production';
+};
 
 // ---------------------------------------------------------------------------
 //  The decision. The CloudFront Function carries a copy of exactly this
@@ -297,10 +309,26 @@ export function compileEdgeRules(inp: {
 
 /** The rules for one stream, read from the database. */
 export async function loadEdgeRules(kind: 'channel' | 'event', id: string, nowSec = Math.floor(Date.now() / 1000)): Promise<EdgeRules | null> {
+  return (await loadEdgeState(kind, id, nowSec)).rules;
+}
+
+/**
+ * The rules AND the variants behind their audience map, from exactly the
+ * windows the rules publish (the 1 KB cut included), so the manifest service
+ * builds each key from the same timeline the edge was given that key for.
+ */
+export async function loadEdgeState(kind: 'channel' | 'event', id: string, nowSec = Math.floor(Date.now() / 1000)): Promise<{ rules: EdgeRules | null; variants: Variant[] }> {
+  const rules = await loadEdgeRulesFromDb(kind, id, nowSec);
+  if (!rules.rules) return { rules: null, variants: [] };
+  const n = rules.rules.w?.length ?? 0;
+  return { rules: rules.rules, variants: reduceVariants(windowsOf(rules.programmes, nowSec, nowSec + RIGHTS_HORIZON_SEC).slice(0, n)).variants };
+}
+
+async function loadEdgeRulesFromDb(kind: 'channel' | 'event', id: string, nowSec: number): Promise<{ rules: EdgeRules | null; programmes: ProgrammeRight[] }> {
   const owner = kind === 'channel'
     ? await one<any>(`SELECT c.geo_mode, c.geo_countries, a.geo_access FROM channels c JOIN groups g ON g.id = c.group_id JOIN accounts a ON a.id = g.account_id WHERE c.id = $1`, [id])
     : await one<any>(`SELECT NULL AS geo_mode, NULL AS geo_countries, a.geo_access FROM events e JOIN groups g ON g.id = e.group_id JOIN accounts a ON a.id = g.account_id WHERE e.id = $1`, [id]);
-  if (!owner) return null;
+  if (!owner) return { rules: null, programmes: [] };
   const col = kind === 'channel' ? 'channel_id' : 'event_id';
   const progs = await query<ProgrammeRight>(
     `SELECT starts_at, ends_at, geo_mode, geo_countries, replacement_asset_id, replacement_kind, replacement_ref, metadata
@@ -308,10 +336,13 @@ export async function loadEdgeRules(kind: 'channel' | 'event', id: string, nowSe
       WHERE ${col} = $1 AND geo_mode IN ('block', 'allow')
         AND ends_at > to_timestamp($2) AND starts_at < to_timestamp($3)
       ORDER BY starts_at LIMIT 200`, [id, nowSec, nowSec + RIGHTS_HORIZON_SEC]);
-  return compileEdgeRules({
-    account: normGeo(owner.geo_access), channel: channelGeo(owner), programmes: progs,
-    variantService: variantServiceOn(), nowSec,
-  });
+  return {
+    programmes: progs,
+    rules: compileEdgeRules({
+      account: normGeo(owner.geo_access), channel: channelGeo(owner), programmes: progs,
+      variantService: variantServiceOn(), nowSec,
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------

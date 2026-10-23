@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**657 routes.** Public API: 71 · Sign-in (no session yet): 7 · Admin API: 523 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 11 · Health and discovery: 8
+**660 routes.** Public API: 71 · Sign-in (no session yet): 7 · Admin API: 523 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 14 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -1131,6 +1131,18 @@ Encoders, engines, add-ons, payment providers. Each has its own secret.
 
 Streams, images, share pages and players. The admin console web app is also served from `/` when its bundle is built (it signs in through the admin API).
 
+### `/channel`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/channel/:id/v/:key/:file` | none, share token or playback token | public delivery | ✓ |
+
+### `/event`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/event/:id/v/:key/:file` | none, share token or playback token | public delivery | ✓ |
+
 ### `/fast`
 
 | Method | Path | Credential | Access | Viewer tier |
@@ -1162,6 +1174,7 @@ Streams, images, share pages and players. The admin console web app is also serv
 |---|---|---|---|---|
 | GET | `/live/:id/:file(master.m3u8\|manifest.mpd)` | none, share token or playback token | public delivery | ✓ |
 | GET | `/live/:id/stream.mp3` | none, share token or playback token | public delivery | ✓ |
+| GET | `/live/:id/v/:key/:file` | none, share token or playback token | public delivery | ✓ |
 
 ### `/radio`
 

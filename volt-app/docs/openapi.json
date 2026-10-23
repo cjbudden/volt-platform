@@ -35237,6 +35237,47 @@
     }
    }
   },
+  "/live/{id}/v/{key}/{file}": {
+   "get": {
+    "operationId": "getLiveByIDVByKeyByFile",
+    "summary": "Play the version of a live stream your viewer's rights give them",
+    "tags": [
+     "Live"
+    ],
+    "description": "Where `GET /live/{id}/master.m3u8` (or `manifest.mpd`) sends a viewer whose country, or rights class, has the current programme replaced: the same stream with the channel's loop in place of the programme inside each replace window. `{key}` names the version; `{file}` is `master.m3u8`, `manifest.mpd` or one of the media playlists the master lists. You do not build this address yourself: follow the redirect.\n\nEvery viewer gets their own version whatever `{key}` says, so a version is never a way round a block (451). Outside a window the version is the normal stream. Expect 404 when the stream is off air and 503 when the loop has not been built for it.\n\n**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "file",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
   "/radio/{id}/stream.mp3": {
    "get": {
     "operationId": "getRadioByIDStreamMP3",

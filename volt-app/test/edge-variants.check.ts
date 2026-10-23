@@ -192,6 +192,9 @@ const check = (m: string, got: unknown, want: unknown) => {
       let j: any = null; try { j = await res.json(); } catch { /* redirect */ }
       return { status: res.status, j, rights: res.headers.get('x-volt-rights'), cache: res.headers.get('cache-control'), loc: res.headers.get('location'), vary: res.headers.get('vary') };
     };
+    // the variant service is on by default outside production since 1.14b;
+    // these checks are of the rights decision before it, so it is off here
+    process.env.EDGE_VARIANT_SERVICE = '0';
     const dbRules = (await er.loadEdgeRules('channel', ch))!;
     check('db: the guide gives AU and NZ each a variant', Object.keys(dbRules.vm ?? {}).sort(), ['AU', 'NZ']);
     let x = await get(`/live/${ch}/master.m3u8?as=AU`);
@@ -208,9 +211,10 @@ const check = (m: string, got: unknown, want: unknown) => {
     x = await get(`/live/${ch}/master.m3u8?as=XX`);
     check('XX (country unknown) is not in a block list', x.status, 404);
     process.env.EDGE_VARIANT_SERVICE = '1';
-    x = await get(`/live/${ch}/master.m3u8?as=AU&at=${encodeURIComponent(new Date().toISOString())}`);
-    check('with the variant service on: AU is sent to its variant', [x.status, x.loc], [302, `/live/${ch}/v/${dbRules.vm!.AU}/master.m3u8`]);
-    delete process.env.EDGE_VARIANT_SERVICE;
+    const nowIso = encodeURIComponent(new Date().toISOString());
+    x = await get(`/live/${ch}/master.m3u8?as=AU&at=${nowIso}`);
+    check('with the variant service on: AU is sent to its variant, the stand-ins with it', [x.status, x.loc], [302, `/live/${ch}/v/${dbRules.vm!.AU}/master.m3u8?as=AU&at=${nowIso}`]);
+    process.env.EDGE_VARIANT_SERVICE = '0';
 
     (config as any).env = 'production';
     x = await get(`/live/${ch}/master.m3u8?as=AU`);
@@ -229,6 +233,7 @@ const check = (m: string, got: unknown, want: unknown) => {
     x = await get(`/live/${ch}/master.m3u8?vrc=${claim.slice(0, -2)}00`, { 'CloudFront-Viewer-Country': 'AU' });
     check('...a forged one is not', x.status, 451);
     (config as any).env = 'development';
+    delete process.env.EDGE_VARIANT_SERVICE;
     srv.close();
     await pool.end();
   }

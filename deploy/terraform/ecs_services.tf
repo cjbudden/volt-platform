@@ -199,6 +199,9 @@ locals {
     { name = "PORT", value = "8080" },
     # edge_rights.tf: the KeyValueStore the rights function reads; empty = off
     { name = "EDGE_RIGHTS_KVS_ARN", value = var.edge_rights_enabled ? aws_cloudfront_key_value_store.rights[0].arn : "" },
+    # services/variantManifest.ts: the CDN sends replaced viewers to this
+    # service (the "variants" origin in s3_cloudfront.tf); off with edge rights
+    { name = "EDGE_VARIANT_SERVICE", value = var.edge_rights_enabled ? "1" : "0" },
     { name = "S3_BUCKET", value = aws_s3_bucket.origin.id },
     { name = "CDN_BASE_URL", value = "https://${aws_cloudfront_distribution.cdn.domain_name}" },
     { name = "AWS_REGION", value = var.region },

@@ -5788,6 +5788,24 @@
  },
  {
   "method": "GET",
+  "path": "/channel/:id/v/:key/:file",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/channel"
+ },
+ {
+  "method": "GET",
+  "path": "/event/:id/v/:key/:file",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/event"
+ },
+ {
+  "method": "GET",
   "path": "/fast/:id/s/:sid/:file",
   "api": "delivery",
   "credential": "none, share token or playback token",
@@ -5870,6 +5888,15 @@
  {
   "method": "GET",
   "path": "/live/:id/stream.mp3",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/live"
+ },
+ {
+  "method": "GET",
+  "path": "/live/:id/v/:key/:file",
   "api": "delivery",
   "credential": "none, share token or playback token",
   "access": "public delivery",

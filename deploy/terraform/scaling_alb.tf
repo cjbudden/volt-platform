@@ -35,7 +35,8 @@ locals {
     ["/library/*", "/player", "/player/*", "/clips/*", "/api/payments/verify"],
     # /gfx/*: graphics template files the player loads (modules/graphics.ts)
     # /fast/*: the FAST ad stitcher's per-viewer playlists (modules/fast.ts)
-    ["/api/public/*", "/gfx/*", "/fast/*"],
+    # /channel/*/v/*, /event/*/v/*: variant manifests (services/variantManifest.ts)
+    ["/api/public/*", "/gfx/*", "/fast/*", "/channel/*/v/*", "/event/*/v/*"],
   ]
 }
 

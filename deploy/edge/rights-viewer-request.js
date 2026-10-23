@@ -29,7 +29,8 @@
 //  a manifest has no segment names to ask for):
 //    allow          the request goes on unchanged
 //    replace:<key>  the URI is rewritten to /<kind>/<id>/v/<key>/<file>
-//                   (same URL for the viewer, no new URL)
+//                   (same URL for the viewer, no new URL) and sent to the
+//                   variant manifest service's origin ("variants")
 //    block          451, not cached. Also a replace with no variant for the
 //                   audience or no variant service (vs absent): never serve
 //                   what the rights say this viewer may not see.
@@ -140,11 +141,19 @@ async function handler(event) {
     rc = claimClass(claim, m[2], key, now);
   }
   var d = edgeDecision(rules, cc, rc, now);
-  if (m[3]) return d === 'replace:' + m[3] ? req : blocked();
+  if (m[3]) return d === 'replace:' + m[3] ? toVariants(req) : blocked();
   if (d === 'allow') return req;
   if (d.indexOf('replace:') === 0) {
     req.uri = '/' + m[1] + '/' + m[2] + '/v/' + d.slice(8) + '/' + m[4];
-    return req;
+    return toVariants(req);
   }
   return blocked();
+}
+
+// A variant is made by the manifest service, not stored in S3: send the
+// rewritten request to its origin (id "variants", deploy/terraform). The
+// behaviour was chosen before this function ran, so the origin is picked here.
+function toVariants(req) {
+  if (cf.selectRequestOriginById) cf.selectRequestOriginById('variants');
+  return req;
 }

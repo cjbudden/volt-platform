@@ -76,8 +76,14 @@ async function publicGeoGate(id: string, country: string | undefined): Promise<{
  * country the CDN cannot tell). Production ignores all of them and uses the
  * CDN's country header and the signed `vrc` claim, exactly as the edge does.
  */
-export async function publicRightsDecision(req: any, id: string): Promise<{
-  restricted: boolean; decision: string; variant: string | null; cc: string; rc: string; perViewer: boolean;
+/**
+ * Who is asking, as the edge sees it: country, rights class and the time to
+ * decide at, with the development-only stand-ins. `carry` is the part of
+ * the query that must follow the viewer onto the variant's own playlists
+ * (the stand-ins and a query-string claim), as `?a=b&c=d` or ''.
+ */
+export async function rightsViewer(req: any, id: string): Promise<{
+  cc: string; rc: string; nowSec: number; atSet: boolean; perViewer: boolean; carry: string;
 }> {
   const er = await import('../services/edgeRights');
   const dev = config.env !== 'production';
@@ -88,8 +94,31 @@ export async function publicRightsDecision(req: any, id: string): Promise<{
   const testAt = dev ? pick(q.at) : undefined;
   const atMs = testAt ? Date.parse(testAt) : NaN;
   const nowSec = Math.floor((Number.isFinite(atMs) ? atMs : Date.now()) / 1000);
+  const ccRaw = typeof testCc === 'string' && /^[A-Za-z]{2}$/.test(testCc) ? testCc.toUpperCase() : (viewerGeo(req) ?? '');
+  const cc = ccRaw === 'XX' ? '' : ccRaw;
+  const qClaim = pick(q.vrc);
+  const claim = qClaim ?? (String(req.get?.('cookie') ?? '').match(/(?:^|;\s*)vrc=([^;]+)/)?.[1]);
+  const rc = typeof testRc === 'string' && er.RC_RE.test(testRc.toLowerCase())
+    ? testRc.toLowerCase()
+    : claim ? er.verifyRightsClaim(decodeURIComponent(claim), id, Math.floor(Date.now() / 1000)) : '';
+  const carryParts: string[] = [];
+  for (const [k, v] of [['as', dev ? pick(q.as) : undefined], ['rc', dev ? pick(q.rc) : undefined], ['at', testAt], ['vrc', qClaim]] as const) {
+    if (typeof v === 'string' && v) carryParts.push(`${k}=${encodeURIComponent(v)}`);
+  }
+  return {
+    cc, rc, nowSec, atSet: Number.isFinite(atMs),
+    perViewer: !!(testCc || testRc || testAt || claim),
+    carry: carryParts.length ? '?' + carryParts.join('&') : '',
+  };
+}
+
+export async function publicRightsDecision(req: any, id: string): Promise<{
+  restricted: boolean; decision: string; variant: string | null; cc: string; rc: string; perViewer: boolean; carry: string;
+}> {
+  const er = await import('../services/edgeRights');
+  const { cc, rc, nowSec, atSet, perViewer, carry } = await rightsViewer(req, id);
   let rules: import('../services/edgeRights').EdgeRules | null;
-  if (Number.isFinite(atMs)) {
+  if (atSet) {
     // another time: the rules as the sync would have published them then
     rules = await er.loadEdgeRules('channel', id, nowSec).catch(() => null)
       ?? await er.loadEdgeRules('event', id, nowSec).catch(() => null);
@@ -97,20 +126,13 @@ export async function publicRightsDecision(req: any, id: string): Promise<{
     const { rulesFor } = await import('../services/edgeViewAs');
     rules = await rulesFor(id);
   }
-  const ccRaw = typeof testCc === 'string' && /^[A-Za-z]{2}$/.test(testCc) ? testCc.toUpperCase() : (viewerGeo(req) ?? '');
-  const cc = ccRaw === 'XX' ? '' : ccRaw;
-  const claim = pick(q.vrc) ?? (String(req.get?.('cookie') ?? '').match(/(?:^|;\s*)vrc=([^;]+)/)?.[1]);
-  const rc = typeof testRc === 'string' && er.RC_RE.test(testRc.toLowerCase())
-    ? testRc.toLowerCase()
-    : claim ? er.verifyRightsClaim(decodeURIComponent(claim), id, Math.floor(Date.now() / 1000)) : '';
   const d = er.decideFor(rules, cc, rc, nowSec);
   return {
     restricted: !!rules,
     decision: er.edgeDecision(rules, cc, rc, nowSec),
     // the variant the audience maps to, even before the variant service runs
     variant: d === 'replace' ? er.variantFor(rules?.vm, cc, rc) : null,
-    cc, rc,
-    perViewer: !!(testCc || testRc || testAt || claim),
+    cc, rc, perViewer, carry,
   };
 }
 
@@ -312,8 +334,9 @@ publicLiveRouter.get(
         noStore(res);
         const k = rd.decision.startsWith('replace:') ? rd.decision.slice(8) : null;
         if (k) {
-          // the variant manifest service (queue item 1.14b) serves it
-          res.redirect(302, `/live/${id}/v/${k}/${file}`);
+          // the variant manifest service (services/variantManifest.ts, below)
+          // serves it; a tester's stand-ins travel with them
+          res.redirect(302, `/live/${id}/v/${k}/${file}${rd.carry}`);
           return;
         }
         // Blocked, or replaced while no variant service runs yet: never
@@ -339,3 +362,91 @@ publicLiveRouter.get(
     res.redirect(302, r.url);
   })
 );
+
+/**
+ * THE VARIANT MANIFEST SERVICE (EDGE_RIGHTS_VARIANTS.md, queue item 1.14b).
+ *
+ *   /live/<id>/v/<key>/<file>      the Mac and the public API (the route
+ *                                  above redirects a replaced viewer here)
+ *   /channel|event/<id>/v/<key>/<file>  behind the CDN: the edge function
+ *                                  rewrote the viewer's own URL to it and
+ *                                  sent it to this service (deploy/terraform,
+ *                                  the variants origin)
+ *
+ * Answers with THE ASKING VIEWER'S OWN variant (their audience in the
+ * published map), whatever key the path names: the key is the cache name,
+ * not a permission. So a variant asked for by name is never a way round a
+ * block, nobody gets another audience's version, and a viewer whose window
+ * has closed while their player still holds a /v/ address is handed the
+ * normal stream through the same path (an empty timeline) instead of an
+ * error. Blocked: 451, as the edge answers. Off air: as the public route.
+ * A variant that cannot be built safely: 503, never the normal stream.
+ */
+async function serveVariant(req: any, res: any, kindHint: 'channel' | 'event' | null, id: string, key: string, file: string) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (!/^[0-9a-f-]{36}$/i.test(id) || !/^v[0-9a-f]{8}$/.test(key) || !/^[A-Za-z0-9_.-]{1,80}\.(m3u8|mpd|vtt)$/.test(file)) {
+    res.status(404).json({ available: false, reason: 'not_found' });
+    return;
+  }
+  const vm = await import('../services/variantManifest');
+  if (file.endsWith('.vtt')) {
+    // the subtitle track inside a window: nothing to show, the same file for everyone
+    if (file !== 'empty.vtt') { res.status(404).json({ available: false, reason: 'not_found' }); return; }
+    edgeCache(res, 86400);
+    res.type('text/vtt; charset=utf-8').send(vm.EMPTY_VTT);
+    return;
+  }
+  const er = await import('../services/edgeRights');
+  if (!er.variantServiceOn()) { noStore(res); res.status(404).json({ available: false, reason: 'variant_service_off' }); return; }
+  const found = await one<any>(`SELECT 'channel' AS kind FROM channels WHERE id = $1 UNION ALL SELECT 'event' FROM events WHERE id = $1 LIMIT 1`, [id]);
+  const kind: 'channel' | 'event' | null = found?.kind ?? null;
+  if (!kind || (kindHint && kindHint !== kind)) { res.status(404).json({ available: false, reason: 'not_found' }); return; }
+  const v = await rightsViewer(req, id);
+  // the account's and the channel's own geo first, as on the normal route
+  const gate = await publicGeoGate(id, v.cc || undefined);
+  if (gate.blocked) { noStore(res); res.status(451).json({ available: false, reason: 'geo', message: gate.blocked }); return; }
+  const st = await er.loadEdgeState(kind, id, v.nowSec);
+  const decision = er.decideFor(st.rules, v.cc, v.rc, v.nowSec);
+  res.setHeader('X-Volt-Rights', decision);
+  if (decision === 'block') {
+    noStore(res);
+    res.status(451).json({ available: false, reason: 'rights', decision: 'block', message: 'This programme is not available where you are' });
+    return;
+  }
+  // on air and producing, exactly as the normal route requires
+  const manifest = file.endsWith('.mpd') ? 'manifest.mpd' : 'master.m3u8';
+  const live = kind === 'channel' ? await resolveLiveManifest(id, manifest) : await resolveEventManifest(id, manifest);
+  if (!live.ok) { noStore(res); res.status(live.status).json({ available: false, reason: live.reason }); return; }
+  const mine = er.variantFor(st.rules?.vm, v.cc, v.rc);
+  const variant = mine ? st.variants.find((x) => x.key === mine) ?? null : null;
+  res.setHeader('X-Volt-Variant', variant?.key ?? 'none');
+  try {
+    const out = await vm.renderVariant({
+      kind, id, key: variant?.key ?? key, file, timeline: variant?.timeline ?? [],
+      shiftSec: v.atSet ? v.nowSec - Math.floor(Date.now() / 1000) : 0, carry: v.carry,
+    });
+    if (!out) { noStore(res); res.status(404).json({ available: false, reason: 'not_found' }); return; }
+    // one answer per variant: the edge may share it for about a segment;
+    // a tester's stand-ins are one viewer's answer
+    if (v.perViewer && config.env !== 'production') noStore(res);
+    else edgeCache(res, scaleConfig.edge.liveRedirectMaxAgeSec);
+    res.type(out.type).send(out.body);
+  } catch (e: any) {
+    noStore(res);
+    if (e instanceof vm.VariantError) {
+      res.status(503).json({ available: false, reason: 'variant_unavailable', message: e.message });
+      return;
+    }
+    throw e;
+  }
+}
+
+publicLiveRouter.get('/live/:id/v/:key/:file', asyncHandler(async (req, res) => {
+  await serveVariant(req, res, null, req.params.id, req.params.key, req.params.file);
+}));
+publicLiveRouter.get('/channel/:id/v/:key/:file', asyncHandler(async (req, res) => {
+  await serveVariant(req, res, 'channel', req.params.id, req.params.key, req.params.file);
+}));
+publicLiveRouter.get('/event/:id/v/:key/:file', asyncHandler(async (req, res) => {
+  await serveVariant(req, res, 'event', req.params.id, req.params.key, req.params.file);
+}));
