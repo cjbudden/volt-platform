@@ -194,15 +194,16 @@ export function splitCodecs(codecs: string | null | undefined): { video: string 
 }
 
 /**
- * The size a player this big would want: the largest rendition no taller than
- * the box in device pixels (one step up is wasted bandwidth), else the smallest.
+ * The size a player this big would want: the smallest rendition that fills
+ * the box in device pixels (scaling down a little is sharp, scaling up is
+ * soft; 10% short still counts as filling it), else the largest there is.
+ * The same idea as hls.js capLevelToPlayerSize and Shaka's restrictToElementSize.
  */
 export function optimalFor<T extends { width?: number | null; height?: number | null }>(list: T[], boxH: number, dpr: number): T | null {
-  const v = list.filter((x) => x.height);
+  const v = list.filter((x) => x.height).sort((a, b) => (a.height as number) - (b.height as number));
   if (!v.length) return null;
   const want = Math.max(1, boxH * (dpr || 1));
-  const fit = v.filter((x) => (x.height as number) <= want * 1.15).sort((a, b) => (b.height as number) - (a.height as number));
-  return fit[0] ?? [...v].sort((a, b) => (a.height as number) - (b.height as number))[0];
+  return v.find((x) => (x.height as number) >= want * 0.9) ?? v[v.length - 1];
 }
 
 /** Seconds buffered ahead of the playhead in the range that holds it. */
@@ -392,6 +393,14 @@ export function hlsJsProbe(hls: any, media?: HTMLVideoElement | null): StatsProb
   return probe;
 }
 
+/** '30', '25', '30000/1001' -> frames per second. */
+export function parseFrameRate(f: unknown): number | null {
+  if (f == null || f === '') return null;
+  const [n, d] = String(f).split('/').map(Number);
+  const v = d ? n / d : n;
+  return Number.isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : null;
+}
+
 /** dash.js 4 (the console's DASH monitors). */
 export function dashJsProbe(player: any): StatsProbe & { destroy(): void } {
   let bytes = 0, errors = 0, lastError: string | null = null, host: string | null = null;
@@ -402,15 +411,33 @@ export function dashJsProbe(player: any): StatsProbe & { destroy(): void } {
     const s: Partial<StatsSample> = { format: 'DASH', bytes, errors, lastError, cdn: host ? { host, pop: null, cache: null, server: null } : null };
     try { s.engine = `dash.js ${player.getVersion?.() ?? ''}`.trim() + ' (MSE)'; } catch { /* */ }
     try { s.manifest = player.getSource?.() ?? null; } catch { /* */ }
+    // The PLAYING representation (codec, frame rate, segment length): the
+    // track's own codec is only its first representation's.
+    const playing = (type: 'video' | 'audio') => {
+      try {
+        const t = player.getCurrentTrackFor(type);
+        const q = player.getQualityFor(type);
+        const reps: any[] = player.getDashAdapter?.()?.getVoRepresentations?.(t) ?? [];
+        return { track: t, rep: reps.find((r) => r.index === q) ?? reps[q] ?? null };
+      } catch { return { track: null, rep: null }; }
+    };
+    const trackCodec = (t: any) => (t?.codec ?? '').replace(/^.*codecs="?([^"]+)"?.*$/, '$1') || null;
+    const v = playing('video'), a = playing('audio');
+    const fps = parseFrameRate(v.rep?.frameRate);
     try {
       const list = player.getBitrateInfoListFor('video') ?? [];
       const q = list[player.getQualityFor('video')];
-      if (q) { s.bitrate = q.bitrate; s.res = q.width ? { w: q.width, h: q.height, fps: null } : null; }
+      if (q) { s.bitrate = q.bitrate; s.res = q.width ? { w: q.width, h: q.height, fps } : null; }
+      const el: HTMLVideoElement | null = player.getVideoElement?.() ?? null;
+      const o = el ? optimalFor(list, el.getBoundingClientRect().height, window.devicePixelRatio || 1) : null;
+      if (o && o.width && o.height) s.optimal = { w: o.width, h: o.height, fps };
       const auto = player.getSettings?.()?.streaming?.abr?.autoSwitchBitrate?.video;
       s.abr = auto === false ? 'pinned' : 'auto';
     } catch { /* */ }
-    try { const t = player.getCurrentTrackFor('video'); s.videoCodec = (t?.codec ?? '').replace(/^.*codecs="?([^"]+)"?.*$/, '$1') || null; } catch { /* */ }
-    try { const t = player.getCurrentTrackFor('audio'); s.audioCodec = (t?.codec ?? '').replace(/^.*codecs="?([^"]+)"?.*$/, '$1') || null; } catch { /* */ }
+    s.videoCodec = v.rep?.codecs || trackCodec(v.track);
+    s.audioCodec = a.rep?.codecs || trackCodec(a.track);
+    if (v.rep?.segmentDuration > 0) s.segmentDuration = v.rep.segmentDuration;
+    try { const ch = a.track?.audioChannelConfiguration?.[0]; if (ch && /^\d+$/.test(String(ch))) s.audioChannels = Number(ch); } catch { /* */ }
     try { const kbps = player.getAverageThroughput('video'); if (kbps > 0) s.bandwidth = kbps * 1000; } catch { /* */ }
     try { s.live = !!player.isDynamic(); } catch { /* */ }
     try { if (s.live) { const l = player.getCurrentLiveLatency(); if (Number.isFinite(l) && l > 0) s.latency = l; } } catch { /* */ }

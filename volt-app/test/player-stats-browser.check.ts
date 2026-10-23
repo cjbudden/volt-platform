@@ -33,6 +33,7 @@ declare const window: any, document: any, navigator: any, VoltPlayer: any, VoltS
 const ROOT = path.resolve(__dirname, '..');
 const PLAYER = path.resolve(ROOT, '../volt-player');
 const HLSJS = path.resolve(ROOT, '../volt-web/node_modules/hls.js/dist/hls.min.js');
+const DASHJS = path.resolve(ROOT, '../volt-web/node_modules/dashjs/dist/dash.all.min.js');
 
 let pw: any = null;
 try { pw = require(require.resolve('playwright-core', { paths: [ROOT, process.cwd(), ...(process.env.PLAYWRIGHT_CORE_DIR ? [process.env.PLAYWRIGHT_CORE_DIR] : [])] })); } catch { /* */ }
@@ -49,13 +50,22 @@ const ff = spawnSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'test
   '-c:v', 'libx264', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-g', '60', '-c:a', 'aac', '-ac', '2', '-f', 'hls', '-hls_time', '4', '-hls_playlist_type', 'vod',
   '-hls_segment_filename', path.join(WWW, 'seg%03d.ts'), path.join(WWW, 'vod.m3u8')], { stdio: 'inherit' });
 if (ff.status !== 0) skip('ffmpeg could not make the test stream (needs libx264)');
+// The same picture as DASH, two renditions, for Shaka and dash.js.
+fs.mkdirSync(path.join(WWW, 'dash'));
+const hasDash = spawnSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30', '-f', 'lavfi', '-i', 'sine=f=440:sample_rate=48000', '-t', '40',
+  '-map', '0:v', '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
+  '-b:v:0', '2500k', '-s:v:0', '1280x720', '-b:v:1', '800k', '-s:v:1', '640x360', '-c:a', 'aac', '-ac', '2',
+  '-f', 'dash', '-seg_duration', '4', '-use_template', '1', '-use_timeline', '0', '-adaptation_sets', 'id=0,streams=v id=1,streams=a',
+  path.join(WWW, 'dash/manifest.mpd')], { stdio: 'inherit' }).status === 0;
+const hasDashJs = hasDash && fs.existsSync(DASHJS);
+if (hasDashJs) fs.copyFileSync(DASHJS, path.join(WWW, 'dash.all.min.js'));
 fs.writeFileSync(path.join(WWW, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2",FRAME-RATE=30\nvod.m3u8\n');
 const shots = process.env.STATS_SCREENSHOTS || null;
 
 const srv = http.createServer((req, res) => {
   const p = path.join(WWW, decodeURIComponent((req.url || '/').split('?')[0]));
   if (req.url === '/' || !fs.existsSync(p)) { res.writeHead(req.url === '/' ? 200 : 404, { 'content-type': 'text/html' }); res.end('<!doctype html><body style="margin:0;background:#222"><div id="p" style="width:960px"></div></body>'); return; }
-  const type = p.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : p.endsWith('.ts') ? 'video/mp2t' : 'application/javascript';
+  const type = p.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : p.endsWith('.ts') ? 'video/mp2t' : p.endsWith('.mpd') ? 'application/dash+xml' : p.endsWith('.m4s') ? 'video/iso.segment' : 'application/javascript';
   res.writeHead(200, { 'content-type': type, 'access-control-allow-origin': '*', 'access-control-expose-headers': 'x-amz-cf-pop, x-cache',
     'x-amz-cf-pop': 'TEST1-P1', 'x-cache': 'Hit from testcdn' });
   fs.createReadStream(p).pipe(res);
@@ -171,6 +181,50 @@ const srv = http.createServer((req, res) => {
     await p2.screenshot({ path: shots ? path.join(shots, 'stats-hlsjs.png') : undefined });
     await p2.evaluate(() => window.st.destroy());
     ok(await p2.locator('.vp-stats').count() === 0, 'destroy removes the panel');
+    }
+
+    // ---- 5. DASH through the SDK (Shaka): the same panel, the same rows ----
+    const rowsOf = (pg: any) => pg.evaluate(() => Object.fromEntries([...document.querySelectorAll('.vp-stats-k')].map((k: any) => [k.textContent, k.nextElementSibling.textContent])));
+    if (!hasDash) console.log('SKIP parts 5-6: ffmpeg could not write DASH');
+    else {
+      const p3 = await ctx.newPage();
+      await p3.goto(base + '/'); await p3.addScriptTag({ url: base + '/volt-player.js' });
+      await p3.evaluate(async (b: string) => { window.p = await VoltPlayer.VoltPlayer.create({ el: '#p', skin: 'admin', source: { url: b + '/dash/manifest.mpd?token=SECRET' }, autoplay: true, muted: true, beacons: false, cast: false, airplay: false }); }, base);
+      await p3.waitForFunction(() => window.p.media.currentTime > 4, null, { timeout: 30000 });
+      await p3.evaluate(() => window.p.showStats(true)); await p3.waitForTimeout(2600);
+      const r3: any = await rowsOf(p3);
+      ok((r3['Stream'] || '').startsWith('DASH, on demand, 4 s segments'), 'DASH (Shaka): format and segment length', r3['Stream']);
+      ok(/^1280×720@30 \/ 1280×720@30$/.test(r3['Current / Optimal Res'] || ''), 'DASH (Shaka): the playing representation, and 720p for a 497 px box', r3['Current / Optimal Res']);
+      ok(/avc1\.64001f/.test(r3['Codecs'] || '') && /AAC-LC/.test(r3['Codecs']), 'DASH (Shaka): the playing representation\'s codec', r3['Codecs']);
+      ok(/POP TEST1-P1/.test(r3['Delivery'] || ''), 'DASH (Shaka): CDN POP from the segment headers', r3['Delivery']);
+      ok(/manifest\.mpd\?…$/.test(r3['Manifest'] || ''), 'DASH (Shaka): the MPD without its token', r3['Manifest']);
+      if (shots) await p3.screenshot({ path: path.join(shots, 'stats-dash-shaka.png') });
+      await p3.evaluate(() => window.p.destroy());
+
+      // ---- 6. the console's dash.js monitors (attachStats + dashJsProbe) ----
+      if (!hasDashJs) console.log('SKIP part 6: dash.js is not installed in volt-web');
+      else {
+        const p4 = await ctx.newPage();
+        await p4.goto(base + '/'); await p4.addScriptTag({ url: base + '/dash.all.min.js' }); await p4.addScriptTag({ url: base + '/volt-stats.js' });
+        await p4.evaluate((b: string) => {
+          const host = document.getElementById('p'); host.style.position = 'relative'; host.style.height = '540px';
+          const v = document.createElement('video'); v.muted = true; v.style.width = '100%'; v.style.height = '100%'; host.appendChild(v);
+          const pl = (window as any).dashjs.MediaPlayer().create(); pl.initialize(v, b + '/dash/manifest.mpd?token=SECRET', true);
+          const S = VoltStats; window.st = S.attachStats(host, S.combineProbes(S.dashJsProbe(pl), S.mediaProbe(v, host)), { version: S.SDK_VERSION });
+        }, base);
+        await p4.waitForFunction(() => document.querySelector('video').currentTime > 4, null, { timeout: 30000 });
+        await p4.evaluate(() => window.st.show(true)); await p4.waitForTimeout(2600);
+        const r4: any = await rowsOf(p4);
+        ok(/^dash\.js 4/.test(r4['Engine'] || ''), 'dash.js monitor: engine', r4['Engine']);
+        ok((r4['Current / Optimal Res'] || '') === '1280×720 / 1280×720', 'dash.js monitor: current and optimal', r4['Current / Optimal Res']);
+        ok(/avc1\.64001f/.test(r4['Codecs'] || ''), 'dash.js monitor: the PLAYING representation\'s codec, not the first one\'s', r4['Codecs']);
+        ok(/2500 kbps/.test(r4['Bitrate'] || '') && /kbps|Mbps/.test(r4['Connection Speed'] || ''), 'dash.js monitor: bitrate and throughput');
+        ok(/[1-9][\d.]* MB total/.test(r4['Network Activity'] || ''), 'dash.js monitor: bytes counted', r4['Network Activity']);
+        ok(parseFloat(r4['Buffer Health']) > 1 && (r4['Stream'] || '').includes('4 s segments'), 'dash.js monitor: buffer and segment length');
+        ok(/manifest\.mpd\?…$/.test(r4['Manifest'] || ''), 'dash.js monitor: the MPD without its token', r4['Manifest']);
+        if (shots) await p4.screenshot({ path: path.join(shots, 'stats-dash-dashjs.png') });
+        await p4.evaluate(() => window.st.destroy());
+      }
     }
   } catch (e: any) { fail++; console.log('FAIL (threw) ' + (e && e.stack || e)); }
   console.log(`\nplayer-stats-browser: ${pass} passed, ${fail} failed`);

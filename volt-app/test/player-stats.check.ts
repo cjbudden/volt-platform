@@ -11,7 +11,7 @@
 // ============================================================================
 import {
   emptySample, combineProbes, statsRows, statsReport, codecName, splitCodecs, redactUrl, hostOf,
-  fmtKbps, fmtBytes, fmtSpan, optimalFor, cdnFromHeaders, type StatsSample,
+  fmtKbps, fmtBytes, fmtSpan, optimalFor, cdnFromHeaders, parseFrameRate, type StatsSample,
 } from '../../volt-player/src/sdk/stats';
 
 let pass = 0, fail = 0;
@@ -43,9 +43,12 @@ ok(hostOf('https://edge-syd.cdn.example.com/seg/1.m4s?x=1') === 'edge-syd.cdn.ex
 const ladder = [{ width: 1920, height: 1080 }, { width: 1280, height: 720 }, { width: 960, height: 540 }, { width: 640, height: 360 }];
 ok(optimalFor(ladder, 793, 2)?.height === 1080, 'a 793 px box on a 2x screen wants 1080p');
 ok(optimalFor(ladder, 360, 1)?.height === 360, 'a 360 px box at 1x wants 360p');
-ok(optimalFor(ladder, 620, 1)?.height === 540, '620 px at 1x: 540p, not a size the box cannot show');
+ok(optimalFor(ladder, 620, 1)?.height === 720, '620 px at 1x: 720p (scaled down, sharp), not 540p (stretched up)');
+ok(optimalFor(ladder, 540, 1)?.height === 540, 'a rendition exactly the box height fills it');
+ok(optimalFor(ladder, 580, 1)?.height === 540, '10% short still counts as filling it');
 ok(optimalFor(ladder, 100, 1)?.height === 360, 'a tiny box still gets the smallest rendition');
 ok(optimalFor([{ width: null, height: null }], 500, 1) === null, 'audio-only: no optimal size');
+ok(parseFrameRate('30000/1001') === 29.97 && parseFrameRate('25') === 25 && parseFrameRate(null) === null, 'DASH frame rates, fractional and whole');
 
 // --- CDN headers ---
 const cf = cdnFromHeaders((n) => ({ 'x-amz-cf-pop': 'SYD62-P1', 'x-cache': 'Hit from cloudfront', server: 'AmazonS3' } as Record<string, string>)[n], 'https://d123.cloudfront.net/v/1.m4s');

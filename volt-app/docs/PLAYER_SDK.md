@@ -287,8 +287,8 @@ A "stats for nerds" panel on every Volt player, so a viewer on a support call,
 a customer's developer, or an operator checking an output can say exactly
 what is playing. Code: `volt-player/src/sdk/stats.ts`. Tests:
 `volt-app/test/player-stats.check.ts` (46, the rows and the report) and
-`volt-app/test/player-stats-browser.check.ts` (34, in Chromium on a real
-stream).
+`volt-app/test/player-stats-browser.check.ts` (46, in Chromium on real HLS
+and DASH streams, through Shaka, hls.js and dash.js).
 
 **Opening it.** Right-click the player > **Playback stats** (Shift+right-click
 still gives the browser's own menu), **Shift+D** while the player has focus,
@@ -301,7 +301,7 @@ the admin skin's **Stats** button, or `player.showStats()`. The same menu has
 |---|---|
 | Asset / Session | the asset id and the beacon session id (what Analytics filed this viewing under) |
 | Viewport / Frames | the player's size × device pixel ratio; frames dropped of frames decoded |
-| Current / Optimal Res | the rendition playing (size @ frame rate); the largest rendition the box can show at this pixel ratio |
+| Current / Optimal Res | the rendition playing (size @ frame rate); the smallest rendition that fills the box at this pixel ratio (as hls.js and Shaka size to the player) |
 | Volume | level, and muted |
 | Codecs | named, with the codec string: `H.264 High L4 (avc1.640028) / AAC-LC (mp4a.40.2) 2ch 48 kHz`; HDR when not SDR |
 | Bitrate | the rendition's bitrate, ABR auto or pinned |
@@ -332,6 +332,12 @@ still works, so a site can put the panel behind its own "Report a problem".
 `player.getStats()` returns the sample without the panel;
 `player.copyDebugInfo()` copies and returns the report; `statschange` fires
 when it opens or closes.
+
+**HLS and DASH alike.** Through the SDK both play in Shaka, so every row is
+the same. On the console's dash.js monitors the codec, frame rate and segment
+length come from the representation actually playing (dash.js's track codec
+is only its first representation's); dash.js does not hand over response
+headers, so Delivery shows the host but not the POP or cache result.
 
 **On players the SDK does not own.** `attachStats(host, probe)` puts the same
 panel and right-click menu on any player. Probes: `mediaProbe(video)` (any
