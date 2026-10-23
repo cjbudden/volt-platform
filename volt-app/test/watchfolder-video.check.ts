@@ -16,8 +16,10 @@
 //    the channel is already producing. Putting it through the ABR ladder makes
 //    four renditions nothing will ever request.
 //
-//    ACCEPTED IS NOT PLAYABLE. The queue must not say "in library" for a file
-//    whose encode has not started. Counted separately, said separately.
+//    ACCEPTED IS NOT PLAYABLE, and the item says so: "in the Media Library,
+//    queued for encoding". It is closed as soon as the asset exists (23 Oct
+//    2026): left open, the next pass made a second asset. The database side of
+//    that is watchfolder-video-landing.check.ts.
 //
 //    AND THE TWO SHARED WITH THE IMAGE PATH, because they are properties of a
 //    drop folder rather than of images: the row's checksum is a claim about the
@@ -35,6 +37,7 @@ import {
   type VideoIngestFolder, type VideoIngestStore,
 } from '../src/services/watchfolder/videoIngest';
 import type { PendingItem } from '../src/services/watchfolder/ingest';
+import { fillerPath } from '../src/services/uploads';
 
 let pass = 0, fail = 0;
 const ok = (m: string) => { console.log('PASS ' + m); pass++; };
@@ -54,13 +57,17 @@ class MemoryStore implements VideoIngestStore {
   fillers: any[] = [];
   jobs: any[] = [];
   failNextAsset = false;
+  /** What the ingest rules answer; 'ingested' unless a test says otherwise. */
+  ingestStatus = 'ingested';
+  ingests: any[] = [];
   private n = 0;
 
   async claim(itemId: any) {
     if (this.claimed.has(itemId)) return false;
     this.claimed.add(itemId); return true;
   }
-  async markQueued(itemId: any, note: string) { this.queuedNotes.push({ itemId, note }); }
+  async markLanded(itemId: any, note: string) { this.queuedNotes.push({ itemId, note }); }
+  async runIngest(a: any) { this.ingests.push(a); return { status: this.ingestStatus, path: a.path }; }
   async markFailed(itemId: any, reason: string) { this.failed.push({ itemId, reason }); }
   /** The source path we were handed, kept even when the write fails, so the
    *  cleanup can be asserted directly. */
@@ -71,7 +78,8 @@ class MemoryStore implements VideoIngestStore {
     const id = `vod-${++this.n}`; this.vods.push({ ...a, id }); return { id };
   }
   async createFillerAsset(a: any) {
-    const id = `fil-${++this.n}`; this.fillers.push({ ...a, id }); return { id };
+    // The caller picks the id (the file is laid out by it before the row).
+    const id = a.id ?? `fil-${++this.n}`; this.fillers.push({ ...a, id }); return { id };
   }
   async enqueueEncode(a: any) {
     const id = `job-${++this.n}`; this.jobs.push({ ...a, id }); return { id };
@@ -145,6 +153,14 @@ const item = (o: Partial<PendingItem> & { objectKey: string }): PendingItem =>
   console.log('\n== the queue says QUEUED, not "in library" ==');
   check('the item was noted', s1.queuedNotes.length, 1);
   check('as queued for encoding', /queued for encoding/.test(at(s1.queuedNotes).note ?? ''), true);
+  check('and in the Media Library', /in the Media Library/.test(at(s1.queuedNotes).note ?? ''), true);
+
+  console.log('\n== the ingest rules ran over it, as for an upload ==');
+  check('once', s1.ingests.length, 1);
+  check('over the preserved copy, not the drop folder', at(s1.ingests).path, kept);
+  check('with the folder as the source', at(s1.ingests).source, 'wf-1');
+  check('with the drop\'s checksum', at(s1.ingests).sha256, sha(body));
+  check('and its path in the folder', at(s1.ingests).relativePath, 'episode-01.mp4');
   check('and it was not marked failed', s1.failed.length, 0);
 
   // ---- a loop --------------------------------------------------------------
@@ -159,6 +175,27 @@ const item = (o: Partial<PendingItem> & { objectKey: string }): PendingItem =>
   // renditions would be four things nothing ever requests.
   check('with no encode job at all', s2.jobs.length, 0);
   check('named from the file', at(s2.fillers).name, 'ident');
+  // THE FAULT FOUND ON 23 OCT: the row had source_key '' and the orchestrator
+  // hands the encoder the source key as the loop's address.
+  const fl: any = at(s2.fillers);
+  check('with a source key laid out as an upload\'s', fl.sourceKey, `filler/acct-1/${fl.id}.mp4`);
+  check('the file is where that key says', existsSync(fillerPath('acct-1', String(fl.id), 'ident.mp4')), true);
+  check('with the original filename', fl.filename, 'ident.mp4');
+  check('and a video content type', fl.contentType, 'video/mp4');
+  check('the item says where it went', /Loops & Fillers/.test(at(s2.queuedNotes).note ?? ''), true);
+  check('and the rules were not run on a loop', s2.ingests.length, 0);
+
+  // ---- held by the ingest rules ---------------------------------------------
+  console.log('\n== a VOD the ingest rules hold is in the library but NOT encoded ==');
+  await drop(root, 'again.mp4', 'w'.repeat(1500));
+  const s2b = new MemoryStore();
+  s2b.ingestStatus = 'duplicate';
+  const r2b = await ingestVideoItem(folder(root), item({ objectKey: 'again.mp4' }), s2b);
+  check('it was held', r2b.result, 'held');
+  check('the asset exists', s2b.vods.length, 1);
+  check('no encode was queued', s2b.jobs.length, 0);
+  check('the item says why', /held by the ingest rules \(duplicate\)/.test(at(s2b.queuedNotes).note ?? ''), true);
+  check('and it is not a failure', s2b.failed.length, 0);
 
   // ---- somebody else's target ----------------------------------------------
   console.log('\n== an image target is left for the image path ==');
@@ -233,6 +270,7 @@ const item = (o: Partial<PendingItem> & { objectKey: string }): PendingItem =>
 
   await rm(root, { recursive: true, force: true });
   await rm(join(sourcePathFor('x', 'y.mp4'), '..'), { recursive: true, force: true }).catch(() => {});
+  await rm(join(fillerPath('acct-1', 'x'), '..'), { recursive: true, force: true }).catch(() => {});
   console.log(`\nwatchfolder-video: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FATAL', e); process.exit(1); });

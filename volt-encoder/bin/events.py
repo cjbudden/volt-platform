@@ -177,6 +177,18 @@ class EventLog:
         self._recompute_output()
         self._publish()
 
+    def source_waiting(self, group="primary", waited_s=20):
+        """The run is up and listening but `group` has never arrived. One event
+        per run (a status flag, NO SOURCE), not a repeating alarm: a push source
+        that has not been started yet is a state, not a fault."""
+        cur = self.status["sources"].get(group, {})
+        if cur.get("state") not in (None, "unknown"):
+            return None
+        self.status["sources"][group] = {**cur, "state": "waiting"}
+        ev = self.event("source.waiting", source=group, waited_s=waited_s)
+        self._publish()
+        return ev
+
     def filler_ready(self, ready=True):
         if "filler" in self.status["sources"]:
             self.status["sources"]["filler"] = {"state": "ready" if ready else "down"}

@@ -238,6 +238,8 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
 
   // Skip markers: the intro and credits, against the other episodes of its series.
   await (await import('./vodMarkers')).queueMarkerDetection(p.vodAssetId, { channelId: asset.channel_id, eventId: asset.event_id });
+  // Social formats: follow what is in the picture (tracking only; cheap). Volt/REFRAME.md.
+  await (await import('./reframe')).queueReframeAnalysis(p.vodAssetId);
 
   // THE RULES MAY PUBLISH IT NOW. After the files and the ladder are in
   // place; a rule that says manual, or a gate that says no, simply leaves it.

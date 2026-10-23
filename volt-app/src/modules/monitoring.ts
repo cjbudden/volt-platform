@@ -32,6 +32,10 @@ import { asyncHandler } from '../util/http';
 import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { loadChannelHealthLite } from '../services/channelDetail';
 import { liveConcurrency } from '../services/analytics';
+import { cached } from '../scale/cache';
+import { liveDirFor } from '../services/liveOrigin';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { PipelineHealth } from '../services/pipelineHealth';
 
 export const monitoringRouter = Router();
@@ -86,12 +90,64 @@ export interface LiveRow {
    *  monitor of what the encoder is producing, and an operator needs to see
    *  that whether or not the channel has been published. */
   previewUrl: string;
+  /**
+   * THE DELIVERED OUTPUT: the manifest a viewer is actually given (the
+   * encoder's *_cc copies, with wall clock, splice and triggers), served from
+   * the origin so it can be watched before the stream is public. Multiview
+   * plays this by default: a monitor that shows something other than what
+   * viewers get can be green while viewers see a fault.
+   */
+  deliveredUrl: string;
   /** Radio has no picture: a video tile for it would render a black square. */
   audioOnly: boolean;
+  /**
+   * TILE FLAGS, from data the board already reads (no extra query, no extra
+   * file IO): per-source state as the encoder last reported it, whether the
+   * encoder says the output is being fed, and the two conditions that have
+   * their own word on the wall.
+   */
+  sources: Record<string, string>;
+  outputAvailable: boolean | null;
+  /** Running and listening, but no source has been pushed (input gate NO SOURCE). */
+  noSource: boolean;
+  /** Output advancing but its timing is wrong (encoder output_check.py), or null. */
+  timingFault: string | null;
+}
+
+/** {source: state} from a stream_status.sources value, filler included. */
+function sourceStates(raw: any): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (raw && typeof raw === 'object') {
+    for (const [k, v] of Object.entries(raw)) out[k] = String((v as any)?.state ?? 'unknown');
+  }
+  return out;
+}
+
+/** The manifest a viewer gets, served from the origin (see LiveRow.deliveredUrl). */
+function deliveredManifest(id: string, kind: OwnerKind): string {
+  // Radio's own master.m3u8 already leads to its delivered copy.
+  if (kind === 'radio') return `/origin/${id}/live/master.m3u8`;
+  try {
+    if (existsSync(join(liveDirFor(id), 'master_cc.m3u8'))) return `/origin/${id}/live/master_cc.m3u8`;
+  } catch { /* fall through */ }
+  return `/origin/${id}/live/master.m3u8`;
+}
+
+/**
+ * THE BOARD IS COMPUTED ONCE PER ACCOUNT EVERY TWO SECONDS, whoever asks.
+ *
+ * Every open Multiview, Monitoring and Live page asks for it, and each answer
+ * costs a few indexed reads per stream plus a look at the origin. Without
+ * this, ten operators with the wall open meant ten times the work for the same
+ * answer. cached() also coalesces concurrent misses into one load. Reads are
+ * plain SELECTs (MVCC), so they never take a lock an encoder report waits on.
+ */
+function liveBoard(acct: string): Promise<LiveRow[]> {
+  return cached(`monitoring:board:${acct}`, { ttlSec: 2, tags: [] }, () => liveBoardUncached(acct));
 }
 
 /** Everything with a pipeline that could be up: channels, stations, events. */
-async function liveBoard(acct: string): Promise<LiveRow[]> {
+async function liveBoardUncached(acct: string): Promise<LiveRow[]> {
   const now = Date.now();
 
   const channels = await query<any>(
@@ -154,7 +210,7 @@ export async function liveRowsFor(
   // is a fault the gates cannot always see, so the age is surfaced directly.
   const reports = await query<any>(
     `SELECT channel_id, event_id, active_source, fallback_in_use, filler_in_use,
-            degraded_outputs, updated_at
+            degraded_outputs, updated_at, sources, output_available
        FROM stream_status WHERE channel_id = ANY($1) OR event_id = ANY($1)`, [ids]
   );
   const report = new Map<string, any>();
@@ -220,7 +276,15 @@ export async function liveRowsFor(
         : row.origin === 'playlist' ? `/fast/${row.id}`
         : `/channels/${row.id}`,
       previewUrl: `/origin/${row.id}/live/master.m3u8`,
+      deliveredUrl: deliveredManifest(row.id, kind),
       audioOnly: kind === 'radio',
+      sources: serverUp ? sourceStates(st?.sources) : {},
+      outputAvailable: serverUp && st ? !!st.output_available : null,
+      noSource: serverUp && health.gates.some((g) => g.gate === 'input' && g.badge === 'NO SOURCE'),
+      timingFault: (() => {
+        const g = health.gates.find((x) => x.gate === 'output');
+        return g && /^timing fault/.test(g.detail) ? g.detail.replace(/^timing fault · /, '') : null;
+      })(),
     };
   };
 

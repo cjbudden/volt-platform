@@ -297,6 +297,8 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
   } catch (e) { console.error(`[vod.encode] ${p.vodAssetId}: no thumbnail candidates:`, e); }
   // Skip markers: the intro and credits, against the other episodes of its series.
   await (await import('./vodMarkers')).queueMarkerDetection(p.vodAssetId);
+  // Social formats: follow what is in the picture (tracking only; cheap). Volt/REFRAME.md.
+  await (await import('./reframe')).queueReframeAnalysis(p.vodAssetId);
 
   return {
     vodAssetId: p.vodAssetId,

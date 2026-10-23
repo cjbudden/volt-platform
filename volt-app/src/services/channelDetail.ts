@@ -7,7 +7,7 @@
 import { encoderRunning, LOCKED_WHILE_RUNNING } from './settingsLock';
 import { one, query } from '../db';
 import { config } from '../config';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, openSync, fstatSync, readSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { liveDirFor } from './liveOrigin';
 import { fleetContext } from './fleetContext';
@@ -139,11 +139,28 @@ function packagingLabel(profile: any): string {
 // Surface the REAL encoder failures (ffmpeg / source / packager errors) from the
 // on-box encoder.log so the event log shows WHY a source or output failed, not just
 // lifecycle events. Local mode writes this file into the origin dir; ignored otherwise.
+function readTail(path: string, bytes: number): string {
+  const fd = openSync(path, 'r');
+  try {
+    const size = fstatSync(fd).size;
+    const len = Math.min(size, bytes);
+    const buf = Buffer.alloc(len);
+    readSync(fd, buf, 0, len, size - len);
+    const text = buf.toString('utf8');
+    // drop a partial first line when we started mid-file
+    return len < size ? text.slice(text.indexOf('\n') + 1) : text;
+  } finally { closeSync(fd); }
+}
+
 function encoderLogTail(channelId: string): { ts: string; level: string; title: string; detail: string }[] {
   try {
     const p = join(config.testStream.originDir, channelId, 'encoder.log');
     if (!existsSync(p)) return [];
-    const allLines = readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean);
+    // ONLY THE TAIL. encoder.log grows for as long as the stream runs, and this
+    // is read for every stream on every board refresh. The newest 256 KB holds
+    // far more than the ten lines kept; when the run banner is older than that,
+    // everything in the window belongs to this run anyway.
+    const allLines = readTail(p, 256 * 1024).split(/\r?\n/).filter(Boolean);
     // encoder.log is APPENDED across runs. Only THIS run's lines may surface: errors
     // from a previous run painted a flash of red on every clean start. The encoder
     // prints a run banner at boot; scope the tail to the last banner onward.
@@ -201,6 +218,10 @@ function newestManifestMtimeMs(channelId: string): number {
   try {
     const dir = liveDirFor(channelId);   // per-run namespace: probe the CURRENT run
     let newest = newestIn(dir);
+    // TV: the packager rewrites the root playlists every segment, so a fresh root
+    // answers the question without listing the rendition folders, which hold
+    // every recorded segment (tens of thousands a day).
+    if (newest > 0 && Date.now() - newest < 15000) return newest;
     // One level of rendition directories (audio/, 720p/, …). Not deeper: the
     // point is to find the playlist a packager is rewriting, and those live
     // beside their segments.
@@ -429,6 +450,18 @@ export async function buildStreamDetail(channel: any, nowMs: number, kind: Owner
     let detail = '';
     try { detail = typeof e.detail === 'string' ? e.detail : JSON.stringify(e.detail ?? {}); } catch { detail = ''; }
     if (detail === '{}') detail = '';
+    // Verdicts that carry their own state say it in words, not as a JSON dump.
+    const dd = (e.detail && typeof e.detail === 'object') ? e.detail : {};
+    if (e.type === 'output.timeline') {
+      const fault = dd.state === 'fault';
+      return { ts: hhmm(new Date(e.ts).getTime()), level: fault ? 'warn' : 'live',
+        title: fault ? 'Output timing fault' : 'Output timing OK',
+        detail: fault ? String(dd.message || '') : `cleared: ${(dd.cleared || []).join(', ')}` };
+    }
+    if (e.type === 'source.waiting') {
+      return { ts: hhmm(new Date(e.ts).getTime()), level: 'warn', title: 'No source pushed',
+        detail: `${dd.source || 'primary'} has not arrived after ${dd.waited_s ?? '?'}s` };
+    }
     return { ts: hhmm(new Date(e.ts).getTime()), level: levelFor(String(e.type)), title: String(e.type), detail };
   });
 

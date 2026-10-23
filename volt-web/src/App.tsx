@@ -24,6 +24,7 @@ import UiSamplesPage from './pages/UiSamples'
 import PlanLimitsPage from './pages/PlanLimits'
 import AccountSettingsPage from './pages/AccountSettings'
 import CaptionsPage from './pages/Captions'
+import ReframeSettingsPage from './pages/ReframeSettings'
 import PermissionsMapPage from './pages/PermissionsMap'
 import { GlobalNotices, PageNoticesProvider, usePageNotice, Notice } from './notices'
 import LivePage from './pages/Live'
@@ -102,7 +103,7 @@ const NAV_FEATURE: Record<string, string> = {
   channels: 'channels', radio: 'radio', events: 'events', epg: 'epg', loops: 'media', graphics: 'graphics', fast: 'channels',
   recordings: 'recordings', vod: 'vod', images: 'media', analytics: 'analytics',
   review: 'vod', watchfolders: 'media', storage: 'media',
-  encoding: 'settings', groups: 'settings', captions: 'settings', plan: 'settings', 'account-settings': 'settings', permissions: 'access',
+  encoding: 'settings', groups: 'settings', captions: 'settings', reframing: 'settings', plan: 'settings', 'account-settings': 'settings', permissions: 'access',
   // Admin sections
   'content-types': 'settings', publishing: 'settings', ingest: 'settings', social: 'settings',
   payments: 'payments', apikeys: 'apps',
@@ -155,6 +156,7 @@ const ADMIN_NAV: NavGroup[] = [
     { key: 'ingest', label: 'Ingest Rules', icon: I.vod },
     { key: 'groups', label: 'Channel Groups', icon: I.channels },
     { key: 'captions', label: 'Captions', icon: I.captions },
+    { key: 'reframing', label: 'Formats & reframing', icon: I.vod },
   ] },
   { group: 'Account', items: [
     { key: 'account-settings', label: 'Account settings', icon: I.palette },
@@ -629,6 +631,8 @@ export default function App() {
             ? <PlanLimitsPage />
             : section === 'account-settings'
             ? <AccountSettingsPage />
+            : section === 'reframing'
+            ? <ReframeSettingsPage />
             : section === 'captions'
             ? <CaptionsPage />
             : section === 'permissions'

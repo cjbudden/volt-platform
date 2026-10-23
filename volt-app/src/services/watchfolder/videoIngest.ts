@@ -28,11 +28,34 @@
 //  A hardlink is tried first because it costs nothing when the drop folder and
 //  the media directory are on one filesystem, which is the common local case;
 //  the copy is the fallback for the mount that they usually are not.
+//
+//  23 Oct 2026 (build queue 1.13), three faults found by running a real drop
+//  end to end against Postgres:
+//
+//    A LOOP LANDED WITH NO SOURCE KEY. The filler row was written with
+//    source_key '' and no filename, so Loops & Fillers listed a loop that no
+//    channel could use: the orchestrator hands the encoder the source key as the
+//    loop's address, and '' is no address. It is now written exactly as an
+//    upload writes it (`filler/<account>/<id><ext>`, at `fillerPath()`).
+//
+//    EVERY DROP CAME BACK EVERY TEN MINUTES. The item was left at 'seen' once
+//    the asset existed, and 'seen' plus a claim older than ten minutes is
+//    exactly what the pending query picks up, so each pass made another asset
+//    and another encode of the same file. The item now closes as 'ingested'
+//    when the asset row exists: the Media Library row carries the encode's own
+//    state, so "in library, encoding" is true and nothing is left to retry.
+//
+//    A VOD DROP SKIPPED THE INGEST RULES. Uploads run the ingest framework
+//    (naming, real type, duplicate check, metadata, sidecar, webhooks) before
+//    the encode; a watch folder drop went straight to the encoder. It now runs
+//    the same `ingestLanded()` with the folder as its source, and only an
+//    'ingested' outcome is encoded, as for an upload.
 // ============================================================================
 import { copyFile, link, mkdir, stat, unlink } from 'node:fs/promises';
 import { join, extname, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from '../../config';
+import { fillerPath, safeExt as uploadExt } from '../uploads';
 import { one, query } from '../../db';
 import { enqueue } from '../jobs/queue';
 import { VOD_ENCODE } from '../jobs/handlers/vodEncode';
@@ -67,6 +90,9 @@ export interface VideoIngestFolder {
 export type VideoOutcome =
   | { result: 'queued'; itemId: string | number; assetId: string; jobId: string; target: 'vod' }
   | { result: 'registered'; itemId: string | number; assetId: string; target: 'loop' }
+  /** In the Media Library, but the ingest rules held it (duplicate, rejected,
+   *  waiting for metadata), so no encode was queued. Same as an upload. */
+  | { result: 'held'; itemId: string | number; assetId: string; target: 'vod'; status: string }
   | { result: 'skipped'; itemId: string | number; why: string }
   | { result: 'deferred'; itemId: string | number; why: string }
   | { result: 'failed'; itemId: string | number; why: string };
@@ -74,15 +100,23 @@ export type VideoOutcome =
 /** What this needs from persistence. Same shape of contract as the image path. */
 export interface VideoIngestStore {
   claim(itemId: string | number): Promise<boolean>;
-  markQueued(itemId: string | number, note: string): Promise<void>;
+  /** The asset exists: close the item so no later pass makes another. */
+  markLanded(itemId: string | number, note: string): Promise<void>;
   markFailed(itemId: string | number, reason: string): Promise<void>;
   createVodAsset(a: {
     accountId: string; title: string; sourceKey: string; sourceBytes: number;
     ladderGroupId: string | null; sourceKind: 'watchfolder' | 'upload';
   }): Promise<{ id: string }>;
   createFillerAsset(a: {
-    accountId: string; name: string; sourceKey: string; bytes: number;
+    id: string; accountId: string; name: string; sourceKey: string; bytes: number;
+    filename: string; contentType: string;
   }): Promise<{ id: string }>;
+  /** The ingest framework over a landed VOD source, as an upload runs it.
+   *  Returns the outcome and where the file is now (naming rules may move it). */
+  runIngest(a: {
+    accountId: string; assetId: string; path: string; originalName: string;
+    relativePath: string; bytes: number; sha256: string; source: string;
+  }): Promise<{ status: string; path: string }>;
   enqueueEncode(a: {
     assetId: string; accountId: string; sourcePath: string;
     ladderGroupId: string | null; dedupeKey: string;
@@ -158,12 +192,26 @@ export async function ingestVideoItem(
 
     if (target === 'loop') {
       // NOT ENCODED. See the header: its consumer re-encodes it anyway.
-      const asset = await store.createFillerAsset({
-        accountId: f.accountId, name: title, sourceKey: '', bytes,
-      });
-      const dest = join(config.uploads.fillerDir, f.accountId, asset.id + safeExt(name));
+      // Laid out exactly as an uploaded loop (same path, same source key), so
+      // Loops & Fillers, filler prep and the orchestrator cannot tell them apart.
+      const id = randomUUID();
+      const ext = uploadExt(name);
+      const dest = fillerPath(f.accountId, id, name);
       await preserveSource(abs, dest);
-      await store.markQueued(item.id, `registered as a filler loop (${title})`);
+      let asset: { id: string };
+      try {
+        asset = await store.createFillerAsset({
+          id, accountId: f.accountId, name: title, bytes,
+          sourceKey: `filler/${f.accountId}/${id}${ext}`,
+          filename: name, contentType: videoTypeOf(name),
+        });
+      } catch (e: any) {
+        await unlink(dest).catch(() => { /* an orphan copy is the cheap failure */ });
+        const why = `could not create the loop: ${String(e?.message ?? e)}`;
+        await store.markFailed(item.id, why);
+        return { result: 'failed', itemId: item.id, why };
+      }
+      await store.markLanded(item.id, `in Loops & Fillers as "${title}"`);
       return { result: 'registered', itemId: item.id, assetId: asset.id, target: 'loop' };
     }
 
@@ -187,21 +235,45 @@ export async function ingestVideoItem(
       return { result: 'failed', itemId: item.id, why };
     }
 
+    // THE INGEST RULES, as for an upload. The folder id is the source, so a
+    // source-rung rule written for this folder applies to its drops.
+    const sha256 = item.checksum ?? await checksumFile(dest);
+    const ing = await store.runIngest({
+      accountId: f.accountId, assetId: asset.id, path: dest, originalName: name,
+      relativePath: item.objectKey, bytes, sha256, source: f.id,
+    });
+    if (ing.status !== 'ingested') {
+      // In the library with the reason on the asset; no encode, as an upload.
+      await store.markLanded(item.id, `in the Media Library as "${title}", held by the ingest rules (${ing.status.replace(/_/g, ' ')})`);
+      return { result: 'held', itemId: item.id, assetId: asset.id, target: 'vod', status: ing.status };
+    }
+
     const job = await store.enqueueEncode({
-      assetId: asset.id, accountId: f.accountId, sourcePath: dest,
+      assetId: asset.id, accountId: f.accountId, sourcePath: ing.path,
       ladderGroupId: f.ladderGroupId ?? null,
       // KEYED ON THE ASSET, so a second scan that somehow reaches the same asset
       // joins the job in flight rather than starting a second encode of the same
       // file into the same directory.
       dedupeKey: `vod.encode:${asset.id}`,
     });
-    await store.markQueued(item.id, `queued for encoding as "${title}"`);
+    await store.markLanded(item.id, `in the Media Library as "${title}", queued for encoding`);
     return { result: 'queued', itemId: item.id, assetId: asset.id, jobId: job.id, target: 'vod' };
   } catch (e: any) {
     const why = String(e?.message ?? e).slice(0, 500);
     await store.markFailed(item.id, why).catch(() => { /* nothing left to try */ });
     return { result: 'failed', itemId: item.id, why };
   }
+}
+
+/** A content type for a dropped video, from its extension. The upload path
+ *  records the browser's type; a drop folder has only the name. */
+export function videoTypeOf(filename: string): string {
+  const e = extname(filename).toLowerCase();
+  const map: Record<string, string> = {
+    '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.ts': 'video/mp2t',
+    '.mkv': 'video/x-matroska', '.webm': 'video/webm', '.mxf': 'application/mxf',
+  };
+  return map[e] ?? 'application/octet-stream';
 }
 
 /* ------------------------------------------------------------- adapter ---- */
@@ -215,12 +287,14 @@ export const pgVideoIngestStore: VideoIngestStore = {
         RETURNING id`, [itemId]);
     return !!r;
   },
-  async markQueued(itemId, note) {
-    // NOT 'ingested'. The bytes are safe and the work is accepted, but the asset
-    // is not playable until the encode finishes, and a queue that says "in
-    // library" for a file that is still encoding is a queue that lies.
+  async markLanded(itemId, note) {
+    // 'ingested', NOT 'seen'. It used to stay 'seen' so the queue would not say
+    // "in library" while the encode ran, but 'seen' is what the pending query
+    // picks up again after ten minutes, so every drop became a new asset and a
+    // new encode every ten minutes. The asset IS in the library now (its row
+    // shows the encode's progress), and the note says it is still encoding.
     await query(
-      `UPDATE watchfolder_items SET status = 'seen', reason = $2, resolved_at = now()
+      `UPDATE watchfolder_items SET status = 'ingested', reason = $2, resolved_at = now()
         WHERE id = $1`, [itemId, note.slice(0, 500)]);
   },
   async markFailed(itemId, reason) {
@@ -240,12 +314,29 @@ export const pgVideoIngestStore: VideoIngestStore = {
     return { id: row.id };
   },
   async createFillerAsset(a) {
+    // The same columns an upload's finish writes, so the loop is usable at once.
     const row = await one<any>(
-      `INSERT INTO filler_assets (account_id, kind, name, status, bytes)
-       VALUES ($1,'loop',$2,'ready',$3) RETURNING id`,
-      [a.accountId, a.name, a.bytes]
+      `INSERT INTO filler_assets
+         (id, account_id, kind, name, status, bytes, source_key, filename, content_type, uploaded_at)
+       VALUES ($1,$2,'loop',$3,'ready',$4,$5,$6,$7,now()) RETURNING id`,
+      [a.id, a.accountId, a.name, a.bytes, a.sourceKey, a.filename, a.contentType]
     );
     return { id: row.id };
+  },
+  async runIngest(a) {
+    // Same contract as the upload path: a probe or rule that cannot run is
+    // recorded, not a reason to lose the file; the asset encodes as before.
+    try {
+      const { ingestLanded } = await import('../ingest/pipeline');
+      const out = await ingestLanded({
+        accountId: a.accountId, assetId: a.assetId, path: a.path, originalName: a.originalName,
+        relativePath: a.relativePath, bytes: a.bytes, sha256: a.sha256, source: a.source,
+      });
+      return { status: out.status, path: out.path };
+    } catch (e: any) {
+      console.warn('[watchfolder] ingest rules could not run for', a.assetId, e?.message ?? e);
+      return { status: 'ingested', path: a.path };
+    }
   },
   async enqueueEncode(a) {
     const job = await enqueue({

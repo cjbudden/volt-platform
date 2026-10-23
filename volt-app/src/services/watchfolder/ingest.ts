@@ -340,6 +340,11 @@ export interface IngestSummary {
    * finished that has not started.
    */
   queued?: number;
+  /** Filler loops added to Loops & Fillers (not encoded, usable at once). */
+  loops?: number;
+  /** VOD files in the Media Library that the ingest rules held (duplicate,
+   *  rejected, waiting for metadata), so no encode was queued. */
+  held?: number;
   outcomes: IngestOutcome[];
 }
 

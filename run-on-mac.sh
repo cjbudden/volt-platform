@@ -222,6 +222,21 @@ else
   echo "      Channels will stream, but without subtitles. Fix with:"
   echo "        python3 -m venv volt-encoder/.venv && volt-encoder/.venv/bin/pip install faster-whisper"
 fi
+# SOCIAL FORMATS (volt/REFRAME.md): the face tracker in reframe_analyse.py
+# needs numpy and OpenCV in the same Python. Without them the Formats tab still
+# finds the shots and frames on the centre, and says why faces were not found.
+if "$PYTHON_BIN" -c "import numpy, cv2; cv2.FaceDetectorYN" >/dev/null 2>&1; then
+  echo "    social formats face tracking: READY (OpenCV via $PYTHON_BIN)"
+else
+  echo "    social formats face tracking: installing numpy and OpenCV for $PYTHON_BIN…"
+  if "$PYTHON_BIN" -m pip install --quiet numpy opencv-python-headless >/dev/null 2>&1 \
+     || "$PYTHON_BIN" -m pip install --quiet --user --break-system-packages numpy opencv-python-headless >/dev/null 2>&1; then
+    echo "      installed."
+  else
+    echo "      NOT AVAILABLE: shots are still found, faces are not. Fix with:"
+    echo "        $PYTHON_BIN -m pip install numpy opencv-python-headless"
+  fi
+fi
 export PYTHON_BIN
 [ -n "$PACKAGER_BIN" ] || MISSING="$MISSING shaka-packager"
 if [ -z "$MISSING" ]; then
@@ -260,15 +275,36 @@ if [ "$WANT_DOCKER" = "1" ]; then
     echo "    ENCODER_MODE=docker requested but Docker could not be started (see step 2)."
     exit 1
   fi
+  # Both images the Docker launcher runs: the encoder (television, events) AND
+  # the station image (radio). Only the encoder used to be built, so in Docker
+  # mode every radio station failed at `docker run` ("pull access denied for
+  # volt-radio") and sat at "Input: connecting" with nothing in its log.
+  # Each image is labelled with its Dockerfile's hash and rebuilt when that
+  # changes (bin/ is mounted live, so code edits never need a rebuild).
+  ensure_image() {  # <tag> <dockerfile> <label>
+    local tag="$1" df="$2" what="$3" want have
+    want=$(shasum -a 256 "$df" 2>/dev/null | cut -c1-16)
+    have=$(docker image inspect -f '{{ index .Config.Labels "volt.dockerfile" }}' "$tag" 2>/dev/null || true)
+    if [ -n "$have" ] && [ "$have" = "$want" ]; then
+      echo "    $what image '$tag' present."
+      return 0
+    fi
+    if [ -z "$have" ] && docker image inspect "$tag" >/dev/null 2>&1 && [ "${REBUILD_IMAGES:-0}" != "1" ]; then
+      echo "    $what image '$tag' present (unlabelled; REBUILD_IMAGES=1 to refresh it)."
+      return 0
+    fi
+    echo "    building $what image '$tag' (a few minutes the first time)..."
+    if ! docker build -f "$df" --label "volt.dockerfile=$want" -t "$tag" "$ROOT/volt-encoder"; then
+      echo "    !! could not build $what image '$tag'. Streams that need it will report why in their event log."
+      return 1
+    fi
+  }
   IMG="${ENCODER_IMAGE:-volt-encoder:local}"
-  if docker image inspect "$IMG" >/dev/null 2>&1; then
-    echo "    encoder image '$IMG' present."
-  else
-    echo "    building encoder image '$IMG' (first run only — a few minutes)..."
-    docker build -t "$IMG" "$ROOT/volt-encoder"
-  fi
+  RIMG="${RADIO_IMAGE:-volt-radio:local}"
+  ensure_image "$IMG"  "$ROOT/volt-encoder/Dockerfile"       encoder || true
+  ensure_image "$RIMG" "$ROOT/volt-encoder/Dockerfile.radio" station || true
   ENCODER_MODE="docker"
-  export ENCODER_IMAGE="$IMG"
+  export ENCODER_IMAGE="$IMG" RADIO_IMAGE="$RIMG"
   echo "    real encoder: DOCKER ('$IMG') — production-identical ffmpeg (SRT + drawtext) + Shaka."
   echo "      NB: Docker uses your Mac's CPU; keep ladders light (720p/480p) for smooth realtime."
 fi

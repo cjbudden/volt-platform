@@ -1162,7 +1162,8 @@ svg.spin{animation:vspin 1s linear infinite}
 .epg-tl-block.overlap{border-color:color-mix(in srgb,var(--warn,#e2b64f) 70%,transparent);border-style:dashed}
 .epg-tl-block.cont-prev{border-top-style:dotted;border-top-left-radius:0;border-top-right-radius:0}
 .epg-tl-block.cont-next{border-bottom-style:dotted;border-bottom-left-radius:0;border-bottom-right-radius:0}
-.epg-tl-block .row1{display:flex;align-items:center;gap:8px;min-width:0}
+.epg-tl-block .row1{display:flex;align-items:flex-start;gap:8px;min-width:0}
+.epg-tl-block.tight .row1{align-items:center;width:100%}
 .epg-tl-block b{font-weight:600;font-size:var(--fs-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .epg-tl-block .t{font-size:var(--fs-xs,11px);color:var(--muted);white-space:nowrap;font-family:ui-monospace,monospace}
 .epg-tl-block.past .t{color:var(--faint)}
@@ -1170,7 +1171,10 @@ svg.spin{animation:vspin 1s linear infinite}
 .epg-tl-block.tight b{font-size:var(--fs-xs,11px)}
 .epg-tl-col .cal-now{z-index:5;pointer-events:none}
 .epg-tl-block .dot{width:6px;height:6px;border-radius:50%;background:var(--live);flex:none}
-.epg-tl-block .tags{display:flex;flex-wrap:wrap;gap:4px}
+.epg-tl-block .tags{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;margin-left:auto;flex:0 1 auto;max-width:65%}
+.epg-tl-block .tl-tag.rec{display:inline-flex;align-items:center;gap:4px;color:#fca5a5;border-color:color-mix(in srgb,var(--down) 50%,transparent);background:color-mix(in srgb,var(--down) 14%,transparent)}
+.epg-tl-block .tl-tag.rec .rd{width:6px;height:6px;border-radius:50%;background:var(--down);box-shadow:0 0 5px rgba(248,113,113,.6)}
+.epg-tl-block.tight .tl-tag{padding:0 5px;line-height:13px}
 .epg-tl-block .tl-tag{font-size:var(--fs-micro,10px);font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border:1px solid;border-radius:5px;background:rgba(0,0,0,.18);white-space:nowrap}
 .epg-tl-block .desc{font-size:var(--fs-xs,11px);color:var(--faint);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .epg-tl-gap{position:absolute;left:6px;right:6px;display:flex;flex-direction:column;justify-content:center;gap:2px;padding:0 10px;border:1px dashed color-mix(in srgb,var(--warn,#e2b64f) 40%,transparent);border-radius:7px;background:repeating-linear-gradient(135deg,transparent 0,transparent 7px,rgba(226,182,79,.05) 7px,rgba(226,182,79,.05) 14px);color:var(--warn,#e2b64f);font:inherit;font-size:var(--fs-xs,11px);text-align:left;cursor:pointer}

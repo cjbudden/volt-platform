@@ -829,6 +829,8 @@ export interface WatchfolderScan {
     /** Video accepted and handed to an encode job. Counted apart from
      *  `ingested`, because accepted is not yet playable. */
     queued?: number
+    loops?: number
+    held?: number
     skipped?: number
   } | null
 }

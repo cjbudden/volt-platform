@@ -17,6 +17,9 @@
 //  means the pipeline is down NOW, and we report it that way.
 // ============================================================================
 
+/** A running stream with no source this long has its own flag (NO SOURCE). */
+export const SOURCE_WAIT_MS = 20_000;
+
 export type GateName = 'server' | 'input' | 'encoder' | 'output' | 'public';
 import { config } from '../config';
 import { diagnoseFailure, eventLine, type FailureDiagnosis } from './failureDiagnosis';
@@ -342,6 +345,9 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   };
 
   const stall = unresolved(/output\.stalled/, /output\.resumed/);
+  // The newest timeline verdict of this run (encoder output_check.py): 'fault' until an 'ok'.
+  const tlLast = firstOf(/^output\.timeline$/);
+  const timelineFault = tlLast && d(tlLast.detail).state === 'fault' ? tlLast : null;
   const srcDown = unresolved(/source\.down/, /source\.up/);
   const inputErr = unresolved(/input\.error/, /source\.up/);
   const lastStop = firstOf(/channel\.stop/);
@@ -403,7 +409,7 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   });
 
   // ---- 2) INPUT (is the source arriving?) ----------------------------------
-  let inputStatus: GateStatus; let inputDetail: string;
+  let inputStatus: GateStatus; let inputDetail: string; let inputBadge = '';
   if (crashIsInput) { inputStatus = 'failed'; inputDetail = inputErrMsg || firstErrLine || stopReason; }
   else if (!live && !crashed) { inputStatus = ended ? 'stopped' : 'idle'; inputDetail = inp.hasPrimarySource ? 'source configured · idle' : 'no source configured'; }
   else if (inputErr) { inputStatus = 'failed'; inputDetail = inputErrMsg || firstErrLine || 'input error'; }
@@ -427,9 +433,21 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   }
   else if (primaryUp && outStalled) { inputStatus = 'degraded'; inputDetail = firstErrLine || `source may have dropped — output stalled ${stalledFor}`; }
   else if (primaryUp) { inputStatus = 'healthy'; inputDetail = crashIsEncoder ? 'receiving — but the encoder failed' : String(primary?.detail || 'receiving'); }
-  else if (reporting) { inputStatus = 'starting'; inputDetail = 'waiting for the source to arrive'; }
+  else if (reporting) {
+    // RUNNING, LISTENING, AND NOTHING HAS ARRIVED. Normal for the first seconds;
+    // past SOURCE_WAIT_MS it is its own state: the server is up (and billing)
+    // while no contribution feed has been pushed to it. Not a failure (a push
+    // source may simply not have started), but the operator must see it.
+    const waited = firstOf(/^source\.waiting$/);
+    const waitedMs = runStartedAt != null ? Date.now() - runStartedAt : 0;
+    if (waited || waitedMs > SOURCE_WAIT_MS) {
+      inputStatus = 'starting';
+      inputDetail = `no source pushed yet · waiting ${Math.max(1, Math.round(waitedMs / 1000))}s`;
+      inputBadge = 'NO SOURCE';
+    } else { inputStatus = 'starting'; inputDetail = 'waiting for the source to arrive'; }
+  }
   else { inputStatus = 'starting'; inputDetail = 'connecting to source'; }
-  gates.push({ gate: 'input', label: 'Input', billable: false, status: inputStatus, detail: inputDetail });
+  gates.push({ gate: 'input', label: 'Input', billable: false, status: inputStatus, detail: inputDetail, ...(inputBadge ? { badge: inputBadge } : {}) });
 
   // ---- 3) ENCODER (running & keeping up?) -----------------------------------
   let encStatus: GateStatus; let encDetail: string;
@@ -447,6 +465,13 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   let outStatus: GateStatus; let outDetail: string;
   if (crashed) { outStatus = 'failed'; outDetail = `no output — ${stopReason}`; }
   else if (!live) { outStatus = ended ? 'stopped' : 'idle'; outDetail = 'no output'; }
+  else if (outFresh && timelineFault) {
+    // ADVANCING BUT TELLING THE WRONG TIME (encoder output_check.py): audio and
+    // video disagree, or a track jumped back. Segments arrive, so every other
+    // check is green, and viewers still see sound out of step with the picture.
+    outStatus = 'degraded';
+    outDetail = `timing fault · ${String(d(timelineFault.detail).message || 'audio/video timeline inconsistent')}`;
+  }
   else if (outFresh) { outStatus = 'healthy'; outDetail = `advancing · ${inp.packagingLabel}`; }
   else if (outStalled) { outStatus = 'degraded'; outDetail = firstErrLine || `output stalled — no new segments for ${stalledFor}`; }
   else if (stall) { outStatus = 'degraded'; outDetail = String(d(stall.detail).message || 'output stalled — no new segments'); }
@@ -463,7 +488,9 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   //   published + NOT valid-> FAILED (red): we are on air but the public stream has no
   //                           valid content, so viewers can't watch — surface the error.
   // "valid content" = the packaged output is actually advancing (outputFresh ground truth).
-  const outputValid = effLive && outStatus === 'healthy';
+  // A timing fault degrades the output but it IS still content: it must not read
+  // as "on air with no valid content", which would send operators the wrong way.
+  const outputValid = effLive && (outStatus === 'healthy' || (outStatus === 'degraded' && !!timelineFault && outFresh));
   const published = !!inp.onAirPublished;
   let pubStatus: GateStatus; let pubDetail: string;
   if (published) {

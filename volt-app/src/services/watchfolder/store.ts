@@ -363,7 +363,11 @@ export async function ingestFolder(folderId: string): Promise<IngestSummary | nu
     for (const item of vids) {
       const o = await ingestVideoItem(vf, item, pgVideoIngestStore);
       summary.outcomes.push(o as any);
-      if (o.result === 'queued' || o.result === 'registered') summary.queued = (summary.queued ?? 0) + 1;
+      // Each counted for what it is: a loop is usable now, a VOD encodes, a held
+      // VOD waits for a person (duplicate, metadata). See ingest.ts.
+      if (o.result === 'queued') summary.queued = (summary.queued ?? 0) + 1;
+      else if (o.result === 'registered') summary.loops = (summary.loops ?? 0) + 1;
+      else if (o.result === 'held') summary.held = (summary.held ?? 0) + 1;
       else if (o.result === 'failed') summary.failed++;
       else if (o.result === 'skipped') summary.skipped++;
       else summary.deferred++;

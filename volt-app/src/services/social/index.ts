@@ -295,7 +295,17 @@ export async function handleSocialPublish(ctx: { job: any; progress: (pct: numbe
     } else {
       const token = await validToken(target);
       await progress(2, 'preparing the video');
-      media = await mediaFile(asset);
+      // The platform's own shape when Admin > Formats and reframing maps it to one
+      // (TikTok to 9:16 ...): that file, rendered now if needed. Otherwise the 16:9.
+      const { formatMediaFor, ReframeNotReady } = await import('../reframe/publish');
+      let shaped: string | null = null;
+      try {
+        shaped = await formatMediaFor(asset, target.platform, (pct, stage) => progress(pct, stage));
+      } catch (e: any) {
+        if (e instanceof ReframeNotReady) throw new SocialError(e.message, { permanent: true });
+        throw e;
+      }
+      media = shaped ? { path: shaped, cleanup: () => {} } : await mediaFile(asset);
       const size = statSync(media.path).size;
       result = await p.upload({ token, externalAccount: target.external_account, accountLabel: target.account_label, file: media.path, size, post, progress });
     }

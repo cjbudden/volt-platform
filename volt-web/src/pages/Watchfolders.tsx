@@ -33,7 +33,7 @@ import { pressable } from '../a11y'
 
 const STATUS: Record<string, { label: string; tone: string; help: string }> = {
   seen:        { label: 'Waiting',     tone: 'var(--brand,#3f7bff)', help: 'Classified, waiting for the next ingest pass.' },
-  ingested:    { label: 'In library',  tone: 'var(--ok,#4ade80)',    help: 'A library record was created for this file.' },
+  ingested:    { label: 'In library',  tone: 'var(--ok,#4ade80)',    help: 'A library record was created for this file: Image Library, Media Library (a video shows its encode there) or Loops & Fillers.' },
   quarantined: { label: 'Needs review',tone: 'var(--warn,#fbbf24)',  help: 'No rule matched, or a rule refused it. The file is in the review folder.' },
   failed:      { label: 'Failed',      tone: 'var(--danger,#f87171)',help: 'It matched a rule, but the ingest itself did not complete.' },
   reprocessed: { label: 'Sent back',   tone: 'var(--brand,#3f7bff)', help: 'Returned to the drop folder to be looked at again.' },
@@ -394,6 +394,8 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
                     number for both would report work as done that has not
                     started. */}
                 {scan.ingest.queued ? `, ${scan.ingest.queued} queued for encoding` : ''}
+                {scan.ingest.loops ? `, ${scan.ingest.loops} added to Loops & Fillers` : ''}
+                {scan.ingest.held ? `, ${scan.ingest.held} held by the ingest rules` : ''}
                 {scan.ingest.failed ? `, ${scan.ingest.failed} failed` : ''}
                 {scan.ingest.deferred ? `, ${scan.ingest.deferred} left for other workflows` : ''}.
               </>

@@ -115,6 +115,9 @@ export const CANONICAL_EVENTS = [
   'failover.switch', 'filler.engaged', 'filler.cleared',
   'packager.up', 'packager.down',
   'output.degraded', 'output.stalled',
+  // the run is up but no source has arrived (NO SOURCE); the delivered output's
+  // timing verdict (encoder output_check.py), and the segment length chosen
+  'source.waiting', 'output.timeline', 'output.segments',
   'engine.provisioned', 'engine.state', 'engine.alert', 'engine.error',
 ] as const;
 export type CanonicalEventType = typeof CANONICAL_EVENTS[number];

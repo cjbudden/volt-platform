@@ -19,6 +19,7 @@ import { LibraryFilterPanel, LibraryToolbar } from './vod/LibraryFilters'
 import { LibraryGrid } from './vod/LibraryGrid'
 import { AvailabilityPill, Completeness, Keyscreen, KindLegend, TypeLabel } from './vod/LibraryCells'
 import { EncodePanel, TargetMetadataPanel } from './vod/AssetPanels'
+import FormatsPanel from './vod/FormatsPanel'
 import { libraryApi, type LibraryFacets, type LibraryRow } from './vod/libraryApi'
 import { VIEWS, codecLabel, filtersToApi, filtersToSearch, isFiltered, parseColumns, parseFilters, resLabel, type LibraryFilters, type LibraryView } from './vod/libraryQuery'
 import { LibIcon } from './vod/icons'
@@ -124,7 +125,7 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   const [d, setD] = useState<any>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
-  const [tab, setTab] = useState<'play' | 'markers' | 'history' | 'availability' | 'metadata' | 'encode'>('play')
+  const [tab, setTab] = useState<'play' | 'markers' | 'history' | 'availability' | 'metadata' | 'encode' | 'formats'>('play')
   const [composeOpen, setComposeOpen] = useState(false)
   const [socialKey, setSocialKey] = useState(0)
   async function load() {
@@ -168,11 +169,11 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   return (
     <div style={{ padding: '8px 2px 14px' }}>
       <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 12 }}>
-        {(['play', 'markers', 'metadata', 'encode', 'availability', 'history'] as const).map(t => (
+        {(['play', 'markers', 'metadata', 'encode', 'formats', 'availability', 'history'] as const).map(t => (
           <button key={t} className={`btn ${tab === t ? 'primary' : 'ghost'}`}
             style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }}
             onClick={() => setTab(t)}>
-            {t === 'play' ? 'Preview' : t === 'markers' ? 'Skip markers' : t === 'metadata' ? 'Metadata' : t === 'encode' ? 'Encode' : t === 'availability' ? 'Availability' : 'History'}
+            {t === 'play' ? 'Preview' : t === 'markers' ? 'Skip markers' : t === 'metadata' ? 'Metadata' : t === 'encode' ? 'Encode' : t === 'formats' ? 'Formats' : t === 'availability' ? 'Availability' : 'History'}
           </button>
         ))}
         <AvailabilityBadge state={d.availability_state} until={d.available_until} />
@@ -338,6 +339,9 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
       )}
 
       {tab === 'encode' && <EncodePanel id={d.id} />}
+
+      {/* SOCIAL FORMATS: 9:16, 1:1 and 4:5 framed by following the picture (volt/REFRAME.md). */}
+      {tab === 'formats' && <FormatsPanel asset={d} />}
 
       {tab === 'availability' && (
         <AvailabilityPanel d={d} onChanged={() => { load(); onChanged() }} />

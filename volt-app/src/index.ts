@@ -195,6 +195,7 @@ boot().then(async () => {
     registerVodEncodeHandlers();
     (await import('./services/jobs/handlers/adCondition')).registerAdConditionHandlers();
     registerVodMarkerHandlers();
+    (await import('./services/jobs/handlers/reframe')).registerReframeHandlers();
     registerVodImageHandlers();
     (await import('./services/jobs/handlers/songArtwork')).registerSongArtworkHandlers();
     registerRemoteIngestHandlers();

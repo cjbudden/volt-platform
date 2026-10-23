@@ -37,8 +37,10 @@ function fmtDur(ms: number) {
   return m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}` : `${m}m`
 }
 
-const VOD_TAG: Partial<Record<VodState, { label: string; color: string }>> = {
-  scheduled: { label: 'Auto VOD', color: 'var(--brand)' },
+type Tag = { label: string; color: string; title?: string; rec?: boolean }
+
+const VOD_TAG: Partial<Record<VodState, Tag>> = {
+  scheduled: { label: 'Rec', color: 'var(--down,#f87171)', title: 'Will be recorded (auto VOD)', rec: true },
   converting: { label: 'Converting', color: 'var(--warn,#e2b64f)' },
   converted: { label: 'VOD ready', color: 'var(--live)' },
   convertible: { label: 'Recorded', color: 'var(--warn,#e2b64f)' },
@@ -219,7 +221,7 @@ export function EpgTimeline({ day, progs, vod, overlapsById, ownerWord, onEdit, 
               const time = `${fmtT(x.rawS)}${contPrev ? ' (prev. day)' : ''} to ${fmtT(x.rawE)}${contNext ? ' (next day)' : ''}`
               const tight = h < 34
               const cls = ['epg-tl-block', live ? 'live' : past ? 'past' : 'upcoming', overlaps ? 'overlap' : '', tight ? 'tight' : '', contPrev ? 'cont-prev' : '', contNext ? 'cont-next' : ''].filter(Boolean).join(' ')
-              const tags: { label: string; color: string; title?: string }[] = []
+              const tags: Tag[] = []
               if (live) tags.push({ label: 'On now', color: 'var(--live)' })
               if (p.series_id) tags.push({ label: 'Repeats', color: 'var(--muted)', title: 'Part of a recurring series' })
               if (p.geo_mode !== 'worldwide') tags.push({
@@ -230,6 +232,8 @@ export function EpgTimeline({ day, progs, vod, overlapsById, ownerWord, onEdit, 
               if (vt) tags.push(vt)
               if (overlaps) tags.push({ label: overlaps.length === 1 ? `Overlaps "${overlaps[0]}"` : `Overlaps ${overlaps.length}`, color: 'var(--warn,#e2b64f)' })
               const w = 100 / x.lanes
+              // Flags sit top right on the title row. A tight block has room for the REC flag only.
+              const shown = tight ? tags.filter(t => t.rec) : tags
               return (
                 <button key={p.id} type="button" className={cls}
                   style={{ top, height: h, left: `calc(${x.lane * w}% + 6px)`, width: `calc(${w}% - 12px)` }}
@@ -239,13 +243,15 @@ export function EpgTimeline({ day, progs, vod, overlapsById, ownerWord, onEdit, 
                     <b>{p.title}</b>
                     {tight && <span className="t">{fmtT(x.rawS)}</span>}
                     {tight && live && <span className="dot" aria-label="On now" />}
+                    {shown.length > 0 && (
+                      <div className="tags">
+                        {shown.map(t => t.rec
+                          ? <span key={t.label} className="tl-tag rec" title={t.title}><i className="rd" aria-hidden />REC</span>
+                          : <span key={t.label} className="tl-tag" title={t.title} style={{ color: t.color, borderColor: `color-mix(in srgb, ${t.color} 45%, transparent)` }}>{t.label}</span>)}
+                      </div>
+                    )}
                   </div>
                   {!tight && <div className="t">{time} · {fmtDur(x.rawE - x.rawS)}</div>}
-                  {!tight && h >= 54 && tags.length > 0 && (
-                    <div className="tags">
-                      {tags.map(t => <span key={t.label} className="tl-tag" title={t.title} style={{ color: t.color, borderColor: `color-mix(in srgb, ${t.color} 45%, transparent)` }}>{t.label}</span>)}
-                    </div>
-                  )}
                   {!tight && h >= 92 && p.metadata?.description && <div className="desc">{p.metadata.description}</div>}
                 </button>
               )

@@ -40,6 +40,7 @@ import time
 import source_selector
 import stream_metrics
 import ingest_args
+import gop_align
 from ladder_args import gop_for, video_rung_args, audio_track_args
 from packager_log import PackagerLogFilter, resolve_mode as resolve_packager_log_mode
 import events as events_mod
@@ -671,6 +672,56 @@ _ingest_inputs = []
 
 def _ingest_key(inp, idx):
     return f"{inp.get('role', 'primary')}:{inp.get('rendition_label') or idx}"
+
+
+def align_segments_to_source(cfg):
+    """package_only: set cfg["segment_seconds"] to a whole number of source GOPs.
+
+    Runs before the packager, the filler build and the caption/companion
+    refreshers, so all of them use the one length. A probe that fails, or a
+    source we cannot probe yet (a push), keeps the configured length."""
+    if cfg.get("workflow") != "package_only" or cfg.get("align_segments") is False:
+        return
+    target = float(cfg.get("segment_seconds", 4))
+    first = next((i for i in primary_inputs(cfg) if gop_align.probeable(i)), None)
+    if first is None:
+        return
+    try:
+        url = input_url(first)
+    except Exception:  # noqa: BLE001
+        url = first.get("url")
+    gop, jitter = gop_align.source_gop(gop_align.probe_keyframes(url))
+    seg, why = gop_align.aligned_segment(target, gop, jitter)
+    if seg != target:
+        cfg["segment_seconds"] = seg
+        log(f"segments: {target}s -> {seg}s ({why}) so audio and video cut on the same boundaries")
+    else:
+        log(f"segments: keeping {target}s ({why})")
+    if _events:
+        _events.event("output.segments", requested=target, used=seg, gop=gop,
+                      jitter=jitter, reason=why)
+
+
+def start_output_watch(cfg, interval=5.0):
+    """Every few seconds, check the packaged output tells one consistent time."""
+    if cfg.get("output_check") is False or _events is None:
+        return
+    import output_check
+    watch = output_check.OutputWatch(
+        OUT_DIR, float(cfg.get("segment_seconds") or 4),
+        emit=lambda etype, **d: _events.event(etype, **d))
+
+    def loop():
+        time.sleep(max(interval, float(cfg.get("segment_seconds") or 4) * 3))  # let a few segments land
+        while True:
+            try:
+                watch.tick()
+            except Exception as e:  # noqa: BLE001 - a checker must never touch the media path
+                log(f"output check error: {e}")
+            time.sleep(interval)
+
+    threading.Thread(target=loop, name="output-check", daemon=True).start()
+    log(f"output check: timeline conformance every {interval:.0f}s")
 
 
 def _segment_hints(cfg, inputs):
@@ -2391,8 +2442,17 @@ def main():
         has_filler=redundancy_on(cfg) and red.get("input_loss_behavior", "slate") in ("slate", "vod_loop"),
     )
     _events.channel_start(cfg["workflow"], nrend)
+    # NO SOURCE: one event if nothing has arrived after a grace period.
+    _wait_s = int(cfg.get("source_wait_seconds") or 20)
+    _wait_t = threading.Timer(_wait_s, lambda: _events.source_waiting("primary", _wait_s))
+    _wait_t.daemon = True
+    _wait_t.start()
 
     keys = fetch_drm_keys(cfg.get("drm"))
+
+    # package_only: cut on the source's own keyframes so every track's seg_N is the
+    # same few seconds (gop_align.py explains the A/V drift this prevents).
+    align_segments_to_source(cfg)
 
     # Shaka first so its UDP listeners are up before FFmpeg starts pushing.
     # Packager log noise: Shaka's harmless AAC rounding warning is summarised, not
@@ -2403,6 +2463,10 @@ def main():
                   log_filter=None if plog == "all" else PackagerLogFilter(plog))
     time.sleep(1)
     _events.packager(True)
+
+    # Time conformance of what we deliver (output_check.py): one event when the
+    # verdict changes, so QC and the OUTPUT gate see A/V or timeline faults.
+    start_output_watch(cfg)
 
     # Failover prep (no-op unless input_failover is on): make sure the filler slate is a
     # real local file so the filler can never fail to open it.

@@ -14,7 +14,7 @@
 //  host CPU, so keep dev ladders light.
 // ============================================================================
 import { spawn, spawnSync, ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, openSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, openSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { config } from '../../config';
 import type { TaskLauncher, LaunchResult, Liveness } from './launcher';
@@ -22,6 +22,79 @@ import type { Placement } from '../fleet/placement';
 import { onboxPlacement } from '../fleet/onbox';
 
 interface Proc { taskArn: string; child: ChildProcess; name: string; kind: string; streamId?: string; }
+
+// ----------------------------------------------------------------------------
+//  A CONTAINER THAT DIES SILENTLY MUST STILL REACH THE EVENT LOG.
+//
+//  The encoder and radio.py report their own faults, but only once they are
+//  running. When `docker run` itself fails (image not built, daemon refused,
+//  bad mount) nothing inside the container ever executes, so nothing reports:
+//  the console sat at "Input: connecting" forever and the event log showed only
+//  start.requested. These helpers make the launcher report on the container's
+//  behalf, through the same applyReport path the encoder uses, so the log, the
+//  health gates and the teardown all see it.
+// ----------------------------------------------------------------------------
+function imagePresent(image: string): boolean {
+  const r = spawnSync('docker', ['image', 'inspect', image], { stdio: 'ignore', timeout: 8000 });
+  return r.status === 0;
+}
+
+function buildHint(image: string): string {
+  if (/volt-radio/.test(image)) return `docker build -f volt-encoder/Dockerfile.radio -t ${image} volt-encoder`;
+  return `docker build -t ${image} volt-encoder`;
+}
+
+/** Last meaningful line of a task log, with docker's own boilerplate removed. */
+function logTail(file: string): string {
+  try {
+    const lines = readFileSync(file, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+      .filter((l) => !/^Run 'docker run --help'/.test(l));
+    return (lines.slice(-1)[0] ?? '').slice(0, 300);
+  } catch { return ''; }
+}
+
+async function reportOnBehalf(streamId: string, events: { type: string; detail: Record<string, any> }[]): Promise<void> {
+  try {
+    // Lazy: modules/status imports the orchestrator, which imports this file.
+    const { applyReport } = await import('../../modules/status');
+    for (const kind of ['channel', 'event'] as const) {
+      try {
+        for (const event of events) await applyReport({ kind, id: streamId, event });
+        return;
+      } catch (e: any) {
+        if (e?.status === 404 || e?.statusCode === 404 || /unknown stream/i.test(String(e?.message))) continue;
+        console.error(`[docker-launcher] could not report for ${streamId}`, e);
+        return;
+      }
+    }
+  } catch (e) {
+    console.error(`[docker-launcher] could not report for ${streamId}`, e);
+  }
+}
+
+/** A container exited without being asked to. Say so, with the reason. */
+function reportUnexpectedExit(streamId: string, what: string, image: string, code: number | null, logFile: string): void {
+  const tail = logTail(logFile);
+  const how = code != null ? `rc=${code}` : 'killed';
+  const events: { type: string; detail: Record<string, any> }[] = [];
+  // 125/126/127 = docker could not start the container at all, so the task
+  // never ran and never reported. Anything else: the task ran and has
+  // normally reported its own error already; only the stop is added here.
+  if (code === 125 || code === 126 || code === 127 || /Unable to find image|pull access denied/i.test(tail)) {
+    const missing = /Unable to find image|pull access denied/i.test(tail);
+    events.push({
+      type: 'input.error',
+      detail: {
+        message: missing
+          ? `The ${what} container could not start: Docker image ${image} is not built. Build it with: ${buildHint(image)}`
+          : `The ${what} container could not start (${how}): ${tail || 'no output'}`,
+        rc: code, source: 'docker',
+      },
+    });
+  }
+  events.push({ type: 'channel.stop', detail: { reason: `${what} container exited ${how}${tail ? `: ${tail}` : ''}` } });
+  void reportOnBehalf(streamId, events);
+}
 
 export class DockerTaskLauncher implements TaskLauncher {
   private procs = new Map<string, Proc>();
@@ -32,6 +105,18 @@ export class DockerTaskLauncher implements TaskLauncher {
   private originFor(streamId: string) { return resolve(this.originDir(), streamId); }
   private encoderBin() { return resolve(config.testStream.encoderBin); }
 
+  /**
+   * Refuse to launch from an image that is not there, and say so in the
+   * stream's own event log. Without this, `docker run` tried to pull a local
+   * tag from Docker Hub, failed, and the start looked accepted.
+   */
+  private async requireImage(streamId: string, image: string, what: string): Promise<void> {
+    if (imagePresent(image)) return;
+    const message = `The ${what} cannot start: Docker image ${image} is not built. Build it with: ${buildHint(image)} (or restart with run-on-mac.sh, which builds it).`;
+    await reportOnBehalf(streamId, [{ type: 'input.error', detail: { message, source: 'docker' } }]);
+    throw new Error(message);
+  }
+
   /** True when docker is on PATH and the daemon is reachable. */
   static available(): boolean {
     const r = spawnSync('docker', ['info'], { stdio: 'ignore', timeout: 8000 });
@@ -40,6 +125,7 @@ export class DockerTaskLauncher implements TaskLauncher {
 
   async launchEncoder(streamId: string, job: Record<string, any>): Promise<LaunchResult> {
     const out = this.originFor(streamId);
+    await this.requireImage(streamId, this.image(), 'encoder');
     try { rmSync(out, { recursive: true, force: true }); } catch { /* ignore */ }
     mkdirSync(out, { recursive: true });
 
@@ -75,8 +161,11 @@ export class DockerTaskLauncher implements TaskLauncher {
     const child = spawn('docker', args, { stdio: ['ignore', logFd, logFd] });
     this.procs.set(taskArn, { taskArn, child, name, kind: 'encoder', streamId });
     child.on('exit', (code) => {
+      // Still registered = nobody called stopTask, so this exit is a surprise.
+      const unexpected = this.procs.has(taskArn);
       this.procs.delete(taskArn);
       console.log(`[docker-launcher] encoder ${streamId} (container ${name}) exited rc=${code}`);
+      if (unexpected && code !== 0) reportUnexpectedExit(streamId, 'encoder', this.image(), code, `${out}/encoder.log`);
     });
     console.log(`[docker-launcher] encoder ${streamId} -> container ${name} (image ${this.image()}) out=${out}`);
     return { taskArn, lifecycle: 'on_demand' };
@@ -101,8 +190,17 @@ export class DockerTaskLauncher implements TaskLauncher {
    */
   async launchRadio(streamId: string, job: Record<string, any>): Promise<LaunchResult> {
     const out = this.originFor(streamId);
+    await this.requireImage(streamId, this.radioImage(), 'station');
     mkdirSync(out, { recursive: true });
     const localJob: Record<string, any> = { ...job, output: { mode: 'local', dir: out } };
+    // Icecast on the developer's machine is published on the HOST (run-on-mac
+    // maps :8000), and inside the container localhost is the container. Only a
+    // loopback host is rewritten: a named relay (a compose service, a real
+    // relay host) is reachable as-is and must not be touched.
+    const ice = localJob.icecast;
+    if (ice && typeof ice.host === 'string' && /^(localhost|127\.0\.0\.1)$/.test(ice.host)) {
+      localJob.icecast = { ...ice, host: 'host.docker.internal' };
+    }
     const rep = localJob.status_report;
     if (rep && typeof rep.url === 'string') {
       localJob.status_report = {
@@ -127,8 +225,10 @@ export class DockerTaskLauncher implements TaskLauncher {
     const child = spawn('docker', args, { stdio: ['ignore', logFd, logFd] });
     this.procs.set(taskArn, { taskArn, child, name, kind: 'radio', streamId });
     child.on('exit', (code) => {
+      const unexpected = this.procs.has(taskArn);
       this.procs.delete(taskArn);
       console.log(`[docker-launcher] radio ${streamId} (container ${name}) exited rc=${code}`);
+      if (unexpected && code !== 0) reportUnexpectedExit(streamId, 'station', this.radioImage(), code, `${out}/radio-task.log`);
     });
     console.log(`[docker-launcher] radio ${streamId} -> container ${name} (image ${this.radioImage()}) out=${out}`);
     return { taskArn, lifecycle: 'on_demand' };

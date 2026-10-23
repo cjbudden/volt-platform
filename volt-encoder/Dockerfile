@@ -30,6 +30,11 @@ RUN curl -fsSL -o /usr/local/bin/packager \
     && chmod +x /usr/local/bin/packager \
     && /usr/local/bin/packager --version
 
+# SOCIAL FORMATS (volt/REFRAME.md): numpy and headless OpenCV for the face
+# tracker in bin/reframe_analyse.py, and its face model (YuNet, MIT, 230 kB)
+# in models/. CPU only, no download at run time.
+RUN pip3 install --no-cache-dir numpy==1.26.4 opencv-python-headless==4.10.0.84
+
 # LIVE CAPTIONS ON CPU (optional, 20 Oct 2026). With CAPTIONS_CPU=true the image
 # carries faster-whisper (CTranslate2, int8) and the tiny and base models, so a
 # channel with whisper tiny/base captions transcribes inside this task on CPU
@@ -71,6 +76,7 @@ ENV GFX_CHROMIUM_PATH=/usr/local/bin/gfx-chromium
 
 WORKDIR /app
 COPY bin/ /app/bin/
+COPY models/ /app/models/
 COPY gfx/burn_renderer.js /app/gfx/
 RUN chmod +x /app/bin/*.sh
 

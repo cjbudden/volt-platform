@@ -49,6 +49,14 @@ const byScope = (s) => notes.filter((n) => n.scope === s);
 const core = byScope('core');
 
 /* ---- customer release notes: core only ---- */
+// The docs site compiles release notes as MDX, where a bare `<resource>` is a
+// JSX tag and `{id}` is an expression: one such line in v0.2.0 failed the whole
+// docs build. Outside inline code, escape them so notes can be written plainly.
+function mdxSafe(line) {
+  return line.split(/(`[^`]*`)/).map((part, i) => (i % 2 ? part : part
+    .replace(/[{}]/g, (c) => `\\${c}`)
+    .replace(/<(?=[A-Za-z\/!])/g, '&lt;'))).join('');
+}
 function section(list, withArea) {
   const out = [];
   for (const t of TYPES) {
@@ -57,8 +65,8 @@ function section(list, withArea) {
     out.push(`## ${TYPE_HEADING[t]}`, '');
     for (const n of items.sort((a, b) => a.area.localeCompare(b.area))) {
       const [first, ...rest] = n.body.split('\n');
-      out.push(`- ${withArea && n.area ? `**${n.area}:** ` : ''}${first}`);
-      for (const l of rest) if (l.trim()) out.push(`  ${l}`);
+      out.push(`- ${withArea && n.area ? `**${n.area}:** ` : ''}${mdxSafe(first)}`);
+      for (const l of rest) if (l.trim()) out.push(`  ${mdxSafe(l)}`);
     }
     out.push('');
   }

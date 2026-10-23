@@ -1,4 +1,5 @@
 import { captionsSettingsRouter } from './modules/captionsSettings';
+import { reframeRouter, reframeSettingsRouter } from './modules/reframe';
 import { CAPTION_LANGUAGES } from './services/captionLanguages';
 import { accountSettingsRouter } from './modules/accountSettings';
 import { sourcePreviewRouter } from './modules/sourcePreview';
@@ -174,7 +175,36 @@ export function createServer() {
   // segments immutably here — `no-cache` keeps a copy but forces revalidation (cheap 304
   // when unchanged within a run, a fresh fetch when the same filename holds new content
   // after a restart). Playlists are never stored.
-  app.use('/origin', (req, res, next) => {
+  app.use('/origin', async (req, res, next) => {
+    // VIEW AS A COUNTRY (Multiview's "Viewer location"): /origin/<id>/as/<CC>/*
+    // is the delivered output passed through the SAME rights decision the
+    // CloudFront Function makes per manifest request (services/edgeViewAs.ts).
+    // Allowed: the run's file. Replaced: the *_rp copy beside it. Blocked, or a
+    // replacement with no _rp written: 451, exactly as the edge answers.
+    // "XX" means a viewer whose country the CDN could not tell.
+    const asCc = req.url.match(/^\/([A-Za-z0-9-]+)\/as\/([A-Za-z]{2})(\/[^?]*)?(\?.*)?$/);
+    if (asCc) {
+      const [, id, ccRaw, restRaw] = asCc;
+      const cc = ccRaw.toUpperCase() === 'XX' ? '' : ccRaw.toUpperCase();
+      let rest = restRaw ?? '/master_cc.m3u8';
+      if (/\.(m3u8|mpd)$/.test(rest)) {
+        try {
+          const { rulesFor, decide } = await import('./services/edgeViewAs');
+          const d = decide(await rulesFor(id), cc, Math.floor(Date.now() / 1000));
+          const run = currentRunId(id);
+          const dir = run ? join(config.testStream.originDir, id, 'runs', run) : join(config.testStream.originDir, id);
+          const rp = rest.replace(/(_cc)?\.(m3u8|mpd)$/, '_rp.$2');
+          if (d === 'replace' && existsSync(join(dir, rp))) rest = rp;
+          else if (d !== 'allow') {
+            res.setHeader('Cache-Control', 'no-store');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.status(451).type('text/plain').send('Not available in your region');
+            return;
+          }
+        } catch { /* rules unreadable: open, as the edge fails open */ }
+      }
+      req.url = `/${id}/live${rest}`;
+    }
     // PER-RUN NAMESPACE: /origin/<id>/live/* is the stable player/share URL; rewrite it
     // to the CURRENT run dir (runs/<runId>/*) named by the channel's pointer file. Falls
     // back to the channel root when no pointer exists (test stub / legacy layout), so
@@ -305,6 +335,7 @@ export function createServer() {
   app.use('/api/sources', sourcesRouter);
   app.use('/api/groups', groupsRouter);
   app.use('/api/plan', planRouter);
+  app.use('/api/account-settings/reframe', reframeSettingsRouter);   // social formats: Admin > Formats and reframing (modules/reframe.ts)
   app.use('/api/account-settings/captions', captionsSettingsRouter);  // live captions: provider and per-profile settings (modules/captionsSettings.ts)
   app.use('/api/account-settings', accountSettingsRouter);  // logo and colours (docs/ACCOUNT_SETTINGS.md)  // the account's plan and how groups share it (docs/PLAN_AND_GROUPS.md)
   app.use('/api/events', eventsRouter);
@@ -376,6 +407,7 @@ export function createServer() {
   // and what retention will do to it next. NOT /api/media — that prefix is the
   // thumbnailer's ingest callback and belongs to a different concern entirely.
   app.use('/api/storage', storageRouter);
+  app.use('/api/vod', reframeRouter);                    // social formats per asset: /:id/reframe... (modules/reframe.ts)
   app.use('/api/vod', vodImageRouter);                   // the image that represents an asset (before vodRouter's /:id)
   app.use('/api/vod', vodRouter);                        // derived VOD assets + metadata
   app.use('/api/metadata-schemas', metadataSchemasRouter); // named metadata schemas
