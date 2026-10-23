@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.12.0 (2026-10-23)
+
+### Product (in customer release notes)
+
+- added · API: One list of every stream: `GET /api/live-streams` returns your channels, radio stations, events and FAST channels together, with search, filters (kind, medium, preset, status, on air, group, dates), sorting, paging and totals. Each row links to its stream summary, its own record and its console page; add `health=true` for the same state, uptime and viewers the Live Streams board shows.
+- improved · Live: The List view on Live Streams now searches and filters by kind (TV, Radio, Events, FAST) on the server and pages 50 at a time, so large fleets load quickly. FAST channels are labelled FAST, and opening an event or a FAST channel from Live Streams goes to its own page.
+- changed · API: The stream presets (`GET /api/live-streams/presets`) no longer include Loop: a loop is a filler video in Loops & Fillers, used to cover a dropped source or a rights window, not a kind of stream.
+
+### Internal
+
+- added: Check suite live-streams-list (55 assertions): the one stream list across both tables, paging, visibility by role, health matching the board, hypermedia.
+
 ## 0.11.0 (2026-10-23)
 
 ### Product (in customer release notes)
