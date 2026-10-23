@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.9.0 (2026-10-23)
+
+### Product (in customer release notes)
+
+- fixed · Player: A Volt player created in code without naming a skin now gets the standard video look. Before, it could show with no picture area.
+- changed · Player: Graphics in viewers' players now only use published template versions. A setup that is trying out a draft still works in the console preview and live control, and appears in players once it is moved to a published version.
+
+### Internal
+
+- added · Player: Browser check of player graphics end to end: shows, updates and hides through the operator API, and the template stays sandboxed (test/player-overlay-browser.check.ts).
+
 ## 0.8.0 (2026-10-23)
 
 ### Product (in customer release notes)
