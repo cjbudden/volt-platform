@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**655 routes.** Public API: 71 · Sign-in (no session yet): 7 · Admin API: 521 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 11 · Health and discovery: 8
+**656 routes.** Public API: 71 · Sign-in (no session yet): 7 · Admin API: 522 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 11 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -434,6 +434,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/fast/channels/:id/ad-report` | admin session (Bearer) or account secret key | any signed-in admin user |  |
 | GET | `/api/fast/channels/:id/ads` | admin session (Bearer) or account secret key | any signed-in admin user |  |
 | PUT | `/api/fast/channels/:id/ads` | admin session (Bearer) or account secret key | operator tier or above |  |
+| GET | `/api/fast/channels/:id/breaks/:bid/beacons` | admin session (Bearer) or account secret key | any signed-in admin user |  |
 | POST | `/api/fast/channels/:id/breaks/:bid/decide` | admin session (Bearer) or account secret key | operator tier or above |  |
 | POST | `/api/fast/channels/:id/lineups` | admin session (Bearer) or account secret key | operator tier or above |  |
 | POST | `/api/fast/channels/:id/on-air` | admin session (Bearer) or account secret key | operator tier or above |  |

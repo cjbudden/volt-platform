@@ -780,6 +780,18 @@ function AdsTab({ channelId, lib }: { channelId: string; lib: { assets: LibAsset
             <div><div className="k">Ad server p95</div><div className="v">{report.p95Ms == null ? '—' : `${report.p95Ms} ms`}</div></div>
           </div>
           {(report.timeouts + report.errors) > 0 && <div style={{ marginTop: 10 }}><Notice kind="warn" variant="compact" message={`${report.timeouts} timed out and ${report.errors} failed; those breaks played house spots.`} /></div>}
+          {report.beacons && <>
+            <div className="sec-label">Reported to the ad server</div>
+            {report.beacons.impressions > 0 ? <>
+              <div className="fast-math">
+                <div><div className="k">Impressions</div><div className="v">{report.beacons.impressions}</div></div>
+                <div><div className="k">Reached halfway</div><div className="v">{report.beacons.events.midpoint?.ads ?? 0}</div></div>
+                <div><div className="k">Played to the end</div><div className="v">{report.beacons.completes}</div></div>
+                <div><div className="k">Completion</div><div className="v">{report.beacons.completionRate == null ? '—' : `${Math.round(report.beacons.completionRate * 100)}%`}</div></div>
+              </div>
+              {report.beacons.failed > 0 && <div style={{ marginTop: 10 }}><Notice kind="warn" variant="compact" message={`${report.beacons.failed} tracking ${report.beacons.failed === 1 ? 'pixel' : 'pixels'} got no good answer from the ad server's tracker. A failed pixel is not sent again.`} /></div>}
+            </> : <div className="hintxt">Nothing yet. Volt sends each ad's impression and quartiles itself as viewers' players reach them, so they appear here once a stitched break has played.</div>}
+          </>}
           {report.creatives.length > 0 && <>
             <div className="sec-label">Creatives</div>
             {report.creatives.slice(0, 8).map(c => <div key={c.creative_key} className="hintxt" style={{ display: 'flex', gap: 8 }}><span style={{ flex: 1 }}>{c.title ?? c.creative_key}</span><span>{c.status === 'ready' ? `${c.plays} plays` : 'packaging, plays from its next request'}</span></div>)}

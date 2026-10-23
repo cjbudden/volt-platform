@@ -54,7 +54,9 @@ export interface ChannelAds {
 }
 export interface AdServer { id: string; name: string; vendor: string; tag_template: string; timeout_ms: number; max_wrappers: number; enabled: boolean }
 export interface AdTest { request: string; elapsedMs: number; requests: number; problems: { code: number; message: string }[]; ads: { id: string; sequence: number | null; title: string | null; adSystem: string | null; durationSec: number; creativeKey: string; mediaFiles: number }[]; adSec: number }
-export interface AdReport { decisions: number; fillRate: number | null; houseShare: number | null; slateShare: number | null; timeouts: number; errors: number; empty: number; notConditioned: number; p95Ms: number | null; creatives: { creative_key: string; title: string | null; ad_system: string | null; plays: number; status: string; last_seen_at: string }[] }
+/** What the stitcher reported to the ad server (server-side beacons): per event, the ads that reached it and the pixels sent. */
+export interface BeaconReport { impressions: number; completes: number; completionRate: number | null; failed: number; events: Record<string, { ads: number; sent: number; failed: number; pending: number }> }
+export interface AdReport { decisions: number; fillRate: number | null; houseShare: number | null; slateShare: number | null; timeouts: number; errors: number; empty: number; notConditioned: number; p95Ms: number | null; beacons?: BeaconReport; creatives: { creative_key: string; title: string | null; ad_system: string | null; plays: number; status: string; last_seen_at: string }[] }
 
 export interface Playout {
   launcher: string; status: 'starting' | 'running' | 'stopped' | 'failed'; started_at: string | null; last_seen_at: string | null

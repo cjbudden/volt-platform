@@ -35,6 +35,8 @@ import { resolve as resolveVast, expandTag } from '../services/fast/vast';
 import { stitchHls, type SessionState, type PodRendition } from '../services/fast/stitch';
 import { isTimeZone } from '../services/epgRepeat';
 import { sessionStore } from '../services/fast/sessionStore';
+import { adSchedule, dueBeacons, playheadOf, type BeaconState, type ScheduledAd } from '../services/fast/beacons';
+import { sendBeacons, beaconReport, breakBeacons } from '../services/fast/beaconSender';
 import { fastConfig, channelPlaylistUrl, readKey, readChannelPlaylist, assetUrlBase } from '../services/fast/media';
 
 export const fastRouter = Router();
@@ -445,7 +447,8 @@ fastRouter.get('/channels/:id/ad-report', asyncHandler(async (req, res) => {
             CASE WHEN v.master_key IS NOT NULL THEN 'ready' ELSE c.status END AS status
        FROM ad_creatives c LEFT JOIN vod_assets v ON v.id = c.vod_asset_id
       WHERE c.account_id = $1 ORDER BY c.last_seen_at DESC LIMIT 50`, [accountId(req)]);
-  res.json({ ...(await adReport(ch.id, new Date(Date.now() - days * 86400_000))), creatives });
+  const since = new Date(Date.now() - days * 86400_000);
+  res.json({ ...(await adReport(ch.id, since)), beacons: await beaconReport(ch.id, since), creatives });
 }));
 
 // ------------------------------------------------------------------ breaks
@@ -492,6 +495,20 @@ fastRouter.delete('/streams/:kind/:id/breaks/:bid', asyncHandler(async (req, res
   const r = await one<any>(`UPDATE stream_breaks SET status = 'cancelled' WHERE id = $1 AND ${s.col} = $2 RETURNING id`, [String(req.params.bid), s.id]);
   if (!r) throw notFound('Break not found');
   res.status(204).end();
+}));
+
+/**
+ * What the stitcher reported to the ad servers for one break: per ad in the
+ * pod, per beacon event, how many viewers reached it and how many pixels were
+ * answered or failed, plus the latest 100 rows (tracker host, not the URL).
+ */
+fastRouter.get('/channels/:id/breaks/:bid/beacons', asyncHandler(async (req, res) => {
+  const ch = await ownChannel(req, String(req.params.id));
+  const bid = String(req.params.bid);
+  if (!uuid.safeParse(bid).success) throw notFound('Break not found');
+  const b = await one<any>(`SELECT id, starts_at, duration_ms FROM stream_breaks WHERE id = $1 AND channel_id = $2`, [bid, ch.id]);
+  if (!b) throw notFound('Break not found');
+  res.json({ breakId: b.id, startsAt: b.starts_at, durationSec: Number(b.duration_ms) / 1000, ...(await breakBeacons(b.id)) });
 }));
 
 /** Decide one break now, as the stitcher would, for a test session. Logged like a real decision. */
@@ -618,7 +635,7 @@ fastPublicRouter.get('/:id/s/:sid/:file', asyncHandler(async (req, res) => {
   // PRE-FETCH: decide breaks that start in the next minute, without waiting
   const ads = await adsFor(id);
   const recent = await query<any>(
-    `SELECT id, starts_at FROM stream_breaks WHERE channel_id = $1 AND status = 'scheduled'
+    `SELECT id, starts_at, duration_ms FROM stream_breaks WHERE channel_id = $1 AND status = 'scheduled'
         AND starts_at BETWEEN now() - interval '10 minutes' AND now() + make_interval(secs => $2)`, [id, LOOKAHEAD_MS / 1000]);
   const decisionSid = ads.scope === 'channel' ? `channel-${id}` : sid;
   if (ads.mode === 'stitched') {
@@ -633,13 +650,33 @@ fastPublicRouter.get('/:id/s/:sid/:file', asyncHandler(async (req, res) => {
   }
   const slate = ads.policy.slateAssetId ? (await one<any>(`SELECT master_key FROM vod_assets WHERE id = $1`, [ads.policy.slateAssetId]))?.master_key ?? null : null;
   const podCache = new Map<string, PodRendition | null>();
+  const plans = new Map<string, any>();
   for (const b of recent) {
     const plan = await sessionStore.pod<any>(decisionSid, b.id);
-    if (plan) podCache.set(`brk:${b.id}`, await podSegments(plan, track, slate).catch(() => null));
+    if (plan) { plans.set(b.id, plan); podCache.set(`brk:${b.id}`, await podSegments(plan, track, slate).catch(() => null)); }
   }
   const st = (await sessionStore.track<SessionState>(sid, track)) ?? { startedMs: Number((ctx as any).started ?? Date.now()), breaks: {} };
   // the channel playlist names a break brk:<id>; the pod is looked up by that
   const out = stitchHls(text, st, (breakId) => podCache.get(breakId) ?? null).replace(/#loop\d+/g, '');
   await sessionStore.saveTrack(sid, track, st);
   res.send(out);
+  // SERVER-SIDE BEACONS (beacons.ts, beaconSender.ts), after the answer: the
+  // paid ads this viewer was actually given, placed where its player now is.
+  if (ads.mode === 'stitched') {
+    (async () => {
+      const head = playheadOf(out);
+      if (head == null) return;
+      const sched: ScheduledAd[] = [];
+      for (const [bid, plan] of plans) {
+        const bs = st.breaks[`brk:${bid}`];
+        if (!bs?.eligible || bs.podSegs == null || !Array.isArray(plan?.items)) continue; // this viewer got the house fill
+        sched.push(...adSchedule(`brk:${bid}`, plan.items, bs.startMs, bs.durationSec));
+      }
+      // one beacon clock per session, whichever of its playlists refreshed
+      const bst = (await sessionStore.track<BeaconState>(sid, '_beacons')) ?? { done: [] };
+      const { due } = dueBeacons(bst, sched, head, Date.now());
+      await sessionStore.saveTrack(sid, '_beacons', bst);
+      await sendBeacons({ channelId: id, sessionId: sid, ip: (ctx as any).ip ?? null, userAgent: (ctx as any).userAgent ?? null }, due);
+    })().catch(() => null);
+  }
 }));

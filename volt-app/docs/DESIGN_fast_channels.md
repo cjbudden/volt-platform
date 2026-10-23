@@ -234,6 +234,28 @@ it cannot read is passed through unchanged.
 (a few hundred bytes per track) and the decided pods are in Valkey, so any task answers any refresh (section 10).
 Without `REDIS_URL` the state is kept in the process.
 
+### Server-side beacons (23 Oct 2026)
+
+In a stitched break the player never sees the VAST, so the stitcher reports for it: the ad's impressions, then
+`creativeView`, `start`, `firstQuartile`, `midpoint`, `thirdQuartile`, `complete` and any VAST 4 `progress`
+offsets, every URL from the inline ad and each wrapper above it (`services/fast/beacons.ts` says when,
+`beaconSender.ts` sends). The stitcher never sees segment requests (they are shared CDN objects), but it does
+see the session's playlist refreshes, so on each refresh it places the player at the end of the newest segment
+minus the hold back (`HOLD-BACK` when the playlist states one, else three target durations, the hls.js, Shaka and
+Safari default) and sends every beacon that position has passed, for the paid ads of breaks this viewer was
+actually given (a viewer who joined mid-break gets the house fill and reports nothing). A viewer who leaves stops
+refreshing, so a viewer who leaves halfway gives no complete; refreshes that stop for over 30 s and start again
+skip what fell due in between rather than sending it late. Order is kept per session (impression first, complete
+last, the first ad before the second); each URL is claimed in `ad_beacons` before it is requested (unique per
+session, break, ad, event and URL), so two API tasks never send a pixel twice, and its answer is recorded
+(status, error, time). Sent as a plain GET with the viewer's address and player in `X-Device-IP` and
+`X-Device-User-Agent` (VAST 4.1 server-side reporting), `[TIMESTAMP]`, `[CACHEBUSTING]`, `[ADPLAYHEAD]` and
+`[BREAKPOSITION]` filled, 5 s at most, redirects followed by hand; a private network address is never fetched
+(`AD_BEACONS_ALLOW_PRIVATE=1` for a local stub only); a failure is recorded, not retried. With decisions made once
+per break for everyone (`channel` scope) each viewer still reports its own impression. Precision is the
+player's: one refresh, about a target duration; a viewer paused or scrubbed back in the DVR window is not
+followed (the player would have to report that itself).
+
 **Later, the cheaper alternative:** server-guided ad insertion with HLS Interstitials (`CLASS=
 "com.apple.hls.interstitial"` with an asset list URL) and DASH alternative content, where the shared, cacheable
 playlist says where the break is and the player fetches its own pod. Same decision code, no per-session
@@ -275,7 +297,8 @@ playlists. Worth adding once player support is solid across the target devices.
 | `GET/POST/PUT/DELETE /api/fast/ad-servers`, `POST .../:sid/test` | ad servers; one real test request |
 | `GET/POST/DELETE /api/fast/streams/:kind/:id/breaks` | breaks on any channel or event; Go to break |
 | `POST /api/fast/channels/:id/breaks/:bid/decide` | decide a break as the stitcher would (logged) |
-| `GET /api/fast/channels/:id/ad-report` | fill, fallbacks, latency, creatives |
+| `GET /api/fast/channels/:id/ad-report` | fill, fallbacks, latency, creatives, and `beacons`: per event the ads that reached it and the URLs sent or failed, completion rate |
+| `GET /api/fast/channels/:id/breaks/:bid/beacons` | one break: per ad in the pod and per event, viewers that reached it, URLs sent and failed; the latest 100 beacons |
 | `GET /api/fast-playout/:id/timeline` | the playout's timeline (ingest token) |
 | `POST /api/fast-playout/:id/heartbeat`, `GET .../state` | the playout's heartbeat with its state; a new task's starting state (ingest token) |
 | `GET /fast/:id/s/:session/(master\|v<h>\|audio).m3u8` | a viewer's stitched playlists (public) |
@@ -304,6 +327,7 @@ and best packaged in 1 s segments.
 # media: any packaged assets (vod_encoder.py) under <lab>/vod/<name>/
 volt-app$ DATABASE_URL=... bash test/fast.check.sh                    # API + guide + decisions, 45 checks
 volt-app$ npx tsx test/fast-lineup.check.ts && npx tsx test/fast-ads.check.ts && npx tsx test/fast-graphics.check.ts
+volt-app$ DATABASE_URL=... npx tsx test/fast-beacons.check.ts          # beacons end to end with a VAST stub, 51 checks, about 50 s
 volt-encoder$ python3 bin/test_fast_playout.py                          # FAST_LAB=<clips dir> for real media
 volt-app$ BASE=... FAST_LAB=<clips dir> CHROME=<chromium> npx tsx dev/fast-e2e.ts   # API running with CLIPS_DIR/ORIGIN_DIR
 volt-app$ BASE=... EMAIL=... PASSWORD=... npx tsx dev/fast-demo-seed.ts # two demo channels with realistic lengths
@@ -313,7 +337,8 @@ volt-app$ DATABASE_URL=... FAST_LAB=<VP9 lab> SLATE_SRC=<mp4> CHROME=... PACKAGE
 
 ## 9. Next
 
-1. Impression and quartile beacons from the stitcher (the decisions already hold the tracking URLs).
+1. ~~Impression and quartile beacons from the stitcher~~ built 23 Oct (section 4, Server-side beacons). VAST
+   `<Error>` pixels for a creative we skipped are still not sent.
 2. S3 retention for `channel/<id>/fast/` after a channel is deleted (the playlists are a few kilobytes; the
    library media under `vod/<id>/` follows the asset's own deletion).
 3. FairPlay / Widevine for FAST channels (the playlists carry no keys yet).

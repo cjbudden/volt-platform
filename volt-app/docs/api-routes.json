@@ -1701,6 +1701,15 @@
   "group": "/api/fast"
  },
  {
+  "method": "GET",
+  "path": "/api/fast/channels/:id/breaks/:bid/beacons",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
   "method": "POST",
   "path": "/api/fast/channels/:id/breaks/:bid/decide",
   "api": "admin",
