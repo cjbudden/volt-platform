@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.7.0 (2026-10-23)
+
+### Product (in customer release notes)
+
+- added · Radio: HLS and DASH listeners now see the song and artist change inside the stream itself, at the moment it is heard: each title change on a station is carried in the audio as standard ID3 timed metadata, which Safari, hls.js, Shaka and dash.js read with no extra code.
+
+### Internal
+
+- added · Radio: Check suites for now-playing ID3 in emsg: radio-id3 (end to end with a synthetic ICY source and the real radio container) and test_id3_emsg.py (bytes, placement, which segments carry a tag); Dockerfile.radio now ships id3_emsg.py and a test fails if a module radio.py imports is not copied.
+
 ## 0.6.0 (2026-10-22)
 
 ### Product (in customer release notes)
