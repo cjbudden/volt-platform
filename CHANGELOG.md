@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.10.0 (2026-10-23)
+
+### Product (in customer release notes)
+
+- added · Graphics: Graphics set to Burned into the video now appear in the picture itself on transcode channels and events, so every viewer, recording, clip and third-party player sees them. Take them on, change them and take them off in live control as usual; they reach the encoded picture in well under a second, and leave it during ad breaks that hide graphics. A graphic assigned to burn while the stream is running appears from its next start.
+
+### Internal
+
+- added: Encoder: graphics renderer (headless Chromium, volt-encoder/gfx) and a composite-once filter graph for burned graphics, the burn feed for it (GET /api/streams/:id/burn-graphics, ingest token), GRAPHICS_BURN build argument for the encoder image, and the graphics-burn and test_gfx_burn checks.
+
 ## 0.9.0 (2026-10-23)
 
 ### Product (in customer release notes)
