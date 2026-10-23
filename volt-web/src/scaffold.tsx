@@ -291,14 +291,16 @@ export interface StripGate {
 export function PipelineStrip({ gates }: { gates: StripGate[] }) {
   if (!gates.length) return null
   return (
-    <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 0 14px' }}>
+    // pipe-strip / pipe-gate / pipe-arrow: on a phone the five gates wrap into
+    // rows instead of squeezing into slivers (index.css, phone shell).
+    <div className="pipe-strip" style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 0 14px' }}>
       {gates.map((g, i) => {
         // A healthy PUBLIC gate is the one that means we are truly on air.
         // the gate's own word for its state (docs/STATUS_MAP.md), else the raw status
         const label = g.badge ?? ((g.gate === 'public' && g.status === 'healthy') ? 'ON AIR' : g.status)
         const color = GATE_COLOR[g.status] ?? '#64748b'
         return (
-          <div key={g.gate} style={{ display: 'flex', alignItems: 'stretch', gap: 6, flex: '1 1 0', minWidth: 0 }}>
+          <div key={g.gate} className="pipe-gate" style={{ display: 'flex', alignItems: 'stretch', gap: 6, flex: '1 1 0', minWidth: 0 }}>
             <div title={g.detail} style={{
               flex: 1, minWidth: 0, border: `1px solid ${color}55`, background: `${color}12`,
               borderRadius: 9, padding: '7px 10px',
@@ -319,7 +321,7 @@ export function PipelineStrip({ gates }: { gates: StripGate[] }) {
               </div>
             </div>
             {i < gates.length - 1 && (
-              <div style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 'var(--fs-sm)', flex: 'none' }}>→</div>
+              <div className="pipe-arrow" style={{ display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 'var(--fs-sm)', flex: 'none' }}>→</div>
             )}
           </div>
         )

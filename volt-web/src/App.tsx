@@ -239,6 +239,18 @@ export default function App() {
   const channelId = route.channelId
   const createOpen = route.create
   const [chooserOpen, setChooserOpen] = useState(false)
+  // THE MENU AS A DRAWER on narrow screens (under 900 px, index.css): the
+  // sidebar slides in over the page from the menu button in the top bar.
+  // Any navigation closes it, so picking a page shows the page, and Escape
+  // closes it like any other overlay. On wide screens it has no effect.
+  const [navOpen, setNavOpen] = useState(false)
+  useEffect(() => { setNavOpen(false) }, [route.path])
+  useEffect(() => {
+    if (!navOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNavOpen(false) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [navOpen])
   const setCreateOpen = (open: boolean) => navigate(open ? '/channels/new' : '/channels', { replace: true })
   const openChannel = (id: string) => navigate(`/channels/${id}`)
 
@@ -452,8 +464,8 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <aside className="sidebar">
+    <div className={`app${navOpen ? ' nav-open' : ''}`}>
+      <aside className="sidebar" id="app-menu">
         <div className="brand">
           <div className="logo">{BOLT}</div>
           <div><div className="n">Volt Streaming</div>{inAdmin ? <span className="area-tag">ADMIN</span> : <div className="s">Live streaming platform</div>}</div>
@@ -502,12 +514,18 @@ export default function App() {
           </div></div>
         </a>
       </aside>
+      {/* Behind the open drawer: a tap outside it closes it. */}
+      {navOpen && <div className="nav-scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />}
 
       <div className="main">
         <IngestQueue />
         <div className="topbar">
           {/* THE TOP BAR IS FOR GLOBAL ACTIONS ONLY: search, uploads, notices, New
               Stream, sign out. The page names itself in its own title. */}
+          <button type="button" className="icon-btn nav-toggle" aria-controls="app-menu" aria-expanded={navOpen}
+            aria-label={navOpen ? 'Close menu' : 'Open menu'} title="Menu" onClick={() => setNavOpen(o => !o)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </button>
           <GlobalSearch pages={jumpPages} />
           <div className="top-actions">
             {access.can('monitoring', 'view') && <OnAirButton />}
@@ -515,8 +533,8 @@ export default function App() {
             <NotificationBell canManage={isAdmin} />
             {/* NEW STREAM asks which kind first (NewStreamChooser), then opens that form. */}
             {(access.can('channels', 'manage') || access.can('events', 'manage') || access.can('radio', 'manage')) && (
-              <button className="btn primary" onClick={() => setChooserOpen(true)} aria-haspopup="dialog">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>New Stream
+              <button className="btn primary" onClick={() => setChooserOpen(true)} aria-haspopup="dialog" aria-label="New Stream">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg><span className="btn-label">New Stream</span>
               </button>
             )}
             <DocsButton />

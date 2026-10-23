@@ -744,7 +744,19 @@ Open questions:
 - Existing accounts keep their seeded copy of Episode, so they have no content rating field until it is added under Content Types; the library reports it as "not on this type" rather than missing.
 - Target fields per type are a code table (TARGETS). If clients should edit them per type, they could move onto the content type as a field flag.
 - `docs/API_ROUTES.md`, `docs/api-routes.json` and `openapi.json` need regenerating for the six new routes (`npm run docs:routes`, `npm run docs:openapi`). Not done here because the hypermedia work has uncommitted changes in the same generated files. The route descriptions are in DESIGN_media_library.md section 7.
-- The app shell itself is not laid out for a phone (the sidebar stays open at 390 px). The library's own grid and filters wrap correctly inside it.
+- The app shell itself is not laid out for a phone (the sidebar stays open at 390 px). The library's own grid and filters wrap correctly inside it. (Done 23 Oct, build queue 1.14.)
+
+## 2026-10-23 - The console works on a phone and a tablet (build queue 1.14, not yet released)
+
+What: under 900 px the 236 px sidebar left too little room and five of the main pages scrolled sideways at 390 px (up to 1024 px wide).
+
+- **Drawer** (`volt-web/src/App.tsx`, `index.css`): a menu button at the left of the top bar (hidden on wide screens) opens the sidebar over the page with a scrim. A page pick, Escape or a tap on the scrim closes it; it closes on any route change. `aria-expanded` and `aria-controls` on the button; no slide with reduced motion.
+- **Top bar**: 16 px gutter, smaller gaps, no Ctrl K hint; under 640 px New Stream is its icon (aria-label kept) and the On air pill shows only its counts. Content gutter 16 px.
+- **Shared causes of sideways scrolling**, fixed once for every page: invisible icon-button tooltips laid out past the screen edge (now only present while shown on narrow screens); wide tables scroll inside their card; customisable panels (`.pl-panel`) no longer size their column from the widest card; page titles wrap; the pipeline gates (`scaffold.tsx`) wrap two to a row under 640 px with the arrows dropped.
+
+Checked: new `volt-web/test/phone-layout.browser.mjs`, Chromium, real API on seeded Postgres, Vite: **26/26** (Dashboard, Channels, a channel, an event, Media Library at 390, 768 and 1280 px with no sideways scroll; the drawer opens, navigates and closes, Escape and scrim close it; desktop shell unchanged). **9/26** on the code before. Screenshots checked at 390 and 768. `tsc -b` clean in volt-web.
+
+Not yet: pages other than these five were not each checked; at 390 px the search box is narrow beside the five top bar actions. Not released: another session's uncommitted CHANGELOG and change notes are in the tree.
 
 ## 2026-10-23 - Watch folder video drops land where they belong (build queue 1.13, not yet released)
 

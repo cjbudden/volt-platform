@@ -1430,7 +1430,7 @@ svg.spin{animation:vspin 1s linear infinite}
 .pl-zone-stack{display:grid;gap:18px;min-width:0;align-content:start}
 .pl-zone-stack.editing{min-height:60px;gap:10px}
 .pl-cols{gap:18px}
-.pl-panel{min-width:0;display:grid;gap:18px}
+.pl-panel{min-width:0;display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
 .pl-panel>.card,.pl-panel>div{margin-top:0 !important;margin-bottom:0 !important}
 .pl-min{display:flex;align-items:center;gap:10px;padding:9px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel)}
 .pl-min-t{flex:1;font-weight:600;font-size:var(--fs-body);color:var(--muted)}
@@ -1477,3 +1477,51 @@ svg.spin{animation:vspin 1s linear infinite}
 .ev-recs{padding:16px}
 .ev-empty{color:var(--faint);font-size:var(--fs-sm)}
 @media (max-width:900px){.ev-lane{grid-template-columns:1fr}.ev-lane-t{white-space:normal}}
+
+/* ---------------- Phone and tablet shell ----------------
+   Under 900 px the 236 px sidebar left too little room for the page, so it
+   becomes a drawer: off screen until the menu button in the top bar opens it,
+   over the page with a scrim behind it. The top bar keeps only what is used
+   on the move (menu, search, on air, notices, New Stream as an icon) and the
+   content gutter drops to 16 px. Pages keep their own stacking rules; these
+   are the shell and the few shared pieces every page uses. */
+.nav-toggle{display:none}
+.nav-scrim{display:none}
+@media (max-width:900px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .sidebar{position:fixed;left:0;top:0;bottom:0;height:auto;width:min(280px,86vw);z-index:60;
+    transform:translateX(-100%);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s;
+    box-shadow:0 0 0 1px var(--border),0 18px 50px -10px rgba(0,0,0,.7)}
+  .app.nav-open .sidebar{transform:none;visibility:visible;transition:transform .22s ease}
+  .nav-scrim{display:block;position:fixed;inset:0;z-index:55;background:rgba(5,7,12,.55)}
+  .nav-toggle{display:grid;flex:none}
+  .topbar{gap:8px;padding:10px 16px}
+  .top-actions{gap:6px}
+  .search{min-width:0}
+  .search .kbd{display:none}
+  .search input{padding-right:12px}
+  .content{padding:18px 16px 40px}
+  .page-head{align-items:flex-start}
+  .page-head>*{min-width:0;max-width:100%}
+  /* A table wider than the screen scrolls inside its card, not the page. */
+  .card:has(>table){overflow-x:auto}
+  /* Hover tooltips on icon buttons are laid out even while invisible, so the
+     one on the last button reached past the screen edge and made the whole
+     page scroll sideways. On narrow screens they exist only while shown. */
+  .icon-btn[data-tip]:not(:hover):not(:focus-visible)::after{display:none}
+}
+@media (max-width:640px){
+  /* New Stream keeps its icon; the label comes back on wider screens. */
+  .topbar .btn .btn-label{display:none}
+  .topbar .btn{padding:9px 10px}
+  .onair-pill{padding:0 10px}
+  .onair-pill > span:nth-child(2){font-size:0}
+  .onair-pill > span:nth-child(2) b{font-size:var(--fs-body)}
+  .page-id{flex-wrap:wrap;row-gap:6px}
+  /* The pipeline gates wrap two or three to a row; the arrows only read in
+     a single line, so they go. */
+  .pipe-strip{flex-wrap:wrap}
+  .pipe-gate{flex:1 1 140px!important}
+  .pipe-arrow{display:none!important}
+}
+@media (prefers-reduced-motion:reduce){.sidebar{transition:none!important}}
