@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type LiveBoard, type LiveStream } from '../api'
+import { api, type LiveBoard, type LiveStream, type LiveStreamListRow } from '../api'
 import { navigate } from '../router'
 import { PipelineStrip, StatusPill } from '../scaffold'
 import { pressable } from '../a11y'
 import { PageError, useNotify, usePageNotice } from '../notices'
-import { Segmented } from '../listFilters'
+import { Segmented, ListToolbar, ClearFilters, NoMatches } from '../listFilters'
 import TimelineGrid from '../TimelineGrid'
 
 /* ============================================================================
@@ -192,33 +192,119 @@ function StreamCard({ s, onOpen, busy, onStop }: {
 }
 
 // ---------------------------------------------------------------------------
-//  The plain List view: every stream, one line each, in the server's order
-//  (trouble first). No gates: it is for scanning a large fleet, not diagnosing.
+//  The plain List view: every stream, one line each, for scanning a large
+//  fleet, not diagnosing (no gates). It reads GET /api/live-streams, the one
+//  list over channels, stations, events and FAST channels, so search, the kind
+//  filter and paging happen on the server and a fleet of thousands stays one
+//  page at a time. health=true brings the board's own reading of each row
+//  (state, uptime, viewers), computed for the page shown. Sorted by name: the
+//  Board view is the trouble-first one.
 // ---------------------------------------------------------------------------
-function StreamList({ streams, onOpen }: { streams: LiveStream[]; onOpen: (s: LiveStream) => void }) {
-  if (streams.length === 0) {
-    return <div className="empty"><h3>No streams</h3><p>There are no channels, stations or events you can see.</p></div>
+type ListKind = 'all' | 'tv' | 'radio' | 'event' | 'fast'
+const LIST_KIND_PARAMS: Record<ListKind, Record<string, string>> = {
+  all: {}, tv: { kind: 'channel', medium: 'tv' }, radio: { kind: 'channel', medium: 'radio' },
+  event: { kind: 'event' }, fast: { kind: 'fast_channel' },
+}
+const PAGE = 50
+const rowKindLabel = (r: LiveStreamListRow) =>
+  r.kind === 'event' ? 'Event' : r.kind === 'fast_channel' ? 'FAST' : r.medium === 'radio' ? 'Radio' : 'TV'
+
+function StreamList({ refreshAt }: { refreshAt: number }) {
+  const [q, setQ] = useState('')
+  const [kind, setKind] = useState<ListKind>('all')
+  const [rows, setRows] = useState<LiveStreamListRow[] | null>(null)
+  const [next, setNext] = useState<string | null>(null)
+  const [total, setTotal] = useState<number | null>(null)
+  const [err, setErr] = useState('')
+  const [more, setMore] = useState(false)
+  const shown = useRef(PAGE)
+  const seq = useRef(0)
+
+  const params = (extra: Record<string, string> = {}) => ({
+    health: 'true', count: 'true', ...LIST_KIND_PARAMS[kind], ...(q.trim() ? { q: q.trim() } : {}), ...extra,
+  })
+
+  // First page (or as many rows as are on screen, on a refresh, so the board's
+  // ten second refresh does not fold away pages the operator opened).
+  async function loadFirst(keep: boolean) {
+    const my = ++seq.current
+    const limit = keep ? Math.min(200, Math.max(PAGE, shown.current)) : PAGE
+    try {
+      const r = await api.liveStreams(params({ limit: String(limit) }))
+      if (my !== seq.current) return
+      setRows(r.rows); setNext(r.next); setTotal(r.total); setErr('')
+      shown.current = r.rows.length
+    } catch (e: any) { if (my === seq.current) setErr(e.message) }
   }
+  async function loadMore() {
+    if (!next) return
+    setMore(true)
+    const my = seq.current
+    try {
+      const r = await api.liveStreams(params({ limit: String(PAGE), cursor: next }))
+      if (my !== seq.current) return
+      setRows(prev => [...(prev ?? []), ...r.rows]); setNext(r.next)
+      shown.current += r.rows.length
+    } catch (e: any) { setErr(e.message) }
+    finally { setMore(false) }
+  }
+
+  // A new search or filter starts again from the top; typing is debounced.
+  useEffect(() => {
+    const h = setTimeout(() => { loadFirst(false) }, q ? 250 : 0)
+    return () => clearTimeout(h)
+    /* eslint-disable-next-line */
+  }, [q, kind])
+  useEffect(() => { if (refreshAt && rows) loadFirst(true) /* eslint-disable-next-line */ }, [refreshAt])
+
+  const filtered = kind !== 'all' || q.trim() !== ''
   return (
-    <div className="card">
-      <table>
-        <thead>
-          <tr><th>Name</th><th>Kind</th><th>State</th><th>Up</th><th>Watching</th><th>Group</th></tr>
-        </thead>
-        <tbody>
-          {streams.map(s => (
-            <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => onOpen(s)}>
-              <td><b>{s.name}</b></td>
-              <td style={{ color: 'var(--muted)' }}>{KIND_LABEL[s.kind] ?? s.kind}</td>
-              <td><StatusPill state={s.overall} /></td>
-              <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUptime(s.uptimeMs) ?? <span style={{ color: 'var(--faint)' }}>not running</span>}</td>
-              <td style={{ fontVariantNumeric: 'tabular-nums' }}>{s.concurrent.toLocaleString()}</td>
-              <td style={{ color: 'var(--faint)' }}>{s.groupName ?? 'No group'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <ListToolbar
+        left={<>
+          <input className="inp" style={{ width: 240 }} placeholder="Search name, group or XMLTV id" value={q}
+            onChange={e => setQ(e.target.value)} aria-label="Search streams" />
+          <Segmented label="Kind" value={kind} onChange={setKind} options={[
+            { value: 'all', label: 'All' }, { value: 'tv', label: 'TV' }, { value: 'radio', label: 'Radio' },
+            { value: 'event', label: 'Events' }, { value: 'fast', label: 'FAST' },
+          ]} />
+          <ClearFilters on={filtered} onClear={() => { setQ(''); setKind('all') }} />
+        </>}
+        right={total != null ? <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>{rows?.length ?? 0} of {total}</span> : undefined}
+      />
+      {err && <div className="card p-4" style={{ color: 'var(--down,#f87171)', marginBottom: 10 }}>{err}</div>}
+      {rows == null ? (
+        <div className="card p-4"><div className="loading">Loading streams…</div></div>
+      ) : rows.length === 0 ? (
+        filtered ? <NoMatches what="streams" onClear={() => { setQ(''); setKind('all') }} />
+          : <div className="empty"><h3>No streams</h3><p>There are no channels, stations or events you can see.</p></div>
+      ) : (
+        <div className="card">
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Kind</th><th>State</th><th>Up</th><th>Watching</th><th>Group</th></tr>
+            </thead>
+            <tbody>
+              {rows.map(s => (
+                <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => navigate(s.console)}>
+                  <td><b>{s.name}</b></td>
+                  <td style={{ color: 'var(--muted)' }}>{rowKindLabel(s)}</td>
+                  <td>{s.live ? <StatusPill state={s.live.overall} /> : <span style={{ color: 'var(--faint)' }}>{s.status ?? 'idle'}</span>}</td>
+                  <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUptime(s.live?.uptimeMs ?? null) ?? <span style={{ color: 'var(--faint)' }}>not running</span>}</td>
+                  <td style={{ fontVariantNumeric: 'tabular-nums' }}>{(s.live?.concurrent ?? 0).toLocaleString()}</td>
+                  <td style={{ color: 'var(--faint)' }}>{s.group_name ?? 'No group'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {next && (
+            <div className="p-4" style={{ textAlign: 'center' }}>
+              <button className="btn ghost" disabled={more} onClick={loadMore}>{more ? 'Loading…' : `Show ${PAGE} more`}</button>
+            </div>
+          )}
+        </div>
+      )}
+    </>
   )
 }
 
@@ -340,7 +426,7 @@ export default function LivePage() {
       {view === 'timeline' ? (
         <TimelineGrid />
       ) : view === 'list' ? (
-        <StreamList streams={b.streams} onOpen={open} />
+        <StreamList refreshAt={at} />
       ) : active.length === 0 ? (
         <div className="empty">
           <h3>Nothing is running</h3>

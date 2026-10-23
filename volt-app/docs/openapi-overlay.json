@@ -24,6 +24,10 @@
     "summary": "Open the documentation",
     "description": "Issues a short-lived pass to this documentation site for the signed-in user. Used by the Documentation button in Volt."
   },
+  "GET /api/live-streams": {
+    "summary": "List every stream",
+    "description": "One list over channels, radio stations, events and FAST channels, with the list standard: `q`, filters (`kind` channel, event or fast_channel; `medium` tv or radio; `preset`; `status`; `on_air`; `group_id`; dates), `sort`, cursor paging and `count=true`. Each row names its aggregate (`/api/live-streams/{kind}/{id}`), its own resource and its console page. `health=true` adds the live board's reading of each row on the page (five-gate state, uptime, viewers). Rows are those the caller's role may see: TV and FAST channels with Channels, stations with Radio, events with Events."
+  },
   "GET /api/events/:id/access-check": {
     "summary": "Check what a viewer elsewhere would get",
     "description": "What the play gate gives a viewer in `country` (two-letter code) for this event right now, and the layer that decided it: the account's geo, the access rules or the programme. `viewer` is `anonymous` (default), `member` or `entitled`. Same answer as `GET /api/channels/{id}/access-check`."

@@ -33,7 +33,11 @@ import { one, query } from '../db';
 import { config } from '../config';
 import { sportsEventJsonLd } from './eventPromo';
 
-export type Origin = 'live_ingest' | 'scheduled_playout' | 'loop';
+// No 'loop' origin (removed 23 Oct 2026, build queue 1.12): a loop is a filler
+// video asset in Loops & Fillers, played to cover a dropped source or a rights
+// window, not a kind of stream (Christian, 22 Oct). No channel could ever have
+// it (channels.origin is 'live' or 'playlist'), so the preset only misled.
+export type Origin = 'live_ingest' | 'scheduled_playout';
 export type Lifecycle = 'continuous' | 'bounded';
 export interface Preset { key: string; label: string; origin: Origin; lifecycle: Lifecycle }
 
@@ -42,12 +46,11 @@ export const PRESETS: Preset[] = [
   { key: 'live_event', label: 'Live event', origin: 'live_ingest', lifecycle: 'bounded' },
   { key: 'fast_channel', label: 'FAST channel', origin: 'scheduled_playout', lifecycle: 'continuous' },
   { key: 'vod_premiere', label: 'Premiere', origin: 'scheduled_playout', lifecycle: 'bounded' },
-  { key: 'loop', label: 'Loop', origin: 'loop', lifecycle: 'continuous' },
 ];
 
 /** The preset of a channel or event row (pure). */
 export function presetOf(kind: 'channel' | 'event', row: { origin?: string | null }): Preset {
-  const origin: Origin = row.origin === 'playlist' ? 'scheduled_playout' : row.origin === 'loop' ? 'loop' : 'live_ingest';
+  const origin: Origin = row.origin === 'playlist' ? 'scheduled_playout' : 'live_ingest';
   const lifecycle: Lifecycle = kind === 'event' ? 'bounded' : 'continuous';
   return PRESETS.find((p) => p.origin === origin && p.lifecycle === lifecycle)
     ?? { key: `${origin}_${lifecycle}`, label: `${origin} ${lifecycle}`, origin, lifecycle };

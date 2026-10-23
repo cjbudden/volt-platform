@@ -16949,6 +16949,239 @@
     }
    }
   },
+  "/api/live-streams": {
+   "get": {
+    "operationId": "getLiveStreams",
+    "summary": "List every stream",
+    "tags": [
+     "Live Streams"
+    ],
+    "description": "One list over channels, radio stations, events and FAST channels, with the list standard: `q`, filters (`kind` channel, event or fast_channel; `medium` tv or radio; `preset`; `status`; `on_air`; `group_id`; dates), `sort`, cursor paging and `count=true`. Each row names its aggregate (`/api/live-streams/{kind}/{id}`), its own resource and its console page. `health=true` adds the live board's reading of each row on the page (five-gate state, uptime, viewers). Rows are those the caller's role may see: TV and FAST channels with Channels, stations with Radio, events with Events.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** monitoring: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `kind`, `medium`, `preset`, `name`, `status`, `on_air`, `group_id`, `group_name`, `xmltv_id`, `scheduled_start`, `scheduled_end`, `created_at`, `updated_at`.",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    },
+    "parameters": [
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Search name, group_name, xmltv_id. Every word must match, case-insensitive."
+     },
+     {
+      "name": "id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "Filter: `id=value` (comma list = any of), or `id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "kind",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "channel",
+        "event",
+        "fast_channel"
+       ]
+      },
+      "description": "channel (live source), event, or fast_channel (built from the library). Filter: `kind=value` (comma list = any of), or `kind[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "medium",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "tv",
+        "radio"
+       ]
+      },
+      "description": "tv or radio. Filter: `medium=value` (comma list = any of), or `medium[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "preset",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "live_channel",
+        "live_event",
+        "fast_channel",
+        "vod_premiere"
+       ]
+      },
+      "description": "the stream preset (GET /api/live-streams/presets). Filter: `preset=value` (comma list = any of), or `preset[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "name",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Filter: `name=value` (comma list = any of), or `name[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "scheduled",
+        "provisioning",
+        "testing",
+        "live",
+        "stopping",
+        "ended",
+        "error"
+       ]
+      },
+      "description": "Filter: `status=value` (comma list = any of), or `status[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "on_air",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "published: a channel on air, an event live. Filter: `on_air=value`, or `on_air[op]=value` with op: `eq` (equals), `ne` (not equal), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "group_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "Filter: `group_id=value` (comma list = any of), or `group_id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "group_name",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Filter: `group_name=value` (comma list = any of), or `group_name[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "xmltv_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Filter: `xmltv_id=value` (comma list = any of), or `xmltv_id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "scheduled_start",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "events only. Filter: `scheduled_start=value`, or `scheduled_start[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "scheduled_end",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "events only. Filter: `scheduled_end=value`, or `scheduled_end[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "created_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `created_at=value`, or `created_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "updated_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `updated_at=value`, or `updated_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "sort",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "default": "name"
+      },
+      "description": "Comma list of: id, kind, medium, preset, name, status, on_air, group_id, group_name, xmltv_id, scheduled_start, scheduled_end, created_at, updated_at. Prefix `-` for descending. Default `name`; ties by id."
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 200,
+       "default": 50
+      }
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "The next page: copy it from the previous response (`Link: rel=\"next\"` or `X-Next-Cursor`). Only valid with the same q, filters and sort."
+     },
+     {
+      "name": "count",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Also return the total that match, in `X-Total-Count`."
+     }
+    ],
+    "x-volt-list": true
+   }
+  },
   "/api/live-streams/{kind}/{id}": {
    "get": {
     "operationId": "getLiveStreamsByKindByID",

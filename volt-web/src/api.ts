@@ -1737,6 +1737,13 @@ export const api = {
   // ---- monitoring ----
   /** The whole live board in one request: the fan-out lives on the server. */
   liveBoard: (): Promise<LiveBoard> => req('/monitoring/live'),
+  /** ONE paged list over channels, stations, events and FAST channels
+   *  (GET /api/live-streams, the list standard). Paging is in the headers. */
+  liveStreams: async (params: Record<string, string>): Promise<{ rows: LiveStreamListRow[]; next: string | null; total: number | null }> => {
+    const { body, headers } = await apiRequestWithHeaders('/live-streams?' + new URLSearchParams(params).toString())
+    const t = headers.get('X-Total-Count')
+    return { rows: body ?? [], next: headers.get('X-Next-Cursor'), total: t == null ? null : Number(t) }
+  },
   /** The Live Streams Timeline view: every visible stream on one clock, one
    *  page of up to 50 rows per call (TIMELINE_MODE.md). Follow `next` for more. */
   timelineSelection: (kind: TimelineGridKind, id: string, fromMs: number, toMs: number): Promise<TimelineSelection> =>
@@ -2580,6 +2587,27 @@ export interface LiveStream {
    *  encoder is producing, whether or not the stream has been published. */
   previewUrl: string
   audioOnly: boolean
+}
+
+/** One row of GET /api/live-streams. `live` is there with health=true: the
+ *  live board's reading of the same stream, computed by the same code. */
+export interface LiveStreamListRow {
+  id: string
+  kind: 'channel' | 'event' | 'fast_channel'
+  medium: 'tv' | 'radio'
+  preset: string
+  preset_label: string
+  name: string
+  status: string | null
+  on_air: boolean
+  group_id: string | null
+  group_name: string | null
+  scheduled_start: string | null
+  scheduled_end: string | null
+  aggregate: string
+  resource: string
+  console: string
+  live?: Omit<LiveStream, 'id' | 'kind' | 'name' | 'groupName' | 'status' | 'onAir' | 'href'>
 }
 
 export interface LiveBoard {

@@ -78,6 +78,24 @@ export const REGISTRY: Record<string, ResourceDesc> = {
       epg: `${b}/api/epg?${q({ eventId: o.id })}`,
     }),
   },
+  // One list over channels, stations, events and FAST channels (build queue
+  // 1.12). An item's own page is its aggregate; `resource` is the row in its
+  // own collection (channel, radio station, event or FAST channel).
+  '/api/live-streams': {
+    type: 'volt:LiveStream',
+    links: (o, b) => {
+      const ev = o.kind === 'event';
+      const fast = o.kind === 'fast_channel';
+      return {
+        self: `${b}/api/live-streams/${ev ? 'event' : 'channel'}/${o.id}`,
+        collection: `${b}/api/live-streams`,
+        up: `${b}/api`,
+        resource: ev ? `${b}/api/events/${o.id}` : fast ? `${b}/api/fast/channels/${o.id}` : o.medium === 'radio' ? `${b}/api/radio/${o.id}` : `${b}/api/channels/${o.id}`,
+        status: `${b}/api/status?${q(ev ? { eventId: o.id } : { channelId: o.id })}`,
+        epg: `${b}/api/epg?${q(ev ? { eventId: o.id } : { channelId: o.id })}`,
+      };
+    },
+  },
   '/api/recordings': {
     type: 'volt:Recording',
     links: (o, b) => ({
@@ -482,6 +500,7 @@ export function contextDoc(b: string) {
       download: idRel('volt:download'),
       scheduledClips: idRel('volt:scheduledClips'),
       recording: idRel('volt:recording'),
+      resource: idRel('volt:resource'),
       apiDocumentation: idRel('hydra:apiDocumentation'),
     },
   };

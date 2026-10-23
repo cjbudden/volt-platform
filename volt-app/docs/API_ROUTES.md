@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**656 routes.** Public API: 71 · Sign-in (no session yet): 7 · Admin API: 522 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 11 · Health and discovery: 8
+**657 routes.** Public API: 71 · Sign-in (no session yet): 7 · Admin API: 523 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 11 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -598,6 +598,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
+| GET | `/api/live-streams` | admin session (Bearer) or account secret key | monitoring: view |  |
 | GET | `/api/live-streams/:kind/:id` | admin session (Bearer) or account secret key | monitoring: view |  |
 | GET | `/api/live-streams/:kind/:id/provider` | admin session (Bearer) or account secret key | monitoring: view |  |
 | GET | `/api/live-streams/:kind/:id/schema.org` | admin session (Bearer) or account secret key | monitoring: view |  |

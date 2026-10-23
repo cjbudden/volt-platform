@@ -37,9 +37,9 @@ import type { PipelineHealth } from '../services/pipelineHealth';
 export const monitoringRouter = Router();
 monitoringRouter.use(requireAuth);
 
-type OwnerKind = 'tv' | 'radio' | 'event';
+export type OwnerKind = 'tv' | 'radio' | 'event';
 
-interface LiveRow {
+export interface LiveRow {
   id: string;
   kind: OwnerKind;
   name: string;
@@ -95,7 +95,7 @@ async function liveBoard(acct: string): Promise<LiveRow[]> {
   const now = Date.now();
 
   const channels = await query<any>(
-    `SELECT c.id, c.name, c.status, c.on_air, COALESCE(c.kind, 'tv') AS kind, g.name AS group_name
+    `SELECT c.id, c.name, c.status, c.on_air, COALESCE(c.kind, 'tv') AS kind, c.origin, g.name AS group_name
        FROM channels c JOIN groups g ON g.id = c.group_id
       WHERE g.account_id = $1
       ORDER BY c.name`,
@@ -109,11 +109,40 @@ async function liveBoard(acct: string): Promise<LiveRow[]> {
     [acct]
   );
 
+  const rows = await liveRowsFor([
+    ...channels.map((c: any) => ({ ...c, kind: (c.kind === 'radio' ? 'radio' : 'tv') as OwnerKind })),
+    ...events.map((e: any) => ({ ...e, kind: 'event' as OwnerKind })),
+  ], now);
+
+  // Trouble first, then what is actually on air, then the rest. An operator
+  // scanning top-down should never have to hunt for the broken one.
+  const RANK: Record<string, number> = {
+    error: 0, degraded: 1, starting: 2, onair: 3, ready: 4, stopped: 5, idle: 6,
+  };
+  return rows.sort((a, b) =>
+    (RANK[a.overall] ?? 9) - (RANK[b.overall] ?? 9)
+    || b.concurrent - a.concurrent
+    || a.name.localeCompare(b.name)
+  );
+}
+
+/**
+ * The board's row for each stream given: the five-gate health, uptime, viewers
+ * and the encoder's last report. Shared by the board and by
+ * GET /api/live-streams?health=true (modules/liveStreams.ts), so a paged list
+ * and the board can never say different things about one stream.
+ */
+export async function liveRowsFor(
+  streams: Array<{ id: string; name: string; status: string; on_air?: boolean | null; group_name?: string | null; origin?: string | null; kind: OwnerKind }>,
+  now = Date.now(),
+): Promise<LiveRow[]> {
+  if (!streams.length) return [];
+  const ids = streams.map((s) => s.id);
   // One query for launch times rather than one per stream.
   const insts = await query<any>(
     `SELECT channel_id, event_id, min(launched_at) AS since
-       FROM instances WHERE terminated_at IS NULL
-      GROUP BY channel_id, event_id`
+       FROM instances WHERE terminated_at IS NULL AND (channel_id = ANY($1) OR event_id = ANY($1))
+      GROUP BY channel_id, event_id`, [ids]
   );
   const since = new Map<string, number>();
   for (const i of insts) {
@@ -126,7 +155,7 @@ async function liveBoard(acct: string): Promise<LiveRow[]> {
   const reports = await query<any>(
     `SELECT channel_id, event_id, active_source, fallback_in_use, filler_in_use,
             degraded_outputs, updated_at
-       FROM stream_status`
+       FROM stream_status WHERE channel_id = ANY($1) OR event_id = ANY($1)`, [ids]
   );
   const report = new Map<string, any>();
   for (const r of reports) {
@@ -183,30 +212,19 @@ async function liveBoard(acct: string): Promise<LiveRow[]> {
       // stream that is not running would describe a run that has ended, which
       // is the same mistake as trusting the instance row.
       degradedOutputs: serverUp ? (st?.degraded_outputs ?? {}) : {},
+      // An event has its own page since 22 Oct (it used to open the list), and
+      // a FAST channel is managed on its FAST page, not the channel page.
       href:
         kind === 'radio' ? `/radio/${row.id}`
-        : kind === 'event' ? `/events`
+        : kind === 'event' ? `/events/${row.id}`
+        : row.origin === 'playlist' ? `/fast/${row.id}`
         : `/channels/${row.id}`,
       previewUrl: `/origin/${row.id}/live/master.m3u8`,
       audioOnly: kind === 'radio',
     };
   };
 
-  const rows = await Promise.all([
-    ...channels.map((c: any) => build(c, c.kind === 'radio' ? 'radio' : 'tv')),
-    ...events.map((e: any) => build(e, 'event')),
-  ]);
-
-  // Trouble first, then what is actually on air, then the rest. An operator
-  // scanning top-down should never have to hunt for the broken one.
-  const RANK: Record<string, number> = {
-    error: 0, degraded: 1, starting: 2, onair: 3, ready: 4, stopped: 5, idle: 6,
-  };
-  return rows.sort((a, b) =>
-    (RANK[a.overall] ?? 9) - (RANK[b.overall] ?? 9)
-    || b.concurrent - a.concurrent
-    || a.name.localeCompare(b.name)
-  );
+  return Promise.all(streams.map((s) => build(s, s.kind)));
 }
 
 /** WHAT IS RUNNING. */
