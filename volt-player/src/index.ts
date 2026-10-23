@@ -24,12 +24,12 @@
 import { VoltPlayerCore } from './core'
 import type { VoltPlayerOptions } from './types'
 import {
-  VoltPlayer, registerSkin, skinNames, isSdkSkin, resolveTheme, themeFromConfig, kit, BUILT_IN_SKINS,
+  VoltPlayer, registerSkin, skinNames, isSdkSkin, resolveTheme, themeFromConfig, kit, BUILT_IN_SKINS, SDK_VERSION,
 } from './sdk'
 import type { VoltPlayerSdkOptions, Theme } from './sdk'
 
 const mounted = new WeakSet<HTMLElement>()
-export const version = '1.0.0'
+export const version = SDK_VERSION
 
 type AnyOptions = VoltPlayerOptions | VoltPlayerSdkOptions
 
@@ -106,6 +106,7 @@ function scan(root: ParentNode = document): void {
         autoplay: a('data-autoplay') === 'true',
         muted: a('data-muted') === 'true',
         poster: a('data-poster'),
+        debug: a('data-debug') === 'false' ? false : a('data-debug') === 'open' ? { open: true } : undefined,
       }).then((p) => { (node as any).voltPlayer = p; node.dispatchEvent(new CustomEvent('volt-player-ready', { detail: p, bubbles: true })) })
         .catch((e) => console.error('[volt-player] failed to mount', e))
       return

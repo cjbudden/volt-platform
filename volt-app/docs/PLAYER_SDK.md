@@ -27,6 +27,7 @@ React wrapper). Tests: `volt-app/test/player-sdk.check.ts` (47, the rules),
 | Picture in picture, full screen, keyboard (space, arrows, m, f, c) | where the browser supports them |
 | **Viewer beacons** for Analytics (start, heartbeat, end) | any item with a playback token |
 | Themes (no code) and custom skins (code) | all |
+| **Playback stats** (right-click > Playback stats, or Shift+D): what is really playing, dropped frames, codecs, bandwidth, buffer, latency, CDN, stalls; Copy debug info for a support ticket | all skins, and the console's hls.js / dash.js monitors (section 12) |
 
 ## 2. Skins
 
@@ -38,7 +39,7 @@ React wrapper). Tests: `volt-app/test/player-sdk.check.ts` (47, the rules),
 | `audio_wave` | A strip: artwork, track, a live waveform (from the audio itself when the browser allows, a gentle idle motion otherwise) | yes |
 | `audio_nowplaying` | Big artwork, track details, the last five tracks, what is coming up, and the Coming up banner | yes |
 | `audio_radio` | A station player: logo and name, the programme on air with its progress and time left, a waveform, the Coming up banner the stream raises before the next programme, then Next and Later | yes |
-| `admin` | The console's player: no branding or casting, the bar under the picture, what is actually playing (resolution, bitrate, buffer, distance from live), a stats overlay | no (console only) |
+| `admin` | The console's player: no branding or casting, the bar under the picture, what is actually playing (resolution, bitrate, buffer, distance from live), a Stats button for the playback stats panel | no (console only) |
 
 The four original station layouts (`card`, `bar`, `hero`, `stage`) remain. A
 station whose saved layout is an SDK skin is handed to the SDK player by the
@@ -97,12 +98,12 @@ Options (all optional except `el`): `skin`, `theme`, `apiBase`, `appKey`,
 `source`, `item`, `playlist`, `startIndex`, `assetId`, `epg`, `stationId`,
 `autoplay`, `muted`, `poster`, `watermark`, `startAt`, `requestHeaders`,
 `beacons`, `cast` (`false`, or `{ receiverAppId }`), `airplay`, `media`,
-`strings` (translations), `demo`, `onEvent`, and for events `eventId`,
+`strings` (translations), `demo`, `debug` (section 12), `onEvent`, and for events `eventId`,
 `viewerToken`, `purchaseUrl`, `signInUrl`.
 
 Events: `state`, `ready`, `play`, `pause`, `ended`, `error`, `itemchange`,
 `programmechange`, `upnext`, `qualitychange`, `castchange`,
-`presentationchange`, `locked`, `purchase`, `signin`. A declarative embed
+`presentationchange`, `locked`, `purchase`, `signin`, `statschange`. A declarative embed
 dispatches `volt-player-ready` (the player in `event.detail`) so a page can
 listen without creating the player itself.
 
@@ -119,14 +120,14 @@ paused, buffering, ended, error, offline), `playing`, `error`, `currentTime`,
 `index`, `item`, `upNext`, `nowPlaying`, `history`, `nextTrack`, `cast`,
 `airplay`, `fullscreen`, `pip`, `hasPicture`, `audioOnly`, `volume`, `muted`,
 and for events `event`, `presentation`, `msToStart`, `access` (mode, message,
-products) and `replaying`; status `locked` means the gate wants a purchase or
+products) `replaying`, and `stats` (the stats panel is open); status `locked` means the gate wants a purchase or
 a sign-in.
 
 Commands: `play`, `pause`, `toggle`, `seek`, `seekBy`, `goLive`, `startOver`,
 `setQuality`, `setTextTrack`, `setAudioTrack`, `setVolume`, `toggleMute`,
 `setRate`, `next`, `previous`, `playItem`, `cancelUpNext`, `toggleFullscreen`,
 `togglePip`, `cast`, `airplay`, `levels` (frequency data for a visualiser),
-`purchase`, `signIn`, `playReplay`, `refreshAccess`.
+`purchase`, `signIn`, `playReplay`, `refreshAccess`, `toggleStats`.
 
 ## 5. Theme (no code) and custom skins (code)
 
@@ -279,6 +280,72 @@ for line, and `test/player-sdk.check.ts`'s cases become each SDK's unit tests.
 
 Migrations `0055_player_sdk_skins.sql` and `0056_player_event_skin.sql` let a
 config name the SDK skins.
+
+## 12. Playback stats (the debug panel, 23 Oct 2026)
+
+A "stats for nerds" panel on every Volt player, so a viewer on a support call,
+a customer's developer, or an operator checking an output can say exactly
+what is playing. Code: `volt-player/src/sdk/stats.ts`. Tests:
+`volt-app/test/player-stats.check.ts` (46, the rows and the report) and
+`volt-app/test/player-stats-browser.check.ts` (34, in Chromium on a real
+stream).
+
+**Opening it.** Right-click the player > **Playback stats** (Shift+right-click
+still gives the browser's own menu), **Shift+D** while the player has focus,
+the admin skin's **Stats** button, or `player.showStats()`. The same menu has
+**Copy debug info**. × closes it.
+
+**What it shows**, measured, not declared:
+
+| Row | Says |
+|---|---|
+| Asset / Session | the asset id and the beacon session id (what Analytics filed this viewing under) |
+| Viewport / Frames | the player's size × device pixel ratio; frames dropped of frames decoded |
+| Current / Optimal Res | the rendition playing (size @ frame rate); the largest rendition the box can show at this pixel ratio |
+| Volume | level, and muted |
+| Codecs | named, with the codec string: `H.264 High L4 (avc1.640028) / AAC-LC (mp4a.40.2) 2ch 48 kHz`; HDR when not SDR |
+| Bitrate | the rendition's bitrate, ABR auto or pinned |
+| Connection Speed | the engine's bandwidth estimate, with a 60-second graph |
+| Network Activity | bytes downloaded each second, and the total, graphed |
+| Buffer Health | seconds buffered ahead, graphed |
+| Live Latency | live only: seconds behind real time (from PROGRAM-DATE-TIME) or the live edge, and the target, graphed |
+| Live Mode / Stream | HLS or DASH, low latency or not, the DVR window, segment length; or "on demand" |
+| Engine | Shaka (with version), the browser's own HLS, progressive, hls.js or dash.js; the DRM key system |
+| Delivery | the host that served the last segment, the CDN POP and cache result (CloudFront `x-amz-cf-pop` / `x-cache`, Cloudflare `cf-ray` / `cf-cache-status`, Fastly `x-served-by`), where the CDN exposes them (CORS `Access-Control-Expose-Headers`) |
+| Stalls / Errors | rebuffers after playback started (and their time), recoverable errors, the last error code |
+| Status, Programme | the player's status (with the error), the programme on air |
+| Manifest | the URL **without its query**, so a token never ends up in a ticket |
+| Date | the playhead's wall clock (live with PROGRAM-DATE-TIME), in the viewer's time zone |
+
+Rows with nothing to say are left out (no latency on demand, no resolution
+for audio). **Copy debug info** gives the same rows in full plus the SDK
+version, the time (UTC), the browser and the page (without its query).
+
+**Cost.** Nothing is built until the panel first opens; sampling runs once a
+second only while it is open. Two media listeners count stalls from load, and
+the Shaka path reads the CDN headers of each segment response.
+
+**For customers.** On by default. `debug: false` (or `data-debug="false"` on
+a declarative embed) removes the menu and the shortcut for viewers; the API
+still works, so a site can put the panel behind its own "Report a problem".
+`debug: { open: true }` (or `data-debug="open"`) opens it on load.
+`player.getStats()` returns the sample without the panel;
+`player.copyDebugInfo()` copies and returns the report; `statschange` fires
+when it opens or closes.
+
+**On players the SDK does not own.** `attachStats(host, probe)` puts the same
+panel and right-click menu on any player. Probes: `mediaProbe(video)` (any
+element, including Safari's own HLS), `hlsJsProbe(hls, video)`,
+`dashJsProbe(player)`, merged with `combineProbes()` (earlier wins). The
+console uses this through `volt-web/src/useStatsPanel.ts` on the channel's
+**output monitor** (with a Stats button beside HLS / DASH), the **source
+preview**, and the **output URL** previews. Every other console player is the
+SDK with the admin skin (recordings, media library, skip markers, FAST), so
+it has the panel already.
+
+**Native SDKs (next phases)** are to expose the same sample (`getStats()`),
+from AVPlayer's access log and ExoPlayer's analytics listener, and draw the
+same rows.
 
 ## HTML graphics from the console (20 Oct 2026)
 

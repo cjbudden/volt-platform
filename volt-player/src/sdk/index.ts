@@ -10,3 +10,8 @@ export * as kit from './skins/kit';
 export * from './schedule';
 export type * from './types';
 export * from './triggers';
+export {
+  StatsPanel, attachStats, bindDebugMenu, combineProbes, mediaProbe, hlsJsProbe, dashJsProbe,
+  statsRows, statsReport, codecName, splitCodecs, redactUrl, optimalFor, SDK_VERSION,
+} from './stats';
+export type { StatsSample, StatsProbe, StatsRow, AttachedStats } from './stats';

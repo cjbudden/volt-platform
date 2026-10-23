@@ -25,6 +25,7 @@ import { injectBaseStyles } from './skins/kit';
 import { GraphicsOverlay, snapshotAt, mergeSnapshots, cameOn, feedUrl, type OverlayDef, type OverlaySnapshot } from './overlay';
 import { activeAt, adBreakAt, fromDashRegion, fromHlsRegions, fromNativeCues, mergeGraphics, upNextFromGraphic } from './triggers';
 import type { TriggerReport } from './engine';
+import { StatsPanel, bindDebugMenu, combineProbes, mediaProbe, SDK_VERSION, type StatsSample } from './stats';
 
 const EPG_REFRESH_MS = 5 * 60_000;
 const NOW_PLAYING_MS = 15_000;
@@ -47,6 +48,7 @@ export function initialState(): PlayerState {
     fullscreen: false, pip: { available: false, active: false },
     hasPicture: false, audioOnly: false,
     event: null, presentation: null, msToStart: null, access: { mode: null, message: null, products: [] }, replaying: false,
+    stats: false,
   };
 }
 
@@ -89,6 +91,9 @@ export class VoltPlayer {
   private url = '';
   private ownsMedia: boolean;
   private destroyed = false;
+  /** Playback stats (sdk/stats.ts): the panel is built the first time it opens. */
+  private statsPanel: StatsPanel | null = null;
+  private mprobe: ReturnType<typeof mediaProbe>;
 
   static async create(o: VoltPlayerSdkOptions): Promise<VoltPlayer> {
     const p = new VoltPlayer(o);
@@ -133,6 +138,7 @@ export class VoltPlayer {
     this.engine.onChange = () => this.pullEngine();
     this.engine.onError = (msg, code) => this.fail(msg, code);
     this.engine.onTrigger = (r) => this.onTrigger(r);
+    this.mprobe = mediaProbe(this.media, this.root);
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -144,6 +150,11 @@ export class VoltPlayer {
     this.wireMedia();
     this.wireRoot();
     this.setupCasting();
+    if (this.o.debug !== false) this.offs.push(bindDebugMenu(this.root, () => [
+      { label: this.t('playbackStats'), checked: this.s.stats, run: () => this.showStats() },
+      { label: this.t('copyDebug'), run: () => void this.copyDebugInfo() },
+    ], `Volt Player ${SDK_VERSION}`));
+    if (typeof this.o.debug === 'object' && this.o.debug.open) this.showStats(true);
 
     const items = normalizePlaylist([
       ...(this.o.item ? [this.o.item] : []),
@@ -174,6 +185,8 @@ export class VoltPlayer {
     for (const t of this.timers) clearInterval(t);
     for (const f of this.offs) { try { f(); } catch { /* */ } }
     cancelAnimationFrame(this.raf);
+    this.statsPanel?.destroy();
+    this.mprobe.destroy();
     try { this.skin?.destroy?.(); } catch { /* */ }
     await this.engine.destroy();
     this.root.remove();
@@ -199,6 +212,52 @@ export class VoltPlayer {
   seek(t: number): void { this.cmd.seek(t); }
   next(): void { this.cmd.next(); }
   previous(): void { this.cmd.previous(); }
+
+  /**
+   * PLAYBACK STATS (sdk/stats.ts). Open, close or (no argument) toggle the
+   * panel; works whatever `debug` says, so a skin's own Stats button does too.
+   */
+  showStats(on?: boolean): void {
+    const open = on ?? !this.s.stats;
+    if (open && !this.statsPanel) {
+      this.statsPanel = new StatsPanel({
+        host: this.root, probe: this.statsProbe(), version: SDK_VERSION, title: this.t('playbackStats'),
+        onClose: () => { this.set({ stats: false }); this.emit('statschange', false); },
+      });
+    }
+    this.statsPanel?.setOpen(open);
+    if (open !== this.s.stats) { this.set({ stats: open }); this.emit('statschange', open); }
+  }
+
+  /** A stats sample now, open or not: for a host page's own support form. */
+  getStats(): StatsSample { return combineProbes(this.statsProbe())() as StatsSample; }
+
+  /** Copy the stats as text (for a support ticket) and return the text. */
+  async copyDebugInfo(): Promise<string> {
+    if (!this.statsPanel) this.statsPanel = new StatsPanel({ host: this.root, probe: this.statsProbe(), version: SDK_VERSION, title: this.t('playbackStats'),
+      onClose: () => { this.set({ stats: false }); this.emit('statschange', false); } });
+    await this.statsPanel.copy();
+    return this.statsPanel.text();
+  }
+
+  /** The player's own knowledge first, then the engine's, then the media element's. */
+  private statsProbe() {
+    return combineProbes(
+      () => {
+        const it = this.s.item;
+        return {
+          assetId: it?.assetId ?? null, title: it?.title ?? null, sessionId: this.beacons?.sessionId ?? null,
+          status: this.s.status === 'error' && this.s.error ? `error: ${this.s.error}${this.s.errorCode != null ? ` (${this.s.errorCode})` : ''}` : this.s.status,
+          programme: this.s.programme?.title ?? null,
+          wallClock: this.s.live ? this.s.wallClock : null,
+        };
+      },
+      () => this.engine.debugSample(),
+      // Distance from the live edge when the engine has no clock-based latency.
+      () => (this.s.live ? { latency: this.s.behindLive } : {}),
+      this.mprobe,
+    );
+  }
 
   /** Change the theme live (the console's preview). */
   setTheme(t: Partial<Theme>): void {
@@ -599,7 +658,7 @@ export class VoltPlayer {
     if (nextIdx < this.s.items.length && this.theme.autoAdvance && this.dismissedFor !== `i:${this.s.index}`) void this.load(nextIdx, true);
   }
 
-  /** Keyboard: space/k play, ←/→ 10 s, ↑/↓ volume, m mute, f fullscreen, c subtitles. */
+  /** Keyboard: space/k play, ←/→ 10 s, ↑/↓ volume, m mute, f fullscreen, c subtitles, Shift+D stats. */
   private wireRoot() {
     const key = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.closest?.('input,select,textarea')) return;
@@ -613,6 +672,7 @@ export class VoltPlayer {
         case 'm': c.toggleMute(); break;
         case 'f': c.toggleFullscreen(); break;
         case 'c': if (this.s.textTracks.length) c.setTextTrack(this.s.textTrack ? null : this.s.textTracks[0].id); break;
+        case 'D': if (!e.shiftKey || e.metaKey || e.ctrlKey || this.o.debug === false) return; this.showStats(); break;
         default: return;
       }
       e.preventDefault();
@@ -768,6 +828,7 @@ export class VoltPlayer {
       void this.setPlaylist([{ id, assetId: id, title: this.s.event?.title ?? null }], 0, true);
     },
     refreshAccess: () => { if (this.s.items.length) void this.load(Math.max(0, this.s.index), true); },
+    toggleStats: (on) => this.showStats(on),
   };
 
   /**

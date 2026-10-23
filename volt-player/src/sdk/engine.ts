@@ -12,6 +12,7 @@
 import shaka from 'shaka-player/dist/shaka-player.compiled';
 import type { AudioTrackInfo, Quality, Source, TextTrackInfo } from './types';
 import { qualityLabel, qualityList, sourceKind } from './schedule';
+import { cdnFromHeaders, optimalFor, type StatsSample } from './stats';
 
 let polyfilled = false;
 
@@ -90,6 +91,9 @@ export class Engine {
   private sp: any = null;
   private pinned: string | null = null;
   private textOn = false;
+  /** For the stats panel: the CDN's answer on the last segment, the last recoverable error. */
+  private cdn: StatsSample['cdn'] = null;
+  private lastErr: string | null = null;
   private o: EngineOptions;
   /** Called whenever tracks, adaptation or the window change. */
   onChange: () => void = () => {};
@@ -178,6 +182,15 @@ export class Engine {
         if (h) Object.assign(req.headers, h);
       });
     }
+    // STATS: which CDN edge answered the last segment and whether it was a hit
+    // (sdk/stats.ts). Only the headers the CDN exposes to the page (CORS).
+    try {
+      sp.getNetworkingEngine()?.registerResponseFilter((type: number, res: any) => {
+        if (type !== 1 /* SEGMENT */) return;
+        const h = res?.headers ?? {};
+        this.cdn = cdnFromHeaders((n) => h[n], res?.uri ?? res?.originalUri ?? null);
+      });
+    } catch { /* stats only */ }
     const changed = () => this.onChange();
     for (const ev of ['trackschanged', 'variantchanged', 'adaptation', 'textchanged', 'texttrackvisibility', 'abrstatuschanged', 'loaded'])
       sp.addEventListener(ev, changed);
@@ -195,6 +208,7 @@ export class Engine {
     sp.addEventListener('timelineregionadded', (ev: any) => { if (ev?.detail) this.onTrigger?.({ kind: 'dash', region: ev.detail }); });
     sp.addEventListener('error', (ev: any) => {
       const d = ev?.detail;
+      this.lastErr = d?.code != null ? `Shaka ${d.code}` : null;
       if (d?.severity === 2 /* CRITICAL */) this.onError(readableError(d), d?.code ?? null);
     });
     await sp.load(url, startAt ?? null);
@@ -235,6 +249,8 @@ export class Engine {
     this.sp = null;
     this.mode = null;
     this.pinned = null;
+    this.cdn = null;
+    this.lastErr = null;
     if (sp) { try { await sp.destroy(); } catch { /* already gone */ } }
     try { this.media.removeAttribute('src'); this.media.load(); } catch { /* */ }
   }
@@ -293,6 +309,54 @@ export class Engine {
       qualities, activeQuality, quality: this.pinned ?? 'auto',
       textTracks, textTrack, audioTracks, audioTrack, audioOnly, bandwidth,
     };
+  }
+
+  /**
+   * What the stats panel needs from the engine (sdk/stats.ts). Shaka knows the
+   * most; the native and progressive paths leave the rest to mediaProbe().
+   */
+  debugSample(): Partial<StatsSample> {
+    const sp = this.sp;
+    if (!sp) return { engine: this.mode === 'native' ? 'Browser HLS (native)' : this.mode === 'progressive' ? 'Progressive' : null };
+    const out: Partial<StatsSample> = { engine: `Shaka ${String((shaka as any).Player?.version ?? '').replace(/^v/, '')} (MSE)`.replace('  ', ' '), cdn: this.cdn, lastError: this.lastErr, abr: this.pinned ? 'pinned' : 'auto' };
+    const num = (v: any) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    try {
+      const st = sp.getStats?.() ?? {};
+      const variants: any[] = sp.getVariantTracks?.() ?? [];
+      const a = variants.find((v) => v.active) ?? null;
+      out.format = sp.getManifestType?.() ?? null;
+      out.manifest = sp.getAssetUri?.() ?? null;
+      if (a) {
+        out.res = a.width && a.height ? { w: a.width, h: a.height, fps: num(a.frameRate) } : null;
+        out.videoCodec = a.videoCodec || null;
+        out.audioCodec = a.audioCodec || null;
+        out.audioChannels = num(a.channelsCount);
+        out.sampleRate = num(a.audioSamplingRate);
+        out.hdr = a.hdr || null;
+        out.bitrate = num(a.bandwidth);
+      }
+      const r = this.media.getBoundingClientRect();
+      const same = variants.filter((v) => !a || v.language === a.language);
+      const o = optimalFor(same, r.height, typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1);
+      if (o && o.width && o.height) out.optimal = { w: o.width, h: o.height, fps: num(o.frameRate) };
+      if (num(st.decodedFrames) != null) out.frames = { dropped: num(st.droppedFrames) ?? 0, total: st.decodedFrames, corrupted: num(st.corruptedFrames) || undefined };
+      out.bandwidth = num(st.estimatedBandwidth);
+      out.bytes = num(st.bytesDownloaded);
+      out.live = !!sp.isLive?.();
+      if (out.live) {
+        const lat = num(st.liveLatency);
+        if (lat != null && lat > 0) out.latency = lat;
+        const sr = sp.seekRange?.();
+        if (sr && Number.isFinite(sr.end - sr.start)) out.dvrWindow = sr.end - sr.start;
+      }
+      out.lowLatency = !!sp.getConfiguration?.()?.streaming?.lowLatencyMode;
+      const seg = num(st.maxSegmentDuration);
+      if (seg != null && seg > 0) out.segmentDuration = seg;
+      out.errors = num(st.nonFatalErrorCount);
+      const ks = sp.keySystem?.();
+      if (ks) out.drm = ks;
+    } catch { /* a half-loaded player: report what is known */ }
+    return out;
   }
 
   setQuality(id: string): void {

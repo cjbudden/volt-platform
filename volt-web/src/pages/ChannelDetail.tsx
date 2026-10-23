@@ -26,6 +26,7 @@ import { pressable } from '../a11y'
 import { FillerField } from '../FillerField'
 import { OutputUrls } from '../OutputUrls'
 import { PanelLayout } from '../panelLayout'
+import { useStatsPanel } from '../useStatsPanel'
 function fmtOffset(sec: number) {
   if (sec <= 0) return 'LIVE'
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60)
@@ -661,6 +662,8 @@ function HlsVideo({ src, fallbackSrc, hostRef, kind = 'hls', preferHeight, onSta
   const ref = useRef<HTMLVideoElement | null>(null)
   const hlsRef = useRef<any>(null)
   const onStateRef = useRef(onState); onStateRef.current = onState
+  // Playback stats on the source preview: right-click or Shift+D (useStatsPanel).
+  useStatsPanel(hostRef, ref, { hls: hlsRef })
   const eng = useAudioEngine(ref)
   const controlsShown = useControlsVisible(hostRef)
   const [audioTracks, setAudioTracks] = useState<AudioTrackOpt[]>([])
@@ -1486,6 +1489,8 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
   const dashRef = useRef<any>(null)
   const eng = useAudioEngine(videoRef)
   const controlsShown = useControlsVisible(videoBoxRef)
+  // Playback stats on the output monitor (the SDK's panel): Stats button, right-click or Shift+D.
+  const stats = useStatsPanel(videoBoxRef, videoRef, { hls: hlsRef, dash: dashRef })
   const [audioTracks, setAudioTracks] = useState<AudioTrackOpt[]>([])
   const [audioTrack, setAudioTrack] = useState(0)
   // element starts muted for autoplay; the audio engine unmutes it once armed and
@@ -1942,6 +1947,8 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
               <button className={`chip ${fmt === 'dash' ? 'active' : ''}`} style={{ padding: '5px 10px', borderRadius: 0 }} onClick={() => setFmt('dash')}>DASH</button>
             </span>
           )}
+          <button className={`chip ${stats.open ? 'active' : ''}`} style={{ padding: '5px 10px' }} onClick={stats.toggle}
+            title="Playback stats: resolution, dropped frames, codecs, bandwidth, buffer, latency, CDN (also right-click the picture, or Shift+D)">Stats</button>
           {capStatus && capStatus.kind === 'error' && (
             <span title={capStatus.hint || 'captions engine error — see the QC log'} style={{ fontSize: 'var(--fs-label)', color: '#fca5a5', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               captions failed: {capStatus.reason}

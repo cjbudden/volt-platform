@@ -16,6 +16,7 @@
 // pressing play.
 import { useEffect, useRef, useState } from 'react'
 import { usePanelControls } from './panelLayout'
+import { useStatsPanel } from './useStatsPanel'
 
 type Fmt = 'hls' | 'dash'
 interface Row { key: string; label: string; sub?: string; url: string; fmt: Fmt; group: 'private' | 'public' }
@@ -138,7 +139,12 @@ function explain(detail?: string): string {
 /** A small muted player for one output, torn down when closed. */
 function Preview({ url, fmt }: { url: string; fmt: Fmt }) {
   const ref = useRef<HTMLVideoElement | null>(null)
+  const box = useRef<HTMLDivElement | null>(null)
+  const hlsRef = useRef<any>(null)
+  const dashRef = useRef<any>(null)
   const [err, setErr] = useState('')
+  // Playback stats: right-click the preview, or Shift+D (useStatsPanel).
+  useStatsPanel(box, ref, { hls: hlsRef, dash: dashRef })
   useEffect(() => {
     const v = ref.current
     if (!v) return
@@ -151,6 +157,7 @@ function Preview({ url, fmt }: { url: string; fmt: Fmt }) {
           if (killed) return
           if (!Hls.isSupported()) { setErr('HLS is not supported in this browser'); return }
           hls = new Hls({ liveDurationInfinity: true })
+          hlsRef.current = hls
           hls.loadSource(url); hls.attachMedia(v)
           hls.on(Hls.Events.MANIFEST_PARSED, () => v.play().catch(() => {}))
           hls.on(Hls.Events.ERROR, (_e: any, d: any) => { if (d?.fatal) setErr(explain(d.details)) })
@@ -158,6 +165,7 @@ function Preview({ url, fmt }: { url: string; fmt: Fmt }) {
           const dashjs: any = (await import('dashjs')).default
           if (killed) return
           dash = dashjs.MediaPlayer().create()
+          dashRef.current = dash
           dash.initialize(v, url, true)
           try { dash.on(dashjs.MediaPlayer.events.ERROR, (e: any) => setErr(explain(e?.error?.message))) } catch { /* older dash.js */ }
         }
@@ -167,12 +175,13 @@ function Preview({ url, fmt }: { url: string; fmt: Fmt }) {
       killed = true
       try { hls?.destroy() } catch { /* ignore */ }
       try { dash?.reset() } catch { /* ignore */ }
+      hlsRef.current = null; dashRef.current = null
       try { v.pause(); v.removeAttribute('src'); v.load() } catch { /* ignore */ }
     }
   }, [url, fmt])
   return (
     <div className="ou-preview">
-      <video ref={ref} muted playsInline controls />
+      <div className="ou-pv" ref={box}><video ref={ref} muted playsInline controls /></div>
       {err && <div className="ou-err">{err}</div>}
     </div>
   )

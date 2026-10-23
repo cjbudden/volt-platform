@@ -268,6 +268,8 @@ export interface PlayerState {
   access: AccessState;
   /** Playing the event's published replay rather than the live stream. */
   replaying: boolean;
+  /** The playback stats panel is open (sdk/stats.ts). */
+  stats: boolean;
 }
 
 /** Everything a skin may ask the player to do. */
@@ -309,6 +311,8 @@ export interface Commands {
   playReplay(): void;
   /** Ask the play gate again (after a purchase or sign-in). */
   refreshAccess(): void;
+  /** Open or close the playback stats panel (no argument: toggle). */
+  toggleStats(on?: boolean): void;
 }
 
 /** Which controls a skin shows. A skin honours what applies to it and ignores the rest. */
@@ -398,7 +402,7 @@ export type SkinFactory = () => Skin;
 export type PlayerEventName =
   | 'state' | 'ready' | 'play' | 'pause' | 'ended' | 'error'
   | 'itemchange' | 'programmechange' | 'upnext' | 'qualitychange' | 'castchange'
-  | 'presentationchange' | 'purchase' | 'signin' | 'locked' | 'graphic';
+  | 'presentationchange' | 'purchase' | 'signin' | 'locked' | 'graphic' | 'statschange';
 
 export interface VoltPlayerSdkOptions {
   el: string | HTMLElement;
@@ -444,6 +448,13 @@ export interface VoltPlayerSdkOptions {
   strings?: Record<string, string>;
   /** Override the saved player setup: act on in-stream graphic triggers or not. */
   showGraphics?: boolean;
+  /**
+   * The playback stats panel (sdk/stats.ts). On by default: right-click >
+   * Playback stats, or Shift+D. `false` removes the menu entry and the
+   * shortcut (player.showStats() and a skin's Stats button still work);
+   * `{ open: true }` opens it on load.
+   */
+  debug?: boolean | { open?: boolean };
   /**
    * DEMO: render this state and play nothing. For a skin preview (the
    * console's Player setup) and for a skin author's test page: every built-in

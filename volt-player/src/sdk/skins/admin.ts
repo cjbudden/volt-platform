@@ -5,6 +5,7 @@
 //  sits under the picture so it never covers what is being checked, and it
 //  says what is actually playing (resolution, bitrate, buffer, distance from
 //  live) instead of "HD". Audio-only streams collapse to the bar alone.
+//  The Stats button opens the shared playback stats panel (sdk/stats.ts).
 // ============================================================================
 import type { PlayerState, Skin, SkinContext } from '../types';
 import { button, el, fmtTime, label, menu, setIcon, show, skipButton, slider, text, type MenuItem } from './kit';
@@ -15,7 +16,6 @@ export function adminSkin(): Skin {
   const p: Record<string, HTMLElement> = {};
   let prog!: ReturnType<typeof slider>;
   let vol!: ReturnType<typeof slider>;
-  let stats = false;
   let skip!: ReturnType<typeof skipButton>;
 
   function mount(ctx: SkinContext) {
@@ -28,12 +28,10 @@ export function adminSkin(): Skin {
     p.err = el('div', 'vpa-err');
     p.spin = el('div', 'vp-spin');
     p.ov = el('div', 'vpa-ov', undefined, p.spin, p.err);
-    p.stats = el('div', 'vpa-stats');
-    p.stats.hidden = true;
     // The same Skip button viewers get, so an operator checking an asset's
     // markers sees exactly what a viewer will.
     skip = skipButton(ctx);
-    top.append(p.ov, p.stats, skip.el);
+    top.append(p.ov, skip.el);
 
     prog = slider('vpa-sl', 'Seek', (f, final) => {
       if (!s || !final) return;
@@ -50,7 +48,8 @@ export function adminSkin(): Skin {
     p.q = el('span', 'vpa-q');
     p.cc = button('cc', t('subtitles'), () => openMenu('cc'), 'vp-btn', 20);
     p.qb = button('gear', t('quality'), () => openMenu('q'), 'vp-btn', 20);
-    p.statsBtn = button('stats', t('stats'), () => { stats = !stats; p.statsBtn.classList.toggle('on', stats); if (s) update(s); }, 'vp-btn', 20);
+    // The shared playback stats panel (sdk/stats.ts), the one right-click opens too.
+    p.statsBtn = button('stats', t('playbackStats'), () => k.toggleStats(), 'vp-btn', 20);
     p.fs = button('fullscreen', t('fullscreen'), () => k.toggleFullscreen(), 'vp-btn', 20);
     const bar = el('div', 'vpa-bar', undefined, prog.root,
       el('div', 'vpa-row', undefined, p.play, p.back, p.fwd, el('div', 'vpv-vol', undefined, p.mute, vol.root), p.time, p.live,
@@ -110,19 +109,7 @@ export function adminSkin(): Skin {
     p.cc.classList.toggle('on', st.textTrack != null);
     show(p.qb, st.qualities.length > 1);
     show(p.fs, !(st.audioOnly && !st.hasPicture));
-    show(p.stats, stats);
-    if (stats) {
-      const media = c.stage.querySelector('video');
-      let buf = 0;
-      if (media && media.buffered.length) { for (let i = 0; i < media.buffered.length; i++) if (media.buffered.start(i) <= media.currentTime + 0.5 && media.buffered.end(i) >= media.currentTime) buf = media.buffered.end(i) - media.currentTime; }
-      text(p.stats, [
-        `${t('resolution')}  ${media && media.videoWidth ? `${media.videoWidth}×${media.videoHeight}` : '-'}`,
-        `${t('bitrate')}     ${aq ? `${Math.round(aq.bitrate / 1000)} kbps` : '-'}`,
-        `${t('buffer')}      ${buf.toFixed(1)} s`,
-        st.live ? `${t('latency')} ${st.behindLive.toFixed(1)} s` : '',
-        `status      ${st.status}`,
-      ].filter(Boolean).join('\n'));
-    }
+    p.statsBtn.classList.toggle('on', st.stats);
   }
 
   return { mount, update };
