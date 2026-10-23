@@ -38,6 +38,8 @@ COPY bin/radio.py /app/bin/radio.py
 COPY bin/events.py /app/bin/events.py
 # In-stream graphic triggers (Up next) in the delivered playlists: radio.py imports it.
 COPY bin/timed_events.py /app/bin/timed_events.py
+# Now-playing as ID3 in emsg in the audio segments: radio.py and timed_events.py import it.
+COPY bin/id3_emsg.py /app/bin/id3_emsg.py
 COPY bin/s3-uploader.sh /app/bin/s3-uploader.sh
 RUN chmod +x /app/bin/s3-uploader.sh
 

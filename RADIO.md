@@ -34,6 +34,12 @@ from one input connection:
 - MP3: a continuous encode fanned out by the control plane at
   `/radio/:id/stream.mp3` to any number of listeners (one encoder, N clients),
   with ICY `StreamTitle` passed through so receivers show now-playing.
+- Now-playing inside HLS and DASH: each title change in the content log is
+  carried in the audio as ID3 (TIT2 title, TPE1 artist) in an `emsg` box,
+  scheme `https://aomedia.org/emsg/ID3`, so Safari, hls.js, Shaka and dash.js
+  show the song as it is heard. Tagged segments are copies under `id3/`
+  beside ffmpeg's files, which recordings keep reading untouched
+  (`volt-encoder/bin/id3_emsg.py`, build queue 1.7).
 
 The output bitrate is one picker (64 to 320 kbps). Packaging is the default
 workflow: if the source is already MP3/AAC at the right rate we repackage

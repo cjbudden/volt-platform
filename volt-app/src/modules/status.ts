@@ -242,7 +242,16 @@ ingestRouter.get(
     // (services/failoverControl.ts). Absent the choice, mode is auto.
     const { currentFailoverControl } = await import('../services/failoverControl');
     const failover = await currentFailoverControl(kind, id);
-    res.json({ id, kind, from: from.toISOString(), to: to.toISOString(), generated_at: new Date(now).toISOString(), triggers: list.map(wireFormat), breaks, control: { failover } });
+    // now_playing: a radio station's title changes, which its container writes
+    // into the audio segments as ID3 (services/radio/nowPlayingTimeline.ts,
+    // volt-encoder/bin/id3_emsg.py). Only for radio; absent otherwise.
+    const { nowPlayingTimeline } = await import('../services/radio/nowPlayingTimeline');
+    const nowPlaying = kind === 'channel' ? await nowPlayingTimeline(id, from, to) : null;
+    res.json({
+      id, kind, from: from.toISOString(), to: to.toISOString(), generated_at: new Date(now).toISOString(),
+      triggers: list.map(wireFormat), breaks, control: { failover },
+      ...(nowPlaying ? { now_playing: nowPlaying } : {}),
+    });
   })
 );
 

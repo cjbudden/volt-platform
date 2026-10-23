@@ -265,6 +265,12 @@ def master_playlist(kbps, media="audio/index.m3u8"):
 # already loads simply leads to the copy with the triggers in it. Until then,
 # and whenever a cycle finds ffmpeg's file mid-write, the last good copy stands.
 #
+# NOW-PLAYING rides the same poll (`now_playing`, the station's content log)
+# and goes INTO the audio: the segments a title change or a repeat falls in are
+# copied to audio/id3/ and dash/id3/ with an ID3 tag in an emsg box, and the
+# delivered copies point at those (id3_emsg.py). ffmpeg's own files, which the
+# recording index and clipping read, are never touched.
+#
 # FAILS OPEN like timed_events.py: no control plane means a copy without
 # triggers, never a missing or late playlist.
 # ---------------------------------------------------------------------------
@@ -281,8 +287,13 @@ def _complete_playlist(text):
         lines[-1].startswith("#") or lines[-1].endswith((".m4s", ".mp4", ".ts")))
 
 
-def refresh_delivered(paths, outs, kbps, triggers, state):
-    """One cycle. Returns what it wrote, for the tests."""
+def refresh_delivered(paths, outs, kbps, triggers, state, now_playing=None):
+    """One cycle. Returns what it wrote, for the tests.
+
+    now_playing: the station's content log from the same poll. When it has
+    entries, the segments a change (or a repeat) falls in are carried as id3/
+    copies with the title as ID3 in an emsg box, and the delivered copies point
+    at them (id3_emsg.py). Each step fails open to ffmpeg's own files."""
     import timed_events
     wrote = []
     if outs.get("hls"):
@@ -292,6 +303,8 @@ def refresh_delivered(paths, outs, kbps, triggers, state):
         except OSError:
             text = ""
         if _complete_playlist(text):
+            if now_playing:
+                text = _with_id3(lambda m: m.refresh_hls(paths["audio"], text, now_playing, state), text)
             _atomic_write(os.path.join(paths["audio"], "index_cc.m3u8"), timed_events.inject_hls(text, triggers))
             wrote.append("audio/index_cc.m3u8")
             if not state.get("master_cc"):
@@ -305,9 +318,22 @@ def refresh_delivered(paths, outs, kbps, triggers, state):
         except OSError:
             mpd = ""
         if "</MPD>" in mpd:
+            if now_playing:
+                mpd = _with_id3(lambda m: m.refresh_dash(paths["dash"], mpd, now_playing, state), mpd)
             _atomic_write(os.path.join(paths["dash"], "manifest_cc.mpd"), timed_events.inject_mpd(mpd, triggers))
             wrote.append("dash/manifest_cc.mpd")
     return wrote
+
+
+def _with_id3(step, fallback):
+    """One now-playing step, or the untouched text when it fails: a title in
+    the stream is never worth a missing playlist."""
+    try:
+        import id3_emsg
+        return step(id3_emsg)
+    except Exception as e:  # noqa: BLE001
+        log(f"now-playing tags: skipped this cycle ({e})")
+        return fallback
 
 
 def start_delivered_copies(cfg, paths, outs, interval=1.0):
@@ -322,7 +348,7 @@ def start_delivered_copies(cfg, paths, outs, interval=1.0):
         warned = False
         while not _stopping:
             try:
-                refresh_delivered(paths, outs, cfg.get("bitrate_kbps"), feed.current(), state)
+                refresh_delivered(paths, outs, cfg.get("bitrate_kbps"), feed.current(), state, feed.now_playing())
                 warned = False
             except Exception as e:  # noqa: BLE001  (one bad cycle must not end the copies)
                 if not warned:

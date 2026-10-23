@@ -93,6 +93,10 @@ class TriggerFeed:
         self.clock = clock
         self._fetch = fetch or self._http
         self._items = []
+        # now_playing: a radio station's content log around now (start, id,
+        # title, artist), which id3_emsg.py writes into the audio segments.
+        # Absent for television; an old control plane simply never sends it.
+        self._now = []
         self._at = 0.0
         self._lock = threading.Lock()
         self._warned = False
@@ -113,8 +117,12 @@ class TriggerFeed:
                     continue
                 dur = t.get("duration")
                 items.append({**t, "_start": start, "_end": (start + float(dur)) if dur is not None else float("inf")})
+            now = []
+            if body.get("now_playing"):
+                import id3_emsg
+                now = id3_emsg.entries_from_wire(body.get("now_playing"))
             with self._lock:
-                self._items, self._at = items, self.clock()
+                self._items, self._now, self._at = items, now, self.clock()
             self._warned = False
             if self.on_control is not None and isinstance(body.get("control"), dict):
                 try:
@@ -133,6 +141,14 @@ class TriggerFeed:
             if self._at and self.clock() - self._at > STALE_SEC:
                 return []
             return list(self._items)
+
+    def now_playing(self):
+        """The station's now-playing log, or [] once the list is stale (a tag
+        that may be wrong is worse than none: players keep the last title)."""
+        with self._lock:
+            if self._at and self.clock() - self._at > STALE_SEC:
+                return []
+            return list(self._now)
 
     def start(self):
         def loop():
