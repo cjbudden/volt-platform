@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.8.0 (2026-10-23)
+
+### Product (in customer release notes)
+
+- improved · Graphics: Graphics live control, the running event rundown and a channel's graphics tab now update the moment anything changes (another operator's take, an API or feed update, a rundown cue, a rule going on at a programme start) instead of checking every second.
+
+### Internal
+
+- added · Graphics: graphics-live-push check suite (32 assertions): every graphics state change reaches a status stream subscriber as a gfx frame within a second, tenancy and permissions, and the consoles no longer poll.
+
 ## 0.7.0 (2026-10-23)
 
 ### Product (in customer release notes)

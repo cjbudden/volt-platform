@@ -1,40 +1,45 @@
 {
-  "version": "0.7.0",
+  "version": "0.8.0",
   "date": "2026-10-23",
-  "commit": "abbf59a8532cc6c85cc74746f78e41a8b8afa10d",
+  "commit": "0e166a5835350298ffc336cbd6bbefe2a644debe",
   "previous": {
-    "version": "0.6.0",
-    "date": "2026-10-22",
-    "commit": "86923cdd6dfde0d1bff7c7c8f55486d3fde4d851",
+    "version": "0.7.0",
+    "date": "2026-10-23",
+    "commit": "abbf59a8532cc6c85cc74746f78e41a8b8afa10d",
     "previous": {
-      "version": "0.5.1",
+      "version": "0.6.0",
       "date": "2026-10-22",
-      "commit": "16041824ffb11d1736455d91c324692969a57409",
+      "commit": "86923cdd6dfde0d1bff7c7c8f55486d3fde4d851",
       "previous": {
-        "version": "0.5.0",
+        "version": "0.5.1",
         "date": "2026-10-22",
-        "commit": "d446d932d8c3aedbdc8ee0b5f87c0efbae010d2e",
+        "commit": "16041824ffb11d1736455d91c324692969a57409",
         "previous": {
-          "version": "0.4.0",
+          "version": "0.5.0",
           "date": "2026-10-22",
-          "commit": "f7e669d7d1027c3b5b6717687128262b6056dadc",
+          "commit": "d446d932d8c3aedbdc8ee0b5f87c0efbae010d2e",
           "previous": {
-            "version": "0.3.0",
+            "version": "0.4.0",
             "date": "2026-10-22",
-            "commit": "ff0d4163ada0f2ee6f122e4dc57f58987d369d6a",
+            "commit": "f7e669d7d1027c3b5b6717687128262b6056dadc",
             "previous": {
-              "version": "0.2.1",
+              "version": "0.3.0",
               "date": "2026-10-22",
-              "commit": "c9c0ccf45e35d1954d27a63b1b77bf491aea89de",
+              "commit": "ff0d4163ada0f2ee6f122e4dc57f58987d369d6a",
               "previous": {
-                "version": "0.2.0",
+                "version": "0.2.1",
                 "date": "2026-10-22",
-                "commit": "fb282862daf7a87546c2bb604ed42020744c67eb",
+                "commit": "c9c0ccf45e35d1954d27a63b1b77bf491aea89de",
                 "previous": {
-                  "version": "0.1.0",
-                  "date": "2026-10-18",
-                  "commit": "7879905d5423d957dd6086e4205fb4e88a161527",
-                  "note": "Baseline when release tooling was introduced. No release had been cut before this."
+                  "version": "0.2.0",
+                  "date": "2026-10-22",
+                  "commit": "fb282862daf7a87546c2bb604ed42020744c67eb",
+                  "previous": {
+                    "version": "0.1.0",
+                    "date": "2026-10-18",
+                    "commit": "7879905d5423d957dd6086e4205fb4e88a161527",
+                    "note": "Baseline when release tooling was introduced. No release had been cut before this."
+                  }
                 }
               }
             }
