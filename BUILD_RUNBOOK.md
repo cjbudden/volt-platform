@@ -106,7 +106,12 @@ the next item.
 2. `VOLT_BUILD_STATUS.md`: update the item's row (or add one) the same way
    the 22 Oct rows are written: what, where in the code, how it was checked,
    what is not yet done.
-3. A change note per customer-visible change, written for the customer:
+3. **The guide.** A change a customer can see updates its guide in
+   `docs-site/docs` (the template and coverage map from item 1.14-G0), with
+   the screenshots retaken by the screenshot script; a new section gets a new
+   guide and a coverage entry. API changes update the developer guides. Not
+   optional: an item whose guide is not updated is not done (Christian, 24 Oct).
+4. A change note per customer-visible change, written for the customer:
    `node scripts/release/change.mjs --scope core --type <added|improved|fixed|changed> --area <Area> "<one or two sentences>"`;
    tooling and tests get `--scope internal`.
 
