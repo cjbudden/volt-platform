@@ -3,6 +3,7 @@ import { api, type AnalyticsOverview } from '../api'
 import { PageError, usePageNotice } from '../notices'
 import { useRoute } from '../router'
 import OperatingReports, { AnalyticsViewSwitch } from './OperatingReports'
+import PlaybackReports from './PlaybackReports'
 
 /* ============================================================================
    ANALYTICS
@@ -254,10 +255,12 @@ function BarList({ title, data, empty, format = fmtInt }: {
 /** Hours: whole numbers once there are some, decimals below ten, so a short test is not shown as 0. */
 const fmtHours = (h: number) => h >= 10 ? Math.round(h).toLocaleString() : h > 0 ? h.toFixed(h < 1 ? 2 : 1) : '0'
 
-/** Two views of one question family: Audience (who watched) and Operating
- *  (what ran, how long on air, why it stopped). /analytics/operating[/:id]. */
+/** Three views of one question family: Audience (who watched), Operating
+ *  (what ran, how long on air, why it stopped; /analytics/operating[/:id]) and
+ *  Playback (what viewers actually saw, from the player's reports; /analytics/playback). */
 export default function AnalyticsPage() {
   const route = useRoute()
+  if (route.path.startsWith('/analytics/playback')) return <PlaybackReports />
   return route.path.startsWith('/analytics/operating') ? <OperatingReports /> : <AudienceAnalytics />
 }
 

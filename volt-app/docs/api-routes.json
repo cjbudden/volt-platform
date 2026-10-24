@@ -271,6 +271,69 @@
  },
  {
   "method": "GET",
+  "path": "/api/analytics/qoe/breakdown",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/qoe/collector",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/qoe/definitions",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/qoe/dimensions",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/qoe/overview",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "POST",
+  "path": "/api/analytics/qoe/replay",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: manage",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/qoe/series",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
   "path": "/api/analytics/realtime",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

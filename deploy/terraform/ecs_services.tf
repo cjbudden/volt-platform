@@ -26,7 +26,7 @@ resource "aws_ecs_task_definition" "control_plane" {
     portMappings = [{ containerPort = 8080, protocol = "tcp" }]
     # The env list lives in local.control_plane_env (bottom of this file) so the
     # role services in scaling_services.tf run with exactly the same settings.
-    environment = concat(local.control_plane_env, local.scale_env, local.image_env, local.docs_env, [
+    environment = concat(local.control_plane_env, local.scale_env, local.image_env, local.docs_env, local.qoe_env, [
       { name = "ROLE", value = var.enable_role_split ? "api-admin" : "all" },
       { name = "PREWARM_ECS_RESOURCE_IDS", value = local.prewarm_target },
     ])

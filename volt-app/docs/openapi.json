@@ -41,7 +41,7 @@
   {
    "name": "Analytics",
    "x-displayName": "Analytics",
-   "description": "Analytics collects playback beacons from your players and reports audience, usage and per-asset viewing for your account.\n\n**Use it to:**\n- Send viewing beacons from a player with `POST /api/public/analytics/beacon`\n- Read reports with `GET /api/analytics/overview`, `GET /api/analytics/realtime`, `GET /api/analytics/audience` and `GET /api/analytics/asset`\n- See billable usage with `GET /api/analytics/usage`\n- Set how long analytics data is kept with `PUT /api/analytics/retention`\n\n**Credential:** playback token for beacons. Reports use an admin session (Bearer) or account secret key, with `analytics: view` to read and `analytics: manage` to change retention.\n\n**Good to know:** beacon values are bounded, so send what the player measured rather than accumulated totals."
+   "description": "Analytics collects playback beacons from your players and reports audience, usage and per-asset viewing for your account.\n\n**Use it to:**\n- Send viewing beacons from a player with `POST /api/public/analytics/beacon`\n- Read reports with `GET /api/analytics/overview`, `GET /api/analytics/realtime`, `GET /api/analytics/audience` and `GET /api/analytics/asset`\n- See billable usage with `GET /api/analytics/usage`\n- Set how long analytics data is kept with `PUT /api/analytics/retention`\n- See what viewers actually experienced (playback success, startup, buffering, quality, engagement, telemetry health), filtered by device, OS, app version, CDN, country and network, with `GET /api/analytics/qoe/overview`, and the worst segments with `GET /api/analytics/qoe/breakdown`\n\n**Credential:** playback token for beacons. Reports use an admin session (Bearer) or account secret key, with `analytics: view` to read and `analytics: manage` to change retention.\n\n**Good to know:** beacon values are bounded, so send what the player measured rather than accumulated totals."
   },
   {
    "name": "Apps",
@@ -2106,6 +2106,188 @@
      "Analytics"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/analytics/qoe/breakdown": {
+   "get": {
+    "operationId": "getAnalyticsQoeBreakdown",
+    "summary": "Worst segments",
+    "tags": [
+     "Analytics"
+    ],
+    "description": "Every value of one dimension (`by`, any filter name) ranked by one `measure` (`failure`, `ebff`, `fatal`, `stalls`, `rebuffer`, `startup_p95`, `bitrate`), over at least `minViews` views (default 20), with the sessions affected. Use it to find the device model, app release, network or country that is worse than the rest.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/analytics/qoe/collector": {
+   "get": {
+    "operationId": "getAnalyticsQoeCollector",
+    "summary": "Collector state",
+    "tags": [
+     "Analytics"
+    ],
+    "description": "What this API process holds in memory for the live reports (open sessions, writes waiting) and whether its last write to the analytics database worked.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/analytics/qoe/definitions": {
+   "get": {
+    "operationId": "getAnalyticsQoeDefinitions",
+    "summary": "How the reports are measured",
+    "tags": [
+     "Analytics"
+    ],
+    "description": "The definitions the numbers use, and their version (stamped on every derived row).\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/analytics/qoe/dimensions": {
+   "get": {
+    "operationId": "getAnalyticsQoeDimensions",
+    "summary": "Filter values",
+    "tags": [
+     "Analytics"
+    ],
+    "description": "The values seen for each filter in the window, most views first.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/analytics/qoe/overview": {
+   "get": {
+    "operationId": "getAnalyticsQoeOverview",
+    "summary": "Playback experience reports",
+    "tags": [
+     "Analytics"
+    ],
+    "description": "Reports 1, 2, 3, 4, 10 and 12 of QOE_REPORTING.md in one answer: playback success, startup (p50, p95, p99 and the startup steps), buffering, quality and ABR, engagement and telemetry health. Window `from` and `to` (ISO 8601), or `hours` or `days` (default 1 day). Filter by any of `content_id`, `stream_type` (`live` or `vod`), `device_model`, `device_class`, `os`, `os_version`, `browser`, `browser_version`, `app_name`, `app_version`, `sdk_version`, `player_version`, `codec`, `cdn`, `country`, `region`, `asn`, `network`; comma separated values, `__none` for not reported. Experience reports count a view by when it ended, engagement by when it started.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/analytics/qoe/replay": {
+   "post": {
+    "operationId": "postAnalyticsQoeReplay",
+    "summary": "Rebuild playback reports from the raw reports",
+    "tags": [
+     "Analytics"
+    ],
+    "description": "Rebuilds the view rows and minute aggregates of your account for `day` (and through `to`, at most 31 days) from the raw CMCD reports, replacing each day whole. Safe to repeat: the same raw reports give the same rows. Needs `analytics: manage`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/analytics/qoe/series": {
+   "get": {
+    "operationId": "getAnalyticsQoeSeries",
+    "summary": "Playback trend",
+    "tags": [
+     "Analytics"
+    ],
+    "description": "Play attempts, starts, failures, stalls, rebuffer ratio and startup p50, p95 and p99 per minute, hour or day (chosen from the window), from the minute aggregates. Only `content_id`, `stream_type`, `country`, `device_class` and `cdn` filter it; `ignoredFilters` lists any others you sent.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
     "security": [
      {
       "adminBearer": []

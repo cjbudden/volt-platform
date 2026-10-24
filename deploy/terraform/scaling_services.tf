@@ -73,7 +73,7 @@ resource "aws_ecs_task_definition" "role" {
     image        = "${aws_ecr_repository.repo["volt-control-plane"].repository_url}:${var.control_plane_image_tag}"
     essential    = true
     portMappings = [{ containerPort = 8080, protocol = "tcp" }]
-    environment  = concat(local.control_plane_env, local.scale_env, local.image_env, local.docs_env, [{ name = "ROLE", value = each.key }], each.value.extra)
+    environment  = concat(local.control_plane_env, local.scale_env, local.image_env, local.docs_env, local.qoe_env, [{ name = "ROLE", value = each.key }], each.value.extra)
     secrets      = concat(local.control_plane_secrets, local.scale_secrets, local.image_secrets, local.docs_secrets)
     healthCheck  = { command = local.live_check, interval = 15, timeout = 5, retries = 3, startPeriod = 90 }
     stopTimeout  = 30

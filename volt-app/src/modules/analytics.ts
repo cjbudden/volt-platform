@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
+import { qoeRouter } from './qoe';
 import { asyncHandler, badRequest, ApiError } from '../util/http';
 import { verifyPlaybackToken } from '../services/apiKeys';
 import { retentionStatus, setRawRetention, sweepAnalytics } from '../services/analyticsRetention';
@@ -76,6 +77,8 @@ analyticsBeaconRouter.post(
 // ---- tenant reports (JWT) --------------------------------------------------
 export const analyticsRouter = Router();
 analyticsRouter.use(requireAuth);
+// Playback experience (QoE) reports, from the separate analytics database (modules/qoe.ts).
+analyticsRouter.use('/qoe', qoeRouter);
 
 /**
  * DATA RETENTION — what is kept, and for how long.

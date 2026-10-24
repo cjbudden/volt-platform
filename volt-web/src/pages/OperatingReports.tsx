@@ -81,13 +81,15 @@ function useReportParams() {
 }
 
 // ---- shared pieces -------------------------------------------------------------
-export function AnalyticsViewSwitch({ view }: { view: 'audience' | 'operating' }) {
+export function AnalyticsViewSwitch({ view }: { view: 'audience' | 'operating' | 'playback' }) {
   return (
     <div className="seg-choice" role="tablist" aria-label="Analytics view">
       <button role="tab" aria-selected={view === 'audience'} className={view === 'audience' ? 'sel' : ''}
         onClick={() => navigate('/analytics')}>Audience</button>
       <button role="tab" aria-selected={view === 'operating'} className={view === 'operating' ? 'sel' : ''}
         onClick={() => navigate('/analytics/operating')}>Operating</button>
+      <button role="tab" aria-selected={view === 'playback'} className={view === 'playback' ? 'sel' : ''}
+        onClick={() => navigate('/analytics/playback')}>Playback</button>
     </div>
   )
 }

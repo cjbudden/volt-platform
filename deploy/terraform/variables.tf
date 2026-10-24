@@ -169,3 +169,16 @@ variable "cdn_geo_countries" {
   default     = []
   description = "ISO 3166-1 alpha-2 codes for the whitelist/blacklist. Ignored when the type is none."
 }
+
+# ---- playback experience (QoE) raw reports (qoe_raw.tf, QOE_REPORTING.md 9a)
+variable "qoe_raw_retention_days" {
+  description = "Days the raw CMCD playback reports are kept before they expire (760 = 25 months: the engagement reports' retention). Raw data is the record every report is rebuilt from."
+  type        = number
+  default     = 760
+}
+
+variable "qoe_raw_lock_days" {
+  description = "Object Lock (governance) retention on each raw report object: nobody without the bypass permission can delete or overwrite it inside this many days. Not more than qoe_raw_retention_days."
+  type        = number
+  default     = 90
+}
