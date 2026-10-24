@@ -14,11 +14,14 @@
  * Sign-in afterwards: admin@example.com / volt1234
  */
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, statSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { query, pool } from '../src/db';
 import { writeAudit } from '../src/services/audit';
 import { fillerPath } from '../src/services/uploads';
+import { imageStore } from '../src/services/imageStore';
+import { upsertMediaRow } from '../src/services/mediaLibrary';
+import { ensureTrackingGroup } from '../src/services/encode/store';
 
 const ACCOUNT = '3de20755-af2b-46d0-8d24-f39afbf4b3a0';
 const ADMIN = '8342a24d-751f-46ca-9636-f72a8a1110ef';
@@ -35,6 +38,10 @@ async function main() {
   await query(`UPDATE accounts SET name='Example Broadcaster' WHERE id=$1`, [ACCOUNT]);
   await query(`UPDATE users SET email=$2 WHERE id=$1`, [ADMIN, DOCS_LOGIN.email]);
   await query(`UPDATE groups SET name='Main' WHERE account_id=$1 AND name='RTM Main'`, [ACCOUNT]);
+  // The demo seed gives its one group a share of 10 on a plan of 5, which the
+  // Channel Groups guide would show as more shared out than the plan holds.
+  // Fit it to the plan and make it the default group, as an account starts.
+  await query(`UPDATE groups SET max_channels=LEAST(max_channels, (SELECT max_channels FROM accounts WHERE id=$1)), is_default=true WHERE account_id=$1 AND name='Main'`, [ACCOUNT]);
   await query(`UPDATE channels SET name='News 24' WHERE id=$1`, [NEWS]);
   await query(`UPDATE channels SET name='Sport One' WHERE id=$1`, [SPORT]);
 
@@ -73,6 +80,53 @@ async function main() {
       [id, ACCOUNT, kind, name, key, w, h, ms, statSync(src).size, ct, file]);
   }
   await query(`UPDATE channels SET input_loss_behavior='slate', filler_asset_id=$2, filler_slate_ref=NULL WHERE id=$1`, [NEWS, fillers[0][0]]);
+
+  // The media sections (guides batch 1.14-G3) would otherwise all open on their
+  // empty states. Two images in the Image Library (the slate picture again, so
+  // no new file is needed), a ladder that mirrors the live HD profile and is the
+  // account default, a watchfolder with two rules on a folder that exists, and
+  // the built-in demo add-on attached to Recording completed. Each is keyed so
+  // a re-run keeps one of each.
+  const slatePng = readFileSync(join(__dirname, 'docs-media', 'standby-slate.png'));
+  for (const [folder, name, kind] of [['slates', 'standby-slate.png', 'slate'], ['brands', 'station-brand.png', 'brand']] as const) {
+    const path = `${folder}/${name}`;
+    const storeKey = `library/${ACCOUNT}/${path}`;
+    await imageStore().put(storeKey, slatePng, 'image/png');
+    await query(`INSERT INTO media_folders(account_id, path) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [ACCOUNT, folder]);
+    await upsertMediaRow({
+      accountId: ACCOUNT, kind, path, folder, name, storeKey, sizeBytes: slatePng.length, contentType: 'image/png',
+      tags: [], userId: ADMIN, source: 'upload', facts: { width: 1280, height: 720, contentType: 'image/png' },
+    } as any);
+  }
+  const hd = await query<{ id: string; name: string }>(
+    `SELECT id, name FROM output_profiles WHERE account_id=$1 ORDER BY name LIMIT 1`, [ACCOUNT]);
+  if (hd[0]) {
+    const hasDefault = await query(`SELECT 1 FROM encode_ladder_groups WHERE account_id=$1 AND is_default`, [ACCOUNT]);
+    await ensureTrackingGroup(ACCOUNT, hd[0].id, `Same as ${hd[0].name}`, { makeDefault: !hasDefault.length, userId: ADMIN });
+  }
+  const WATCH = '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e10';
+  // A neutral path that exists on any Mac or Linux box: the console shows it,
+  // and a missing folder would read as scan failing in the screenshot.
+  const watchDir = '/tmp/volt-docs/agency-drop';
+  mkdirSync(watchDir, { recursive: true });
+  await query(
+    `INSERT INTO watchfolders(id, account_id, name, kind, config, created_by, updated_by)
+     VALUES ($1,$2,'Agency drop','local',$3::jsonb,$4,$4)
+     ON CONFLICT (id) DO UPDATE SET config=EXCLUDED.config`,
+    [WATCH, ACCOUNT, JSON.stringify({ path: watchDir }), ADMIN]);
+  await query(`DELETE FROM watchfolder_rules WHERE watchfolder_id=$1`, [WATCH]);
+  await query(
+    `INSERT INTO watchfolder_rules(watchfolder_id, ordinal, name, match_type, pattern, target_kind, workflow) VALUES
+       ($1,1,'Slates','glob','slate_*.png','slate','register'),
+       ($1,2,'Programmes','glob','*.mp4','programme','register')`, [WATCH]);
+  const DEMO = '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e20';
+  await query(
+    `INSERT INTO addon_services(id, account_id, name, description, category, kind, signing_secret, accepts, steps, timeout_sec)
+     VALUES ($1,$2,'Summary agent','Writes a summary and chapters for each recording','ai_agent','demo','docs-seed-not-a-secret',
+             ARRAY['recording','vod_asset']::text[], '[]'::jsonb, 600)
+     ON CONFLICT (id) DO NOTHING`, [DEMO, ACCOUNT]);
+  await query(`DELETE FROM addon_triggers WHERE addon_id=$1`, [DEMO]);
+  await query(`INSERT INTO addon_triggers(account_id, addon_id, hook) VALUES ($1,$2,'recording.completed')`, [ACCOUNT, DEMO]);
 
   // A short, believable history for the audit log. Re-running the seed
   // replaces it rather than piling up copies.

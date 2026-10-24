@@ -373,7 +373,7 @@ function PipelineMap({ map, runs, trace, hookSel, onHook, onRun }: {
             let cursorY = p.y + NODE_H + 8
             return (
               <div key={p.stage.id}>
-                <div className={`wf-node ${ts ?? ''} ${traceState && !ts ? 'dim' : ''}`} style={{ left: p.x, top: p.y, width: NODE_W, height: NODE_H }} title={`${p.stage.description}\n\n${p.stage.impl}`}>
+                <div className={`wf-node ${ts ?? ''} ${traceState && !ts ? 'dim' : ''}`} style={{ left: p.x, top: p.y, width: NODE_W, height: NODE_H }} title={p.stage.description}>
                   <div className="wf-nodelabel">{ts === 'done' || ts === 'implied' ? '✓ ' : ''}{p.stage.label}</div>
                   <div className="wf-nodesub">{ts === 'current' ? 'Here now' : p.hooks.length ? plural(p.hooks.reduce((n, h) => n + h.fired24h, 0), 'event') + ' · 24h' : 'no hooks'}</div>
                 </div>
@@ -813,7 +813,7 @@ function AddonsView({ canManage, map, onChanged }: { canManage: boolean; map: Wo
         Volt POSTs <code className="wf-code">run.dispatch</code> to the endpoint, signed in <code className="wf-code">X-Volt-Signature</code> (HMAC SHA-256 of <code className="wf-code">timestamp.body</code> with the add-on's secret).
         The body carries the subject, media links, options and a per-run <code className="wf-code">callbackUrl</code> and <code className="wf-code">callbackToken</code>.
         The add-on reports back with <code className="wf-code">POST callbackUrl</code>, <code className="wf-code">Authorization: Bearer callbackToken</code> and
-        {' '}<code className="wf-code">{'{ progress, step, state, result }'}</code>. Full contract in WORKFLOWS.md.
+        {' '}<code className="wf-code">{'{ progress, step, state, result }'}</code>. The full contract is in the Workflows guide.
       </div>
 
       {edit && <AddonForm addon={edit === 'new' ? null : edit} onClose={() => setEdit(null)}

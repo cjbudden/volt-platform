@@ -80,9 +80,30 @@ const baseCoverage = (over: any = {}) => ({
   }
   const map = readFileSync(join(SITE, 'docs/getting-started/how-volt-fits-together.md'), 'utf8');
   ok(Object.values(g2).every((p) => map.includes(`../${p}`)), 'How Volt fits together links each G2 section to its guide');
+  // G3 (media and media setup) is done and required: thirteen guides in the
+  // section template, each with its own screenshot, linked from the map, and
+  // the share links guide listed under the three streams that open it.
+  ok(real.required.includes('G3'), 'G3 is a required batch');
+  ok(!real.gaps.some((g: any) => g.batch === 'G3'), 'nothing in G3 is left as a gap');
+  const g3: Record<string, string> = {
+    vod: 'guides/media-library.md', recordings: 'guides/recordings.md', images: 'guides/images-and-thumbnails.md',
+    review: 'guides/review.md', encoding: 'guides/encoding-profiles.md', watchfolders: 'guides/watchfolders.md',
+    storage: 'guides/storage.md', workflows: 'guides/workflows.md', 'content-types': 'guides/content-types.md',
+    publishing: 'guides/publishing-rules.md', ingest: 'guides/ingest-rules.md', groups: 'guides/channel-groups.md',
+  };
+  for (const [k, path] of Object.entries(g3)) {
+    const sec = coverage.sections.find((x: any) => x.key === k);
+    ok(sec && sec.batch === 'G3' && sec.guides.includes(path), `${k} is mapped to ${path}`);
+    ok(g2shots.some((s: any) => s.guide === path), `${path} has a screenshot in the manifest`);
+    ok(map.includes(`../${path}`), `How Volt fits together links ${k} to ${path}`);
+  }
+  for (const k of ['channels', 'radio', 'events']) {
+    ok(coverage.sections.find((x: any) => x.key === k)?.guides.includes('guides/share-links.md'), `${k} lists the share links guide`);
+  }
+  ok(g2shots.some((s: any) => s.guide === 'guides/share-links.md'), 'the share links guide has a screenshot in the manifest');
   // The batches not yet written still show as gaps, both kinds.
-  ok(real.gaps.some((g: any) => g.key === 'vod' && g.problems.includes('no guide')), 'Media Library (G3) is listed as a gap with no guide');
-  ok(real.gaps.some((g: any) => g.key === 'images' && /not in the section template/.test(g.problems.join())), 'Image Library (G3) is listed as having a guide not yet in the template');
+  ok(real.gaps.some((g: any) => g.key === 'plan' && g.problems.includes('no guide')), 'Plan & limits (G4) is listed as a gap with no guide');
+  ok(real.gaps.some((g: any) => g.key === 'audit' && /not in the section template/.test(g.problems.join())), 'Audit log (G4) is listed as having a guide not yet in the template');
   ok(!coverage.sections.some((s: any) => s.key === 'system' && !s.internal), 'System Admin is marked internal, not a customer gap');
   ok(real.total === real.inTemplate + real.gaps.length, `every entry is either covered or a gap (${real.inTemplate} + ${real.gaps.length} = ${real.total})`);
 
@@ -95,7 +116,7 @@ const baseCoverage = (over: any = {}) => ({
   ok(checkCoverage({ site: SITE, coverage: fewer, appSource }).errors.some((e: string) => e.includes('"FAST"')), 'a console section dropped from the map is an error');
   const stale = { ...coverage, sections: [...coverage.sections, { key: 'gone', label: 'Gone', batch: 'G1', guides: [] }] };
   ok(checkCoverage({ site: SITE, coverage: stale, appSource }).errors.some((e: string) => e.includes('no longer has')), 'a map entry for a section the console no longer has is an error');
-  ok(checkCoverage({ site: SITE, coverage: { ...coverage, required: [...coverage.required, 'G3'] }, appSource }).errors.some((e: string) => e.includes('"Media Library"') && e.includes('no guide')), 'requiring G3 today fails on its gaps (Media Library has no guide)');
+  ok(checkCoverage({ site: SITE, coverage: { ...coverage, required: [...coverage.required, 'G4'] }, appSource }).errors.some((e: string) => e.includes('"Plan & limits"') && e.includes('no guide')), 'requiring G4 today fails on its gaps (Plan & limits has no guide)');
   // A G2 guide that loses a template heading fails the build again.
   const brokenSite = mkdtempSync(join(tmpdir(), 'cov-g2-'));
   for (const d of ['templates', 'docs/guides', 'docs/getting-started', 'docs/api']) mkdirSync(join(brokenSite, d), { recursive: true });
@@ -105,6 +126,9 @@ const baseCoverage = (over: any = {}) => ({
   const loopsPath = join(brokenSite, 'docs/guides/loops-and-fillers.md');
   writeFileSync(loopsPath, readFileSync(loopsPath, 'utf8').replace('## Troubleshooting', '## Problems'));
   ok(checkCoverage({ site: brokenSite, coverage, appSource }).errors.some((e: string) => e.includes('loops-and-fillers.md') && e.includes('Troubleshooting')), 'a G2 guide that loses a template heading is an error');
+  const storagePath = join(brokenSite, 'docs/guides/storage.md');
+  writeFileSync(storagePath, readFileSync(storagePath, 'utf8').replace('## Who can do it', '## Access'));
+  ok(checkCoverage({ site: brokenSite, coverage, appSource }).errors.some((e: string) => e.includes('storage.md') && e.includes('Who can do it')), 'a G3 guide that loses a template heading is an error');
   // A finished batch stays finished: drop a G1 guide from the map and the page
   // is reported as unlisted, and its section as having no guide.
   const dropped = { ...coverage, sections: coverage.sections.map((x: any) => x.key === 'fast' ? { ...x, guides: [] } : x) };

@@ -29,7 +29,7 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 
 | Section | What it is for |
 |---|---|
-| [**Channels**](../guides/channels.md) | Live channels that run around the clock: a source in, adaptive outputs out, with backup sources and failover ([first channel](first-channel.md), [status](../guides/channel-status.md), [failover](../guides/failover.md)) |
+| [**Channels**](../guides/channels.md) | Live channels that run around the clock: a source in, adaptive outputs out, with backup sources and failover ([first channel](first-channel.md), [status](../guides/channel-status.md), [failover](../guides/failover.md), [share links](../guides/share-links.md)) |
 | [**Radio**](../guides/radio.md) | Audio-only stations with MP3, HLS and DASH outputs and a now-playing log |
 | [**Events**](../guides/events.md) | Scheduled one-off broadcasts: the stream starts for its window, then recordings and replays follow the event's settings |
 | [**FAST**](../guides/fast.md) | Channels played out from the library: a run order of programmes that loops, with the guide written for you and ad breaks signalled |
@@ -41,23 +41,23 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 
 | Section | What it is for |
 |---|---|
-| **Media Library** | Every on-demand asset: what it is, how it was encoded and where it was published |
-| **Recordings** | Everything a stream has sent out, to search, scrub and clip across the retained range |
-| **Image Library** | Watermarks, slates, posters and channel brands, with an image service for any size ([guide](../guides/images-and-thumbnails.md)) |
-| **Review** | Clips waiting for a decision, with what quality checks already found |
+| [**Media Library**](../guides/media-library.md) | Every on-demand asset: what it is, how it was encoded and where it was published |
+| [**Recordings**](../guides/recordings.md) | Everything a stream has sent out, to search, scrub and clip across the retained range |
+| [**Image Library**](../guides/images-and-thumbnails.md) | Watermarks, slates, posters and channel brands, with an image service for any size |
+| [**Review**](../guides/review.md) | Clips waiting for a decision, with what quality checks already found |
 
 ### Admin: media setup
 
 | Section | What it is for |
 |---|---|
-| **Encoding Profiles** | The ladders that uploaded and watch-folder files are encoded to |
-| **Watchfolders** | Folders Volt watches for new files to ingest |
-| **Storage** | What media exists, where it lives, and what retention will do to it next |
-| **Workflows** | The steps every stream, recording and file goes through, and where each piece of work is now |
-| **Content Types** | What metadata each kind of content carries, and which guide fields it fills |
-| **Publishing Rules** | Where on-demand content goes when it is published, and who can watch it, where and until when |
-| **Ingest Rules** | What happens to a file when it arrives: its name, where it is filed, duplicates, required metadata |
-| **Channel Groups** | The groups every channel, station and event sits in; a group sets the output profile and its share of the plan |
+| [**Encoding Profiles**](../guides/encoding-profiles.md) | The ladders that uploaded and watch-folder files are encoded to |
+| [**Watchfolders**](../guides/watchfolders.md) | Folders Volt watches for new files to ingest |
+| [**Storage**](../guides/storage.md) | What media exists, where it lives, and what retention will do to it next |
+| [**Workflows**](../guides/workflows.md) | The steps every stream, recording and file goes through, and where each piece of work is now |
+| [**Content Types**](../guides/content-types.md) | What metadata each kind of content carries, and which guide fields it fills |
+| [**Publishing Rules**](../guides/publishing-rules.md) | Where on-demand content goes when it is published, and who can watch it, where and until when |
+| [**Ingest Rules**](../guides/ingest-rules.md) | What happens to a file when it arrives: its name, where it is filed, duplicates, required metadata |
+| [**Channel Groups**](../guides/channel-groups.md) | The groups every channel, station and event sits in; a group sets the output profile and its share of the plan |
 | **Captions** | Live subtitles and translation: the engine for the account and the languages each output profile publishes ([guide](../guides/captions.md)) |
 | **Formats & reframing** | Which social formats Volt makes from your widescreen media, and how it keeps the subject in frame ([guide](../guides/formats-and-reframing.md)) |
 
@@ -99,4 +99,5 @@ Underneath every flow, **Dashboard**, **Live Streams** and **Multiview** show wh
 - Setting up your team: [Roles and access](roles-and-access.md).
 - Running channels: [channel status](../guides/channel-status.md) and [input failover](../guides/failover.md).
 - Building the schedule: [the programme guide](../guides/epg.md).
+- Working with recorded and uploaded media: the [Media Library](../guides/media-library.md) and [Recordings](../guides/recordings.md).
 - Writing code against Volt: the [API overview](../api/overview.md).

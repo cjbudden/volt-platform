@@ -124,6 +124,106 @@
       "path": "/reframing",
       "waitFor": ".rfs-grid",
       "alt": "The Formats and reframing page: output formats and what to keep in frame on the left, publish targets and when it runs on the right"
+    },
+    {
+      "name": "media-library",
+      "guide": "guides/media-library.md",
+      "path": "/vod",
+      "waitFor": "h1",
+      "alt": "The Media Library page: the upload band at the top, the search, sort and filter chips, then the list of assets with their review, QC and availability"
+    },
+    {
+      "name": "recordings",
+      "guide": "guides/recordings.md",
+      "path": "/recordings",
+      "waitFor": "h1",
+      "alt": "The Recordings page: filter chips for channels, radio, events and what is recording now, then one row per source with its recordings, available range, content held and status"
+    },
+    {
+      "name": "image-library",
+      "guide": "guides/images-and-thumbnails.md",
+      "path": "/images",
+      "waitFor": "h1",
+      "settleMs": 2000,
+      "alt": "The Image Library: the folder tree on the left, the search box and filters at the top, and a grid of images with their usage type, size and folder"
+    },
+    {
+      "name": "review",
+      "guide": "guides/review.md",
+      "path": "/review",
+      "waitFor": "h1",
+      "alt": "The Review page: the queue of clips with their source, length, QC result and review state, one clip opened to show what was measured and the decision buttons"
+    },
+    {
+      "name": "share-links",
+      "guide": "guides/share-links.md",
+      "path": "/channels/ae0e5ac4-9833-48b7-ab97-91df0d27467c",
+      "waitFor": ".pipe-strip",
+      "click": [
+        "button[aria-label=Share]"
+      ],
+      "alt": "The Share window: how to send it, how long it lasts, who can open it and a label, with the links already made for this stream listed below",
+      "_why": "The Share window over the channel page; the window has no dialog role to crop to, so the shot is the whole page."
+    },
+    {
+      "name": "encoding-profiles",
+      "guide": "guides/encoding-profiles.md",
+      "path": "/encoding",
+      "waitFor": "h2",
+      "alt": "The Encoding profiles page: the list of renditions with the form to add one, the New ladder card, and a ladder with its rungs and the preview of what a source would get"
+    },
+    {
+      "name": "watchfolders",
+      "guide": "guides/watchfolders.md",
+      "path": "/watchfolders",
+      "waitFor": "h2",
+      "click": [
+        "text=Agency drop"
+      ],
+      "alt": "A watchfolder's page: its path and Scan now button, the numbered rules with the one that would win highlighted, the Try a filename box, and the queue of files that need a person"
+    },
+    {
+      "name": "storage",
+      "guide": "guides/storage.md",
+      "path": "/storage",
+      "waitFor": "h1",
+      "alt": "The Storage page: what this service can do at the top, the retention ladder, event data retention, the dry run, and the list of media with its state, tier and size"
+    },
+    {
+      "name": "workflows",
+      "guide": "guides/workflows.md",
+      "path": "/workflows",
+      "waitFor": "h1",
+      "settleMs": 1500,
+      "alt": "The Workflows page: the counts of runs, the Map, Runs and Add-ons and triggers tabs, and the pipeline map with its three lanes, stages and hooks"
+    },
+    {
+      "name": "content-types",
+      "guide": "guides/content-types.md",
+      "path": "/content-types",
+      "waitFor": "h1",
+      "alt": "The Content Types page: the list of types on the left with filters for what each is offered for, and the field editor for the chosen type on the right"
+    },
+    {
+      "name": "publishing-rules",
+      "guide": "guides/publishing-rules.md",
+      "path": "/publishing",
+      "waitFor": "h1",
+      "alt": "The Publishing Rules page: the publishing points, the account default with each of its fields, and the lists of content type and channel, event or station overrides"
+    },
+    {
+      "name": "ingest-rules",
+      "guide": "guides/ingest-rules.md",
+      "path": "/ingest",
+      "waitFor": "h1",
+      "alt": "The Ingest Rules page: the platform baseline, the account default, content type and source or folder rungs with their rules, then linked cloud accounts and webhooks"
+    },
+    {
+      "name": "channel-groups",
+      "guide": "guides/channel-groups.md",
+      "path": "/groups",
+      "waitFor": "h1",
+      "alt": "The Channel groups page: the plan strip with what is shared out, then the table of groups with their workflow, output profile, share of the plan and events"
     }
   ]
 }

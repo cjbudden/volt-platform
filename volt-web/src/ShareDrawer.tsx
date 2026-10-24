@@ -135,7 +135,7 @@ export function ShareDrawer({ target, onClose }: { target: ShareTarget; onClose:
         </div>
         <p style={{ color: 'var(--muted)', marginTop: 4 }}>
           A private preview of <b>{target.name}</b> for a client or reviewer to approve before go-live.
-          This does not put the {noun} on air and ignores geo/access rules.
+          This does not put the {noun} on air. Where your account limits viewing by country, the preview follows that too.
         </p>
 
         {!created ? (
@@ -148,7 +148,7 @@ export function ShareDrawer({ target, onClose }: { target: ShareTarget; onClose:
                 desc="You get a URL to paste into your own email, WhatsApp or ticket." />
               <Choice on={delivery === 'email'} onPick={() => setDelivery('email')}
                 title="Send by email"
-                desc="VOLT emails the link, your message and viewing instructions to each recipient.">
+                desc="Volt emails the link, your message and viewing instructions to each recipient.">
                 <Nested>
                   <input value={recipients} onChange={e => setRecipients(e.target.value)}
                     className="w-full" placeholder="client@example.com, reviewer@example.com" />
@@ -215,7 +215,7 @@ export function ShareDrawer({ target, onClose }: { target: ShareTarget; onClose:
               </Choice>
               <Choice on={authMode === 'email_pin'} onPick={() => setAuthMode('email_pin')}
                 title="Verified recipients only"
-                desc="Most secure. The viewer confirms the email the link was sent to and enters a one-time code we email them." />
+                desc="Most secure. The viewer confirms the email the link was sent to and enters a one-time code Volt emails to them." />
             </div>
 
             {/* ---- 4. LABEL --------------------------------------------- */}
