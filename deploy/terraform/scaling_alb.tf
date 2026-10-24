@@ -37,6 +37,8 @@ locals {
     # /fast/*: the FAST ad stitcher's per-viewer playlists (modules/fast.ts)
     # /channel/*/v/*, /event/*/v/*: variant manifests (services/variantManifest.ts)
     ["/api/public/*", "/gfx/*", "/fast/*", "/channel/*/v/*", "/event/*/v/*"],
+    # /api/cmcd: players' CMCD v2 event reports (modules/cmcd.ts)
+    ["/api/cmcd", "/api/cmcd/*"],
   ]
 }
 

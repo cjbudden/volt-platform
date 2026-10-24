@@ -14,6 +14,8 @@
 
 export interface BeaconOptions {
   url: string;
+  /** The session id to use: the play attempt's CMCD sid (sdk/cmcd.ts). Else a new one. */
+  id?: string;
   token: string;
   prefix: string;
   /** Current bitrate in kbps, if known. */
@@ -36,7 +38,7 @@ export class Beacons {
 
   constructor(media: HTMLMediaElement, o: BeaconOptions) {
     this.o = o;
-    this.id = newId(o.prefix);
+    this.id = o.id ?? newId(o.prefix);
     const on = <K extends keyof HTMLMediaElementEventMap>(el: HTMLMediaElement, ev: K, fn: () => void) => { el.addEventListener(ev, fn); this.off.push(() => el.removeEventListener(ev, fn)); };
     on(media, 'playing', () => {
       if (this.started) return;

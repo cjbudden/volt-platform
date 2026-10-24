@@ -57,13 +57,18 @@ export interface ResolvedItem {
   kind?: string;
 }
 
-export async function resolveAsset(apiBase: string, appKey: string, assetId: string, viewerToken?: string | null): Promise<ResolvedItem> {
+/**
+ * Ask the play gate. `sid` is the play attempt's CMCD session id: the gate
+ * puts it in the playback token, so its decision, the beacons and the CDN logs
+ * join on one id.
+ */
+export async function resolveAsset(apiBase: string, appKey: string, assetId: string, viewerToken?: string | null, sid?: string | null): Promise<ResolvedItem> {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   // A signed-in viewer: purchases and memberships are checked against them.
   if (viewerToken) headers.authorization = `Bearer ${viewerToken}`;
   const r = await fetch(`${apiBase}/api/availability`, {
     method: 'POST', credentials: 'omit', headers,
-    body: JSON.stringify({ appKey, assetId }),
+    body: JSON.stringify({ appKey, assetId, ...(sid ? { sid } : {}) }),
   });
   const j: any = await r.json().catch(() => ({}));
   if (!r.ok || j.available === false) {

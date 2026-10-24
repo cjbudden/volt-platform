@@ -123,11 +123,17 @@ export function mintPlaybackToken(opts: {
   geo?: string; ttlSec?: number;
   /** Where the play came from, when it is not an app: 'share' for a share-link preview. */
   source?: 'share';
+  /**
+   * The play attempt's CMCD session id, when the player sent one: the same id
+   * is on its CDN requests, its CMCD reports and its beacons, so a licence
+   * proxy or the variant service reading the token logs the same session.
+   */
+  sid?: string;
 }): { token: string; expiresIn: number } {
   const ttl = opts.ttlSec ?? 120;
   const token = jwt.sign(
     { typ: 'playback', aid: opts.accountId, app: opts.appId,
-      asset: opts.assetId, kind: opts.assetKind, geo: opts.geo ?? null, ...(opts.source ? { src: opts.source } : {}) },
+      asset: opts.assetId, kind: opts.assetKind, geo: opts.geo ?? null, ...(opts.source ? { src: opts.source } : {}), ...(opts.sid ? { sid: opts.sid } : {}) },
     playbackSecret(),
     { expiresIn: ttl }
   );

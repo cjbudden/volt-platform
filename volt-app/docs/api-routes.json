@@ -909,6 +909,15 @@
   "group": "/api/channels"
  },
  {
+  "method": "POST",
+  "path": "/api/cmcd",
+  "api": "public",
+  "credential": "publishable key",
+  "access": "public (legacy alias of /api/public/cmcd)",
+  "viewerTier": true,
+  "group": "/api/cmcd"
+ },
+ {
   "method": "GET",
   "path": "/api/context.jsonld",
   "api": "discovery",
@@ -3742,6 +3751,15 @@
   "access": "public API",
   "viewerTier": true,
   "group": "/api/public/availability"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/cmcd",
+  "api": "public",
+  "credential": "publishable key",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/cmcd"
  },
  {
   "method": "DELETE",

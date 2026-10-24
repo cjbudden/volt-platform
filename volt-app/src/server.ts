@@ -60,6 +60,7 @@ import { docsSessionRouter } from './modules/docsSession';
 import { notificationsRouter, notificationTemplatesRouter } from './modules/notifications';
 import { shareLinksRouter, publicShareRouter } from './modules/shareLinks';
 import { publicLiveRouter } from './modules/publicLive';
+import { cmcdRouter } from './modules/cmcd';
 import { hypermediaRouter } from './modules/hypermedia';
 import { liveStreamsRouter } from './modules/liveStreams';
 import { hypermediaNegotiation } from './middleware/hypermedia';
@@ -458,12 +459,14 @@ export function createServer() {
   app.use('/api/public/access', accessRouter);
   app.use('/api/public/player', playerRouter);
   app.use('/api/public/analytics/beacon', analyticsBeaconRouter);
+  app.use('/api/public/cmcd', cmcdRouter);                 // CMCD v2 event mode (modules/cmcd.ts)
   app.use('/api/public/payments', paymentsAppRouter);
   // Admin view of public users (feature `viewers`).
   app.use('/api/viewers', viewersAdminRouter);
   app.use('/api/availability', availabilityRouter);      // public play-gate → mints playback token (publishable key)
   app.use('/api/access', accessRouter);                  // public check-access → booleans, no token (publishable key)
   app.use('/api/analytics/beacon', analyticsBeaconRouter); // public session beacon (playback-token)
+  app.use('/api/cmcd', cmcdRouter);                      // public CMCD v2 event reports (publishable key), QOE_REPORTING.md
   app.use('/api/reports', reportsRouter);              // per-stream operating reports + CSV (docs/REQ_stream_reporting.md)
   app.use('/api/analytics', analyticsRouter);            // tenant reports (realtime/audience/usage)
   app.use('/api/tickets', ticketsRouter);                // client support tickets

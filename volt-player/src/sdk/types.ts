@@ -440,6 +440,20 @@ export interface VoltPlayerSdkOptions {
 
   /** Viewer beacons for Analytics. On when the item has a playback token. */
   beacons?: boolean | { url?: string; prefix?: string };
+  /**
+   * CMCD v2 (QOE_REPORTING.md): request mode (a CMCD query argument on every
+   * playlist and segment request) and event mode (batched reports to the
+   * collector, POST /api/cmcd). Both on when there is an app key; `false`
+   * turns both off. `app` and `appVersion` name the app the player is in, so
+   * a bad release can be found in the reports.
+   */
+  cmcd?: false | {
+    requestMode?: boolean; eventMode?: boolean; url?: string;
+    app?: string; appVersion?: string; deviceModel?: string;
+    heartbeatMs?: number; rrSampleEvery?: number;
+  };
+  /** DRM: licence servers by key system, and headers for licence requests. */
+  drm?: { servers?: Record<string, string>; headers?: Record<string, string> };
   cast?: false | { receiverAppId?: string };
   airplay?: boolean;
   /** Use a media element the caller owns (the console's recording page). */

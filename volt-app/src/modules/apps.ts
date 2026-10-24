@@ -186,6 +186,8 @@ const availSchema = z.object({
   /** Who is watching, as the client's app knows them. Anonymous when absent.
    *  Groups the app asserts (site users, members) feed the members-only rules. */
   viewer: z.object({ externalId: z.string().min(1), email: z.string().email().optional(), groups: z.array(z.string()).optional() }).optional(),
+  /** The player's play attempt (its CMCD session id), carried into the playback token. */
+  sid: z.string().regex(/^[A-Za-z0-9._:-]{8,64}$/).optional(),
 });
 
 /**
@@ -306,7 +308,7 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }):
         );
         return { status: 451, body: { available: false, mode: 'blocked', reason: rights.reason }, edgeSec };
       }
-      const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: rights.replacementAssetId, assetKind: rk, geo });
+      const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: rights.replacementAssetId, assetKind: rk, geo, sid: b.sid });
       return {
         status: 200, edgeSec,
         body: { available: true, mode: 'replacement', assetId: rights.replacementAssetId, reason: rights.reason,
@@ -326,7 +328,7 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }):
       edgeSec,
     };
   }
-  const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: b.assetId, assetKind: kind, geo });
+  const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: b.assetId, assetKind: kind, geo, sid: b.sid });
   return {
     status: 200, edgeSec,
     body: { available: true, mode: 'play', assetId: b.assetId, playbackToken: tok.token, expiresIn: tok.expiresIn,

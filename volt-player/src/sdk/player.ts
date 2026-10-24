@@ -25,6 +25,8 @@ import { injectBaseStyles } from './skins/kit';
 import { GraphicsOverlay, snapshotAt, mergeSnapshots, cameOn, feedUrl, type OverlayDef, type OverlaySnapshot } from './overlay';
 import { activeAt, adBreakAt, fromDashRegion, fromHlsRegions, fromNativeCues, mergeGraphics, upNextFromGraphic } from './triggers';
 import type { TriggerReport } from './engine';
+import { errorCode, errorStep } from './engine';
+import { CmcdSender, PlayAttempt, deviceModel, identityKeys } from './cmcd';
 import { StatsPanel, bindDebugMenu, combineProbes, mediaProbe, SDK_VERSION, type StatsSample } from './stats';
 
 const EPG_REFRESH_MS = 5 * 60_000;
@@ -69,6 +71,8 @@ export class VoltPlayer {
   private tick: ReturnType<typeof setInterval> | null = null;
   private timers: Array<ReturnType<typeof setInterval>> = [];
   private beacons: Beacons | null = null;
+  /** CMCD v2 (sdk/cmcd.ts): the play attempt of the item now loading or playing. */
+  private attempt: PlayAttempt | null = null;
   private caster: Caster | null = null;
   private loadSeq = 0;
   private dismissedFor: string | null = null;
@@ -134,7 +138,7 @@ export class VoltPlayer {
     this.themeLayers = [o.theme];
     this.theme = resolveTheme(...this.themeLayers);
     applyTheme(this.root, this.theme);
-    this.engine = new Engine(this.media, { requestHeaders: o.requestHeaders, nativeHlsOnApple: o.airplay !== false, textContainer: this.stage });
+    this.engine = new Engine(this.media, { requestHeaders: o.requestHeaders, nativeHlsOnApple: o.airplay !== false, textContainer: this.stage, drm: o.drm ?? null });
     this.engine.onChange = () => this.pullEngine();
     this.engine.onError = (msg, code) => this.fail(msg, code);
     this.engine.onTrigger = (r) => this.onTrigger(r);
@@ -177,6 +181,9 @@ export class VoltPlayer {
 
   async destroy(): Promise<void> {
     this.destroyed = true;
+    this.attempt?.close();
+    this.attempt = null;
+    this.engine.attempt = null;
     this.beacons?.destroy();
     if (this.gfxTimer) clearTimeout(this.gfxTimer);
     this.overlay?.destroy();
@@ -246,7 +253,7 @@ export class VoltPlayer {
       () => {
         const it = this.s.item;
         return {
-          assetId: it?.assetId ?? null, title: it?.title ?? null, sessionId: this.beacons?.sessionId ?? null,
+          assetId: it?.assetId ?? null, title: it?.title ?? null, sessionId: this.attempt?.sid ?? this.beacons?.sessionId ?? null,
           status: this.s.status === 'error' && this.s.error ? `error: ${this.s.error}${this.s.errorCode != null ? ` (${this.s.errorCode})` : ''}` : this.s.status,
           programme: this.s.programme?.title ?? null,
           wallClock: this.s.live ? this.s.wallClock : null,
@@ -333,6 +340,7 @@ export class VoltPlayer {
 
   private pullEngine() {
     const e = this.engine.snapshot();
+    if (e.activeQuality?.bitrate) this.attempt?.bitrate(e.activeQuality.bitrate / 1000);
     const prevQ = this.s.activeQuality?.id;
     this.set({
       live: e.live, duration: e.duration, seekable: e.seekable,
@@ -534,11 +542,18 @@ export class VoltPlayer {
     const seq = ++this.loadSeq;
     this.beacons?.destroy();
     this.beacons = null;
+    this.attempt?.close();
+    this.attempt = null;
+    this.engine.attempt = null;
     this.dismissedFor = null;
     this.streamGraphics.clear();
     this.activeGraphicIds = '';
     let item = this.s.items[index];
     if (!item) return;
+    // The play attempt opens HERE, before the play gate is asked: a refusal, a
+    // manifest that never comes or a failed licence is still a view, with its
+    // step and code (QOE_REPORTING.md principle 2).
+    const attempt = this.openAttempt(item, autoplay);
     this.startGraphicsFeed(item.assetId ?? null);
     this.set({ index, item, status: 'loading', error: null, errorCode: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null, hasPicture: false, audioOnly: false, qualities: [], textTracks: [], audioTracks: [],
       access: { mode: null, message: null, products: [] } });
@@ -546,15 +561,21 @@ export class VoltPlayer {
     try {
       if (item.assetId && !hasSource(item.source)) {
         if (!this.o.appKey) throw new GateError(401, 'This player needs an app key to play asset ids.', null);
-        const r = await resolveAsset(this.api, this.o.appKey, item.assetId, this.o.viewerToken);
+        attempt?.spanStart('entitlement');
+        const r = await resolveAsset(this.api, this.o.appKey, item.assetId, this.o.viewerToken, attempt?.sid);
+        attempt?.spanEnd('entitlement');
         if (seq !== this.loadSeq) return;
         item = mergeResolved(item, r);
+        if (attempt && item.live != null) attempt.live = item.live;
         const items = this.s.items.slice(); items[index] = item;
         this.set({ items, item });
       }
       if (!hasSource(item.source)) {
         // An event before its start is not "off air": the skin shows the countdown.
         this.set({ status: 'offline', error: this.s.presentation && this.s.presentation !== 'live' ? null : this.t('offline'), live: item.live ?? true });
+        // Nothing to play: an event before its start is not a failed attempt; a stream off air is.
+        if (this.s.presentation && this.s.presentation !== 'live') attempt?.close();
+        else attempt?.error('not-on-air', 'entitlement', true);
         return;
       }
       if (item.artworkUrl && !this.o.poster && this.ownsMedia) this.media.poster = item.artworkUrl;
@@ -562,6 +583,7 @@ export class VoltPlayer {
       const used = await this.engine.load(item.source!, startAt);
       if (seq !== this.loadSeq) return;
       this.kind = used.kind; this.url = used.url;
+      if (attempt) { attempt.sf = used.kind === 'hls' ? 'h' : used.kind === 'dash' ? 'd' : 'o'; attempt.live = this.engine.snapshot().live; }
       this.set({ status: 'ready' });
       this.pullEngine();
       // Subtitles in the language the viewer chose last time, when this item has it.
@@ -572,6 +594,10 @@ export class VoltPlayer {
       else if (autoplay) this.cmd.play();
     } catch (e: any) {
       if (seq !== this.loadSeq) return;
+      // The attempt ends here either way: a refusal at the gate (its status)
+      // or a failure on the way to a first frame (the step it failed at).
+      if (e instanceof GateError) attempt?.error(`gate-${e.status}`, 'entitlement', true);
+      else attempt?.error(errorCode(e), e?.category != null ? errorStep(e) : 'playback', true);
       // PAYWALL / SIGN IN / REGION: not a failure. The viewer is shown what it
       // is (title, artwork from the gate) and what would let them watch.
       if (e instanceof GateError && (e.status === 402 || e.mode === 'paywall' || e.mode === 'sign_in' || e.status === 451)) {
@@ -593,12 +619,55 @@ export class VoltPlayer {
     if (b === false || !item.playbackToken) return;
     const cfg = typeof b === 'object' ? b : {};
     this.beacons = new Beacons(this.media, {
+      // One session id everywhere: the beacons' session is the CMCD sid.
+      id: this.attempt?.sid,
       url: cfg.url ?? `${this.api}/api/analytics/beacon`,
       token: item.playbackToken,
       prefix: cfg.prefix ?? 'web',
       kbps: () => { const q = this.s.activeQuality; return q ? Math.round(q.bitrate / 1000) : undefined; },
     });
   }
+
+  /**
+   * A new play attempt for an item (sdk/cmcd.ts), or null with CMCD off.
+   * Request mode is on for players with an app key (viewers); event mode needs
+   * the key too, which is how the collector knows whose viewer it is.
+   */
+  private openAttempt(item: PlaylistItem, autoplay: boolean): PlayAttempt | null {
+    const c = this.o.cmcd;
+    if (c === false || this.o.demo) return null;
+    const cfg = typeof c === 'object' ? c : {};
+    const key = this.o.appKey;
+    const requestMode = cfg.requestMode ?? !!key;
+    const eventMode = (cfg.eventMode ?? true) && !!key;
+    if (!requestMode && !eventMode) return null;
+    const sender = eventMode ? new CmcdSender({ url: `${cfg.url ?? `${this.api}/api/cmcd`}?appKey=${encodeURIComponent(key!)}` }) : null;
+    const a = new PlayAttempt({
+      cid: item.assetId ?? item.id ?? null, live: item.live ?? null, sender, requestMode, autoplay,
+      identity: identityKeys({ app: cfg.app ?? null, appVersion: cfg.appVersion ?? null, sdkVersion: SDK_VERSION, deviceModel: cfg.deviceModel ?? deviceModel() }),
+      probe: this.engine.playbackProbe(), heartbeatMs: cfg.heartbeatMs, rrSampleEvery: cfg.rrSampleEvery,
+    });
+    this.attempt = a;
+    this.engine.attempt = a;
+    return a;
+  }
+
+  /**
+   * 'playing' is not yet a picture: the browser fires it when it MEANS to
+   * play (an encrypted stream waiting for its key does too). The first frame
+   * is the one the compositor presents (requestVideoFrameCallback); audio, and
+   * browsers without the callback, count 'playing'.
+   */
+  private attemptPlaying() {
+    const a = this.attempt;
+    if (!a) return;
+    const m: any = this.media;
+    if (a.started || !(m.videoWidth > 0) || typeof m.requestVideoFrameCallback !== 'function') { a.playing(); return; }
+    m.requestVideoFrameCallback(() => { if (this.attempt === a) a.playing(); });
+  }
+
+  /** The current play attempt's CMCD session id (sid), for a host page's own logs. */
+  get sessionId(): string | null { return this.attempt?.sid ?? null; }
 
   private async loadSchedule() {
     const run = async () => {
@@ -625,16 +694,24 @@ export class VoltPlayer {
   private wireMedia() {
     const m = this.media;
     const on = (ev: string, fn: () => void) => { m.addEventListener(ev, fn); this.offs.push(() => m.removeEventListener(ev, fn)); };
-    on('playing', () => { this.set({ status: 'playing', playing: true, buffering: false, error: null }); this.emit('play'); });
+    on('playing', () => { this.attemptPlaying(); this.set({ status: 'playing', playing: true, buffering: false, error: null }); this.emit('play'); });
     on('play', () => this.set({ playing: true }));
-    on('pause', () => { if (this.caster?.connected) return; this.set({ status: m.ended ? 'ended' : 'paused', playing: false }); this.emit('pause'); });
-    on('waiting', () => this.set({ status: 'buffering', buffering: true }));
+    on('pause', () => { if (this.caster?.connected) return; if (!m.ended) this.attempt?.paused(); this.set({ status: m.ended ? 'ended' : 'paused', playing: false }); this.emit('pause'); });
+    on('waiting', () => { this.attempt?.waiting(); this.set({ status: 'buffering', buffering: true }); });
+    on('seeking', () => this.attempt?.seekingStarted());
+    // CMCD: backgrounded (e=b), and a quit when the page goes away.
+    const vis = () => this.attempt?.backgrounded(document.visibilityState === 'hidden');
+    const gone = () => this.attempt?.close(true);
+    document.addEventListener('visibilitychange', vis);
+    addEventListener('pagehide', gone);
+    this.offs.push(() => document.removeEventListener('visibilitychange', vis), () => removeEventListener('pagehide', gone));
     on('canplay', () => this.set({ buffering: false, status: this.s.playing ? 'playing' : this.s.status === 'loading' ? 'ready' : this.s.status }));
     on('volumechange', () => {
+      if (m.muted !== this.s.muted) this.attempt?.muted(m.muted);
       store.set('volume', String(m.volume)); store.set('muted', m.muted ? '1' : '0');
       this.set({ volume: m.volume, muted: m.muted });
     });
-    on('ratechange', () => this.set({ rate: m.playbackRate }));
+    on('ratechange', () => { this.attempt?.rate(m.playbackRate); this.set({ rate: m.playbackRate }); });
     on('loadedmetadata', () => this.pullEngine());
     on('durationchange', () => this.pullEngine());
     on('resize', () => this.set({ hasPicture: m.videoWidth > 0 }));
@@ -651,6 +728,7 @@ export class VoltPlayer {
   }
 
   private onEnded() {
+    this.attempt?.ended();
     this.beacons?.end();
     this.set({ status: 'ended', playing: false });
     this.emit('ended', { index: this.s.index });
@@ -716,11 +794,13 @@ export class VoltPlayer {
       if (this.caster?.connected) { if (!this.caster.remote.playing) this.caster.playPause(); return; }
       if (this.s.status === 'offline' || (this.s.status === 'error' && this.s.item)) { void this.load(Math.max(0, this.s.index), true); return; }
       if (this.s.live && this.s.status === 'paused' && this.s.seekable && this.media.currentTime < this.s.seekable.start) this.engine.goLive();
+      this.attempt?.playRequested();
       const p = this.media.play();
       p?.catch?.((e: any) => {
         if (e?.name === 'NotAllowedError') {
           // Autoplay with sound refused: try muted, which browsers allow, and show the unmute control.
-          if (!this.media.muted && this.o.autoplay) { this.media.muted = true; this.media.play().catch(() => this.set({ playing: false, status: 'ready' })); return; }
+          if (!this.media.muted && this.o.autoplay) { this.media.muted = true; this.media.play().catch(() => { this.attempt?.waitForViewer(); this.set({ playing: false, status: 'ready' }); }); return; }
+          this.attempt?.waitForViewer();
           this.set({ playing: false, status: 'ready' });
         } else if (e?.name !== 'AbortError') this.fail(readableError(e), e?.name ?? null);
       });

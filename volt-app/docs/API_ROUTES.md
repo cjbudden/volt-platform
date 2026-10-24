@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**672 routes.** Public API: 71 · Sign-in (no session yet): 7 · Admin API: 534 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 15 · Health and discovery: 8
+**674 routes.** Public API: 73 · Sign-in (no session yet): 7 · Admin API: 534 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 15 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -31,6 +31,12 @@ For apps and players. A publishable key (`pk_…`) names the client account. Vie
 |---|---|---|---|---|
 | GET | `/api/availability` | publishable key; viewer session optional | public (legacy alias of /api/public/availability) | ✓ |
 | POST | `/api/availability` | publishable key; viewer session optional | public (legacy alias of /api/public/availability) | ✓ |
+
+### `/api/cmcd`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| POST | `/api/cmcd` | publishable key | public (legacy alias of /api/public/cmcd) | ✓ |
 
 ### `/api/onboarding`
 
@@ -93,6 +99,12 @@ For apps and players. A publishable key (`pk_…`) names the client account. Vie
 |---|---|---|---|---|
 | GET | `/api/public/availability` | publishable key; viewer session optional | public API | ✓ |
 | POST | `/api/public/availability` | publishable key; viewer session optional | public API | ✓ |
+
+### `/api/public/cmcd`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| POST | `/api/public/cmcd` | publishable key | public API | ✓ |
 
 ### `/api/public/me`
 

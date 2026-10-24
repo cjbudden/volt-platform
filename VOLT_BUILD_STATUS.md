@@ -746,6 +746,21 @@ Open questions:
 - `docs/API_ROUTES.md`, `docs/api-routes.json` and `openapi.json` need regenerating for the six new routes (`npm run docs:routes`, `npm run docs:openapi`). Not done here because the hypermedia work has uncommitted changes in the same generated files. The route descriptions are in DESIGN_media_library.md section 7.
 - The app shell itself is not laid out for a phone (the sidebar stays open at 390 px). The library's own grid and filters wrap correctly inside it. (Done 23 Oct, build queue 1.14.)
 
+## 2026-10-24 - CMCD v2 in the Volt SDK (build queue 1.14d, not yet released)
+
+What: QOE_REPORTING.md sections 2 to 4 and 10. Every Volt player reports what its viewer saw in the CMCD v2 standard, from the moment play is pressed, and the CDN can be joined to it.
+
+- **Play attempt** (`volt-player/src/sdk/cmcd.ts` `PlayAttempt`): opened in `player.ts` `load()` before `resolveAsset()`; `sid` a UUID (`player.sessionId`), sent to the gate (`apps.ts` `availSchema.sid`, a `sid` claim in `mintPlaybackToken`) and used by `Beacons` as its session. States s, d, p, k, r, a, e, f, q; first frame from `requestVideoFrameCallback`; startup spans entitlement, manifest, licence, first segment, decode and other, adding up to `msd`.
+- **Request mode** (`engine.ts` request filter): `CMCD=` on playlists, init and media segments, built with `@svta/cml-cmcd` 2.8.0 (`appendCmcdQuery`, version 2, request mode); none on licence and key requests. Native HLS and progressive: the first URL only.
+- **Event mode** (`CmcdSender`): `application/cmcd` lines to `POST /api/cmcd?appKey=`; ps, e (with `ec` and `com.volt-step`), bc, t (30 s), b, pr, m, um, rr (startup, 1 in 50, failed, slow), each with v, ts, e, sid, sn; 429, 410, 5xx and offline handled as the spec says.
+- **Collector** (`volt-app/src/modules/cmcd.ts`, `services/qoe/cmcdParse.ts`, `services/qoe/rawStore.ts`): publishable key, raw first (`QOE_RAW_DIR`, default `volt-app/qoe-raw`, ignored by git), 204/400/410/413/415/429. Public tier prefix `/api/cmcd`.
+- **CDN** (`deploy/terraform/s3_cloudfront.tf`, `scaling_alb.tf`): delivery response headers policy exposing `x-amz-cf-id` and the CMSD headers, Timing-Allow-Origin; cache policies left ignoring query strings; `/api/cmcd` to the public tier.
+- **Player options** (`types.ts`): `cmcd` (off, `app`, `appVersion`, `deviceModel`, `requestMode`, `eventMode`), `drm` (`servers`, `headers`).
+
+Checked: `volt-app/test/cmcd.check.ts` **73/73** and `volt-app/test/cmcd-browser.check.ts` **34/34** (Chromium, real gate, collector and Postgres, a stand-in CDN on its own origin; 15/34 on the SDK before this change). Every request and report validated with the library's CMCD v2 validator; a refused entitlement (gate-403, entitlement step) and a failed licence (shaka-6007, DRM step, encrypted DASH, licence server 500) both reported as views; two viewers with different CMCD share one cached segment; the startup `rr` reports carry the CDN request id. Full run 199/204 suites, 6353 assertions: fast, live-degraded and xmltv-import fail the same before, recordings passes alone (35/35), player-stats-browser fails the same with this change taken out (another session's Debug mode rename). `terraform validate` ok. Typechecks clean on the device.
+
+Not yet: view rows, aggregates and reports (1.14e); segment duration `d` only where Shaka exposes it; CMSD (2.10); not run on the Mac. Not released: other sessions' uncommitted CHANGELOG and change notes are in the tree.
+
 ## 2026-10-24 - Rights preview on the admin side (build queue 1.14c, not yet released)
 
 What: EDGE_RIGHTS_VARIANTS.md, "Testing it from the admin side". An operator picks a country, a rights class and a time and is told what the CDN edge gives that viewer, why, and can watch exactly that version, before it airs.

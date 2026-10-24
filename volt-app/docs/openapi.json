@@ -69,6 +69,11 @@
    "description": "Channels are your 24/7 linear streams: their sources, output, on-air state, redundancy and timeline.\n\n**Use it to:**\n- Create and configure channels with `POST /api/channels` and `PATCH /api/channels/{id}`\n- Start, stop and put a channel on air with `POST /api/channels/{id}/start`, `.../stop` and `.../air`\n- Set filler, auto connect and run failover or test-stream checks with `POST /api/channels/{id}/filler`, `.../auto-connect` and `.../failover-test`\n- Read coverage, history, timeline, dayparts and thumbnails with `GET /api/channels/{id}/timeline` and related requests\n\n**Credential:** admin session (Bearer) or account secret key, with `channels: view` to read, `channels: operate` to start, stop or air, and `channels: manage` to change. Radio stations need the same `radio` level.\n\n**Good to know:** creating a channel counts against your group's channel limit. Check `GET /api/channels/{id}/delete-impact` before deleting."
   },
   {
+   "name": "Cmcd",
+   "x-displayName": "Playback experience (CMCD)",
+   "description": "Your players report what each viewer saw, in the CMCD v2 standard (CTA-5004), so playback success, startup time, buffering and quality can be measured per viewer and per device.\n\n**Use it to:**\n- Send a player's event reports with `POST /api/public/cmcd`\n\n**Credential:** publishable key.\n\n**Good to know:** the Volt player SDK sends these by itself, and puts CMCD on every playlist and segment request too (a `CMCD` query argument the CDN ignores for caching). A player of your own can send the same reports: `v=2`, `ts`, `e` and `sid` on every line, the `sid` the same one you send to `POST /api/public/availability`."
+  },
+  {
    "name": "Daypart Presets",
    "x-displayName": "Daypart presets",
    "description": "Daypart presets are ready-made ways of dividing a broadcast day into labelled parts (such as breakfast or prime time) for a channel's timeline.\n\n**Use it to:**\n- List the available presets with `GET /api/daypart-presets`\n- Apply a preset or your own dayparts to a channel with `PUT /api/channels/{id}/dayparts`\n- Read a channel's current dayparts with `GET /api/channels/{id}/dayparts`\n\n**Credential:** admin session (Bearer) or account secret key, with `channels: view`. Applying dayparts to a channel needs `channels: manage`.\n\n**Good to know:** dayparts label the channel timeline only. They do not change the schedule or what goes to air."
@@ -375,6 +380,7 @@
     "Analytics",
     "Auth",
     "Availability",
+    "Cmcd",
     "Me",
     "Onboarding",
     "Payments",
@@ -7537,6 +7543,29 @@
      },
      "403": {
       "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/cmcd": {
+   "post": {
+    "operationId": "postCmcd",
+    "summary": "Send CMCD v2 event reports (alias)",
+    "tags": [
+     "Cmcd"
+    ],
+    "description": "The same as `POST /api/public/cmcd`.\n\n**Credential:** publishable key",
+    "security": [
+     {
+      "publishableKey": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
      }
     }
    }
@@ -20834,6 +20863,29 @@
         "assetId": "<channelId>"
        }
       }
+     }
+    }
+   }
+  },
+  "/api/public/cmcd": {
+   "post": {
+    "operationId": "postPublicCmcd",
+    "summary": "Send CMCD v2 event reports (QoE)",
+    "tags": [
+     "Cmcd"
+    ],
+    "description": "Event mode of CMCD v2 (CTA-5004): one report per line, `Content-Type: application/cmcd` (`text/cmcd` also accepted), with the app's publishable key as `?appKey=`. Every report must carry `v=2`, `ts`, `e` and `sid`; the Volt player SDK also sends `sn` and does this for you. A play attempt is reported from the moment the viewer presses play, before the play gate answers, so a refused entitlement or a failed licence is still counted. Answers: 204 received; 400 nothing valid; 410 stop reporting (unknown key); 413 more than 200 reports; 415 wrong content type; 429 slow down (Retry-After). Reports are kept exactly as sent.\n\n**Credential:** publishable key",
+    "security": [
+     {
+      "publishableKey": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
      }
     }
    }

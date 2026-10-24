@@ -13,6 +13,7 @@ import shaka from 'shaka-player/dist/shaka-player.compiled';
 import type { AudioTrackInfo, Quality, Source, TextTrackInfo } from './types';
 import { qualityLabel, qualityList, sourceKind } from './schedule';
 import { cdnFromHeaders, optimalFor, type StatsSample } from './stats';
+import type { PlayAttempt, PlaybackProbe, RequestInfo, RequestKind } from './cmcd';
 
 let polyfilled = false;
 
@@ -44,6 +45,54 @@ export interface EngineOptions {
    * controls and the theme's font applies.
    */
   textContainer?: HTMLElement;
+  /**
+   * DRM: licence servers by key system ({ 'com.widevine.alpha': url, ... })
+   * and headers for the licence requests (a token, say).
+   */
+  drm?: { servers?: Record<string, string>; headers?: Record<string, string> } | null;
+}
+
+/** Where in the path to a first frame (or after it) an error happened. */
+export type ErrorStep = 'entitlement' | 'manifest' | 'drm' | 'segment' | 'decode' | 'playback';
+
+/**
+ * The step a Shaka error belongs to, from its category and, for an HTTP
+ * failure, the request type in its data (BAD_HTTP_STATUS and HTTP_ERROR carry
+ * it at index 4 and 2): a licence server answering 500 is a DRM failure, not
+ * a stream fault.
+ */
+export function errorStep(e: any): ErrorStep {
+  const cat = e?.category ?? e?.detail?.category;
+  const code = e?.code ?? e?.detail?.code;
+  const data = e?.data ?? e?.detail?.data ?? [];
+  if (cat === 6) return 'drm';
+  if (cat === 4) return 'manifest';
+  if (cat === 3) return 'decode';
+  if (cat === 1) {
+    const rt = code === 1001 ? data[4] : code === 1002 || code === 1003 ? data[2] : null;
+    if (rt === 0) return 'manifest';
+    if (rt === 2) return 'drm';
+    if (rt === 1) return 'segment';
+    return 'segment';
+  }
+  return 'playback';
+}
+
+/** A Shaka error code as a CMCD `ec` value, else the code or name given. */
+export function errorCode(e: any): string {
+  const code = e?.code ?? e?.detail?.code;
+  if (typeof code === 'number' && code >= 1000) return `shaka-${code}`;
+  if (code != null) return String(code);
+  return e?.name ? String(e.name) : 'unknown';
+}
+
+/** Shaka request types, as the CMCD object type and our startup spans see them. */
+function requestKind(type: number, ctx: any): RequestKind {
+  if (type === 0) return 'manifest';
+  if (type === 2) return 'licence';
+  if (type === 6) return 'key';
+  if (type === 1) return ctx?.type === 0 ? 'init' : 'segment';
+  return 'other';
 }
 
 /** Raw in-stream triggers as the engine received them; sdk/triggers.ts turns them into graphics. */
@@ -89,6 +138,23 @@ export class Engine {
   readonly media: HTMLVideoElement;
   mode: EngineMode | null = null;
   private sp: any = null;
+  /**
+   * The play attempt this load belongs to (sdk/cmcd.ts): it adds CMCD to each
+   * manifest and segment request and hears every response. Set by the player.
+   */
+  attempt: PlayAttempt | null = null;
+  private loadedOk = false;
+  private pendingErr: any = null;
+
+  /** A Shaka error into the play attempt: the failed request (e=rr), then e=e with its step. */
+  private reportError(d: any) {
+    const a = this.attempt;
+    if (!a) return;
+    try {
+      if (d?.code === 1001) a.response({ kind: requestKind(d.data?.[4] ?? -1, null), url: String(d.data?.[0] ?? ''), status: Number(d.data?.[1]) || 0, failed: true });
+      a.error(errorCode(d), errorStep(d), d?.severity === 2);
+    } catch { /* reporting never breaks playback */ }
+  }
   private pinned: string | null = null;
   private textOn = false;
   /** For the stats panel: the CDN's answer on the last segment, the last recoverable error. */
@@ -131,9 +197,17 @@ export class Engine {
     for (const p of plan) {
       try {
         await this.unload();
+        // CMCD: the streaming format is known from the plan, before the first request.
+        if (this.attempt) this.attempt.sf = p.kind === 'hls' ? 'h' : p.kind === 'dash' ? 'd' : 'o';
         if (p.mode === 'shaka') await this.loadShaka(p.url, startAt);
         else {
-          this.media.src = p.url;
+          // The browser fetches everything after this URL itself: request
+          // mode reaches the first request (the playlist or the file) only.
+          const a = this.attempt;
+          const info: RequestInfo = p.mode === 'native' ? { kind: 'manifest', url: p.url } : { kind: 'segment', url: p.url, media: p.kind === 'mp3' ? 'audio' : 'video' };
+          a?.spanStart(p.mode === 'native' ? 'manifest' : 'segment');
+          this.media.addEventListener('loadedmetadata', () => a?.spanEnd(p.mode === 'native' ? 'manifest' : 'segment'), { once: true });
+          this.media.src = a ? a.requestUrl(info) : p.url;
           if (startAt) { const go = () => { try { this.media.currentTime = startAt; } catch { /* */ } }; this.media.addEventListener('loadedmetadata', go, { once: true }); }
           await new Promise<void>((ok, bad) => {
             const done = () => { cleanup(); ok(); };
@@ -146,12 +220,15 @@ export class Engine {
           });
         }
         this.mode = p.mode;
+        this.loadedOk = true;
+        if (this.pendingErr) { const d = this.pendingErr; this.pendingErr = null; this.reportError(d); }
         if (p.mode === 'native' && p.kind === 'hls') this.watchNativeCues();
         this.onChange();
         return p;
       } catch (e) { last = e; }
     }
-    throw Object.assign(new Error(readableError(last)), { code: last?.code ?? null });
+    // category and data travel with it: the player reports the step it failed at.
+    throw Object.assign(new Error(readableError(last)), { code: last?.code ?? null, category: last?.category ?? null, data: last?.data ?? null });
   }
 
   private async loadShaka(url: string, startAt?: number) {
@@ -175,6 +252,8 @@ export class Engine {
       abr: { enabled: true },
       manifest: { retryParameters: { maxAttempts: 4, baseDelay: 800, backoffFactor: 2, timeout: 15000 } },
     });
+    const drm = this.o.drm;
+    if (drm?.servers && Object.keys(drm.servers).length) sp.configure({ drm: { servers: drm.servers } });
     const hdr = this.o.requestHeaders;
     if (hdr) {
       sp.getNetworkingEngine()?.registerRequestFilter((_t: unknown, req: any) => {
@@ -182,13 +261,59 @@ export class Engine {
         if (h) Object.assign(req.headers, h);
       });
     }
+    // CMCD REQUEST MODE and the startup spans (sdk/cmcd.ts). The CMCD query is
+    // added after any caller headers; a licence request gets its headers and
+    // no CMCD (licence servers are often someone else's and strict).
+    try {
+      sp.getNetworkingEngine()?.registerRequestFilter((type: number, req: any, ctx: any) => {
+        if (type === 2 && drm?.headers) Object.assign(req.headers, drm.headers);
+        const a = this.attempt;
+        if (!a) return;
+        const kind = requestKind(type, ctx);
+        if (kind === 'manifest') a.spanStart('manifest');
+        else if (kind === 'licence') a.spanStart('drm');
+        else if (kind === 'segment') a.spanStart('segment');
+        if (kind !== 'manifest' && kind !== 'segment' && kind !== 'init') return;
+        const st = ctx?.stream;
+        const seg = ctx?.segment;
+        // SegmentReference is internal to Shaka: its getters survive the
+        // compiled build, its fields do not. A stream's own bandwidth is often
+        // unset (an HLS variant has one); then the variant playing is used.
+        const t0 = typeof seg?.getStartTime === 'function' ? seg.getStartTime() : seg?.startTime;
+        const t1 = typeof seg?.getEndTime === 'function' ? seg.getEndTime() : seg?.endTime;
+        let bw = typeof st?.bandwidth === 'number' && st.bandwidth > 0 ? st.bandwidth : null;
+        if (!bw && st && st.type !== 'audio' && st.type !== 'text') { try { bw = (sp.getVariantTracks() ?? []).find((v: any) => v.active)?.bandwidth ?? null; } catch { /* */ } }
+        const info: RequestInfo = {
+          kind, url: req.uris?.[0] ?? '',
+          media: st?.type === 'audio' ? 'audio' : st?.type === 'text' ? 'text' : st ? 'video' : null,
+          bitrateKbps: bw ? bw / 1000 : null,
+          durationMs: Number.isFinite(t1 - t0) && t1 > t0 ? (t1 - t0) * 1000 : null,
+        };
+        req.uris = (req.uris ?? []).map((u: string) => a.requestUrl({ ...info, url: u }));
+      });
+    } catch { /* reporting never breaks playback */ }
     // STATS: which CDN edge answered the last segment and whether it was a hit
     // (sdk/stats.ts). Only the headers the CDN exposes to the page (CORS).
     try {
-      sp.getNetworkingEngine()?.registerResponseFilter((type: number, res: any) => {
-        if (type !== 1 /* SEGMENT */) return;
+      sp.getNetworkingEngine()?.registerResponseFilter((type: number, res: any, ctx: any) => {
         const h = res?.headers ?? {};
-        this.cdn = cdnFromHeaders((n) => h[n], res?.uri ?? res?.originalUri ?? null);
+        if (type === 1 /* SEGMENT */) this.cdn = cdnFromHeaders((n) => h[n], res?.uri ?? res?.originalUri ?? null);
+        const a = this.attempt;
+        if (!a) return;
+        const kind = requestKind(type, ctx);
+        if (kind === 'manifest') a.spanEnd('manifest');
+        else if (kind === 'licence') a.spanEnd('drm');
+        else if (kind === 'segment') a.spanEnd('segment');
+        const st = ctx?.stream;
+        // x-amz-cf-id is CloudFront's own id for this request, the same value
+        // its logs carry as x-edge-request-id: the join from this report to
+        // the CDN's row. Readable only when the CDN exposes it (terraform).
+        a.response({
+          kind, url: res?.originalUri ?? res?.uri ?? '', status: res?.status ?? 200,
+          media: st?.type === 'audio' ? 'audio' : st?.type === 'text' ? 'text' : st ? 'video' : null,
+          ttfbMs: res?.originalRequest?.timeToFirstByte ?? null, ttlbMs: res?.timeMs ?? null,
+          edgeId: h['x-amz-cf-id'] ?? null, cmsds: h['cmsd-static'] ?? null, cmsdd: h['cmsd-dynamic'] ?? null,
+        });
       });
     } catch { /* stats only */ }
     const changed = () => this.onChange();
@@ -209,6 +334,13 @@ export class Engine {
     sp.addEventListener('error', (ev: any) => {
       const d = ev?.detail;
       this.lastErr = d?.code != null ? `Shaka ${d.code}` : null;
+      // CMCD: a failed request as e=rr with its status, the error as e=e with
+      // the step. A fatal one before load() has finished is held: if load()
+      // fails the player reports it (the next plan may still work), if load()
+      // succeeds it is reported then (a licence refused while the first
+      // segments load, say).
+      if (this.loadedOk) this.reportError(d);
+      else if (d?.severity === 2) this.pendingErr = d;
       if (d?.severity === 2 /* CRITICAL */) this.onError(readableError(d), d?.code ?? null);
     });
     await sp.load(url, startAt ?? null);
@@ -251,6 +383,8 @@ export class Engine {
     this.pinned = null;
     this.cdn = null;
     this.lastErr = null;
+    this.loadedOk = false;
+    this.pendingErr = null;
     if (sp) { try { await sp.destroy(); } catch { /* already gone */ } }
     try { this.media.removeAttribute('src'); this.media.load(); } catch { /* */ }
   }
@@ -357,6 +491,34 @@ export class Engine {
       if (ks) out.drm = ks;
     } catch { /* a half-loaded player: report what is known */ }
     return out;
+  }
+
+  /** What a play attempt asks about playback (sdk/cmcd.ts PlaybackProbe). */
+  playbackProbe(): PlaybackProbe {
+    const num = (v: any) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    const stats = () => { try { return this.sp?.getStats?.() ?? {}; } catch { return {}; } };
+    const variants = (): any[] => { try { return this.sp?.getVariantTracks?.() ?? []; } catch { return []; } };
+    return {
+      bufferMs: () => {
+        const m = this.media, b = m.buffered, t = m.currentTime;
+        for (let i = 0; b && i < b.length; i++) if (b.start(i) <= t + 0.1 && b.end(i) >= t) return (b.end(i) - t) * 1000;
+        return b && b.length ? 0 : null;
+      },
+      throughputKbps: () => { const v = num(stats().estimatedBandwidth); return v ? v / 1000 : null; },
+      playingKbps: () => { const a = variants().find((v) => v.active); return a?.bandwidth ? a.bandwidth / 1000 : null; },
+      topKbps: () => { const m = Math.max(0, ...variants().map((v) => v.bandwidth || 0)); return m ? m / 1000 : null; },
+      topPlayableKbps: () => {
+        const r = this.media.getBoundingClientRect();
+        const o = optimalFor(variants(), r.height, typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1);
+        return o?.bandwidth ? o.bandwidth / 1000 : null;
+      },
+      droppedFrames: () => {
+        try { const q = (this.media as any).getVideoPlaybackQuality?.(); if (q) return q.droppedVideoFrames; } catch { /* */ }
+        return num(stats().droppedFrames);
+      },
+      latencyMs: () => { const l = num(stats().liveLatency); return l != null && l > 0 ? l * 1000 : null; },
+      keySystem: () => { try { return this.sp?.keySystem?.() || null; } catch { return null; } },
+    };
   }
 
   setQuality(id: string): void {

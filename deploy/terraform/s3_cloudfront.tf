@@ -73,6 +73,39 @@ resource "aws_cloudfront_cache_policy" "segment" {
   }
 }
 
+# CMCD (QOE_REPORTING.md sections 2 and 3). Players put CMCD in a query
+# argument on every playlist and segment request. Both cache policies above
+# have query_string_behavior = "none", so CMCD is never part of the cache key
+# nor forwarded to S3: every viewer still shares one cached object, and the
+# CDN logs keep the CMCD values. Keep it that way: a whitelist that named
+# CMCD, or "all", would cache one copy per viewer.
+#
+# CloudFront's own id for each response (x-amz-cf-id, the x-edge-request-id
+# of its logs) is exposed to the page, so the Volt SDK copies it into its
+# response-received reports and they join the CDN's log rows. Timing-Allow-
+# Origin lets the page read the request timings. origin_override: S3's CORS
+# rule has no expose list, so the CDN's answer wins.
+resource "aws_cloudfront_response_headers_policy" "delivery" {
+  name    = "${local.name}-delivery"
+  comment = "Players on any site; x-amz-cf-id and CMSD exposed for CMCD reports"
+  cors_config {
+    access_control_allow_credentials = false
+    access_control_allow_headers { items = ["*"] }
+    access_control_allow_methods { items = ["GET", "HEAD", "OPTIONS"] }
+    access_control_allow_origins { items = ["*"] }
+    access_control_expose_headers { items = ["x-amz-cf-id", "x-amz-cf-pop", "x-cache", "age", "cmsd-static", "cmsd-dynamic"] }
+    access_control_max_age_sec = 3000
+    origin_override            = true
+  }
+  custom_headers_config {
+    items {
+      header   = "Timing-Allow-Origin"
+      value    = "*"
+      override = true
+    }
+  }
+}
+
 resource "aws_cloudfront_distribution" "cdn" {
   enabled         = true
   comment         = "${local.name} OTT delivery"
@@ -123,14 +156,15 @@ resource "aws_cloudfront_distribution" "cdn" {
   dynamic "ordered_cache_behavior" {
     for_each = var.edge_rights_enabled ? ["/channel/*/v/*", "/event/*/v/*"] : []
     content {
-      path_pattern             = ordered_cache_behavior.value
-      target_origin_id         = "variants"
-      viewer_protocol_policy   = "redirect-to-https"
-      allowed_methods          = ["GET", "HEAD", "OPTIONS"]
-      cached_methods           = ["GET", "HEAD"]
-      cache_policy_id          = aws_cloudfront_cache_policy.manifest.id
-      origin_request_policy_id = aws_cloudfront_origin_request_policy.variants[0].id
-      compress                 = true
+      path_pattern               = ordered_cache_behavior.value
+      target_origin_id           = "variants"
+      viewer_protocol_policy     = "redirect-to-https"
+      allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+      cached_methods             = ["GET", "HEAD"]
+      cache_policy_id            = aws_cloudfront_cache_policy.manifest.id
+      origin_request_policy_id   = aws_cloudfront_origin_request_policy.variants[0].id
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.delivery.id
+      compress                   = true
       function_association {
         event_type   = "viewer-request"
         function_arn = aws_cloudfront_function.rights[0].arn
@@ -140,23 +174,25 @@ resource "aws_cloudfront_distribution" "cdn" {
 
   # Default: treat as segments (immutable, long cache).
   default_cache_behavior {
-    target_origin_id       = "s3-origin"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    cache_policy_id        = aws_cloudfront_cache_policy.segment.id
-    compress               = true
+    target_origin_id           = "s3-origin"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = aws_cloudfront_cache_policy.segment.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.delivery.id
+    compress                   = true
   }
 
   # HLS manifests — short TTL.
   ordered_cache_behavior {
-    path_pattern           = "*.m3u8"
-    target_origin_id       = "s3-origin"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    cache_policy_id        = aws_cloudfront_cache_policy.manifest.id
-    compress               = true
+    path_pattern               = "*.m3u8"
+    target_origin_id           = "s3-origin"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = aws_cloudfront_cache_policy.manifest.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.delivery.id
+    compress                   = true
     # edge_rights.tf: per-stream geo and blackout, decided per manifest request
     dynamic "function_association" {
       for_each = var.edge_rights_enabled ? [1] : []
@@ -169,13 +205,14 @@ resource "aws_cloudfront_distribution" "cdn" {
 
   # DASH manifests — short TTL.
   ordered_cache_behavior {
-    path_pattern           = "*.mpd"
-    target_origin_id       = "s3-origin"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    cache_policy_id        = aws_cloudfront_cache_policy.manifest.id
-    compress               = true
+    path_pattern               = "*.mpd"
+    target_origin_id           = "s3-origin"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = aws_cloudfront_cache_policy.manifest.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.delivery.id
+    compress                   = true
     # edge_rights.tf: per-stream geo and blackout, decided per manifest request
     dynamic "function_association" {
       for_each = var.edge_rights_enabled ? [1] : []

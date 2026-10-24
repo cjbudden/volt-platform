@@ -35,6 +35,9 @@ volt_frame_scrub.png
 volt_image_gallery.png
 volt_share_page.png
 
+# ---- raw CMCD reports kept by the collector on the Mac (volt-app/src/services/qoe/rawStore.ts) ----
+volt-app/qoe-raw/
+
 # ---- env / secrets ----
 .env
 *.env
