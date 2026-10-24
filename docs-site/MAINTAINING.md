@@ -9,6 +9,9 @@ static site. Signed-in customers only. Releases and change notes are in
 | Part | Source | Edit it? |
 |---|---|---|
 | Guides | `docs/**/*.md` | Yes. The sidebar follows the folders (`_category_.json` sets a folder's label and order, `sidebar_position` a page's) |
+| Coverage map | `coverage.json` | Yes. Every console section, workflow and developer topic, and the guides that cover it |
+| Guide templates | `templates/*.md` | Yes, with care: the coverage check reads their headings |
+| Screenshots | `static/img/screens/*.png` | No. Retaken by `npm run screenshots` from `screenshots.json` |
 | Release notes | `release-notes/*.md` | Written by `scripts/release/release.mjs`. Fix wording by hand if needed |
 | API reference | `../volt-app/docs/openapi.json` | No. Regenerate (`npm run docs:openapi` in volt-app). Wording overrides go in `openapi-overlay.json` |
 | Look | `src/css/custom.css`, fonts and logos from `../brand` | Yes |
@@ -62,9 +65,76 @@ it, never how it is built. Plain sentences, Australian spelling, sentence-case
 headings, few em dashes. Hosts are `your-volt-host` / `example.com`, keys are
 `pk_live_...`. Check a feature exists in the app before documenting it.
 
-Guides not written yet (sources in `volt-app/docs` and the repo root): radio
-stations, events and ticketing, recordings and clips, the media library and
-watch folders, publishing and social, workflows, analytics, share links.
+### Coverage: which guide explains which part of Volt
+
+`coverage.json` lists every section in the console's sidebar (daily and
+Admin), every cross-section workflow and every developer topic, with the
+guides that cover each and the build-queue batch that writes them.
+`npm run coverage` prints what is missing, by batch. It fails when:
+
+- the console gains, loses or renames a section and the map does not follow
+  (it reads the sidebar from the console source, so a new section cannot ship
+  without someone deciding where it is documented);
+- a guide the map names does not exist, or a page marked as a guide is not on
+  the map;
+- a batch listed in `required` still has an entry with no guide, or only
+  guides not written to the template.
+
+Each guides batch (1.14-G1 to G6) adds its id to `required` when it is done,
+so what was finished stays finished. The build runs the check too (counts
+only). Volt-staff sections (System Admin) are marked `internal` and never get
+a customer guide.
+
+### The page template
+
+Copy `templates/section.md` (a console section), `templates/workflow.md` (how
+sections work together) or `templates/developer.md` (for customer developers).
+The frontmatter `guide: section|workflow|developer` and the level-two headings
+are what the coverage check looks for, so keep their wording:
+
+| Section guide | Workflow guide |
+|---|---|
+| What it is for | What it is for |
+| Before you start | Before you start |
+| Step by step | The flow (with a diagram) |
+| How it connects | Step by step |
+| Who can do it | Who can do it |
+| Troubleshooting | Troubleshooting |
+| Through the API | Through the API |
+
+The map of everything is `docs/getting-started/how-volt-fits-together.md`; it
+must name every section, so add a new one there as well. Diagrams are SVG in
+`static/img/flows/`, drawn to read on both the light and the dark theme.
+
+Before a guide is published, walk every step it describes in the app on the
+docs demo (below). Anything that does not work as written is fixed if small,
+or queued as its own build item.
+
+### Screenshots
+
+Never take them by hand. `screenshots.json` lists each one (console path, what
+to wait for, optionally an element to crop to, elements to hide, clicks to
+make first) and the guide it belongs to; `npm run screenshots` retakes them
+all from the running app. A guide shows one with
+`![What it shows](/img/screens/<name>.png)`, and the docs-coverage check suite
+fails if a guide shows a screenshot the manifest does not list.
+
+```bash
+# volt-app: a fresh demo account with neutral names (Example Broadcaster)
+DATABASE_URL=... npx tsx scripts/seed-docs.ts
+PORT=8080 npx tsx src/index.ts
+# volt-web
+npx vite --port 5173
+# docs-site: all shots, or name some
+npm run screenshots
+npm run screenshots -- audit-log
+```
+
+Before saving each picture the script checks the page's visible text (and
+field values and placeholders) against `scrub.json` and refuses to save one
+that shows a banned term: a picture is the one thing the build cannot read.
+The console is dark; the site frames every PNG so it reads on both themes.
+After retaking, look at every changed picture before committing it.
 
 ## Publishing
 

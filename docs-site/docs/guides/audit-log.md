@@ -16,7 +16,9 @@ The audit log records who did what in your account. It is open to owners and adm
 
 ## Review it
 
-Go to **Insight > Audit log**. Filter by action (**Deleted**, **Delete refused**, **Changed**, **Created**), by kind of thing, by person, by date range and by free text. Open a row for the full detail. **Export CSV** downloads what you have filtered.
+Go to **Admin > Audit log** (under **Access**). Filter by action (**Deleted**, **Delete refused**, **Changed**, **Created**), by kind of thing, by person, by date range and by free text. Open a row for the full detail. **Export CSV** downloads what you have filtered.
+
+![The Audit log page: filter buttons and search above a list of changes, newest first](/img/screens/audit-log.png)
 
 ## Removing a channel or station
 

@@ -164,7 +164,11 @@ export default function AccountSettings() {
 
   const dirty = !!a && (logo !== (a.logo ?? '') || primary.toLowerCase() !== a.primary.toLowerCase() || secondary.toLowerCase() !== a.secondary.toLowerCase())
   const valid = HEX.test(primary) && HEX.test(secondary)
-  const lowContrast = useMemo(() => HEX.test(primary) && contrast(primary, '#ffffff') < 2.2 && contrast(primary, '#0f172a') < 2.2, [primary])
+  // Mid-tone: neither white nor dark text reaches the 4.5:1 that body text
+  // needs. The bar used to be 2.2, which no colour can miss on both sides
+  // (white and this dark text are about 18:1 apart, so one of the two is
+  // always above 4.2), so the warning the guide promises never appeared.
+  const lowContrast = useMemo(() => HEX.test(primary) && contrast(primary, '#ffffff') < 4.5 && contrast(primary, '#0f172a') < 4.5, [primary])
 
   async function save() {
     if (!a || !valid) return

@@ -1,0 +1,20 @@
+{
+  "_comment": "Every screenshot the guides use, retaken by scripts/screenshots.mjs against the app on a fresh docs seed (volt-app/scripts/seed-docs.ts). A shot is a console path, what to wait for, and optionally an element to crop to, elements to hide and clicks to make first. Images land in static/img/screens/<name>.png; guides show them with ![...](/img/screens/<name>.png).",
+  "viewport": { "width": 1440, "height": 900 },
+  "shots": [
+    {
+      "name": "account-settings",
+      "guide": "guides/account-settings.md",
+      "path": "/account-settings",
+      "waitFor": "h1",
+      "alt": "The Account settings page, with the logo and colours at the top"
+    },
+    {
+      "name": "audit-log",
+      "guide": "guides/audit-log.md",
+      "path": "/audit",
+      "waitFor": "h1",
+      "alt": "The Audit log page listing recent changes, newest first"
+    }
+  ]
+}

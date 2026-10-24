@@ -8,6 +8,8 @@ description: Your account's logo and colours, and the account-wide rule for wher
 
 **Admin > Account settings** holds your account's own look, used on the pages Volt shows to people outside your account, and the one geo rule that applies to everything you have.
 
+![The Account settings page: branding on the left, a preview of a share page on the right, and the account-wide geo rule below](/img/screens/account-settings.png)
+
 ## Logo and colours
 
 | Setting | Used for | Default |

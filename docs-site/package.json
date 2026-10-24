@@ -6,9 +6,11 @@
   "scripts": {
     "prepare-assets": "node scripts/prepare.mjs",
     "start": "npm run prepare-assets && docusaurus start",
-    "build": "npm run prepare-assets && docusaurus build && node scripts/check-scrub.mjs build",
+    "build": "npm run prepare-assets && node scripts/check-coverage.mjs --summary && docusaurus build && node scripts/check-scrub.mjs build",
     "serve": "docusaurus serve",
     "check": "node scripts/check-scrub.mjs docs release-notes static/openapi.json",
+    "coverage": "node scripts/check-coverage.mjs",
+    "screenshots": "node scripts/screenshots.mjs",
     "clear": "docusaurus clear"
   },
   "dependencies": {

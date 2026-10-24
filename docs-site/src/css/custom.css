@@ -56,3 +56,17 @@ table { display: table; width: 100%; font-size: 0.93em; }
 td, th { vertical-align: top; }
 code { font-variant-numeric: tabular-nums; }
 .markdown { max-width: 78ch; }
+
+/* Console screenshots (scripts/screenshots.mjs). The build renames images
+   into /assets/images/, so the rule keys on the file type: every PNG in a
+   guide is a console screenshot (diagrams are SVG). The console is dark, so
+   on the light theme a frame keeps the picture from bleeding into the page;
+   on the dark theme the same frame separates it from the background. */
+.markdown img[src$=".png"] {
+  display: block;
+  margin: 1.2rem 0 1.6rem;
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(15, 18, 24, 0.14);
+}
+[data-theme='dark'] .markdown img[src$=".png"] { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); border-color: rgba(255, 255, 255, 0.14); }

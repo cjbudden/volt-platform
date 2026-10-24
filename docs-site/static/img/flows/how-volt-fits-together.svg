@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 450" width="1000" height="450" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">How Volt fits together</title>
+  <desc id="d">Live sources feed live streams (channels, radio, events and FAST), shaped by the programme guide, loops and fillers, graphics and captions. Streams go to viewers and are recorded; recordings become clips that are reviewed and land in the media library, alongside files that arrive through uploads and watch folders and pass the ingest rules. The library feeds FAST channels and, through the publishing rules, viewers and social accounts. Dashboard, monitoring, analytics and the audit log watch all of it.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#8a93a6"/></marker>
+    <style>
+      .box text{fill:#ffffff}
+      .t{font-size:16px;font-weight:650}
+      .s{font-size:12.5px;opacity:.92}
+      .ln{fill:none;stroke:#8a93a6;stroke-width:2;marker-end:url(#a)}
+      .lb{fill:#8a93a6;font-size:12px}
+    </style>
+  </defs>
+  <!-- arrows first, so boxes sit on top -->
+  <path class="ln" d="M190 85 H247"/>
+  <path class="ln" d="M450 40 H860 V47"/>
+  <text class="lb" x="560" y="33">live outputs (HLS, DASH, MP3)</text>
+  <path class="ln" d="M450 85 H517"/>
+  <text class="lb" x="455" y="78">recorded</text>
+  <path class="ln" d="M350 175 V143"/>
+  <path class="ln" d="M610 120 V172"/>
+  <text class="lb" x="618" y="152">clips</text>
+  <path class="ln" d="M610 245 V297"/>
+  <text class="lb" x="618" y="277">approved</text>
+  <path class="ln" d="M190 335 H247"/>
+  <path class="ln" d="M450 335 H517"/>
+  <path class="ln" d="M700 335 H860 V248"/>
+  <text class="lb" x="712" y="327">published</text>
+  <path class="ln" d="M860 175 V123"/>
+  <path class="ln" d="M520 312 H485 V110 H453"/>
+  <text class="lb" transform="translate(474 262) rotate(-90)">FAST plays from the library</text>
+  <!-- boxes -->
+  <g class="box"><rect x="20" y="50" width="170" height="70" rx="10" fill="#475569"/><text class="t" x="35" y="80">Live sources</text><text class="s" x="35" y="101">SRT, RTMP, HLS, Icecast</text></g>
+  <g class="box"><rect x="250" y="30" width="200" height="110" rx="10" fill="#3f63e0"/><text class="t" x="266" y="62">Live streams</text><text class="s" x="266" y="86">Channels · Radio</text><text class="s" x="266" y="106">Events · FAST</text></g>
+  <g class="box"><rect x="250" y="175" width="200" height="80" rx="10" fill="#5b4fd6"/><text class="t" x="266" y="202">Shaped by</text><text class="s" x="266" y="223">EPG · Loops &amp; Fillers</text><text class="s" x="266" y="242">Graphics · Captions</text></g>
+  <g class="box"><rect x="520" y="50" width="180" height="70" rx="10" fill="#0f766e"/><text class="t" x="536" y="80">Recordings</text><text class="s" x="536" y="101">search, scrub, clip</text></g>
+  <g class="box"><rect x="520" y="175" width="180" height="70" rx="10" fill="#0f766e"/><text class="t" x="536" y="205">Review</text><text class="s" x="536" y="226">clips and QC</text></g>
+  <g class="box"><rect x="520" y="300" width="180" height="70" rx="10" fill="#0f766e"/><text class="t" x="536" y="330">Media Library</text><text class="s" x="536" y="351">on-demand assets</text></g>
+  <g class="box"><rect x="20" y="300" width="170" height="70" rx="10" fill="#475569"/><text class="t" x="35" y="330">Files</text><text class="s" x="35" y="351">uploads · Watchfolders</text></g>
+  <g class="box"><rect x="250" y="300" width="200" height="70" rx="10" fill="#5b4fd6"/><text class="t" x="266" y="330">Ingest Rules</text><text class="s" x="266" y="351">Content Types · Encoding</text></g>
+  <g class="box"><rect x="760" y="175" width="220" height="70" rx="10" fill="#b45309"/><text class="t" x="776" y="205">Publishing Rules</text><text class="s" x="776" y="226">and Social accounts</text></g>
+  <g class="box"><rect x="760" y="50" width="220" height="70" rx="10" fill="#b45309"/><text class="t" x="776" y="80">Viewers</text><text class="s" x="776" y="101">your apps, the player, social</text></g>
+  <g class="box"><rect x="20" y="400" width="960" height="40" rx="10" fill="#334155"/><text class="s" x="36" y="425">Watching all of it: Dashboard · Live Streams · Monitoring · Multiview · Analytics · Notifications · Audit log</text></g>
+</svg>

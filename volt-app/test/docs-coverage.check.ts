@@ -1,0 +1,128 @@
+/**
+ * Guide coverage map and screenshots (build queue 1.14-G0).
+ *
+ * docs-site/scripts/check-coverage.mjs decides whether every console section,
+ * workflow and developer topic has a guide written to the template. This
+ * runs it on the real tree (no errors; the known gaps are listed, not failed)
+ * and on small made-up sites that break one rule each, so a checker that
+ * stopped noticing would fail here. It also checks that every screenshot a
+ * guide shows is in the manifest and on disk, and the other way round.
+ * No database, no API.
+ */
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+let passed = 0, failed = 0;
+function ok(cond: unknown, msg: string) {
+  if (cond) { passed++; console.log(`  ok   ${msg}`); } else { failed++; console.log(`  FAIL ${msg}`); }
+}
+
+const SITE = join(__dirname, '../../docs-site');
+const APP = join(__dirname, '../../volt-web/src/App.tsx');
+
+const SECTION_HEADS = ['What it is for', 'Before you start', 'Step by step', 'How it connects', 'Who can do it', 'Troubleshooting', 'Through the API'];
+const fakeApp = (items: Array<[string, string]>) =>
+  `const NAV: NavGroup[] = [\n  { group: 'X', items: [\n${items.map(([k, l]) => `    { key: '${k}', label: '${l}', icon: I.x },`).join('\n')}\n  ] },\n]\nconst ADMIN_NAV: NavGroup[] = []\nconst ADMIN_KEYS = new Set()\n`;
+const guide = (kind: string, heads: string[], extra = '') =>
+  `---\ntitle: T\nguide: ${kind}\n---\n\n# T\n\n${heads.map((h) => `## ${h}\n\ntext\n`).join('\n')}${extra}`;
+
+/** A throwaway docs site: templates, docs and a coverage map. */
+function fakeSite(files: Record<string, string>) {
+  const dir = mkdtempSync(join(tmpdir(), 'cov-'));
+  mkdirSync(join(dir, 'templates'));
+  mkdirSync(join(dir, 'docs/guides'), { recursive: true });
+  writeFileSync(join(dir, 'templates/section.md'), guide('section', SECTION_HEADS));
+  for (const [p, body] of Object.entries(files)) { mkdirSync(join(dir, p, '..'), { recursive: true }); writeFileSync(join(dir, p), body); }
+  return dir;
+}
+const baseCoverage = (over: any = {}) => ({
+  required: ['G1'],
+  templates: { section: SECTION_HEADS, map: ['The sections'] },
+  sections: [{ key: 'dashboard', label: 'Dashboard', batch: 'G1', guides: ['guides/dashboard.md'] }],
+  workflows: [], developer: [], pages: [],
+  ...over,
+});
+
+(async () => {
+  const mod: any = await import(join(SITE, 'scripts/check-coverage.mjs'));
+  const { checkCoverage, readNav } = mod;
+
+  console.log('the real tree');
+  const appSource = readFileSync(APP, 'utf8');
+  const coverage = JSON.parse(readFileSync(join(SITE, 'coverage.json'), 'utf8'));
+  const nav = readNav(appSource);
+  ok(nav.length >= 30 && nav.some((n: any) => n.key === 'channels' && n.label === 'Channels'), `the console nav is read from the source (${nav.length} sections)`);
+  ok(nav.some((n: any) => n.key === 'audit') && nav.some((n: any) => n.key === 'dashboard'), 'both the daily and the Admin nav are read');
+  const real = checkCoverage({ site: SITE, coverage, appSource });
+  ok(real.errors.length === 0, `no errors on the real tree${real.errors.length ? ': ' + real.errors.join(' | ') : ''}`);
+  ok(real.required.includes('G0'), 'G0 is a required batch');
+  ok(!real.gaps.some((g: any) => g.batch === 'G0'), 'nothing in G0 is left as a gap (the How Volt fits together page is in its template)');
+  ok(real.gaps.some((g: any) => g.key === 'dashboard' && g.problems.includes('no guide')), 'Dashboard is listed as a gap with no guide');
+  ok(real.gaps.some((g: any) => g.key === 'channels' && /not in the section template/.test(g.problems.join())), 'Channels is listed as having guides not yet in the template');
+  ok(!coverage.sections.some((s: any) => s.key === 'system' && !s.internal), 'System Admin is marked internal, not a customer gap');
+  ok(real.total === real.inTemplate + real.gaps.length, `every entry is either covered or a gap (${real.inTemplate} + ${real.gaps.length} = ${real.total})`);
+
+  console.log('the console and the map must agree');
+  const plusOne = appSource.replace("{ key: 'dashboard', label: 'Dashboard'", "{ key: 'brandnew', label: 'Brand new', icon: I.dash },\n    { key: 'dashboard', label: 'Dashboard'");
+  ok(checkCoverage({ site: SITE, coverage, appSource: plusOne }).errors.some((e: string) => e.includes('Brand new')), 'a new console section with no map entry is an error');
+  const relabelled = appSource.replace("label: 'Radio'", "label: 'Audio'");
+  ok(checkCoverage({ site: SITE, coverage, appSource: relabelled }).errors.some((e: string) => /radio is "Audio"/.test(e)), 'a section renamed in the console is an error until the map follows');
+  const fewer = { ...coverage, sections: coverage.sections.filter((s: any) => s.key !== 'fast') };
+  ok(checkCoverage({ site: SITE, coverage: fewer, appSource }).errors.some((e: string) => e.includes('"FAST"')), 'a console section dropped from the map is an error');
+  const stale = { ...coverage, sections: [...coverage.sections, { key: 'gone', label: 'Gone', batch: 'G1', guides: [] }] };
+  ok(checkCoverage({ site: SITE, coverage: stale, appSource }).errors.some((e: string) => e.includes('no longer has')), 'a map entry for a section the console no longer has is an error');
+  ok(checkCoverage({ site: SITE, coverage: { ...coverage, required: ['G0', 'G1'] }, appSource }).errors.some((e: string) => e.includes('"Dashboard"') && e.includes('no guide')), 'requiring G1 today fails on its gaps (Dashboard has no guide)');
+
+  console.log('the template rules, on made-up sites');
+  const app1 = fakeApp([['dashboard', 'Dashboard']]);
+  let site = fakeSite({ 'docs/guides/dashboard.md': guide('section', SECTION_HEADS) });
+  let r = checkCoverage({ site, coverage: baseCoverage(), appSource: app1 });
+  ok(r.errors.length === 0 && r.inTemplate === 1, 'a guide with the frontmatter and all seven headings covers its section');
+  site = fakeSite({ 'docs/guides/dashboard.md': guide('section', SECTION_HEADS.filter((h) => h !== 'Troubleshooting')) });
+  r = checkCoverage({ site, coverage: baseCoverage(), appSource: app1 });
+  ok(r.errors.some((e: string) => e.includes('missing: Troubleshooting')), 'a missing heading is named');
+  site = fakeSite({ 'docs/guides/dashboard.md': guide('workflow', SECTION_HEADS) });
+  r = checkCoverage({ site, coverage: baseCoverage(), appSource: app1 });
+  ok(r.errors.some((e: string) => e.includes('frontmatter guide: workflow')), 'the wrong kind in the frontmatter is an error');
+  r = checkCoverage({ site, coverage: baseCoverage({ required: [] }), appSource: app1 });
+  ok(r.errors.length === 0 && r.gaps.length === 1, 'the same problem outside a required batch is a gap, not a failure');
+  site = fakeSite({});
+  r = checkCoverage({ site, coverage: baseCoverage(), appSource: app1 });
+  ok(r.errors.some((e: string) => e.includes('guides/dashboard.md does not exist')), 'a guide path that does not exist is an error');
+  site = fakeSite({ 'docs/guides/dashboard.md': guide('section', SECTION_HEADS), 'docs/guides/stray.md': guide('section', SECTION_HEADS) });
+  r = checkCoverage({ site, coverage: baseCoverage(), appSource: app1 });
+  ok(r.errors.some((e: string) => e.includes('guides/stray.md is a guide')), 'a guide page the map does not list is an error');
+  site = fakeSite({ 'docs/guides/dashboard.md': guide('section', SECTION_HEADS) });
+  writeFileSync(join(site, 'templates/section.md'), guide('section', SECTION_HEADS.slice(0, 3)));
+  r = checkCoverage({ site, coverage: baseCoverage(), appSource: app1 });
+  ok(r.errors.some((e: string) => e.startsWith('templates/section.md lacks')), 'a template that lost a heading is an error');
+  const mapCov = (body: string) => {
+    const s = fakeSite({ 'docs/guides/dashboard.md': guide('section', SECTION_HEADS), 'docs/map.md': body });
+    return checkCoverage({ site: s, appSource: fakeApp([['dashboard', 'Dashboard'], ['radio', 'Radio']]), coverage: baseCoverage({
+      required: ['G0'],
+      sections: [{ key: 'dashboard', label: 'Dashboard', batch: 'G1', guides: ['guides/dashboard.md'] }, { key: 'radio', label: 'Radio', batch: 'G1', guides: [] }],
+      pages: [{ key: 'map', title: 'Map', kind: 'map', batch: 'G0', guides: ['map.md'] }],
+    }) });
+  };
+  ok(mapCov(guide('map', ['The sections'], 'Dashboard and Radio.\n')).errors.length === 0, 'a map page naming every section passes');
+  ok(mapCov(guide('map', ['The sections'], 'Dashboard only.\n')).errors.some((e: string) => e.includes('does not mention: Radio')), 'a map page that leaves a section out is an error');
+
+  console.log('screenshots');
+  const shots = JSON.parse(readFileSync(join(SITE, 'screenshots.json'), 'utf8')).shots;
+  ok(shots.length >= 2, `the manifest has ${shots.length} shots`);
+  for (const s of shots) {
+    const png = join(SITE, 'static/img/screens', `${s.name}.png`);
+    ok(existsSync(png) && statSync(png).size > 10_000, `${s.name}.png exists`);
+    ok(existsSync(join(SITE, 'docs', s.guide)) && readFileSync(join(SITE, 'docs', s.guide), 'utf8').includes(`/img/screens/${s.name}.png`), `${s.guide} shows ${s.name}.png`);
+  }
+  const used = new Set<string>();
+  const walk = (d: string) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) walk(p); else if (/\.mdx?$/.test(f)) for (const m of readFileSync(p, 'utf8').matchAll(/\/img\/screens\/([\w-]+)\.png/g)) used.add(m[1]); } };
+  walk(join(SITE, 'docs'));
+  const names = new Set(shots.map((s: any) => s.name));
+  const unmanaged = [...used].filter((u) => !names.has(u));
+  ok(unmanaged.length === 0, `every screenshot a guide shows is in the manifest, so it gets retaken${unmanaged.length ? ' (not: ' + unmanaged.join(', ') + ')' : ''}`);
+
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+})().catch((e) => { console.error(e); console.log(`\n${passed} passed, ${failed + 1} failed`); process.exit(1); });
