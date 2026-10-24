@@ -70,6 +70,8 @@ export interface EdgeRules {
 }
 
 export interface ProgrammeRight {
+  /** id and title only name the rule in the rights preview; the decision never reads them */
+  id?: string; title?: string | null;
   starts_at: Date | string; ends_at: Date | string;
   geo_mode: string | null; geo_countries: string[] | null;
   replacement_asset_id?: string | null; replacement_kind?: string | null;
@@ -128,6 +130,27 @@ export function variantFor(vm: Record<string, string> | undefined, cc: string, r
 }
 
 /**
+ * decideFor() with the layer that made the decision: the account's list, the
+ * channel's list, or the index of the published window (rules.w) that
+ * applied. The rights preview says WHY from this, so it walks exactly the
+ * steps decideFor() does; the parity test holds the two to one answer.
+ */
+export function explainDecision(rules: EdgeRules | null, cc: string, rc: string, nowSec: number):
+  { decision: 'allow' | 'block' | 'replace'; layer: 'none' | 'account' | 'channel' | 'window'; index: number } {
+  if (!rules || rules.v !== 1) return { decision: 'allow', layer: 'none', index: -1 };
+  if (listStops(rules.a, cc)) return { decision: 'block', layer: 'account', index: -1 };
+  if (listStops(rules.c, cc)) return { decision: 'block', layer: 'channel', index: -1 };
+  const w = rules.w || [];
+  for (let i = 0; i < w.length; i++) {
+    const x = w[i];
+    if (nowSec >= x[0] && nowSec < x[1] && listStops([x[2], x[3]], cc) && !exempted(x, rc)) {
+      return { decision: x[4] ? 'replace' : 'block', layer: 'window', index: i };
+    }
+  }
+  return { decision: 'allow', layer: 'none', index: -1 };
+}
+
+/**
  * What the edge does with a manifest request: "allow", "block" or
  * "replace:<key>". A replace with no variant (or no variant service yet) is a
  * block. Same string as the CloudFront Function's edgeDecision().
@@ -146,7 +169,9 @@ export function edgeDecision(rules: EdgeRules | null, cc: string, rc: string, no
 export type Timeline = [number, number, string][];
 export interface Variant { key: string; timeline: Timeline; audiences: string[] }
 
-interface Win { from: number; to: number; mode: Mode; cc: string[]; replace: boolean; asset: string; exempt: string[] }
+interface Win { from: number; to: number; mode: Mode; cc: string[]; replace: boolean; asset: string; exempt: string[]; src?: ProgrammeRight }
+/** One published window and the programme it came from (the rights preview names the rule). */
+export type EdgeWindow = Win;
 
 const asWindow = (w: Win): Window => (w.exempt.length
   ? [w.from, w.to, w.mode, w.cc, w.replace ? 1 : 0, w.exempt]
@@ -221,7 +246,7 @@ function windowsOf(programmes: ProgrammeRight[], nowSec: number, horizon: number
     const replace = !!(p.replacement_asset_id || kind);
     out.push({ from, to, mode: g.mode === 'block' ? 'b' : 'a', cc: g.countries, replace,
       asset: p.replacement_asset_id ? String(p.replacement_asset_id) : replace ? `${kind}:${p.replacement_ref ?? ''}` : '',
-      exempt: exemptOf(p) });
+      exempt: exemptOf(p), src: p });
   }
   // stable: programmes arrive ordered by start, and ties keep that order
   return out.sort((x, y) => x.from - y.from);
@@ -318,10 +343,22 @@ export async function loadEdgeRules(kind: 'channel' | 'event', id: string, nowSe
  * builds each key from the same timeline the edge was given that key for.
  */
 export async function loadEdgeState(kind: 'channel' | 'event', id: string, nowSec = Math.floor(Date.now() / 1000)): Promise<{ rules: EdgeRules | null; variants: Variant[] }> {
+  const d = await loadEdgeDetail(kind, id, nowSec);
+  return { rules: d.rules, variants: d.variants };
+}
+
+/**
+ * loadEdgeState() plus the published windows themselves, each with the
+ * programme it came from, in the order of rules.w (index i of one is index i
+ * of the other). For the rights preview, which has to name the rule.
+ */
+export async function loadEdgeDetail(kind: 'channel' | 'event', id: string, nowSec = Math.floor(Date.now() / 1000)):
+  Promise<{ rules: EdgeRules | null; variants: Variant[]; windows: EdgeWindow[] }> {
   const rules = await loadEdgeRulesFromDb(kind, id, nowSec);
-  if (!rules.rules) return { rules: null, variants: [] };
+  if (!rules.rules) return { rules: null, variants: [], windows: [] };
   const n = rules.rules.w?.length ?? 0;
-  return { rules: rules.rules, variants: reduceVariants(windowsOf(rules.programmes, nowSec, nowSec + RIGHTS_HORIZON_SEC).slice(0, n)).variants };
+  const windows = windowsOf(rules.programmes, nowSec, nowSec + RIGHTS_HORIZON_SEC).slice(0, n);
+  return { rules: rules.rules, variants: reduceVariants(windows).variants, windows };
 }
 
 async function loadEdgeRulesFromDb(kind: 'channel' | 'event', id: string, nowSec: number): Promise<{ rules: EdgeRules | null; programmes: ProgrammeRight[] }> {
@@ -331,7 +368,7 @@ async function loadEdgeRulesFromDb(kind: 'channel' | 'event', id: string, nowSec
   if (!owner) return { rules: null, programmes: [] };
   const col = kind === 'channel' ? 'channel_id' : 'event_id';
   const progs = await query<ProgrammeRight>(
-    `SELECT starts_at, ends_at, geo_mode, geo_countries, replacement_asset_id, replacement_kind, replacement_ref, metadata
+    `SELECT id, title, starts_at, ends_at, geo_mode, geo_countries, replacement_asset_id, replacement_kind, replacement_ref, metadata
        FROM programmes
       WHERE ${col} = $1 AND geo_mode IN ('block', 'allow')
         AND ends_at > to_timestamp($2) AND starts_at < to_timestamp($3)

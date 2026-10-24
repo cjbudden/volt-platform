@@ -234,6 +234,28 @@ async function req(path: string, opts: RequestInit = {}) {
   return r.json()
 }
 
+/** GET /channels|events/:id/rights-preview (services/rightsPreview.ts). */
+export interface RightsPreviewResult {
+  kind: 'channel' | 'event'; id: string
+  country: string; rightsClass: string; at: string; atIsNow: boolean
+  decision: 'allow' | 'block' | 'replace'
+  /** the edge's own answer: allow, block or replace:<key> */
+  edge: string
+  variant: string | null; variantService: boolean; loopReady: boolean | null
+  rule: {
+    layer: 'none' | 'account' | 'channel' | 'window'; reason: string
+    programme: null | {
+      id: string | null; title: string | null; startsAt: string; endsAt: string; mode: 'allow' | 'block'
+      countries: string[]; exemptRightsClasses: string[]
+      replacement: null | { kind: string; ref: string | null; assetId: string | null; title: string | null }
+    }
+  }
+  until: string | null
+  play: null | { hls: string; dash: string; expiresInSec: number }
+  windows: { programmeId: string | null; title: string | null; from: string; to: string; mode: 'allow' | 'block'; countries: string[]; replace: boolean; exemptRightsClasses: string[] }[]
+  strip: { from: string; to: string; truncated: boolean; rows: { audience: string; country: string; rightsClass: string; label: string; asked: boolean; segments: { from: string; to: string; decision: 'allow' | 'block' | 'replace'; variant: string | null }[] }[] }
+}
+
 export interface DeleteImpact {
   id: string; name: string; kind: 'tv' | 'radio'; group: string; status: string
   /** why the delete would be refused right now (live, encoder running), else null */
@@ -1736,6 +1758,9 @@ export const api = {
   copyFillerFromLibrary: (ref: string, name?: string): Promise<{ asset: FillerAsset; relinked: FillerUser[] }> =>
     req('/filler-assets/copy-from-library', { method: 'POST', body: JSON.stringify({ ref, ...(name ? { name } : {}) }) }),
 
+  /** RIGHTS PREVIEW: what the edge gives a viewer with this country, class and time, why, and how to play it. */
+  rightsPreview: (kind: 'channel' | 'event', id: string, q: { country: string; rightsClass?: string; at?: string }): Promise<RightsPreviewResult> =>
+    req(`/${kind === 'event' ? 'events' : 'channels'}/${id}/rights-preview?country=${encodeURIComponent(q.country)}${q.rightsClass ? `&rightsClass=${encodeURIComponent(q.rightsClass)}` : ''}${q.at ? `&at=${encodeURIComponent(q.at)}` : ''}`),
   // ---- monitoring ----
   /** The whole live board in one request: the fan-out lives on the server. */
   liveBoard: (): Promise<LiveBoard> => req('/monitoring/live'),

@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**660 routes.** Public API: 71 · Sign-in (no session yet): 7 · Admin API: 523 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 14 · Health and discovery: 8
+**672 routes.** Public API: 71 · Sign-in (no session yet): 7 · Admin API: 534 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 15 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -209,6 +209,8 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/account-settings/captions` | admin session (Bearer) or account secret key | settings: any signed-in admin user (lookup for forms) |  |
 | PATCH | `/api/account-settings/captions` | admin session (Bearer) or account secret key | settings: manage |  |
 | PATCH | `/api/account-settings/captions/profiles/:id` | admin session (Bearer) or account secret key | settings: manage |  |
+| GET | `/api/account-settings/reframe` | admin session (Bearer) or account secret key | settings: any signed-in admin user (lookup for forms) |  |
+| PATCH | `/api/account-settings/reframe` | admin session (Bearer) or account secret key | settings: manage |  |
 
 ### `/api/addons`
 
@@ -309,6 +311,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/channels/:id/history` | admin session (Bearer) or account secret key | channels: view (radio: same level, when the channel is a station) |  |
 | GET | `/api/channels/:id/inputs/:inputId/preview` | admin session (Bearer) or account secret key | channels: view (radio: same level, when the channel is a station) |  |
 | POST | `/api/channels/:id/reset-health` | admin session (Bearer) or account secret key | channels: operate (radio: same level, when the channel is a station) |  |
+| GET | `/api/channels/:id/rights-preview` | admin session (Bearer) or account secret key | channels: view (radio: same level, when the channel is a station) |  |
 | GET | `/api/channels/:id/test-stream` | admin session (Bearer) or account secret key | channels: view (radio: same level, when the channel is a station) |  |
 | POST | `/api/channels/:id/test-stream` | admin session (Bearer) or account secret key | channels: operate (radio: same level, when the channel is a station) |  |
 | GET | `/api/channels/:id/thumbs` | admin session (Bearer) or account secret key | channels: view (radio: same level, when the channel is a station) |  |
@@ -418,6 +421,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/events/:id/history` | admin session (Bearer) or account secret key | events: view |  |
 | GET | `/api/events/:id/inputs/:inputId/preview` | admin session (Bearer) or account secret key | events: view |  |
 | POST | `/api/events/:id/reset-health` | admin session (Bearer) or account secret key | events: operate |  |
+| GET | `/api/events/:id/rights-preview` | admin session (Bearer) or account secret key | events: view |  |
 
 ### `/api/fast`
 
@@ -947,6 +951,13 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/vod/:id/provenance` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/:id/publish` | admin session (Bearer) or account secret key | vod: operate |  |
 | POST | `/api/vod/:id/qc` | admin session (Bearer) or account secret key | vod: manage |  |
+| GET | `/api/vod/:id/reframe` | admin session (Bearer) or account secret key | vod: view |  |
+| POST | `/api/vod/:id/reframe/analyse` | admin session (Bearer) or account secret key | vod: manage |  |
+| PUT | `/api/vod/:id/reframe/formats/:format` | admin session (Bearer) or account secret key | vod: manage |  |
+| POST | `/api/vod/:id/reframe/formats/:format/approve` | admin session (Bearer) or account secret key | vod: manage |  |
+| POST | `/api/vod/:id/reframe/formats/:format/reset` | admin session (Bearer) or account secret key | vod: manage |  |
+| POST | `/api/vod/:id/reframe/render` | admin session (Bearer) or account secret key | vod: manage |  |
+| GET | `/api/vod/:id/reframe/tracks` | admin session (Bearer) or account secret key | vod: view |  |
 | GET | `/api/vod/:id/review` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/:id/review` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/schema.org` | admin session (Bearer) or account secret key | vod: view |  |
@@ -1175,6 +1186,12 @@ Streams, images, share pages and players. The admin console web app is also serv
 | GET | `/live/:id/:file(master.m3u8\|manifest.mpd)` | none, share token or playback token | public delivery | ✓ |
 | GET | `/live/:id/stream.mp3` | none, share token or playback token | public delivery | ✓ |
 | GET | `/live/:id/v/:key/:file` | none, share token or playback token | public delivery | ✓ |
+
+### `/origin`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/origin/:id/v/:key/:file` | admin session or internal | preview / internal |  |
 
 ### `/radio`
 

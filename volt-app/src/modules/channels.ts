@@ -230,6 +230,23 @@ export async function accessCheckFor(c: { id: string; account_id: string }, q: a
   };
 }
 
+/**
+ * RIGHTS PREVIEW (services/rightsPreview.ts, EDGE_RIGHTS_VARIANTS.md): what
+ * the EDGE gives a viewer with this country, rights class and time (normal,
+ * replaced with which variant, blocked), the rule behind it, an admin-only
+ * address that plays exactly that variant, and a 24 hour strip per audience.
+ * access-check above is the play gate's side; this is the CDN's.
+ */
+channelsRouter.get('/:id/rights-preview', asyncHandler(async (req, res) => {
+  const c = await one<any>(`SELECT c.id FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1 AND g.account_id = $2`,
+    [req.params.id, accountId(req)]);
+  if (!c) throw notFound('Channel not found');
+  const { parsePreviewQuery, rightsPreview } = await import('../services/rightsPreview');
+  const ask = parsePreviewQuery(req.query);
+  if ('error' in ask) throw badRequest(ask.error);
+  res.json(await rightsPreview('channel', c.id, accountId(req), ask));
+}));
+
 // A preview address for one of the channel's HLS inputs, relayed by the
 // control plane for sources that refuse playback from other sites
 // (modules/sourcePreview.ts). Viewing the channel is enough.

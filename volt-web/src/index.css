@@ -1478,6 +1478,50 @@ svg.spin{animation:vspin 1s linear infinite}
 .ev-empty{color:var(--faint);font-size:var(--fs-sm)}
 @media (max-width:900px){.ev-lane{grid-template-columns:1fr}.ev-lane-t{white-space:normal}}
 
+/* RIGHTS PREVIEW (RightsPreview.tsx): the edge's answer for one viewer and a 24 hour strip per audience */
+.rp-card{padding:16px}
+.rp-card .sec-label{display:flex;align-items:center;gap:6px}
+.rp-hint{font-size:var(--fs-sm);color:var(--faint);margin:-2px 0 12px}
+.rp-form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.rp-form .field{margin:0}
+.rp-form .inp{width:100%;min-width:0}
+.rp-f-cc{width:90px}
+.rp-f-rc{width:150px}
+.rp-f-at{flex:0 1 300px;min-width:0}
+.rp-at{display:flex;gap:6px}
+.rp-at .inp{flex:1}
+.rp-quick{margin-top:10px}
+.rp-err{margin-top:10px;font-size:var(--fs-sm);color:#fca5a5}
+.rp-result{margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+.rp-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.rp-who{font-size:var(--fs-body);color:var(--muted)}
+.rp-key{font-size:var(--fs-sm);color:var(--faint)}
+.rp-key code{color:var(--text)}
+.rp-why{margin-top:8px;font-size:var(--fs-body);line-height:1.45}
+.rp-facts{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:8px;font-size:var(--fs-sm);color:var(--faint)}
+.rp-facts b{color:var(--text);font-weight:600}
+.rp-play{margin-top:12px;display:grid;gap:10px;justify-items:start}
+.rp-video{width:100%;max-width:560px;aspect-ratio:16/9;background:#000;border-radius:var(--radius-sm)}
+.rp-strip{margin-top:16px;display:grid;gap:6px}
+.rp-row{display:grid;grid-template-columns:170px minmax(0,1fr);gap:12px;align-items:center}
+.rp-aud{font-size:var(--fs-sm);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rp-row.asked .rp-aud{color:var(--text);font-weight:600}
+.rp-track{position:relative;height:14px;border-radius:7px;background:rgba(74,222,128,.12);border:1px solid var(--border)}
+.rp-row.asked .rp-track{border-color:var(--border-2)}
+.rp-seg{position:absolute;top:2px;bottom:2px;border:0;padding:0;border-radius:4px;cursor:pointer}
+.rp-seg.replace,.rp-sw.replace{background:rgba(251,191,36,.75)}
+.rp-seg.block,.rp-sw.block{background:rgba(248,113,113,.75)}
+.rp-sw.allow{background:rgba(74,222,128,.3)}
+.rp-seg:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.rp-ruler .rp-track{background:none;border:0;height:14px}
+.rp-ticks span{position:absolute;top:0;transform:translateX(-50%);font-size:var(--fs-micro);color:var(--faint);white-space:nowrap}
+.rp-ticks span:first-child{transform:none}
+.rp-ticks span:last-child{transform:translateX(-100%)}
+.rp-legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:var(--fs-micro);color:var(--faint);margin-top:4px}
+.rp-sw{display:inline-block;width:10px;height:10px;border-radius:3px;vertical-align:-1px;margin-right:4px}
+@media (max-width:900px){.rp-row{grid-template-columns:110px minmax(0,1fr)}}
+@media (max-width:640px){.rp-f-at,.rp-form>.btn{flex:1 1 100%}.rp-ticks span:nth-child(2),.rp-ticks span:nth-child(4){display:none}}
+
 /* ---------------- Phone and tablet shell ----------------
    Under 900 px the 236 px sidebar left too little room for the page, so it
    becomes a drawer: off screen until the menu button in the top bar opens it,

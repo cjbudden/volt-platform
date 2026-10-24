@@ -382,7 +382,8 @@ publicLiveRouter.get(
  * error. Blocked: 451, as the edge answers. Off air: as the public route.
  * A variant that cannot be built safely: 503, never the normal stream.
  */
-async function serveVariant(req: any, res: any, kindHint: 'channel' | 'event' | null, id: string, key: string, file: string) {
+async function serveVariant(req: any, res: any, kindHint: 'channel' | 'event' | null, id: string, key: string, file: string,
+  preview?: { claims: import('../services/rightsPreview').PreviewClaims; token: string }) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (!/^[0-9a-f-]{36}$/i.test(id) || !/^v[0-9a-f]{8}$/.test(key) || !/^[A-Za-z0-9_.-]{1,80}\.(m3u8|mpd|vtt)$/.test(file)) {
     res.status(404).json({ available: false, reason: 'not_found' });
@@ -397,11 +398,27 @@ async function serveVariant(req: any, res: any, kindHint: 'channel' | 'event' | 
     return;
   }
   const er = await import('../services/edgeRights');
-  if (!er.variantServiceOn()) { noStore(res); res.status(404).json({ available: false, reason: 'variant_service_off' }); return; }
+  // The rights preview plays the variant even where the service is off, so
+  // an operator can check a window before the CDN sends anyone to it; the
+  // preview's answer says what the edge itself would do (`edge`).
+  if (!preview && !er.variantServiceOn()) { noStore(res); res.status(404).json({ available: false, reason: 'variant_service_off' }); return; }
   const found = await one<any>(`SELECT 'channel' AS kind FROM channels WHERE id = $1 UNION ALL SELECT 'event' FROM events WHERE id = $1 LIMIT 1`, [id]);
   const kind: 'channel' | 'event' | null = found?.kind ?? null;
   if (!kind || (kindHint && kindHint !== kind)) { res.status(404).json({ available: false, reason: 'not_found' }); return; }
-  const v = await rightsViewer(req, id);
+  if (preview) {
+    // the token names its account: the stream must still be that account's
+    const owned = await one<any>(kind === 'channel'
+      ? `SELECT 1 FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1 AND g.account_id = $2`
+      : `SELECT 1 FROM events e JOIN groups g ON g.id = e.group_id WHERE e.id = $1 AND g.account_id = $2`, [id, preview.claims.a]);
+    if (!owned || preview.claims.k !== kind) { noStore(res); res.status(404).json({ available: false, reason: 'not_found' }); return; }
+  }
+  // The preview is one viewer, fixed by the token: its country, class and
+  // time, never the request's (the stand-ins would let a token be re-aimed).
+  const v = preview
+    ? { cc: preview.claims.c, rc: preview.claims.r,
+        nowSec: preview.claims.t || Math.floor(Date.now() / 1000), atSet: !!preview.claims.t,
+        perViewer: true, carry: `?pt=${encodeURIComponent(preview.token)}` }
+    : await rightsViewer(req, id);
   // the account's and the channel's own geo first, as on the normal route
   const gate = await publicGeoGate(id, v.cc || undefined);
   if (gate.blocked) { noStore(res); res.status(451).json({ available: false, reason: 'geo', message: gate.blocked }); return; }
@@ -413,10 +430,13 @@ async function serveVariant(req: any, res: any, kindHint: 'channel' | 'event' | 
     res.status(451).json({ available: false, reason: 'rights', decision: 'block', message: 'This programme is not available where you are' });
     return;
   }
-  // on air and producing, exactly as the normal route requires
-  const manifest = file.endsWith('.mpd') ? 'manifest.mpd' : 'master.m3u8';
-  const live = kind === 'channel' ? await resolveLiveManifest(id, manifest) : await resolveEventManifest(id, manifest);
-  if (!live.ok) { noStore(res); res.status(live.status).json({ available: false, reason: live.reason }); return; }
+  // on air and producing, exactly as the normal route requires (the preview
+  // is the operator's check before air: it needs only the output itself)
+  if (!preview) {
+    const manifest = file.endsWith('.mpd') ? 'manifest.mpd' : 'master.m3u8';
+    const live = kind === 'channel' ? await resolveLiveManifest(id, manifest) : await resolveEventManifest(id, manifest);
+    if (!live.ok) { noStore(res); res.status(live.status).json({ available: false, reason: live.reason }); return; }
+  }
   const mine = er.variantFor(st.rules?.vm, v.cc, v.rc);
   const variant = mine ? st.variants.find((x) => x.key === mine) ?? null : null;
   res.setHeader('X-Volt-Variant', variant?.key ?? 'none');
@@ -428,7 +448,7 @@ async function serveVariant(req: any, res: any, kindHint: 'channel' | 'event' | 
     if (!out) { noStore(res); res.status(404).json({ available: false, reason: 'not_found' }); return; }
     // one answer per variant: the edge may share it for about a segment;
     // a tester's stand-ins are one viewer's answer
-    if (v.perViewer && config.env !== 'production') noStore(res);
+    if (preview || (v.perViewer && config.env !== 'production')) noStore(res);
     else edgeCache(res, scaleConfig.edge.liveRedirectMaxAgeSec);
     res.type(out.type).send(out.body);
   } catch (e: any) {
@@ -449,4 +469,21 @@ publicLiveRouter.get('/channel/:id/v/:key/:file', asyncHandler(async (req, res) 
 }));
 publicLiveRouter.get('/event/:id/v/:key/:file', asyncHandler(async (req, res) => {
   await serveVariant(req, res, 'event', req.params.id, req.params.key, req.params.file);
+}));
+
+/**
+ * THE RIGHTS PREVIEW'S PLAY PATH (services/rightsPreview.ts): one viewer's
+ * variant for an operator, through the same service, with the token the
+ * authenticated preview route minted (a video element cannot send the
+ * console's bearer). No token, a token for another stream, or an expired
+ * one: 401, and nothing about the stream. The empty subtitle file needs none.
+ */
+publicLiveRouter.get('/origin/:id/v/:key/:file', asyncHandler(async (req, res) => {
+  const { id, key, file } = req.params;
+  if (file === 'empty.vtt') { await serveVariant(req, res, null, id, key, file); return; }
+  const { readPreviewPlayToken } = await import('../services/rightsPreview');
+  const pt = Array.isArray(req.query.pt) ? String(req.query.pt[0]) : (req.query.pt as string | undefined);
+  const claims = readPreviewPlayToken(pt, id);
+  if (!claims) { noStore(res); res.setHeader('Access-Control-Allow-Origin', '*'); res.status(401).json({ available: false, reason: 'preview_token' }); return; }
+  await serveVariant(req, res, null, id, key, file, { claims, token: pt! });
 }));

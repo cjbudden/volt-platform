@@ -29,6 +29,7 @@ import { EmbedDrawer } from '../EmbedDrawer'
 import { pressable } from '../a11y'
 import { OutputUrls } from '../OutputUrls'
 import { PanelLayout } from '../panelLayout'
+import { RightsPreview } from '../RightsPreview'
 import { DualPlayers, StatusBoard, EventLog, ViewersCard, QcPanel, withMeters } from './ChannelDetail'
 import { EventDrawer } from './Events'
 
@@ -221,6 +222,7 @@ export default function EventDetail({ id, onBack }: { id: string; onBack: () => 
             onSendSource={() => startStop('start')} onGoLive={() => startStop('start')} busy={busy} />) },
         { id: 'outputs', label: 'Output URLs', node: (
           <OutputUrls id={d.id} packaging={d.profile?.packaging} captions={!!d.captions?.enabled} publicOpen={!!d.onAir} kindLabel="event" />) },
+        { id: 'rights', label: 'Rights preview', node: <RightsPreview kind="event" id={d.id} /> },
         { id: 'viewers', label: 'Realtime viewers', node: <ViewersCard d={cd} live={!!d.onAir} /> },
         { id: 'status', label: 'Status board and event log', node: (
           <div className="grid-2">

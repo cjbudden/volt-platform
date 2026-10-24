@@ -26,6 +26,7 @@ import { pressable } from '../a11y'
 import { FillerField } from '../FillerField'
 import { OutputUrls } from '../OutputUrls'
 import { PanelLayout } from '../panelLayout'
+import { RightsPreview } from '../RightsPreview'
 import { useStatsPanel } from '../useStatsPanel'
 function fmtOffset(sec: number) {
   if (sec <= 0) return 'LIVE'
@@ -338,6 +339,7 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
         { id: 'outputs', label: 'Output URLs', node: (
           <OutputUrls id={d.id} packaging={d.profile?.packaging} captions={!!d.captions?.enabled}
             publicOpen={!!d.onAir} kindLabel="channel" />) },
+        { id: 'rights', label: 'Rights preview', node: <RightsPreview kind="channel" id={d.id} /> },
         { id: 'viewers', label: 'Realtime viewers', node: <ViewersCard d={d} live={live} /> },
         { id: 'status', label: 'Status board and event log', node: (
           <div className="grid-2">

@@ -117,6 +117,24 @@
   "group": "/api/account-settings"
  },
  {
+  "method": "GET",
+  "path": "/api/account-settings/reframe",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/account-settings"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/account-settings/reframe",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/account-settings"
+ },
+ {
   "method": "POST",
   "path": "/api/addon-callbacks/runs/:id",
   "api": "machine",
@@ -833,6 +851,15 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "channels: operate (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
+  "method": "GET",
+  "path": "/api/channels/:id/rights-preview",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: view (radio: same level, when the channel is a station)",
   "viewerTier": false,
   "group": "/api/channels"
  },
@@ -1571,6 +1598,15 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "events: operate",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "GET",
+  "path": "/api/events/:id/rights-preview",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: view",
   "viewerTier": false,
   "group": "/api/events"
  },
@@ -5482,6 +5518,69 @@
  },
  {
   "method": "GET",
+  "path": "/api/vod/:id/reframe",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/reframe/analyse",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/vod/:id/reframe/formats/:format",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/reframe/formats/:format/approve",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/reframe/formats/:format/reset",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/reframe/render",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/:id/reframe/tracks",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
   "path": "/api/vod/:id/review",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -5902,6 +6001,15 @@
   "access": "public delivery",
   "viewerTier": true,
   "group": "/live"
+ },
+ {
+  "method": "GET",
+  "path": "/origin/:id/v/:key/:file",
+  "api": "delivery",
+  "credential": "admin session or internal",
+  "access": "preview / internal",
+  "viewerTier": false,
+  "group": "/origin"
  },
  {
   "method": "GET",

@@ -424,6 +424,16 @@ eventsRouter.get('/:id/access-check', asyncHandler(async (req, res) => {
   res.json(await accessCheckFor(e, req.query));
 }));
 
+/** RIGHTS PREVIEW: what the edge gives a viewer here, why, and a way to play it (services/rightsPreview.ts). */
+eventsRouter.get('/:id/rights-preview', asyncHandler(async (req, res) => {
+  const e = await ownedEvent(req.params.id, accountId(req));
+  if (!e) throw notFound('Event not found');
+  const { parsePreviewQuery, rightsPreview } = await import('../services/rightsPreview');
+  const ask = parsePreviewQuery(req.query);
+  if ('error' in ask) throw badRequest(ask.error);
+  res.json(await rightsPreview('event', e.id, accountId(req), ask));
+}));
+
 /** A relayed preview address for one of the event's HLS inputs (modules/sourcePreview.ts). */
 eventsRouter.get('/:id/inputs/:inputId/preview', asyncHandler(async (req, res) => {
   const row = await one<{ ingest_url: string | null }>(

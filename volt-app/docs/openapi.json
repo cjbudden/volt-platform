@@ -1663,6 +1663,56 @@
     }
    }
   },
+  "/api/account-settings/reframe": {
+   "get": {
+    "operationId": "getAccountSettingsReframe",
+    "summary": "Get account settings reframe",
+    "tags": [
+     "Account Settings"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: any signed-in admin user (lookup for forms)",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "patch": {
+    "operationId": "patchAccountSettingsReframe",
+    "summary": "Update account settings reframe",
+    "tags": [
+     "Account Settings"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/addons": {
    "get": {
     "operationId": "getAddons",
@@ -7277,6 +7327,42 @@
     }
    }
   },
+  "/api/channels/{id}/rights-preview": {
+   "get": {
+    "operationId": "getChannelsByIDRightsPreview",
+    "summary": "Preview what the edge gives a viewer",
+    "tags": [
+     "Channels"
+    ],
+    "description": "What the CDN edge gives one viewer, and why. `country` is a two-letter code (`XX` for a country the CDN cannot tell), `rightsClass` is optional (a class a programme may exempt, as carried by the signed `vrc` claim), `at` is now (default) or an ISO time within 31 days. The answer: `decision` (`allow`, `replace` or `block`), `edge` (the edge's own string, `replace:<key>` or `block` where the variant service is off), the `variant` key, the `rule` behind it (the account's or the stream's geo list, or the programme with its window, countries, exempt classes and replacement), `until` when the answer changes, `play` (an admin-only HLS and DASH address that plays exactly that variant, valid for two hours, also before the stream is on air), the guide `windows` with rules, and `strip`: the next 24 hours per audience (every country the rules name and anywhere else, each with every exempt class). Decided by the same code as the edge function.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view (radio: same level, when the channel is a station)",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/channels/{id}/test-stream": {
    "get": {
     "operationId": "getChannelsByIDTestStream",
@@ -10834,6 +10920,42 @@
      "Events"
     ],
     "description": "The same as `POST /api/events/{id}/health/reset`, at the path channels use, so one path works for either kind.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** events: operate",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/events/{id}/rights-preview": {
+   "get": {
+    "operationId": "getEventsByIDRightsPreview",
+    "summary": "Preview what the edge gives a viewer",
+    "tags": [
+     "Events"
+    ],
+    "description": "What the CDN edge gives one viewer, and why. `country` is a two-letter code (`XX` for a country the CDN cannot tell), `rightsClass` is optional (a class a programme may exempt, as carried by the signed `vrc` claim), `at` is now (default) or an ISO time within 31 days. The answer: `decision` (`allow`, `replace` or `block`), `edge` (the edge's own string, `replace:<key>` or `block` where the variant service is off), the `variant` key, the `rule` behind it (the account's or the stream's geo list, or the programme with its window, countries, exempt classes and replacement), `until` when the answer changes, `play` (an admin-only HLS and DASH address that plays exactly that variant, valid for two hours, also before the stream is on air), the guide `windows` with rules, and `strip`: the next 24 hours per audience (every country the rules name and anywhere else, each with every exempt class). Decided by the same code as the edge function. Same answer as `GET /api/channels/{id}/rights-preview`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** events: view",
     "security": [
      {
       "adminBearer": []
@@ -32997,6 +33119,282 @@
      "VOD"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/reframe": {
+   "get": {
+    "operationId": "getVODByIDReframe",
+    "summary": "Get a VOD asset's reframe",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/reframe/analyse": {
+   "post": {
+    "operationId": "postVODByIDReframeAnalyse",
+    "summary": "Reframe: analyse",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/reframe/formats/{format}": {
+   "put": {
+    "operationId": "putVODByIDReframeFormatsByFormat",
+    "summary": "Replace a format",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "format",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/reframe/formats/{format}/approve": {
+   "post": {
+    "operationId": "postVODByIDReframeFormatsByFormatApprove",
+    "summary": "Approve (format)",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "format",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/reframe/formats/{format}/reset": {
+   "post": {
+    "operationId": "postVODByIDReframeFormatsByFormatReset",
+    "summary": "Reset (format)",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "format",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/reframe/render": {
+   "post": {
+    "operationId": "postVODByIDReframeRender",
+    "summary": "Reframe: render",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/reframe/tracks": {
+   "get": {
+    "operationId": "getVODByIDReframeTracks",
+    "summary": "Get reframe tracks",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
     "security": [
      {
       "adminBearer": []

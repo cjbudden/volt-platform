@@ -32,6 +32,14 @@
     "summary": "Check what a viewer elsewhere would get",
     "description": "What the play gate gives a viewer in `country` (two-letter code) for this event right now, and the layer that decided it: the account's geo, the access rules or the programme. `viewer` is `anonymous` (default), `member` or `entitled`. Same answer as `GET /api/channels/{id}/access-check`."
   },
+  "GET /api/channels/:id/rights-preview": {
+    "summary": "Preview what the edge gives a viewer",
+    "description": "What the CDN edge gives one viewer, and why. `country` is a two-letter code (`XX` for a country the CDN cannot tell), `rightsClass` is optional (a class a programme may exempt, as carried by the signed `vrc` claim), `at` is now (default) or an ISO time within 31 days. The answer: `decision` (`allow`, `replace` or `block`), `edge` (the edge's own string, `replace:<key>` or `block` where the variant service is off), the `variant` key, the `rule` behind it (the account's or the stream's geo list, or the programme with its window, countries, exempt classes and replacement), `until` when the answer changes, `play` (an admin-only HLS and DASH address that plays exactly that variant, valid for two hours, also before the stream is on air), the guide `windows` with rules, and `strip`: the next 24 hours per audience (every country the rules name and anywhere else, each with every exempt class). Decided by the same code as the edge function."
+  },
+  "GET /api/events/:id/rights-preview": {
+    "summary": "Preview what the edge gives a viewer",
+    "description": "What the CDN edge gives one viewer, and why. `country` is a two-letter code (`XX` for a country the CDN cannot tell), `rightsClass` is optional (a class a programme may exempt, as carried by the signed `vrc` claim), `at` is now (default) or an ISO time within 31 days. The answer: `decision` (`allow`, `replace` or `block`), `edge` (the edge's own string, `replace:<key>` or `block` where the variant service is off), the `variant` key, the `rule` behind it (the account's or the stream's geo list, or the programme with its window, countries, exempt classes and replacement), `until` when the answer changes, `play` (an admin-only HLS and DASH address that plays exactly that variant, valid for two hours, also before the stream is on air), the guide `windows` with rules, and `strip`: the next 24 hours per audience (every country the rules name and anywhere else, each with every exempt class). Decided by the same code as the edge function. Same answer as `GET /api/channels/{id}/rights-preview`."
+  },
   "GET /api/events/:id/inputs/:inputId/preview": {
     "summary": "Preview one of the event's inputs",
     "description": "A relayed preview address for one of the event's http or https inputs, for sources that refuse playback from other sites. The address is a token that expires after two hours and plays that input only. A push input (SRT, RTMP) answers `400`."
@@ -153,6 +161,10 @@
     "Channel": {
       "hidden": true,
       "description": "Internal to the CDN: the variant manifests the edge sends replaced viewers to (/channel/{id}/v/{key}/{file}). Players never call it; they keep using the Live playback address."
+    },
+    "Origin": {
+      "hidden": true,
+      "description": "Internal to the console: the rights preview plays one viewer's variant through /origin/{id}/v/{key}/{file} with a short-lived signed preview token. Players never call it; they keep using the Live playback address."
     },
     "Event": {
       "hidden": true,
