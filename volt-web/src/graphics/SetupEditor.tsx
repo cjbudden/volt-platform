@@ -42,7 +42,15 @@ export function SetupEditor({ id, versionId }: { id?: string; versionId?: string
       url: s.templateUrl, fields: s.templateFields, sample: {}, canvas: s.canvas })
   }).catch((e) => setErr(e.message))
   useEffect(() => {
-    if (id) { loadSetup(id); return }
+    if (id) {
+      const wantAssign = new URLSearchParams(window.location.search).has('assign')
+      loadSetup(id).then(() => {
+        if (!wantAssign) return
+        navigate(`/graphics/setups/${id}`, { replace: true })
+        if (canManage) setAssign(true)
+      })
+      return
+    }
     if (!versionId) { setErr('Choose a template first.'); return }
     gfx.templates().then((r) => {
       const t: Template | undefined = r.items.find((x) => x.latest?.id === versionId || x.draft?.id === versionId)
@@ -88,8 +96,11 @@ export function SetupEditor({ id, versionId }: { id?: string; versionId?: string
       const s = setup ? await gfx.patchSetup(setup.id, { name, note: note || null, fields: clean, placement })
         : await gfx.createSetup({ name, note: note || null, versionId: tpl.versionId, fields: clean, placement })
       notify({ kind: 'ok', message: setup ? 'Setup saved.' : 'Setup created.' })
-      if (!setup) navigate(`/graphics/setups/${s.id}`, { replace: true })
-      else await loadSetup(s.id)
+      // A new setup moves to its own address, which mounts a fresh editor, so
+      // "Save and assign" carries the wish in the URL rather than in this
+      // component's state (which goes with the old editor).
+      if (!setup) { navigate(`/graphics/setups/${s.id}${thenAssign ? '?assign=1' : ''}`, { replace: true }); return }
+      await loadSetup(s.id)
       if (thenAssign) setAssign(true)
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }

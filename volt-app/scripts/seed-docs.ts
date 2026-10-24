@@ -14,9 +14,11 @@
  * Sign-in afterwards: admin@example.com / volt1234
  */
 import { spawnSync } from 'node:child_process';
-import { join } from 'node:path';
+import { copyFileSync, mkdirSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { query, pool } from '../src/db';
 import { writeAudit } from '../src/services/audit';
+import { fillerPath } from '../src/services/uploads';
 
 const ACCOUNT = '3de20755-af2b-46d0-8d24-f39afbf4b3a0';
 const ADMIN = '8342a24d-751f-46ca-9636-f72a8a1110ef';
@@ -49,6 +51,28 @@ async function main() {
     await query(`INSERT INTO stream_inputs(channel_id, role, protocol, ingest_url) VALUES ($1,'primary','icecast'::ingest_protocol,$2)`,
       [ch[0].id, 'https://source.example/radio-one-128-mp3']);
   }
+
+  // Loops & Fillers: one slate and one loop, so its guide shows the list rather
+  // than the empty state, and News 24 falls back to the slate (Used by). The
+  // files are small neutral pictures kept beside this script; the rows are laid
+  // out exactly as an upload leaves them. Fixed ids keep re-runs to one each.
+  const fillers: Array<[string, 'slate' | 'loop', string, string, string, number, number, number | null]> = [
+    ['5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e01', 'slate', 'Standby slate', 'standby-slate.png', 'image/png', 1280, 720, null],
+    ['5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e02', 'loop', 'Break loop', 'break-loop.mp4', 'video/mp4', 640, 360, 4000],
+  ];
+  for (const [id, kind, name, file, ct, w, h, ms] of fillers) {
+    const src = join(__dirname, 'docs-media', file);
+    const dest = fillerPath(ACCOUNT, id, file);
+    mkdirSync(dirname(dest), { recursive: true });
+    copyFileSync(src, dest);
+    const key = `filler/${ACCOUNT}/${id}${file.slice(file.lastIndexOf('.'))}`;
+    await query(
+      `INSERT INTO filler_assets(id, account_id, kind, name, status, source_key, width, height, duration_ms, bytes, content_type, filename, uploaded_at, created_at)
+       VALUES ($1,$2,$3,$4,'ready',$5,$6,$7,$8,$9,$10,$11, now() - interval '2 days', now() - interval '2 days')
+       ON CONFLICT (id) DO UPDATE SET status='ready', source_key=EXCLUDED.source_key, bytes=EXCLUDED.bytes`,
+      [id, ACCOUNT, kind, name, key, w, h, ms, statSync(src).size, ct, file]);
+  }
+  await query(`UPDATE channels SET input_loss_behavior='slate', filler_asset_id=$2, filler_slate_ref=NULL WHERE id=$1`, [NEWS, fillers[0][0]]);
 
   // A short, believable history for the audit log. Re-running the seed
   // replaces it rather than piling up copies.

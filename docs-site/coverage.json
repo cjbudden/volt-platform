@@ -1,6 +1,6 @@
 {
   "_comment": "Which guide covers each part of Volt (build queue 1.14-G0). sections: every console nav item (scripts/check-coverage.mjs reads the nav from the console source and fails when one is missing here or listed here but gone). workflows: how sections work together. developer: the customer developer topics. pages: the cross-cutting pages. 'guides' are paths under docs/. 'batch' is the build-queue item that writes them; a batch listed in 'required' must have every entry covered by guides that follow the template, so each guides item adds its batch here when it is done. 'internal' entries are for Volt staff and never get a customer guide.",
-  "required": ["G0", "G1"],
+  "required": ["G0", "G1", "G2"],
   "templates": {
     "section": ["What it is for", "Before you start", "Step by step", "How it connects", "Who can do it", "Troubleshooting", "Through the API"],
     "workflow": ["What it is for", "Before you start", "The flow", "Step by step", "Who can do it", "Troubleshooting", "Through the API"],
@@ -18,8 +18,8 @@
     { "key": "events", "label": "Events", "batch": "G1", "guides": ["guides/events.md"] },
     { "key": "fast", "label": "FAST", "batch": "G1", "guides": ["guides/fast.md"] },
     { "key": "epg", "label": "EPG", "batch": "G2", "guides": ["guides/epg.md"] },
-    { "key": "loops", "label": "Loops & Fillers", "batch": "G2", "guides": [] },
-    { "key": "graphics", "label": "Graphics", "batch": "G2", "guides": [] },
+    { "key": "loops", "label": "Loops & Fillers", "batch": "G2", "guides": ["guides/loops-and-fillers.md"] },
+    { "key": "graphics", "label": "Graphics", "batch": "G2", "guides": ["guides/graphics.md"] },
     { "key": "vod", "label": "Media Library", "batch": "G3", "guides": [] },
     { "key": "recordings", "label": "Recordings", "batch": "G3", "guides": [] },
     { "key": "images", "label": "Image Library", "batch": "G3", "guides": ["guides/images-and-thumbnails.md"] },
@@ -33,7 +33,7 @@
     { "key": "ingest", "label": "Ingest Rules", "batch": "G3", "guides": [] },
     { "key": "groups", "label": "Channel Groups", "batch": "G3", "guides": [] },
     { "key": "captions", "label": "Captions", "batch": "G2", "guides": ["guides/captions.md"] },
-    { "key": "reframing", "label": "Formats & reframing", "batch": "G2", "guides": [] },
+    { "key": "reframing", "label": "Formats & reframing", "batch": "G2", "guides": ["guides/formats-and-reframing.md"] },
     { "key": "account-settings", "label": "Account settings", "batch": "G4", "guides": ["guides/account-settings.md"] },
     { "key": "plan", "label": "Plan & limits", "batch": "G4", "guides": [] },
     { "key": "fleet", "label": "Fleet & Usage", "batch": "G4", "guides": [] },

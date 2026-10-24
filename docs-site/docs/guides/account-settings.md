@@ -41,7 +41,7 @@ When a viewer asks to play, Volt checks the layers in this order and reports the
 1. **Account** geo (this setting)
 2. The **channel's** own geo (Channel settings > Source geo rules)
 3. **Access rules**
-4. The **programme** on air (see [programme guide](epg.md#geo-access-for-this-period))
+4. The **programme** on air (see [programme guide](epg.md#control-a-slot))
 
 The rule applies in the app play gate, on the public live URL (HLS, DASH and radio MP3) and on share links, where viewers are told the content is not available in their region. Every change is recorded in the [audit log](audit-log.md).
 

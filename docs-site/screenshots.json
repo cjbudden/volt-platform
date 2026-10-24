@@ -87,6 +87,43 @@
       ],
       "clip": "[role=dialog]",
       "alt": "The New FAST channel form: name, video or audio, group and time zone"
+    },
+    {
+      "name": "epg",
+      "guide": "guides/epg.md",
+      "path": "/epg",
+      "waitFor": "h1",
+      "alt": "The EPG list: one row per channel, station and event guide, with how many programmes it has, how far ahead it is filled and what is next"
+    },
+    {
+      "name": "loops-and-fillers",
+      "guide": "guides/loops-and-fillers.md",
+      "path": "/loops",
+      "waitFor": "td video",
+      "alt": "The Loops & Fillers page: the upload area at the top, then the list of loops and slates with a preview, what uses each one, its size and status",
+      "_why": "The docs seed adds a slate (used by News 24) and a loop, so the list is not the empty state."
+    },
+    {
+      "name": "graphics",
+      "guide": "guides/graphics.md",
+      "path": "/graphics",
+      "waitFor": ".gfx-card",
+      "settleMs": 2500,
+      "alt": "The Graphics page: counts of templates, setups and what is on air, the four tabs, and the template library with a preview of each"
+    },
+    {
+      "name": "captions",
+      "guide": "guides/captions.md",
+      "path": "/captions",
+      "waitFor": "[data-profile]",
+      "alt": "The Captions page: the engine for the account at the top, then a card for each output profile with its languages and who uses it"
+    },
+    {
+      "name": "formats-and-reframing",
+      "guide": "guides/formats-and-reframing.md",
+      "path": "/reframing",
+      "waitFor": ".rfs-grid",
+      "alt": "The Formats and reframing page: output formats and what to keep in frame on the left, publish targets and when it runs on the right"
     }
   ]
 }

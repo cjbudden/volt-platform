@@ -34,8 +34,8 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 | [**Events**](../guides/events.md) | Scheduled one-off broadcasts: the stream starts for its window, then recordings and replays follow the event's settings |
 | [**FAST**](../guides/fast.md) | Channels played out from the library: a run order of programmes that loops, with the guide written for you and ad breaks signalled |
 | **EPG** | The programme guide for each stream: what is on when, and per slot, where it can be watched, what replaces it and what is clipped afterwards ([guide](../guides/epg.md)) |
-| **Loops & Fillers** | What a stream shows when its source goes away |
-| **Graphics** | Templates, the setups built from them, and what is on air now |
+| **Loops & Fillers** | What a stream shows when its source goes away ([guide](../guides/loops-and-fillers.md)) |
+| **Graphics** | Templates, the setups built from them, and what is on air now ([guide](../guides/graphics.md)) |
 
 ### Media: everything recorded, cut or uploaded
 
@@ -59,7 +59,7 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 | **Ingest Rules** | What happens to a file when it arrives: its name, where it is filed, duplicates, required metadata |
 | **Channel Groups** | The groups every channel, station and event sits in; a group sets the output profile and its share of the plan |
 | **Captions** | Live subtitles and translation: the engine for the account and the languages each output profile publishes ([guide](../guides/captions.md)) |
-| **Formats & reframing** | Which social formats Volt makes from your widescreen media, and how it keeps the subject in frame |
+| **Formats & reframing** | Which social formats Volt makes from your widescreen media, and how it keeps the subject in frame ([guide](../guides/formats-and-reframing.md)) |
 
 ### Admin: account and access
 
