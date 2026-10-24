@@ -20,7 +20,7 @@ const FALLBACK: IngestProtocol[] = [
   { id: 'ndi', label: 'NDI', ingest: 'pull', urlLabel: 'NDI source name', urlPlaceholder: 'STUDIO-PC (Camera 1)', urlExample: 'STUDIO-PC (Camera 1)', urlPattern: '^.+ \\(.+\\)$', streamKey: { show: false }, hint: 'Needs an NDI-enabled ingest node.', scopes: ['video'], packageFriendly: true, packaging: 'encode', checkable: false },
   { id: 'st2110', label: 'ST 2110', ingest: 'pull', urlLabel: 'Video flow (multicast:port)', urlPlaceholder: '239.10.10.1:5000', urlExample: '239.10.10.1:5000', urlPattern: '^\\d{1,3}(\\.\\d{1,3}){3}:\\d{2,5}$', streamKey: { show: false }, hint: 'Needs a 2110 ingest node.', scopes: ['video'], packageFriendly: true, packaging: 'encode', checkable: false,
     fields: [{ key: 'sdp', label: 'SDP', type: 'text', required: true }] },
-  { id: 'icecast', label: 'Icecast / HTTP audio', ingest: 'pull', urlLabel: 'Stream URL (mount)', urlPlaceholder: 'https://ice.example.com/station-128-mp3', urlExample: 'https://ice5.somafm.com/groovesalad-128-mp3', urlPattern: '^https?://', streamKey: { show: false }, hint: 'Icecast / SHOUTcast mount.', scopes: ['radio'], packageFriendly: true, packaging: 'remux', checkable: true },
+  { id: 'icecast', label: 'Icecast / HTTP audio', ingest: 'pull', urlLabel: 'Stream URL (mount)', urlPlaceholder: 'https://ice.example.com/station-128-mp3', urlExample: 'https://ice.example.com/station-128-mp3', urlPattern: '^https?://', streamKey: { show: false }, hint: 'Icecast / SHOUTcast mount.', scopes: ['radio'], packageFriendly: true, packaging: 'remux', checkable: true },
 ]
 
 let cache: IngestProtocol[] | null = null

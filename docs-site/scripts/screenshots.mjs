@@ -39,7 +39,9 @@ if (!shots.length) { console.error(`no shots match ${only.join(', ')}`); process
 const { chromium } = await import(process.env.PLAYWRIGHT || 'playwright');
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
-const ctx = await browser.newContext({ viewport: manifest.viewport, deviceScaleFactor: 1, colorScheme: 'dark' });
+// A fixed time zone, so forms that default to the browser's zone (FAST) show
+// the same believable zone on every machine instead of the first in the list.
+const ctx = await browser.newContext({ viewport: manifest.viewport, deviceScaleFactor: 1, colorScheme: 'dark', timezoneId: manifest.timezoneId || 'Australia/Sydney' });
 const page = await ctx.newPage();
 const consoleErrors = [];
 page.on('pageerror', (e) => consoleErrors.push(String(e.message || e)));

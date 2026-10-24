@@ -130,6 +130,9 @@ npm run screenshots
 npm run screenshots -- audit-log
 ```
 
+The browser runs in the manifest's `timezoneId` (Australia/Sydney by default), so
+forms that start from the viewer's time zone look the same on every machine.
+
 Before saving each picture the script checks the page's visible text (and
 field values and placeholders) against `scrub.json` and refuses to save one
 that shows a banned term: a picture is the one thing the build cannot read.

@@ -36,6 +36,20 @@ async function main() {
   await query(`UPDATE channels SET name='News 24' WHERE id=$1`, [NEWS]);
   await query(`UPDATE channels SET name='Sport One' WHERE id=$1`, [SPORT]);
 
+  // One radio station, so the Radio guide shows a station rather than the
+  // empty state. Neutral name and an example source: a screenshot carries
+  // whatever the page shows. Created stopped and off air; re-running the seed
+  // keeps the one already there.
+  const grp = await query<{ id: string }>(`SELECT id FROM groups WHERE account_id=$1 ORDER BY created_at LIMIT 1`, [ACCOUNT]);
+  const have = await query(`SELECT 1 FROM channels c JOIN groups g ON g.id=c.group_id WHERE g.account_id=$1 AND c.kind='radio' AND c.name='Radio One'`, [ACCOUNT]);
+  if (grp[0] && !have.length) {
+    const ch = await query<{ id: string }>(
+      `INSERT INTO channels(group_id, name, kind, radio_config, recording_enabled) VALUES ($1,'Radio One','radio',$2::jsonb,true) RETURNING id`,
+      [grp[0].id, JSON.stringify({ outputs: { mp3: true, hls: true, dash: true }, bitrateKbps: 128, metadataCapture: true })]);
+    await query(`INSERT INTO stream_inputs(channel_id, role, protocol, ingest_url) VALUES ($1,'primary','icecast'::ingest_protocol,$2)`,
+      [ch[0].id, 'https://source.example/radio-one-128-mp3']);
+  }
+
   // A short, believable history for the audit log. Re-running the seed
   // replaces it rather than piling up copies.
   await query(`DELETE FROM audit_log WHERE account_id=$1 AND detail->>'seed'='docs'`, [ACCOUNT]);

@@ -18,7 +18,7 @@ This walk-through takes a channel from nothing to on air. You need the **TV chan
 4. Pick a **group**. A group that is already full cannot be picked, and the form says why.
 5. Add the **primary source**: choose the protocol (for example SRT, RTMP or HLS) and enter its address. You can add a **backup source** now or later.
 6. Optionally choose the output ladder, filler for when no source is available, subtitles and a watermark. All of these can be changed later in the channel's settings.
-7. Choose **Create**.
+7. Choose **Create channel**.
 
 If something stops the channel being created, the reason is shown at the bottom of the form, whichever tab you are on.
 

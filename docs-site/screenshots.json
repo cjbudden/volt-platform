@@ -1,6 +1,10 @@
 {
   "_comment": "Every screenshot the guides use, retaken by scripts/screenshots.mjs against the app on a fresh docs seed (volt-app/scripts/seed-docs.ts). A shot is a console path, what to wait for, and optionally an element to crop to, elements to hide and clicks to make first. Images land in static/img/screens/<name>.png; guides show them with ![...](/img/screens/<name>.png).",
-  "viewport": { "width": 1440, "height": 900 },
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "timezoneId": "Australia/Sydney",
   "shots": [
     {
       "name": "account-settings",
@@ -15,6 +19,74 @@
       "path": "/audit",
       "waitFor": "h1",
       "alt": "The Audit log page listing recent changes, newest first"
+    },
+    {
+      "name": "dashboard",
+      "guide": "guides/dashboard.md",
+      "path": "/dashboard",
+      "waitFor": "h1",
+      "alt": "The Dashboard: five counts across the top, then the attention list, streams on air, the last seven days and recent output"
+    },
+    {
+      "name": "live-streams",
+      "guide": "guides/live-streams.md",
+      "path": "/live",
+      "waitFor": "h1",
+      "alt": "The Live Streams board: counts across the top, then one row per running stream with its five gates"
+    },
+    {
+      "name": "monitoring",
+      "guide": "guides/monitoring.md",
+      "path": "/monitoring",
+      "waitFor": "h1",
+      "alt": "The Monitoring page: severity counts, the alert list and fleet activity"
+    },
+    {
+      "name": "multiview",
+      "guide": "guides/multiview.md",
+      "path": "/multiview",
+      "waitFor": "h1",
+      "alt": "Multiview: the output and viewer location choices, grid size, and a tile per running stream"
+    },
+    {
+      "name": "channels",
+      "guide": "guides/channels.md",
+      "path": "/channels",
+      "waitFor": "h1",
+      "alt": "The Channels list: type and status filters, then one row per channel with its type, status and a Start or Stop button"
+    },
+    {
+      "name": "channel-status",
+      "guide": "guides/channel-status.md",
+      "path": "/channels/ae0e5ac4-9833-48b7-ab97-91df0d27467c",
+      "waitFor": ".pipe-strip",
+      "alt": "A channel page: the overall status beside the name, the five gates under it, then the source and output players",
+      "_why": "The docs seed leaves News 24 recorded as running with no encoder behind it, so its page shows real gates: starting just after the API comes up, a failed Server gate with the Diagnose banner after about 90 seconds."
+    },
+    {
+      "name": "radio",
+      "guide": "guides/radio.md",
+      "path": "/radio",
+      "waitFor": "h1",
+      "alt": "The Radio list: status filters, then one row per station with now playing, signal, outputs and status"
+    },
+    {
+      "name": "events",
+      "guide": "guides/events.md",
+      "path": "/events",
+      "waitFor": "h1",
+      "alt": "The Events list: status filters, list and calendar views, then one row per event with its window, status, recording and replay settings"
+    },
+    {
+      "name": "fast-new",
+      "guide": "guides/fast.md",
+      "path": "/fast",
+      "waitFor": "h1",
+      "click": [
+        "button:has-text('New FAST channel')"
+      ],
+      "clip": "[role=dialog]",
+      "alt": "The New FAST channel form: name, video or audio, group and time zone"
     }
   ]
 }

@@ -183,7 +183,7 @@ function GroupDrawer({ plan, profiles, manage, group, onClose, onSaved }: {
         <div className="drawer-h"><div className="t" id="grp-t">{isNew ? 'New group' : `Edit ${group!.name}`}</div><button className="xbtn" onClick={onClose} aria-label="Close">✕</button></div>
         <div className="drawer-b">
           <div className={`field${nameErr && err ? ' has-err' : ''}`}><label htmlFor="grp-name">Name <span className="req">*</span></label>
-            <input id="grp-name" className="inp" autoFocus value={name} maxLength={80} onChange={e => setName(e.target.value)} placeholder="e.g. RTM Radio" />
+            <input id="grp-name" className="inp" autoFocus value={name} maxLength={80} onChange={e => setName(e.target.value)} placeholder="e.g. Radio" />
             {err && <FieldError>{nameErr}</FieldError>}
             <div className="hintxt">Shown under each channel, station and event in the lists.</div>
           </div>

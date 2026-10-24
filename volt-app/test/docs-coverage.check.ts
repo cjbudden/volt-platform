@@ -58,8 +58,17 @@ const baseCoverage = (over: any = {}) => ({
   ok(real.errors.length === 0, `no errors on the real tree${real.errors.length ? ': ' + real.errors.join(' | ') : ''}`);
   ok(real.required.includes('G0'), 'G0 is a required batch');
   ok(!real.gaps.some((g: any) => g.batch === 'G0'), 'nothing in G0 is left as a gap (the How Volt fits together page is in its template)');
-  ok(real.gaps.some((g: any) => g.key === 'dashboard' && g.problems.includes('no guide')), 'Dashboard is listed as a gap with no guide');
-  ok(real.gaps.some((g: any) => g.key === 'channels' && /not in the section template/.test(g.problems.join())), 'Channels is listed as having guides not yet in the template');
+  // G1 (the live sections) is done and required: each of its sections has a
+  // guide in the section template, so none of them is a gap any more.
+  ok(real.required.includes('G1'), 'G1 is a required batch');
+  ok(!real.gaps.some((g: any) => g.batch === 'G1'), 'nothing in G1 is left as a gap');
+  for (const k of ['dashboard', 'live', 'monitoring', 'multiview', 'channels', 'radio', 'events', 'fast']) {
+    const sec = coverage.sections.find((x: any) => x.key === k);
+    ok(sec && sec.batch === 'G1' && sec.guides.length > 0, `${k} is mapped to a G1 guide`);
+  }
+  // The batches not yet written still show as gaps, both kinds.
+  ok(real.gaps.some((g: any) => g.key === 'loops' && g.problems.includes('no guide')), 'Loops & Fillers (G2) is listed as a gap with no guide');
+  ok(real.gaps.some((g: any) => g.key === 'epg' && /not in the section template/.test(g.problems.join())), 'EPG (G2) is listed as having a guide not yet in the template');
   ok(!coverage.sections.some((s: any) => s.key === 'system' && !s.internal), 'System Admin is marked internal, not a customer gap');
   ok(real.total === real.inTemplate + real.gaps.length, `every entry is either covered or a gap (${real.inTemplate} + ${real.gaps.length} = ${real.total})`);
 
@@ -72,7 +81,12 @@ const baseCoverage = (over: any = {}) => ({
   ok(checkCoverage({ site: SITE, coverage: fewer, appSource }).errors.some((e: string) => e.includes('"FAST"')), 'a console section dropped from the map is an error');
   const stale = { ...coverage, sections: [...coverage.sections, { key: 'gone', label: 'Gone', batch: 'G1', guides: [] }] };
   ok(checkCoverage({ site: SITE, coverage: stale, appSource }).errors.some((e: string) => e.includes('no longer has')), 'a map entry for a section the console no longer has is an error');
-  ok(checkCoverage({ site: SITE, coverage: { ...coverage, required: ['G0', 'G1'] }, appSource }).errors.some((e: string) => e.includes('"Dashboard"') && e.includes('no guide')), 'requiring G1 today fails on its gaps (Dashboard has no guide)');
+  ok(checkCoverage({ site: SITE, coverage: { ...coverage, required: [...coverage.required, 'G2'] }, appSource }).errors.some((e: string) => e.includes('"Loops & Fillers"') && e.includes('no guide')), 'requiring G2 today fails on its gaps (Loops & Fillers has no guide)');
+  // A finished batch stays finished: drop a G1 guide from the map and the page
+  // is reported as unlisted, and its section as having no guide.
+  const dropped = { ...coverage, sections: coverage.sections.map((x: any) => x.key === 'fast' ? { ...x, guides: [] } : x) };
+  const dr = checkCoverage({ site: SITE, coverage: dropped, appSource }).errors;
+  ok(dr.some((e: string) => e.includes('guides/fast.md') && e.includes('does not list it')) && dr.some((e: string) => e.includes('"FAST"') && e.includes('required')), 'unlisting a G1 guide fails the required batch');
 
   console.log('the template rules, on made-up sites');
   const app1 = fakeApp([['dashboard', 'Dashboard']]);
