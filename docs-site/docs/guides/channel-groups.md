@@ -81,7 +81,7 @@ Account owners and administrators use this page when the account is set up and w
 |---|---|
 | [Channels](channels.md), [Radio](radio.md), [Events](events.md) | Each is created in a group, takes its type from it and counts towards its share |
 | [Encoding Profiles](encoding-profiles.md) | A file ladder can mirror a group's output profile, so uploaded files match the channels |
-| Plan & limits | The account's total, which the groups' shares add up to no more than |
+| [Plan & limits](plan-and-limits.md) | The account's total, which the groups' shares add up to no more than |
 | [Audit log](audit-log.md) | Creating, changing and removing groups is recorded there |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.

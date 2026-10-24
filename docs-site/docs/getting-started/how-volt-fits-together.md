@@ -23,7 +23,7 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 | [**Live Streams**](../guides/live-streams.md) | Every channel, station and event that is running, with the same health checks the detail pages show |
 | [**Monitoring**](../guides/monitoring.md) | Problems only: a healthy account leaves it nearly empty |
 | [**Multiview**](../guides/multiview.md) | Confidence monitors showing what viewers are actually given |
-| **Analytics** | Audiences, operations and playback quality over time |
+| **Analytics** | Audiences, operations and playback quality over time ([guide](../guides/analytics.md)) |
 
 ### Broadcast: the live streams and what shapes them
 
@@ -66,14 +66,14 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 | Section | What it is for |
 |---|---|
 | **Account settings** | Your logo and colours, and where your content can be watched ([guide](../guides/account-settings.md)) |
-| **Plan & limits** | What your plan allows, and how the channel groups share it |
-| **Fleet & Usage** | The servers running your streams and the billable time they have used |
-| **Payments** | The payment providers you use and what each product buys |
-| **Social accounts** | The social channels, Pages and accounts clips can be published to |
-| **Notifications** | The alerts Volt sends to the people who run the account |
-| **Users & Roles** | Who can sign in to the console and what they can do, and the viewers who watch ([roles and access](roles-and-access.md)) |
-| **Permissions map** | What each kind of user can do, area by area, including your own roles |
-| **API Keys & Apps** | The apps that play your content and the keys your own servers use ([authentication](../api/authentication.md)) |
+| **Plan & limits** | What your plan allows, and how the channel groups share it ([guide](../guides/plan-and-limits.md)) |
+| **Fleet & Usage** | The servers running your streams and the billable time they have used ([guide](../guides/fleet-and-usage.md)) |
+| **Payments** | The payment providers you use and what each product buys ([guide](../guides/payments.md)) |
+| **Social accounts** | The social channels, Pages and accounts clips can be published to ([guide](../guides/social-accounts.md)) |
+| **Notifications** | The alerts Volt sends to the people who run the account ([guide](../guides/notifications.md)) |
+| **Users & Roles** | Who can sign in to the console and what they can do, and the viewers who watch ([guide](../guides/users-and-roles.md), [roles and access](roles-and-access.md)) |
+| **Permissions map** | What each kind of user can do, area by area, including your own roles ([guide](../guides/permissions-map.md)) |
+| **API Keys & Apps** | The apps that play your content and the keys your own servers use ([guide](../guides/api-keys-and-apps.md), [authentication](../api/authentication.md)) |
 | **Audit log** | Who changed what and when, including every delete ([guide](../guides/audit-log.md)) |
 
 ## The main flows

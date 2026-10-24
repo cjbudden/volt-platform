@@ -49,7 +49,7 @@ Operators keep it open on a second screen; on-call staff check it when alerted.
 | [Dashboard](dashboard.md) | Its **Attention** panel is the top of this list |
 | [Live Streams](live-streams.md) | Shows every running stream, healthy or not; Monitoring shows only the problems |
 | [Channels](channels.md), [Radio](radio.md), [Events](events.md) | **Open** goes to the stream's page, where **Diagnose** and **Clear QC** are |
-| Notifications | Sends the same alerts by email or to your own systems |
+| [Notifications](notifications.md) | Sends the same alerts by email or to your own systems |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 

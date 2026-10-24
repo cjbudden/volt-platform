@@ -62,7 +62,7 @@ Account administrators set it up; social and digital producers check and approve
 | Section | How it relates |
 |---|---|
 | Media Library | Each asset's **Formats** tab shows, adjusts and approves its framing |
-| Social accounts | The platforms under **Publish targets**, and the accounts linked to them |
+| [Social accounts](social-accounts.md) | The platforms under **Publish targets**, and the accounts linked to them |
 | Publishing Rules | Publishing to a platform sends the format chosen here |
 | Recordings | Clips cut from recordings become assets that can be reframed |
 

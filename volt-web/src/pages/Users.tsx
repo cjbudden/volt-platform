@@ -55,6 +55,9 @@ export default function Users() {
   const [err, setErr] = useState('')
   const [userOpen, setUserOpen] = useState<UserRow | 'new' | null>(null)
   const [roleOpen, setRoleOpen] = useState<UserGroupRow | 'new' | null>(null)
+  // The Public users chip showed a fixed 0 whatever the audience held, which
+  // read as "nobody has signed up". Its count is the total the API reports.
+  const [publicTotal, setPublicTotal] = useState<number | null>(null)
 
   async function load() {
     setErr('')
@@ -65,6 +68,7 @@ export default function Users() {
       ])
       setUsers(u); setRoles(r)
     } catch (e: any) { setErr(e.message) }
+    if (can('viewers', 'view')) api.viewers('', '').then(v => setPublicTotal(v.total)).catch(() => setPublicTotal(null))
   }
   useEffect(() => { load() }, [])
   usePageNotice('load', err ? { kind: 'error', title: "Couldn't load users and roles.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
@@ -79,7 +83,7 @@ export default function Users() {
       <PageHead title="Users & Roles" sub="Who can sign in to the admin, what their roles let them see and do, and the public users who watch." action={action} />
       <div className="filters">
         {tabs.map(([k, label]) => (
-          <FChip key={k} label={label} n={k === 'users' ? users?.length ?? 0 : k === 'roles' ? roles?.length ?? 0 : 0} on={tab === k} onClick={() => setTab(k)} />
+          <FChip key={k} label={label} n={k === 'users' ? users?.length ?? 0 : k === 'roles' ? roles?.length ?? 0 : publicTotal ?? 0} on={tab === k} onClick={() => setTab(k)} />
         ))}
       </div>
 

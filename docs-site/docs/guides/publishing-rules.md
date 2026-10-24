@@ -95,7 +95,7 @@ Each premium term is kept in step with your products for payments when the rule 
 | [Content Types](content-types.md) | Each type can have its own rung of the rule |
 | [Channels](channels.md), [Radio](radio.md), [Events](events.md) | Each stream can have its own rung, on the **Access** tab of its settings; it applies to what is recorded or cut from it |
 | [Review](review.md) | **Require an approved review before publishing** waits for an approval there |
-| API Keys & Apps | Registered apps are the publishing points you can choose |
+| [API Keys & Apps](api-keys-and-apps.md) | Registered apps are the publishing points you can choose |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 

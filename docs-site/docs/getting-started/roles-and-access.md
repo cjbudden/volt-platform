@@ -6,7 +6,7 @@ description: Who can see and do what in Volt, the default roles, and how to make
 
 # Roles and access
 
-Every admin user's access comes from their **roles**. A role gives a **level** in each area of Volt. A user with several roles gets the highest level any of them gives. **Admin > Permissions map** in the console shows the live map for your account, including any roles you have made.
+Every admin user's access comes from their **roles**. A role gives a **level** in each area of Volt. A user with several roles gets the highest level any of them gives. **Admin > Permissions map** in the console shows the live map for your account, including any roles you have made (see [Permissions map](../guides/permissions-map.md)).
 
 ## Levels
 
@@ -24,6 +24,7 @@ Every admin user's access comes from their **roles**. A role gives a **level** i
 | **Owner** | Everything in the account |
 | **Administrator** | Everything in the account except changing the plan |
 | **Event Manager** | Creates, schedules and runs events, their guides and recordings, and publishes the results |
+| **Graphics Operator** | Runs graphics live: takes them on and off, changes scores and names, works event rundowns. Cannot change templates or setups. |
 | **Radio Manager** | Creates, configures and runs radio stations, their schedules and clips |
 | **Report and Analytics Manager** | Analytics and reports. Sees content and usage, cannot change or run it. |
 | **System Viewer** | Reads everything in the console, changes nothing, starts nothing |
@@ -31,25 +32,26 @@ Every admin user's access comes from their **roles**. A role gives a **level** i
 
 ## Default levels by area
 
-| Area | Owner and Administrator | Event Manager | Radio Manager | Report and Analytics | System Viewer |
-|---|---|---|---|---|---|
-| Live and monitoring | Manage | View | View | View | View |
-| TV channels | Manage | View | None | View | View |
-| Radio stations | Manage | None | Manage | View | View |
-| Events | Manage | Manage | None | View | View |
-| EPG and schedules | Manage | Manage | Manage | View | View |
-| Recordings and clips | Manage | Manage | Manage | View | View |
-| Media library and publishing | Manage | Operate | None | View | View |
-| Files, uploads and storage | Manage | Manage | Manage | View | View |
-| Share links | Manage | Manage | Manage | View | View |
-| Analytics and reports | Manage | View | View | Manage | View |
-| Fleet and usage | Manage | None | None | View | View |
-| Admin users | Manage | None | None | None | View |
-| Roles and access | Manage | None | None | None | View |
-| Public users | Manage | None | None | View | View |
-| Apps, API keys and players | Manage | None | None | None | View |
-| Payments and products | Manage | None | None | None | View |
-| Account settings | Manage | None | None | None | View |
+| Area | Owner and Administrator | Event Manager | Graphics Operator | Radio Manager | Report and Analytics | System Viewer |
+|---|---|---|---|---|---|---|
+| Live and monitoring | Manage | View | View | View | View | View |
+| TV channels | Manage | View | View | None | View | View |
+| Radio stations | Manage | None | None | Manage | View | View |
+| Events | Manage | Manage | View | None | View | View |
+| EPG and schedules | Manage | Manage | View | Manage | View | View |
+| Graphics | Manage | Manage | Operate | None | View | View |
+| Recordings and clips | Manage | Manage | None | Manage | View | View |
+| Media library and publishing | Manage | Operate | None | None | View | View |
+| Files, uploads and storage | Manage | Manage | View | Manage | View | View |
+| Share links | Manage | Manage | None | Manage | View | View |
+| Analytics and reports | Manage | View | None | View | Manage | View |
+| Fleet and usage | Manage | None | None | None | View | View |
+| Admin users | Manage | None | None | None | None | View |
+| Roles and access | Manage | None | None | None | None | View |
+| Public users | Manage | None | None | None | View | View |
+| Apps, API keys and players | Manage | None | None | None | None | View |
+| Payments and products | Manage | None | None | None | None | View |
+| Account settings | Manage | None | None | None | None | View |
 
 ## Account controls
 
@@ -66,7 +68,7 @@ Some actions depend on the kind of user rather than a level:
 
 ## Making your own roles
 
-Go to **Users and Roles > Roles > New role**. Give the role a name, a tier and a level per area:
+Go to **Admin > Users & Roles > Roles > New role** (see [Users & Roles](../guides/users-and-roles.md)). Give the role a name, a tier and a level per area:
 
 - **Operator** tier: any level up to Manage.
 - **Viewer** tier: everything is capped at View.
@@ -98,4 +100,4 @@ With only **EPG and schedules: Manage**, a user:
 
 ## Two-step sign-in
 
-Owners and administrators can require two-step sign-in for every admin user in the account (**Users and Roles**, security policy). Users can sign in with an authenticator app, an emailed code or a texted code, and get backup codes when they turn it on. If someone loses their phone, an administrator can reset their two-step sign-in.
+Owners and administrators can require two-step sign-in for every admin user in the account (**Users & Roles**, **Require two-step sign-in for all admin users**). Users can sign in with an authenticator app, an emailed code or a texted code, and get backup codes when they turn it on. If someone loses their phone, an administrator can reset their two-step sign-in.

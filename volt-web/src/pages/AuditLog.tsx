@@ -1,5 +1,5 @@
 // ============================================================================
-//  AUDIT LOG (Insight > Audit log). Administrators only.
+//  AUDIT LOG (Admin > Audit log). Administrators only.
 //
 //  Who did what and when in this account: every create, change and delete the
 //  API records, and every delete that was refused with the reason. Filter by

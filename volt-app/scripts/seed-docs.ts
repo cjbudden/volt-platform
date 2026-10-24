@@ -22,6 +22,10 @@ import { fillerPath } from '../src/services/uploads';
 import { imageStore } from '../src/services/imageStore';
 import { upsertMediaRow } from '../src/services/mediaLibrary';
 import { ensureTrackingGroup } from '../src/services/encode/store';
+import { hashPassword } from '../src/auth/password';
+import { generateKey } from '../src/services/apiKeys';
+import { addSandbox } from '../src/services/social/index';
+import { ensureDefaultRoles } from '../src/auth/defaultRoles';
 
 const ACCOUNT = '3de20755-af2b-46d0-8d24-f39afbf4b3a0';
 const ADMIN = '8342a24d-751f-46ca-9636-f72a8a1110ef';
@@ -41,7 +45,9 @@ async function main() {
   // The demo seed gives its one group a share of 10 on a plan of 5, which the
   // Channel Groups guide would show as more shared out than the plan holds.
   // Fit it to the plan and make it the default group, as an account starts.
-  await query(`UPDATE groups SET max_channels=LEAST(max_channels, (SELECT max_channels FROM accounts WHERE id=$1)), is_default=true WHERE account_id=$1 AND name='Main'`, [ACCOUNT]);
+  // Running at once too: a group allowed more than the plan made the plan
+  // itself impossible to save on Plan & limits (found writing the G4 guides).
+  await query(`UPDATE groups SET max_channels=LEAST(max_channels, (SELECT max_channels FROM accounts WHERE id=$1)), max_concurrent=LEAST(max_concurrent, (SELECT max_concurrent_sources FROM accounts WHERE id=$1)), is_default=true WHERE account_id=$1 AND name='Main'`, [ACCOUNT]);
   await query(`UPDATE channels SET name='News 24' WHERE id=$1`, [NEWS]);
   await query(`UPDATE channels SET name='Sport One' WHERE id=$1`, [SPORT]);
 
@@ -148,7 +154,151 @@ async function main() {
     );
   }
 
+  await seedAccountSections();
+
   console.log(`\ndocs demo ready. Sign in as ${DOCS_LOGIN.email} (password as in seed-demo.ts)`);
   await pool.end();
 }
+
+// The audience, account and access sections (guides batch 1.14-G4) would
+// otherwise open on empty states, or on the demo seed's prospect-named rows:
+// a fortnight of audience figures with neutral app names, two colleagues and a
+// custom role, two public users, a registered web and iOS app, one alert with
+// a delivered and a failed copy, a template, a sandbox social account, a
+// product with a viewer who holds it, and the server the running channel is on
+// with a week of metered time. Everything is keyed or cleared first, so a
+// re-run keeps one of each.
+const HOST = '6a7f3c1e-4b2d-4e8f-9a61-0d5c2b7e8f10';
+const SAM = '0b6f1f7e-2a43-4c1e-9d55-3a8e6c4b2d11';
+const ALEX = '1c7a2e8f-3b54-4d2f-8e66-4b9f7d5c3e22';
+const NEWSDESK = '2d8b3f9a-4c65-4e3a-9f77-5ca08e6d4f33';
+const JORDAN = '3e9c4a0b-5d76-4f4b-8a88-6db19f7e5a44';
+const WEBAPP = '4fad5b1c-6e87-4a5c-9b99-7ec2a08f6b55';
+const IOSAPP = '5abe6c2d-7f98-4b6d-8caa-8fd3b19a7c66';
+const PRODUCT = '6bcf7d3e-8a09-4c7e-9dbb-90e4c2ab8d77';
+
+async function seedAccountSections() {
+  // Audience: daily figures for two weeks, the last day still open. The demo
+  // seed's one row names its prospect's app, which a screenshot would carry.
+  await query(`DELETE FROM analytics_rollups WHERE account_id=$1`, [ACCOUNT]);
+  for (let d = 13; d >= 0; d--) {
+    const w = 1 + 0.35 * Math.sin(d / 2.2) + (d % 7 === 1 || d % 7 === 2 ? 0.25 : 0);
+    const views = Math.round(820 * w), uniques = Math.round(views * 0.71), peak = Math.round(96 * w);
+    const sealed = d > 0;
+    const json = (o: Record<string, number>) => JSON.stringify(o);
+    const split = (n: number, parts: Array<[string, number]>) => Object.fromEntries(parts.map(([k, f]) => [k, Math.round(n * f)]));
+    await query(
+      `INSERT INTO analytics_rollups(account_id, scope, scope_id, bucket_date, total_views, unique_views, peak_concurrent, watch_seconds, blocked_count, by_app, by_device, by_geo, sealed, sealed_at)
+       VALUES ($1,'account',NULL,current_date - $2::int,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11, CASE WHEN $11 THEN now() END)`,
+      [ACCOUNT, d, views, uniques, peak, views * 410, Math.round(views * 0.012),
+        json(split(views, [['Web player', 0.52], ['iOS app', 0.27], ['TV app', 0.21]])),
+        json(split(views, [['Mobile', 0.46], ['Desktop', 0.31], ['TV', 0.23]])),
+        json(split(views, [['AU', 0.68], ['NZ', 0.17], ['GB', 0.09], ['US', 0.06]])), sealed]);
+    for (const [id, share] of [[NEWS, 0.62], [SPORT, 0.38]] as const) {
+      const v = Math.round(views * share);
+      await query(
+        `INSERT INTO analytics_rollups(account_id, scope, scope_id, bucket_date, total_views, unique_views, peak_concurrent, watch_seconds, by_app, by_device, by_geo, sealed, sealed_at)
+         VALUES ($1,'channel',$2,current_date - $3::int,$4,$5,$6,$7,'{}','{}','{}',$8, CASE WHEN $8 THEN now() END)`,
+        [ACCOUNT, id, d, v, Math.round(v * 0.7), Math.round(peak * share), v * 410, sealed]);
+    }
+  }
+  await query(`UPDATE stream_concurrency SET concurrent=64, updated_at=now() WHERE account_id=$1`, [ACCOUNT]);
+
+  // People: a colleague on a default role, an invited one on a custom role.
+  const pw = await hashPassword('volt1234');
+  await query(
+    `INSERT INTO user_groups(id, account_id, name, description, permissions, tier, is_system)
+     VALUES ($1,$2,'News desk','Runs the news channel and its events, and watches monitoring. Cannot create or change them.',$3::jsonb,'operator',false)
+     ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, permissions=EXCLUDED.permissions`,
+    [NEWSDESK, ACCOUNT, JSON.stringify({ monitoring: 'view', channels: 'operate', events: 'operate', epg: 'view', recordings: 'view' })]);
+  // The default roles are made when the API starts; a fresh database has none yet.
+  await ensureDefaultRoles(ACCOUNT);
+  const eventManager = await query<any>(`SELECT id FROM user_groups WHERE role_key='event_manager' AND is_system AND account_id=$1 LIMIT 1`, [ACCOUNT]);
+  await query(
+    `INSERT INTO users(id, account_id, email, password_hash, role, status, display_name, email_verified_at, created_at)
+     VALUES ($1,$3,'sam.lee@example.com',$4,'operator','active','Sam Lee',now(),now() - interval '20 days'),
+            ($2,$3,'alex.chen@example.com',$4,'operator','invited','Alex Chen',NULL,now() - interval '1 day')
+     ON CONFLICT (id) DO NOTHING`, [SAM, ALEX, ACCOUNT, pw]);
+  await query(`DELETE FROM user_group_members WHERE user_id = ANY($1::uuid[])`, [[SAM, ALEX]]);
+  if (eventManager[0]) await query(`INSERT INTO user_group_members(user_id, group_id, granted_by) VALUES ($1,$2,$3)`, [SAM, eventManager[0].id, ADMIN]);
+  await query(`INSERT INTO user_group_members(user_id, group_id, granted_by) VALUES ($1,$2,$3)`, [ALEX, NEWSDESK, ADMIN]);
+
+  // Public users: one with a Volt account, one from the broadcaster's own sign-in.
+  await query(
+    `INSERT INTO viewers(id, account_id, external_id, email, display_name, groups, status, source, password_hash, email_verified_at, last_seen_at, created_at)
+     VALUES ($1,$2,'jordan@example.net','jordan@example.net','Jordan Smith','{members}','active','hosted',$3,now(),now() - interval '2 hours',now() - interval '30 days')
+     ON CONFLICT (id) DO NOTHING`, [JORDAN, ACCOUNT, pw]);
+  await query(
+    `INSERT INTO viewers(account_id, external_id, groups, status, source, last_seen_at, created_at)
+     VALUES ($1,'member-1042','{members}','active','external',now() - interval '1 day',now() - interval '9 days')
+     ON CONFLICT (account_id, external_id) DO NOTHING`, [ACCOUNT]);
+
+  // Apps: a web player bound to its site, and an iOS app.
+  for (const [id, name, type, restrictions] of [
+    [WEBAPP, 'Web player', 'web', { referrers: ['https://watch.example.com'] }],
+    [IOSAPP, 'iOS app', 'ios', {}],
+  ] as const) {
+    const made = await query<any>(
+      `INSERT INTO apps(id, account_id, name, type, restrictions, enabled) VALUES ($1,$2,$3,$4,$5::jsonb,true)
+       ON CONFLICT (id) DO NOTHING RETURNING id`, [id, ACCOUNT, name, type, JSON.stringify(restrictions)]);
+    if (made.length) {
+      const k = generateKey('publishable');
+      await query(`INSERT INTO api_keys(account_id, app_id, kind, key_prefix, key_hash, scopes, request_count, last_used_at)
+                   VALUES ($1,$2,'publishable',$3,$4,'{playback}',$5,now() - interval '3 minutes')`,
+        [ACCOUNT, id, k.prefix, k.hash, type === 'web' ? 18240 : 5310]);
+    }
+  }
+
+  // Notifications: one alert, delivered to the inbox, refused by email.
+  await query(`DELETE FROM notifications WHERE account_id=$1 AND payload->>'seed'='docs'`, [ACCOUNT]);
+  const n = await query<any>(
+    `INSERT INTO notifications(account_id, topic, subject, body, payload, created_at)
+     VALUES ($1,'auto_connect.gave_up','Auto connect gave up on Sport One','Sport One could not reach its source after 5 attempts. Check the source, then start the channel again.','{"seed":"docs"}'::jsonb, now() - interval '50 minutes')
+     RETURNING id`, [ACCOUNT]);
+  await query(
+    `INSERT INTO notification_deliveries(notification_id, account_id, recipient, channel, status, attempts, sent_at, last_error, gave_up_at, created_at)
+     VALUES ($1,$2,'admin@example.com','in_app','sent',1,now() - interval '50 minutes',NULL,NULL,now() - interval '50 minutes'),
+            ($1,$2,'admin@example.com','email','failed',1,NULL,'Email is not set up on this deployment.',now() - interval '50 minutes',now() - interval '50 minutes')`,
+    [n[0].id, ACCOUNT]);
+  // Read already, so the bell in every other guide's screenshots stays quiet.
+  await query(`UPDATE notification_deliveries SET read_at=now() WHERE notification_id=$1 AND channel='in_app'`, [n[0].id]);
+  await query(
+    `INSERT INTO notification_templates(account_id, key, subject, body)
+     SELECT $1,'event.reminder','Reminder: {{name}} starts at {{time}}','{{name}} goes live at {{time}}. Open it in Volt to check its sources.'
+      WHERE NOT EXISTS (SELECT 1 FROM notification_templates WHERE account_id=$1 AND key='event.reminder')`, [ACCOUNT]);
+
+  // Social: a sandbox account, so the page shows a linked account.
+  await query(`DELETE FROM publish_targets WHERE account_id=$1 AND mode='sandbox'`, [ACCOUNT]);
+  await addSandbox(ACCOUNT, ADMIN, 'youtube', 'Example Broadcaster');
+
+  // Payments: a month pass on Sport One, and a viewer who bought it elsewhere.
+  const term = { kind: 'period', count: 1, unit: 'month', priceCents: 999, currency: 'AUD', productKey: 'sport-month', name: 'Sport One monthly pass' };
+  await query(
+    `INSERT INTO products(id, account_id, key, name, term, grants, source_rule, enabled)
+     VALUES ($1,$2,'sport-month','Sport One monthly pass',$3::jsonb,$4::jsonb,'channel',true)
+     ON CONFLICT (account_id, key) DO UPDATE SET name=EXCLUDED.name, term=EXCLUDED.term`,
+    [PRODUCT, ACCOUNT, JSON.stringify(term), JSON.stringify({ channels: [SPORT] })]);
+
+  // The server News 24 runs on, with readings, and a week of metered time.
+  await query(
+    `INSERT INTO compute_hosts(id, kind, external_id, instance_type, lifecycle, vcpus, memory_mib, state, first_seen_at, last_seen_at, last_metric_at)
+     VALUES ($1,'local','studio-1','Studio server',NULL,8,16384,'up',now() - interval '8 days',now(),now())
+     ON CONFLICT (id) DO UPDATE SET state='up', last_seen_at=now(), last_metric_at=now()`, [HOST]);
+  await query(`DELETE FROM host_samples WHERE host_id=$1`, [HOST]);
+  await query(`INSERT INTO host_samples(host_id, at, source, cpu_pct, mem_pct, net_in_bps, net_out_bps, tasks_on_host) VALUES ($1, now() - interval '1 minute', 'onbox', 38, 46, 9200000, 31500000, 1)`, [HOST]);
+  await query(`UPDATE instances SET host_id=$1, lifecycle='on_demand', task_kind='transcode', launched_at=now() - interval '2 hours', metered_through=now() - interval '6 minutes' WHERE channel_id=$2 AND terminated_at IS NULL`, [HOST, NEWS]);
+  await query(`DELETE FROM usage_accruals WHERE account_id=$1`, [ACCOUNT]);
+  const radio = await query<any>(`SELECT c.id FROM channels c JOIN groups g ON g.id=c.group_id WHERE g.account_id=$1 AND c.kind='radio' AND c.name='Radio One' LIMIT 1`, [ACCOUNT]);
+  const RADIO = radio[0]?.id ?? null;
+  for (let d = 6; d >= 0; d--) {
+    for (const [id, name, kind, hours] of [[NEWS, 'News 24', 'transcode', d ? 18 : 1.9], [SPORT, 'Sport One', 'transcode', d % 3 === 0 ? 4 : 0], [RADIO, 'Radio One', 'radio', d ? 24 : 2]] as const) {
+      if (!hours || !id) continue;
+      await query(
+        `INSERT INTO usage_accruals(account_id, channel_id, host_id, stream_id, stream_name, task_kind, instance_type, from_at, to_at, seconds, indicative)
+         VALUES ($1,$2,$3,$2,$4,$5,'Studio server', date_trunc('day', now()) - make_interval(days => $6), date_trunc('day', now()) - make_interval(days => $6) + make_interval(secs => $7), $7, true)`,
+        [ACCOUNT, id, HOST, name, kind, d, Math.round(hours * 3600)]);
+    }
+  }
+}
+
 main().catch((e) => { console.error(e); process.exit(1); });

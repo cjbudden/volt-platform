@@ -224,6 +224,78 @@
       "path": "/groups",
       "waitFor": "h1",
       "alt": "The Channel groups page: the plan strip with what is shared out, then the table of groups with their workflow, output profile, share of the plan and events"
+    },
+    {
+      "name": "analytics",
+      "guide": "guides/analytics.md",
+      "path": "/analytics",
+      "waitFor": "h1",
+      "settleMs": 2000,
+      "alt": "The Audience view: watching now, views, unique viewers, watch hours and peak concurrent across the top, then views and unique viewers by day"
+    },
+    {
+      "name": "plan-and-limits",
+      "guide": "guides/plan-and-limits.md",
+      "path": "/plan",
+      "waitFor": "h1",
+      "alt": "The Plan & limits page: the plan name, three meters for channels and stations, shared out to groups and running at once, then the table of groups"
+    },
+    {
+      "name": "fleet-and-usage",
+      "guide": "guides/fleet-and-usage.md",
+      "path": "/fleet",
+      "waitFor": "h1",
+      "alt": "The Fleet & Usage page: servers now, billable today, this month and all time across the top, one server with its load, then billable time by day"
+    },
+    {
+      "name": "payments",
+      "guide": "guides/payments.md",
+      "path": "/payments",
+      "waitFor": "h1",
+      "alt": "The Payments page: four provider cards, the products made from your access rules with each provider's id, and the viewer look-up"
+    },
+    {
+      "name": "social-accounts",
+      "guide": "guides/social-accounts.md",
+      "path": "/social",
+      "waitFor": "h1",
+      "_why": "The note about the server's token key is for whoever runs the Volt deployment, not the customer reading the guide (queued as 1.14-G4a).",
+      "alt": "The Social accounts page: one card per platform, with a linked sandbox account under YouTube",
+      "remove": [
+        ".lock-note"
+      ]
+    },
+    {
+      "name": "notifications",
+      "guide": "guides/notifications.md",
+      "path": "/notifications",
+      "waitFor": "h1",
+      "hide": [
+        ".nt-row:has(> button) .hintxt"
+      ],
+      "_why": "Each delivery channel's line names the server settings behind it, which is for whoever runs the Volt deployment (queued as 1.14-G4a).",
+      "alt": "The Notifications page: the three delivery channels with a test button each, the sent list with one alert, the templates and your devices"
+    },
+    {
+      "name": "users-and-roles",
+      "guide": "guides/users-and-roles.md",
+      "path": "/users",
+      "waitFor": "h1",
+      "alt": "The Users & Roles page on Admin users: the two-step sign-in policy, then the account's people with their roles, tier, two-step sign-in and status"
+    },
+    {
+      "name": "permissions-map",
+      "guide": "guides/permissions-map.md",
+      "path": "/permissions",
+      "waitFor": "h1",
+      "alt": "The Permissions map: one column per kind of user, one row per area of Volt, with None, View, Operate or Manage in each cell"
+    },
+    {
+      "name": "api-keys-and-apps",
+      "guide": "guides/api-keys-and-apps.md",
+      "path": "/apikeys",
+      "waitFor": "h1",
+      "alt": "The API Keys & Apps page: the registered apps with their platform, key prefix and requests, then the server-to-server secret keys"
     }
   ]
 }

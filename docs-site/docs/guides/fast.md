@@ -81,7 +81,7 @@ Programmers and channel managers use it.
 | [EPG](epg.md) | The guide Volt writes for the channel; programmes entered by hand that overlap it are reported when you activate |
 | Loops & Fillers | House spots and the slate for ad breaks |
 | [Live Streams](live-streams.md) | FAST channels are listed there with every other stream |
-| Analytics | Viewing and ad delivery reports |
+| [Analytics](analytics.md) | Viewing and ad delivery reports |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 

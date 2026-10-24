@@ -106,7 +106,7 @@ The **On channels and events** tab lists every assignment by stream, with **Take
 | [Channels](channels.md), [Events](events.md) | Graphics are assigned to them; burned graphics need a transcode workflow |
 | [EPG](epg.md) | Rules and triggers follow the guide, and fields can show the current or next programme |
 | Image Library | Images for a setup's image fields |
-| API Keys & Apps | A pushed data source and **API** fields are driven with an API key |
+| [API Keys & Apps](api-keys-and-apps.md) | A pushed data source and **API** fields are driven with an API key |
 | [Live Streams](live-streams.md), [Multiview](multiview.md) | Where you watch the result with everything else on air |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.

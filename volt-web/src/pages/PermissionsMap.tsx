@@ -73,7 +73,7 @@ export default function PermissionsMap() {
       cell: c => c.kind !== 'role' },
     { label: 'Remove events', hint: 'Events manage',
       cell: c => c.kind !== 'role' || level(c, 'events') === 'manage' },
-    { label: 'Read the audit log', hint: 'Insight > Audit log, CSV export',
+    { label: 'Read the audit log', hint: 'Admin > Audit log, CSV export',
       cell: c => c.kind !== 'role' },
     { label: 'Add users and give roles', hint: 'Only access you hold yourself can be given',
       cell: c => c.kind !== 'role' ? true : level(c, 'users') === 'manage' ? 'Within own access' : false },

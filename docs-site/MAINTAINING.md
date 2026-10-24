@@ -113,8 +113,8 @@ or queued as its own build item.
 ### Screenshots
 
 Never take them by hand. `screenshots.json` lists each one (console path, what
-to wait for, optionally an element to crop to, elements to hide, clicks to
-make first) and the guide it belongs to; `npm run screenshots` retakes them
+to wait for, optionally an element to crop to, elements to hide or remove,
+clicks to make first) and the guide it belongs to; `npm run screenshots` retakes them
 all from the running app. A guide shows one with
 `![What it shows](/img/screens/<name>.png)`, and the docs-coverage check suite
 fails if a guide shows a screenshot the manifest does not list.

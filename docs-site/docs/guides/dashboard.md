@@ -45,7 +45,7 @@ Operators and managers use it every day; anyone with access to live and monitori
 |---|---|
 | [Monitoring](monitoring.md) | The **Attention** panel is the top of Monitoring's alert list |
 | [Live Streams](live-streams.md) | **On air** and **On air and at risk** come from the same board |
-| Analytics | **Views · 7D** and the **Last 7 days** sparkline are a summary of the audience reports |
+| [Analytics](analytics.md) | **Views · 7D** and the **Last 7 days** sparkline are a summary of the audience reports |
 | Media Library and Review | **Recent output** and **Awaiting review** count what is in them |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.

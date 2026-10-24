@@ -103,7 +103,7 @@ Reports stay after the raw sessions they were made from are pruned.
 | [Recordings](recordings.md) | Every recording is media here; the ladder decides when it moves or goes, and **Removed** on a recording shows its keep period |
 | [Channels](channels.md), [Radio](radio.md), [Events](events.md) | Each sets its own **Keep recordings for**, which applies alongside the ladder |
 | [Media Library](media-library.md) | Clips and exports made from recordings are tracked here too |
-| Analytics | Reports are built from the viewer data that **Event data** keeps |
+| [Analytics](analytics.md) | Reports are built from the viewer data that **Event data** keeps |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 

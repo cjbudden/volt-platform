@@ -14,6 +14,8 @@
 //   (volt-app)  PORT=8080 npx tsx src/index.ts
 //   (volt-web)  npx vite --port 5173
 //   (docs-site) node scripts/screenshots.mjs [name ...]
+// A shot may also `hide` elements (kept in place, left blank) or `remove` them
+// (taken out of the layout).
 // Env: BASE (default http://127.0.0.1:5173), EMAIL, PASSWORD (the docs seed's
 // login by default), PLAYWRIGHT (path to playwright's index.mjs if it is not
 // installed here), CHROMIUM (a browser binary), OUT (default static/img/screens),
@@ -63,6 +65,11 @@ for (const s of shots) {
     for (const c of s.click || []) { await page.click(c); await page.waitForTimeout(600); }
     if (s.hide?.length) {
       await page.addStyleTag({ content: s.hide.map((h) => `${h}{visibility:hidden!important}`).join('\n') });
+    }
+    // `remove` takes the element out of the layout as well, for a note that
+    // would otherwise leave a blank band across the top of the picture.
+    if (s.remove?.length) {
+      await page.addStyleTag({ content: s.remove.map((h) => `${h}{display:none!important}`).join('\n') });
     }
     const text = await page.evaluate(() => {
       const bits = [document.body.innerText];

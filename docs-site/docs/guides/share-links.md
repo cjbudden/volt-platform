@@ -82,7 +82,7 @@ Lost the address? It cannot be shown again. Create another link and revoke the o
 | Section | How it relates |
 |---|---|
 | [Channels](channels.md), [Radio](radio.md), [Events](events.md) | Each one's page opens the Share window for that stream |
-| [Account settings](account-settings.md) | The preview page uses the account's logo and colours. If you limit [where content can be watched](account-settings.md#where-content-can-be-watched), the preview follows that too |
+| [Account settings](account-settings.md) | The preview page uses the account's logo and colours. If you limit [where content can be watched](account-settings.md#keep-content-to-some-countries), the preview follows that too |
 | [Embedding](embedding.md) | For putting a stream on a public website rather than in front of one reviewer |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
