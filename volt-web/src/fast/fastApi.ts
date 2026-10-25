@@ -17,15 +17,16 @@ export interface LibAsset {
 export interface ChannelLibrary { media: FastMedia | null; hidden: { otherMedia: number; noSource: number }; inUse: LibAsset[]; assets: LibAsset[]; series: LibSeries[] }
 export interface LibSeries { name: string; episodes: number; seasons: number[]; durationSec: number }
 export type PoolRef = { assetId: string } | { skip: true }
-export interface TitleSlot { id: string; kind: 'title'; pool: PoolRef[]; every?: number; phase?: number; label?: string }
-export interface SeriesSlot { id: string; kind: 'series'; series: string; count: number; order: 'sequential' | 'shuffle'; atEnd?: 'loop' | 'stop'; every?: number; phase?: number; encoreOf?: string | null; label?: string }
+export type AdRule = 'default' | 'none' | 'no_mid'
+export interface TitleSlot { id: string; kind: 'title'; pool: PoolRef[]; every?: number; phase?: number; label?: string; adRule?: AdRule }
+export interface SeriesSlot { id: string; kind: 'series'; series: string; count: number; order: 'sequential' | 'shuffle'; atEnd?: 'loop' | 'stop'; every?: number; phase?: number; encoreOf?: string | null; label?: string; adRule?: AdRule }
 export type Slot = TitleSlot | SeriesSlot
 export interface LineupSettings { cycleShift?: number; anchor?: string | null; gridMin?: 0 | 5 | 15 | 30 | 60; backfill?: string[]; horizonDays?: number }
 export interface Lineup {
   id: string; channel_id: string; name: string; version: number; status: 'draft' | 'active' | 'archived'
   epoch: string; zone: string; slots: Slot[]; settings: LineupSettings; applied_until: string | null; applied_at: string | null; updated_at: string
 }
-export interface PlannedBreak { start: string; durationSec: number; position: 'mid' | 'end'; atAssetSec: number; source: string }
+export interface PlannedBreak { start: string; durationSec: number; position: 'mid' | 'end'; atAssetSec: number; source: string; fromPadSec?: number; capped?: boolean }
 export interface PlannedProgramme {
   key: string; cycle: number; slotId: string; assetId: string; title: string; start: string; end: string; contentEnd: string
   contentSec: number; padSec: number; note: 'rotation' | 'backfill' | 'encore' | null
@@ -45,6 +46,14 @@ export interface Preview {
 export interface AdPolicy {
   enabled?: boolean; loadMinPerHour: number; breakSec: number; firstAfterMin: number; minGapMin: number; endGuardMin: number
   minProgrammeMin: number; betweenSec: number; useCues: boolean; slateAssetId?: string | null
+  placement?: 'both' | 'between' | 'mid'; betweenMode?: 'fixed' | 'earned'
+  betweenMinSec?: number; betweenMaxSec?: number; betweenStepSec?: number; betweenEveryMin?: number
+  maxPerHourMin?: number; padToAds?: boolean; padToAdsMinSec?: number; padToAdsMaxSec?: number
+  podMaxAds?: number; maxAdSec?: number; dayparts?: Daypart[]
+}
+export interface Daypart {
+  label?: string; from: string; to: string; days?: number[]
+  loadMinPerHour?: number; breakSec?: number; betweenSec?: number; maxPerHourMin?: number; placement?: 'both' | 'between' | 'mid'
 }
 export interface ChannelAds {
   mode: 'off' | 'markers' | 'stitched'; policy: AdPolicy; adServerId: string | null

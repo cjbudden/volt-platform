@@ -166,6 +166,10 @@ then slate), and grid pads.
 
 ### Planning the breaks
 
+*Between-programme scheduling (placement, earned break lengths, accumulation over short titles, dayparts,
+the hourly cap, pad to ads, per-title rules, pod shape) and the plan for VOD ads are in `SSAI.md` at the repo root.*
+
+
 On a VOD-built channel a break **inserts time**: the film pauses at a segment boundary, the break plays, the film
 carries on from the same frame. So the guide slot is content + breaks (+ grid pad), and every break is known
 hours ahead, which is what lets every consumer prepare. The policy (per channel): target load in minutes per

@@ -204,8 +204,8 @@ fastRouter.get('/library', asyncHandler(async (req, res) => {
 
 const poolRef = z.union([z.object({ assetId: uuid }), z.object({ skip: z.literal(true) })]);
 const slotSchema = z.discriminatedUnion('kind', [
-  z.object({ id: z.string().min(1).max(40), kind: z.literal('title'), pool: z.array(poolRef).min(1).max(20), every: z.number().int().min(1).max(52).optional(), phase: z.number().int().min(0).max(51).optional(), label: z.string().max(80).optional() }),
-  z.object({ id: z.string().min(1).max(40), kind: z.literal('series'), series: z.string().min(1).max(200), count: z.number().int().min(1).max(24), order: z.enum(['sequential', 'shuffle']), atEnd: z.enum(['loop', 'stop']).optional(), every: z.number().int().min(1).max(52).optional(), phase: z.number().int().min(0).max(51).optional(), encoreOf: z.string().max(40).nullable().optional(), label: z.string().max(80).optional() }),
+  z.object({ id: z.string().min(1).max(40), kind: z.literal('title'), pool: z.array(poolRef).min(1).max(20), every: z.number().int().min(1).max(52).optional(), phase: z.number().int().min(0).max(51).optional(), label: z.string().max(80).optional(), adRule: z.enum(['default', 'none', 'no_mid']).optional() }),
+  z.object({ id: z.string().min(1).max(40), kind: z.literal('series'), series: z.string().min(1).max(200), count: z.number().int().min(1).max(24), order: z.enum(['sequential', 'shuffle']), atEnd: z.enum(['loop', 'stop']).optional(), every: z.number().int().min(1).max(52).optional(), phase: z.number().int().min(0).max(51).optional(), encoreOf: z.string().max(40).nullable().optional(), label: z.string().max(80).optional(), adRule: z.enum(['default', 'none', 'no_mid']).optional() }),
 ]);
 const settingsSchema = z.object({
   cycleShift: z.number().int().min(0).max(50).optional(),

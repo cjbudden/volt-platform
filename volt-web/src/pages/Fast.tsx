@@ -6,7 +6,7 @@ import { navigate } from '../router'
 import { Notice, usePageNotice, useNotify } from '../notices'
 import {
   fastApi, type FastChannelRow, type FastMedia, type ChannelLibrary, type LibAsset, type LibSeries, type Lineup, type Slot, type SeriesSlot,
-  type LineupSettings, type Preview, type PlannedProgramme, type ChannelAds, type AdServer, type AdTest, type AdReport, type Playout, type ReadinessRow,
+  type LineupSettings, type Preview, type PlannedProgramme, type ChannelAds, type AdPolicy, type AdRule, type Daypart, type AdServer, type AdTest, type AdReport, type Playout, type ReadinessRow,
 } from '../fast/fastApi'
 import '../fast/fast.css'
 import VoltPlayerView from '../VoltPlayerView'
@@ -463,6 +463,12 @@ function SlotRow({ slot, i, n, all, assetById, picking, plays, passWeek, onPick,
           <span className="fast-plays" title="From the pass length and how often the slot comes round">≈ <b>{plays >= 10 ? Math.round(plays) : plays.toFixed(1)}</b> play{Math.round(plays) === 1 ? '' : 's'} a week{slot.kind === 'title' && slot.pool.length > 1 ? ' each' : ''}</span>
           <label className="fast-mini" title="Type how many plays a week you want; the slot's frequency is set to the nearest">want <input value={target} onChange={e => setTarget(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') applyTarget() }} placeholder="#" aria-label="Plays a week wanted" /> / week</label>
           {target && <button className="btn ghost sm" onClick={applyTarget}>Set</button>}
+          <label className="fast-mini" title="Overrides the titles' own ad rule for this slot">Ads
+            <select value={slot.adRule ?? 'default'} onChange={e => onChange({ ...slot, adRule: e.target.value as AdRule })} aria-label="Ads in this slot">
+              <option value="default">As the channel</option>
+              <option value="no_mid">Only after, never inside</option>
+              <option value="none">None (ad-free)</option>
+            </select></label>
         </div>
       </div>
       <div className="ctl">
@@ -616,7 +622,7 @@ function WeekView({ p }: { p: Preview | null }) {
             <span className="k">Content</span><span>{fmtDur(sel.contentSec)}</span>
             {sel.series && <><span className="k">Episode</span><span>{sel.series.name} S{sel.series.season ?? '?'}E{sel.series.episode ?? '?'}{sel.series.pass ? ` · time ${sel.series.pass + 1} through` : ''}</span></>}
             <span className="k">Pass</span><span>{sel.cycle + 1}{sel.note ? ` · ${sel.note === 'rotation' ? 'rotation pick' : sel.note}` : ''}</span>
-            <span className="k">Ad breaks</span><span>{sel.breaks.length ? sel.breaks.map(b => `${localParts(b.start, zone).hm} (${fmtDur(b.durationSec)}${b.position === 'end' ? ', after' : ''})`).join(', ') : 'none'}</span>
+            <span className="k">Ad breaks</span><span>{sel.breaks.length ? sel.breaks.map(b => `${localParts(b.start, zone).hm} (${fmtDur(b.durationSec)}${b.position === 'end' ? ', after' : ''}${b.fromPadSec ? `, ${fmtDur(b.fromPadSec)} from the grid pad` : ''}${b.capped ? ', shortened by the hourly cap' : ''})`).join(', ') : 'none'}</span>
             {sel.padSec > 0 && <><span className="k">Pad</span><span>{fmtDur(sel.padSec)} of promos/slate</span></>}
             {sel.warnings.map((w, i) => <span key={i} style={{ gridColumn: '1 / -1' }}><Notice kind="warn" variant="compact" message={w} /></span>)}
           </div>
@@ -654,6 +660,66 @@ function Repeats({ p }: { p: Preview | null }) {
 
 // ---------------------------------------------------------------- ads
 
+const DAYS: [number, string][] = [[1, 'M'], [2, 'T'], [3, 'W'], [4, 'T'], [5, 'F'], [6, 'S'], [7, 'S']]
+const DAY_NAMES = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+/**
+ * DAYPARTS: the ad load, break lengths and hourly cap by local time of day
+ * and weekday, first match wins (volt/SSAI.md 3.4). A programme takes the
+ * daypart it STARTS in.
+ */
+function DaypartsCard({ pol, save }: { pol: AdPolicy; save: (b: { policy: Partial<AdPolicy> }) => Promise<void> }) {
+  const list = pol.dayparts ?? []
+  const put = (next: Daypart[]) => save({ policy: { ...pol, dayparts: next } })
+  const set = (i: number, patch: Partial<Daypart>) => put(list.map((d, j) => (j === i ? { ...d, ...patch } : d)))
+  const optNum = (i: number, k: 'loadMinPerHour' | 'breakSec' | 'betweenSec' | 'maxPerHourMin', label: string, unit: string, step = 1) => (
+    <label className="fast-mini" title={`${label}: blank uses the channel setting`}>{label}
+      <input type="number" step={step} defaultValue={list[i][k] ?? ''} placeholder="·" style={{ width: 64 }}
+        onBlur={e => { const raw = e.target.value.trim(); const v = raw === '' ? undefined : Number(raw); if (v !== list[i][k] && (v === undefined || Number.isFinite(v))) set(i, { [k]: v } as Partial<Daypart>) }} aria-label={label} /> {unit}</label>
+  )
+  return (
+    <div className="card">
+      <div className="card-h"><h3>Dayparts</h3><span className="sub">different ad rules by time of day</span></div>
+      <div className="card-b">
+        {!list.length && <div className="hintxt">One set of rules all day. Add a daypart to carry more ads in prime time, fewer overnight, or between-only breaks on weekend mornings.</div>}
+        {list.map((d, i) => (
+          <div key={i} className="fast-daypart" style={{ borderTop: i ? '1px solid var(--line)' : undefined, padding: '10px 0', display: 'grid', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input className="inp" defaultValue={d.label ?? ''} placeholder={`Daypart ${i + 1}`} style={{ width: 130 }} onBlur={e => { if (e.target.value !== (d.label ?? '')) set(i, { label: e.target.value || undefined }) }} aria-label="Daypart name" />
+              <input className="inp" type="time" value={d.from} onChange={e => e.target.value && set(i, { from: e.target.value })} aria-label="From" />
+              <span style={{ color: 'var(--muted)' }}>to</span>
+              <input className="inp" type="time" value={d.to} onChange={e => e.target.value && set(i, { to: e.target.value })} aria-label="To" />
+              <span className="spacer" style={{ flex: 1 }} />
+              <button className="fast-ico" aria-label="Move up" disabled={i === 0} onClick={() => { const n = [...list]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; put(n) }}>{Ico.up}</button>
+              <button className="fast-ico" aria-label="Remove daypart" onClick={() => put(list.filter((_, j) => j !== i))}>{Ico.x}</button>
+            </div>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }} role="group" aria-label="Days">
+              {DAYS.map(([n, l]) => {
+                const on = !d.days?.length || d.days.includes(n)
+                return <button key={n} type="button" className={`btn sm ${on ? '' : 'ghost'}`} style={{ minWidth: 30, padding: '2px 0' }} title={DAY_NAMES[n]} aria-pressed={on}
+                  onClick={() => { const cur = d.days?.length ? d.days : [1, 2, 3, 4, 5, 6, 7]; const next = on ? cur.filter(x => x !== n) : [...cur, n].sort(); set(i, { days: next.length === 7 ? undefined : next }) }}>{l}</button>
+              })}
+              <span className="hintxt" style={{ marginLeft: 8 }}>{d.to < d.from ? 'runs past midnight; the day is the one it starts on' : ''}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {optNum(i, 'loadMinPerHour', 'Load', 'min/h', 0.5)}
+              {optNum(i, 'maxPerHourMin', 'Cap', 'min/h', 0.5)}
+              {optNum(i, 'breakSec', 'Mid break', 's')}
+              {optNum(i, 'betweenSec', 'After', 's')}
+              <label className="fast-mini">Breaks
+                <select value={d.placement ?? ''} onChange={e => set(i, { placement: (e.target.value || undefined) as Daypart['placement'] })}>
+                  <option value="">as the channel</option><option value="both">inside and between</option><option value="between">only between</option><option value="mid">only inside</option>
+                </select></label>
+            </div>
+          </div>
+        ))}
+        <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => put([...list, list.length ? { label: 'Overnight', from: '00:00', to: '06:00', loadMinPerHour: Math.max(0, pol.loadMinPerHour - 2) } : { label: 'Prime time', from: '18:00', to: '22:30', loadMinPerHour: pol.loadMinPerHour + 2 }])}>Add daypart</button>
+        <div className="hintxt" style={{ marginTop: 8 }}>A programme follows the daypart it starts in. Blank fields use the channel setting.</div>
+      </div>
+    </div>
+  )
+}
+
 function AdsTab({ channelId, lib }: { channelId: string; lib: { assets: LibAsset[] } }) {
   const notify = useNotify()
   const [ads, setAds] = useState<ChannelAds | null>(null)
@@ -674,6 +740,7 @@ function AdsTab({ channelId, lib }: { channelId: string; lib: { assets: LibAsset
     catch (e: any) { notify({ kind: 'error', title: "Couldn't save.", message: e.message }) }
   }
   const pol = ads.policy
+  const placement = pol.placement ?? 'both'
   const num = (k: keyof typeof pol, label: string, unit: string, hint?: string, step = 1) => (
     <div className="field"><label>{label}</label>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -704,22 +771,67 @@ function AdsTab({ channelId, lib }: { channelId: string; lib: { assets: LibAsset
           ))}
           {ads.mode !== 'off' && <>
             <div className="sec-label">How much and where</div>
+            <div className="field"><label>Breaks go</label>
+              <select className="inp" value={placement} onChange={e => save({ policy: { ...pol, placement: e.target.value as AdPolicy['placement'] } })}>
+                <option value="both">Inside programmes and between them</option>
+                <option value="between">Only between programmes (content is never interrupted)</option>
+                <option value="mid">Only inside programmes</option>
+              </select>
+              <div className="hintxt">Titles marked ad-free, or slots set to "only after", follow their own rule.</div></div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
               {num('loadMinPerHour', 'Ad load', 'min per hour', 'FAST channels typically run 8 to 12.', 0.5)}
-              {num('breakSec', 'Mid-programme break', 'seconds')}
-              {num('betweenSec', 'Break between programmes', 'seconds', '0 for none.')}
-              {num('firstAfterMin', 'No break before', 'min in')}
-              {num('minGapMin', 'At least', 'min between breaks')}
-              {num('endGuardMin', 'None in the last', 'minutes')}
-              {num('minProgrammeMin', 'Mid breaks only in titles over', 'minutes')}
+              {num('maxPerHourMin', 'Never more than', 'min in a clock hour', '0 for no cap. Breaks over it are shortened or dropped.', 0.5)}
             </div>
+            {placement !== 'between' && <>
+              <div className="sec-label">Inside programmes</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
+                {num('breakSec', 'Mid-programme break', 'seconds')}
+                {num('firstAfterMin', 'No break before', 'min in')}
+                {num('minGapMin', 'At least', 'min between breaks')}
+                {num('endGuardMin', 'None in the last', 'minutes')}
+                {num('minProgrammeMin', 'Mid breaks only in titles over', 'minutes')}
+              </div>
+              <label className="toggle-row" style={{ cursor: 'pointer' }}>
+                <input type="checkbox" checked={pol.useCues} onChange={e => save({ policy: { ...pol, useCues: e.target.checked } })} />
+                <div><div className="tt">Use the title's own break points</div><div className="td">Act breaks marked on the asset are used first; otherwise breaks are spread evenly, always on a segment boundary.</div></div>
+              </label>
+            </>}
+            {placement !== 'mid' && <>
+              <div className="sec-label">Between programmes</div>
+              <div className="field"><label>Length of the break after a programme</label>
+                <select className="inp" value={pol.betweenMode ?? 'fixed'} onChange={e => save({ policy: { ...pol, betweenMode: e.target.value as 'fixed' | 'earned' } })}>
+                  <option value="fixed">The same length every time</option>
+                  <option value="earned">Earned by the content before it (ad load × its minutes)</option>
+                </select>
+                <div className="hintxt">{pol.betweenMode === 'earned' ? 'A 22 minute episode at 9 min/hour earns about 3 minutes; a 2 hour film earns the maximum. Keeps the load right when titles vary in length.' : 'Simple and predictable: one break of the same length after every programme.'}</div></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
+                {(pol.betweenMode ?? 'fixed') === 'fixed'
+                  ? num('betweenSec', 'Break between programmes', 'seconds', '0 for none.')
+                  : <>{num('betweenMinSec', 'Shortest', 'seconds')}{num('betweenMaxSec', 'Longest', 'seconds')}{num('betweenStepSec', 'Rounded to', 'seconds', 'Matches common spot lengths: 15 or 30.')}</>}
+                {num('betweenEveryMin', 'Only after at least', 'min of content', 'Short titles add up: 0 puts a break after every programme; 15 puts one after every few music videos or shorts.')}
+              </div>
+            </>}
             <label className="toggle-row" style={{ cursor: 'pointer' }}>
-              <input type="checkbox" checked={pol.useCues} onChange={e => save({ policy: { ...pol, useCues: e.target.checked } })} />
-              <div><div className="tt">Use the title's own break points</div><div className="td">Act breaks marked on the asset are used first; otherwise breaks are spread evenly, always on a segment boundary.</div></div>
+              <input type="checkbox" checked={!!pol.padToAds} onChange={e => save({ policy: { ...pol, padToAds: e.target.checked } })} />
+              <div><div className="tt">Sell grid pad as break time</div><div className="td">When programmes are rounded up to the grid, a pad of at least {pol.padToAdsMinSec ?? 30} s becomes ad time after the programme (up to {pol.padToAdsMaxSec ?? 180} s); the rest stays promos and slate.</div></div>
             </label>
+            {pol.padToAds && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
+              {num('padToAdsMinSec', 'Only pads over', 'seconds')}
+              {num('padToAdsMaxSec', 'Sell at most', 'seconds')}
+            </div>}
+            {ads.mode === 'stitched' && <>
+              <div className="sec-label">Pod shape (stitched)</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
+                {num('podMaxAds', 'Most ads in a break', 'ads', '0 for no limit. Also sent to the ad server as [POD_MAX_ADS].')}
+                {num('maxAdSec', 'Longest single ad', 'seconds', '0 for no limit. Sent as [MAX_AD_DURATION].')}
+              </div>
+              <div className="hintxt">One ad per advertiser in a break (competitive separation) when the ad server names the advertiser or category.</div>
+            </>}
           </>}
         </div>
       </div>
+
+      {ads.mode !== 'off' && <DaypartsCard pol={pol} save={save} />}
 
       {ads.mode !== 'off' && <div className="card">
         <div className="card-h"><h3>House spots and slate</h3><span className="sub">what fills a break nobody has sold</span></div>

@@ -38,6 +38,9 @@ export interface VastAd {
   sequence: number | null;
   adSystem?: string;
   title?: string;
+  /** VAST 3+ <Advertiser> and <Category>: what competitive separation keys on. */
+  advertiser?: string;
+  categories?: string[];
   /** The creative's identity for the conditioning cache (UniversalAdId, else creative id, else media URL). */
   creativeKey: string;
   durationSec: number;
@@ -172,6 +175,8 @@ export function parseVast(xml: string): VastDoc {
       sequence: n.attrs.sequence ? Number(n.attrs.sequence) : null,
       adSystem: text(kid(body, 'AdSystem')) || undefined,
       title: text(kid(body, 'AdTitle')) || undefined,
+      advertiser: text(kid(body, 'Advertiser')) || undefined,
+      categories: kids(body, 'Category').map((c) => text(c)).filter(Boolean),
       creativeKey,
       durationSec: parseDuration(text(kid(linear, 'Duration'))),
       mediaFiles, mezzanine: mezz,

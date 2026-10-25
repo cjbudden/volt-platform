@@ -59,7 +59,7 @@ export interface PodPlan {
   fallback: null | 'ad-server-timeout' | 'ad-server-error' | 'no-ads' | 'not-conditioned' | 'partial' | 'off';
   /** Creatives to package now, so they play next time. */
   toCondition: { creativeKey: string; adId: string }[];
-  skipped: { adId: string; reason: 'not-conditioned' | 'too-long' | 'no-media' | 'repeat' }[];
+  skipped: { adId: string; reason: 'not-conditioned' | 'too-long' | 'no-media' | 'repeat' | 'pod-full' | 'over-max-length' | 'competitive' }[];
 }
 
 export interface FillInput {
@@ -76,6 +76,11 @@ export interface FillInput {
   adsOff?: boolean;
   /** Ads must not exceed the break by more than this. */
   toleranceSec?: number;
+  /** Pod shape: most paid ads in one break, and the longest single ad (0 = no limit). */
+  maxAds?: number;
+  maxAdSec?: number;
+  /** Competitive separation: one ad per advertiser (or category) in a pod. */
+  separate?: (ad: VastAd) => string | null;
 }
 
 export function fillBreak(i: FillInput): PodPlan {
@@ -85,11 +90,17 @@ export function fillBreak(i: FillInput): PodPlan {
   const toCondition: PodPlan['toCondition'] = [];
   const skipped: PodPlan['skipped'] = [];
   const usedCreatives = new Set<string>();
+  const usedSeparation = new Set<string>();
+  let paid = 0;
   let adSec = 0, houseSec = 0, slateSec = 0;
 
   if (!i.adsOff) {
     for (const ad of i.ads) {
       if (usedCreatives.has(ad.creativeKey)) { skipped.push({ adId: ad.id, reason: 'repeat' }); continue; }
+      if (i.maxAds && paid >= i.maxAds) { skipped.push({ adId: ad.id, reason: 'pod-full' }); continue; }
+      if (i.maxAdSec && ad.durationSec > i.maxAdSec + 0.5) { skipped.push({ adId: ad.id, reason: 'over-max-length' }); continue; }
+      const sepKey = i.separate?.(ad) ?? null;
+      if (sepKey && usedSeparation.has(sepKey)) { skipped.push({ adId: ad.id, reason: 'competitive' }); continue; }
       if (!ad.mediaFiles.length && !ad.mezzanine) { skipped.push({ adId: ad.id, reason: 'no-media' }); continue; }
       const c = i.conditioned(ad.creativeKey);
       if (!c) {
@@ -100,6 +111,8 @@ export function fillBreak(i: FillInput): PodPlan {
       if (c.durationSec > left + tol) { skipped.push({ adId: ad.id, reason: 'too-long' }); continue; }
       items.push({ kind: 'ad', adId: ad.id, creativeKey: ad.creativeKey, assetId: c.assetId, durationSec: c.durationSec, title: ad.title, impressions: ad.impressions, tracking: ad.tracking });
       usedCreatives.add(ad.creativeKey);
+      if (sepKey) usedSeparation.add(sepKey);
+      paid++;
       left -= c.durationSec;
       adSec += c.durationSec;
     }

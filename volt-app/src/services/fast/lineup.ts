@@ -38,7 +38,7 @@
 //  PURE: no database, no clock. Tested in node (test/fast-lineup.check.ts).
 // ============================================================================
 import { localTimeOf, localDateOf, localToUtc, addDays } from '../epgRepeat';
-import { planBreaks, type AdPolicy, type PlannedBreak, DEFAULT_AD_POLICY } from './adPlan';
+import { planProgrammeBreaks, policyAt, capBreaks, type AdPolicy, type AdRule, type PlannedBreak, DEFAULT_AD_POLICY } from './adPlan';
 
 export interface AssetInfo {
   id: string;
@@ -55,6 +55,8 @@ export interface AssetInfo {
   ready?: boolean;
   imageUrl?: string | null;
   genre?: string | null;
+  /** Ad rule from the asset's metadata: none (ad-free) or no_mid (breaks only after it). */
+  adRule?: AdRule;
 }
 
 export type PoolRef = { assetId: string } | { skip: true };
@@ -68,6 +70,8 @@ export interface TitleSlot {
   /** Which pass of `every` it plays on (0-based). Also offsets the pool rotation. */
   phase?: number;
   label?: string;
+  /** Overrides the titles' own ad rule for this slot. */
+  adRule?: AdRule;
 }
 
 export interface SeriesSlot {
@@ -84,6 +88,7 @@ export interface SeriesSlot {
   /** Replay the episodes another slot aired (its most recent play). */
   encoreOf?: string | null;
   label?: string;
+  adRule?: AdRule;
 }
 
 export type Slot = TitleSlot | SeriesSlot;
@@ -263,6 +268,13 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
   let items = 0;
   let emptyCycles = 0;
   let last: PlannedProgramme | null = null;
+  // AD SCHEDULE STATE carried across programmes (deterministic from the
+  // epoch, like the series pointers): content since the last break, for
+  // between breaks that accumulate over short titles, and ad seconds charged
+  // to each local clock hour, for the hourly cap.
+  let sinceBreak = 0;
+  const hourUse = new Map<string, number>();
+  const hourKey = (d: Date) => `${localDateOf(d, zone)}T${localTimeOf(d, zone).slice(0, 2)}`;
   const toMs = to.getTime();
   while (t < toMs) {
     let placed = 0;
@@ -277,9 +289,17 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
       if (!picks.length) continue;
       lastPlay[slot.id] = picks;
       for (const p of picks) {
-        const breaks = planBreaks(p.asset.durationSec, p.asset.breakCuesSec ?? [], ads, seg);
-        const breakSec = breaks.reduce((s, b) => s + b.durationSec, 0);
         const contentSec = p.asset.durationSec;
+        const pol = policyAt(ads, new Date(t), zone);
+        const rule: AdRule = slot.adRule && slot.adRule !== 'default' ? slot.adRule : (p.asset.adRule ?? 'default');
+        let breaks = planProgrammeBreaks(contentSec, p.asset.breakCuesSec ?? [], pol, seg, { sinceBreakSec: sinceBreak, rule }).breaks;
+        let charge = new Map<string, number>();
+        if (pol.enabled && pol.maxPerHourMin > 0 && breaks.length) {
+          const c = capBreaks(breaks, t, pol.maxPerHourMin, (k) => hourUse.get(k) ?? 0, hourKey, seg);
+          breaks = c.breaks; charge = c.charge;
+          if (c.trimmedSec > 0) notice(new Date(t), `The hourly cap of ${pol.maxPerHourMin} ad minutes shortened or dropped some breaks.`);
+        }
+        const breakSec = breaks.reduce((s, b) => s + b.durationSec, 0);
         // ANCHOR: an item that would run past the daily restart is not started.
         // The programme before it is padded up to the anchor and the run order
         // starts again from the top.
@@ -297,7 +317,27 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
         }
         const midSec = breaks.filter((b) => b.position === 'mid').reduce((x, b) => x + b.durationSec, 0);
         const endMs = t + Math.round((contentSec + breakSec) * 1000);
-        const padSec = gridPad(new Date(endMs), grid, zone);
+        let padSec = gridPad(new Date(endMs), grid, zone);
+        const slotEndMs = endMs + Math.round(padSec * 1000);
+        // PAD TO ADS: grid pad long enough is sold as break time after the
+        // programme (it joins the between break, or becomes one), whole
+        // segments, within the hourly cap; the rest stays promos/slate.
+        if (pol.enabled && pol.padToAds && rule !== 'none' && padSec >= pol.padToAdsMinSec) {
+          const breakAt = new Date(t + Math.round((contentSec + midSec) * 1000));
+          let conv = Math.floor(Math.min(padSec, pol.padToAdsMaxSec) / seg) * seg;
+          if (pol.maxPerHourMin > 0) {
+            const k = hourKey(breakAt);
+            const left = pol.maxPerHourMin * 60 - (hourUse.get(k) ?? 0) - (charge.get(k) ?? 0);
+            conv = Math.min(conv, Math.floor(Math.max(0, left) / seg) * seg);
+            if (conv >= 15) charge.set(k, (charge.get(k) ?? 0) + conv);
+          }
+          if (conv >= 15) {
+            const end = breaks.find((b) => b.position === 'end');
+            if (end) breaks = breaks.map((b) => (b === end ? { ...b, durationSec: b.durationSec + conv, fromPadSec: conv } : b));
+            else breaks = [...breaks, { atAssetSec: contentSec, durationSec: conv, position: 'end', offsetBeforeSec: midSec, source: 'pad', fromPadSec: conv }];
+            padSec = Math.round((padSec - conv) * 1000) / 1000;
+          }
+        }
         const warnings: string[] = [];
         if (p.asset.ready === false) warnings.push('Not prepared for this channel yet: it is packaged to the channel ladder before it airs.');
         const prog: PlannedProgramme = {
@@ -305,13 +345,19 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
           cycle, slotId: slot.id, slotIndex, ordinal: k, assetId: p.asset.id, title: p.asset.title,
           start: new Date(t),
           contentEnd: new Date(t + Math.round((contentSec + midSec) * 1000)),
-          end: new Date(endMs + Math.round(padSec * 1000)),
+          end: new Date(slotEndMs),
           contentSec,
           breaks: breaks.map((b) => ({ ...b, start: new Date(t + Math.round((b.atAssetSec + b.offsetBeforeSec) * 1000)) })),
           padSec, series: p.series, note: p.note, warnings,
         };
         if (prog.end.getTime() > from.getTime()) out.push(prog);
         last = prog;
+        // commit the ad schedule state now that the programme is placed
+        for (const [k, v] of charge) hourUse.set(k, (hourUse.get(k) ?? 0) + v);
+        if (pol.enabled && rule !== 'none') {
+          const lb = breaks[breaks.length - 1];
+          sinceBreak = !lb ? sinceBreak + contentSec : lb.position === 'end' ? 0 : contentSec - lb.atAssetSec;
+        }
         t = prog.end.getTime();
         placed++;
         // landed on (or past) the restart: the next pass starts the run order again

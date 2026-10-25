@@ -17,7 +17,7 @@
 import { query, one, tx } from '../../db';
 import { existsSync } from 'node:fs';
 import { planLineup, rebase, type AssetInfo, type Lineup, type Slot, type PlannedProgramme } from './lineup';
-import { resolveAdPolicy, type AdPolicy } from './adPlan';
+import { resolveAdPolicy, adRuleOf, type AdPolicy } from './adPlan';
 import { houseFill, fillBreak, type HouseAd, type PodPlan } from './pod';
 import { spliceInsert, toHex, eventIdFor } from './scte35';
 import { resolve as resolveVast, expandTag, bestSource, type Fetcher, type TagContext } from './vast';
@@ -105,6 +105,7 @@ export function assetFromRow(r: any): AssetInfo {
     ready: !!r.master_key,
     imageUrl: md.image ?? null,
     genre: Array.isArray(md.genre) ? md.genre[0] ?? null : md.genre ?? null,
+    adRule: adRuleOf(md),
   };
 }
 
@@ -182,7 +183,7 @@ export function wireProgramme(p: PlannedProgramme) {
     key: p.key, cycle: p.cycle, slotId: p.slotId, assetId: p.assetId, title: p.title,
     start: p.start.toISOString(), end: p.end.toISOString(), contentEnd: p.contentEnd.toISOString(),
     contentSec: p.contentSec, padSec: p.padSec, note: p.note ?? null, series: p.series ?? null, warnings: p.warnings,
-    breaks: p.breaks.map((b) => ({ start: b.start!.toISOString(), durationSec: b.durationSec, position: b.position, atAssetSec: b.atAssetSec, source: b.source })),
+    breaks: p.breaks.map((b) => ({ start: b.start!.toISOString(), durationSec: b.durationSec, position: b.position, atAssetSec: b.atAssetSec, source: b.source, fromPadSec: b.fromPadSec ?? 0, capped: !!b.capped })),
   };
 }
 
@@ -273,7 +274,7 @@ export async function applyLineup(lineupId: string, opts: { from?: Date; days?: 
              SET programme_id = EXCLUDED.programme_id, starts_at = EXCLUDED.starts_at, duration_ms = EXCLUDED.duration_ms,
                  position = EXCLUDED.position, at_asset_ms = EXCLUDED.at_asset_ms, status = 'scheduled'`,
           [row.channel_id, pid, `${ref}:b${i}`, b.start!.toISOString(), Math.round(b.durationSec * 1000), b.position,
-           Math.round(b.atAssetSec * 1000), eventIdFor(`${ref}:b${i}`), JSON.stringify({ source: b.source })]);
+           Math.round(b.atAssetSec * 1000), eventIdFor(`${ref}:b${i}`), JSON.stringify({ source: b.source, ...(b.fromPadSec ? { fromPadSec: b.fromPadSec } : {}), ...(b.capped ? { capped: true } : {}) })]);
         result.breaks++;
       }
     }
@@ -444,6 +445,12 @@ export async function decideBreak(i: DecideInput): Promise<PodPlan & { breakId: 
       sessionId: i.sessionId, breakId: b.id, breakIndex, durationSec: breakSec, channelId: i.channelId,
       contentId: b.pmeta?.vodAssetId ?? null, contentTitle: b.programme_title ?? null, series: b.pmeta?.series ?? null,
       ...i.ctx,
+      // pod shape and placement for the ad server ([POD_MAX_ADS], [MAX_AD_DURATION], [BREAK_POSITION])
+      extra: {
+        POD_MAX_ADS: String(ads.policy.podMaxAds || ''), MAX_AD_DURATION: String(ads.policy.maxAdSec || ''),
+        BREAK_POSITION: b.position === 'end' ? 'between' : 'mid',
+        ...((i.ctx as any)?.extra ?? {}),
+      },
     });
     const r = await resolveVast(tag, i.fetcher ?? defaultFetcher, { budgetMs: server.timeout_ms, maxDepth: server.max_wrappers });
     vastAds = r.ads; problems = r.problems; elapsedMs = r.elapsedMs; requests = r.requests;
@@ -456,7 +463,9 @@ export async function decideBreak(i: DecideInput): Promise<PodPlan & { breakId: 
     `SELECT c.creative_key, c.vod_asset_id, v.duration_ms, v.master_key FROM ad_creatives c LEFT JOIN vod_assets v ON v.id = c.vod_asset_id
       WHERE c.account_id = $1 AND c.creative_key = ANY($2::text[])`, [acct.account_id, keys]) : [];
   const ready = new Map(cache.filter((c) => c.master_key && c.duration_ms).map((c) => [c.creative_key, { assetId: String(c.vod_asset_id), durationSec: Number(c.duration_ms) / 1000 }]));
-  const plan = fillBreak({ breakSec, segmentSec: SEGMENT_SEC, ads: vastAds, conditioned: (k) => ready.get(k) ?? null, house: ads.house, breakIndex, serverProblem, adsOff: ads.mode !== 'stitched' });
+  const plan = fillBreak({ breakSec, segmentSec: SEGMENT_SEC, ads: vastAds, conditioned: (k) => ready.get(k) ?? null, house: ads.house, breakIndex, serverProblem, adsOff: ads.mode !== 'stitched',
+    maxAds: ads.policy.podMaxAds || undefined, maxAdSec: ads.policy.maxAdSec || undefined,
+    separate: (ad) => (ad.advertiser ? `adv:${ad.advertiser.toLowerCase()}` : ad.categories?.length ? `cat:${ad.categories[0].toLowerCase()}` : null) });
   // remember every creative we were offered; queue the ones not yet packaged
   for (const a of vastAds) {
     await query(
