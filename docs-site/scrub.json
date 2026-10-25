@@ -98,6 +98,18 @@
     {
       "pattern": "\\bsk_live_[A-Za-z0-9]{8,}",
       "why": "looks like a real secret key"
+    },
+    {
+      "pattern": "\\b(SOCIAL_TOKEN_KEY|SMTP_URL|NOTIFY_FROM|FCM_SERVICE_ACCOUNT)\\b",
+      "why": "server setting name: for whoever runs the Volt deployment, not customers"
+    },
+    {
+      "pattern": "\\b[a-z]+_(client_id|client_secret|client_key|app_id|app_secret|api_secret)\\b",
+      "why": "server setting name for a platform app: for whoever runs the Volt deployment, not customers"
+    },
+    {
+      "pattern": "\\b(EC2|Fargate)\\b",
+      "why": "cloud infrastructure name: customers see shared or dedicated servers"
     }
   ],
   "scan": [

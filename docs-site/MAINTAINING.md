@@ -165,6 +165,17 @@ npm run screenshots -- audit-log
 The browser runs in the manifest's `timezoneId` (Australia/Sydney by default), so
 forms that start from the viewer's time zone look the same on every machine.
 
+Shots marked `customerView` (Social accounts, Notifications, Fleet & Usage) show
+what a customer account sees. On a single-client deployment, the default, the
+docs login is the owner who runs the server and sees its setting and machine
+names, so the script skips those shots and says so. Take them with the API in
+saas mode:
+
+```bash
+VOLT_DEPLOYMENT=saas PORT=8080 npx tsx src/index.ts      # volt-app
+npm run screenshots -- social-accounts notifications fleet-and-usage
+```
+
 Before saving each picture the script checks the page's visible text (and
 field values and placeholders) against `scrub.json` and refuses to save one
 that shows a banned term: a picture is the one thing the build cannot read.

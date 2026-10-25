@@ -21,7 +21,7 @@ Each card also says the platform's limits, for example the longest title and des
 
 ## Before you start
 
-- For a real account, the platform must be set up for your Volt: its card says **Ready to connect**. A card marked **Not set up** needs an app registered with that platform first; **How to set up** shows the redirect address and permissions to register. This is usually done by your Volt provider.
+- For a real account, the platform must be set up for your Volt: its card says **Ready to connect**. A card marked **Not set up**, with **Your Volt provider sets this up.**, needs an app registered with that platform first, which whoever runs your Volt does. On a Volt you run yourself, the account owner also sees **How to set up**, with the redirect address, the two server settings and the permissions to register.
 - You must be able to sign in to the platform account with the right to post (for a Facebook Page, a Page admin).
 - Access: see [Who can do it](#who-can-do-it).
 
@@ -64,7 +64,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 
 | Task | Access needed |
 |---|---|
-| See the platforms and linked accounts | Account settings: View and Media library & publishing: View |
+| See the platforms and linked accounts | Account settings: View and Media library & publishing: View (the menu shows **Social accounts** only with both) |
 | Link an account, add a sandbox account | Media library & publishing: Manage |
 | Turn an account on or off, disconnect it | Account settings: Manage |
 | Publish to a linked account | Media library & publishing: Operate |
@@ -75,7 +75,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 
 | You see | What it means | What to do |
 |---|---|---|
-| **Not set up** on a card | The platform has not been registered for your Volt | Choose **How to set up** and pass the details to whoever runs your Volt; use a sandbox account meanwhile |
+| **Not set up** on a card | The platform has not been registered for your Volt | Ask your Volt provider to set it up (on a Volt you run yourself, **How to set up** has the details); use a sandbox account meanwhile |
 | **Reconnect needed** | The platform's access expired or was withdrawn | Choose **Reconnect** and sign in again |
 | **Problem** with a note under the account | The platform refused the last request | Read the note; reconnect if it asks you to |
 | **This sign-in link has already been used or was not started here. Start again from Social accounts.** | The platform sent you back with an old or unknown sign-in | Choose **Connect** again |

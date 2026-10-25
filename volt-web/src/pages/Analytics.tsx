@@ -316,7 +316,7 @@ function AudienceAnalytics() {
       <div className="page-head">
         <div>
           <h1>Analytics</h1>
-          <p>Read from the daily rollups, so it keeps answering after the raw events age out.</p>
+          <p>Who watched, for how long and where, by day, with what is watched most.</p>
         </div>
         <div className="spacer" />
         <div className="flex items-center gap-2">

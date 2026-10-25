@@ -49,6 +49,21 @@ export function channelConfig(): Record<Channel, { configured: boolean; detail: 
   return { in_app: { configured: true, detail: 'Shown in each recipient\'s inbox in the console.' }, email, push };
 }
 
+/**
+ * The same, worded for an account user: whether each channel works and who
+ * sets it up, without the server's setting names or mail host
+ * (services/serverSetup.ts). The sender address stays: it is what lands in
+ * the inbox.
+ */
+export function channelConfigForAccount(): Record<Channel, { configured: boolean; detail: string }> {
+  const c = channelConfig();
+  return {
+    in_app: c.in_app,
+    email: { configured: c.email.configured, detail: c.email.configured ? `Sent from ${process.env.NOTIFY_FROM}.` : 'Not set up yet. Your Volt provider sets this up.' },
+    push: { configured: c.push.configured, detail: c.push.configured ? 'Sent to the devices people register in the Volt app.' : 'Not set up yet. Your Volt provider sets this up.' },
+  };
+}
+
 class Permanent extends Error {}
 
 type Adapter = (recipient: string, subject: string, body: string, accountId: string) => Promise<string | void>;
@@ -57,7 +72,9 @@ const adapters: Record<Channel, Adapter> = {
   email: async (recipient, subject, body) => {
     const url = process.env.SMTP_URL;
     const from = process.env.NOTIFY_FROM;
-    if (!url || !from) throw new Permanent('Email is not configured on this deployment (SMTP_URL, NOTIFY_FROM).');
+    if (!url || !from) // Stored on the delivery and shown to whoever looks at it, account users
+    // included, so it says what happened, not which settings are missing.
+    throw new Permanent('Email is not set up on this deployment.');
     try {
       const r = await sendMail(parseSmtpUrl(url), { from, to: recipient, subject, text: body });
       return r.response.slice(0, 200);

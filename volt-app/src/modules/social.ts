@@ -26,6 +26,7 @@ import {
   fitPost, defaultPost, queueSocialPublication, syncViews, removeFromPlatform, type PlatformId,
 } from '../services/social';
 import { publish, NotPublishable } from '../services/availability';
+import { seesServerSetup } from '../services/serverSetup';
 
 export const socialRouter = Router();
 export const socialPublicRouter = Router();
@@ -82,7 +83,7 @@ function requireAdmin(req: any) {
   if (!can(req, 'settings', 'manage')) throw forbidden('Linking social accounts needs manage on account settings');
 }
 
-socialRouter.get('/platforms', asyncHandler(async (_req, res) => { res.json(platformStatus()); }));
+socialRouter.get('/platforms', asyncHandler(async (req, res) => { res.json(platformStatus(seesServerSetup(req))); }));
 
 socialRouter.get('/accounts', asyncHandler(async (req, res) => {
   const rows = await query<any>(

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, type FleetHost, type FleetUsage, type StreamUsage, type UsageBucket } from '../api'
 import { pressable } from '../a11y'
 import { PageError, usePageNotice } from '../notices'
+import { useAccess } from '../access'
 
 /* ============================================================================
    FLEET — the servers, and the billable time they produced.
@@ -37,6 +38,12 @@ import { PageError, usePageNotice } from '../notices'
       has been running since the meter last wrote. It is real usage, but it is
       still moving. Adding it silently into the totals would make a closed
       month and a live minute look like the same kind of fact.
+
+   3. INFRASTRUCTURE NAMES ARE FOR WHOEVER RUNS VOLT (build queue 1.14-G4a).
+      Machine types, zones, instance ids, Spot, EC2 and Fargate, and where a
+      reading came from, mean something to whoever runs the deployment
+      (access.seesServerSetup). An account user on a shared Volt gets what
+      the server is to them (shared or their own) and how old the reading is.
    ========================================================================== */
 
 const KIND_LABEL: Record<string, string> = {
@@ -46,6 +53,10 @@ const KIND_LABEL: Record<string, string> = {
 
 const HOST_LABEL: Record<string, string> = {
   ec2: 'EC2 (shared)', fargate: 'Fargate (one task)', local: 'On-premises',
+}
+/** The same kinds, for an account user: what the server is to them. */
+const HOST_LABEL_ACCOUNT: Record<string, string> = {
+  ec2: 'Shared cloud server', fargate: 'Cloud server for one stream', local: 'On-premises server',
 }
 
 /** Seconds as something a person reads. Exact, never rounded to "about". */
@@ -144,6 +155,7 @@ function Meter({ pct, label }: { pct: number | null; label: string }) {
 // ---------------------------------------------------------------------------
 function HostCard({ h }: { h: FleetHost }) {
   const [open, setOpen] = useState(false)
+  const { seesServerSetup: infra } = useAccess()
   const m = h.metrics
   // A reading older than this is history, not the present. Saying so beats
   // showing a stale number as though it were live.
@@ -156,20 +168,22 @@ function HostCard({ h }: { h: FleetHost }) {
         <div style={{ minWidth: 210, flex: 1 }}>
           <div className="flex items-center gap-2">
             <strong style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {h.instanceType ?? 'unknown type'}
+              {infra ? (h.instanceType ?? 'unknown type') : (HOST_LABEL_ACCOUNT[h.kind] ?? 'Server')}
             </strong>
-            {h.lifecycle === 'spot' && (
+            {infra && h.lifecycle === 'spot' && (
               <span className="chip" style={{ fontSize: 'var(--fs-micro)' }}>Spot</span>
             )}
           </div>
           <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', marginTop: 2 }}>
-            {HOST_LABEL[h.kind] ?? h.kind}
-            {h.availabilityZone ? ` · ${h.availabilityZone}` : ''}
-            {h.vcpus ? ` · ${h.vcpus} vCPU` : ''}
+            {infra
+              ? <>{HOST_LABEL[h.kind] ?? h.kind}{h.availabilityZone ? ` · ${h.availabilityZone}` : ''}{h.vcpus ? ` · ${h.vcpus} vCPU` : ''}</>
+              : (h.vcpus ? `${h.vcpus} vCPU` : '')}
           </div>
-          <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', fontVariantNumeric: 'tabular-nums' }}>
-            {h.externalId}
-          </div>
+          {infra && (
+            <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', fontVariantNumeric: 'tabular-nums' }}>
+              {h.externalId}
+            </div>
+          )}
         </div>
 
         {/* The MACHINE's load beside this tenant's share. Two numbers on
@@ -209,13 +223,13 @@ function HostCard({ h }: { h: FleetHost }) {
 
       <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', marginTop: 8 }}>
         {m
-          ? `${m.source} · ${ago(m.at)}${stale ? ' · reading is stale' : ''}`
+          ? `${infra ? `${m.source} · ` : 'Read '}${ago(m.at)}${stale ? ' · reading is stale' : ''}`
           : h.kind === 'fargate'
             // Not a fault, and worth saying so: a one-task microVM has no host
             // metric to read, and pretending otherwise would invite someone to
             // "consolidate" capacity that cannot be consolidated.
-            ? 'no host metrics: a Fargate task is a machine of one'
-            : 'no telemetry provider is reporting for this host'}
+            ? (infra ? 'no host metrics: a Fargate task is a machine of one' : 'no reading: a server for one stream has no machine figures to read')
+            : (infra ? 'no telemetry provider is reporting for this host' : 'no reading from this server yet')}
       </div>
 
       {open && (

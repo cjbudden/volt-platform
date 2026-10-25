@@ -198,6 +198,7 @@ authRouter.get(
   asyncHandler(async (req, res) => {
     const { query: q } = await import('../db');
     const { accessDescription } = await import('./roles');
+    const { seesServerSetup } = await import('../services/serverSetup');
     const acc = req.access!;
     const u = await one<any>(
       `SELECT u.id, u.email, u.display_name, u.role, u.status, u.platform_role,
@@ -218,6 +219,8 @@ authRouter.get(
       mfa: { methods: methodsOf((await loadPrincipal('user', u.id))!), required: !!u.require_admin_mfa },
       role: acc.role, tier: acc.role, status: u.status,
       platformRole: u.platform_role ?? null,
+      // Whether pages may name the server's settings and machines (services/serverSetup.ts).
+      seesServerSetup: seesServerSetup(req),
       roles: roles.map((r) => ({ id: r.id, name: r.name, key: r.role_key })),
       // legacy single-group fields
       userGroupId: roles[0]?.id ?? null, userGroupName: roles[0]?.name ?? null,

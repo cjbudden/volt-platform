@@ -16,6 +16,17 @@
 //   (docs-site) node scripts/screenshots.mjs [name ...]
 // A shot may also `hide` elements (kept in place, left blank) or `remove` them
 // (taken out of the layout).
+//
+// `customerView: true` marks a page that words itself differently for whoever
+// runs the Volt deployment (the server's setting and machine names, build
+// queue 1.14-G4a). The docs login is the account owner, and on a single-client
+// deployment (the default) the owner runs the server, so those shots need the
+// API started with VOLT_DEPLOYMENT=saas, where the owner is a customer. The
+// script reads `seesServerSetup` from /api/auth/me at sign-in and skips such a
+// shot, saying so, rather than save a picture of the operator's view. Run the
+// rest as usual, then the skipped ones with the API in saas mode:
+//   (volt-app)  VOLT_DEPLOYMENT=saas PORT=8080 npx tsx src/index.ts
+//   (docs-site) node scripts/screenshots.mjs social-accounts notifications fleet-and-usage
 // Env: BASE (default http://127.0.0.1:5173), EMAIL, PASSWORD (the docs seed's
 // login by default), PLAYWRIGHT (path to playwright's index.mjs if it is not
 // installed here), CHROMIUM (a browser binary), OUT (default static/img/screens),
@@ -51,11 +62,20 @@ page.on('pageerror', (e) => consoleErrors.push(String(e.message || e)));
 await page.goto(BASE + '/');
 await page.fill('#signin-email', EMAIL);
 await page.fill('#signin-pw', PASSWORD);
+const meResponse = page.waitForResponse((r) => r.url().includes('/api/auth/me') && r.request().method() === 'GET', { timeout: 20000 });
 await page.click('button:has-text("Sign in")');
 await page.waitForSelector('.topbar', { timeout: 20000 });
+const me = await meResponse.then((r) => r.json()).catch(() => null);
+const seesServerSetup = !!me?.seesServerSetup;
 
 let failed = 0;
+const skipped = [];
 for (const s of shots) {
+  if (s.customerView && seesServerSetup) {
+    skipped.push(s.name);
+    console.log(`SKIP  ${s.name.padEnd(22)} needs the customer's view; this login sees the server's setup (start the API with VOLT_DEPLOYMENT=saas)`);
+    continue;
+  }
   // The session lives in memory, so move inside the app instead of reloading.
   await page.evaluate((u) => { history.pushState(null, '', u); dispatchEvent(new PopStateEvent('popstate')); }, s.path);
   try {
@@ -94,5 +114,5 @@ for (const s of shots) {
 }
 await browser.close();
 if (consoleErrors.length) console.log(`page errors seen:\n  ${consoleErrors.slice(0, 10).join('\n  ')}`);
-console.log(`\n${shots.length - failed} passed, ${failed} failed`);
+console.log(`\n${shots.length - failed - skipped.length} passed, ${failed} failed${skipped.length ? `, ${skipped.length} skipped (${skipped.join(' ')})` : ''}`);
 process.exit(failed ? 1 : 0);

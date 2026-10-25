@@ -4,6 +4,7 @@ import { PageHead } from '../scaffold'
 import { navigate } from '../router'
 import { pressable } from '../a11y'
 import { useNotify, usePageNotice } from '../notices'
+import { useAccess } from '../access'
 
 /* ============================================================================
    SOCIAL ACCOUNTS (Admin). Link the YouTube channels, Facebook Pages and X,
@@ -13,9 +14,11 @@ import { useNotify, usePageNotice } from '../notices'
    it back here with the outcome in the URL (?linked= or ?error=), which this
    page reads once, says out loud, and clears.
 
-   A platform the deployment has no app credentials for says so, names the two
-   settings and the callback URL to register, and still offers a SANDBOX
-   account: one that behaves like the platform (progress, a post page, views)
+   A platform the deployment has no app credentials for says so and still
+   offers a SANDBOX account. Whoever runs the deployment (access.seesServerSetup)
+   is also shown the two settings and the callback URL to register; an account
+   user is told their Volt provider sets it up, since they cannot act on the
+   server's settings (and the API leaves them out for them). A SANDBOX account is one that behaves like the platform (progress, a post page, views)
    without sending anything anywhere, so the publishing flow can be tried now.
    ========================================================================== */
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -36,6 +39,7 @@ export default function SocialAccountsPage() {
   const [busy, setBusy] = useState('')
   const [setupOpen, setSetupOpen] = useState<string | null>(null)
   const notify = useNotify()
+  const { seesServerSetup } = useAccess()
   const fail = (e: any) => notify({ kind: 'error', message: e.message })
 
   const load = () => {
@@ -67,7 +71,7 @@ export default function SocialAccountsPage() {
     <>
       <PageHead title="Social accounts" sub="The channels, Pages and accounts clips can be published to. Each is linked by signing in on the platform; Volt never sees the password, and keeps only an access token, encrypted." />
       {banner && <div className={`nt-banner ${banner.ok ? 'ok' : 'bad'}`} role="status">{banner.text}<button className="xbtn" onClick={() => setBanner(null)} aria-label="Dismiss">✕</button></div>}
-      {st && !st.tokenKeyConfigured && (
+      {seesServerSetup && st && st.tokenKeyConfigured === false && (
         <div className="lock-note"><strong>Set SOCIAL_TOKEN_KEY before linking real accounts.</strong> Tokens are encrypted with a key derived from the sign-in secret until then, and rotating that secret would disconnect every account.</div>
       )}
 
@@ -82,20 +86,20 @@ export default function SocialAccountsPage() {
                   <span className={`nt-pill ${p.configured ? 'ok' : 'muted'}`}>{p.configured ? 'Ready to connect' : 'Not set up'}</span>
                 </div>
                 <div className="hintxt" style={{ marginTop: 2 }}>
-                  {p.configured ? `Publishes to a ${p.accountNoun}.` : `Needs ${p.label} app credentials on this deployment.`}
+                  {p.configured ? `Publishes to a ${p.accountNoun}.` : seesServerSetup ? `Needs ${p.label} app credentials on this deployment.` : 'Your Volt provider sets this up.'}
                   {' '}{p.limits.title != null ? `Title up to ${p.limits.title} characters, description up to ${p.limits.description}.` : `Caption up to ${p.limits.description} characters, hashtags included.`}
                 </div>
               </div>
-              {!p.configured && <button className="btn ghost" onClick={() => setSetupOpen(o => o === p.id ? null : p.id)}>How to set up</button>}
+              {!p.configured && seesServerSetup && p.env && <button className="btn ghost" onClick={() => setSetupOpen(o => o === p.id ? null : p.id)}>How to set up</button>}
               <button className="btn ghost" disabled={busy === `sb-${p.id}`} onClick={() => sandbox(p.id)}>Add sandbox account</button>
               {p.configured && <button className="btn primary" disabled={busy === p.id} onClick={() => connect(p.id)}>{busy === p.id ? 'Opening…' : `Connect ${p.label}`}</button>}
             </div>
-            {setupOpen === p.id && (
+            {setupOpen === p.id && p.env && (
               <div className="nt-setup">
                 Register an app with {p.label}, add this redirect URL to it, and set the two values on the server, then restart:
                 <div className="nt-kv"><span>Redirect URL</span><code>{p.callbackUrl}</code></div>
                 <div className="nt-kv"><span>Settings</span><code>{p.env[0]}</code><code>{p.env[1]}</code></div>
-                <div className="nt-kv"><span>Permissions</span><code>{p.scopes.join(' ')}</code></div>
+                <div className="nt-kv"><span>Permissions</span><code>{(p.scopes ?? []).join(' ')}</code></div>
               </div>
             )}
             {mine.length > 0 && (

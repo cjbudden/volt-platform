@@ -36,6 +36,11 @@ export interface AccessApi {
   level: (feature: string) => AccessLevel
   /** Owner or admin tier: full access, and the only tiers that may mint account secret keys. */
   isAdminTier: boolean
+  /** Whoever runs the Volt deployment (a system administrator, or the owner on a
+   *  single-client deployment): pages may name the server's settings and
+   *  machines. Everyone else is told their Volt provider sets it up. The API
+   *  decides (`seesServerSetup` on /auth/me, services/serverSetup.ts). */
+  seesServerSetup: boolean
 }
 
 export function makeAccess(me: Me | null, loaded: boolean): AccessApi {
@@ -46,6 +51,7 @@ export function makeAccess(me: Me | null, loaded: boolean): AccessApi {
     level,
     can: (f, l) => RANK[level(f)] >= RANK[l],
     isAdminTier: me?.role === 'admin' || me?.role === 'owner',
+    seesServerSetup: !!(me as (Me & { seesServerSetup?: boolean }) | null)?.seesServerSetup,
   }
 }
 

@@ -30,10 +30,10 @@ Account owners use it to follow usage against their plan; operations staff use t
 
 1. Open **Admin** and choose **Fleet & Usage**.
 2. The tiles across the top: **Servers now** (with how many streams are running), **Billable today**, **Billable this month**, **All time** and **Not yet settled**.
-3. Under **Servers**, each card is one server: its type and where it runs, the number of your **Streams** on it, and **CPU**, **Memory** and **Network** in and out.
+3. Under **Servers**, each card is one server: a **Shared cloud server** (other customers' streams may run on it too), a **Cloud server for one stream** or an **On-premises server**, with its vCPUs, the number of your **Streams** on it, and **CPU**, **Memory** and **Network** in and out. On a Volt you run yourself, the account owner sees the machine type, zone and id instead.
 4. Where other customers' work shares the machine, **Streams** reads "1 of 9": yours of the machine's. The load figures are always the whole machine's, because that is what tells you whether it is coping.
 5. **Streams** on a card lists what of yours runs on it and how long each has been up; **Hide** closes the list.
-6. The line under each card says where the reading came from and how old it is. **reading is stale** means it is more than ten minutes old.
+6. The line under each card says how old the reading is, for example **Read 2m ago**. **reading is stale** means it is more than ten minutes old.
 
 The page reads again every 30 seconds; **Refresh** reads at once.
 
@@ -70,7 +70,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | You see | What it means | What to do |
 |---|---|---|
 | **No servers carrying your work** | Nothing of yours is running now | Servers appear once a channel, event or station is running |
-| **no reading** under CPU or Memory | The server could not be measured, which is not the same as idle | Look again shortly; if it stays, check [Monitoring](monitoring.md) |
+| **no reading** under CPU or Memory, and **no reading from this server yet** under the card | The server could not be measured, which is not the same as idle | Look again shortly; if it stays, check [Monitoring](monitoring.md) |
+| **no reading: a server for one stream has no machine figures to read** | A server that runs a single stream reports no machine load; this is expected, not a fault | Nothing to do; the stream's own health is on [Monitoring](monitoring.md) |
 | **reading is stale** | The last reading is more than ten minutes old | Choose **Refresh**; a server that stays stale may have lost contact |
 | **No usage recorded yet.** | No stream has run since metering began | Time appears once a stream has run |
 | **Couldn't refresh the fleet.** | The page could not reach Volt; the last figures stay shown | Choose **Retry** |

@@ -346,6 +346,11 @@ export default function App() {
     if (key === 'system') return !!me.platformRole
     // The audit log is for account administrators (owner, admin).
     if (key === 'audit') return access.isAdminTier
+    // Social accounts sits with the settings, but its list is read through
+    // /api/social, which is Media library & publishing. Offer it only to whom
+    // both answer, or a settings-only role opens a page that cannot load
+    // (build queue 1.14-G4a).
+    if (key === 'social') return access.can('settings', 'view') && access.can('vod', 'view')
     // The notices and errors reference page: anyone signed in (it calls no API).
     if (key === 'ui-samples') return true
     const f = NAV_FEATURE[key]
@@ -518,7 +523,6 @@ export default function App() {
       {navOpen && <div className="nav-scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />}
 
       <div className="main">
-        <IngestQueue />
         <div className="topbar">
           {/* THE TOP BAR IS FOR GLOBAL ACTIONS ONLY: search, uploads, notices, New
               Stream, sign out. The page names itself in its own title. */}
@@ -530,6 +534,9 @@ export default function App() {
           <div className="top-actions">
             {access.can('monitoring', 'view') && <OnAirButton />}
             <UploadIndicator />
+            {/* THE INGEST QUEUE lives in the bar, not floating over the page: as a fixed
+                pill at the bottom right it sat on top of drawer and table buttons. */}
+            <IngestQueue />
             <NotificationBell canManage={isAdmin} />
             {/* NEW STREAM asks which kind first (NewStreamChooser), then opens that form. */}
             {(access.can('channels', 'manage') || access.can('events', 'manage') || access.can('radio', 'manage')) && (

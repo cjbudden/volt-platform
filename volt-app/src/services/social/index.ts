@@ -40,16 +40,22 @@ const STATE_TTL_MIN = 10;
 const publicBase = () => config.publicBaseUrl.replace(/\/$/, '');
 export const callbackUrl = (p: PlatformId) => `${publicBase()}/api/social/callback/${p}`;
 
-export function platformStatus() {
+/**
+ * Which platforms can be linked here. `setup` adds what whoever runs the
+ * deployment needs to set one up (the token key, each platform's two settings,
+ * its redirect URL and permissions); an account user gets only whether each is
+ * ready, because they cannot act on the rest (services/serverSetup.ts).
+ */
+export function platformStatus(setup = true) {
   return {
-    tokenKeyConfigured: tokenKeyConfigured(),
-    callbackBase: `${publicBase()}/api/social/callback/`,
+    ...(setup ? { tokenKeyConfigured: tokenKeyConfigured(), callbackBase: `${publicBase()}/api/social/callback/` } : {}),
+    setupDetail: setup,
     platforms: PLATFORM_IDS.map((id) => {
       const p = PLATFORMS[id];
       return {
         id, label: p.label, accountNoun: p.accountNoun, configured: !!appCreds(p),
-        env: [p.env.id, p.env.secret], callbackUrl: callbackUrl(id),
-        limits: p.limits, privacy: p.privacy, scopes: p.scopes,
+        ...(setup ? { env: [p.env.id, p.env.secret], callbackUrl: callbackUrl(id), scopes: p.scopes } : {}),
+        limits: p.limits, privacy: p.privacy,
       };
     }),
   };

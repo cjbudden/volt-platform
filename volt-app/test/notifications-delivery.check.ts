@@ -131,7 +131,7 @@ const VIEWER = '0000000b-0000-0000-0000-0000000000e2';
   delete process.env.SMTP_URL;
   const u = await N.sendNotification({ accountId: ACC, topic: 't', recipients: ['ops@notify.example'], channels: ['email'], subject: 's', body: 'b' });
   const [ur] = await deliv(u.id);
-  truthy('email with no SMTP_URL is given up with a plain reason, not retried for ever', ur.gave_up_at && /not configured/.test(ur.last_error), JSON.stringify(ur));
+  truthy('email with no SMTP_URL is given up with a plain reason, not retried for ever', ur.gave_up_at && /not set up/.test(ur.last_error) && !/SMTP_URL/.test(ur.last_error), JSON.stringify(ur));
 
   smtp.close(); fcm.close(); await pool.end();
   console.log(`\n${pass} passed, ${fail} failed`);

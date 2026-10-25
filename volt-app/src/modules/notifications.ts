@@ -9,7 +9,8 @@ import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, conflict, forbidden } from '../util/http';
 import { ROLE_RANK, rankOf } from '../auth/roles';
-import { sendNotification, retryFailed, channelConfig, MAX_ATTEMPTS } from '../services/notifications';
+import { sendNotification, retryFailed, channelConfig, channelConfigForAccount, MAX_ATTEMPTS } from '../services/notifications';
+import { seesServerSetup } from '../services/serverSetup';
 import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 
 export const notificationsRouter = Router();
@@ -78,8 +79,8 @@ notificationsRouter.get('/', asyncHandler(async (req, res) => {
 }));
 
 /** Which channels can deliver here, and the retry policy. */
-notificationsRouter.get('/config', asyncHandler(async (_req, res) => {
-  res.json({ channels: channelConfig(), maxAttempts: MAX_ATTEMPTS, backoffMinutes: [1, 5, 15, 60] });
+notificationsRouter.get('/config', asyncHandler(async (req, res) => {
+  res.json({ channels: seesServerSetup(req) ? channelConfig() : channelConfigForAccount(), maxAttempts: MAX_ATTEMPTS, backoffMinutes: [1, 5, 15, 60] });
 }));
 
 /** Send a test to yourself on one channel. */

@@ -22,7 +22,7 @@ The bell at the top of every page is your own inbox: it shows a count of unread 
 
 ## Before you start
 
-- The console inbox always works. Email and device push are set up for your Volt deployment; a channel marked **Not set up** is not yet. Your Volt provider can switch them on.
+- The console inbox always works. Email and device push are set up for your Volt deployment; a channel marked **Not set up** says **Not set up yet. Your Volt provider sets this up.** Once email is on, its line names the address alerts are sent from. On a Volt you run yourself, the account owner sees the server settings behind each channel instead.
 - For push to reach you, sign in to the Volt management app on your phone and allow notifications.
 - Access: the page is open to every admin user; sending tests and retrying need an operator-tier role or above (see [Who can do it](#who-can-do-it)).
 
