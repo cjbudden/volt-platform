@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 320" width="1000" height="320" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Captions and graphics on a live stream</title>
+  <desc id="d">Admin, Captions sets the engine for the account and, for each output profile, whether its streams are captioned and in which languages. A channel group gives its channels and events that output profile, which is read when each stream starts. The stream then carries subtitle tracks to viewers. In Graphics, templates become setups that are assigned to a channel or event; operators take them on and off in live control or an event rundown, and the stream carries them to viewers as a player overlay or burned into the picture.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#8a93a6"/></marker>
+    <style>
+      .box text{fill:#ffffff}
+      .t{font-size:16px;font-weight:650}
+      .s{font-size:12.5px;opacity:.92}
+      .ln{fill:none;stroke:#8a93a6;stroke-width:2;marker-end:url(#a)}
+      .lb{fill:#8a93a6;font-size:12px}
+    </style>
+  </defs>
+  <!-- arrows first, so boxes sit on top -->
+  <path class="ln" d="M190 85 H287"/>
+  <text class="lb" x="200" y="77">engine and</text>
+  <text class="lb" x="200" y="104">languages</text>
+  <path class="ln" d="M460 85 H557"/>
+  <text class="lb" x="470" y="77">its profile,</text>
+  <text class="lb" x="470" y="104">read at start</text>
+  <path class="ln" d="M730 85 H827"/>
+  <text class="lb" x="740" y="77">subtitles and</text>
+  <text class="lb" x="740" y="104">graphics</text>
+  <path class="ln" d="M460 255 H557"/>
+  <text class="lb" x="470" y="247">assigned</text>
+  <text class="lb" x="470" y="274">setups</text>
+  <path class="ln" d="M645 210 V133"/>
+  <text class="lb" x="655" y="176">take on, take off</text>
+  <!-- boxes -->
+  <g class="box"><rect x="20" y="45" width="170" height="80" rx="10" fill="#5b4fd6"/><text class="t" x="35" y="77">Captions</text><text class="s" x="35" y="98">engine for the account</text><text class="s" x="35" y="115">languages per profile</text></g>
+  <g class="box"><rect x="290" y="45" width="170" height="80" rx="10" fill="#475569"/><text class="t" x="305" y="77">Channel Groups</text><text class="s" x="305" y="98">each group's</text><text class="s" x="305" y="115">output profile</text></g>
+  <g class="box"><rect x="560" y="45" width="170" height="80" rx="10" fill="#3f63e0"/><text class="t" x="575" y="77">Channels</text><text class="s" x="575" y="98">or Events</text><text class="s" x="575" y="115">the stream on air</text></g>
+  <g class="box"><rect x="830" y="45" width="150" height="80" rx="10" fill="#b45309"/><text class="t" x="845" y="77">Viewers</text><text class="s" x="845" y="98">subtitle tracks,</text><text class="s" x="845" y="115">overlays</text></g>
+  <g class="box"><rect x="290" y="215" width="170" height="80" rx="10" fill="#5b4fd6"/><text class="t" x="305" y="247">Graphics</text><text class="s" x="305" y="268">templates, setups,</text><text class="s" x="305" y="285">assignments</text></g>
+  <g class="box"><rect x="560" y="215" width="170" height="80" rx="10" fill="#0f766e"/><text class="t" x="575" y="247">Live control</text><text class="s" x="575" y="268">and event rundowns</text><text class="s" x="575" y="285">(operators)</text></g>
+</svg>

@@ -78,18 +78,18 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 
 ## The main flows
 
-These are the paths most work follows. Each will get its own step-by-step guide.
+These are the paths most work follows. Each has its own step-by-step guide.
 
 | Flow | Sections it passes through |
 |---|---|
-| **A 24/7 channel that never goes dark** | Channel Groups, Channels (primary and backup sources, failover), Loops & Fillers, Monitoring and Notifications |
-| **The guide drives recording and publishing** | EPG (the schedule), Recordings (what aired), Media Library (each programme as an asset), Publishing Rules and Social accounts (where it goes) |
-| **A live event from start to finish** | Events (schedule and window), EPG, Recordings, Review, Media Library (the replay), Analytics (who watched) |
-| **From upload to published** | Watchfolders or an upload, Ingest Rules, Content Types, Encoding Profiles, Media Library, Publishing Rules |
-| **A FAST channel from the library** | Media Library (the programmes), FAST (the run order), EPG (written for you) |
-| **A radio station with now playing** | Radio (the station and its log), EPG, Recordings |
-| **Captions and graphics on a live stream** | Captions (engine and languages), Channels or Events (turned on per stream), Graphics (templates and live control) |
-| **Securing a live stream** | Account settings and EPG (where it can be watched), API Keys & Apps (which apps can play it), Payments and Users & Roles (who can watch) |
+| [**A 24/7 channel that never goes dark**](../workflows/never-dark-channel.md) | Channel Groups, Channels (primary and backup sources, failover), Loops & Fillers, Monitoring and Notifications |
+| [**The guide drives recording and publishing**](../workflows/epg-record-publish.md) | EPG (the schedule), Recordings (what aired), Media Library (each programme as an asset), Publishing Rules and Social accounts (where it goes) |
+| [**A live event from start to finish**](../workflows/live-event.md) | Events (schedule and window), EPG, Recordings, Review, Media Library (the replay), Analytics (who watched) |
+| [**From upload to published**](../workflows/upload-to-published.md) | Watchfolders or an upload, Ingest Rules, Content Types, Encoding Profiles, Media Library, Publishing Rules |
+| [**A FAST channel from the library**](../workflows/fast-from-library.md) | Media Library (the programmes), FAST (the run order), EPG (written for you) |
+| [**A radio station with now playing**](../workflows/radio-now-playing.md) | Radio (the station and its log), EPG, Recordings |
+| [**Captions and graphics on a live stream**](../workflows/captions-graphics-live.md) | Captions (engine and languages), Channels or Events (turned on per stream), Graphics (templates and live control) |
+| [**Securing a live stream**](../workflows/secure-live-stream.md) | Account settings and EPG (where it can be watched), API Keys & Apps (which apps can play it), Payments and Users & Roles (who can watch) |
 
 Underneath every flow, **Dashboard**, **Live Streams** and **Multiview** show what is running, **Storage** and **Workflows** show what is being kept and done, and the **Audit log** records who changed what.
 

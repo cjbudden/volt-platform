@@ -73,7 +73,7 @@ In a programme's **Slot controls**:
 | Control | Choices |
 |---|---|
 | **Geo access for this period** | **Worldwide** (no extra limit), **Allow only listed countries** or **Block listed countries**, with two-letter country codes separated by commas (for example `AU, NZ`) |
-| **Replacement for this period** | **None** (air the live feed), **Slate image**, **Loop video** or **VOD asset**, then **Browse…** to pick it from the library, or paste its address. Viewers see it instead of the live feed for the slot |
+| **Replacement for this period** | **None** (air the live feed), **Slate image**, **Loop video** or **VOD asset**, then **Browse…** to pick it from the library, or paste its address. Viewers the slot's countries leave out are given a replacement instead of the live feed for the slot: today that is the stream's own filler (the slate or loop under **Filler on total loss**, played as a loop) |
 
 A programme's geo rule only narrows access further. It never opens up what the account or the stream already restricts ([Account settings](account-settings.md)).
 

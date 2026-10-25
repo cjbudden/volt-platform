@@ -49,7 +49,7 @@ Event managers and producers use it for anything that is not on around the clock
 ### After the event
 
 1. **Recordings** on the event's page lists what it recorded, with a link to clip it.
-2. With **Automatic VOD on end**, the full event is published to the Media Library when the recording closes, with the event's details carried over.
+2. With **Automatic VOD on end**, the full event arrives in the Media Library when the recording closes, with the event's details carried over. It is not published by itself: open it and choose **Publish** on its **Availability** tab.
 
 ### Find events
 

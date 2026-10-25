@@ -78,7 +78,7 @@ The **On channels and events** tab lists every assignment by stream, with **Take
 
 ### Run graphics live
 
-1. Choose **Live control** on a channel or event (from its graphics, or the **On channels and events** tab). **Open in its own window** pops it out beside the stream.
+1. Choose **Live control** on a channel or event (from its graphics, or the **On channels and events** tab). It opens in a window of its own, beside the stream. If your browser blocks the window, the page offers **Open in its own window**.
 2. Pick the **Channel or event**. Each graphic shows whether it is **On air** or on **Standby**.
 3. **TAKE ON** puts a graphic on screen; **On for 10 s**, **On for 15 s** or **On for 30 s** take it off again by themselves. For one that runs by rule, **Hold on screen** keeps it on until you take it off.
 4. Change values: **−** and **+** on a number take effect at once; after typing in a text field, choose **Update on air** (or **Discard**).

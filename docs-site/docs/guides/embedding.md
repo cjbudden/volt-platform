@@ -13,7 +13,7 @@ You can put any channel, event, on-demand asset or radio station on your own web
 The quickest way is to let Volt write the tag for you:
 
 - **Channels**: open the channel and choose **Embed player** (the icon next to Share).
-- **Events**: open the event and choose **Player**.
+- **Events**: open the event and choose the player icon (**Embed player: countdown, Buy when paid, then the live player**), or **Settings**, then **Player**.
 - **Radio stations**: use the station's **Player** setup page, which offers the audio skins.
 
 The embed builder lets you choose the skin, the app and its key (or create a key for this embed), your account branding or a colour, corners, autoplay, the schedule and start-over buttons, Chromecast, AirPlay, the checkout and sign-in pages for paid events, and the width. The preview is the real player in demo mode. For events you can preview each phase: countdown, paid, postponed, live and replay.

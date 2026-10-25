@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 285" width="1000" height="285" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">The guide drives recording and publishing</title>
+  <desc id="d">The EPG gives each programme its times and details, with Auto VOD on. Recordings holds what the channel aired. Each flagged programme becomes one asset in the Media Library, named from the guide. If the publishing rule asks for approval the asset waits in Review; then Publishing Rules send it to the catalogue, your apps and your social accounts, which receive it as a post.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#8a93a6"/></marker>
+    <style>
+      .box text{fill:#ffffff}
+      .t{font-size:16px;font-weight:650}
+      .s{font-size:12.5px;opacity:.92}
+      .ln{fill:none;stroke:#8a93a6;stroke-width:2;marker-end:url(#a)}
+      .lb{fill:#8a93a6;font-size:12px}
+    </style>
+  </defs>
+  <!-- arrows first, so boxes sit on top -->
+  <path class="ln" d="M280 85 H367"/>
+  <text class="lb" x="324" y="66" text-anchor="middle">programme</text>
+  <text class="lb" x="324" y="108" text-anchor="middle">times</text>
+  <path class="ln" d="M630 85 H717"/>
+  <text class="lb" x="674" y="66" text-anchor="middle">an asset for</text>
+  <text class="lb" x="674" y="108" text-anchor="middle">each one</text>
+  <path class="ln" d="M850 120 V160 H150 V197"/>
+  <text class="lb" x="500" y="153" text-anchor="middle">a built asset</text>
+  <path class="ln" d="M280 232 H367"/>
+  <text class="lb" x="324" y="213" text-anchor="middle">approved,</text>
+  <text class="lb" x="324" y="255" text-anchor="middle">or straight on</text>
+  <path class="ln" d="M630 232 H717"/>
+  <text class="lb" x="674" y="213" text-anchor="middle">a post</text>
+  <text class="lb" x="674" y="255" text-anchor="middle">per account</text>
+  <!-- boxes -->
+  <g class="box"><rect x="20" y="50" width="260" height="70" rx="10" fill="#5b4fd6"/><text class="t" x="36" y="80">EPG</text><text class="s" x="36" y="101">programmes, details, Auto VOD</text></g>
+  <g class="box"><rect x="370" y="50" width="260" height="70" rx="10" fill="#0f766e"/><text class="t" x="386" y="80">Recordings</text><text class="s" x="386" y="101">what the channel aired</text></g>
+  <g class="box"><rect x="720" y="50" width="260" height="70" rx="10" fill="#0f766e"/><text class="t" x="736" y="80">Media Library</text><text class="s" x="736" y="101">named and tagged from the guide</text></g>
+  <g class="box"><rect x="20" y="197" width="260" height="70" rx="10" fill="#0f766e"/><text class="t" x="36" y="227">Review</text><text class="s" x="36" y="248">only if the rule asks for approval</text></g>
+  <g class="box"><rect x="370" y="197" width="260" height="70" rx="10" fill="#b45309"/><text class="t" x="386" y="227">Publishing Rules</text><text class="s" x="386" y="248">where, until when, Auto-publish</text></g>
+  <g class="box"><rect x="720" y="197" width="260" height="70" rx="10" fill="#b45309"/><text class="t" x="736" y="227">Social accounts</text><text class="s" x="736" y="248">YouTube, Facebook, X, TikTok</text></g>
+</svg>

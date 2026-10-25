@@ -124,8 +124,21 @@ const baseCoverage = (over: any = {}) => ({
   }
   const roles = readFileSync(join(SITE, 'docs/getting-started/roles-and-access.md'), 'utf8');
   ok(roles.includes('| Graphics |') && roles.includes('**Graphics Operator**'), 'Roles and access lists the Graphics area and the Graphics Operator role');
+  // G5 (workflow guides) is done and required: eight workflows, each a page in
+  // the workflow template with its own diagram, linked from the map's flows.
+  ok(real.required.includes('G5'), 'G5 is a required batch');
+  ok(!real.gaps.some((g: any) => g.batch === 'G5'), 'nothing in G5 is left as a gap');
+  const flows = ['epg-record-publish', 'secure-live-stream', 'never-dark-channel', 'live-event', 'fast-from-library', 'radio-now-playing', 'captions-graphics-live', 'upload-to-published'];
+  for (const k of flows) {
+    const path = `workflows/${k}.md`;
+    const wf = coverage.workflows.find((x: any) => x.key === k);
+    ok(wf && wf.batch === 'G5' && wf.guides.includes(path), `${k} is mapped to ${path}`);
+    const page = readFileSync(join(SITE, 'docs', path), 'utf8');
+    ok(/^guide: workflow$/m.test(page) && page.includes(`](/img/flows/${k}.svg)`) && existsSync(join(SITE, 'static/img/flows', `${k}.svg`)), `${path} is a workflow guide showing its own diagram`);
+    ok(map.includes(`(../${path})`), `How Volt fits together links the ${k} flow`);
+    ok(!page.includes('\u2014'), `${path} has no em dashes`);
+  }
   // The batches not yet written still show as gaps.
-  ok(real.gaps.some((g: any) => g.key === 'epg-record-publish' && g.problems.includes('no guide')), 'a G5 workflow is listed as a gap with no guide');
   ok(real.gaps.some((g: any) => g.key === 'authentication' && /not in the developer template/.test(g.problems.join())), 'a G6 developer page is listed as having a guide not yet in the template');
   ok(!coverage.sections.some((s: any) => s.key === 'system' && !s.internal), 'System Admin is marked internal, not a customer gap');
   ok(real.total === real.inTemplate + real.gaps.length, `every entry is either covered or a gap (${real.inTemplate} + ${real.gaps.length} = ${real.total})`);
@@ -139,7 +152,7 @@ const baseCoverage = (over: any = {}) => ({
   ok(checkCoverage({ site: SITE, coverage: fewer, appSource }).errors.some((e: string) => e.includes('"FAST"')), 'a console section dropped from the map is an error');
   const stale = { ...coverage, sections: [...coverage.sections, { key: 'gone', label: 'Gone', batch: 'G1', guides: [] }] };
   ok(checkCoverage({ site: SITE, coverage: stale, appSource }).errors.some((e: string) => e.includes('no longer has')), 'a map entry for a section the console no longer has is an error');
-  ok(checkCoverage({ site: SITE, coverage: { ...coverage, required: [...coverage.required, 'G5'] }, appSource }).errors.some((e: string) => e.includes('no guide') && e.includes('required')), 'requiring G5 today fails on its gaps (its workflows have no guide)');
+  ok(checkCoverage({ site: SITE, coverage: { ...coverage, required: [...coverage.required, 'G6'] }, appSource }).errors.some((e: string) => e.includes('no guide') && e.includes('required')), 'requiring G6 today fails on its gaps (some developer topics have no guide)');
   // A G2 guide that loses a template heading fails the build again.
   const brokenSite = mkdtempSync(join(tmpdir(), 'cov-g2-'));
   for (const d of ['templates', 'docs/guides', 'docs/getting-started', 'docs/api']) mkdirSync(join(brokenSite, d), { recursive: true });
@@ -155,6 +168,9 @@ const baseCoverage = (over: any = {}) => ({
   const paymentsPath = join(brokenSite, 'docs/guides/payments.md');
   writeFileSync(paymentsPath, readFileSync(paymentsPath, 'utf8').replace('## Through the API', '## API'));
   ok(checkCoverage({ site: brokenSite, coverage, appSource }).errors.some((e: string) => e.includes('payments.md') && e.includes('Through the API')), 'a G4 guide that loses a template heading is an error');
+  const livePath = join(brokenSite, 'docs/workflows/live-event.md');
+  writeFileSync(livePath, readFileSync(livePath, 'utf8').replace('## The flow', '## Overview'));
+  ok(checkCoverage({ site: brokenSite, coverage, appSource }).errors.some((e: string) => e.includes('live-event.md') && e.includes('The flow')), 'a G5 workflow guide that loses its flow heading is an error');
   // A finished batch stays finished: drop a G1 guide from the map and the page
   // is reported as unlisted, and its section as having no guide.
   const dropped = { ...coverage, sections: coverage.sections.map((x: any) => x.key === 'fast' ? { ...x, guides: [] } : x) };

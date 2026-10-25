@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" width="1000" height="300" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">A FAST channel from the library</title>
+  <desc id="d">Packaged titles and series in the Media Library go into a FAST channel's run order. House spots, a slate and an ad server set on the Ads tab fill its ad breaks. Activating the run order writes the programmes and ad breaks to the channel's EPG, a week or more ahead. The playout plays that guide as a live HLS and DASH stream, and once the channel is made public on the On air tab, viewers get it through your apps, the Volt player and FAST platforms.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#8a93a6"/></marker>
+    <style>
+      .box text{fill:#ffffff}
+      .t{font-size:16px;font-weight:650}
+      .s{font-size:12.5px;opacity:.92}
+      .ln{fill:none;stroke:#8a93a6;stroke-width:2;marker-end:url(#a)}
+      .lb{fill:#8a93a6;font-size:12px}
+    </style>
+  </defs>
+  <!-- arrows first, so boxes sit on top -->
+  <path class="ln" d="M190 85 H247"/>
+  <text class="lb" x="200" y="74">titles</text>
+  <path class="ln" d="M420 85 H487"/>
+  <text class="lb" x="428" y="74">activate</text>
+  <path class="ln" d="M660 85 H727"/>
+  <text class="lb" x="670" y="74">guide</text>
+  <path class="ln" d="M815 120 V187"/>
+  <text class="lb" x="823" y="158">public on air</text>
+  <path class="ln" d="M335 200 V123"/>
+  <text class="lb" x="343" y="165">breaks filled</text>
+  <!-- boxes -->
+  <g class="box"><rect x="20" y="50" width="170" height="70" rx="10" fill="#0f766e"/><text class="t" x="35" y="80">Media Library</text><text class="s" x="35" y="101">titles and series</text></g>
+  <g class="box"><rect x="250" y="50" width="170" height="70" rx="10" fill="#3f63e0"/><text class="t" x="265" y="80">FAST</text><text class="s" x="265" y="101">the run order</text></g>
+  <g class="box"><rect x="250" y="200" width="170" height="70" rx="10" fill="#5b4fd6"/><text class="t" x="265" y="230">FAST: Ads</text><text class="s" x="265" y="251">house spots, slate, ads</text></g>
+  <g class="box"><rect x="490" y="50" width="170" height="70" rx="10" fill="#5b4fd6"/><text class="t" x="505" y="80">EPG</text><text class="s" x="505" y="101">written for you</text></g>
+  <g class="box"><rect x="730" y="50" width="250" height="70" rx="10" fill="#3f63e0"/><text class="t" x="746" y="80">FAST: On air</text><text class="s" x="746" y="101">plays the guide as HLS and DASH</text></g>
+  <g class="box"><rect x="730" y="190" width="250" height="80" rx="10" fill="#b45309"/><text class="t" x="746" y="218">Viewers</text><text class="s" x="746" y="239">your apps, the Volt player</text><text class="s" x="746" y="257">FAST platforms</text></g>
+</svg>

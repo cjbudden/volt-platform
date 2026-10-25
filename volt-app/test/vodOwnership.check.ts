@@ -47,6 +47,19 @@
     ok(JSON.stringify(reviewQ).includes(mine.id), 'review queue includes it');
     const mon = await fetch(`${base}/api/monitoring/overview`, { headers: H });
     ok(mon.status === 200, 'monitoring overview (QC and review counts) answers');
+    // Publishing resolves the asset's account too (build queue 1.14-G5: Publish
+    // and Remove access on an upload answered "Asset not found").
+    const { assetAccount } = await import('../src/services/availability');
+    const found = await assetAccount(mine.id);
+    ok(found?.accountId === acct, 'publishing resolves the upload to its own account');
+    ok((await assetAccount(theirs.id))?.accountId === other, "and another account's upload to that account");
+    ok((await fetch(`${base}/api/publishing-rules/resolve?assetId=${mine.id}`, { headers: H })).status === 200, 'its publishing plan can be resolved');
+    ok((await fetch(`${base}/api/publishing-rules/resolve?assetId=${theirs.id}`, { headers: H })).status === 404, "another account's plan: still 404");
+    const pub = await fetch(`${base}/api/vod/${mine.id}/publish`, { method: 'POST', headers: H, body: '{}' });
+    const pubBody = await pub.json().catch(() => ({})) as any;
+    ok(pub.status !== 404 && pubBody.code !== 'not_found', `Publish reaches the gate instead of "not found" (${pub.status} ${pubBody.code ?? pubBody.state ?? ''})`);
+    const wd = await fetch(`${base}/api/vod/${mine.id}/withdraw`, { method: 'POST', headers: H, body: '{}' });
+    ok(wd.status === 200, `Remove access works on it (${wd.status})`);
   } finally {
     await query(`DELETE FROM share_links WHERE resource_id = ANY($1)`, [[mine.id, theirs.id]]).catch(() => {});
     await query(`DELETE FROM vod_assets WHERE id = ANY($1)`, [[mine.id, theirs.id]]);

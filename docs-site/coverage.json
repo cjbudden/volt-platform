@@ -1,6 +1,6 @@
 {
   "_comment": "Which guide covers each part of Volt (build queue 1.14-G0). sections: every console nav item (scripts/check-coverage.mjs reads the nav from the console source and fails when one is missing here or listed here but gone). workflows: how sections work together. developer: the customer developer topics. pages: the cross-cutting pages. 'guides' are paths under docs/. 'batch' is the build-queue item that writes them; a batch listed in 'required' must have every entry covered by guides that follow the template, so each guides item adds its batch here when it is done. 'internal' entries are for Volt staff and never get a customer guide.",
-  "required": ["G0", "G1", "G2", "G3", "G4"],
+  "required": ["G0", "G1", "G2", "G3", "G4", "G5"],
   "templates": {
     "section": ["What it is for", "Before you start", "Step by step", "How it connects", "Who can do it", "Troubleshooting", "Through the API"],
     "workflow": ["What it is for", "Before you start", "The flow", "Step by step", "Who can do it", "Troubleshooting", "Through the API"],
@@ -47,14 +47,14 @@
     { "key": "system", "label": "System Admin", "internal": true, "why": "Volt staff only (platform administration); never shown to customers" }
   ],
   "workflows": [
-    { "key": "epg-record-publish", "title": "The guide drives recording and publishing", "batch": "G5", "guides": [] },
-    { "key": "secure-live-stream", "title": "Securing a live stream", "batch": "G5", "guides": [] },
-    { "key": "never-dark-channel", "title": "A 24/7 channel that never goes dark", "batch": "G5", "guides": [] },
-    { "key": "live-event", "title": "A live event from start to finish", "batch": "G5", "guides": [] },
-    { "key": "fast-from-library", "title": "A FAST channel from the library", "batch": "G5", "guides": [] },
-    { "key": "radio-now-playing", "title": "A radio station with now playing", "batch": "G5", "guides": [] },
-    { "key": "captions-graphics-live", "title": "Captions and graphics on a live stream", "batch": "G5", "guides": [] },
-    { "key": "upload-to-published", "title": "From upload to published", "batch": "G5", "guides": [] }
+    { "key": "epg-record-publish", "title": "The guide drives recording and publishing", "batch": "G5", "guides": ["workflows/epg-record-publish.md"] },
+    { "key": "secure-live-stream", "title": "Securing a live stream", "batch": "G5", "guides": ["workflows/secure-live-stream.md"] },
+    { "key": "never-dark-channel", "title": "A 24/7 channel that never goes dark", "batch": "G5", "guides": ["workflows/never-dark-channel.md"] },
+    { "key": "live-event", "title": "A live event from start to finish", "batch": "G5", "guides": ["workflows/live-event.md"] },
+    { "key": "fast-from-library", "title": "A FAST channel from the library", "batch": "G5", "guides": ["workflows/fast-from-library.md"] },
+    { "key": "radio-now-playing", "title": "A radio station with now playing", "batch": "G5", "guides": ["workflows/radio-now-playing.md"] },
+    { "key": "captions-graphics-live", "title": "Captions and graphics on a live stream", "batch": "G5", "guides": ["workflows/captions-graphics-live.md"] },
+    { "key": "upload-to-published", "title": "From upload to published", "batch": "G5", "guides": ["workflows/upload-to-published.md"] }
   ],
   "developer": [
     { "key": "apps-and-keys", "title": "Getting started with apps and keys", "batch": "G6", "guides": [] },

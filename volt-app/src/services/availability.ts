@@ -37,13 +37,18 @@ export class NotPublishable extends Error {
 /** Account id for an asset, through its owner's group. */
 export async function assetAccount(assetId: string): Promise<{ asset: any; accountId: string } | null> {
   const row = await one<any>(
-    `SELECT v.*, g.account_id AS _account
+    // An uploaded or watch-folder asset has no channel or event, so it
+    // belongs to its account directly (as in the library, vod.ts
+    // OWNER_ACCOUNT). Resolving through the group only made Publish and
+    // Remove access answer "Asset not found" for every upload (found
+    // walking the From upload to published guide, build queue 1.14-G5).
+    `SELECT v.*, COALESCE(g.account_id, v.account_id) AS _account
        FROM vod_assets v
        LEFT JOIN channels c ON c.id = v.channel_id
        LEFT JOIN events   e ON e.id = v.event_id
-       JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
+       LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
       WHERE v.id = $1`, [assetId]);
-  if (!row) return null;
+  if (!row || !row._account) return null;
   const { _account, ...asset } = row;
   return { asset, accountId: _account };
 }
