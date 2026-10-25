@@ -112,7 +112,8 @@ Edit the run order or the clock and Volt makes a draft; the channel keeps playin
 | Upload titles | Files, uploads & storage: Manage, and Account settings: Manage |
 | Set content type, series and episode | Media library & publishing: Manage |
 | See FAST channels, run orders and reports | TV channels: View |
-| Create a channel, build the run order, set ads, activate, make it public | A role of the Operator tier, with TV channels: View |
+| Activate a run order, make the channel public | TV channels: Operate |
+| Create a channel, build the run order, set ads | TV channels: Manage |
 | Read the guide Volt writes | EPG & schedules: View |
 | Change programmes by hand, set up XMLTV feeds | EPG & schedules: Manage |
 

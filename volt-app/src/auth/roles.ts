@@ -77,14 +77,26 @@ export interface FeatureDef {
   operateMeans?: string;
   /** Prefixes any signed-in user may READ (lookups the forms of other features need). */
   readOpen?: string[];
+  /** POSTs that change nothing (a dry-run plan): they need view, like a read. */
+  readWrites?: RegExp[];
 }
 
 const ID = '[^/]+';
 export const CATALOGUE: FeatureDef[] = [
   { key: 'monitoring', label: 'Live & monitoring', area: 'content', prefixes: ['/api/status', '/api/monitoring', '/api/timeline', '/api/live-streams'] },
-  { key: 'channels', label: 'TV channels', area: 'content', prefixes: ['/api/channels', '/api/daypart-presets'],
-    operate: [new RegExp(`^/api/channels/${ID}/(start|stop|air|auto-connect|test-stream|failover-test|reset-health)$`)],
-    operateMeans: 'Start/stop, on/off air, auto connect, test streams, clear QC' },
+  // FAST CHANNELS ARE TV CHANNELS (origin = 'playlist'), so /api/fast follows
+  // the same levels: the console already showed FAST to TV channels: View while
+  // the API let any signed-in user read it and any operator-tier role change it.
+  // Running a FAST channel (on/off air, activating a run order, deciding a
+  // break as the stitcher would) is operate; building one (create, run orders,
+  // ads, ad servers) is manage. A preview plans a window and writes nothing,
+  // so seeing the builder needs view only.
+  { key: 'channels', label: 'TV channels', area: 'content', prefixes: ['/api/channels', '/api/daypart-presets', '/api/fast'],
+    operate: [new RegExp(`^/api/channels/${ID}/(start|stop|air|auto-connect|test-stream|failover-test|reset-health)$`),
+      new RegExp(`^/api/fast/channels/${ID}/on-air$`), new RegExp(`^/api/fast/lineups/${ID}/activate$`),
+      new RegExp(`^/api/fast/channels/${ID}/breaks/${ID}/decide$`)],
+    readWrites: [new RegExp(`^/api/fast/lineups/${ID}/preview$`)],
+    operateMeans: 'Start/stop, on/off air, auto connect, test streams, clear QC, activate FAST run orders' },
   { key: 'radio', label: 'Radio stations', area: 'content', prefixes: ['/api/radio'],
     operate: [new RegExp(`^/api/radio/${ID}/(start|stop|air|auto-connect|clear-recovery)$`), /^\/api\/radio\/probe$/],
     operateMeans: 'Start/stop, on/off air, auto connect, clear recovery' },
@@ -287,6 +299,17 @@ export async function requirementFor(method: string, rawPath: string, body?: any
     }
   }
 
+  // AD BREAKS ON ANY STREAM (/api/fast/streams/<kind>/<id>/breaks). They live
+  // in the FAST router but belong to whatever stream they are on: an event's
+  // breaks are Events work and a station's are Radio work, not TV channels.
+  // Putting a break on air now (Go to break) or cancelling one is running the
+  // stream, so operate; listing them is view.
+  const brk = path.match(/^\/api\/fast\/streams\/([^/]+)\/([^/]+)\/breaks(\/[^/]+)?$/);
+  if (brk) {
+    const feature = brk[1] === 'event' ? 'events' : (await kindOf(brk[2])) === 'radio' ? 'radio' : 'channels';
+    return { features: [feature], level: write ? 'operate' : 'view', reason: feature };
+  }
+
   // Longest owning prefix wins (/api/epg/import before /api/epg, etc.).
   let best: FeatureDef | null = null;
   let bestLen = -1;
@@ -316,6 +339,7 @@ export async function requirementFor(method: string, rawPath: string, body?: any
     const open = (BY_KEY.get(best.key)?.readOpen ?? []).some((p) => path === p || path.startsWith(p + '/'));
     return { features: [feature], level: open ? 'none' : 'view', reason: open ? 'read-open lookup' : feature };
   }
+  if ((def.readWrites ?? []).some((rx) => rx.test(path))) return { features: [feature], level: 'view', reason: feature };
   // Operate patterns are checked on the feature that OWNS the path (channels'
   // patterns for a radio station reached through /api/channels/:id/start).
   const ops = [...(best.operate ?? []), ...(def.operate ?? [])];

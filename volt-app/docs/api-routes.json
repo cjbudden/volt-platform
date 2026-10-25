@@ -1714,7 +1714,7 @@
   "path": "/api/fast/ad-servers",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "any signed-in admin user",
+  "access": "channels: view",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1723,7 +1723,7 @@
   "path": "/api/fast/ad-servers",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: manage",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1732,7 +1732,7 @@
   "path": "/api/fast/ad-servers/:sid",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: manage",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1741,7 +1741,7 @@
   "path": "/api/fast/ad-servers/:sid",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: manage",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1750,7 +1750,7 @@
   "path": "/api/fast/ad-servers/:sid/test",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: manage",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1759,7 +1759,7 @@
   "path": "/api/fast/channels",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "any signed-in admin user",
+  "access": "channels: view",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1768,7 +1768,7 @@
   "path": "/api/fast/channels",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: manage",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1777,7 +1777,7 @@
   "path": "/api/fast/channels/:id",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "any signed-in admin user",
+  "access": "channels: view",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1786,7 +1786,7 @@
   "path": "/api/fast/channels/:id/ad-report",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "any signed-in admin user",
+  "access": "channels: view",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1795,7 +1795,7 @@
   "path": "/api/fast/channels/:id/ads",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "any signed-in admin user",
+  "access": "channels: view",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1804,7 +1804,7 @@
   "path": "/api/fast/channels/:id/ads",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: manage",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1813,7 +1813,7 @@
   "path": "/api/fast/channels/:id/breaks/:bid/beacons",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "any signed-in admin user",
+  "access": "channels: view",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1822,7 +1822,7 @@
   "path": "/api/fast/channels/:id/breaks/:bid/decide",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: operate",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1831,7 +1831,7 @@
   "path": "/api/fast/channels/:id/lineups",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: manage",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1840,7 +1840,7 @@
   "path": "/api/fast/channels/:id/on-air",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: operate",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1849,7 +1849,7 @@
   "path": "/api/fast/channels/:id/prepare",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: manage",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1858,7 +1858,7 @@
   "path": "/api/fast/channels/:id/readiness",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "any signed-in admin user",
+  "access": "channels: view",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1867,7 +1867,7 @@
   "path": "/api/fast/library",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "any signed-in admin user",
+  "access": "channels: view",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1876,7 +1876,7 @@
   "path": "/api/fast/lineups/:lid",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: manage",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1885,7 +1885,7 @@
   "path": "/api/fast/lineups/:lid",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "any signed-in admin user",
+  "access": "channels: view",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1894,7 +1894,7 @@
   "path": "/api/fast/lineups/:lid",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: manage",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1903,7 +1903,7 @@
   "path": "/api/fast/lineups/:lid/activate",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: operate",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1912,7 +1912,7 @@
   "path": "/api/fast/lineups/:lid/apply",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: manage",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1921,7 +1921,7 @@
   "path": "/api/fast/lineups/:lid/preview",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: view",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1930,7 +1930,7 @@
   "path": "/api/fast/streams/:kind/:id/breaks",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "any signed-in admin user",
+  "access": "channels: view",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1939,7 +1939,7 @@
   "path": "/api/fast/streams/:kind/:id/breaks",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: operate",
   "viewerTier": false,
   "group": "/api/fast"
  },
@@ -1948,7 +1948,7 @@
   "path": "/api/fast/streams/:kind/:id/breaks/:bid",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "operator tier or above",
+  "access": "channels: operate",
   "viewerTier": false,
   "group": "/api/fast"
  },

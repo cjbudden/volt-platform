@@ -28,6 +28,14 @@ at View. Nobody can give access they do not hold.
 View: see lists and pages. Operate: run (start, stop, on air, publish).
 Manage: create, edit, remove.
 
+FAST channels are TV channels (`origin = 'playlist'`), so `/api/fast` is
+under *TV channels*: reads and lineup previews need View; on and off air,
+activating a lineup and a test break decision need Operate; creating
+channels, lineups, ads, ad servers, prepare and apply need Manage. Ad
+breaks on a stream (`/api/fast/streams/<kind>/<id>/breaks`) follow the
+stream: TV channels, Radio stations or Events, View to list and Operate to
+add or cancel (build queue 1.14-G1b, `test/fast-access.check.ts`).
+
 | Area | System admin | Owner | Administrator | Event Manager | Radio Manager | Report & Analytics | System Viewer |
 |---|---|---|---|---|---|---|---|
 | Live & monitoring | Manage | Manage | Manage | View | View | View | View |

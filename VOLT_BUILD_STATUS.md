@@ -746,6 +746,18 @@ Open questions:
 - `docs/API_ROUTES.md`, `docs/api-routes.json` and `openapi.json` need regenerating for the six new routes (`npm run docs:routes`, `npm run docs:openapi`). Not done here because the hypermedia work has uncommitted changes in the same generated files. The route descriptions are in DESIGN_media_library.md section 7.
 - The app shell itself is not laid out for a phone (the sidebar stays open at 390 px). The library's own grid and filters wrap correctly inside it. (Done 23 Oct, build queue 1.14.)
 
+## 2026-10-25 - FAST access follows the TV channels levels (build queue 1.14-G1b, not yet released)
+
+What: `/api/fast` was outside the access catalogue, so any signed-in user could read FAST channels and any operator-tier role could create, change, activate and put them on air whatever their TV channels level, while the console showed FAST to TV channels: View.
+
+- **Gate** (`volt-app/src/auth/roles.ts`): `/api/fast` is a TV channels prefix. View: every read, and `POST /lineups/:lid/preview` (it plans a window and writes nothing; new `readWrites` list on a feature). Operate: `POST /channels/:id/on-air`, `POST /lineups/:lid/activate`, `POST /channels/:id/breaks/:bid/decide`. Manage: everything else (create, lineups, ads, ad servers and their test, prepare, apply). `/api/fast-playout` (ingest token) is not caught by the prefix.
+- **Breaks on any stream** (`/api/fast/streams/<kind>/<id>/breaks`): follow the stream, so an event is Events, a station is Radio stations, a TV or FAST channel is TV channels; View to list, Operate to add (Go to break) or cancel.
+- **Docs**: FAST guide and the FAST-from-the-library workflow guide access tables, `volt-app/docs/PERMISSIONS_MAP.md`, regenerated `API_ROUTES.md`, `api-routes.json`, `openapi.json` (only the FAST rows change).
+
+Checked: new `volt-app/test/fast-access.check.ts` **29/29** (every FAST route is listed with its level, so a new route without a decision fails; a role without TV channels gets 403 forbidden_feature on all 27 routes over HTTP; view, operate and manage roles are refused exactly below each route's level; viewer tier capped; event and station breaks follow Events and Radio). Without the change 13 of its assertions fail. Neighbours through `scripts/check.js` on a `git archive HEAD` copy plus this item: fast-lineup 57/57, fast-ads 48/48, fast-beacons 51/51, fast-graphics 15/15, fast 44/45 (the known time-dependent "the programme on air is left alone", which fails the same way on HEAD without this change), access-control 17/17, access-rules 28/28, custom-role 31/31, geo-access 15/15, tenancy 8/8, event-routes 29/29, graphics 120/120, hypermedia 57/57, kind-routing 14/14, live-streams-list 55/55, test/access/access-check.ts 52/52, docs-coverage 275/275, docs-samples 85/85, docs-session and docs.check.sh ok; coverage 55/55, scrub clean. Typechecks on the Mac: volt-app clean; volt-web has one error in `ChannelDetail.tsx` from other uncommitted work (no web file changed here).
+
+Not yet: the FAST pages do not hide Activate, On air or the editors from a role that only has View, so such a user sees the 403 message when they press one. Screenshots unchanged (no screen changed).
+
 ## 2026-10-25 - Console fixes from the live guides (build queue 1.14-G1a, not yet released)
 
 What: three small faults the 1.14-G1 guides ran into, plus one found while checking them.

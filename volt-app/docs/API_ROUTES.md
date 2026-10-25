@@ -446,33 +446,33 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
-| GET | `/api/fast/ad-servers` | admin session (Bearer) or account secret key | any signed-in admin user |  |
-| POST | `/api/fast/ad-servers` | admin session (Bearer) or account secret key | operator tier or above |  |
-| DELETE | `/api/fast/ad-servers/:sid` | admin session (Bearer) or account secret key | operator tier or above |  |
-| PUT | `/api/fast/ad-servers/:sid` | admin session (Bearer) or account secret key | operator tier or above |  |
-| POST | `/api/fast/ad-servers/:sid/test` | admin session (Bearer) or account secret key | operator tier or above |  |
-| GET | `/api/fast/channels` | admin session (Bearer) or account secret key | any signed-in admin user |  |
-| POST | `/api/fast/channels` | admin session (Bearer) or account secret key | operator tier or above |  |
-| GET | `/api/fast/channels/:id` | admin session (Bearer) or account secret key | any signed-in admin user |  |
-| GET | `/api/fast/channels/:id/ad-report` | admin session (Bearer) or account secret key | any signed-in admin user |  |
-| GET | `/api/fast/channels/:id/ads` | admin session (Bearer) or account secret key | any signed-in admin user |  |
-| PUT | `/api/fast/channels/:id/ads` | admin session (Bearer) or account secret key | operator tier or above |  |
-| GET | `/api/fast/channels/:id/breaks/:bid/beacons` | admin session (Bearer) or account secret key | any signed-in admin user |  |
-| POST | `/api/fast/channels/:id/breaks/:bid/decide` | admin session (Bearer) or account secret key | operator tier or above |  |
-| POST | `/api/fast/channels/:id/lineups` | admin session (Bearer) or account secret key | operator tier or above |  |
-| POST | `/api/fast/channels/:id/on-air` | admin session (Bearer) or account secret key | operator tier or above |  |
-| POST | `/api/fast/channels/:id/prepare` | admin session (Bearer) or account secret key | operator tier or above |  |
-| GET | `/api/fast/channels/:id/readiness` | admin session (Bearer) or account secret key | any signed-in admin user |  |
-| GET | `/api/fast/library` | admin session (Bearer) or account secret key | any signed-in admin user |  |
-| DELETE | `/api/fast/lineups/:lid` | admin session (Bearer) or account secret key | operator tier or above |  |
-| GET | `/api/fast/lineups/:lid` | admin session (Bearer) or account secret key | any signed-in admin user |  |
-| PUT | `/api/fast/lineups/:lid` | admin session (Bearer) or account secret key | operator tier or above |  |
-| POST | `/api/fast/lineups/:lid/activate` | admin session (Bearer) or account secret key | operator tier or above |  |
-| POST | `/api/fast/lineups/:lid/apply` | admin session (Bearer) or account secret key | operator tier or above |  |
-| POST | `/api/fast/lineups/:lid/preview` | admin session (Bearer) or account secret key | operator tier or above |  |
-| GET | `/api/fast/streams/:kind/:id/breaks` | admin session (Bearer) or account secret key | any signed-in admin user |  |
-| POST | `/api/fast/streams/:kind/:id/breaks` | admin session (Bearer) or account secret key | operator tier or above |  |
-| DELETE | `/api/fast/streams/:kind/:id/breaks/:bid` | admin session (Bearer) or account secret key | operator tier or above |  |
+| GET | `/api/fast/ad-servers` | admin session (Bearer) or account secret key | channels: view |  |
+| POST | `/api/fast/ad-servers` | admin session (Bearer) or account secret key | channels: manage |  |
+| DELETE | `/api/fast/ad-servers/:sid` | admin session (Bearer) or account secret key | channels: manage |  |
+| PUT | `/api/fast/ad-servers/:sid` | admin session (Bearer) or account secret key | channels: manage |  |
+| POST | `/api/fast/ad-servers/:sid/test` | admin session (Bearer) or account secret key | channels: manage |  |
+| GET | `/api/fast/channels` | admin session (Bearer) or account secret key | channels: view |  |
+| POST | `/api/fast/channels` | admin session (Bearer) or account secret key | channels: manage |  |
+| GET | `/api/fast/channels/:id` | admin session (Bearer) or account secret key | channels: view |  |
+| GET | `/api/fast/channels/:id/ad-report` | admin session (Bearer) or account secret key | channels: view |  |
+| GET | `/api/fast/channels/:id/ads` | admin session (Bearer) or account secret key | channels: view |  |
+| PUT | `/api/fast/channels/:id/ads` | admin session (Bearer) or account secret key | channels: manage |  |
+| GET | `/api/fast/channels/:id/breaks/:bid/beacons` | admin session (Bearer) or account secret key | channels: view |  |
+| POST | `/api/fast/channels/:id/breaks/:bid/decide` | admin session (Bearer) or account secret key | channels: operate |  |
+| POST | `/api/fast/channels/:id/lineups` | admin session (Bearer) or account secret key | channels: manage |  |
+| POST | `/api/fast/channels/:id/on-air` | admin session (Bearer) or account secret key | channels: operate |  |
+| POST | `/api/fast/channels/:id/prepare` | admin session (Bearer) or account secret key | channels: manage |  |
+| GET | `/api/fast/channels/:id/readiness` | admin session (Bearer) or account secret key | channels: view |  |
+| GET | `/api/fast/library` | admin session (Bearer) or account secret key | channels: view |  |
+| DELETE | `/api/fast/lineups/:lid` | admin session (Bearer) or account secret key | channels: manage |  |
+| GET | `/api/fast/lineups/:lid` | admin session (Bearer) or account secret key | channels: view |  |
+| PUT | `/api/fast/lineups/:lid` | admin session (Bearer) or account secret key | channels: manage |  |
+| POST | `/api/fast/lineups/:lid/activate` | admin session (Bearer) or account secret key | channels: operate |  |
+| POST | `/api/fast/lineups/:lid/apply` | admin session (Bearer) or account secret key | channels: manage |  |
+| POST | `/api/fast/lineups/:lid/preview` | admin session (Bearer) or account secret key | channels: view |  |
+| GET | `/api/fast/streams/:kind/:id/breaks` | admin session (Bearer) or account secret key | channels: view |  |
+| POST | `/api/fast/streams/:kind/:id/breaks` | admin session (Bearer) or account secret key | channels: operate |  |
+| DELETE | `/api/fast/streams/:kind/:id/breaks/:bid` | admin session (Bearer) or account secret key | channels: operate |  |
 
 ### `/api/files`
 

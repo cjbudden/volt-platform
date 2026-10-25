@@ -89,8 +89,13 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 
 | Task | Access needed |
 |---|---|
-| Open FAST and see channels, run orders and reports | TV channels: View |
-| Create a channel, edit the run order and ads, activate, put it on air | A role of the Operator tier |
+| Open FAST and see channels, run orders, previews and reports | TV channels: View |
+| Put a channel on or off air, activate a run order, test a break decision | TV channels: Operate |
+| Create a channel, edit run orders, ads and ad servers, prepare titles, write the guide again | TV channels: Manage |
+| Add or cancel an ad break on a FAST channel or live TV channel | TV channels: Operate |
+| Add or cancel an ad break on an event or a radio station | Events: Operate or Radio stations: Operate |
+
+FAST channels are TV channels, so FAST follows the TV channels level of your role. A role without TV channels does not see FAST and cannot use it through the API either. A role of the Viewer tier is held at View.
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).
 

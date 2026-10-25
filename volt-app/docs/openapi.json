@@ -11202,7 +11202,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view",
     "security": [
      {
       "adminBearer": []
@@ -11226,7 +11226,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: manage",
     "security": [
      {
       "adminBearer": []
@@ -11252,7 +11252,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: manage",
     "security": [
      {
       "adminBearer": []
@@ -11286,7 +11286,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: manage",
     "security": [
      {
       "adminBearer": []
@@ -11322,7 +11322,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: manage",
     "security": [
      {
       "adminBearer": []
@@ -11358,7 +11358,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view",
     "security": [
      {
       "adminBearer": []
@@ -11382,7 +11382,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: manage",
     "security": [
      {
       "adminBearer": []
@@ -11408,7 +11408,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view",
     "security": [
      {
       "adminBearer": []
@@ -11444,7 +11444,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "Over the last `days` (default 7, at most 90): decisions, paid fill, house and slate shares, ad server timeouts and errors, p95 answer time, the creatives offered, and `beacons`: what Volt reported to the ad servers for stitched breaks. Per event (`impression`, `start`, `firstQuartile`, `midpoint`, `thirdQuartile`, `complete`, VAST 4 `progress@` offsets) the number of ads that reached it and the tracking URLs answered (`sent`) or not (`failed`), with `impressions`, `completes` and `completionRate`. Beacons are sent server-side as each viewer's player reaches the moment, so a viewer who leaves halfway gives no complete.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "description": "Over the last `days` (default 7, at most 90): decisions, paid fill, house and slate shares, ad server timeouts and errors, p95 answer time, the creatives offered, and `beacons`: what Volt reported to the ad servers for stitched breaks. Per event (`impression`, `start`, `firstQuartile`, `midpoint`, `thirdQuartile`, `complete`, VAST 4 `progress@` offsets) the number of ads that reached it and the tracking URLs answered (`sent`) or not (`failed`), with `impressions`, `completes` and `completionRate`. Beacons are sent server-side as each viewer's player reaches the moment, so a viewer who leaves halfway gives no complete.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view",
     "security": [
      {
       "adminBearer": []
@@ -11480,7 +11480,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view",
     "security": [
      {
       "adminBearer": []
@@ -11514,7 +11514,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: manage",
     "security": [
      {
       "adminBearer": []
@@ -11550,7 +11550,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "For one break on a stitched FAST channel: per paid ad in the pod (`podIndex`, counting house spots and slate), per beacon event, how many viewer sessions reached it and how many tracking URLs were answered or failed; plus the latest 100 beacons with the tracker's host, its HTTP status and any error. A URL is sent once per viewer, never retried.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "description": "For one break on a stitched FAST channel: per paid ad in the pod (`podIndex`, counting house spots and slate), per beacon event, how many viewer sessions reached it and how many tracking URLs were answered or failed; plus the latest 100 beacons with the tracker's host, its HTTP status and any error. A URL is sent once per viewer, never retried.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view",
     "security": [
      {
       "adminBearer": []
@@ -11594,7 +11594,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: operate",
     "security": [
      {
       "adminBearer": []
@@ -11638,7 +11638,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: manage",
     "security": [
      {
       "adminBearer": []
@@ -11674,7 +11674,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: operate",
     "security": [
      {
       "adminBearer": []
@@ -11710,7 +11710,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: manage",
     "security": [
      {
       "adminBearer": []
@@ -11746,7 +11746,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view",
     "security": [
      {
       "adminBearer": []
@@ -11782,7 +11782,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view",
     "security": [
      {
       "adminBearer": []
@@ -11808,7 +11808,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: manage",
     "security": [
      {
       "adminBearer": []
@@ -11842,7 +11842,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view",
     "security": [
      {
       "adminBearer": []
@@ -11876,7 +11876,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: manage",
     "security": [
      {
       "adminBearer": []
@@ -11912,7 +11912,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: operate",
     "security": [
      {
       "adminBearer": []
@@ -11948,7 +11948,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: manage",
     "security": [
      {
       "adminBearer": []
@@ -11984,7 +11984,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view",
     "security": [
      {
       "adminBearer": []
@@ -12020,7 +12020,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: view",
     "security": [
      {
       "adminBearer": []
@@ -12062,7 +12062,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: operate",
     "security": [
      {
       "adminBearer": []
@@ -12106,7 +12106,7 @@
     "tags": [
      "Fast"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: operate",
     "security": [
      {
       "adminBearer": []
