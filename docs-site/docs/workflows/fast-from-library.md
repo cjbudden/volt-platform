@@ -70,7 +70,7 @@ The [FAST guide](../guides/fast.md#build-the-run-order) explains every slot and 
 1. Open **Ads** and choose **No ads**, **Ad markers for a FAST platform** or **Stitched ads from your ad server**.
 2. Set **How much and where** (for example **Ad load** in minutes per hour), or tick **Use the title's own break points**.
 3. Under **House spots and slate**, add spots with **+ Add a promo or sponsor spot** and choose a **Slate**. These fill every break nobody has sold, and every break when the ad server is slow or down.
-4. For stitched ads, the channel needs an ad server first. Today the console only shows the ad server form once **Stitched ads from your ad server** is chosen, and refuses that choice while the channel has no ad server ("Stitched ads need an ad server"). So add the first ad server through the API (`POST /api/fast/ad-servers` with its name, vendor, VAST tag URL and time budget) and set it on the channel (`PUT /api/fast/channels/{id}/ads` with `"mode": "stitched"` and its `adServerId`), or ask your Volt administrator to. After that, **Ads** shows the **Ad server** card: change it under **Ask**, add more with **+ Add ad server**, and choose how to **Decide**.
+4. For stitched ads, choose **Stitched ads from your ad server**. With no ad server yet, the **Ad server** card opens: enter its **Name**, **Vendor**, **VAST tag URL** and **Time budget** and choose **Add and use**. Stitched ads are saved with that server; until then the channel keeps its previous ad setting. Change the server later under **Ask**, add more with **+ Add ad server**, and choose how to **Decide**.
 
 Ad settings are saved as you change them. Break lengths reach the guide when you activate (step 4); on a channel already on air, choose **Rewrite guide** after changing them.
 
@@ -89,7 +89,7 @@ Activating also checks every title, house spot and slate the channel uses, and p
 1. Open **On air**. **Playout** shows the channel's state (**Playing**, **Starting**, **Not responding** or **Failed to start**), **Runs on**, **Last heard from**, **Restarts** and **Segments published**.
 2. **Media** lists every title, house spot and slate with **Ready**, **Preparing**, **Needs preparing** or **No source**. Choose **Prepare** (with the number) if any need preparing.
 3. When the playout is **Playing**, **Preview** plays the channel's own feed. Check it.
-4. Turn on **Public**. **The channel is public.** confirms it. Until then only the console can preview it.
+4. Turn on **Public**. **The channel is public.** confirms it. Until then only the console can preview it. **Public** can be turned on only with an active run order (step 4).
 
 The playout and the preview need a real deployment of Volt: the FAST playout runs there, on its own, for each channel with an active run order. If it stays on **Starting**, nothing is writing the channel yet.
 
@@ -129,7 +129,7 @@ An Owner or Administrator can run the whole flow. Otherwise a media librarian pr
 | **No series yet** under **Series** | No asset has a **Series** in its metadata | Set **Programme / episode** and fill in **Series**, **Season** and **Episode number** (step 1) |
 | **Activate and go on air** is greyed out | The run order has no slots | Add at least one title or series |
 | The activation message says programmes entered by hand overlap it | The channel's guide already had programmes in that time | Remove or move them in the channel's guide in EPG |
-| **Couldn't save.** "Stitched ads need an ad server" when choosing stitched ads | The channel has no ad server yet, and the console cannot add the first one | Add it through the API and set it on the channel (step 3), then choose stitched ads |
+| **Public** cannot be turned on; it reads **Activate the run order first** | The channel has no active run order, so it has nothing to play | Activate the run order, then turn on **Public** |
 | New ad settings are not in the guide | Break lengths reach the guide when it is written | Choose **Rewrite guide**, or activate the draft |
 | **Needs preparing** in **Media** | A title is not yet packaged for the channel | Choose **Prepare** |
 | **No source** in **Media** | The title's file is gone, so it cannot be prepared | Upload it again |
@@ -151,7 +151,7 @@ An Owner or Administrator can run the whole flow. Otherwise a media librarian pr
 | `POST /api/fast/lineups/{id}/activate` | Activates it and writes the guide |
 | `GET /api/epg?channelId={id}&from=…&to=…` | The programmes written to the guide |
 | `GET /api/fast/channels/{id}/readiness` | Whether each title, spot and slate is ready to air |
-| `POST /api/fast/channels/{id}/on-air` | Makes it public (`{"on": true}`) or private |
+| `POST /api/fast/channels/{id}/on-air` | Makes it public (`{"on": true}`, refused with 409 until a run order is active) or private |
 | `GET /api/fast/channels/{id}` | The channel, its playout and its public HLS and DASH addresses |
 
 ```bash

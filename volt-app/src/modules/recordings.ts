@@ -603,7 +603,12 @@ recordingsRouter.post(
         rec.thumb_status,
       ]
     );
-    res.status(201).json(row);
+    // Made from the finished recording, so ready now: its publishing rules
+    // decide whether it goes out by itself (build queue 1.14-G5a).
+    const { autoPublishWhenReady } = await import('../services/availability');
+    const autoPublish = await autoPublishWhenReady((row as any).id, 'full_event');
+    const out = autoPublish === 'skipped' ? row : await one(`SELECT * FROM vod_assets WHERE id = $1`, [(row as any).id]);
+    res.status(201).json({ ...(out as any), autoPublish });
   })
 );
 

@@ -237,6 +237,36 @@ export async function onDemandAccess(assetId: string, geo?: string, appId?: stri
 }
 
 /**
+ * THE OTHER TWO MOMENTS A RULE CAN PUBLISH (build queue 1.14-G5a). Auto-publish
+ * used to run only when a clip finished building, so two things its rules said
+ * should publish never did:
+ *   - an asset held for review: the build ran, the gate said "not approved",
+ *     and approving it later published nothing;
+ *   - a full-event replay (Automatic VOD on end, Publish full VOD): it is made
+ *     straight from the finished recording, with no build, so nothing asked.
+ *
+ * Only assets cut from a recording (clips and full-event replays), as before:
+ * whether finished uploads and watch folder files should publish themselves is
+ * Christian's call and is asked in the build queue. A clip that is still
+ * building is left to its build, which asks itself when the files exist.
+ * Never throws: a refusal or a failure leaves the asset for a person.
+ */
+export async function autoPublishWhenReady(assetId: string, why: 'approved' | 'full_event'): Promise<'published' | 'scheduled' | 'skipped'> {
+  try {
+    const a = await one<any>(`SELECT id, recording_id FROM vod_assets WHERE id = $1`, [assetId]);
+    if (!a?.recording_id) return 'skipped';
+    const building = await one<any>(
+      `SELECT 1 FROM jobs WHERE type = 'clip.extract' AND state IN ('queued', 'running')
+          AND payload->>'vodAssetId' = $1 LIMIT 1`, [assetId]);
+    if (building) return 'skipped';
+    return await autoPublishOnBuild(assetId);
+  } catch (e: any) {
+    console.warn(`[availability] auto-publish (${why}) failed for ${assetId}:`, e?.message ?? e);
+    return 'skipped';
+  }
+}
+
+/**
  * A freshly built asset publishes itself when its rules say so. Called by the
  * clip extract handler once the files exist. A refusal (the gate, a rule that
  * says manual) is not an error: it is logged and the asset waits for a person.

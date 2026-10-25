@@ -190,6 +190,38 @@ export async function registerFillerHandlers(): Promise<void> {
 export const FILLER_FIELDS = ['sources', 'outputLadder', 'inputFailoverEnabled', 'inputLossBehavior',
   'fillerSlateRef', 'fillerAssetId', 'watermark'];
 
+/**
+ * What the stream's loop would be built from, without building it: the slate
+ * image or loop video its filler settings name, or why there is none, plus the
+ * last build's state. The rights preview uses it to tell "set a slate or loop"
+ * apart from "it is set, the loop is just not built yet" (build queue 1.14-G5a:
+ * it said "Set a loop" to a stream that had a slate set).
+ */
+export async function fillerSource(kind: Kind, id: string): Promise<{
+  kind: 'image' | 'video' | null; reason: string | null; build: string | null; error: string | null;
+}> {
+  // Read from the stream's own settings, the same ones the orchestrator turns
+  // into the encoder's filler (loadContext): a filler asset (a loop is video,
+  // anything else an image), else the slate reference. Not through loadContext
+  // itself, which needs an output profile this answer does not.
+  const row = await one<any>(
+    `SELECT o.input_failover_enabled, o.input_loss_behavior, o.filler_slate_ref, o.filler_build, fa.kind AS asset_kind
+       FROM ${kind === 'channel' ? 'channels' : 'events'} o LEFT JOIN filler_assets fa ON fa.id = o.filler_asset_id
+      WHERE o.id = $1`, [id]);
+  const build = row?.filler_build ?? null;
+  const st = { build: build?.status ?? null, error: build?.status === 'failed' ? (build.error ?? null) : null };
+  if (!row) return { kind: null, reason: `${kind} not found`, ...st };
+  if (!row.input_failover_enabled) return { kind: null, reason: 'input failover is off', ...st };
+  // As jobConfig.ts and fillerSpec above.
+  const loss = row.input_loss_behavior ?? 'slate';
+  if (loss !== 'slate' && loss !== 'vod_loop') return { kind: null, reason: `loss behaviour '${loss}' has no loop`, ...st };
+  const loop = row.asset_kind === 'loop';
+  const slate = (!!row.asset_kind && !loop) || !!row.filler_slate_ref;
+  if (loss === 'vod_loop' && loop) return { kind: 'video', reason: null, ...st };
+  if (slate) return { kind: 'image', reason: null, ...st };
+  return { kind: null, reason: 'no slate image or loop video has been added', ...st };
+}
+
 export async function fillerStatus(kind: Kind, id: string): Promise<any> {
   const row = await one<any>(`SELECT filler_build FROM ${kind === 'channel' ? 'channels' : 'events'} WHERE id = $1`, [id]);
   return row?.filler_build ?? null;

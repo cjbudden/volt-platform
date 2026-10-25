@@ -6,6 +6,17 @@ import { scaleConfig } from './scale/config';
 // smaller set of real connections, so this can stay modest per task.
 export const pool = new Pool({ connectionString: config.databaseUrl, max: scaleConfig.dbPoolMax });
 
+// AN IDLE CONNECTION THAT DIES MUST NOT TAKE THE API WITH IT. When the database
+// restarts, fails over or drops a connection, pg emits 'error' on the pool for
+// each idle client it loses. An 'error' event with no listener is thrown by
+// Node, so the whole process exited (seen three times in the container while
+// the database restarted). The pool has already discarded that client and
+// makes a new one on the next query; the queries in flight fail on their own
+// and are answered as errors. So: say what happened and carry on.
+pool.on('error', (e) => {
+  console.error('[db] lost an idle database connection; the pool will reconnect:', (e as any)?.message ?? e);
+});
+
 /** Simple query helper. */
 export async function query<T = any>(text: string, params: any[] = []): Promise<T[]> {
   const res = await pool.query(text, params);

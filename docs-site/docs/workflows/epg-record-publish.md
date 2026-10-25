@@ -122,7 +122,7 @@ Of the default roles, Owners and Administrators can do all of it. An Event Manag
 | **Expired** in the **VOD** column | The recording was removed at the end of **Keep recordings for** | Keep recordings longer, or convert sooner |
 | **VOD failed** | The asset could not be built from the recording | Open the programme and choose **Retry conversion** |
 | **REC** instead of **VOD** after it aired | **Auto VOD** was off for that slot | Open it and choose **Convert now** before the days shown run out |
-| The asset is **Not published** although the rule has **Auto-publish** | The publish gate held it (a review is required, or QC failed), or **Auto-publish** is not set on the rung that decides | Check **What a publish does for this item** on **Availability**; approve it in Review and choose **Publish** |
+| The asset is **Not published** although the rule has **Auto-publish** | The publish gate held it (a review is required, or QC failed), or **Auto-publish** is not set on the rung that decides | Check **What a publish does for this item** on **Availability**. Approve it in Review: with **Auto-publish** on, the approval publishes it; otherwise choose **Publish** |
 | **Publish to** reads **nowhere (publishing is a no-op)** | No publishing point is ticked on the rung that decides | Tick **Catalogue (portal)** or an account in the rule, and save |
 | A social post shows **Failed** | The platform refused it | Read its message in **History**, fix the post or reconnect the account in [Social accounts](../guides/social-accounts.md), then **Retry** |
 | The account cannot be picked in **Publish to social** | It says **reconnect needed** | Choose **Reconnect** in Social accounts and sign in again |

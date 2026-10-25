@@ -48,7 +48,7 @@ Administrators set the default; the people who run a channel, an event or the li
    | Field | Choices |
    |---|---|
    | **Publish to** | **Catalogue (portal)**, and each registered app and social account. With nothing ticked, publishing does nothing |
-   | **Auto-publish** | **Publish automatically once built and gated**, or leave it off to publish by hand |
+   | **Auto-publish** | **Publish automatically once built and gated**, or leave it off to publish by hand. It applies to clips and full-event replays made from recordings: a clip when it is built, or when it is approved if the gate requires a review; a replay as soon as it is made. Uploaded and watch folder files are published by hand |
    | **Available from** | **When published**, or **At a set time** with a date and time |
    | **Expires** | **Never**, **After a number of days** (counted from when it becomes available), or **On a date** |
    | **Access rules** | Rules by viewer location, explained below. With none, the simpler fields below decide |

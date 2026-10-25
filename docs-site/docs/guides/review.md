@@ -57,7 +57,7 @@ Editors, producers and whoever signs clips off before they go out use it.
 
 ### Publish an approved clip
 
-Publishing is not done here. Open the clip in the [Media Library](media-library.md), go to its **Availability** tab and choose **Publish**. Its **Review** column there shows **Approved**.
+If the clip's [publishing rule](publishing-rules.md) has **Auto-publish**, approving it publishes it straight away (a clip still being built is published when its build finishes). Otherwise publishing is not done here: open the clip in the [Media Library](media-library.md), go to its **Availability** tab and choose **Publish**. Its **Review** column there shows **Approved**.
 
 ## How it connects
 
@@ -99,7 +99,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 |---|---|
 | `GET /api/vod/review/queue` | The clips waiting: in review or with changes requested, oldest first |
 | `GET /api/vod/{id}/review` | One clip's state, QC findings, decisions and whether it may be published |
-| `POST /api/vod/{id}/review` | Moves it on: `{"to": "in_review"}`, `"approved"`, `"changes_requested"`, `"rejected"` or `"draft"`, with a `note` (required for anything but `in_review` and `approved`) |
+| `POST /api/vod/{id}/review` | Moves it on: `{"to": "in_review"}`, `"approved"`, `"changes_requested"`, `"rejected"` or `"draft"`, with a `note` (required for anything but `in_review` and `approved`). An approval answers with `autoPublish`: `published` or `scheduled` when the rule published it, `skipped` when it waits for someone |
 | `POST /api/vod/{id}/qc` | Runs QC again |
 
 This sends a clip for review, which puts it in the queue:

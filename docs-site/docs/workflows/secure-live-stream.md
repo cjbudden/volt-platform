@@ -93,7 +93,7 @@ A slot changes what viewers get only when it has a country list: viewers the lis
 
 **View as a viewer in** answers what the play gate allows; the **Rights preview** answers what the delivery network sends for the same viewer. Leave **Rights class** empty: every viewer is in the default class today, and Volt does not yet give viewers any other class.
 
-If the preview says **The loop for this stream is not built yet**, set a **Slate image** or **Loop video** under the channel's **Filler on total loss**: until it is built, viewers in a replaced window would get an error instead of the replacement.
+If the preview says the loop is not ready, it also says why. **The loop is built from this stream's slate image** (or loop video) **and is not ready yet**: nothing needs setting, it is built at the latest when the channel next runs. **No slate image or loop video**, or **input failover off**: set a **Slate image** or **Loop video** under the channel's **Filler on total loss**. Until the loop exists, viewers in a replaced window would get an error instead of the replacement.
 
 ### 5. Connect payments for premium access
 
@@ -143,7 +143,7 @@ Owners and Administrators can do all of it. A rights manager with EPG & schedule
 | Viewers told the content is not available in their region | A geo rule or a rights window keeps them out | Check with **View as a viewer in**: it names the layer. Change that layer, starting with the account rule |
 | **Blocked: an access rule** for a viewer who should get in | The access rules cover the channel but none matches where the viewer is | Add a rule for their country, or one for **WORLD** at the bottom |
 | The **Rights preview** says **Normal** in a country the programme should not reach | The programme has no country list, or the time checked is outside it | Set **Geo access for this period** on the programme; check the time with **Guide times** |
-| **The loop for this stream is not built yet** in the preview | A programme is replaced but the channel has no filler ready to show | Set a **Slate image** or **Loop video** under **Filler on total loss** in the channel's settings |
+| The preview says the loop is not ready | A programme is replaced but the channel's loop does not exist yet | If it says the loop is built from the slate or loop video, wait for the channel to run. If it says there is no slate or loop, or failover is off, set a **Slate image** or **Loop video** under **Filler on total loss** in the channel's settings |
 | **The variant service is off for this deployment** in the preview | Your deployment blocks replaced viewers instead of replacing | Expected until your Volt provider turns it on; viewers in that window are blocked |
 | **Enter a two-letter country code, or XX for a country the CDN cannot tell** | The country typed is not a code | Type a code such as `AU`, or `XX` for a viewer whose country is unknown |
 | A paying viewer cannot watch | The product's provider id does not match, or the webhook is not set up | Check **Products** and the webhook in Payments; grant the product by hand meanwhile |

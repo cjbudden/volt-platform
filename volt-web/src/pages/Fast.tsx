@@ -661,6 +661,10 @@ function AdsTab({ channelId, lib }: { channelId: string; lib: { assets: LibAsset
   const [report, setReport] = useState<AdReport | null>(null)
   const [test, setTest] = useState<AdTest | null>(null)
   const [adding, setAdding] = useState(false)
+  // Stitched chosen while the channel has no ad server yet. The API refuses
+  // stitched without one, so the choice is held here, the Ad server card opens
+  // and the mode is saved together with the server (build queue 1.14-G5a).
+  const [wantStitched, setWantStitched] = useState(false)
   const [srv, setSrv] = useState({ name: '', vendor: 'gam', tagTemplate: '', timeoutMs: 1500 })
   const load = () => { fastApi.ads(channelId).then(setAds).catch(() => {}); fastApi.adServers().then(r => setServers(r.items)).catch(() => {}); fastApi.adReport(channelId).then(setReport).catch(() => {}) }
   useEffect(load, [channelId])
@@ -690,7 +694,11 @@ function AdsTab({ channelId, lib }: { channelId: string; lib: { assets: LibAsset
         <div className="card-b">
           {MODES.map(([m, t, d]) => (
             <label key={m} className="toggle-row" style={{ cursor: 'pointer', alignItems: 'flex-start' }}>
-              <input type="radio" name="admode" checked={ads.mode === m} onChange={() => save({ mode: m })} style={{ marginTop: 3 }} />
+              <input type="radio" name="admode" checked={wantStitched ? m === 'stitched' : ads.mode === m} style={{ marginTop: 3 }}
+                onChange={() => {
+                  if (m === 'stitched' && !ads.adServerId) { setWantStitched(true); if (!servers.length) setAdding(true); return }
+                  setWantStitched(false); setAdding(false); save({ mode: m })
+                }} />
               <div><div className="tt">{t}</div><div className="td">{d}</div></div>
             </label>
           ))}
@@ -742,9 +750,16 @@ function AdsTab({ channelId, lib }: { channelId: string; lib: { assets: LibAsset
         </div>
       </div>}
 
-      {ads.mode === 'stitched' && <div className="card">
-        <div className="card-h"><h3>Ad server</h3><span className="spacer" /><button className="btn ghost sm" onClick={() => setAdding(a => !a)}>{adding ? 'Cancel' : '+ Add ad server'}</button></div>
+      {(ads.mode === 'stitched' || wantStitched) && <div className="card" data-ad-server-card="">
+        <div className="card-h"><h3>Ad server</h3><span className="spacer" /><button className="btn ghost sm" onClick={() => {
+          // Cancelling the first ad server also drops the held Stitched choice: the channel keeps its saved mode.
+          if (adding && wantStitched && !servers.length) setWantStitched(false)
+          setAdding(a => !a)
+        }}>{adding ? 'Cancel' : '+ Add ad server'}</button></div>
         <div className="card-b">
+          {wantStitched && <div style={{ marginBottom: 12 }}><Notice kind="info" variant="compact" message={servers.length
+            ? 'Choose the ad server to ask, or add one. Stitched ads start once the channel has one.'
+            : 'Add your ad server to start stitched ads. Until then the channel keeps its current ad setting.'} /></div>}
           {adding ? (
             <>
               <div className="field"><label>Name</label><input className="inp" value={srv.name} onChange={e => setSrv({ ...srv, name: e.target.value })} placeholder="Google Ad Manager" /></div>
@@ -754,12 +769,15 @@ function AdsTab({ channelId, lib }: { channelId: string; lib: { assets: LibAsset
                 <div className="hintxt">Paste the vendor's tag. Volt fills [BREAK_DURATION], [BREAK_DURATION_MS], [POD_INDEX], [SESSION_ID], [CHANNEL_ID], [CONTENT_ID], [CONTENT_TITLE], [SERIES], [GENRE], [IP], [USER_AGENT], [COUNTRY], [CACHEBUSTING]; anything else is passed through untouched.</div></div>
               <div className="field"><label>Time budget</label><input className="inp" type="number" value={srv.timeoutMs} onChange={e => setSrv({ ...srv, timeoutMs: Number(e.target.value) })} style={{ width: 120 }} />
                 <div className="hintxt">Milliseconds for the whole answer, wrappers included. Past it, the break is house spots.</div></div>
-              <button className="btn primary" onClick={async () => { try { const s = await fastApi.addAdServer(srv); setAdding(false); setServers(x => [...x, s]); await save({ adServerId: s.id }) } catch (e: any) { notify({ kind: 'error', title: "Couldn't add it.", message: e.message }) } }}>Add and use</button>
+              <button className="btn primary" onClick={async () => { try { const s = await fastApi.addAdServer(srv); setAdding(false); setServers(x => [...x, s]); await save(wantStitched ? { mode: 'stitched', adServerId: s.id } : { adServerId: s.id }); setWantStitched(false) } catch (e: any) { notify({ kind: 'error', title: "Couldn't add it.", message: e.message }) } }}>Add and use</button>
             </>
           ) : (
             <>
               <div className="field"><label>Ask</label>
-                <select className="inp" value={ads.adServerId ?? ''} onChange={e => save({ adServerId: e.target.value || null })}>
+                <select className="inp" value={ads.adServerId ?? ''} onChange={e => {
+                  const id = e.target.value || null
+                  if (wantStitched && id) { save({ mode: 'stitched', adServerId: id }); setWantStitched(false) } else save({ adServerId: id })
+                }}>
                   <option value="">Choose an ad server</option>{servers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select></div>
               <div className="field"><label>Decide</label>
@@ -887,12 +905,16 @@ function AirTab({ channelId, hasActive, onAirChange }: { channelId: string; hasA
         <div className={`big-toggle${onAir ? '' : ' offair'}`}>
           <div className="txt">
             <div className="t">{onAir ? 'Public' : 'Private'}</div>
-            <div className="d">{onAir ? 'Viewers can play the channel from its public URL and the player.' : 'Only the console can preview it. Turn it on to give viewers the channel.'}</div>
+            <div className="d">{onAir ? 'Viewers can play the channel from its public URL and the player.'
+              : !hasActive ? 'Activate the run order first: until then the channel has nothing to play.'
+              : 'Only the console can preview it. Turn it on to give viewers the channel.'}</div>
           </div>
           {/* The spread first, so this control's own switch semantics win over
-              pressable's generic button role and label. */}
-          <div {...pressable(() => { if (!busy) toggle() })}
-            className={`switch${onAir ? '' : ' off'}`} role="switch" aria-checked={onAir} aria-label="Public" aria-disabled={!!busy}><i /></div>
+              pressable's generic button role and label. Public needs an active
+              run order (the API refuses it too); private is always allowed. */}
+          <div {...pressable(() => { if (!busy && (onAir || hasActive)) toggle() })}
+            className={`switch${onAir ? '' : ' off'}`} role="switch" aria-checked={onAir} aria-label="Public"
+            aria-disabled={!!busy || (!onAir && !hasActive)} data-needs-run-order={!onAir && !hasActive ? '' : undefined}><i /></div>
         </div>
       </div>
 

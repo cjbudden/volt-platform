@@ -138,6 +138,13 @@ fastRouter.post('/channels/:id/prepare', asyncHandler(async (req, res) => {
 fastRouter.post('/channels/:id/on-air', asyncHandler(async (req, res) => {
   const ch = await ownChannel(req, String(req.params.id));
   const on = req.body?.on === true;
+  // Public with nothing to play gave viewers an empty channel and counted
+  // public hours that aired nothing. A run order has to be active first;
+  // turning it private is always allowed (build queue 1.14-G5a).
+  if (on && !ch.on_air) {
+    const active = await one<any>(`SELECT 1 FROM fast_lineups WHERE channel_id = $1 AND status = 'active' LIMIT 1`, [ch.id]);
+    if (!active) throw conflict('Activate a run order before making the channel public: until then it has nothing to play.');
+  }
   // Through the air-session ledger like every other on-air switch, not a bare
   // UPDATE: a FAST channel's public hours otherwise never reached the
   // on-air totals and as-run reports (services/airSessions.ts).
@@ -374,7 +381,7 @@ fastRouter.put('/channels/:id/ads', asyncHandler(async (req, res) => {
   }
   if (b.mode === 'stitched' && !b.adServerId) {
     const cur = await one<any>(`SELECT ad_server_id FROM channel_ads WHERE channel_id = $1`, [ch.id]);
-    if (!cur?.ad_server_id) throw badRequest('Stitched ads need an ad server. Add one, or choose "Markers only" to let a FAST platform insert the ads.');
+    if (!cur?.ad_server_id) throw badRequest('Stitched ads need an ad server. Add one, or choose "Ad markers for a FAST platform" to let the platform that carries the channel insert the ads.');
   }
   // `enabled` follows the mode (off = no breaks) unless it is set on purpose
   const policy = b.policy ? (() => { const r: any = { ...resolveAdPolicy(b.policy), slateAssetId: b.policy.slateAssetId ?? null }; if (typeof b.policy.enabled !== 'boolean') delete r.enabled; return r; })() : null;

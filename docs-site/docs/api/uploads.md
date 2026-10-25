@@ -64,6 +64,8 @@ The answer to opening has the session `id`, its `token`, `chunkSize`, `chunkCoun
 
 **Finish** checks every chunk arrived, puts the file together and answers with its SHA-256 (compare it with your own) and what the ingest rules decided: `ingested`, or held as a `duplicate`, `awaiting_metadata` or `quarantined`. Finishing twice is harmless. A [webhook](webhooks.md) can tell your system the same thing.
 
+An ingested file is then encoded as a job. The asset's `encode_job_id` (on `GET /api/vod/{assetId}`) can be followed with `GET /api/jobs/{id}`: its progress while it runs, and the reason if it fails.
+
 ### 2. Resume after a dropped connection
 
 ```bash file=uploads/resume.sh

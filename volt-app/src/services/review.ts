@@ -79,6 +79,20 @@ export async function decide(d: ReviewDecision): Promise<any> {
     [d.assetId, d.to, d.actorId ?? null]
   );
   fireHook('review.decided', 'vod_asset', d.assetId, { from, to: d.to, overrodeQc: overrode });
+  // An approval is what a held asset was waiting for: if its rules publish
+  // automatically, they publish now (services/availability.ts). The answer
+  // carries the outcome and the asset as it stands after it, so the console
+  // shows "published" without a reload. Imported here, not at the top:
+  // availability imports this file for the publish gate.
+  if (d.to === 'approved') {
+    const { autoPublishWhenReady } = await import('./availability');
+    const autoPublish = await autoPublishWhenReady(d.assetId, 'approved');
+    if (autoPublish !== 'skipped') {
+      const fresh = await one<any>(`SELECT * FROM vod_assets WHERE id = $1`, [d.assetId]);
+      return { ...(fresh ?? updated), autoPublish };
+    }
+    return { ...updated, autoPublish };
+  }
   return updated;
 }
 

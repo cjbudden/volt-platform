@@ -33,7 +33,7 @@ export async function deriveEventVod(rec: any) {
   const ev = await one<any>(`SELECT name, schema_id, metadata FROM events WHERE id=$1`, [rec.event_id]);
   if (!ev) return null;
   const dur = Number(rec.duration_ms ?? 0);
-  return one(
+  const row = await one<any>(
     `INSERT INTO vod_assets(event_id, recording_id, kind, title, master_key,
                             start_epoch_ms, end_epoch_ms, duration_ms,
                             output_kind, formats, schema_id, metadata, thumb_status)
@@ -42,6 +42,10 @@ export async function deriveEventVod(rec: any) {
     [rec.event_id, rec.id, ev.name ?? 'Event recording', `${rec.master_key}/master.m3u8`, dur,
      JSON.stringify(formatsFor('manifest')), ev.schema_id ?? null, JSON.stringify(ev.metadata ?? {})]
   );
+  // The replay is the finished recording itself: there is no build to wait
+  // for, so the publishing rules are asked now (build queue 1.14-G5a).
+  if (row) await (await import('./availability')).autoPublishWhenReady(row.id, 'full_event');
+  return row;
 }
 
 export async function createClipVod(opts: {

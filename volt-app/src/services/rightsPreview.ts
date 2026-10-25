@@ -232,9 +232,14 @@ export async function rightsPreview(kind: Kind, id: string, accountId: string, a
 
   // Whether the replacement can be built: every window plays the stream's own pre-built loop.
   let loopReady: boolean | null = null;
+  // When it is not ready: what it would be built from (a slate image or a loop
+  // video) or why there is nothing to build it from, so the console says the
+  // right thing to fix.
+  let loopSource: Awaited<ReturnType<typeof import('./fillerPrep').fillerSource>> | null = null;
   if (decision === 'replace') {
     const { loadLoop } = await import('./variantManifest');
     loopReady = !!(await loadLoop(kind, id).catch(() => null));
+    if (!loopReady) loopSource = await (await import('./fillerPrep')).fillerSource(kind, id).catch(() => null);
   }
 
   let play: { hls: string; dash: string; expiresInSec: number } | null = null;
@@ -252,7 +257,7 @@ export async function rightsPreview(kind: Kind, id: string, accountId: string, a
     decision,
     /** the edge's own answer string: replace with no variant service is a block there */
     edge: edgeDecision(rules, ask.cc, ask.rc, at),
-    variant, variantService: variantServiceOn(), loopReady,
+    variant, variantService: variantServiceOn(), loopReady, loopSource,
     rule, until,
     play,
     windows: first.windows.map((w) => ({

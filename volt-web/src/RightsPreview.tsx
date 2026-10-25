@@ -27,6 +27,28 @@ const toLocalInput = (iso: string) => { const d = new Date(iso); return `${d.get
 const hm = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 const when = (iso: string) => new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })
 
+/** What the API says the loop would be built from when it is not ready (rightsPreview.ts loopSource).
+ *  Typed here rather than in api.ts so this fix stands on its own. */
+type LoopSource = { kind: 'image' | 'video' | null; reason: string | null; build: string | null; error: string | null }
+
+/**
+ * Why a replaced viewer would get an error, and what to do about it. It used to
+ * say "Set a loop" even when a slate was set, where there is nothing to set:
+ * the loop is built from the slate (build queue 1.14-G5a).
+ */
+function loopMessage(res: RightsPreviewResult): string {
+  const src = (res as RightsPreviewResult & { loopSource?: LoopSource | null }).loopSource ?? null
+  const harm = 'so for now this viewer would get an error instead of the replacement.'
+  if (src?.kind) {
+    const from = src.kind === 'image' ? "this stream's slate image" : "this stream's loop video"
+    if (src.build === 'failed') return `The loop is built from ${from}, and its last build failed${src.error ? ` (${src.error})` : ''}, ${harm} Check the slate or loop in the stream's filler settings.`
+    return `The loop is built from ${from} and is not ready yet, ${harm} Nothing needs setting: it is ready once it has been built, at the latest when the stream next runs.`
+  }
+  if (src?.reason?.startsWith('loss behaviour')) return `When its sources drop, this stream shows neither a slate nor a loop, so it has no loop to replace with, ${harm} Choose a slate image or loop video for source loss in the stream's filler settings.`
+  if (src?.reason === 'input failover is off') return `This stream has input failover off, so it has no loop to replace with, ${harm} Turn on failover and set a slate image or loop video in the stream's filler settings.`
+  return `This stream has no slate image or loop video to build the loop from, ${harm} Set one in the stream's filler settings.`
+}
+
 export function RightsPreview({ kind, id }: { kind: Kind; id: string }) {
   const [country, setCountry] = useState('')
   const [rc, setRc] = useState('')
@@ -117,7 +139,7 @@ export function RightsPreview({ kind, id }: { kind: Kind; id: string }) {
               {prog.replacement && <span>Replacement <b>{prog.replacement.title ?? prog.replacement.ref ?? prog.replacement.kind}</b> (plays the stream's own loop)</span>}
             </div>
           )}
-          {res.decision === 'replace' && res.loopReady === false && <div className="rp-err">The loop for this stream is not built yet, so this viewer would get an error instead of the replacement. Set a loop in the stream's filler settings.</div>}
+          {res.decision === 'replace' && res.loopReady === false && <div className="rp-err" data-loop-missing="">{loopMessage(res)}</div>}
           {res.decision === 'replace' && !res.variantService && <div className="rp-err">The variant service is off for this deployment, so the edge blocks this viewer instead of replacing ({res.edge}).</div>}
           {res.play && (
             <div className="rp-play">

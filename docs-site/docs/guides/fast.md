@@ -58,13 +58,13 @@ Programmers and channel managers use it.
    - **Stitched ads from your ad server**: Volt asks your ad server for each break and stitches the ads in for each viewer. House spots fill what the ad server does not, or if it is slow or down.
 2. Choose **How much and where**, or **Use the title's own break points**.
 3. Add **House spots, in rotation** and a **Slate**.
-4. For stitched ads, add the ad server (**Name**, **Vendor**, **VAST tag URL**, **Time budget**), choose **Add and use**, and choose how to **Decide**: **For each viewer** (targeted) or **Once per break for everyone** (cheapest).
+4. For stitched ads, choose **Stitched ads from your ad server**. If the channel has no ad server yet, the **Ad server** card opens: fill in **Name**, **Vendor**, **VAST tag URL** and **Time budget** and choose **Add and use**, which saves stitched ads with that server. If your account already has ad servers, pick one under **Ask** instead. Then choose how to **Decide**: **For each viewer** (targeted) or **Once per break for everyone** (cheapest).
 5. The report under it shows the last seven days: decisions, paid fill, impressions and completion.
 
 ### Put it on air
 
 1. Choose **Activate and go on air**. The programmes and ad breaks are written to the guide and the channel starts playing.
-2. Open **On air**. The channel starts **Private**: only the console can preview it. Turn it on to give viewers the channel.
+2. Open **On air**. The channel starts **Private**: only the console can preview it. Turn it on to give viewers the channel. It can be turned on only once a run order is active: before that the switch reads **Activate the run order first** and the channel has nothing to play.
 3. **Playout** shows where the channel runs, when it was last heard from, restarts and segments published. **Media** lists every title, house spot and slate it uses.
 
 ### Change a channel that is on air
@@ -121,7 +121,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `PUT /api/fast/lineups/{id}` | Saves a draft run order |
 | `POST /api/fast/lineups/{id}/preview` | The week a run order would make, without saving it |
 | `POST /api/fast/lineups/{id}/activate` | Activates it and writes the guide |
-| `POST /api/fast/channels/{id}/on-air` | Opens or closes it to viewers |
+| `POST /api/fast/channels/{id}/on-air` | Opens or closes it to viewers (opening needs an active run order, 409 otherwise) |
 | `PUT /api/fast/channels/{id}/ads` | Sets its ads |
 | `GET /api/fast/channels/{id}/ad-report` | Ad delivery for the last days |
 

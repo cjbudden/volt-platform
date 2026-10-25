@@ -19,15 +19,30 @@ jobsRouter.use(requireAuth);
 
 /**
  * Tenant scoping. A job carries a denormalised channel_id / event_id, and both
- * lead to an account through groups. A job with neither is platform-internal
- * and is not exposed here at all.
+ * lead to an account through groups. A job about a library asset that has no
+ * stream (an upload or a watch folder file being encoded) carries neither: it
+ * names the asset in its payload, and the asset belongs to its account
+ * directly (the same rule as the library, vod.ts OWNER_ACCOUNT). Without that
+ * second route `GET /api/jobs/{id}` answered 404 for the very job id the
+ * upload had just returned. A job with none of these is platform-internal and
+ * is not exposed here at all.
+ *
+ * The payload is only used to FIND the asset; the account comes from the
+ * asset row, never from the payload. The CASE guard keeps a payload that is
+ * not a uuid from failing the cast for the whole query (AND does not
+ * promise an order of evaluation; CASE does).
  */
 const OWNED = `
   FROM jobs j
   LEFT JOIN channels c ON c.id = j.channel_id
   LEFT JOIN events   e ON e.id = j.event_id
   LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
+  LEFT JOIN vod_assets va ON j.channel_id IS NULL AND j.event_id IS NULL
+        AND va.id = CASE WHEN j.payload->>'vodAssetId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                         THEN (j.payload->>'vodAssetId')::uuid END
 `;
+/** The job's account, through its stream or through its library asset. */
+const ACCOUNT = `COALESCE(g.account_id, va.account_id)`;
 
 // THE LIST STANDARD (util/listQuery.ts): search, filter on any column below,
 // sort, page. The console's old camelCase parameters still work as aliases.
@@ -44,7 +59,7 @@ const jobsList = defineList({
     channel_id: { sql: 'j.channel_id', type: 'uuid' },
     event_id: { sql: 'j.event_id', type: 'uuid' },
     correlation_id: { sql: 'j.correlation_id', type: 'uuid' },
-    source_name: { sql: 'COALESCE(c.name, e.name)', type: 'string', doc: 'Name of the channel or event' },
+    source_name: { sql: 'COALESCE(c.name, e.name, va.title)', type: 'string', doc: 'Name of the channel or event, or the title of the library asset' },
     created_at: { sql: 'j.created_at', type: 'timestamp', notNull: true },
     started_at: { sql: 'j.started_at', type: 'timestamp' },
     finished_at: { sql: 'j.finished_at', type: 'timestamp' },
@@ -65,9 +80,9 @@ jobsRouter.get('/', asyncHandler(async (req, res) => {
             j.attempts, j.max_attempts, j.last_error, j.error_code,
             j.channel_id, j.event_id, j.correlation_id,
             j.created_at, j.started_at, j.finished_at, j.run_after,
-            COALESCE(c.name, e.name) AS source_name
+            COALESCE(c.name, e.name, va.title) AS source_name
      ${OWNED}
-     WHERE g.account_id = $1${whereSql(pl)}
+     WHERE ${ACCOUNT} = $1${whereSql(pl)}
      ${pageSql(pl)}`,
     params
   );
@@ -77,7 +92,7 @@ jobsRouter.get('/', asyncHandler(async (req, res) => {
   if (pl.count) {
     const cp: unknown[] = [accountId(req)];
     const cpl = parseList(jobsList, { ...req.query, cursor: undefined, offset: undefined }, cp);
-    total = Number((await one<any>(`SELECT count(*)::int AS n ${OWNED} WHERE g.account_id = $1${whereSql(cpl)}`, cp))?.n ?? 0);
+    total = Number((await one<any>(`SELECT count(*)::int AS n ${OWNED} WHERE ${ACCOUNT} = $1${whereSql(cpl)}`, cp))?.n ?? 0);
   }
   res.json({ jobs: finishPage(req, res, pl, rows, total) });
 }));
@@ -85,8 +100,8 @@ jobsRouter.get('/', asyncHandler(async (req, res) => {
 /** One job with its full attempt history — what you need when it failed twice. */
 jobsRouter.get('/:id', asyncHandler(async (req, res) => {
   const job = await one<any>(
-    `SELECT j.*, COALESCE(c.name, e.name) AS source_name ${OWNED}
-      WHERE j.id = $1 AND g.account_id = $2`,
+    `SELECT j.*, COALESCE(c.name, e.name, va.title) AS source_name ${OWNED}
+      WHERE j.id = $1 AND ${ACCOUNT} = $2`,
     [req.params.id, accountId(req)]
   );
   if (!job) throw notFound('Job not found');
@@ -98,7 +113,7 @@ jobsRouter.get('/:id', asyncHandler(async (req, res) => {
 }));
 
 jobsRouter.post('/:id/retry', asyncHandler(async (req, res) => {
-  const job = await one<any>(`SELECT j.id, j.state ${OWNED} WHERE j.id=$1 AND g.account_id=$2`,
+  const job = await one<any>(`SELECT j.id, j.state ${OWNED} WHERE j.id=$1 AND ${ACCOUNT}=$2`,
     [req.params.id, accountId(req)]);
   if (!job) throw notFound('Job not found');
   const done = await retry(job.id);
@@ -107,7 +122,7 @@ jobsRouter.post('/:id/retry', asyncHandler(async (req, res) => {
 }));
 
 jobsRouter.post('/:id/cancel', asyncHandler(async (req, res) => {
-  const job = await one<any>(`SELECT j.id, j.state ${OWNED} WHERE j.id=$1 AND g.account_id=$2`,
+  const job = await one<any>(`SELECT j.id, j.state ${OWNED} WHERE j.id=$1 AND ${ACCOUNT}=$2`,
     [req.params.id, accountId(req)]);
   if (!job) throw notFound('Job not found');
   const done = await cancel(job.id);

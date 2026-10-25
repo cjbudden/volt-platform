@@ -185,8 +185,12 @@ function writeNav(k: string, v: string) { try { sessionStorage.setItem(k, v) } c
 
 export default function App() {
   const [authed, setAuthed] = useState(false)
-  const [email, setEmail] = useState('admin@rtm.example')
-  const [pw, setPw] = useState('volt1234')
+  // The demo sign-in is filled in for local development only (vite dev, where
+  // the demo seed's login is the one you want). A customer's console starts
+  // with an empty form: no demo address or password in what is shipped, and
+  // no prospect's name on the sign-in page (build queue 1.14-G5a).
+  const [email, setEmail] = useState(import.meta.env.DEV ? 'admin@rtm.example' : '')
+  const [pw, setPw] = useState(import.meta.env.DEV ? 'volt1234' : '')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [me, setMe] = useState<Me | null>(null)

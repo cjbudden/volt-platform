@@ -96,8 +96,8 @@ Details: [Review](../guides/review.md).
 ### 7. Publish the replay and the clips
 
 1. When the recording closes after the event, the full event appears in the **Media Library** with the event's name and details (with **Automatic VOD on end** on). Choose the **Event** chip to see the event's assets.
-2. Open the replay, go to **Availability** and choose **Publish**. The replay waits for you even when the rule has **Auto-publish**: it is published by hand.
-3. Do the same for each approved clip. A clip whose rule has **Auto-publish** and no review gate is published as soon as it is built.
+2. If the rule has **Auto-publish** and its gate lets it through, the replay is published as soon as it appears. Otherwise open it, go to **Availability** and choose **Publish**.
+3. A clip whose rule has **Auto-publish** is published as soon as it is built, or, when the rule requires a review, as soon as you approve it in step 6. Publish any other clip the same way as the replay.
 4. To post a clip or the replay to your social accounts, open its **History** tab and choose **Publish to social**.
 
 No replay? Turn on recording and **Automatic VOD on end** for the next event, and for this one open the recording and choose **Publish full VOD**. Details: [Media Library](../guides/media-library.md#publish-it-or-take-it-off-availability).
