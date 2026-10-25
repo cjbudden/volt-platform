@@ -138,8 +138,23 @@ const baseCoverage = (over: any = {}) => ({
     ok(map.includes(`(../${path})`), `How Volt fits together links the ${k} flow`);
     ok(!page.includes('\u2014'), `${path} has no em dashes`);
   }
-  // The batches not yet written still show as gaps.
-  ok(real.gaps.some((g: any) => g.key === 'authentication' && /not in the developer template/.test(g.problems.join())), 'a G6 developer page is listed as having a guide not yet in the template');
+  // G6 (developer guides) is done and required: every developer topic has a
+  // guide in the developer template, and its code comes from the tested sample
+  // files (docs-samples.check.ts runs them), never pasted into the page.
+  ok(real.required.includes('G6'), 'G6 is a required batch');
+  ok(!real.gaps.length, `no gaps are left in any batch (${real.gaps.map((g: any) => g.key).join(', ') || 'none'})`);
+  for (const d of coverage.developer) {
+    const templated = (d.guides as string[]).filter((g) => /^guide: developer$/m.test(readFileSync(join(SITE, 'docs', g), 'utf8')));
+    ok(d.batch === 'G6' && templated.length >= 1, `${d.key} has a developer guide (${templated.join(', ')})`);
+    for (const g of templated) {
+      const page = readFileSync(join(SITE, 'docs', g), 'utf8');
+      const fences = [...page.matchAll(/^```(\w+)([^\n]*)$/gm)];
+      const code = fences.filter((m) => /^(bash|sh|js|ts|html|python)$/.test(m[1]));
+      const pasted = code.filter((m) => !/\bfile=\S+/.test(m[2])).map((m) => m[0]);
+      ok(code.length > 0 && !pasted.length, `${g}: every code block is a tested sample file (${code.length})${pasted.length ? ': pasted ' + pasted.join(', ') : ''}`);
+      ok(!page.includes('\u2014'), `${g} has no em dashes`);
+    }
+  }
   ok(!coverage.sections.some((s: any) => s.key === 'system' && !s.internal), 'System Admin is marked internal, not a customer gap');
   ok(real.total === real.inTemplate + real.gaps.length, `every entry is either covered or a gap (${real.inTemplate} + ${real.gaps.length} = ${real.total})`);
 
@@ -152,7 +167,8 @@ const baseCoverage = (over: any = {}) => ({
   ok(checkCoverage({ site: SITE, coverage: fewer, appSource }).errors.some((e: string) => e.includes('"FAST"')), 'a console section dropped from the map is an error');
   const stale = { ...coverage, sections: [...coverage.sections, { key: 'gone', label: 'Gone', batch: 'G1', guides: [] }] };
   ok(checkCoverage({ site: SITE, coverage: stale, appSource }).errors.some((e: string) => e.includes('no longer has')), 'a map entry for a section the console no longer has is an error');
-  ok(checkCoverage({ site: SITE, coverage: { ...coverage, required: [...coverage.required, 'G6'] }, appSource }).errors.some((e: string) => e.includes('no guide') && e.includes('required')), 'requiring G6 today fails on its gaps (some developer topics have no guide)');
+  const noGuide = { ...coverage, developer: coverage.developer.map((d: any) => (d.key === 'uploads' ? { ...d, guides: [] } : d)) };
+  ok(checkCoverage({ site: SITE, coverage: noGuide, appSource }).errors.some((e: string) => e.includes('no guide') && e.includes('required')), 'a required developer topic that loses its guide is an error');
   // A G2 guide that loses a template heading fails the build again.
   const brokenSite = mkdtempSync(join(tmpdir(), 'cov-g2-'));
   for (const d of ['templates', 'docs/guides', 'docs/getting-started', 'docs/api']) mkdirSync(join(brokenSite, d), { recursive: true });

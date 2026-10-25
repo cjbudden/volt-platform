@@ -1,0 +1,24 @@
+<div id="p"></div>
+<script src="https://your-volt-host/player/volt-player.js"></script>
+<script>
+  VoltPlayer.registerSkin('acme', () => {
+    let title;
+    return {
+      mount(ctx) {
+        // Build your DOM in ctx.root, place ctx.stage (the picture), wire up ctx.commands
+        title = document.createElement('h2');
+        const play = document.createElement('button');
+        play.textContent = 'Play or pause';
+        play.onclick = () => ctx.commands.toggle();
+        ctx.root.append(title, ctx.stage, play);
+      },
+      update(state) {
+        // Change only what changed
+        const text = state.item?.title ?? state.status;
+        if (title.textContent !== text) title.textContent = text;
+      },
+    };
+  });
+
+  VoltPlayer.VoltPlayer.create({ el: '#p', skin: 'acme', appKey: 'pk_live_...', assetId: '<asset id>' });
+</script>

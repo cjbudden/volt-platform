@@ -22,14 +22,7 @@ The tag carries its own settings, so nothing is saved in Volt and two sites can 
 
 ## The tag
 
-```html
-<div data-volt-player
-     data-app-key="pk_live_..."
-     data-asset-id="<channel, event or VOD id>"
-     data-skin="video"
-     data-primary-color="#e11d48"></div>
-
-<script src="https://your-volt-host/player/volt-player.js"></script>
+```html file=player/tag.html
 ```
 
 The script takes the API address from where it was served, so there is nothing else to configure.
@@ -66,12 +59,7 @@ A publishable key works only on the domains listed against its app. Add yours in
 
 Every `[data-volt-player]` on the page is mounted once when the page loads. If your page adds players later (in a tab, a modal or an infinite scroll), call `VoltPlayer.scan()` and the new ones mount. Existing players are never mounted twice, so calling it again is safe.
 
-```html
-<script>
-  document.querySelector('#tab-2').addEventListener('shown', () => {
-    window.VoltPlayer.scan();
-  });
-</script>
+```html file=player/scan.html
 ```
 
 ## Autoplay

@@ -2,9 +2,23 @@
 title: Authentication
 sidebar_position: 2
 description: The credentials Volt uses, how to send them, how sign-in works, and quick-start examples.
+guide: developer
 ---
 
 # Authentication
+
+Every Volt request carries one credential: an admin session or your account secret key for the admin API, a publishable key (and, once someone signs in, a public user session) for the public API. This page lists them all and shows each sign-in flow working.
+
+## What it is for
+
+- Signing your staff in to tools you build on the admin API, including two-step sign-in.
+- Calling Volt from your own servers with the account secret key.
+- Letting your audience make accounts and sign in through your apps, or vouching for members who already sign in to your own site.
+
+## Before you start
+
+- An app and its publishable key, and an account secret key: see [Getting started with apps and keys](apps-and-keys.md).
+- `curl` and `jq` for the examples. Replace `https://your-volt-host` with your Volt address.
 
 ## Credentials
 
@@ -25,42 +39,27 @@ description: The credentials Volt uses, how to send them, how sign-in works, and
 - **Publishable keys are safe in public**, but only work on the domains, app bundle ids or IP ranges you allow for the app.
 - **Never send identity or entitlements in a public request body.** The public user's session decides who they are, which groups they are in and what they have paid for.
 
-## Quick start
+## Step by step
 
-### Admin: sign in and list channels
+### 1. Admin: sign in, use the session, refresh it
 
-```bash
-B=https://your-volt-host
-T=$(curl -s -X POST $B/api/auth/login -H 'content-type: application/json' \
-  -d '{"email":"admin@example.com","password":"your-password"}' | jq -r .access)
-curl -s $B/api/channels -H "authorization: Bearer $T"
+```bash file=authentication/admin-sign-in.sh
 ```
 
-### Your server: use the secret key
+From your own server you can skip sign-in and send the account secret key instead: `Authorization: Bearer sk_live_...`.
 
-```bash
-curl -s https://your-volt-host/api/channels -H "authorization: Bearer sk_live_..."
+### 2. Public: a viewer makes an account in your app and asks to play
+
+```bash file=authentication/viewer-sign-in.sh
 ```
 
-### Public: a viewer signs in through your app and asks to play
+Registering again with the same email is refused without saying whether the address has an account; use `POST /api/public/auth/login` with the same body to sign in. The `Origin` header is what a browser sends by itself: the publishable key only works on the sites its app allows.
 
-```bash
-PK=pk_live_...
-V=$(curl -s -X POST $B/api/public/auth/login -H 'content-type: application/json' \
-  -d "{\"appKey\":\"$PK\",\"email\":\"fan@example.com\",\"password\":\"your-password\"}" | jq -r .access)
-curl -s -X POST $B/api/public/availability -H "authorization: Bearer $V" -H 'content-type: application/json' \
-  -d "{\"appKey\":\"$PK\",\"assetId\":\"<channel, event or VOD id>\"}"
-```
+### 3. Your server: vouch for a member from your own sign-in system
 
-### Your server: vouch for a member from your own sign-in system
+If your members already sign in to your own site, your server can exchange that for a Volt public user session. The `groups` you send are what members-only rules check.
 
-If your members already sign in to your own site, your server can exchange that for a Volt public user session:
-
-```bash
-curl -s -X POST $B/api/public/auth/token-exchange -H "authorization: Bearer sk_live_..." \
-  -H 'content-type: application/json' \
-  -d '{"externalId":"crm-123","email":"member@example.com","groups":["members"]}'
-# -> {viewer, access, refresh}: hand access and refresh to your app
+```bash file=authentication/token-exchange.sh
 ```
 
 ## Admin sign-in
@@ -121,3 +120,16 @@ Before a player can play anything, it asks the play gate:
 | `POST /api/public/access/check {appKey, assetId}` | None | Yes or no answers for catalogue screens, without a token |
 
 The gate applies the asset's publishing rules, geo rules, schedule windows and access rules. The [player](../guides/player-sdk.md) does all of this for you.
+
+The [play gate guide](play-gate.md) covers the answers and the playback token in full.
+
+## Troubleshooting
+
+| Response | Means | Do |
+|---|---|---|
+| `401 Invalid email or password` | Wrong email or password, or the user is disabled | Check both; an administrator can re-enable the user |
+| `401` with code `mfa_required` on refresh | Your account started requiring two-step sign-in | Sign in again and set up a method |
+| `401 An account secret key is required` from token exchange | The request carried a publishable key, an admin session or nothing | Send `Authorization: Bearer sk_live_...` from your server |
+| `401 This session belongs to another account` at the play gate | A viewer session from one account with another account's key | Use the key of the app the viewer signed in to |
+| A refresh token is refused | It was already used once (refresh tokens rotate) or the session ended | Keep the newest pair from each refresh; sign in again if refused |
+| `429` | Too many sign-in attempts or codes | Wait, see [Errors and limits](errors.md) |

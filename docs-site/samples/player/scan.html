@@ -1,0 +1,11 @@
+<button id="show">Show the second player</button>
+<div id="tab-2"></div>
+<script src="https://your-volt-host/player/volt-player.js"></script>
+<script>
+  // A player added after the page loaded: scan() mounts it (and never mounts one twice)
+  document.querySelector('#show').addEventListener('click', () => {
+    document.querySelector('#tab-2').innerHTML =
+      '<div data-volt-player data-app-key="pk_live_..." data-asset-id="<channel, event or VOD id>"></div>';
+    window.VoltPlayer.scan();
+  });
+</script>

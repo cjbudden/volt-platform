@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="news.example.com">
+    <display-name>Example News</display-name>
+  </channel>
+  <channel id="radio.example.com">
+    <display-name>Example Radio</display-name>
+  </channel>
+  <programme start="20270302060000 +0000" stop="20270302070000 +0000" channel="news.example.com">
+    <title lang="en">Breakfast</title>
+    <desc lang="en">News, weather and sport.</desc>
+  </programme>
+  <programme start="20270302070000 +0000" stop="20270302080000 +0000" channel="news.example.com">
+    <title lang="en">Morning Briefing</title>
+  </programme>
+  <programme start="20270302060000 +0000" stop="20270302090000 +0000" channel="radio.example.com">
+    <title lang="en">Breakfast with Sam</title>
+  </programme>
+</tv>

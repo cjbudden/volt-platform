@@ -1,0 +1,19 @@
+<div id="player"></div>
+<script src="https://your-volt-host/player/volt-player.js"></script>
+<script>
+  VoltPlayer.VoltPlayer.create({
+    el: '#player',
+    appKey: 'pk_live_...',
+    assetId: '<asset id>',
+    // Protected streams: the licence server for each key system your content uses
+    drm: {
+      servers: {
+        'com.widevine.alpha': 'https://licence.example.com/widevine',
+        'com.microsoft.playready': 'https://licence.example.com/playready',
+      },
+      headers: { 'x-customer-tag': 'website' },
+    },
+    // Playback reporting is on by default. Name your app, so a bad release shows up in the reports.
+    cmcd: { app: 'Example website', appVersion: '4.2.0' },
+  });
+</script>

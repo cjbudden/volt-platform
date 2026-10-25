@@ -36,8 +36,7 @@ See [authentication](authentication.md) for every credential and how to send it.
 
 Send `Accept: application/ld+json` on a GET to receive the same data with links to related resources (JSON-LD with Hydra). Start at `GET /api`, then follow the links down to a resource, up to its parent, or across to its siblings, without building URLs yourself. Plain JSON is unchanged when you do not ask for it.
 
-```bash
-curl -s https://your-volt-host/api -H 'Accept: application/ld+json'
+```bash file=lists/follow-links.sh
 ```
 
 ## What each admin request needs

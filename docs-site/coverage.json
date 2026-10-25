@@ -1,6 +1,6 @@
 {
   "_comment": "Which guide covers each part of Volt (build queue 1.14-G0). sections: every console nav item (scripts/check-coverage.mjs reads the nav from the console source and fails when one is missing here or listed here but gone). workflows: how sections work together. developer: the customer developer topics. pages: the cross-cutting pages. 'guides' are paths under docs/. 'batch' is the build-queue item that writes them; a batch listed in 'required' must have every entry covered by guides that follow the template, so each guides item adds its batch here when it is done. 'internal' entries are for Volt staff and never get a customer guide.",
-  "required": ["G0", "G1", "G2", "G3", "G4", "G5"],
+  "required": ["G0", "G1", "G2", "G3", "G4", "G5", "G6"],
   "templates": {
     "section": ["What it is for", "Before you start", "Step by step", "How it connects", "Who can do it", "Troubleshooting", "Through the API"],
     "workflow": ["What it is for", "Before you start", "The flow", "Step by step", "Who can do it", "Troubleshooting", "Through the API"],
@@ -57,16 +57,16 @@
     { "key": "upload-to-published", "title": "From upload to published", "batch": "G5", "guides": ["workflows/upload-to-published.md"] }
   ],
   "developer": [
-    { "key": "apps-and-keys", "title": "Getting started with apps and keys", "batch": "G6", "guides": [] },
+    { "key": "apps-and-keys", "title": "Getting started with apps and keys", "batch": "G6", "guides": ["api/apps-and-keys.md"] },
     { "key": "authentication", "title": "Authentication", "batch": "G6", "guides": ["api/authentication.md"] },
     { "key": "lists-and-links", "title": "Lists and links", "batch": "G6", "guides": ["api/lists.md"] },
-    { "key": "play-gate", "title": "The play gate and playback tokens", "batch": "G6", "guides": [] },
+    { "key": "play-gate", "title": "The play gate and playback tokens", "batch": "G6", "guides": ["api/play-gate.md"] },
     { "key": "player-sdk", "title": "The player SDK and embedding", "batch": "G6", "guides": ["guides/player-sdk.md", "guides/embedding.md"] },
-    { "key": "playback-reporting", "title": "Playback reporting and the QoE API", "batch": "G6", "guides": [] },
-    { "key": "webhooks", "title": "Notifications and webhooks", "batch": "G6", "guides": [] },
-    { "key": "epg-api", "title": "Guide import (XMLTV) and the EPG API", "batch": "G6", "guides": [] },
-    { "key": "uploads", "title": "Uploads", "batch": "G6", "guides": [] },
-    { "key": "recipes", "title": "Recipes for common integrations", "batch": "G6", "guides": [] }
+    { "key": "playback-reporting", "title": "Playback reporting and the QoE API", "batch": "G6", "guides": ["api/playback-reporting.md"] },
+    { "key": "webhooks", "title": "Notifications and webhooks", "batch": "G6", "guides": ["api/webhooks.md"] },
+    { "key": "epg-api", "title": "Guide import (XMLTV) and the EPG API", "batch": "G6", "guides": ["api/epg-api.md"] },
+    { "key": "uploads", "title": "Uploads", "batch": "G6", "guides": ["api/uploads.md"] },
+    { "key": "recipes", "title": "Recipes for common integrations", "batch": "G6", "guides": ["api/recipes.md"] }
   ],
   "pages": [
     { "key": "how-volt-fits-together", "title": "How Volt fits together", "batch": "G0", "kind": "map", "guides": ["getting-started/how-volt-fits-together.md"] }

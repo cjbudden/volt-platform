@@ -19,6 +19,8 @@ import type * as Preset from '@docusaurus/preset-classic';
 import { themes as prismThemes } from 'prism-react-renderer';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+// Fills code blocks in the developer guides from the tested sample files.
+import includeSamples from './src/remark/include-samples.mjs';
 
 const SITE_URL = process.env.DOCS_SITE_URL ?? 'https://docs.volt.example';
 // Where "Back to Volt" and the sign-in page send people. Set per environment.
@@ -51,6 +53,7 @@ const config: Config = {
           routeBasePath: '/',
           sidebarPath: './sidebars.ts',
           showLastUpdateTime: false,
+          remarkPlugins: [includeSamples],
         },
         blog: {
           path: 'release-notes',

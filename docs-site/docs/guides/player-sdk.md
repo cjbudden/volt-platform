@@ -1,14 +1,15 @@
 ---
 title: Player SDK
 sidebar_position: 5
-description: Create and control the Volt web player from code, with skins, themes, playlists, the programme guide, casting and paid events.
+description: Create and control the Volt web player from code, with skins, themes, playlists, the programme guide, casting, paid events, DRM and playback reporting.
+guide: developer
 ---
 
 # Player SDK
 
 The Volt player is the same player everywhere Volt plays: your websites and apps, share links and the console. This page is for developers who want to create and control it from code. For a no-code tag, see [embed the player](embedding.md).
 
-## What it does
+## What it is for
 
 | Feature | Where it works |
 |---|---|
@@ -39,37 +40,30 @@ The Volt player is the same player everywhere Volt plays: your websites and apps
 
 The audio skins show, best first: the track now playing (with artwork), otherwise the programme on air, otherwise the item's own title and artwork.
 
-## Create a player
+## Before you start
+
+- An app for your website and its publishable key, with your site on its list: see [Getting started with apps and keys](../api/apps-and-keys.md). Never put a secret key (`sk_live_...`) in a page.
+- The ids of the channels, events or on-demand assets to play.
+- For paid or members-only content, your sign-in and checkout pages (see [the play gate](../api/play-gate.md)).
+
+Every example on this page is a complete page you can paste and run, with your own key, ids and host.
+
+## Step by step
+
+### Create a player
 
 Load the script, then create a player in an element:
 
-```html
-<div id="player"></div>
-<script src="https://your-volt-host/player/volt-player.js"></script>
-<script>
-  (async () => {
-    const player = await VoltPlayer.VoltPlayer.create({
-      el: '#player',
-      appKey: 'pk_live_...',
-      playlist: ['<asset id>', '<asset id>', 'https://cdn.example.com/promo/master.m3u8'],
-      epg: { channelId: '<channel id>' },
-      theme: { primary: '#e11d48', logoUrl: 'https://example.com/logo.png', upNextSeconds: 20 },
-      skin: 'video',
-      autoplay: true,
-      muted: true,
-    });
-
-    player.on('itemchange', ({ index }) => console.log('now playing item', index));
-    player.on('programmechange', (p) => console.log('programme', p));
-  })();
-</script>
+```html file=player/create-player.html
 ```
+
+The script takes the API address from where it was served, so `apiBase` is only needed when you serve the script from somewhere else.
 
 ### Options
 
 Everything is optional except `el`:
 
-`skin`, `theme`, `apiBase`, `appKey`, `source`, `item`, `playlist`, `startIndex`, `assetId`, `epg`, `stationId`, `autoplay`, `muted`, `poster`, `watermark`, `startAt`, `requestHeaders`, `beacons`, `cast` (`false`, or `{ receiverAppId }`), `airplay`, `media`, `strings` (your own translations), `demo`, `onEvent`, and for events `eventId`, `viewerToken`, `purchaseUrl` and `signInUrl`.
+`skin`, `theme`, `apiBase`, `appKey`, `source`, `item`, `playlist`, `startIndex`, `assetId`, `epg`, `stationId`, `autoplay`, `muted`, `poster`, `watermark`, `startAt`, `requestHeaders`, `beacons`, `cmcd`, `drm`, `debug`, `cast` (`false`, or `{ receiverAppId }`), `airplay`, `media`, `strings` (your own translations), `demo`, `onEvent`, and for events `eventId`, `viewerToken`, `purchaseUrl` and `signInUrl`.
 
 ### Events
 
@@ -81,11 +75,7 @@ A tag embed dispatches `volt-player-ready` on the page, with the player in `even
 
 `play`, `pause`, `toggle`, `seek`, `seekBy`, `goLive`, `startOver`, `setQuality`, `setTextTrack`, `setAudioTrack`, `setVolume`, `toggleMute`, `setRate`, `next`, `previous`, `playItem`, `cancelUpNext`, `toggleFullscreen`, `togglePip`, `cast`, `airplay`, `purchase`, `signIn`, `playReplay`, `refreshAccess`, and `setTheme`, `setViewerToken`.
 
-```js
-player.next();
-player.seek(120);
-player.setTheme({ radius: 0 });
-```
+The example above wires **Next** to `player.next()` and calls `player.setTheme(...)`; every command works the same way.
 
 ### State
 
@@ -112,20 +102,19 @@ Text on a colour is always black or white, whichever reads better. "Use account 
 
 A custom skin is a `mount` and an `update`. It is given state and commands, never the stream itself.
 
-```js
-VoltPlayer.registerSkin('acme', () => ({
-  mount(ctx) {
-    // Build your DOM in ctx.root, place ctx.stage (the picture), wire up ctx.commands
-  },
-  update(state) {
-    // Change only what changed
-  },
-}));
-
-VoltPlayer.VoltPlayer.create({ el: '#p', skin: 'acme', appKey: 'pk_live_...', assetId: '<asset id>' });
+```html file=player/custom-skin.html
 ```
 
 `VoltPlayer.kit` has the building blocks the built-in skins use: icons, buttons with tooltips, menus, sliders, auto-hide and time formatting. Pass `demo: { ... }` to render any state with no stream, which is handy while you design a skin.
+
+## Playback reporting and DRM
+
+```html file=player/drm-and-reporting.html
+```
+
+- **`drm`**: `servers` maps each key system to its licence server address (`com.widevine.alpha`, `com.microsoft.playready`, `org.w3.clearkey`), and `headers` are sent with every licence request. The player picks the system the device supports. FairPlay on Apple devices is not offered yet: Safari plays with its own player, without these settings.
+- **`cmcd`**: the player reports what the viewer saw in the CMCD v2 standard, on by default whenever there is an app key: a `CMCD` argument on every playlist and segment request (so the CDN logs carry it), and batched reports to Volt from the moment the play gate is asked. `app` and `appVersion` name your app in the reports; `false` turns reporting off. Read the results in **Analytics > Playback** or through the [QoE API](../api/playback-reporting.md).
+- The player's `sessionId` is this play attempt's id. The play gate, the viewer reports and the CDN logs all carry it, so one viewer's problem can be followed from end to end.
 
 ## Events: countdown, phases and paid access
 
@@ -154,3 +143,14 @@ The guide covers six hours back to 24 hours ahead and refreshes every few minute
 - **AirPlay**: uses Safari's picker.
 
 Both are off on private share links, so a private preview stays on the device it was opened on.
+
+## Troubleshooting
+
+| You see | Usually | Do |
+|---|---|---|
+| "This site is not on the app's allowed origins" | The page's site is not on the app's list | Add it in **API Keys & Apps**, including staging sites |
+| "This player key is not valid" | A revoked key, or a secret key pasted by mistake | Use the app's current `pk_live_...` key |
+| `VoltPlayer is not defined` | Your code ran before the script loaded | Put your code after the `<script src>` tag, or wait for `volt-player-ready` |
+| An `error` with `stage: 'autoplay-blocked'` | The browser blocked sound starting by itself | Start muted (`muted: true`) and let the viewer unmute |
+| A protected stream fails at the licence | No licence server for the device's key system, or the server refused | Add the key system to `drm.servers`; check the licence server's own logs |
+| `registerSkin` throws | The name is a built-in skin, or not 2 to 41 lowercase letters, digits, `-` or `_` | Pick another name |

@@ -110,6 +110,38 @@ Before a guide is published, walk every step it describes in the app on the
 docs demo (below). Anything that does not work as written is fixed if small,
 or queued as its own build item.
 
+### Code samples in the developer guides
+
+A developer guide never pastes code. Each example is a file in `samples/`
+(by topic: `samples/uploads/upload.sh`), and the guide shows it with an
+empty code block that names it:
+
+````md
+```bash file=uploads/upload.sh
+```
+````
+
+The build fills the block from the file and titles it with the file name
+(`src/remark/include-samples.mjs`); a missing file, or code typed into a
+block that names one, fails the build. The `docs-samples` check suite in the
+API runs every sample against a real API on a seeded database, the way a
+customer would (shell samples with `curl` and `jq`, `.mjs` with Node, player
+pages in Chromium), and checks what each one prints. So a change that breaks
+an example fails the checks, and the page always shows code that ran.
+
+Write samples with the placeholders customers replace, because the suite
+replaces exactly these: `https://your-volt-host`, `pk_live_...`,
+`sk_live_...`, `admin@example.com` and `your-password`, ids as
+`<channel id>`, `<asset id>` and the like. A new sample needs its own checks
+in the suite (it fails while a sample is not run, or not shown in a guide);
+a placeholder the suite does not know fails it too.
+
+```bash
+# volt-app, against a migrated and seeded database
+DATABASE_URL=... node scripts/check.js docs-samples
+SHOW_OUTPUT=1 DATABASE_URL=... npx tsx test/docs-samples.check.ts   # also prints each sample's output
+```
+
 ### Screenshots
 
 Never take them by hand. `screenshots.json` lists each one (console path, what

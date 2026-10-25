@@ -1,7 +1,8 @@
 ---
 title: Search, filter, sort and page
 sidebar_position: 3
-description: The one way every Volt list works, from recordings to users.
+description: The one way every Volt list works, from recordings to users, and how to follow links between records.
+guide: developer
 ---
 
 # Search, filter, sort and page
@@ -11,12 +12,18 @@ once and it applies to recordings, VOD assets, jobs, events, users and the rest.
 Each list's page in the [API reference](/api-reference) shows exactly which
 fields it can search, filter and sort on.
 
-## At a glance
+## What it is for
 
-```bash
-curl -s "https://your-volt-host/api/vod?q=evening%20news&published=true&created_at[gte]=2026-10-01&sort=-created_at&limit=50" \
-  -H "Authorization: Bearer $TOKEN" -D headers.txt
-```
+- Showing your catalogue, schedule or recordings in your own tools, filtered and sorted on the server.
+- Syncing Volt records into your own systems page by page, however many there are.
+- Building search boxes and filters that behave the same on every list.
+
+## Before you start
+
+- An account secret key or an admin session: see [Getting started with apps and keys](apps-and-keys.md).
+- `curl` and `jq` for the shell examples, Node 18 or later for the JavaScript one.
+
+## At a glance
 
 | Parameter | What it does | Example |
 |---|---|---|
@@ -31,6 +38,50 @@ curl -s "https://your-volt-host/api/vod?q=evening%20news&published=true&created_
 Field names are the names you see in the response, such as `created_at` or
 `channel_id`.
 
+## Step by step
+
+### 1. Filter, sort and read the first page
+
+```bash file=lists/filter-sort-page.sh
+```
+
+The first page has two assets, the headers say how many match in all and where the next page starts, and the second request with `cursor=` returns the rest:
+
+```text
+X-Total-Count: 3
+X-Next-Cursor: eyJmIjoiMEJhTmFTSnVZY09PIiwidiI6...
+```
+
+### 2. Read every page
+
+Follow the `Link` header until there is no `rel="next"`:
+
+```js file=lists/all-pages.mjs
+```
+
+### 3. When a request is not valid
+
+```bash file=lists/invalid-query.sh
+```
+
+### 4. Follow links instead of building addresses
+
+Ask for `application/ld+json` and every answer links to what is related: the entry point to each collection, a collection to its members, a record to its parent and to related records such as a channel's live status.
+
+```bash file=lists/follow-links.sh
+```
+
+```json
+{
+  "id": "https://your-volt-host/api/channels/0000000e-...",
+  "type": "volt:Channel",
+  "name": "Example News",
+  "status": "https://your-volt-host/api/status?channelId=0000000e-..."
+}
+```
+
+In this form a list is a `hydra:Collection` with `hydra:member` and `hydra:totalItems`. Plain JSON stays as it is when you do not ask for it.
+
 ## Operators
 
 | Operator | Means | Works on |
@@ -44,7 +95,7 @@ Field names are the names you see in the response, such as `created_at` or
 
 Combine as many as you need. They all have to match:
 
-```
+```text
 GET /api/jobs?state=failed,cancelled&type[ne]=thumbnail&created_at[gte]=2026-10-17T00:00:00Z&created_at[lt]=2026-10-18T00:00:00Z
 ```
 
@@ -56,7 +107,7 @@ lists, `true` or `false` for yes/no fields.
 
 Each response tells you whether there is more, in its headers:
 
-```
+```text
 Link: </api/vod?q=news&sort=-created_at&limit=50&cursor=eyJm...>; rel="next"
 X-Next-Cursor: eyJm...
 X-Page-Limit: 50
@@ -67,15 +118,7 @@ To get the next page, request the `Link` URL, or send the same request with
 cursor only works with the same search, filters and sort it came from, so the
 pages always belong to one consistent view, even while new records arrive.
 
-```js
-// Every failed job from the last day, page by page
-let url = '/api/jobs?state=failed&created_at[gte]=2026-10-17&limit=200'
-while (url) {
-  const res = await fetch(base + url, { headers: { Authorization: `Bearer ${token}` } })
-  handle(await res.json())
-  url = (res.headers.get('Link') ?? '').match(/<([^>]+)>;\s*rel="next"/)?.[1]
-}
-```
+The [Read every page](#2-read-every-page) example above does exactly this.
 
 Some lists also accept `offset` for jumping to a page number; their reference
 page says so. Prefer `cursor` everywhere else.
@@ -108,3 +151,12 @@ cursor from a different search. See [Errors and limits](errors.md).
 - Keep the cursor as an opaque value. Do not build or edit it.
 - Your account is never a filter: it comes from your credential, and you only
   ever see your own records.
+
+## Troubleshooting
+
+| Response | Means | Do |
+|---|---|---|
+| `400` with code `invalid_list_query` and `details.parameter` | A filter, sort field, operator or value the list does not support | Use one of the fields in `details.filterable` (or `sortable`) |
+| `400` about the cursor | The cursor came from a different search, filter or sort | Send the cursor with exactly the request it came from |
+| `400` about `limit` | Larger than the list allows (usually 200) | Ask for fewer and follow the cursor |
+| Square brackets in the URL are rejected by `curl` | `curl` treats `[...]` as a range | Use `curl -g`, or write `%5B` and `%5D` |
