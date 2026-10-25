@@ -105,11 +105,11 @@ current version is always the file in this repo.
 | **Run the whole app locally (Layer 1, native encoder)** | `bash run-on-mac.sh` → http://localhost:5173 (admin@rtm.example / volt1234) |
 | **Run with the Docker encoder (Layer 2, prod-parity ffmpeg incl. SRT)** | `ENCODER_MODE=docker bash run-on-mac.sh` |
 | **Reset the demo DB** | `RESET_DB=1 bash run-on-mac.sh` |
-| **Control plane only** | `cd volt-app && ./run-local.sh` |
-| **Encoder offline validation** | `cd volt-encoder && bash validate.sh` (HLS) · `bash validate-docker.sh` (ALL, incl. SRT) |
+| **Control plane only** | `cd volt-app && DATABASE_URL=postgres://volt:volt@localhost:5432/volt npx tsx src/index.ts` (keeps your data; `volt-app/dev/run-local.sh` is a legacy harness that drops the schema, see `volt-app/dev/README.md`) |
+| **Encoder offline validation** | `bash volt-encoder/dev/validate.sh` (HLS) · `bash volt-encoder/dev/validate-docker.sh` (ALL, incl. SRT) |
 | **Full media e2e** | `bash e2e/run-e2e.sh` |
 
-Encoder run details: `volt-encoder/RUN_LOCAL.md`. Quick-start narrative: `volt-app/TEST_TONIGHT.md`.
+Encoder run details: `volt-encoder/dev/RUN_LOCAL.md`. Quick-start narrative: `volt-app/TEST_TONIGHT.md`.
 
 ## Test base (what each test covers)
 
@@ -195,8 +195,8 @@ Run TS checks with `npx tsx <file>`; shell checks with `bash <file>` (most need 
 - `identity/identity-check.ts`, email change, mobile, two-step sign-in, account policy, resets, group renames (59 checks).
 
 **Encoder, `volt-encoder/`**
-- `validate.sh`, REAL encoder against a synthetic source (HLS path), offline.
-- `validate-docker.sh`, ALL encoder functions incl. **SRT ingest**, inside the Linux image.
+- `dev/validate.sh`, REAL encoder against a synthetic source (HLS path), offline.
+- `dev/validate-docker.sh`, ALL encoder functions incl. **SRT ingest**, inside the Linux image.
 - `synctest.sh <name> <seconds>`, **the caption-sync verdict**. Runs a real channel against
   a real live source, then measures in seconds how far the subtitles are from the words.
   Reports start-up, ingest health, clean stop, sync error, coverage, WER, and what a real

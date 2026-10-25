@@ -23,7 +23,6 @@ uses.
 ```bash
 cd volt-app
 export DATABASE_URL=postgres://volt:volt@localhost:5432/volt
-export JWT_ACCESS_SECRET=devsecret           # the test signing value the suites assume (below)
 node scripts/check.js                        # every suite, one at a time, each on its own database
 node scripts/check.js vod clip               # only suites whose file name contains vod or clip
 KEEP_DB=1 node scripts/check.js epg          # keep a failing suite's database to look at
@@ -50,13 +49,15 @@ What `volt-app/scripts/check.js` does, so you know what a result means:
 5. Prints one line per suite, the tail of each failure, and a total. The exit
    code is the number of failing suites.
 
-**Set `JWT_ACCESS_SECRET` for a full run.** Several suites sign their own
-access tokens with the test value `devsecret` unless `JWT_ACCESS_SECRET` is
-set, while the control plane's own default is different. The runner passes its
-environment to the control planes it starts, so exporting the value once makes
-both sides agree. Without it `auth-boundary`, `station-clear`,
-`timeline-grid`, `recordings-counts` and others fail with 401 answers that
-look like product faults.
+**One test signing secret.** Several suites sign their own access tokens
+with the test value `devsecret` unless `JWT_ACCESS_SECRET` is set, while the
+control plane's own default is different. The runner sets
+`JWT_ACCESS_SECRET=devsecret` and `JWT_REFRESH_SECRET=devrefresh` when they
+are not set and passes its environment to every suite and every control plane
+it starts, so both sides agree. Before 25 Oct 2026 a run with nothing set
+failed `auth-boundary`, `station-clear`, `timeline-grid`, `recordings-counts`
+and others with 401 answers that looked like product faults. A value you
+export yourself is kept.
 
 `SHARED_DB=1` runs everything on the one database in `DATABASE_URL`, the old
 way. Only use it to reproduce a suite that depends on another's leftovers.

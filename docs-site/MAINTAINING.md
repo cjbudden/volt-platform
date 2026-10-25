@@ -151,13 +151,28 @@ all from the running app. A guide shows one with
 `![What it shows](/img/screens/<name>.png)`, and the docs-coverage check suite
 fails if a guide shows a screenshot the manifest does not list.
 
+Two things the commands below need that a fresh checkout does not have:
+
+- **A social token key.** The docs seed links a sandbox social account, and
+  social tokens are stored encrypted, so `seed-docs.ts` stops without
+  `SOCIAL_TOKEN_KEY`. For a docs database any 32 bytes will do (64 hex
+  characters, for example from `openssl rand -hex 32`); give the API the same
+  value so Social accounts can read the account it shows.
+- **Playwright.** `docs-site` does not install it (the site build does not need
+  a browser). Install it for the session with `npm install --no-save playwright`
+  in `docs-site` and `npx playwright install chromium`, or point the script at
+  one you already have: `PLAYWRIGHT=/path/to/playwright/index.mjs` and, for a
+  browser of your own, `CHROMIUM=/path/to/chrome`.
+
 ```bash
+export SOCIAL_TOKEN_KEY=$(openssl rand -hex 32)   # any 32 bytes for a docs database
 # volt-app: a fresh demo account with neutral names (Example Broadcaster)
 DATABASE_URL=... npx tsx scripts/seed-docs.ts
-PORT=8080 npx tsx src/index.ts
+DATABASE_URL=... PORT=8080 npx tsx src/index.ts
 # volt-web
 npx vite --port 5173
-# docs-site: all shots, or name some
+# docs-site: once per checkout, then all shots, or name some
+npm install --no-save playwright && npx playwright install chromium
 npm run screenshots
 npm run screenshots -- audit-log
 ```

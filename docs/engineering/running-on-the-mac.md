@@ -29,7 +29,7 @@ It prints five steps and then the addresses:
 | 1 | checks the app is present |
 | 2 | checks Docker and starts it if it is installed but not running |
 | 3 | makes sure Postgres answers on :5432, starting a container if it has to |
-| 4 | loads the demo snapshot (`volt_web_demo.sql`) into a fresh database; an existing database is kept |
+| 4 | loads the demo snapshot (`volt_web_demo.sql`) into a fresh database; an existing database is kept. The snapshot is the RTM account, its admin login (the script prints it), two channel groups and two encoding profiles, with the migration ledger, so newer migrations apply on top. It has no channels |
 | 5 | starts the control plane on :8080, the Icecast relay on :8000 and the console on :5173 |
 
 Then it checks and builds the customer docs and serves them on :3000, so the
@@ -91,11 +91,14 @@ the build queue.
 - **API failed:** the script prints the last lines of
   `volt-app/origin/_control-plane.log`. A port already in use is freed for
   :8080 and :5173; anything else on :8000 that is not Icecast is named.
-- **API failed after a fresh load or `RESET_DB=1`:** at the time of writing
-  the demo snapshot predates the schema, so the migration runner stops at
-  `volt-app/migrations/0003_containers_dayparts.sql` ("column c.radio_config
-  does not exist").
-  An existing database is not affected. Queued as build item 1.14-G7a.
+- **API failed after a fresh load or `RESET_DB=1`:** the snapshot must carry
+  the migration ledger (`schema_migrations`). One without it (before 25 Oct
+  2026) stopped the runner in
+  `volt-app/migrations/0003_containers_dayparts.sql`. The check suite
+  `volt-app/test/mac-snapshot.check.sh` loads the snapshot the way the script
+  does and boots on it; when you regenerate the snapshot, dump a database the
+  migration runner has brought up to date (`pg_dump --no-owner --no-privileges`)
+  and run that suite.
 - **Stations have no MP3:** there is no Icecast relay, usually because Docker
   could not start. Stations still go on air over HLS and DASH.
 - **No subtitles on a captioned channel:** the start-up line for the captions

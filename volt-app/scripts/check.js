@@ -35,6 +35,7 @@ const { readdirSync, readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { spawnSync, spawn } = require('node:child_process');
 const { Client } = require('pg');
+const net = require('node:net');
 
 const ROOT = join(__dirname, '..');
 const DIR = join(ROOT, 'test');
@@ -45,6 +46,16 @@ const TEMPLATE = 'volt_check_template';
 
 const BASE_URL = process.env.DATABASE_URL;
 if (!BASE_URL) { console.error('set DATABASE_URL'); process.exit(1); }
+
+// ONE TEST SIGNING SECRET for the suites and the control planes they talk to.
+// Several suites sign their tokens with `devsecret` unless JWT_ACCESS_SECRET is
+// set, while the control plane falls back to its own development value, so a
+// plain run with nothing set failed six suites with 401s that were not product
+// faults. Every suite and every control plane started here inherits this
+// environment, so setting it once makes both sides agree. A value already set
+// by whoever runs the checks is kept.
+if (!process.env.JWT_ACCESS_SECRET) process.env.JWT_ACCESS_SECRET = 'devsecret';
+if (!process.env.JWT_REFRESH_SECRET) process.env.JWT_REFRESH_SECRET = 'devrefresh';
 
 /** Swap the database name in a connection string, keeping everything else. */
 function withDb(url, db) {
@@ -134,6 +145,29 @@ function needsApi(file) {
   return /process\.env\.API|\bAPI=|localhost:8080/.test(src);
 }
 
+/**
+ * A port nothing is listening on, starting at `from`.
+ *
+ * The runner used to start a suite's control plane on 8300 + its position, but
+ * several shell suites start their own on fixed ports in the same range
+ * (edit-audit on 8478, radio on 8490, ...) and leave it running with their own
+ * signing secret. The new control plane then could not bind, the health check
+ * was answered by the old one, and the suite failed with 401s against a
+ * database that was not its own (station-clear and timeline-grid in a full
+ * run, build queue 1.14-G7a). Probing first means /health is ours.
+ */
+function freePort(from) {
+  const tryPort = (p) => new Promise((res) => {
+    const srv = net.createServer();
+    srv.once('error', () => res(false));
+    srv.listen({ port: p }, () => srv.close(() => res(true)));
+  });
+  return (async () => {
+    for (let p = from; p < from + 500; p++) if (await tryPort(p)) return p;
+    throw new Error(`no free port from ${from}`);
+  })();
+}
+
 /** Start a control plane against `url` on `port`, and wait for it to answer. */
 async function startApi(url, port) {
   const proc = spawn(
@@ -194,10 +228,10 @@ async function startApi(url, port) {
     // fail on the state of somebody's afternoon.
     let api = null;
     let apiErr = '';
-    const port = 8300 + i;
+    let port = 8300 + i;
     if (!SHARED && needsApi(f)) {
       // eslint-disable-next-line no-empty
-      try { api = await startApi(url, port); }
+      try { port = await freePort(port); api = await startApi(url, port); }
       catch (e) { apiErr = String(e.message); }
     }
 

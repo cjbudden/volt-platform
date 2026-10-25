@@ -12,8 +12,10 @@ model, a React admin app, and runnable prototypes.
 - `volt-web/` - React + Vite admin app (channels, channel detail with live players,
   image library, settings).
 - `volt-encoder/` - encoder/packager: ingest relay + x264/Shaka transcode/package,
-  source failover, thumbnailer, status events, captions sidecar. Local run + test
-  tooling: `run-local.sh`, `validate.sh`, `validate-docker.sh` (see `RUN_LOCAL.md`).
+  source failover, thumbnailer, status events, captions sidecar. Encoder-only developer
+  harnesses, not used by the product: `volt-encoder/dev/run-local.sh`,
+  `volt-encoder/dev/validate.sh`, `volt-encoder/dev/validate-docker.sh` (see
+  `volt-encoder/dev/RUN_LOCAL.md`).
 - `packages/image-url/` - `@volt/image-url`, the dependency-free SDK that builds and signs image
   service URLs (copied from `volt-app/src/services/images/sdk.ts`).
 - `volt-frame-proto/` - prototype (frame-accurate media). `volt-image-proto/` - the superseded
@@ -29,7 +31,7 @@ model, a React admin app, and runnable prototypes.
 - `python3`.
 - `ffmpeg`. macOS: `brew install ffmpeg`. NOTE: to ingest real SRT feeds you need an
   ffmpeg built WITH SRT (`ffmpeg -protocols | grep -w srt`). HLS/RTMP pull sources work
-  on any ffmpeg. See `volt-encoder/RUN_LOCAL.md` for an SRT-enabled build.
+  on any ffmpeg. See `volt-encoder/dev/RUN_LOCAL.md` for an SRT-enabled build.
 - Shaka Packager: auto-downloaded on first encoder run; or `brew install --cask shaka-packager`.
 
 ## Run the full app locally (the development build)
@@ -104,9 +106,8 @@ user type: `volt-app/docs/PERMISSIONS_MAP.md`, and Admin > Permissions map in th
 ## Test cases
 Encoder pipeline (no cloud):
 ```bash
-cd volt-encoder
-bash validate.sh          # real encoder vs a synthetic source, HLS ingest, PASS/FAIL per function
-bash validate-docker.sh   # TEST ALL: HLS + SRT ingest inside the Linux runtime (needs Docker)
+bash volt-encoder/dev/validate.sh          # real encoder vs a synthetic source, HLS ingest, PASS/FAIL per function
+bash volt-encoder/dev/validate-docker.sh   # TEST ALL: HLS + SRT ingest inside the Linux runtime (needs Docker)
 ```
 Control plane + API:
 ```bash

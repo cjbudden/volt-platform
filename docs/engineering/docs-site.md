@@ -85,8 +85,11 @@ npm run screenshots                          # all of them
 npm run screenshots -- audit-log             # or name some
 ```
 
-The screenshot script imports `playwright` and launches its own browser. To
-use another copy, set `PLAYWRIGHT` to the path of that copy's index.mjs and `CHROMIUM`
+The screenshot script imports `playwright` and launches its own browser.
+`docs-site` does not install it (the site build needs no browser), so install
+it once per checkout with `npm install --no-save playwright` and
+`npx playwright install chromium` in `docs-site` (the same steps are in
+`docs-site/MAINTAINING.md`). To use another copy, set `PLAYWRIGHT` to the path of that copy's index.mjs and `CHROMIUM`
 to a browser binary.
 
 ## Publishing
