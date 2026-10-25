@@ -32,7 +32,7 @@ Programmers and channel managers use it.
 
 1. Open **FAST** in the sidebar and choose **New FAST channel** (or **New Stream > FAST channel**).
 2. Enter a **Name** and choose the **Channel type**: **Video** or **Audio**. It cannot be changed later.
-3. Choose the **Group** and the **Time zone**. The time zone is the guide's clock: rounding, the daily restart and prime time are worked out in it.
+3. Choose the **Group** and the **Time zone**. The time zone is the guide's clock: rounding, the daily restart and prime time are worked out in it. It starts on your browser's zone; **UTC** is first in the list.
 4. Choose **Create and build lineup**. The channel opens on its **Run order**, as a draft.
 
 ### Build the run order
@@ -41,7 +41,7 @@ Programmers and channel managers use it.
 2. For a title slot, add alternates that take turns, one per pass, or set it to air only every few passes.
 3. For a series slot, choose **Episodes each time**, **In episode order** or **Shuffled, no repeats**, and what happens at the last episode: **Start again from episode 1** or **Drop out**.
 4. Move, duplicate or remove slots to get the order you want.
-5. **What this run order does to a week** shows how long one pass is, how many passes air this week, when the next pass starts and how many minutes of ads an hour. Notices under it warn about things like a run order so short it repeats titles within a few hours.
+5. **What this run order does to a week** shows how long one pass is, how many passes air this week, when the next pass starts and how many minutes of ads an hour. Notices under it warn about things like a run order so short it repeats titles within a few hours. Until the run order has a slot, it only asks you to add titles or series.
 6. Under **Channel clock**, choose whether to **Restart the run order daily** at a fixed time, whether to **Round programmes up to** the hour, whether to **Rotate the run order each pass**, how far to **Keep the guide written ahead**, and what to play **when a title is outside its rights window**.
 7. Choose **Save draft** to keep your work. Nothing airs until you activate it.
 

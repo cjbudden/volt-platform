@@ -312,9 +312,17 @@ export function EventDrawer({ groups, event: ev, onClose, onDone }: {
     transcode: groups.find(g => g.workflow_type === 'transcode'),
     package_only: groups.find(g => g.workflow_type === 'package_only'),
   }), [groups])
-  const initType: 'transcode' | 'package_only' =
-    (ev && groups.find(g => g.id === ev.group_id)?.workflow_type === 'package_only') ? 'package_only' : 'transcode'
+  // A new event starts on a workflow the account can actually create: an
+  // account with only a packaging group used to land on Transcode and hear
+  // about it only when Create event failed.
+  const initType: 'transcode' | 'package_only' = ev
+    ? (groups.find(g => g.id === ev.group_id)?.workflow_type === 'package_only' ? 'package_only' : 'transcode')
+    : (!byType.transcode && byType.package_only ? 'package_only' : 'transcode')
   const [type, setType] = useState<'transcode' | 'package_only'>(initType)
+  // Groups can arrive after the form opens; until the user picks a workflow,
+  // follow them so the start is still one the account can create.
+  const [typePicked, setTypePicked] = useState(false)
+  useEffect(() => { if (!ev && !typePicked && groups.length) setType(initType) /* eslint-disable-next-line */ }, [groups, typePicked])
   const groupId = ev?.group_id ?? byType[type]?.id ?? ''
   const [purchasing, setPurchasing] = useState('spot_fallback')
   // schedule: on-air window + optional early server spin-up (input check time)
@@ -436,11 +444,19 @@ export function EventDrawer({ groups, event: ev, onClose, onDone }: {
           {!isEdit && (
             <div className="field"><label>Workflow</label>
               <div className="presets">
-                <Preset sel={type === 'transcode'} onClick={() => setType('transcode')} title="Transcode"
-                  desc="One source in. We build the ABR ladder with FFmpeg." meta="1 input → many outputs" />
-                <Preset sel={type === 'package_only'} onClick={() => setType('package_only')} title="Packaging"
-                  desc="You send a pre-encoded ladder; we just package it." meta="N inputs → N outputs" />
+                <Preset sel={type === 'transcode'} onClick={() => { setType('transcode'); setTypePicked(true) }} title="Transcode"
+                  desc="One source in. We build the ABR ladder with FFmpeg." meta={byType.transcode ? '1 input → many outputs' : 'no transcode group yet'} />
+                <Preset sel={type === 'package_only'} onClick={() => { setType('package_only'); setTypePicked(true) }} title="Packaging"
+                  desc="You send a pre-encoded ladder; we just package it." meta={byType.package_only ? 'N inputs → N outputs' : 'no packaging group yet'} />
               </div>
+              {/* Said where the workflow is chosen, as on the channel form, not after the whole form is filled in. */}
+              {!byType[type] && (
+                <div className="group-missing" role="status" style={{ marginTop: 10 }}>
+                  <strong>This account has no {type === 'transcode' ? 'transcode' : 'packaging'} group.</strong> An event goes into a group, and the group decides whether it is transcode or packaging.
+                  {' '}An account administrator adds one under Admin, Channel groups.
+                  {byType[type === 'transcode' ? 'package_only' : 'transcode'] && <> You can create a {type === 'transcode' ? 'packaging' : 'transcode'} event now.</>}
+                </div>
+              )}
             </div>
           )}
 

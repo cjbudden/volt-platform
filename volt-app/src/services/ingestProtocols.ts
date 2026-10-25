@@ -174,7 +174,8 @@ export const INGEST_PROTOCOLS: IngestProtocol[] = [
     id: 'icecast', label: 'Icecast / HTTP audio', ingest: 'pull',
     urlLabel: 'Stream URL (mount)',
     urlPlaceholder: 'https://ice.example.com/station-128-mp3',
-    urlExample: 'https://ice5.somafm.com/groovesalad-128-mp3',
+    // A neutral example: the form shows it to customers (it named a real station).
+    urlExample: 'https://radio.example.com/live-128-mp3',
     urlPattern: '^https?://',
     streamKey: { show: false },
     hint: 'Icecast / SHOUTcast mount or any HTTP MP3/AAC stream. We negotiate ICY metadata, so now-playing titles are captured into the timed metadata log.',

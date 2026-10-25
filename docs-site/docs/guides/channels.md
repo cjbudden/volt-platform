@@ -40,6 +40,9 @@ A channel belongs to a **channel group**, and the group decides which type it is
 1. Open **Channels** in the sidebar and choose **New channel** (or **New Stream > 24x7 channel** in the top bar).
 2. Enter a **Channel name** and, if you have one, a logo (**Browse / upload…**).
 3. Choose **Transcode** or **Packaging**, and a **Group**.
+
+   ![The New channel form: name and logo, Transcode or Packaging with the group, then the source or the renditions you send](/img/screens/channel-new.png)
+
 4. For **Transcode**, under **Source**, choose the **Primary source** protocol and fill in its address. For **Packaging**, add one row per rendition you send instead: its label, bitrate, protocol and address. For SRT, choose **Caller (we connect)** or **Listener (it connects)**, and set the latency and passphrase to match the sender. **Check source** tests it before you save.
 5. Optionally add a **Backup source** (see [input failover](failover.md)).
 6. Choose the **Output rendition ladder** (transcode only), a **Watermark**, the **Filler on total loss**, **Subtitles**, the **DVR window** (how far viewers can rewind) and whether to keep **Recording and clipping**.

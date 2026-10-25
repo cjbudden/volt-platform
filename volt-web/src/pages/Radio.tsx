@@ -199,7 +199,7 @@ export default function Radio() {
         <div className="empty">
           <div className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 11h16a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><circle cx="8" cy="15.5" r="2.5" /><path d="M17 14h2M17 17h2M18 3 7 8" /></svg></div>
           <h3>No stations yet</h3>
-          <p>Create a station from an Icecast mount (or HLS/SRT audio). Try the SomaFM samples: ice5.somafm.com/groovesalad-128-mp3, secretagent-128-mp3, dronezone-128-mp3.</p>
+          <p>Create a station from an Icecast mount, or from HLS or SRT audio. Paste the stream address from your encoder or playout system.</p>
           {canManage && (
             <button className="btn primary" onClick={() => setCreateOpen(true)} style={{ margin: '0 auto' }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>
@@ -440,7 +440,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
           </TabPane>
           <TabPane active={tab === 'settings'}>
           <div className="field"><label>Station name <span className="req">*</span></label>
-            <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Groove Salad" />
+            <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Coast FM" />
           </div>
           <ImageRefField label="Station artwork" hint="shown on the detail page, the player and the guide"
             value={artRef} onChange={setArtRef} pickerTitle="Choose or upload station artwork" />

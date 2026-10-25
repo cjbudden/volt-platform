@@ -403,7 +403,13 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
     transcode: groups.filter(g => g.workflow_type === 'transcode'),
     package_only: groups.filter(g => g.workflow_type === 'package_only'),
   }), [groups])
-  const [type, setType] = useState<'transcode' | 'package_only'>(() => groups.some(g => g.workflow_type === 'transcode') || !groups.some(g => g.workflow_type === 'package_only') ? 'transcode' : 'package_only')
+  const startType = (gs: Group[]): 'transcode' | 'package_only' => gs.some(g => g.workflow_type === 'transcode') || !gs.some(g => g.workflow_type === 'package_only') ? 'transcode' : 'package_only'
+  const [type, setType] = useState<'transcode' | 'package_only'>(() => startType(groups))
+  // The form can open before the groups have loaded (New channel from the top
+  // bar remounts the page), when the start above can only guess Transcode.
+  // Until the user picks a type, follow the groups as they arrive.
+  const [typePicked, setTypePicked] = useState(false)
+  useEffect(() => { if (!typePicked && groups.length) setType(startType(groups)) /* eslint-disable-next-line */ }, [groups, typePicked])
   const [groupId, setGroupId] = useState('')
   const [tab, setTab] = useState<DrawerTab>('settings')
   const [name, setNameRaw] = useState('')
@@ -549,16 +555,16 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
           </TabPane>
           <TabPane active={tab === 'settings'}>
           <div className="field"><label>Channel name <span className="req">*</span></label>
-            <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. RTM News 24" />
+            <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. City News 24" />
           </div>
           <ImageRefField label="Channel logo" hint="shown in lists, on the channel page and in the guide"
             value={brandRef} onChange={setBrandRef} pickerTitle="Choose or upload the channel logo" kinds={['brand', 'poster', 'other']} />
 
           <div className="field"><label>Type</label>
             <div className="presets">
-              <Preset sel={type === 'transcode'} onClick={() => { setType('transcode'); setGroupId('') }} title="Transcode"
+              <Preset sel={type === 'transcode'} onClick={() => { setType('transcode'); setTypePicked(true); setGroupId('') }} title="Transcode"
                 desc="One source in. We build the ABR ladder with FFmpeg." meta={ofType.transcode.length ? '1 input → many outputs' : 'no transcode group yet'} />
-              <Preset sel={type === 'package_only'} onClick={() => { setType('package_only'); setGroupId('') }} title="Packaging"
+              <Preset sel={type === 'package_only'} onClick={() => { setType('package_only'); setTypePicked(true); setGroupId('') }} title="Packaging"
                 desc="You send a pre-encoded ladder; we just package it." meta={ofType.package_only.length ? 'N inputs → N outputs' : 'no packaging group yet'} />
             </div>
           </div>

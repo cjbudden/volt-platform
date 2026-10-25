@@ -56,6 +56,17 @@
       "alt": "The Channels list: type and status filters, then one row per channel with its type, status and a Start or Stop button"
     },
     {
+      "name": "channel-new",
+      "guide": "guides/channels.md",
+      "path": "/channels",
+      "waitFor": "h1",
+      "click": [
+        "button:has-text('New channel')"
+      ],
+      "clip": ".drawer",
+      "alt": "The New channel form: name and logo, Transcode or Packaging with the group, then the source or the renditions you send"
+    },
+    {
       "name": "channel-status",
       "guide": "guides/channel-status.md",
       "path": "/channels/ae0e5ac4-9833-48b7-ab97-91df0d27467c",

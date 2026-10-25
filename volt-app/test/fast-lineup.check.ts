@@ -38,6 +38,9 @@ ok(math.passesPerWeek === 12 && math.dailyShiftMin === -600, `rotation maths: 12
 ok(math.distinctClockTimes.length === 12 && math.warnings.length === 0, '12 distinct clock times, no warnings');
 ok(rotationMath(12 * H).warnings.some((w) => w.includes('same time every day')), '12h lineup warns: same time every day');
 ok(rotationMath(13 * H).warnings.some((w) => w.includes('does not divide the week')), '13h lineup warns: next week starts elsewhere');
+const none = rotationMath(0);
+ok(none.lengthSec === 0 && none.passesPerWeek === 0 && none.distinctClockTimes.length === 0 && none.warnings.length === 0,
+  `an empty run order has no pass: 0 passes, no clock times, no warnings (got ${none.passesPerWeek} passes, ${none.warnings.length} warnings)`);
 ok(everyForPlays(14 * H, 4) === 3, 'four plays a week from a 14h lineup = every third pass');
 ok(nominalLength(hbo, assets) === 14 * H, 'nominal length = 14h');
 

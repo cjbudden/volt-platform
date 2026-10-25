@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { zoneList, browserZone } from '../lib/timeZones'
 import { api } from '../api'
 import { PageHead, NewButton, EntityCell, StatusTag } from '../scaffold'
 import { navigate } from '../router'
@@ -32,8 +33,7 @@ const fmtDur = (sec: number) => {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60
   return h ? `${h}h ${String(m).padStart(2, '0')}m` : m ? `${m}m${ss ? ` ${String(ss).padStart(2, '0')}s` : ''}` : `${ss}s`
 }
-const tzNow = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' } }
-const ZONES = (() => { try { return (Intl as any).supportedValuesOf('timeZone') as string[] } catch { return ['UTC', 'Australia/Brisbane', 'Australia/Sydney', 'Europe/London', 'America/New_York'] } })()
+const tzNow = browserZone
 const localParts = (iso: string, zone: string) => {
   const p: Record<string, string> = {}
   for (const x of new Intl.DateTimeFormat('en-GB', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', weekday: 'short', hourCycle: 'h23' }).formatToParts(new Date(iso))) p[x.type] = x.value
@@ -136,7 +136,7 @@ function CreateDialog({ onClose, onCreated }: { onClose: () => void; onCreated: 
           <select id="fg" className="inp" value={groupId} onChange={e => setGroupId(e.target.value)}>{groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
           <div className="hintxt">Counts towards the group's share of the plan, like any channel.</div></div>
         <div className="field"><label htmlFor="fz">Time zone</label>
-          <select id="fz" className="inp" value={zone} onChange={e => setZone(e.target.value)}>{ZONES.map(z => <option key={z}>{z}</option>)}</select>
+          <select id="fz" className="inp" value={zone} onChange={e => setZone(e.target.value)}>{zoneList(null, zone).map(z => <option key={z}>{z}</option>)}</select>
           <div className="hintxt">The guide's clock: grid rounding, the daily restart and prime time are worked out in it.</div></div>
         {err && <Notice kind="error" message={err} variant="compact" />}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
@@ -487,6 +487,14 @@ function RepeatHelper({ p, firstSlot, anchor }: { p: Preview; firstSlot: string 
   const drift = r.dailyShiftMin
   // A pass of 14 h means a title's next airing is 14 h later: 10 h EARLIER on the clock.
   const driftTxt = drift === 0 ? 'at the same clock time' : `${fmtDur(Math.abs(drift) * 60)} ${drift < 0 ? 'earlier' : 'later'} on the clock`
+  // An empty run order has no pass to describe: say so rather than show the
+  // numbers of a made-up one-minute pass.
+  if (r.lengthSec <= 0) return (
+    <div className="card">
+      <div className="card-h"><h3>What this run order does to a week</h3></div>
+      <div className="card-b"><div className="hintxt" data-empty-run-order="">Add titles or series to the run order to see how long one pass is, how many passes air in a week and when each title airs.</div></div>
+    </div>
+  )
   return (
     <div className="card">
       <div className="card-h"><h3>What this run order does to a week</h3><span className="sub">{anchor ? `restarting daily at ${anchor}` : 'free-running'}</span></div>
@@ -521,7 +529,7 @@ function SettingsCard({ settings, zone, lib, nSlots, onZone, onChange }: {
       <div className="card-h"><h3>Channel clock</h3></div>
       <div className="card-b" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '0 18px' }}>
         <div className="field"><label htmlFor="fz2">Time zone</label>
-          <select id="fz2" className="inp" value={zone} onChange={e => onZone(e.target.value)}>{ZONES.map(z => <option key={z}>{z}</option>)}</select></div>
+          <select id="fz2" className="inp" value={zone} onChange={e => onZone(e.target.value)}>{zoneList(null, zone).map(z => <option key={z}>{z}</option>)}</select></div>
         <div className="field"><label htmlFor="fanc">Restart the run order daily</label>
           <div style={{ display: 'flex', gap: 8 }}>
             <select id="fanc" className="inp" value={settings.anchor ? 'yes' : 'no'} onChange={e => onChange({ anchor: e.target.value === 'yes' ? '06:00' : null })}>

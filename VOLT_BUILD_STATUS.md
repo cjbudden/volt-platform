@@ -746,6 +746,20 @@ Open questions:
 - `docs/API_ROUTES.md`, `docs/api-routes.json` and `openapi.json` need regenerating for the six new routes (`npm run docs:routes`, `npm run docs:openapi`). Not done here because the hypermedia work has uncommitted changes in the same generated files. The route descriptions are in DESIGN_media_library.md section 7.
 - The app shell itself is not laid out for a phone (the sidebar stays open at 390 px). The library's own grid and filters wrap correctly inside it. (Done 23 Oct, build queue 1.14.)
 
+## 2026-10-25 - Console fixes from the live guides (build queue 1.14-G1a, not yet released)
+
+What: three small faults the 1.14-G1 guides ran into, plus one found while checking them.
+
+- **New event workflow** (`volt-web/src/pages/Events.tsx`): starts on Packaging when the account has only a packaging group; each workflow card says when it has no group; a note under the cards (the channel form's `group-missing` style) says so before Create event, offering the other workflow when there is one.
+- **New channel type** (`volt-web/src/pages/Channels.tsx`): the start type was worked out once at mount, and the form mounts before the page has its groups, so it always opened on Transcode. Both forms now follow the groups until the user picks a type.
+- **FAST time zone** (`volt-web/src/lib/timeZones.ts`, `pages/Fast.tsx`): browsers leave `UTC` out of `Intl.supportedValuesOf('timeZone')`, so a UTC browser or a channel saved as UTC showed Africa/Abidjan. UTC is first, Etc/UTC folds into it, and a saved zone the list lacks stays a choice.
+- **Empty run order** (`volt-app/src/services/fast/lineup.ts` `rotationMath`): no longer a one-minute pass (10 080 passes a week, "divides a day exactly"); the week card asks for titles or series.
+- **Real names**: `e.g. City News 24` and `e.g. Coast FM` placeholders, a neutral Radio empty state, and the Icecast `urlExample` in `volt-app/src/services/ingestProtocols.ts`, which named a real station in the New station form.
+
+Checked: `volt-web/test/console-fixes.browser.mjs` 18/18 in Chromium against the API on the docs seed (group lists narrowed in the browser with `page.route`; one FAST channel created last); `volt-web/test/time-zones.check.ts` 7/7; fast-lineup 57/57 with the empty run order case. Neighbouring suites through `scripts/check.js`: event-routes 29/29, events 16/16, fast 45/45, fast-ads 48/48, fast-beacons 51/51, fast-graphics 15/15, radio 41/41, radio-args 42/42, radio-outputs 18/18, radio-teardown 18/18, radio-classify 14/14, source-protocols 31/31, metadata-events 9/9. radio-container-sidecars and radio-id3 not run here (they need `volt-encoder` beside `volt-app`). Typechecks: volt-app clean; volt-web `tsc -b` clean on HEAD plus this item. Guides: events, the live event workflow, FAST and channels; `channel-new` screenshot added and taken.
+
+Not yet: fast.check.sh "the programme on air is left alone" is time dependent and fails about half the time with or without this change. The docs seed has only a packaging group, so the New channel and New event screenshots show Packaging.
+
 ## 2026-10-25 - Engineering guides (build queue 1.14-G7, not yet released)
 
 What: guides for whoever builds and runs Volt, kept in the repository (not the customer site), and a check that keeps them matching the tree.

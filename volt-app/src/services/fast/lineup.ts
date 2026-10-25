@@ -400,6 +400,11 @@ function bestBackfill(backfill: AssetInfo[], pool: PoolRef[], assets: Map<string
  * drifts against the clock, and the distinct clock times a title will air at.
  */
 export function rotationMath(lengthSec: number, days = 7) {
+  // An empty run order has no pass. It used to be treated as a one-minute
+  // pass: 10 080 passes a week and "divides a day exactly".
+  if (!(lengthSec > 0)) {
+    return { lengthSec: 0, passesPerWeek: 0, dailyShiftMin: 0, distinctClockTimes: [] as string[], warnings: [] as string[] };
+  }
   const L = Math.max(60, lengthSec);
   const week = days * 86400;
   const passes = week / L;

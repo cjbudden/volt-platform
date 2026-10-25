@@ -30,7 +30,7 @@ Event managers and producers use it for anything that is not on around the clock
 ### Schedule an event
 
 1. Open **Events** in the sidebar and choose **New event** (or **New Stream > Event**).
-2. Enter the **Event name** and choose the **Workflow**: **Transcode** or **Packaging**.
+2. Enter the **Event name** and choose the **Workflow**: **Transcode** or **Packaging**. The form starts on a workflow your account has a group for; a workflow with no group says so on its card (**no transcode group yet**), with a note under the cards.
 3. Under **Schedule**, set **On-air start** and **On-air end**.
 4. Choose when to **Spin up server early**: from **at the on-air time** up to **1 hour before**. That is your time to receive and check the source before viewers can watch.
 5. For **Transcode**, under **Source**, set the **Primary source** and, optionally, a **Backup source**. For **Packaging**, under **Sent renditions**, add one row per rendition you send: its label, bitrate, protocol and address. **Check source** tests each one.
@@ -87,7 +87,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 
 | You see | What it means | What to do |
 |---|---|---|
-| **Not saved: No transcode group set up yet** | The account has no transcode group, and the form starts on **Transcode** | Choose **Packaging**, or ask an administrator to add a transcode group |
+| **This account has no transcode group** under **Workflow** | The account has no group of that type | Choose **Packaging**, or ask an administrator to add a transcode group under **Admin > Channel groups** |
 | **Not saved: Add at least one rendition input** | A packaging event needs the renditions you send | Fill in the label and address of at least one rendition |
 | **Start event (no source)** | The event has no source set | Open its settings and add the primary source |
 | **No input source is configured** | The same: the event cannot start without one | Add a source in the event's settings |

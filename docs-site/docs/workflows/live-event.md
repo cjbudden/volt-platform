@@ -132,7 +132,7 @@ The default Event Manager role covers the event, its guide, share links, clips, 
 
 | You see | What it means | What to do |
 |---|---|---|
-| **Not saved: No transcode group set up yet** | The account has no transcode group | Choose **Packaging**, or ask an administrator to add a transcode group |
+| **This account has no transcode group** under **Workflow** | The account has no transcode group | Choose **Packaging**, or ask an administrator to add a transcode group under **Admin > Channel groups** |
 | **Start event (no source)** | The event has no source | Open **Settings** and add the primary source |
 | The share link's viewer sees **Preview not live right now** | The server is not up yet | Ask them to choose **Check again** after the **Spin up server early** time |
 | The embed player says the site is not on the app's allowed origins | Your website's domain is not listed for the app | Add it in [API Keys & Apps](../guides/api-keys-and-apps.md) |
