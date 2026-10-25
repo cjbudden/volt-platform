@@ -746,6 +746,18 @@ Open questions:
 - `docs/API_ROUTES.md`, `docs/api-routes.json` and `openapi.json` need regenerating for the six new routes (`npm run docs:routes`, `npm run docs:openapi`). Not done here because the hypermedia work has uncommitted changes in the same generated files. The route descriptions are in DESIGN_media_library.md section 7.
 - The app shell itself is not laid out for a phone (the sidebar stays open at 390 px). The library's own grid and filters wrap correctly inside it. (Done 23 Oct, build queue 1.14.)
 
+## 2026-10-25 - Engineering guides (build queue 1.14-G7, not yet released)
+
+What: guides for whoever builds and runs Volt, kept in the repository (not the customer site), and a check that keeps them matching the tree.
+
+- **Guides** (`docs/engineering/`): `README.md` (index, conventions, how they stay true), `architecture.md` (every process with its code and where it runs on the Mac and in AWS, the four `ROLE` services, the `ORCH_LAUNCHER` launchers, the control plane's folders), `running-on-the-mac.md`, `check-suites.md` (including how `scripts/check.js` builds its template, isolates suites and starts control planes, and how to add a suite), `build-queue.md`, `releasing.md`, `docs-site.md`, `deploying-to-aws.md` (what each Terraform file builds, checking it without an account, the first apply in outline, the cost functions with their queue items). `DOCS.md` links them.
+- **Check:** `scripts/docs/check-engineering.mjs` (CLI and module). Inline paths are from the repository root; bash blocks start at the root and follow their own `cd`; it checks scripts run with node, tsx, bash, sh or python3, `npm run` scripts against the folder's `package.json`, `check.js` filters against `volt-app/test`, relative links, the index, secrets (AWS keys, private keys, live keys, JWTs, the local development secrets and demo password, credentials in URLs other than the local throwaway database) and em dashes. Folders Volt makes at run time are accepted by name (`volt-app/origin`, `volt-encoder/_local_out`; the suite holds that `volt-clean.sh` names them).
+- **Suite:** `volt-app/test/engineering-guides.check.ts`, no database: the real tree, a passing made-up guide, fourteen made-up trees that each break one rule, the allowed cases, and the index rules.
+
+Checked: engineering-guides **35/35** through `scripts/check.js` on a clean `git archive HEAD` copy plus this item's files. Every command in the guides run once in the container or read-only on the Mac (numbers in BUILD_QUEUE.md 1.14-G7), except `run-on-mac.sh` and its Docker options (Mac only), the release lock-file finish and the AWS steps. Full run 195/203 suites first pass; with `JWT_ACCESS_SECRET=devsecret` 201/203 (live-degraded 12/17 and xmltv-import 34/35 remain, outside this item).
+
+Not yet: queued 1.14-G7a for what walking the guides found (fresh-database start fails on the demo snapshot, stale script names in README and DOCS.md, the suites' test JWT secret, the docs seed's key and Playwright), and two things for 2.1 (no radio repository or task definition in Terraform; `terraform fmt -check` fails on `ecs_cluster.tf`).
+
 ## 2026-10-25 - Customer developer guides (build queue 1.14-G6, not yet released)
 
 What: the developer guides for customers building on Volt, in the developer template, where every code example is a file that is run against the API before the docs are built.

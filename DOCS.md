@@ -22,6 +22,7 @@ current version is always the file in this repo.
 | **The API** (public/admin/platform split, credentials, params, payloads) | `volt-app/docs/API_GUIDE.md` (how to use it) · `API_ROUTES.md` (every route and the access it needs) · `API.md` + Postman collection (request by request, live examples) |
 | **Customer docs, API reference, release notes** (how to publish, how access works) | `docs-site/MAINTAINING.md` |
 | **How to cut a release** (change notes, versions, changelog) | `RELEASING.md` · scope rules `release/scopes.json` |
+| **How Volt is built, run, tested, queued, released and deployed** (for engineers) | `docs/engineering/README.md`, checked against the tree by `node scripts/docs/check-engineering.mjs` |
 | **A specific file** | It's in this repo; the important ones are linked below |
 
 **Fast orientation (do this at the start of any work session):**
