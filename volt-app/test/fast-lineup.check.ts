@@ -44,6 +44,27 @@ ok(none.lengthSec === 0 && none.passesPerWeek === 0 && none.distinctClockTimes.l
 ok(everyForPlays(14 * H, 4) === 3, 'four plays a week from a 14h lineup = every third pass');
 ok(nominalLength(hbo, assets) === 14 * H, 'nominal length = 14h');
 
+// On a grid the pass is as long as the guide makes it, not the content alone
+// (1.14-G5c): three short episodes and a film on a half-hour grid is two hours.
+{
+  const sec = (id: string, title: string, s: number, extra: Partial<AssetInfo> = {}): AssetInfo => ({ id, title, durationSec: s, ...extra });
+  const shortLib = lib(
+    sec('e1', 'One', 48, { series: 'Kitchens', season: 1, episode: 1 }), sec('e2', 'Two', 52, { series: 'Kitchens', season: 1, episode: 2 }),
+    sec('e3', 'Three', 50, { series: 'Kitchens', season: 1, episode: 3 }), sec('fv', 'Valley', 64));
+  const slots: Lineup['slots'] = [{ id: 'a', kind: 'series', series: 'Kitchens', count: 3, order: 'sequential' }, { id: 'b', kind: 'title', pool: [{ assetId: 'fv' }] }];
+  const free: Lineup = { epoch, zone: Z, slots };
+  ok(nominalLength(free, shortLib) === 214, `no grid: one pass is the content, 214 s (got ${nominalLength(free, shortLib)})`);
+  const grid: Lineup = { ...free, gridMin: 30 };
+  const len = nominalLength(grid, shortLib);
+  ok(len === 2 * H, `half-hour grid: one pass is four half hours, 2h (got ${len} s)`);
+  const shortWeek = planLineup(grid, shortLib, epoch, new Date(epoch.getTime() + 86400_000));
+  const firstPassEnd = shortWeek.programmes[3].end.getTime() - shortWeek.programmes[0].start.getTime();
+  ok(firstPassEnd === len * 1000, `the planned guide agrees: the first pass takes ${firstPassEnd / 1000} s`);
+  ok(rotationMath(len).passesPerWeek === 84, `84 passes a week on the grid (got ${rotationMath(len).passesPerWeek})`);
+  const g15: Lineup = { ...free, slots: [...slots, { id: 'c', kind: 'series', series: 'Kitchens', count: 1, order: 'sequential', encoreOf: 'a' }], gridMin: 15 };
+  ok(nominalLength(g15, shortLib) === 105 * 60, `an encore of the series counts on the grid too: 7 x 15 min (got ${nominalLength(g15, shortLib)} s)`);
+}
+
 const rep = repeatReport(week.programmes, Z);
 ok(rep.length === 7 && rep[0].plays === 12 && rep[0].sameTimeRepeats === 0, 'repeat report: 7 titles, 12 plays, no same-clock repeats');
 ok(rep.every((r) => r.minGapHours === 14), 'repeat report: plays are 14h apart');

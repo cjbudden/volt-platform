@@ -100,6 +100,26 @@
       "alt": "The New FAST channel form: name, video or audio, group and time zone"
     },
     {
+      "name": "fast-run-order",
+      "guide": "guides/fast.md",
+      "path": "/fast/5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e30",
+      "waitFor": "h3:has-text('What this run order does to a week')",
+      "click": [
+        "[role=tab]:has-text('Run order')"
+      ],
+      "alt": "A FAST channel's Run order: the library of titles and series on the left, what the run order does to a week, then the series slot and the film slot"
+    },
+    {
+      "name": "fast-week",
+      "guide": "guides/fast.md",
+      "path": "/fast/5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e30",
+      "waitFor": "h3:has-text('Run order')",
+      "click": [
+        "[role=tab]:has-text('Week')"
+      ],
+      "alt": "The Week tab: seven days side by side, every programme of the coming week at its start time on the half-hour grid"
+    },
+    {
       "name": "epg",
       "guide": "guides/epg.md",
       "path": "/epg",

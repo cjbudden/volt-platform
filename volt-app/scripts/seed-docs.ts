@@ -14,7 +14,7 @@
  * Sign-in afterwards: admin@example.com / volt1234
  */
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { query, pool } from '../src/db';
 import { writeAudit } from '../src/services/audit';
@@ -26,6 +26,7 @@ import { hashPassword } from '../src/auth/password';
 import { generateKey } from '../src/services/apiKeys';
 import { addSandbox } from '../src/services/social/index';
 import { ensureDefaultRoles } from '../src/auth/defaultRoles';
+import { config } from '../src/config';
 
 const ACCOUNT = '3de20755-af2b-46d0-8d24-f39afbf4b3a0';
 const ADMIN = '8342a24d-751f-46ca-9636-f72a8a1110ef';
@@ -155,9 +156,86 @@ async function main() {
   }
 
   await seedAccountSections();
+  await seedFast();
 
   console.log(`\ndocs demo ready. Sign in as ${DOCS_LOGIN.email} (password as in seed-demo.ts)`);
   await pool.end();
+}
+
+// FAST (build queue 1.14-G5c). The FAST library offers only titles that can
+// air: packaged for splicing, or with their uploaded file still on this server
+// so activating the run order can prepare them. The demo seed's assets have
+// neither, so the FAST guides could show an empty library and no week. This
+// adds four short titles with real source files, laid out exactly as a video
+// upload leaves them (source under clips/vod-src, nothing packaged yet), and a
+// FAST channel whose draft run order uses them: a three-episode series and a
+// film, rounded up to the half hour so the week reads like a guide grid.
+// The files are generated with ffmpeg (a test pattern and a tone, 2 to 3 MB
+// each) rather than kept in the repo, and only when missing, so a re-run is
+// quick. Activating the run order prepares them through the normal encode.
+const DOCS_FAST = {
+  channel: '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e30',
+  lineup: '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e31',
+  assets: [
+    { id: '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e32', title: 'Harbour Market', series: 'Coastal Kitchens', season: 1, episode: 1, sec: 48, tone: 440 },
+    { id: '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e33', title: 'Smoke and Salt', series: 'Coastal Kitchens', season: 1, episode: 2, sec: 52, tone: 523 },
+    { id: '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e34', title: 'The Night Bakery', series: 'Coastal Kitchens', season: 1, episode: 3, sec: 50, tone: 587 },
+    { id: '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e35', title: 'A Quiet Valley', series: null, season: null, episode: null, sec: 64, tone: 659 },
+  ],
+} as const;
+
+async function seedFast() {
+  const ffmpeg = process.env.FFMPEG_BIN || 'ffmpeg';
+  if (spawnSync(ffmpeg, ['-version'], { stdio: 'ignore' }).status !== 0) {
+    console.warn('[seed-docs] ffmpeg not found: no FAST titles or FAST channel (the FAST screenshots need them)');
+    return;
+  }
+  const srcDir = join(config.clips.dir, 'vod-src');
+  mkdirSync(srcDir, { recursive: true });
+  for (const a of DOCS_FAST.assets) {
+    const src = join(srcDir, `${a.id}.mp4`);
+    if (!existsSync(src)) {
+      const r = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25',
+        '-f', 'lavfi', '-i', `sine=frequency=${a.tone}:sample_rate=48000`,
+        '-t', String(a.sec), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '32', '-pix_fmt', 'yuv420p', '-g', '50',
+        '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', src], { stdio: 'inherit' });
+      if (r.status !== 0) throw new Error(`ffmpeg could not make ${src}`);
+    }
+    const metadata: Record<string, unknown> = { title: a.title };
+    if (a.series) Object.assign(metadata, { series: a.series, season: a.season, episodeNumber: a.episode });
+    await query(
+      `INSERT INTO vod_assets(id, account_id, source_kind, kind, title, source_key, source_bytes, start_epoch_ms, end_epoch_ms, duration_ms, metadata, created_at)
+       VALUES ($1,$2,'upload','clip',$3,$4,$5,0,$6,$6,$7::jsonb, now() - interval '3 days')
+       ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, source_key=EXCLUDED.source_key, source_bytes=EXCLUDED.source_bytes,
+         duration_ms=EXCLUDED.duration_ms, end_epoch_ms=EXCLUDED.end_epoch_ms, metadata=EXCLUDED.metadata`,
+      [a.id, ACCOUNT, a.title, src, statSync(src).size, a.sec * 1000, JSON.stringify(metadata)]);
+  }
+
+  // The channel, as POST /api/fast/channels makes it: a playlist channel with
+  // no source, no recording and no encoder, its ads row, and one lineup.
+  const grp = await query<{ id: string }>(`SELECT id FROM groups WHERE account_id=$1 AND name='Main' LIMIT 1`, [ACCOUNT]);
+  if (!grp[0]) throw new Error('docs seed: no Main group for the FAST channel');
+  const zone = 'Australia/Sydney';
+  await query(
+    `INSERT INTO channels(id, group_id, name, origin, fast_media, recording_enabled, tz, created_by, updated_by)
+     VALUES ($1,$2,'Food & Travel','playlist','video',false,$3,$4,$4)
+     ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name`,
+    [DOCS_FAST.channel, grp[0].id, zone, ADMIN]);
+  await query(`INSERT INTO channel_ads(channel_id) VALUES ($1) ON CONFLICT DO NOTHING`, [DOCS_FAST.channel]);
+  const [e1, , , film] = DOCS_FAST.assets;
+  const slots = [
+    { id: 's1', kind: 'series', series: e1.series, count: 3, order: 'sequential', atEnd: 'loop' },
+    { id: 's2', kind: 'title', pool: [{ assetId: film.id }] },
+  ];
+  // Left a draft: the guide shows building and checking a run order before it
+  // airs, and activating needs the API (it prepares the titles and starts the
+  // playout). The epoch is the seed's own midnight, so the week starts today.
+  await query(
+    `INSERT INTO fast_lineups(id, channel_id, name, epoch, zone, slots, settings, status, created_by)
+     VALUES ($1,$2,'Main lineup', date_trunc('day', now() AT TIME ZONE $3) AT TIME ZONE $3, $3, $4::jsonb, $5::jsonb, 'draft', $6)
+     ON CONFLICT (id) DO UPDATE SET slots=EXCLUDED.slots, settings=EXCLUDED.settings, epoch=EXCLUDED.epoch, status='draft'`,
+    [DOCS_FAST.lineup, DOCS_FAST.channel, zone, JSON.stringify(slots), JSON.stringify({ gridMin: 30, horizonDays: 7 }), ADMIN]);
 }
 
 // The audience, account and access sections (guides batch 1.14-G4) would

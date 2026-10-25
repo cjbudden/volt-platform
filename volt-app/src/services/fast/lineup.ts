@@ -470,23 +470,31 @@ export function repeatReport(progs: PlannedProgramme[], zone: string): RepeatRep
   return out.sort((a, b) => b.plays - a.plays || a.title.localeCompare(b.title));
 }
 
-/** Length of one pass with each slot's FIRST choice, ignoring breaks and pads. */
+/**
+ * Length of one pass with each slot's FIRST choice, ignoring breaks. With a
+ * grid (gridMin) each programme counts as the guide places it, rounded up to
+ * the grid: a 50 s title on a half-hour grid takes half an hour of the clock.
+ * Counting only the content made a short run order on a grid report minutes
+ * a pass and thousands of passes a week while its Week showed two-hour passes
+ * (found seeding the FAST guide's screenshots, build queue 1.14-G5c).
+ */
 export function nominalLength(lineup: Lineup, assets: Map<string, AssetInfo>): number {
+  const g = (lineup.gridMin ?? 0) * 60;
+  const onGrid = (d: number) => (g > 0 && d > 0 ? Math.ceil(d / g - 1e-9) * g : d);
+  const seriesPass = (name: string, count: number) => {
+    const eps = episodesOf(name, assets);
+    return eps.length ? (eps.reduce((x, e) => x + onGrid(e.durationSec), 0) / eps.length) * Math.max(1, count) : 0;
+  };
   let s = 0;
   for (const slot of lineup.slots) {
     if (slot.kind === 'title') {
       const r = slot.pool.find((x) => 'assetId' in x) as { assetId: string } | undefined;
-      s += r ? assets.get(r.assetId)?.durationSec ?? 0 : 0;
+      s += r ? onGrid(assets.get(r.assetId)?.durationSec ?? 0) : 0;
     } else if (!slot.encoreOf) {
-      const eps = episodesOf(slot.series, assets);
-      const avg = eps.length ? eps.reduce((x, e) => x + e.durationSec, 0) / eps.length : 0;
-      s += avg * Math.max(1, slot.count);
+      s += seriesPass(slot.series, slot.count);
     } else {
       const ref = lineup.slots.find((x) => x.id === slot.encoreOf);
-      if (ref && ref.kind === 'series') {
-        const eps = episodesOf(ref.series, assets);
-        s += eps.length ? (eps.reduce((x, e) => x + e.durationSec, 0) / eps.length) * Math.max(1, ref.count) : 0;
-      }
+      if (ref && ref.kind === 'series') s += seriesPass(ref.series, ref.count);
     }
   }
   return s;
