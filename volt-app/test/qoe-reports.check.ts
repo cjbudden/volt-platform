@@ -314,7 +314,8 @@ interface Viewer { sid: string; ua: string; geo: Record<string, string>; lines: 
     const prb: any = await pr.json();
     ok(pr.status === 200 && prb.results?.[0]?.account === acct && (await snap()) === before, 'POST /replay (the console) does the same, for the caller\'s account only', [pr.status, prb]);
     const [{ v: defv }] = await adb.aquery(`SELECT min(def_version) || '-' || max(def_version) AS v FROM qoe_views`);
-    ok(defv === '1-1', 'every row stamped with the definitions version', defv);
+    const { DEFINITIONS_VERSION: DV } = await import('../src/services/qoe/views');
+    ok(defv === `${DV}-${DV}`, `every row stamped with the definitions version (${DV})`, defv);
 
     console.log('== the analytics database goes away mid-run ==');
     await query(`ALTER DATABASE "${aname}" ALLOW_CONNECTIONS false`);

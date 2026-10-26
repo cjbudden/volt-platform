@@ -226,7 +226,7 @@ publicLiveRouter.get(
  * never disagree. Reads only cached state (services/viewerPath.ts): an on-air
  * change invalidates at once, the output check is at most 2 s old.
  */
-export async function resolveLiveManifest(id: string, file: 'master.m3u8' | 'manifest.mpd'):
+export async function resolveLiveManifest(id: string, file: 'master.m3u8' | 'manifest.mpd', sid?: string | null):
   Promise<{ ok: true; url: string } | { ok: false; status: 404 | 503; reason: string }> {
   const ch = await channelDelivery(id);
   // A FAST CHANNEL (origin = playlist): its playout's playlists, while the
@@ -234,7 +234,7 @@ export async function resolveLiveManifest(id: string, file: 'master.m3u8' | 'man
   // stitched (HLS; DASH viewers get the channel's own breaks). services/fast/delivery.ts
   if (ch && ch.on_air) {
     const { fastManifest } = await import('../services/fast/delivery');
-    const f = await fastManifest(id, file);
+    const f = await fastManifest(id, file, sid);
     if (f) return f;
   }
   // Off air: the public URL exposes nothing. This is the whole point of "On means

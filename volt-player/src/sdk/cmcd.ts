@@ -13,8 +13,9 @@
 //  EVENT MODE. The experience itself, as batched POSTs (`application/cmcd`,
 //  one report per line) to the collector (`POST /api/cmcd`): play state
 //  changes, errors, bitrate changes, the 30 s heartbeat, backgrounding,
-//  playback rate, mute, and response received for a sample of requests
-//  (plus every failed or slow one). Every report carries v, ts, e, sid, sn.
+//  playback rate, mute, ad break start and end (abs, abe), and response
+//  received for a sample of requests (plus every failed or slow one). Every
+//  report carries v, ts, e, sid, sn.
 //
 //  A PLAY ATTEMPT is opened before the play gate is asked, so a refused
 //  entitlement, a manifest that never comes or a licence that fails is still a
@@ -279,6 +280,7 @@ export class PlayAttempt {
   private hb: ReturnType<typeof setInterval> | null = null;
   private lastBr: number | null = null;
   private identitySent = false;
+  private breakId: string | null = null;
   sf: 'h' | 'd' | 'o' | null = null;
   closed = false;
   /** Every report made, in order (the debug panel; tests). */
@@ -397,14 +399,31 @@ export class PlayAttempt {
   }
 
   /**
+   * The stream's ad break at the playhead: its id while one is on, null when
+   * none is. Called as often as the player likes; a report (abs, abe) only
+   * when it changes, so the reports can count the break's time as the ad's
+   * (QOE_REPORTING.md report 9). The id travels as com.volt-brk.
+   */
+  adBreak(id: string | null): void {
+    if (this.closed) return;
+    const next = id ? String(id).slice(0, 64) : null;
+    if (next === this.breakId) return;
+    if (this.breakId) this.emit('abe', { [VOLT_KEY + 'brk']: this.breakId });
+    this.breakId = next;
+    if (next) this.emit('abs', { [VOLT_KEY + 'brk']: next });
+  }
+
+  /**
    * An error. `fatal`: playback stopped (sta=f follows). `step` says where it
    * happened (entitlement, manifest, drm, segment, decode, playback), so a
-   * licence failure is not counted as a stream fault.
+   * licence failure is not counted as a stream fault. `http`: the server's
+   * status when it was a refused request (a 401 or 403 mid-view is the
+   * playback token no longer accepted; report 7).
    */
-  error(code: string | number, step: string, fatal: boolean): void {
+  error(code: string | number, step: string, fatal: boolean, http?: number | null): void {
     if (this.closed) return;
     const ec = String(code).slice(0, 64);
-    this.emit('e', { ec: [ec], [VOLT_KEY + 'step']: step, ...(this.started ? {} : { su: true }) }, fatal);
+    this.emit('e', { ec: [ec], [VOLT_KEY + 'step']: step, ...(http ? { [VOLT_KEY + 'http']: http } : {}), ...(this.started ? {} : { su: true }) }, fatal);
     if (fatal) { this.state('f', {}, true); this.stopHeartbeat(); this.closed = true; this.o.sender?.flush(); }
   }
 
@@ -488,6 +507,7 @@ export class PlayAttempt {
   close(last = false): void {
     if (this.closed) { if (last) void this.o.sender?.flush(true); return; }
     this.stopHeartbeat();
+    // Leaving during a break: no abe, so the reports see the viewer left during the ad.
     if (this.sta !== 'e') this.state('q', {}, true);
     this.closed = true;
     void this.o.sender?.flush(last);

@@ -15,7 +15,7 @@ guide: section
 
 - **Audience.** Views, unique viewers, watch hours and the peak number watching at once, by day, with the split by device, country and app, and the most watched channels, events and on-demand items. **Watching now** is live and refreshes every 15 seconds.
 - **Operating.** Every channel, radio station and event that ran in a period: how many runs, hours run, hours on air, availability, unplanned stops and the time to recover from a fault. Open a stream for each run and why it ended. Download either as CSV.
-- **Playback.** The player's own reports from players built on the Volt SDK: whether playback started, how long it took, how often it stalled, the quality chosen and whether viewers stayed. Filter by content, device, app, country, network and more, and rank the worst segments.
+- **Playback.** The player's own reports from players built on the Volt SDK: whether playback started, how long it took, how often it stalled, the quality chosen, how smoothly the device played it, whether access checks or DRM got in the way, how far behind live viewers were, how ads played and whether viewers stayed. Filter by content, device, app, country, network and more, rank the worst segments, and open any one viewer's session to see everything that happened to it, in order.
 
 Audience and Operating are read from daily totals that Volt keeps after the raw viewing events age out, so a report for last quarter still answers. Today is a partial day: it is drawn dashed and called **not final** until it closes.
 
@@ -93,12 +93,32 @@ Programme and marketing staff use Audience; operations staff use Operating to pr
    | **Startup** | How long from pressing play to the first frame, as p50, p95 and p99, and which step took the time |
    | **Buffering and interruptions** | Views with stalls, the rebuffer ratio, stalls per hour, time to first stall and seek delay |
    | **Quality and adaptive bitrate** | The bitrate watched, time below what the screen can use, quality switches, buffer and throughput |
+   | **Rendering and devices** | Dropped frames per minute of playing, decoder errors, hardware or software decoding and the DRM system, with the worst devices first |
+   | **Access and DRM** | How often the play gate said no and why (region, rights window, payment, sign in, the app's restrictions, an unknown asset), how long it took, licence time and failures, and viewers whose token was refused part way through |
+   | **Live streams** | How far behind live viewers were, how much that grew during a view (drift), and time spent catching up, by device. Shown when live views are in the period |
+   | **Advertising** | Breaks watched to the end, ad startup, buffering inside breaks, the time back to the programme, viewers who left during an ad, and the beacons the ad stitcher sent. Shown when the period has ad breaks |
    | **Engagement and abandonment** | Playing time, viewers who left after a stall or an error, and the same by content |
    | **Worst segments** | Which values of a dimension do worst on a measure you choose |
+   | **Sessions** | The views behind the numbers, newest first, to open one viewer's timeline |
    | **Telemetry health** | Whether the numbers can be trusted: reports lost, late or refused |
+
+   Time inside an ad break counts as the ad's, so stalls during an ad are in **Advertising**, not in **Buffering and interruptions**.
 
 5. In **Worst segments**, choose **By** (the dimension), **Ranked by** (the measure) and **At least** (the fewest views a value needs to be ranked), so one unlucky viewer does not top the list.
 6. **How these are measured** at the foot of the page gives the definition behind every figure.
+
+### Follow one viewer's session
+
+1. In **Playback**, under **Sessions**, choose which views to list: **All**, **Ended by an error**, **Failed to start**, **Stalled**, **Left before the first frame** or **Left during an ad**. The filters at the top apply here too.
+2. Choose **Timeline** beside a view.
+3. **Session timeline** opens below the list:
+   - a line with the content, the device, the country and how the view went;
+   - a coloured strip of what the viewer saw, second by second (starting, playing, stalled, seeking, paused, in the background, ad), with the time in each;
+   - every report the player sent, in order, with the play gate's answer for this session and the beacons the ad stitcher sent for this viewer. Problems are shown in red.
+4. If reports are missing (the player sent them but they never arrived), the line at the top says how many and which. A batch the player sent twice is counted once.
+5. **Close** hides the timeline.
+
+A timeline can be opened for as long as the player's raw reports are kept.
 
 ## How it connects
 
@@ -135,6 +155,10 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **+1?** beside Faults, or **Unknown** as a stop | A run ended without Volt recording why, for example a lost server | See [Monitoring](monitoring.md) for that time |
 | **No playback reports in this period** | No player sent reports, or none for these filters | Clear the filters, choose a longer period, or turn reporting on in your player |
 | **No value has 20 views or more in this period.** | Nothing in that dimension has enough views to rank | Choose a lower **At least**, or a longer period |
+| **No sessions like this in the period.** | No view matches the choice under **Sessions** | Choose **All**, or a longer period |
+| **Not in the gate log** under **Why, from the gate** | The view failed at the entitlement step, but the play gate has no answer for its session: the answer came from an edge cache, or the player did not send its session to the gate | Use a player built on the Volt SDK, which sends it |
+| **No view row: the session never reached play.** in a timeline | The play gate answered for this session but the player never reported pressing play | Check the app: it asked for the stream and did not play it |
+| **Couldn't open that session** | The session is not in your account, or its raw reports are no longer kept | Choose a more recent session |
 | **The trend is not filtered by ...** | The minute-by-minute trend keeps only content, live or on demand, country, device class and CDN | The reports below it are filtered by everything chosen |
 | **Couldn't load analytics.** (or operating or playback reports) | The page could not reach Volt | Choose **Retry** |
 
@@ -149,6 +173,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/reports/stream/{id}` | One stream's runs (`from`, `to`); `/api/reports/stream/{id}.csv` for CSV |
 | `GET /api/analytics/qoe/overview` | The Playback reports (`hours` and any filter, for example `device_class=tv`) |
 | `GET /api/analytics/qoe/breakdown` | Worst segments (`by`, `measure`, `minViews`) |
+| `GET /api/analytics/qoe/sessions` | The views behind the numbers (`problem`: `all`, `error`, `failed`, `stalled`, `exited`, `ad`) |
+| `GET /api/analytics/qoe/sessions/{sid}` | One session's timeline: every report in order, the states, the gate's answers and the ad beacons |
 | `GET /api/analytics/qoe/definitions` | How each figure is measured |
 
 ```bash

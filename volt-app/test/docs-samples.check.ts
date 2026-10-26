@@ -287,6 +287,10 @@ const LEFTOVER = /your-volt-host|\b(pk|sk)_live_\.\.\.|whsec_\.\.\.|<[a-z][^<>="
   r = await run('playback-reporting/breakdown.sh');
   ran('playback-reporting/breakdown.sh', r);
   ok(r.out[0]?.by === 'app_version' && r.out[0]?.rows?.some((x: any) => x.value === '2.1.0' && x.views >= 1 && x.measure === 0), 'breakdown: the app version the reports named, with no failures', r.out[0]);
+  r = await run('playback-reporting/session.sh');
+  ran('playback-reporting/session.sh', r);
+  ok(r.out[0]?.reports >= 2 && r.out[0]?.events?.[0] === 'Play pressed' && r.out[0]?.events?.some((l: string) => l.startsWith('First frame')) && Array.isArray(r.out[0]?.missingSequence)
+    && r.out[0]?.spans?.some((x: any) => x.state === 'playing'), 'session: the newest view\'s timeline, from play pressed to the first frame', r.out[0]);
 
   // ========================================================================
   console.log('== webhooks, then an upload that fires one ==');

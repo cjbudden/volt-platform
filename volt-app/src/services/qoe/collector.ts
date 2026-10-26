@@ -27,6 +27,7 @@
 import { MinuteSink, SessionState, SILENCE_MS, RESUME_MS, toEvent, byReportOrder, type MinuteRow, type ViewRow, type Ev } from './views';
 import type { RawRow } from './rawStore';
 import { addCollectorCounts, addMinutes, writeViews } from './store';
+import { flushGate, gatePending, gateStats } from './gateLog';
 
 export const FLUSH_MS = 10_000;
 export const MAX_PENDING_VIEWS = 200_000;
@@ -133,6 +134,8 @@ export async function flushQoe(now = Date.now()): Promise<void> {
       stats.lastError = (e as Error).message;
       requeue(views, minutes, c);
     }
+    // The play gate's decisions (report 7) go in the same beat; its own buffer and bound.
+    await flushGate();
   })().finally(() => { flushing = null; });
   return flushing;
 }
@@ -152,7 +155,8 @@ function requeue(views: Array<[string, ViewRow]>, minutes: MinuteRow[], c: Array
 
 /** What is held in memory now (the console's telemetry panel, tests). */
 export function collectorState() {
-  return { sessions: sessions.size, pendingViews: pendingViews.size, pendingMinuteRows: sink.rows.size, ...stats };
+  return { sessions: sessions.size, pendingViews: pendingViews.size, pendingMinuteRows: sink.rows.size, ...stats,
+    gate: { pending: gatePending(), ...gateStats } };
 }
 
 /** For tests: forget everything held in memory. */

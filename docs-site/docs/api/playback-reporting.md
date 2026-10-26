@@ -13,6 +13,7 @@ Volt measures the playback experience (did it start, how fast, did it stall, at 
 
 - **Your own dashboards and alerts.** Pull the same figures as **Analytics > Playback** in the console: startup failures, startup time, rebuffering, quality, errors.
 - **Finding what is broken.** Rank app versions, device models, countries or networks by how badly they do.
+- **Answering "what happened to this viewer?"** Read one play attempt's reports in order, with the play gate's answer and the ad beacons for it.
 - **Players that are not the Volt player** (a native TV app, a partner's player) counted in the same reports.
 
 ## Before you start
@@ -34,12 +35,16 @@ Post CMCD v2 **event reports**, one per line, to the collector with your publish
 |---|---|---|
 | `ps` | Play state changed. `sta` is the new state: `s` starting, `p` playing, `r` rebuffering, `k` seeking, `a` paused, `e` ended, `q` the viewer quit, `f` a fatal error | `sta`, `cid` (the asset id), `st` (`l` live or `v` on demand) |
 | `t` | Heartbeat, every 30 seconds | `bl` (buffer, ms), `mtp` (throughput), `ltc` (live latency), `pb` and `tpb` (bitrate and top bitrate, kbps), `dfa` (dropped frames) |
-| `e` | An error | `ec` (your error code) |
+| `e` | An error | `ec` (your error code), `com.volt-step` (where: `entitlement`, `manifest`, `drm`, `segment`, `decode`, `playback`), `com.volt-http` (the HTTP status when a request was refused) |
 | `bc` | Bitrate changed | `br` (kbps) |
 | `b` | Went to or came back from the background | `bg` |
-| `rr` | Response received, for a sample of requests and every slow or failed one | The CDN is read from it |
+| `pr` | Playback rate changed | `pr` (1 is normal speed; above 1 is catching up to live) |
+| `abs`, `abe` | An ad break started, ended | `com.volt-brk` (the break's id) |
+| `rr` | Response received, for a sample of requests and every slow or failed one | `rc`, `ttlb`; the CDN is read from it. Mark licence requests with `com.volt-req=licence` |
 
-Name your app on any report with `com.volt-app` and `com.volt-appv` (and `com.volt-dm` for the device model), so the reports can be broken down by them.
+Name your app on any report with `com.volt-app` and `com.volt-appv` (and `com.volt-dm` for the device model, `com.volt-hwdec` for hardware decoding, `com.volt-drm` for the DRM system), so the reports can be broken down by them.
+
+Send the same `sid` to the [play gate](play-gate.md) when you ask it for the stream: its answer is then joined to the view, so a refusal is reported with its reason (region, rights window, payment, sign in). Time between an ad break's start and end is counted as the ad's, not the programme's.
 
 Send batches every few seconds rather than one request per report, at most 200 lines a request. Answers follow the CMCD collector rules:
 
@@ -68,7 +73,7 @@ A view closes when its play attempt goes quiet for a minute, and then appears in
 }
 ```
 
-The full answer has six parts: `success` (attempts, startup failures, exits before the first frame, failures after start, the errors with their codes), `startup` (percentiles, and where the time went: entitlement, manifest, DRM, first segment, decode), `buffering`, `quality`, `engagement`, and `telemetry` (how many reports arrived and how many were lost on the way). `GET /api/analytics/qoe/definitions` says exactly how each figure is worked out.
+The full answer has ten parts: `success` (attempts, startup failures, exits before the first frame, failures after start, the errors with their codes), `startup` (percentiles, and where the time went: entitlement, manifest, DRM, first segment, decode), `buffering`, `quality`, `rendering` (dropped frames per minute of playing, decoder errors, hardware decoding, DRM systems, by device), `access` (the play gate's decisions by reason and how long they took, failed views attributed to the step and the gate's reason, licence time and failures, tokens refused mid-view), `live` (latency behind live, drift during a view and catching up, by device), `ads` (breaks, ad startup, buffering in breaks, return to the programme, viewers who left during an ad, and the stitcher's beacons), `engagement`, and `telemetry` (how many reports arrived and how many were lost on the way). `GET /api/analytics/qoe/definitions` says exactly how each figure is worked out.
 
 **The window:** `days`, `hours`, or `from` and `to` (ISO 8601). One day if you send none.
 
@@ -93,6 +98,23 @@ The full answer has six parts: `success` (attempts, startup failures, exits befo
 
 For trend lines, `GET /api/analytics/qoe/series` returns minute buckets for the same window; only `content_id`, `stream_type`, `country`, `device_class` and `cdn` filter it.
 
+### 4. Follow one session
+
+```bash file=playback-reporting/session.sh
+```
+
+```json
+{
+  "sid": "attempt-1792975000-12345",
+  "reports": 3,
+  "missingSequence": [],
+  "spans": [{ "state": "starting", "ms": 850 }, { "state": "playing", "ms": 30150 }],
+  "events": ["Play pressed", "First frame", "Heartbeat: buffer 9.0 s"]
+}
+```
+
+`GET /api/analytics/qoe/sessions` lists views, newest first, with the same window and filters as the overview; `problem` narrows it to `error` (ended by an error), `failed` (never started), `stalled`, `exited` (left before the first frame) or `ad` (left during an ad). `GET /api/analytics/qoe/sessions/{sid}` returns every report of that play attempt in the player's order (`events`, each with `label`, `kind`, `problem`, `offsetMs`), the states as `spans`, the reports that never arrived (`missingSequence`), the view rows made of them (`views`), the play gate's answers for it (`gate`) and the server-side ad beacons sent for it (`beacons`). Another account's session answers `404`.
+
 ## Troubleshooting
 
 | You see | Means | Do |
@@ -103,3 +125,5 @@ For trend lines, `GET /api/analytics/qoe/series` returns minute buckets for the 
 | Reports accepted but the overview shows nothing | The play attempt has not been quiet for a minute yet, or the window or filters leave it out | Wait a minute; widen the window |
 | `app_version` shows `null` | The reports did not name the app | Add `com.volt-app` and `com.volt-appv`, or the player's `cmcd` option |
 | `403` reading reports | The user lacks **Analytics: View** | Use the secret key or a user with that access |
+| `access.failures` says `not in the gate log` | The view failed at the entitlement step but the gate has no answer for its `sid` | Send the same `sid` to the play gate's `POST` |
+| `404` for a session | Not in your account, or its raw reports are no longer kept | Use a recent `sid` from `GET /api/analytics/qoe/sessions` |

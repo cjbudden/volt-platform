@@ -25,6 +25,7 @@ import { cached } from '../scale/cache';
 import { config } from '../config';
 import { manifestUrls } from '../services/shareLinks';
 import { publicMp3Url } from '../services/radio/jobConfig';
+import { classifyGate, recordGate, type GateNote } from '../services/qoe/gateLog';
 
 // ---- management (JWT-auth) --------------------------------------------------
 export const appsRouter = Router();
@@ -241,6 +242,28 @@ async function viewerInputs(req: Request, b: GateInput, acct: string, app: any, 
 interface GateAnswer { status: number; body: any; edgeSec: number }
 
 /**
+ * decide(), timed and noted for the playback reports (report 7): how long the
+ * gate took and why it answered as it did, by the attempt's sid. The note is
+ * buffered (services/qoe/gateLog.ts), never written on this path.
+ */
+async function timedDecide(req: Request, b: GateInput, opts: { cacheable: boolean }, method: 'GET' | 'POST'): Promise<GateAnswer> {
+  const t0 = performance.now();
+  const note: GateNote = {};
+  const log = (status: number, body: any) => {
+    if (!note.accountId) return; // a key we do not know: nobody's report
+    const c = classifyGate(status, body, note);
+    recordGate({ account_id: note.accountId, app_id: note.appId ?? null, sid: b.sid ?? null, at: Date.now(), method, status,
+      mode: body?.mode ?? null, reason: c.reason, layer: c.layer, rule_id: c.ruleId, asset_id: b.assetId, asset_kind: note.kind ?? null,
+      country: note.geo ?? null, ms: performance.now() - t0 });
+  };
+  try {
+    const a = await decide(req, b, opts, note);
+    log(a.status, a.body);
+    return a;
+  } catch (e) { log(500, null); throw e; }
+}
+
+/**
  * THE PLAY GATE'S DECISION, shared by POST (any viewer) and GET (anonymous,
  * edge-cacheable). Every lookup in here is cached (services/viewerPath.ts), so
  * a warm process answers an anonymous start without touching the database.
@@ -249,10 +272,11 @@ interface GateAnswer { status: number; body: any; edgeSec: number }
  * viewer with the same key, asset, origin and country: the edge cache time,
  * capped so a programme boundary (blackout on/off) is never served late.
  */
-async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }): Promise<GateAnswer> {
+async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, note: GateNote = {}): Promise<GateAnswer> {
   const nope = (status: number, msg: string): GateAnswer => ({ status, body: { error: msg }, edgeSec: opts.cacheable ? 5 : 0 });
   const key = await verifyKey(b.appKey);
   if (!key || key.kind !== 'publishable') return nope(401, 'invalid publishable key');
+  note.accountId = key.account_id; note.appId = key.app_id ?? null;
   const app = await appForKey(key);
   if (!app) return nope(401, 'app not found for key');
   // A cached answer may only depend on what is in the cache key: for a web app
@@ -271,6 +295,7 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }):
   if (!kind) return { status: 404, body: { error: 'unknown asset' }, edgeSec: cacheable ? 5 : 0 };
 
   const geo = viewerGeo(req, b.geo);
+  note.kind = kind; note.geo = geo ?? null;
   let edgeSec = cacheable ? scaleConfig.edge.availabilityMaxAgeSec : 0;
   if (edgeSec > 0 && kind === 'channel') {
     const w = await currentProgrammeWindow(b.assetId);
@@ -293,6 +318,7 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }):
     rights = await evaluateAccess(b.assetId, geo, { appId: key.app_id, accountId: key.account_id,
       viewerCtx: { ...vi.viewerCtx!, entitlements: fresh } });
   }
+  note.rights = rights;
   if (!rights.allowed) {
     if (rights.replacementAssetId) {
       // The replacement is named by the PROGRAMME, so its kind is looked up
@@ -313,7 +339,7 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }):
         status: 200, edgeSec,
         body: { available: true, mode: 'replacement', assetId: rights.replacementAssetId, reason: rights.reason,
           playbackToken: tok.token, expiresIn: tok.expiresIn,
-          delivery: await deliveryFor(rk, String(rights.replacementAssetId), key.account_id),
+          delivery: await deliveryFor(rk, String(rights.replacementAssetId), key.account_id, b.sid),
           meta: await metaFor(key.account_id, rk, String(rights.replacementAssetId)) },
       };
     }
@@ -332,7 +358,7 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }):
   return {
     status: 200, edgeSec,
     body: { available: true, mode: 'play', assetId: b.assetId, playbackToken: tok.token, expiresIn: tok.expiresIn,
-      delivery: await deliveryFor(kind, b.assetId, key.account_id),
+      delivery: await deliveryFor(kind, b.assetId, key.account_id, b.sid),
       meta: await metaFor(key.account_id, kind, b.assetId) },
   };
 }
@@ -348,9 +374,11 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }):
  *   vod      the asset's own manifests, in the formats it was built in.
  *   event    its live manifests while it is live in its public window.
  */
-async function deliveryFor(kind: string, assetId: string, acct: string): Promise<{ hls: string | null; dash: string | null; mp3?: string | null } | null> {
+async function deliveryFor(kind: string, assetId: string, acct: string, sid?: string | null): Promise<{ hls: string | null; dash: string | null; mp3?: string | null } | null> {
   if (kind === 'channel') {
-    const [h, d] = await Promise.all([resolveLiveManifest(assetId, 'master.m3u8'), resolveLiveManifest(assetId, 'manifest.mpd')]);
+    // sid: a stitched FAST channel names the viewer's stitcher session after the
+    // play attempt, so its server-side ad beacons join the player's reports (report 11).
+    const [h, d] = await Promise.all([resolveLiveManifest(assetId, 'master.m3u8', sid), resolveLiveManifest(assetId, 'manifest.mpd')]);
     if (!(h.ok && d.ok)) return null;
     const m = await assetMeta(acct, 'channel', assetId);
     return { hls: h.url, dash: d.url, mp3: m?.radio ? publicMp3Url(assetId) : null };
@@ -434,7 +462,7 @@ availabilityRouter.post(
   '/',
   asyncHandler(async (req, res) => {
     const b = availSchema.parse(req.body);
-    const a = await decide(req, b, { cacheable: false });
+    const a = await timedDecide(req, b, { cacheable: false }, 'POST');
     if (a.status === 401 || a.status === 403 || a.status === 404) throw new ApiError(a.status, a.body.error);
     send(res, a);
   })
@@ -465,7 +493,7 @@ availabilityRouter.get(
       assetId: String(req.query.assetId ?? ''),
       geo: typeof req.query.geo === 'string' && req.query.geo ? req.query.geo : undefined,
     });
-    const a = await decide(req, b, { cacheable: true });
+    const a = await timedDecide(req, b, { cacheable: true }, 'GET');
     send(res, a);
   })
 );

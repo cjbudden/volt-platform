@@ -79,6 +79,14 @@ export function errorStep(e: any): ErrorStep {
 }
 
 /** A Shaka error code as a CMCD `ec` value, else the code or name given. */
+/** The HTTP status of a refused request (Shaka BAD_HTTP_STATUS, 1001: data[1]), else null. */
+export function httpStatus(e: any): number | null {
+  const code = e?.code ?? e?.detail?.code;
+  const data = e?.data ?? e?.detail?.data ?? [];
+  if (code === 1001 && typeof data[1] === 'number') return data[1];
+  return null;
+}
+
 export function errorCode(e: any): string {
   const code = e?.code ?? e?.detail?.code;
   if (typeof code === 'number' && code >= 1000) return `shaka-${code}`;
@@ -152,7 +160,7 @@ export class Engine {
     if (!a) return;
     try {
       if (d?.code === 1001) a.response({ kind: requestKind(d.data?.[4] ?? -1, null), url: String(d.data?.[0] ?? ''), status: Number(d.data?.[1]) || 0, failed: true });
-      a.error(errorCode(d), errorStep(d), d?.severity === 2);
+      a.error(errorCode(d), errorStep(d), d?.severity === 2, httpStatus(d));
     } catch { /* reporting never breaks playback */ }
   }
   private pinned: string | null = null;

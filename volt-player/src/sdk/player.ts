@@ -441,6 +441,8 @@ export class VoltPlayer {
       this.activeGraphicIds = ids;
       for (const g of graphics) if (!before.has(g.id)) this.emit('graphic', g);
     }
+    // The playback reports count a break's time as the ad's (sdk/cmcd.ts adBreak; only a change is reported).
+    if (!casting) this.attempt?.adBreak(adBreak ? (adBreak.data.break || adBreak.id) : null);
     this.set({
       currentTime, behindLive, atLiveEdge: !e.live || behindLive < 8, wallClock: e.live ? wallClock : null,
       programme, nextProgramme, upNext, skip, graphics, overlays,

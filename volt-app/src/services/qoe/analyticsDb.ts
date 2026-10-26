@@ -41,7 +41,7 @@ export function analyticsUrl(): string {
 function dbName(url: string): string { return decodeURIComponent(new URL(url).pathname.replace(/^\//, '')); }
 
 /** Bump when the schema below changes shape (the tables are rebuildable, so a bump may drop them). */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS qoe_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
@@ -108,7 +108,43 @@ CREATE TABLE IF NOT EXISTS qoe_views (
   unknown_keys   JSONB NOT NULL DEFAULT '{}'::jsonb,
   PRIMARY KEY (account_id, view_id)
 );
+-- Version 2 (build queue 1.14f): rendering, access, live and ad measures of
+-- each view (views.ts, definitions version 2). Added in place: a day replayed
+-- afterwards fills them; rows written before stay at their defaults.
+ALTER TABLE qoe_views
+  ADD COLUMN IF NOT EXISTS decode_errors INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS hw_decode BOOLEAN,
+  ADD COLUMN IF NOT EXISTS key_system TEXT,
+  ADD COLUMN IF NOT EXISTS licence_requests INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS licence_failures INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS licence_ms BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS licence_max_ms INT,
+  ADD COLUMN IF NOT EXISTS token_errors INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS latency_first_ms INT,
+  ADD COLUMN IF NOT EXISTS latency_last_ms INT,
+  ADD COLUMN IF NOT EXISTS latency_min_ms INT,
+  ADD COLUMN IF NOT EXISTS latency_max_ms INT,
+  ADD COLUMN IF NOT EXISTS rate_changes INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS catchup_ms BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS slowdown_ms BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ad_breaks INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ad_breaks_ended INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ad_ms BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ad_playing_ms BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ad_rebuffer_ms BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ad_stalls INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ad_errors INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ad_start_ms BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ad_start_n INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ad_start_max_ms INT,
+  ADD COLUMN IF NOT EXISTS ad_return_ms BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ad_return_n INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ad_return_max_ms INT,
+  ADD COLUMN IF NOT EXISTS ads_started INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ads_ended INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS left_in_ad BOOLEAN NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS qoe_views_day ON qoe_views (account_id, day);
+CREATE INDEX IF NOT EXISTS qoe_views_sid ON qoe_views (account_id, sid);
 CREATE INDEX IF NOT EXISTS qoe_views_ended ON qoe_views (account_id, ended_at);
 
 -- MINUTE AGGREGATES for the live charts, on the few dimensions they need.
@@ -145,6 +181,31 @@ CREATE TABLE IF NOT EXISTS qoe_collector_minutes (
   reasons    JSONB NOT NULL DEFAULT '{}'::jsonb,
   PRIMARY KEY (account_id, minute)
 );
+
+-- THE PLAY GATE'S DECISIONS, timed, by sid (report 7; services/qoe/gateLog.ts).
+-- A server log, not derived from the player's reports, so like the collector
+-- counts it is not rebuildable by a replay. One row per decision the API
+-- made (edge-cached answers never reach it); sid is null when the caller did
+-- not send one (the anonymous GET).
+CREATE TABLE IF NOT EXISTS qoe_gate (
+  id          BIGSERIAL PRIMARY KEY,
+  account_id  UUID NOT NULL,
+  app_id      UUID,
+  sid         TEXT,
+  at          TIMESTAMPTZ NOT NULL,
+  method      TEXT NOT NULL,             -- GET (anonymous, cacheable) or POST
+  status      INT NOT NULL,
+  mode        TEXT,                      -- play | replacement | paywall | sign_in | blocked
+  reason      TEXT NOT NULL,             -- allowed | replacement | geo | rights | payment | sign_in | group | rules | availability | app_restriction | unknown_asset | error
+  layer       TEXT,                      -- which rights layer decided (services/rights.ts)
+  rule_id     TEXT,
+  asset_id    TEXT,
+  asset_kind  TEXT,
+  country     TEXT,
+  ms          INT NOT NULL               -- time the API took to decide
+);
+CREATE INDEX IF NOT EXISTS qoe_gate_at ON qoe_gate (account_id, at);
+CREATE INDEX IF NOT EXISTS qoe_gate_sid ON qoe_gate (account_id, sid);
 `;
 
 async function createIfMissing(url: string): Promise<void> {

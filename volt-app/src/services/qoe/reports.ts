@@ -1,5 +1,6 @@
 // ============================================================================
-//  THE PLAYBACK EXPERIENCE REPORTS 1, 2, 3, 4, 10 AND 12 (QOE_REPORTING.md 5).
+//  THE PLAYBACK EXPERIENCE REPORTS 1 TO 10 AND 12 (QOE_REPORTING.md 5).
+//  Report 11, one session's timeline, is timeline.ts.
 //
 //  Read from the analytics database only (analyticsDb.ts), never the control
 //  plane's: view rows for every figure, so any filter in section 6 applies to
@@ -233,12 +234,229 @@ export async function telemetryHealth(acct: string, q: ReportQuery) {
   };
 }
 
-/** All six at once, for the console page. */
-export async function overview(acct: string, q: ReportQuery, names?: (ids: string[]) => Promise<Record<string, string>>) {
-  const [success, startup, buf, qual, eng, telemetry] = await Promise.all([
+/**
+ * 5. Rendering and device health: does it look smooth even when delivery is
+ * fine? Dropped frames per minute of playing (the SDK reports the dropped
+ * total, not decoded frames, so the ratio to decoded frames waits for that
+ * key), decoder errors, hardware decoding and DRM system where the player
+ * says. Backgrounded time is not playing time, so hidden tabs do not count.
+ */
+export async function rendering(acct: string, q: ReportQuery) {
+  const p: unknown[] = [];
+  const w = where(acct, q, 'ended_at', p) + ` AND outcome = 'started'`;
+  const dpm = `(COALESCE(dropped_frames, 0)::numeric * 60000 / NULLIF(playing_ms, 0))`;
+  const [r] = await aquery<any>(
+    `SELECT count(*) AS views, count(dropped_frames) AS reported, COALESCE(sum(dropped_frames), 0) AS dropped, COALESCE(sum(playing_ms) FILTER (WHERE dropped_frames IS NOT NULL), 0) AS playing_ms,
+       count(*) FILTER (WHERE dropped_frames > 0) AS with_drops, count(DISTINCT sid) FILTER (WHERE dropped_frames > 0) AS drop_sessions,
+       percentile_disc(0.5) WITHIN GROUP (ORDER BY ${dpm}) FILTER (WHERE dropped_frames IS NOT NULL) AS dpm_p50,
+       percentile_disc(0.95) WITHIN GROUP (ORDER BY ${dpm}) FILTER (WHERE dropped_frames IS NOT NULL) AS dpm_p95,
+       percentile_disc(0.99) WITHIN GROUP (ORDER BY ${dpm}) FILTER (WHERE dropped_frames IS NOT NULL) AS dpm_p99,
+       COALESCE(sum(decode_errors), 0) AS decode_errors, count(*) FILTER (WHERE decode_errors > 0) AS decode_views,
+       count(*) FILTER (WHERE error_step = 'decode' AND fatal_after_start) AS decode_fatal,
+       count(*) FILTER (WHERE hw_decode IS TRUE) AS hw, count(*) FILTER (WHERE hw_decode IS FALSE) AS sw
+     FROM qoe_views WHERE ${w}`, p);
+  const byDevice = await aquery<any>(
+    `SELECT COALESCE(device_model, device_class) AS device, count(*) AS views, COALESCE(sum(dropped_frames), 0) AS dropped,
+       COALESCE(sum(playing_ms) FILTER (WHERE dropped_frames IS NOT NULL), 0) AS playing_ms, COALESCE(sum(decode_errors), 0) AS decode_errors
+     FROM qoe_views WHERE ${w} GROUP BY 1 ORDER BY (COALESCE(sum(dropped_frames), 0)::numeric / NULLIF(sum(playing_ms) FILTER (WHERE dropped_frames IS NOT NULL), 0)) DESC NULLS LAST, views DESC, 1 LIMIT 20`, p);
+  const keys = await aquery<any>(`SELECT key_system, count(*) AS views FROM qoe_views WHERE ${w} AND key_system IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 10`, p);
+  const play = Number(r.playing_ms);
+  return {
+    views: Number(r.views), viewsReportingFrames: Number(r.reported),
+    droppedFrames: Number(r.dropped), droppedPerMinute: play ? Number(r.dropped) * 60_000 / play : null,
+    perViewDroppedPerMinute: { p50: n(r.dpm_p50), p95: n(r.dpm_p95), p99: n(r.dpm_p99) },
+    viewsWithDrops: Number(r.with_drops), dropSessions: Number(r.drop_sessions),
+    decodeErrors: Number(r.decode_errors), viewsWithDecodeErrors: Number(r.decode_views), decodeFatal: Number(r.decode_fatal),
+    hardwareDecode: { yes: Number(r.hw), no: Number(r.sw) },
+    keySystems: keys.map((k) => ({ keySystem: k.key_system, views: Number(k.views) })),
+    byDevice: byDevice.map((d) => ({ device: d.device, views: Number(d.views), droppedPerMinute: Number(d.playing_ms) ? Number(d.dropped) * 60_000 / Number(d.playing_ms) : null, decodeErrors: Number(d.decode_errors) })),
+    // Not measured yet: freezes (a picture that stops while playing), A/V sync on the player, and the
+    // encoder's own A/V check beside it (output_check.py, in pipelineHealth.ts).
+    notMeasured: ['freezes', 'player A/V sync', 'stream-side A/V check'],
+  };
+}
+
+/**
+ * 7. DRM and access: are protection or access checks blocking playback?
+ * The play gate's own log (qoe_gate, timed, by sid) says why it answered as
+ * it did; a view that failed at the entitlement step is joined to it by sid
+ * so the refusal is attributed to geo, rights, payment, sign in and so on.
+ * Licence timing and failures are the player's (the startup span and its
+ * reports on licence requests). Token errors: refused mid-view (401/403).
+ */
+export async function access(acct: string, q: ReportQuery) {
+  const p: unknown[] = [];
+  const w = where(acct, q, 'ended_at', p);
+  // The gate's decisions in the window. Content filters apply (asset), viewer dimensions cannot (the gate has none).
+  const gp: unknown[] = [acct, q.from.toISOString(), q.to.toISOString()];
+  const gw = [`account_id = $1`, `at >= $2`, `at < $3`];
+  if (q.filters.content_id?.length) { gp.push(q.filters.content_id); gw.push(`asset_id = ANY($${gp.length}::text[])`); }
+  if (q.filters.country?.length) { gp.push(q.filters.country); gw.push(`country = ANY($${gp.length}::text[])`); }
+  const [g] = await aquery<any>(
+    `SELECT count(*) AS decisions, count(*) FILTER (WHERE reason IN ('allowed', 'replacement')) AS allowed,
+       count(*) FILTER (WHERE reason NOT IN ('allowed', 'replacement')) AS denied, count(DISTINCT sid) AS sessions,
+       percentile_disc(0.5) WITHIN GROUP (ORDER BY ms) AS ms_p50, percentile_disc(0.95) WITHIN GROUP (ORDER BY ms) AS ms_p95,
+       percentile_disc(0.99) WITHIN GROUP (ORDER BY ms) AS ms_p99
+     FROM qoe_gate WHERE ${gw.join(' AND ')}`, gp);
+  const reasons = await aquery<any>(
+    `SELECT reason, status, count(*) AS decisions, count(DISTINCT sid) AS sessions FROM qoe_gate WHERE ${gw.join(' AND ')}
+     GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2 LIMIT 30`, gp);
+  // Every view that ended in a fatal error at the entitlement or DRM step, with the gate's reason for that sid.
+  const failures = await aquery<any>(
+    `SELECT v.error_step AS step, v.error_code AS code, COALESCE(g.reason, CASE WHEN v.error_step = 'entitlement' THEN 'not in the gate log' END) AS gate_reason,
+       CASE WHEN v.outcome = 'failed' THEN 'before_start' ELSE 'after_start' END AS phase, count(*) AS views, count(DISTINCT v.sid) AS sessions
+     FROM (SELECT account_id, sid, outcome, fatal_after_start, error_step, error_code FROM qoe_views
+           WHERE ${w} AND (outcome = 'failed' OR fatal_after_start) AND error_step IN ('entitlement', 'drm')) v
+     LEFT JOIN LATERAL (SELECT reason FROM qoe_gate g WHERE g.account_id = v.account_id AND g.sid = v.sid ORDER BY g.at DESC LIMIT 1) g ON true
+     GROUP BY 1, 2, 3, 4 ORDER BY views DESC, step, code, gate_reason, phase LIMIT 30`, p);
+  const [l] = await aquery<any>(
+    `SELECT count(*) FILTER (WHERE licence_requests > 0 OR t_drm IS NOT NULL OR error_step = 'drm') AS drm_views,
+       COALESCE(sum(licence_requests), 0) AS licence_requests, COALESCE(sum(licence_failures), 0) AS licence_failures,
+       count(*) FILTER (WHERE licence_failures > 0) AS views_licence_failed,
+       count(*) FILTER (WHERE outcome = 'failed' AND error_step = 'drm') AS drm_failed, count(*) FILTER (WHERE fatal_after_start AND error_step = 'drm') AS drm_fatal_after,
+       count(*) FILTER (WHERE outcome = 'failed' AND error_step = 'entitlement') AS ent_failed,
+       percentile_disc(0.5) WITHIN GROUP (ORDER BY t_drm) AS t_drm_p50, percentile_disc(0.95) WITHIN GROUP (ORDER BY t_drm) AS t_drm_p95,
+       percentile_disc(0.99) WITHIN GROUP (ORDER BY t_drm) AS t_drm_p99,
+       percentile_disc(0.5) WITHIN GROUP (ORDER BY licence_max_ms) AS lic_p50, percentile_disc(0.95) WITHIN GROUP (ORDER BY licence_max_ms) AS lic_p95,
+       percentile_disc(0.5) WITHIN GROUP (ORDER BY t_entitlement) AS t_ent_p50, percentile_disc(0.95) WITHIN GROUP (ORDER BY t_entitlement) AS t_ent_p95,
+       COALESCE(sum(token_errors), 0) AS token_errors, count(*) FILTER (WHERE token_errors > 0) AS token_views, count(DISTINCT sid) FILTER (WHERE token_errors > 0) AS token_sessions
+     FROM qoe_views WHERE ${w}`, p);
+  return {
+    gate: {
+      decisions: Number(g.decisions), allowed: Number(g.allowed), denied: Number(g.denied), sessions: Number(g.sessions),
+      deniedShare: ratio(Number(g.denied), Number(g.decisions)), timeMs: { p50: n(g.ms_p50), p95: n(g.ms_p95), p99: n(g.ms_p99) },
+      reasons: reasons.map((x) => ({ reason: x.reason, status: Number(x.status), decisions: Number(x.decisions), sessions: Number(x.sessions) })),
+    },
+    entitlementFailures: Number(l.ent_failed),
+    failures: failures.map((f) => ({ step: f.step, code: f.code, gateReason: f.gate_reason, phase: f.phase, views: Number(f.views), sessions: Number(f.sessions) })),
+    playerEntitlementMs: { p50: n(l.t_ent_p50), p95: n(l.t_ent_p95) },
+    licence: {
+      views: Number(l.drm_views), requests: Number(l.licence_requests), failures: Number(l.licence_failures), viewsWithFailures: Number(l.views_licence_failed),
+      failedBeforeStart: Number(l.drm_failed), failedAfterStart: Number(l.drm_fatal_after),
+      startupSpanMs: { p50: n(l.t_drm_p50), p95: n(l.t_drm_p95), p99: n(l.t_drm_p99) },
+      slowestRequestMs: { p50: n(l.lic_p50), p95: n(l.lic_p95) },
+    },
+    tokenErrors: { errors: Number(l.token_errors), views: Number(l.token_views), sessions: Number(l.token_sessions) },
+    // Volt has no licence proxy of its own yet (Axinom is waiting on its tenant): licence timing is the player's.
+    // Output-protection (HDCP) failures are not told apart from other DRM errors by the players yet.
+    notMeasured: ['licence proxy log', 'output protection'],
+  };
+}
+
+/**
+ * 8. Live-stream health: are viewers live, stable and close to target
+ * latency? From the player: latency behind the live edge (ltc) at the start
+ * and end of each view (drift = end minus start), the highest, and time spent
+ * catching up (rate above 1). Per device, so a model that drifts stands out.
+ */
+export async function liveHealth(acct: string, q: ReportQuery) {
+  const p: unknown[] = [];
+  const w = where(acct, q, 'ended_at', p) + ` AND outcome = 'started' AND stream_type IN ('l', 'll')`;
+  const drift = `(latency_last_ms - latency_first_ms)`;
+  const [r] = await aquery<any>(
+    `SELECT count(*) AS views, count(latency_avg_ms) AS with_latency, count(DISTINCT sid) AS sessions,
+       percentile_disc(0.5) WITHIN GROUP (ORDER BY latency_avg_ms) AS lat_p50, percentile_disc(0.95) WITHIN GROUP (ORDER BY latency_avg_ms) AS lat_p95,
+       percentile_disc(0.99) WITHIN GROUP (ORDER BY latency_avg_ms) AS lat_p99,
+       percentile_disc(0.5) WITHIN GROUP (ORDER BY ${drift}) AS drift_p50, percentile_disc(0.95) WITHIN GROUP (ORDER BY ${drift}) AS drift_p95,
+       avg(${drift}) AS drift_avg, max(latency_max_ms) AS lat_max,
+       count(*) FILTER (WHERE ${drift} > 5000) AS drifted, count(DISTINCT sid) FILTER (WHERE ${drift} > 5000) AS drifted_sessions,
+       COALESCE(sum(catchup_ms), 0) AS catchup_ms, COALESCE(sum(slowdown_ms), 0) AS slowdown_ms, COALESCE(sum(playing_ms), 0) AS playing_ms,
+       COALESCE(sum(rate_changes), 0) AS rate_changes
+     FROM qoe_views WHERE ${w}`, p);
+  const byDevice = await aquery<any>(
+    `SELECT device_class, device_model, count(*) AS views, avg(latency_avg_ms) AS lat_avg,
+       percentile_disc(0.95) WITHIN GROUP (ORDER BY latency_avg_ms) AS lat_p95, avg(${drift}) AS drift_avg, max(latency_max_ms) AS lat_max,
+       COALESCE(sum(catchup_ms), 0) AS catchup_ms, COALESCE(sum(playing_ms), 0) AS playing_ms
+     FROM qoe_views WHERE ${w} AND latency_avg_ms IS NOT NULL GROUP BY 1, 2 ORDER BY avg(${drift}) DESC NULLS LAST, views DESC, 1, 2 LIMIT 30`, p);
+  const play = Number(r.playing_ms);
+  const rnd = (x: unknown) => (x == null ? null : Math.round(Number(x)));
+  return {
+    views: Number(r.views), viewsWithLatency: Number(r.with_latency), sessions: Number(r.sessions),
+    latencyMs: { p50: n(r.lat_p50), p95: n(r.lat_p95), p99: n(r.lat_p99) }, highestLatencyMs: n(r.lat_max),
+    driftMs: { p50: n(r.drift_p50), p95: n(r.drift_p95), avg: rnd(r.drift_avg) },
+    viewsDriftedOver5s: Number(r.drifted), driftedSessions: Number(r.drifted_sessions),
+    catchUpShare: ratio(Number(r.catchup_ms), play), slowDownShare: ratio(Number(r.slowdown_ms), play), rateChanges: Number(r.rate_changes),
+    byDevice: byDevice.map((d) => ({ deviceClass: d.device_class, deviceModel: d.device_model, views: Number(d.views), latencyAvgMs: rnd(d.lat_avg), latencyP95Ms: n(d.lat_p95),
+      driftAvgMs: rnd(d.drift_avg), highestLatencyMs: n(d.lat_max), catchUpShare: ratio(Number(d.catchup_ms), Number(d.playing_ms)) })),
+    // The stream side (manifest freshness, missing segments, discontinuities from output_check.py and the
+    // five gates) lives in pipelineHealth.ts and joins here by content in a later step.
+    notMeasured: ['stream side: manifest freshness, missing segments, discontinuities'],
+  };
+}
+
+/** What the stitcher's server-side beacons recorded (1.11), read by the module from the control plane. */
+export interface BeaconSummary { impressions: number; starts: number; firstQuartile: number; midpoint: number; thirdQuartile: number; complete: number; failed: number; sessions: number }
+
+/**
+ * 9. Advertising: are ads hurting playback or revenue? The player's side:
+ * breaks, ad startup delay (break start to the ad playing), buffering and
+ * stalls inside breaks, errors in breaks, viewers who left during an ad, and
+ * how long it took to get back to the programme. The server's side: the
+ * beacons the stitcher sent for the same period.
+ */
+export async function advertising(acct: string, q: ReportQuery, beacons?: () => Promise<BeaconSummary | null>) {
+  const p: unknown[] = [];
+  const w = where(acct, q, 'ended_at', p) + ` AND ad_breaks > 0`;
+  const [r] = await aquery<any>(
+    `SELECT count(*) AS views, count(DISTINCT sid) AS sessions, COALESCE(sum(ad_breaks), 0) AS breaks, COALESCE(sum(ad_breaks_ended), 0) AS breaks_ended,
+       COALESCE(sum(ad_ms), 0) AS ad_ms, COALESCE(sum(ad_playing_ms), 0) AS ad_playing_ms, COALESCE(sum(ad_rebuffer_ms), 0) AS ad_rebuffer_ms,
+       COALESCE(sum(ad_stalls), 0) AS ad_stalls, count(*) FILTER (WHERE ad_stalls > 0) AS views_ad_stalls, COALESCE(sum(ad_errors), 0) AS ad_errors,
+       COALESCE(sum(ad_start_ms), 0) AS start_ms, COALESCE(sum(ad_start_n), 0) AS start_n,
+       percentile_disc(0.5) WITHIN GROUP (ORDER BY ad_start_max_ms) AS start_p50, percentile_disc(0.95) WITHIN GROUP (ORDER BY ad_start_max_ms) AS start_p95,
+       COALESCE(sum(ad_return_ms), 0) AS return_ms, COALESCE(sum(ad_return_n), 0) AS return_n,
+       percentile_disc(0.95) WITHIN GROUP (ORDER BY ad_return_max_ms) AS return_p95,
+       count(*) FILTER (WHERE left_in_ad) AS left_in_ad, count(DISTINCT sid) FILTER (WHERE left_in_ad) AS left_in_ad_sessions,
+       COALESCE(sum(ads_started), 0) AS ads_started, COALESCE(sum(ads_ended), 0) AS ads_ended
+     FROM qoe_views WHERE ${w}`, p);
+  const breaks = Number(r.breaks), adPlay = Number(r.ad_playing_ms), adReb = Number(r.ad_rebuffer_ms);
+  const server = beacons ? await beacons().catch(() => null) : null;
+  return {
+    views: Number(r.views), sessions: Number(r.sessions), breaks, breaksCompleted: Number(r.breaks_ended),
+    breakCompletion: ratio(Number(r.breaks_ended), breaks), avgBreakMs: breaks ? Math.round(Number(r.ad_ms) / breaks) : null,
+    adStartupMs: { avg: Number(r.start_n) ? Math.round(Number(r.start_ms) / Number(r.start_n)) : null, p50: n(r.start_p50), p95: n(r.start_p95) },
+    adRebufferRatio: ratio(adReb, adPlay + adReb), adStalls: Number(r.ad_stalls), viewsWithAdStalls: Number(r.views_ad_stalls), adErrors: Number(r.ad_errors),
+    returnToContentMs: { avg: Number(r.return_n) ? Math.round(Number(r.return_ms) / Number(r.return_n)) : null, p95: n(r.return_p95) },
+    leftDuringAd: Number(r.left_in_ad), leftDuringAdSessions: Number(r.left_in_ad_sessions),
+    adsStarted: Number(r.ads_started), adsEnded: Number(r.ads_ended),
+    server,
+    serverCompletion: server && server.impressions ? server.complete / server.impressions : null,
+  };
+}
+
+/**
+ * The views behind the numbers, newest first, to open one as a timeline
+ * (report 11). `problem`: failed (before the first frame), error (any fatal),
+ * stalled, ad (left during an ad), or all.
+ */
+export async function listViews(acct: string, q: ReportQuery, problem = 'all', limit = 50) {
+  const p: unknown[] = [];
+  let w = where(acct, q, 'ended_at', p);
+  if (problem === 'failed') w += ` AND outcome = 'failed'`;
+  else if (problem === 'error') w += ` AND (outcome = 'failed' OR fatal_after_start)`;
+  else if (problem === 'stalled') w += ` AND stalls > 0`;
+  else if (problem === 'ad') w += ` AND left_in_ad`;
+  else if (problem === 'exited') w += ` AND outcome = 'exited'`;
+  p.push(Math.min(200, Math.max(1, limit)));
+  const rows = await aquery<any>(
+    `SELECT sid, attempt, started_at, ended_at, ended_by, content_id, stream_type, device_class, device_model, os, browser, app_name, app_version, country,
+       outcome, startup_ms, error_code, error_step, fatal_after_start, stalls, rebuffer_ms, playing_ms, ad_breaks, left_in_ad, latency_avg_ms
+     FROM qoe_views WHERE ${w} ORDER BY ended_at DESC, sid, attempt LIMIT $${p.length}`, p);
+  return rows.map((v) => ({
+    sid: v.sid, attempt: Number(v.attempt), startedAt: new Date(v.started_at).toISOString(), endedAt: new Date(v.ended_at).toISOString(), endedBy: v.ended_by,
+    contentId: v.content_id, streamType: v.stream_type, device: v.device_model ?? v.device_class, os: v.os, browser: v.browser, app: v.app_name, appVersion: v.app_version,
+    country: v.country, outcome: v.outcome, startupMs: v.startup_ms, errorCode: v.error_code, errorStep: v.error_step, fatalAfterStart: v.fatal_after_start,
+    stalls: Number(v.stalls), rebufferMs: Number(v.rebuffer_ms), playingMs: Number(v.playing_ms), adBreaks: Number(v.ad_breaks), leftInAd: v.left_in_ad, latencyAvgMs: v.latency_avg_ms,
+  }));
+}
+
+/** Reports 1 to 10 and 12 at once, for the console page. */
+export async function overview(acct: string, q: ReportQuery, names?: (ids: string[]) => Promise<Record<string, string>>, beacons?: () => Promise<BeaconSummary | null>) {
+  const [success, startup, buf, qual, eng, telemetry, rend, acc, live, ads] = await Promise.all([
     playbackSuccess(acct, q), startupPerformance(acct, q), buffering(acct, q), quality(acct, q), engagement(acct, q, names), telemetryHealth(acct, q),
+    rendering(acct, q), access(acct, q), liveHealth(acct, q), advertising(acct, q, beacons),
   ]);
-  return { definitions: DEFINITIONS_VERSION, from: q.from.toISOString(), to: q.to.toISOString(), filters: q.filters, success, startup, buffering: buf, quality: qual, engagement: eng, telemetry };
+  return { definitions: DEFINITIONS_VERSION, from: q.from.toISOString(), to: q.to.toISOString(), filters: q.filters, success, startup, buffering: buf, quality: qual, engagement: eng, telemetry,
+    rendering: rend, access: acc, live, ads };
 }
 
 /** The measures a breakdown can rank by. */

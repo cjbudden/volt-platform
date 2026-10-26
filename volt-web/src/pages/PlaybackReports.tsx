@@ -4,13 +4,16 @@ import { PageError, usePageNotice } from '../notices'
 import { AnalyticsViewSwitch } from './OperatingReports'
 
 /* ============================================================================
-   PLAYBACK EXPERIENCE  (QOE_REPORTING.md, build queue 1.14e)
+   PLAYBACK EXPERIENCE  (QOE_REPORTING.md, build queue 1.14e and 1.14f)
 
    The third view under Analytics: what each viewer actually saw, from the
-   Volt SDK's CMCD v2 reports. Six reports on one page (playback success,
-   startup, buffering, quality, engagement, telemetry health), every one
-   filtered by the same bar, plus the worst segments of any dimension so a bad
-   device or app release stands out instead of being averaged away.
+   Volt SDK's CMCD v2 reports. The reports on one page (playback success,
+   startup, buffering, quality, rendering, access and DRM, live streams,
+   advertising, engagement, telemetry health), every one filtered by the same
+   bar, plus the worst segments of any dimension so a bad device or app
+   release stands out instead of being averaged away, and the sessions behind
+   the numbers: open one to see everything that happened to that viewer, in
+   order (report 11).
 
    Everything comes from GET /api/analytics/qoe/* (modules/qoe.ts), which
    reads the separate analytics database. The definitions behind each number
@@ -32,7 +35,39 @@ export interface QoeOverview {
     leftAfterStallShare: number | null; byContent: Array<{ contentId: string | null; name: string | null; views: number; started: number; playingHours: number; stalledShare: number | null; leftAfterProblem: number }> }
   telemetry: { views: number; reports: number; eventLoss: number | null; missingReports: number; viewsWithLoss: number; viewsWithoutSequence: number; lateReports: number; lateShare: number | null
     clockSkewMs: Trio; unknownKeys: Array<{ key: string; reports: number }>; collector: { accepted: number; rejected: number; rejectedShare: number | null; reasons: Record<string, number> } }
+  rendering?: { views: number; viewsReportingFrames: number; droppedFrames: number; droppedPerMinute: number | null; perViewDroppedPerMinute: Trio; viewsWithDrops: number; dropSessions: number
+    decodeErrors: number; viewsWithDecodeErrors: number; decodeFatal: number; hardwareDecode: { yes: number; no: number }; keySystems: Array<{ keySystem: string; views: number }>
+    byDevice: Array<{ device: string | null; views: number; droppedPerMinute: number | null; decodeErrors: number }> }
+  access?: { gate: { decisions: number; allowed: number; denied: number; sessions: number; deniedShare: number | null; timeMs: Trio; reasons: Array<{ reason: string; status: number; decisions: number; sessions: number }> }
+    entitlementFailures: number; failures: Array<{ step: string; code: string | null; gateReason: string | null; phase: string; views: number; sessions: number }>
+    licence: { views: number; requests: number; failures: number; viewsWithFailures: number; failedBeforeStart: number; failedAfterStart: number; startupSpanMs: Trio; slowestRequestMs: { p50: number | null; p95: number | null } }
+    tokenErrors: { errors: number; views: number; sessions: number } }
+  live?: { views: number; viewsWithLatency: number; latencyMs: Trio; highestLatencyMs: number | null; driftMs: { p50: number | null; p95: number | null; avg: number | null }
+    viewsDriftedOver5s: number; driftedSessions: number; catchUpShare: number | null; rateChanges: number
+    byDevice: Array<{ deviceClass: string | null; deviceModel: string | null; views: number; latencyAvgMs: number | null; latencyP95Ms: number | null; driftAvgMs: number | null; highestLatencyMs: number | null; catchUpShare: number | null }> }
+  ads?: { views: number; sessions: number; breaks: number; breaksCompleted: number; breakCompletion: number | null; avgBreakMs: number | null; adStartupMs: { avg: number | null; p50: number | null; p95: number | null }
+    adRebufferRatio: number | null; adStalls: number; viewsWithAdStalls: number; adErrors: number; returnToContentMs: { avg: number | null; p95: number | null }
+    leftDuringAd: number; leftDuringAdSessions: number; server: null | { impressions: number; starts: number; firstQuartile: number; midpoint: number; thirdQuartile: number; complete: number; failed: number; sessions: number }
+    serverCompletion: number | null }
 }
+interface SessionRow { sid: string; attempt: number; startedAt: string; endedAt: string; contentId: string | null; contentName: string | null; device: string | null; os: string | null; browser: string | null
+  country: string | null; outcome: string; startupMs: number | null; errorCode: string | null; errorStep: string | null; fatalAfterStart: boolean; stalls: number; adBreaks: number; leftInAd: boolean }
+interface Timeline { sid: string; from: string; reports: number; duplicates: number; missingSequence: number[]; viewer: { userAgent: string | null; country: string | null } | null
+  views: any[]; contentNames: Record<string, string>
+  spans: Array<{ state: string; fromOffsetMs: number; toOffsetMs: number; ms: number }>
+  events: Array<{ offsetMs: number; sn: number | null; kind: string; label: string; problem: boolean }>
+  gate: Array<{ offsetMs: number; method: string; status: number; reason: string; ms: number; country: string | null }>
+  beacons: Array<{ offsetMs: number; event: string; adId: string | null; ok: boolean | null; status: number | null }> }
+
+/** The gate's reasons, in the words an operator uses. */
+const GATE_REASON: Record<string, string> = {
+  allowed: 'Allowed', replacement: 'Replacement shown', geo: 'Region (geo)', rights: 'Rights window of the programme', payment: 'Payment or entitlement',
+  sign_in: 'Sign in needed', group: 'Not in the viewer group', rules: 'Access rule', availability: 'Not published or outside its window',
+  app_restriction: 'The app\'s restrictions (origin, referrer, IP)', unknown_asset: 'Unknown asset', error: 'Server error', 'not in the gate log': 'Not in the gate log',
+}
+const STEP: Record<string, string> = { entitlement: 'Entitlement (play gate)', drm: 'DRM licence', manifest: 'Manifest', segment: 'Segment', decode: 'Decode', playback: 'Playback' }
+const SPAN_COLOUR: Record<string, string> = { starting: 'var(--brand-dim, var(--faint))', playing: 'var(--live)', stalled: 'var(--down)', seeking: 'var(--sched)', paused: 'var(--idle)', backgrounded: 'var(--faint)', ad: 'var(--warn)' }
+const PROBLEMS = [{ key: 'all', label: 'All' }, { key: 'error', label: 'Ended by an error' }, { key: 'failed', label: 'Failed to start' }, { key: 'stalled', label: 'Stalled' }, { key: 'exited', label: 'Left before the first frame' }, { key: 'ad', label: 'Left during an ad' }]
 interface Series { bucketMs: number; ignoredFilters: string[]; points: Array<{ at: string; attempts: number; starts: number; failures: number; stalls: number; startupP50: number | null; startupP95: number | null; rebufferRatio: number | null }> }
 interface Breakdown { label: string; rows: Array<{ value: string | null; name?: string | null; views: number; sessions: number; affected: number; measure: number | null }> }
 
@@ -58,6 +93,9 @@ const fmtMs = (ms: number | null | undefined) => (ms == null ? '–' : ms >= 10_
 const fmtKbps = (k: number | null | undefined) => (k == null ? '–' : k >= 1000 ? `${(k / 1000).toFixed(2)} Mbps` : `${Math.round(k)} kbps`)
 const fmtRate = (x: number | null | undefined) => (x == null ? '–' : x.toFixed(x >= 10 ? 0 : 2))
 const fmtMeasure = (kind: string, v: number | null) => (kind === 'rate' ? fmtPct(v, 2) : kind === 'ms' ? fmtMs(v) : fmtKbps(v))
+const pl = (n: number, one: string, many = `${one}s`) => `${fmtInt(n)} ${n === 1 ? one : many}`
+/** DRM systems by the names people know them by. */
+const keySystemName = (k: string) => ({ 'com.widevine.alpha': 'Widevine', 'com.apple.fps': 'FairPlay', 'com.apple.fps.1_0': 'FairPlay', 'com.microsoft.playready': 'PlayReady', 'com.microsoft.playready.recommendation': 'PlayReady', 'org.w3.clearkey': 'ClearKey' } as Record<string, string>)[k] ?? k
 const valueLabel = (v: string | null) => (v == null || v === '' ? 'Not reported' : v === 'l' ? 'Live' : v === 'll' ? 'Live (low latency)' : v === 'v' ? 'On demand' : v)
 
 /** Small line icons beside each report's title (the house style: an icon with the text, never alone). */
@@ -70,6 +108,73 @@ const Ic = {
   pulse: <><path d="M4 12h4l2-5 4 10 2-5h4" /></>,
   filter: <path d="M4 5h16l-6 8v5l-4 2v-7z" />,
   bars: <><path d="M5 20V10M12 20V4M19 20v-7" /></>,
+  monitor: <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>,
+  lock: <><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></>,
+  live: <><circle cx="12" cy="12" r="2" /><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8" /></>,
+  ad: <><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M7 15l2-6 2 6M7.7 13h2.6M14 9v6h1.5a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2z" /></>,
+  list: <><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4.5" cy="6" r="1" /><circle cx="4.5" cy="12" r="1" /><circle cx="4.5" cy="18" r="1" /></>,
+}
+
+/** One session's states as a strip (report 11), with a legend: what the viewer saw, second by second. */
+function SpanStrip({ t }: { t: Timeline }) {
+  const end = Math.max(1, ...t.spans.map((s) => s.toOffsetMs))
+  const states = [...new Set(t.spans.map((s) => s.state))]
+  return (
+    <div>
+      <div role="img" aria-label="The session's states over time" style={{ position: 'relative', height: 18, borderRadius: 4, background: 'var(--border)', overflow: 'hidden' }}>
+        {t.spans.map((s, i) => (
+          <span key={i} title={`${s.state}: ${fmtMs(s.ms)}`} style={{ position: 'absolute', top: 0, bottom: 0, left: `${(Math.max(0, s.fromOffsetMs) / end) * 100}%`, width: `${Math.max(0.3, (s.ms / end) * 100)}%`, background: SPAN_COLOUR[s.state] ?? 'var(--muted)' }} />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-3" style={{ fontSize: 'var(--fs-micro)', color: 'var(--muted)', marginTop: 6 }}>
+        {states.map((st) => (
+          <span key={st}><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: SPAN_COLOUR[st] ?? 'var(--muted)', verticalAlign: 'middle', marginRight: 6 }} />
+            {st[0].toUpperCase() + st.slice(1)} {fmtMs(t.spans.filter((x) => x.state === st).reduce((n, x) => n + x.ms, 0))}</span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Report 11: everything one session sent, in order, with the gate's decisions and the stitcher's beacons. */
+function SessionTimeline({ t, onClose }: { t: Timeline; onClose: () => void }) {
+  const v = t.views[t.views.length - 1]
+  const at = (ms: number) => `${ms < 0 ? '-' : '+'}${fmtMs(Math.abs(ms))}`
+  type Row = { at: number; what: React.ReactNode; tone?: string; source: string }
+  const rows: Row[] = [
+    ...t.gate.map((g) => ({ at: g.offsetMs, source: 'Play gate', what: <>Gate answered {g.status}: {GATE_REASON[g.reason] ?? g.reason} ({fmtMs(g.ms)} on the server{g.country ? `, ${g.country}` : ''})</>, tone: g.status >= 400 ? 'var(--down)' : undefined })),
+    ...t.events.map((e) => ({ at: e.offsetMs, source: e.sn != null ? `Player #${e.sn}` : 'Player', what: e.label, tone: e.problem ? 'var(--down)' : undefined })),
+    ...t.beacons.map((b) => ({ at: b.offsetMs, source: 'Ad server', what: <>Beacon {b.event}{b.adId ? ` for ${b.adId}` : ''}{b.ok === false ? ` failed (${b.status ?? 'no answer'})` : ''}</>, tone: b.ok === false ? 'var(--down)' : undefined })),
+  ].sort((a, b) => a.at - b.at)
+  return (
+    <section id="qoe-timeline" className="card p-4" style={{ marginBottom: 16, minWidth: 0 }} aria-label="Session timeline">
+      <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 8 }}>
+        <Icon d={Ic.list} /><h3 style={{ margin: 0 }}>Session timeline</h3>
+        <code style={{ fontSize: 'var(--fs-micro)', overflowWrap: 'anywhere' }}>{t.sid}</code>
+        <div className="spacer" />
+        <button className="btn ghost" style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }} onClick={onClose}>Close</button>
+      </div>
+      <p style={{ margin: '0 0 12px', color: 'var(--muted)', fontSize: 'var(--fs-sm)' }}>
+        {v ? <>{t.contentNames[v.content_id] ?? valueLabel(v.content_id)} · {[v.device_model ?? v.device_class, v.os, v.browser].filter(Boolean).join(', ') || 'Unknown device'} · {v.country ?? 'unknown country'} · {v.outcome === 'started' ? `started in ${fmtMs(v.startup_ms)}` : v.outcome === 'failed' ? `failed at ${STEP[v.error_step] ?? v.error_step ?? 'an unknown step'} (${v.error_code ?? 'no code'})` : 'left before the first frame'}</> : 'No view row: the session never reached play.'}
+        {' '}· {fmtInt(t.reports)} reports from {new Date(t.from).toLocaleString()}
+        {t.missingSequence.length > 0 && <> · <span style={{ color: 'var(--warn)' }}>{t.missingSequence.length} missing (#{t.missingSequence.slice(0, 5).join(', #')}{t.missingSequence.length > 5 ? ', ...' : ''})</span></>}
+        {t.duplicates > 0 && <> · {t.duplicates} sent twice, counted once</>}
+      </p>
+      {t.spans.length > 0 && <SpanStrip t={t} />}
+      <div style={{ overflowX: 'auto', marginTop: 14 }}>
+        <table>
+          <thead><tr><th>When</th><th>From</th><th>What happened</th></tr></thead>
+          <tbody>{rows.map((r, i) => (
+            <tr key={i}>
+              <td style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{at(r.at)}</td>
+              <td style={{ whiteSpace: 'nowrap', color: 'var(--muted)' }}>{r.source}</td>
+              <td style={{ color: r.tone ?? 'var(--text)', overflowWrap: 'anywhere' }}>{r.what}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </section>
+  )
 }
 function Icon({ d }: { d: React.ReactNode }) {
   return <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: 'none', color: 'var(--muted)' }}>{d}</svg>
@@ -156,6 +261,10 @@ export default function PlaybackReports() {
   const [measure, setMeasure] = useState('failure')
   const [minViews, setMinViews] = useState(20)
   const [bd, setBd] = useState<Breakdown | null>(null)
+  const [problem, setProblem] = useState('error')
+  const [sessions, setSessions] = useState<SessionRow[] | null>(null)
+  const [timeline, setTimeline] = useState<Timeline | null>(null)
+  const [openErr, setOpenErr] = useState('')
   const [err, setErr] = useState('')
 
   const qs = useMemo(() => {
@@ -176,12 +285,23 @@ export default function PlaybackReports() {
   useEffect(() => {
     apiRequest(`/analytics/qoe/breakdown?${qs}&by=${by}&measure=${measure}&minViews=${minViews}`).then(setBd).catch(() => setBd(null))
   }, [qs, by, measure, minViews])
+  useEffect(() => {
+    apiRequest(`/analytics/qoe/sessions?${qs}&problem=${problem}&limit=25`).then((r: any) => setSessions(r.items)).catch(() => setSessions(null))
+  }, [qs, problem])
+  async function openSession(sid: string) {
+    try {
+      setOpenErr(''); setTimeline(await apiRequest(`/analytics/qoe/sessions/${encodeURIComponent(sid)}`))
+      setTimeout(() => document.getElementById('qoe-timeline')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+    }
+    catch (e: any) { setOpenErr(e.message); setTimeline(null) }
+  }
 
   usePageNotice('qoe', err && d ? { kind: 'error', title: "Couldn't load playback reports.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
   if (err && !d) return <PageError message={err} onRetry={() => load()} />
   if (!d) return <div className="loading">Loading playback reports…</div>
 
   const s = d.success, st = d.startup, b = d.buffering, q = d.quality, e = d.engagement, t = d.telemetry
+  const rd = d.rendering, ac = d.access, lv = d.live, ad = d.ads
   const m = MEASURES.find((x) => x.key === measure)!
   const active = Object.entries(filters).filter(([, v]) => v)
   const nothing = s.attempts === 0 && e.views === 0
@@ -278,6 +398,62 @@ export default function PlaybackReports() {
             {q.timeAtBitrate.length > 0 && <Bars data={q.timeAtBitrate.map((x) => ({ label: x.band, share: x.share }))} />}
           </Report>
 
+          {rd && (
+            <Report icon={Ic.monitor} title="Rendering and devices" question="Does it look smooth even when delivery is fine? Dropped frames while playing, decoder errors, and how the device decodes.">
+              <div style={statGrid}>
+                <Stat label="Dropped frames" value={rd.droppedPerMinute == null ? '–' : `${fmtRate(rd.droppedPerMinute)} / min`} sub={`of playing time; per view p95 ${rd.perViewDroppedPerMinute.p95 == null ? '–' : fmtRate(rd.perViewDroppedPerMinute.p95)}`} tone={rd.droppedPerMinute != null && rd.droppedPerMinute > 30 ? 'var(--warn)' : undefined} />
+                <Stat label="Views with dropped frames" value={fmtInt(rd.viewsWithDrops)} sub={`of ${fmtInt(rd.viewsReportingFrames)} reporting frames`} />
+                <Stat label="Decoder errors" value={fmtInt(rd.decodeErrors)} sub={`in ${pl(rd.viewsWithDecodeErrors, 'view')}, ${fmtInt(rd.decodeFatal)} stopped playback`} tone={rd.decodeFatal ? 'var(--down)' : undefined} />
+                <Stat label="Hardware decoding" value={rd.hardwareDecode.yes + rd.hardwareDecode.no ? fmtPct(rd.hardwareDecode.yes / (rd.hardwareDecode.yes + rd.hardwareDecode.no), 0) : '–'} sub={`${pl(rd.hardwareDecode.no, 'view')} decoded in software`} />
+                <Stat label="DRM system" value={rd.keySystems[0] ? keySystemName(rd.keySystems[0].keySystem) : 'None'} sub={rd.keySystems.length ? rd.keySystems.map((k) => `${keySystemName(k.keySystem)} in ${pl(k.views, 'view')}`).join(', ') : 'no protected views'} />
+              </div>
+              {rd.byDevice.length > 0 && <Table head={['Device', 'Dropped per minute', 'Decoder errors', 'Views']} rows={rd.byDevice.map((x) => [x.device ?? 'Not reported', x.droppedPerMinute == null ? '–' : fmtRate(x.droppedPerMinute), fmtInt(x.decodeErrors), fmtInt(x.views)])} />}
+            </Report>
+          )}
+
+          {ac && (
+            <Report icon={Ic.lock} title="Access and DRM" question="Are access checks or DRM blocking playback? The play gate's decisions by session, and licence requests from the player.">
+              <div style={statGrid}>
+                <Stat label="Refused at the gate" value={fmtPct(ac.gate.deniedShare)} sub={`${fmtInt(ac.gate.denied)} of ${fmtInt(ac.gate.decisions)} decisions`} tone={ac.gate.denied ? 'var(--warn)' : undefined} />
+                <Stat label="Gate time" value={fmtMs(ac.gate.timeMs.p50)} sub={`p50 on the server; p95 ${fmtMs(ac.gate.timeMs.p95)}`} />
+                <Stat label="Licence time" value={fmtMs(ac.licence.startupSpanMs.p50)} sub={`p50 of the startup; p95 ${fmtMs(ac.licence.startupSpanMs.p95)}`} />
+                <Stat label="Licence failures" value={fmtInt(ac.licence.failures)} sub={`of ${pl(ac.licence.requests, 'request')}; ${pl(ac.licence.failedBeforeStart, 'view')} never started`} tone={ac.licence.failures ? 'var(--down)' : undefined} />
+                <Stat label="Token refused mid-view" value={fmtInt(ac.tokenErrors.views)} sub="views (401 or 403 after the start)" tone={ac.tokenErrors.views ? 'var(--warn)' : undefined} />
+              </div>
+              {ac.gate.reasons.length > 0 && <Table head={['Gate decision', 'Answer', 'Decisions', 'Sessions']} rows={ac.gate.reasons.map((x) => [GATE_REASON[x.reason] ?? x.reason, String(x.status), fmtInt(x.decisions), fmtInt(x.sessions)])} />}
+              {ac.failures.length > 0 && <Table head={['Failed at', 'Code', 'Why, from the gate', 'When', 'Views']} rows={ac.failures.map((x) => [STEP[x.step] ?? x.step, <code key="c">{x.code ?? '–'}</code>, x.gateReason ? GATE_REASON[x.gateReason] ?? x.gateReason : '–', x.phase === 'before_start' ? 'Before the first frame' : 'After the start', fmtInt(x.views)])} />}
+            </Report>
+          )}
+
+          {lv && lv.views > 0 && (
+            <Report icon={Ic.live} title="Live streams" question="Are viewers live, stable and close to the live edge? Latency is how far behind live the player is; drift is how much that grew during a view.">
+              <div style={statGrid}>
+                <Stat label="Behind live" value={fmtMs(lv.latencyMs.p50)} sub={`p50; p95 ${fmtMs(lv.latencyMs.p95)}, highest ${fmtMs(lv.highestLatencyMs)}`} />
+                <Stat label="Drift during a view" value={fmtMs(lv.driftMs.p95)} sub={`p95; average ${fmtMs(lv.driftMs.avg)}`} tone={lv.driftMs.p95 != null && lv.driftMs.p95 > 5000 ? 'var(--warn)' : undefined} />
+                <Stat label="Drifted over 5 s" value={fmtInt(lv.viewsDriftedOver5s)} sub={`views, in ${pl(lv.driftedSessions, 'session')}`} />
+                <Stat label="Catching up" value={fmtPct(lv.catchUpShare)} sub="of playing time faster than 1x" />
+              </div>
+              {lv.byDevice.length > 0 && <Table head={['Device', 'Behind live (average)', 'p95', 'Drift (average)', 'Catching up', 'Views']} rows={lv.byDevice.map((x) => [x.deviceModel ?? x.deviceClass ?? 'Not reported', fmtMs(x.latencyAvgMs), fmtMs(x.latencyP95Ms), fmtMs(x.driftAvgMs), fmtPct(x.catchUpShare), fmtInt(x.views)])} />}
+            </Report>
+          )}
+
+          {ad && ad.breaks > 0 && (
+            <Report icon={Ic.ad} title="Advertising" question="Are ads hurting playback or revenue? Time in a break is the ad's, so it is not in the buffering and quality figures above.">
+              <div style={statGrid}>
+                <Stat label="Breaks watched to the end" value={fmtPct(ad.breakCompletion)} sub={`${fmtInt(ad.breaksCompleted)} of ${fmtInt(ad.breaks)}; average ${fmtMs(ad.avgBreakMs)}`} />
+                <Stat label="Ad startup" value={fmtMs(ad.adStartupMs.avg)} sub={`average; p95 ${fmtMs(ad.adStartupMs.p95)}`} />
+                <Stat label="Ad buffering" value={fmtPct(ad.adRebufferRatio, 2)} sub={`${pl(ad.adStalls, 'stall')} in ${pl(ad.viewsWithAdStalls, 'view')}`} tone={ad.adStalls ? 'var(--warn)' : undefined} />
+                <Stat label="Back to the programme" value={fmtMs(ad.returnToContentMs.avg)} sub={`average; p95 ${fmtMs(ad.returnToContentMs.p95)}`} />
+                <Stat label="Left during an ad" value={fmtInt(ad.leftDuringAd)} sub={`views, in ${pl(ad.leftDuringAdSessions, 'session')}`} tone={ad.leftDuringAd ? 'var(--warn)' : undefined} />
+              </div>
+              {ad.server && ad.server.impressions + ad.server.failed > 0 && (
+                <p style={{ margin: '14px 0 0', color: 'var(--muted)', fontSize: 'var(--fs-sm)' }}>
+                  Server-side beacons sent by the stitcher: {fmtInt(ad.server.impressions)} impressions, {fmtInt(ad.server.firstQuartile)} first quartiles, {fmtInt(ad.server.midpoint)} midpoints, {fmtInt(ad.server.complete)} completes ({fmtPct(ad.serverCompletion, 0)}){ad.server.failed ? `, ${fmtInt(ad.server.failed)} failed to send` : ''}.
+                </p>
+              )}
+            </Report>
+          )}
+
           <Report icon={Ic.users} title="Engagement and abandonment" question="How does quality relate to retention? Views counted by when they started.">
             <div style={statGrid}>
               <Stat label="Playing time" value={`${e.playingHours >= 10 ? Math.round(e.playingHours).toLocaleString() : e.playingHours.toFixed(2)} h`} sub={`average ${fmtMs(e.avgPlayingMs)} per started view`} />
@@ -304,6 +480,24 @@ export default function PlaybackReports() {
               ? <Table head={[FILTERS.find((f) => f.key === by)?.label ?? by, m.label, 'Views', 'Sessions affected']} rows={bd.rows.map((r) => [r.name ?? valueLabel(r.value), fmtMeasure(m.kind, r.measure), fmtInt(r.views), fmtInt(r.affected)])} />
               : <p style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', margin: '12px 0 0' }}>No value has {minViews} views or more in this period.</p>}
           </Report>
+
+          <Report icon={Ic.list} title="Sessions" question="The views behind these numbers, newest first. Open one to see everything that happened to that viewer, in order.">
+            <div className="flex flex-wrap gap-2">
+              {PROBLEMS.map((x) => <button key={x.key} className={`btn ${problem === x.key ? 'primary' : 'ghost'}`} style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }} onClick={() => setProblem(x.key)}>{x.label}</button>)}
+            </div>
+            {sessions && sessions.length > 0
+              ? <Table head={['', 'What happened', 'Content', 'Device', 'Ended']} rows={sessions.map((x) => [
+                  <button key="o" className="btn ghost" style={{ padding: '2px 10px', fontSize: 'var(--fs-sm)' }} onClick={() => openSession(x.sid)} aria-label={`Open the timeline of session ${x.sid}`}>
+                    <span className="flex items-center gap-2"><Icon d={Ic.list} />Timeline</span></button>,
+                  x.outcome === 'failed' ? `Failed at ${STEP[x.errorStep ?? ''] ?? x.errorStep ?? '?'} (${x.errorCode ?? 'no code'})` : x.outcome === 'exited' ? 'Left before the first frame'
+                    : x.fatalAfterStart ? `Stopped by ${x.errorCode ?? 'an error'}` : x.leftInAd ? 'Left during an ad' : `${pl(x.stalls, 'stall')}, started in ${fmtMs(x.startupMs)}`,
+                  x.contentName ?? valueLabel(x.contentId), [x.device, x.country].filter(Boolean).join(', ') || '–', new Date(x.endedAt).toLocaleString(),
+                ])} />
+              : <p style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', margin: '12px 0 0' }}>No sessions like this in the period.</p>}
+            {openErr && <p style={{ color: 'var(--down)', fontSize: 'var(--fs-sm)', margin: '12px 0 0' }}>Couldn't open that session: {openErr}</p>}
+          </Report>
+
+          {timeline && <SessionTimeline t={timeline} onClose={() => setTimeline(null)} />}
 
           <Report icon={Ic.pulse} title="Telemetry health" question="Can these numbers be trusted? Reports lost, late or refused, and keys the collector does not know.">
             <div style={statGrid}>

@@ -37,12 +37,31 @@
 //    end) within 30 s of the end of a stall (or during one) / of a non-fatal
 //    error.
 //  - Percentiles everywhere are nearest rank: the value at rank ceil(q x n).
+//
+//  ADDED IN VERSION 2 (build queue 1.14f, reports 5, 7, 8, 9 and 11)
+//  - Ad is its own state. From an ad break start (abs) to its end (abe) the
+//    time is the break's: playing, stalling and the stalls themselves are
+//    counted as ad playing, ad buffering and ad stalls, never as the
+//    programme's (backgrounded still wins). Ad startup delay is the wait from
+//    the break start until the picture plays (0 when it was already playing);
+//    return to content is the same wait after the break end. A viewer who
+//    left (q or silence) while a break was on left during the ad.
+//  - Rendering: dropped frames are the largest dfa reported (the player's
+//    running total); decoder errors are errors at the decode step.
+//  - Access: licence requests, failures and their time come from the
+//    player's response reports for licence requests (com.volt-req=licence);
+//    a token error is an error after the first frame where the server
+//    answered 401 or 403 (com.volt-http), i.e. the playback token stopped
+//    being accepted mid-view.
+//  - Live: latency is the player's ltc; the first, last, lowest and highest
+//    per view are kept and drift is last minus first. Catch-up is playing
+//    time at a rate above 1 (pr), slow-down below 1.
 // ============================================================================
 import { parseCmcdLine, type CmcdValue } from './cmcdParse';
 import { parseUa } from './ua';
 import * as sk from './sketch';
 
-export const DEFINITIONS_VERSION = 1;
+export const DEFINITIONS_VERSION = 2;
 export const SILENCE_MS = 60_000;
 export const RESUME_MS = 60 * 60_000;
 const OSC_MS = 10_000;
@@ -74,6 +93,17 @@ export interface ViewRow {
   switches: number; oscillations: number; buffer_avg_ms: number | null; throughput_avg_kbps: number | null;
   dropped_frames: number | null; latency_avg_ms: number | null;
   exit_after_stall: boolean; exit_after_error: boolean;
+  // version 2: rendering (report 5)
+  decode_errors: number; hw_decode: boolean | null; key_system: string | null;
+  // access (report 7)
+  licence_requests: number; licence_failures: number; licence_ms: number; licence_max_ms: number | null; token_errors: number;
+  // live (report 8)
+  latency_first_ms: number | null; latency_last_ms: number | null; latency_min_ms: number | null; latency_max_ms: number | null;
+  rate_changes: number; catchup_ms: number; slowdown_ms: number;
+  // advertising (report 9)
+  ad_breaks: number; ad_breaks_ended: number; ad_ms: number; ad_playing_ms: number; ad_rebuffer_ms: number; ad_stalls: number; ad_errors: number;
+  ad_start_ms: number; ad_start_n: number; ad_start_max_ms: number | null; ad_return_ms: number; ad_return_n: number; ad_return_max_ms: number | null;
+  ads_started: number; ads_ended: number; left_in_ad: boolean;
   events: number; sn_missing: number; no_sn: number; late_events: number; clock_skew_ms: number | null; unknown_keys: Record<string, number>;
 }
 
@@ -153,6 +183,13 @@ export class ViewBuilder {
   private sns = new Set<number>();
   private sums = { bl: 0, bln: 0, mtp: 0, mtpn: 0, ltc: 0, ltcn: 0 };
   private ctxSeen = false;
+  private rate = 1;
+  /** The ad break on now (abs seen, abe not yet), and since when. */
+  private inBreak: string | null = null;
+  private breakSince = 0;
+  /** Waiting for the picture to play: since the break started, or since it ended. */
+  private adWaitSince: number | null = null;
+  private returnWaitSince: number | null = null;
   lastRt = 0;
   closed = false;
 
@@ -170,6 +207,12 @@ export class ViewBuilder {
       bitrate_ms: 0, bitrate_kbps_ms: 0, below_top_ms: 0, switches: 0, oscillations: 0,
       buffer_avg_ms: null, throughput_avg_kbps: null, dropped_frames: null, latency_avg_ms: null,
       exit_after_stall: false, exit_after_error: false, events: 0, sn_missing: 0, no_sn: 0, late_events: 0, clock_skew_ms: null, unknown_keys: {},
+      decode_errors: 0, hw_decode: null, key_system: null,
+      licence_requests: 0, licence_failures: 0, licence_ms: 0, licence_max_ms: null, token_errors: 0,
+      latency_first_ms: null, latency_last_ms: null, latency_min_ms: null, latency_max_ms: null, rate_changes: 0, catchup_ms: 0, slowdown_ms: 0,
+      ad_breaks: 0, ad_breaks_ended: 0, ad_ms: 0, ad_playing_ms: 0, ad_rebuffer_ms: 0, ad_stalls: 0, ad_errors: 0,
+      ad_start_ms: 0, ad_start_n: 0, ad_start_max_ms: null, ad_return_ms: 0, ad_return_n: 0, ad_return_max_ms: null,
+      ads_started: 0, ads_ended: 0, left_in_ad: false,
     };
   }
 
@@ -205,6 +248,8 @@ export class ViewBuilder {
     if (!v.device_model && r[VOLT + 'dm'] != null) v.device_model = str(r[VOLT + 'dm']);
     if (!v.codec && r[VOLT + 'codec'] != null) v.codec = str(r[VOLT + 'codec']);
     if (!v.network && r[VOLT + 'net'] != null) v.network = str(r[VOLT + 'net']);
+    if (v.hw_decode == null && r[VOLT + 'hwdec'] != null) { const h = str(r[VOLT + 'hwdec']); v.hw_decode = h === 'true' || h === '1' ? true : h === 'false' || h === '0' ? false : null; }
+    if (!v.key_system && r[VOLT + 'drm'] != null) v.key_system = str(r[VOLT + 'drm']);
     if (!v.cdn && ev.e === 'rr') v.cdn = cdnOf(r);
     if (!this.ctxSeen && ev.ctx) {
       this.ctxSeen = true;
@@ -230,8 +275,48 @@ export class ViewBuilder {
         this.errors++;
         this.lastErrTs = ts;
         this.lastErr = { code: str(r.ec), step: str(r[VOLT + 'step']) };
+        if (this.lastErr.step === 'decode') v.decode_errors++;
+        if (this.inBreak) v.ad_errors++;
+        const http = num(r[VOLT + 'http']);
+        if (this.ffTs != null && (http === 401 || http === 403) && (this.lastErr.step === 'manifest' || this.lastErr.step === 'segment')) v.token_errors++;
         break;
       }
+      case 'rr': {
+        if (str(r[VOLT + 'req']) === 'licence') {
+          v.licence_requests++;
+          const rc = num(r.rc);
+          if (rc == null || rc === 0 || rc >= 400) v.licence_failures++;
+          const t = num(r.ttlb);
+          if (t != null) { v.licence_ms += Math.round(t); v.licence_max_ms = Math.max(v.licence_max_ms ?? 0, Math.round(t)); }
+        }
+        break;
+      }
+      case 'pr': {
+        const pr = num(r.pr);
+        if (pr != null && pr > 0 && pr !== this.rate) { this.rate = pr; if (this.ffTs != null) v.rate_changes++; }
+        break;
+      }
+      case 'abs': {
+        if (!this.opened || this.inBreak) break;
+        this.inBreak = str(r[VOLT + 'brk']) ?? 'break';
+        this.breakSince = ts;
+        this.returnWaitSince = null;
+        v.ad_breaks++;
+        if (this.sta === 'p') { v.ad_start_n++; v.ad_start_max_ms = Math.max(v.ad_start_max_ms ?? 0, 0); }
+        else this.adWaitSince = ts;
+        break;
+      }
+      case 'abe': {
+        if (!this.inBreak) break;
+        this.inBreak = null;
+        this.adWaitSince = null;
+        v.ad_breaks_ended++;
+        if (this.sta === 'p') { v.ad_return_n++; v.ad_return_max_ms = Math.max(v.ad_return_max_ms ?? 0, 0); }
+        else this.returnWaitSince = ts;
+        break;
+      }
+      case 'as': if (this.opened) v.ads_started++; break;
+      case 'ae': if (this.opened) v.ads_ended++; break;
       case 'bc': {
         const b = num(r.br);
         if (b != null && this.ffTs != null && b !== this.br) {
@@ -249,7 +334,15 @@ export class ViewBuilder {
       case 't': {
         const bl = num(r.bl); if (bl != null) { this.sums.bl += bl; this.sums.bln++; }
         const mtp = num(r.mtp); if (mtp != null) { this.sums.mtp += mtp; this.sums.mtpn++; }
-        const ltc = num(r.ltc); if (ltc != null) { this.sums.ltc += ltc; this.sums.ltcn++; }
+        const ltc = num(r.ltc);
+        if (ltc != null) {
+          this.sums.ltc += ltc; this.sums.ltcn++;
+          const l = Math.round(ltc);
+          if (v.latency_first_ms == null) v.latency_first_ms = l;
+          v.latency_last_ms = l;
+          v.latency_min_ms = Math.min(v.latency_min_ms ?? l, l);
+          v.latency_max_ms = Math.max(v.latency_max_ms ?? l, l);
+        }
         const tpb = num(r.tpb); if (tpb != null) this.tpb = tpb;
         const pb = num(r.pb); if (pb != null && this.br == null) this.br = pb;
         const dfa = num(r.dfa); if (dfa != null) v.dropped_frames = Math.max(v.dropped_frames ?? 0, dfa);
@@ -263,6 +356,17 @@ export class ViewBuilder {
   private count(dt: number, at: number, sink: MinuteSink | null): void {
     const v = this.v;
     if (this.bg) { v.background_ms += dt; return; }
+    // In a break the time is the ad's, not the programme's (version 2).
+    if (this.inBreak) {
+      v.ad_ms += dt;
+      if (this.sta === 'p') v.ad_playing_ms += dt;
+      else if (this.sta === 'r') v.ad_rebuffer_ms += dt;
+      else if (this.sta === 'a') v.paused_ms += dt;
+      else if (this.sta === 'k') v.seek_ms += dt;
+      return;
+    }
+    if (this.sta === 'p' && this.rate > 1) v.catchup_ms += dt;
+    if (this.sta === 'p' && this.rate < 1) v.slowdown_ms += dt;
     switch (this.sta) {
       case 'p':
         v.playing_ms += dt;
@@ -303,13 +407,22 @@ export class ViewBuilder {
       sink?.add(this.acct, ts, this.dims(), { starts: 1 }, v.startup_ms ?? undefined);
     }
     // stalls and seeks are entries into the state, after the first frame
-    if (this.ffTs != null && s === 'r' && prev !== 'r') {
+    if (s === 'p' && this.adWaitSince != null) {
+      const w = ts - this.adWaitSince; v.ad_start_ms += w; v.ad_start_n++; v.ad_start_max_ms = Math.max(v.ad_start_max_ms ?? 0, w); this.adWaitSince = null;
+    }
+    if (s === 'p' && this.returnWaitSince != null) {
+      const w = ts - this.returnWaitSince; v.ad_return_ms += w; v.ad_return_n++; v.ad_return_max_ms = Math.max(v.ad_return_max_ms ?? 0, w); this.returnWaitSince = null;
+    }
+    if (this.inBreak && this.ffTs != null && s === 'r' && prev !== 'r') {
+      v.ad_stalls++;
+    } else if (this.ffTs != null && s === 'r' && prev !== 'r') {
       v.stalls++;
       if (v.first_stall_ms == null) v.first_stall_ms = ts - this.ffTs;
       this.inStallSince = ts;
       sink?.add(this.acct, ts, this.dims(), { stalls: 1 });
     }
-    if (prev === 'r' && s !== 'r') { this.inStallSince = null; this.lastStallEnd = ts; }
+    // An ad stall is the ad's (report 9): it does not make the exit an exit after a stall.
+    if (prev === 'r' && s !== 'r') { if (!this.inBreak) this.lastStallEnd = ts; this.inStallSince = null; }
     if (this.ffTs != null && s === 'k' && prev !== 'k') v.seeks++;
     if (s === 'f') {
       if (this.ffTs == null) { v.outcome = 'failed'; sink?.add(this.acct, ts, this.dims(), { failures: 1 }); }
@@ -332,6 +445,7 @@ export class ViewBuilder {
     const end = this.lastTs ?? 0;
     v.exit_after_stall = left && this.ffTs != null && (this.inStallSince != null || (this.lastStallEnd != null && end - this.lastStallEnd <= EXIT_AFTER_MS));
     v.exit_after_error = left && this.lastErrTs != null && end - this.lastErrTs <= EXIT_AFTER_MS && v.ended_by !== 'f';
+    v.left_in_ad = left && this.inBreak != null;
     const s = this.sums;
     v.buffer_avg_ms = s.bln ? Math.round(s.bl / s.bln) : null;
     v.throughput_avg_kbps = s.mtpn ? Math.round(s.mtp / s.mtpn) : null;

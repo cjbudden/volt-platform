@@ -32,13 +32,18 @@ async function kindOf(id: string) {
   return v;
 }
 
-export async function fastManifest(id: string, file: 'master.m3u8' | 'manifest.mpd'):
+export async function fastManifest(id: string, file: 'master.m3u8' | 'manifest.mpd', sid?: string | null):
   Promise<null | { ok: true; url: string; perViewer?: boolean } | { ok: false; status: 503; reason: string }> {
   const k = await kindOf(id);
   if (!k.playlist) return null;
   if (!(await playoutFresh(id))) return { ok: false, status: 503, reason: 'no_valid_content' };
   if (k.stitched && file === 'master.m3u8') {
-    const session = randomBytes(12).toString('base64url');
+    // Named after the player's play attempt when the gate was told it (its CMCD
+    // sid), so the stitcher's server-side ad beacons (ad_beacons.session_id)
+    // join that viewer's playback reports (report 11). The random part keeps
+    // it unguessable and unique: a sid is the client's own word.
+    const rnd = randomBytes(12).toString('base64url');
+    const session = sid && /^[A-Za-z0-9-]{8,64}$/.test(sid) ? `${sid}_${rnd}` : rnd;
     const base = fastConfig.cdn ? config.publicBaseUrl.replace(/\/$/, '') : '';
     return { ok: true, url: `${base}/fast/${id}/s/${session}/master.m3u8`, perViewer: true };
   }

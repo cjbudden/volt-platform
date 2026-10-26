@@ -29,6 +29,11 @@ const VIEW_COLS = [
   'playing_ms', 'rebuffer_ms', 'stalls', 'first_stall_ms', 'seeks', 'seek_ms', 'paused_ms', 'background_ms', 'bitrate_ms', 'bitrate_kbps_ms', 'below_top_ms',
   'switches', 'oscillations', 'buffer_avg_ms', 'throughput_avg_kbps', 'dropped_frames', 'latency_avg_ms', 'exit_after_stall', 'exit_after_error',
   'events', 'sn_missing', 'no_sn', 'late_events', 'clock_skew_ms', 'unknown_keys',
+  // definitions version 2 (reports 5, 7, 8 and 9)
+  'decode_errors', 'hw_decode', 'key_system', 'licence_requests', 'licence_failures', 'licence_ms', 'licence_max_ms', 'token_errors',
+  'latency_first_ms', 'latency_last_ms', 'latency_min_ms', 'latency_max_ms', 'rate_changes', 'catchup_ms', 'slowdown_ms',
+  'ad_breaks', 'ad_breaks_ended', 'ad_ms', 'ad_playing_ms', 'ad_rebuffer_ms', 'ad_stalls', 'ad_errors',
+  'ad_start_ms', 'ad_start_n', 'ad_start_max_ms', 'ad_return_ms', 'ad_return_n', 'ad_return_max_ms', 'ads_started', 'ads_ended', 'left_in_ad',
 ];
 const MIN_KEY = ['account_id', 'minute', 'content_id', 'stream_type', 'country', 'device_class', 'cdn'];
 const MIN_ADD = ['attempts', 'starts', 'failures', 'fatal_after', 'stalls', 'playing_ms', 'rebuffer_ms', 'switches'];

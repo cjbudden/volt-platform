@@ -334,6 +334,24 @@
  },
  {
   "method": "GET",
+  "path": "/api/analytics/qoe/sessions",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/qoe/sessions/:sid",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
   "path": "/api/analytics/realtime",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
