@@ -35,9 +35,10 @@ import { defaultFetcher } from '../fast/store';
 import { fetchTracker } from '../fast/beaconSender';
 import { fillBeaconUrl, progressOffsetSec } from '../fast/beacons';
 import {
-  resolveVodAdPolicy, planVodBreaks, titleRule, stitchedStarts, catchupWindows, replaceBreaks,
-  type VodAdPolicy, type Position, type Delivery, type CutWindow, type BroadcastBreak,
+  resolveVodAdPolicy, planVodBreaks, planVmapBreaks, titleRule, stitchedStarts, catchupWindows, replaceBreaks,
+  type VodAdPolicy, type Position, type Delivery, type CutWindow, type BroadcastBreak, type VmapPlaced,
 } from './plan';
+import { fetchVmap, sourceFetcher, type VmapFetch } from './vmap';
 import {
   masterEntries, rewriteMaster, parseMedia, stitchMedia, guidedMedia, boundariesOf, durationOf, matchEntry, cutMedia,
   type MasterEntry, type Media, type Segment,
@@ -184,24 +185,93 @@ export async function catchupCuts(asset: AssetRow, policy: VodAdPolicy, media: M
  * cue points; for a recording of a live stream, its broadcast breaks cut out
  * and replaced (`cuts`, in the recording's seconds; content time is then the
  * title without them).
+ *
+ * Under a VMAP rule (`policy.schedule` 'vmap') the ad server's schedule
+ * (`vmap`, fetched by `vmapFor`) places the breaks instead. When the ad
+ * server could not be asked, the rule's own breaks are planned and marked
+ * `vmapFailed`: they are filled with house spots without asking again, so a
+ * viewer is never held up twice by an ad server that is down.
  */
-export async function breaksFor(asset: AssetRow, policy: VodAdPolicy) {
+export async function breaksFor(asset: AssetRow, policy: VodAdPolicy, vmap?: VmapFetch | null) {
   const h = await assetHls(asset.master_key!);
   const v = firstVideo(h);
   const recorded = v ? h.media.get(v.track)! : null;
   const cuts = await catchupCuts(asset, policy, recorded);
   const media = recorded && cuts.length ? cutMedia(recorded, cuts) : recorded;
   const contentSec = media ? durationOf(media) : Number(asset.duration_ms ?? 0) / 1000;
-  return {
-    contentSec,
-    cuts,
-    breaks: planVodBreaks(contentSec, policy, {
-      cuesSec: (asset.break_cues_ms ?? []).map((ms) => ms / 1000),
-      boundaries: media ? boundariesOf(media) : undefined,
-      titleRule: titleRule(asset.metadata),
-      replace: cuts.length ? replaceBreaks(cuts) : undefined,
-    }),
-  };
+  const cuesSec = (asset.break_cues_ms ?? []).map((ms) => ms / 1000);
+  const boundaries = media ? boundariesOf(media) : undefined;
+  if (policy.schedule === 'vmap' && vmap?.doc) {
+    return {
+      contentSec, cuts, vmap: vmapView(vmap),
+      breaks: planVmapBreaks(contentSec, vmap.doc.breaks, policy, { cuesSec, boundaries, titleRule: titleRule(asset.metadata) }),
+    };
+  }
+  const breaks = planVodBreaks(contentSec, policy, { cuesSec, boundaries, titleRule: titleRule(asset.metadata), replace: cuts.length ? replaceBreaks(cuts) : undefined });
+  if (policy.schedule === 'vmap') {
+    const failed: 'timeout' | 'error' = vmap?.problem === 'timeout' ? 'timeout' : 'error';
+    return { contentSec, cuts, vmap: vmap ? vmapView(vmap) : { state: 'error' as const, message: 'No ad server to ask for the schedule', problems: [], elapsedMs: 0 }, breaks: breaks.map((b) => ({ ...b, vmapFailed: failed })) };
+  }
+  return { contentSec, cuts, vmap: null, breaks };
+}
+
+/** What the plan and the timeline say about the ad server's schedule. */
+function vmapView(v: VmapFetch) {
+  return { state: (v.doc ? 'ok' : v.problem ?? 'error') as 'ok' | 'timeout' | 'error', message: v.message, problems: v.doc?.problems ?? [], elapsedMs: Math.round(v.elapsedMs) };
+}
+
+// ---------------------------------------------------------------- VMAP: asking the ad server for the schedule
+
+const vmapCache = new Map<string, { v: VmapFetch; at: number }>();
+
+/**
+ * Ask the rule's ad server for a title's schedule (VMAP). With a viewer
+ * (`ctx`) this is that viewer's schedule, asked once per playback with the
+ * same macros a VAST tag gets. Without one it is the title's schedule, used
+ * where one answer serves every viewer (the guided playlist the CDN caches,
+ * the console's plan): asked without viewer macros and kept five minutes
+ * (a failure one minute, so an outage is retried soon).
+ *
+ * The ad server is told where the title's own cue points are ([CUE_POINTS],
+ * seconds, comma separated, including a catch-up title's replaced broadcast
+ * breaks), for the ad servers that place mid-rolls on the publisher's cues.
+ */
+export async function vmapFor(asset: AssetRow, rule: VodAdRuleRow & { resolved: VodAdPolicy }, viewer: { sessionId: string; ctx: SessionCtx } | null, fetcher?: Fetcher): Promise<VmapFetch | null> {
+  if (rule.resolved.schedule !== 'vmap') return null;
+  const key = `${asset.id}|${rule.id}|${new Date(rule.updated_at).getTime()}`;
+  if (!viewer) {
+    const hit = vmapCache.get(key);
+    if (hit && Date.now() - hit.at < (hit.v.doc ? 300_000 : 60_000)) return hit.v;
+  }
+  const server = rule.ad_server_id ? await one<any>(`SELECT * FROM ad_servers WHERE id = $1 AND account_id = $2 AND enabled`, [rule.ad_server_id, asset.account_id]) : null;
+  if (!server) return { doc: null, problem: 'error', message: 'The rule has no ad server (or it is turned off) to ask for the schedule', elapsedMs: 0 };
+  const md = asset.metadata ?? {};
+  const h = await assetHls(asset.master_key!);
+  const v = firstVideo(h);
+  const recorded = v ? h.media.get(v.track)! : null;
+  const cuts = await catchupCuts(asset, rule.resolved, recorded);
+  const cues = [...(asset.break_cues_ms ?? []).map((ms) => ms / 1000), ...replaceBreaks(cuts).map((r) => r.atSec)].sort((a, b) => a - b);
+  const contentSec = recorded ? durationOf(cuts.length ? cutMedia(recorded, cuts) : recorded) : Number(asset.duration_ms ?? 0) / 1000;
+  const ctx = viewer?.ctx ?? {};
+  const url = expandTag(rule.resolved.vmapUrl || server.tag_template, {
+    sessionId: viewer?.sessionId ?? '', breakId: '', breakIndex: 0, durationSec: 0,
+    channelId: asset.id, contentId: asset.id, contentTitle: asset.title ?? md.title ?? null, series: md.series ?? null,
+    genre: md.genre ?? null, rating: md.rating ?? md.contentRating ?? null, country: ctx.country ?? null, ip: ctx.ip ?? null,
+    userAgent: ctx.userAgent ?? null, appId: ctx.appId ?? null, ifa: ctx.ifa ?? null, limitAdTracking: !!ctx.lmt,
+    gdpr: ctx.gdpr ?? null, usPrivacy: ctx.usPrivacy ?? null,
+    extra: { CONTENT_DURATION: String(Math.round(contentSec)), CUE_POINTS: cues.map((c) => String(Math.round(c * 1000) / 1000)).join(',') },
+  });
+  const r = await fetchVmap(url, fetcher ?? defaultFetcher, server.timeout_ms ?? 1500);
+  if (!viewer) {
+    vmapCache.set(key, { v: r, at: Date.now() });
+    if (vmapCache.size > 500) vmapCache.delete(vmapCache.keys().next().value!);
+  }
+  return r;
+}
+
+/** The breaks under a rule, asking the ad server for its schedule first when the rule says it decides. */
+export async function breaksForRule(asset: AssetRow, rule: VodAdRuleRow & { resolved: VodAdPolicy }, viewer: { sessionId: string; ctx: SessionCtx } | null = null, fetcher?: Fetcher) {
+  return breaksFor(asset, rule.resolved, await vmapFor(asset, rule, viewer, fetcher));
 }
 
 /** The replaced broadcast breaks as the plan and the timeline report them. */
@@ -229,11 +299,17 @@ export interface SessionBreak {
   index: number; position: Position; atSec: number; plannedSec: number;
   /** null until decided; [] = decided, nothing to play (the break is dropped). */
   pod: PodEntry[] | null;
+  /** VMAP: the ad server's sources and trackers for this break. */
+  vmap?: VmapPlaced;
+  /** VMAP rule whose ad server could not be asked: the rule's own break, house spots only. */
+  vmapFailed?: 'timeout' | 'error';
 }
 export interface SessionPlan {
   contentSec: number; snapback: boolean; prerollOnResume: boolean; breaks: SessionBreak[];
   /** Catch-up: the broadcast breaks left out of the recording (its seconds), fixed for the session. */
   cuts?: CutWindow[];
+  /** VMAP rule: how asking the ad server for this viewer's schedule went. */
+  vmap?: { state: 'ok' | 'timeout' | 'error'; message: string | null; problems: string[]; elapsedMs: number };
 }
 export interface SessionCtx { ip?: string | null; userAgent?: string | null; country?: string | null; appId?: string | null; ifa?: string | null; lmt?: boolean; gdpr?: string | null; usPrivacy?: string | null }
 
@@ -256,13 +332,18 @@ export interface OpenInput {
 export async function openSession(i: OpenInput): Promise<{ id: string; plan: SessionPlan }> {
   const asset = await assetFor(i.assetId, i.accountId);
   if (!asset?.master_key) throw new Error('asset has no playlist');
-  const { contentSec, breaks, cuts } = await breaksFor(asset, i.rule.resolved);
+  const id = i.id ?? newSessionId();
+  // A VMAP rule: this viewer's schedule, asked with the viewer's macros.
+  const { contentSec, breaks, cuts, vmap } = await breaksForRule(asset, i.rule, { sessionId: id, ctx: i.ctx }, i.fetcher);
   const plan: SessionPlan = {
     contentSec, snapback: i.rule.resolved.snapback, prerollOnResume: i.rule.resolved.prerollOnResume,
-    breaks: breaks.map((b) => ({ index: b.index, position: b.position, atSec: b.atSec, plannedSec: b.durationSec, pod: null })),
+    breaks: breaks.map((b) => ({
+      index: b.index, position: b.position, atSec: b.atSec, plannedSec: b.durationSec, pod: null,
+      ...(b.vmap ? { vmap: b.vmap } : {}), ...((b as { vmapFailed?: 'timeout' | 'error' }).vmapFailed ? { vmapFailed: (b as { vmapFailed?: 'timeout' | 'error' }).vmapFailed } : {}),
+    })),
     ...(cuts.length ? { cuts } : {}),
+    ...(vmap ? { vmap } : {}),
   };
-  const id = i.id ?? newSessionId();
   await query(
     `INSERT INTO vod_ad_sessions (id, account_id, vod_asset_id, app_id, play_sid, delivery, state, plan, ctx)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb) ON CONFLICT (id) DO NOTHING`,
@@ -308,13 +389,32 @@ interface DecideInput { sessionId: string; asset: AssetRow; brk: SessionBreak; r
 /** Ask the ad server for one break (within its budget), fill it, record it. Never throws for an ad server fault. */
 export async function decideVodBreak(i: DecideInput): Promise<PodEntry[]> {
   const pol = i.rule.resolved;
-  const breakSec = i.brk.plannedSec;
+  let breakSec = i.brk.plannedSec;
   let serverProblem: 'timeout' | 'error' | null = null;
   let vastAds: VastAd[] = [];
   let problems: { code: number; message: string }[] = [];
   let elapsedMs = 0;
   const server = i.rule.ad_server_id ? await one<any>(`SELECT * FROM ad_servers WHERE id = $1 AND account_id = $2 AND enabled`, [i.rule.ad_server_id, i.asset.account_id]) : null;
-  if (server) {
+  if (i.brk.vmapFailed) {
+    // The ad server could not give the schedule: the rule's own break, filled
+    // with house spots, without asking the server again for this viewer.
+    serverProblem = i.brk.vmapFailed;
+  } else if (i.brk.vmap) {
+    // The ad server placed this break: its sources (a VAST tag to ask, or the
+    // VAST itself) resolved as any VAST is, wrappers and budget included, in
+    // the order the ad server listed them.
+    if (server && i.brk.vmap.sources.length) {
+      const got = await Promise.all(i.brk.vmap.sources.map((src) => {
+        const { url, fetcher } = sourceFetcher(src, i.fetcher ?? defaultFetcher);
+        return resolveVast(url, fetcher, { budgetMs: server.timeout_ms, maxDepth: server.max_wrappers });
+      }));
+      vastAds = got.flatMap((r) => r.ads);
+      problems = got.flatMap((r) => r.problems.map((p) => ({ code: p.code, message: p.message })));
+      elapsedMs = Math.max(0, ...got.map((r) => r.elapsedMs));
+      if (!vastAds.length && problems.some((p) => p.code === 301)) serverProblem = 'timeout';
+      else if (!vastAds.length && problems.length) serverProblem = 'error';
+    }
+  } else if (server) {
     const md = i.asset.metadata ?? {};
     const tag = expandTag(server.tag_template, {
       sessionId: i.sessionId, breakId: `${i.sessionId}-${i.brk.index}`, breakIndex: i.brk.index, durationSec: breakSec,
@@ -340,6 +440,9 @@ export async function decideVodBreak(i: DecideInput): Promise<PodEntry[]> {
       WHERE c.account_id = $1 AND c.creative_key = ANY($2::text[])`, [i.asset.account_id, keys]) : [];
   const ready = new Map(cache.filter((c) => c.master_key && c.duration_ms).map((c) => [c.creative_key, { assetId: String(c.vod_asset_id), durationSec: Number(c.duration_ms) / 1000 }]));
   const house = await houseAds(i.rule.house_ads);
+  // VMAP gives no break length: the ad server's pod is the break. With no ads
+  // back, the rule's length for the position is what house spots fill.
+  if (i.brk.vmap && vastAds.length) breakSec = vastAds.reduce((n, a) => n + a.durationSec, 0);
   const plan = fillBreak({
     breakSec, segmentSec: 2, ads: vastAds,
     conditioned: (k) => ready.get(k) ?? null, house, breakIndex: i.brk.index, serverProblem,
@@ -374,13 +477,21 @@ export async function decideVodBreak(i: DecideInput): Promise<PodEntry[]> {
         impressions: [], tracking: {}, clickThrough: null, clickTracking: [] });
     }
   }
+  // VMAP's breakStart and breakEnd go with the pod's first and last ad (sent
+  // as their first and last segments are asked for, like the quartiles).
+  const paid = pod.filter((p) => p.kind === 'ad');
+  if (i.brk.vmap && paid.length) {
+    const { breakStart, breakEnd } = i.brk.vmap.tracking;
+    if (breakStart.length) paid[0].tracking = { ...paid[0].tracking, breakStart: [...breakStart] };
+    if (breakEnd.length) paid[paid.length - 1].tracking = { ...paid[paid.length - 1].tracking, breakEnd: [...breakEnd] };
+  }
   const adMs = Math.round(pod.filter((p) => p.kind === 'ad').reduce((n, p) => n + p.durationSec, 0) * 1000);
   const houseMs = Math.round(pod.filter((p) => p.kind === 'house').reduce((n, p) => n + p.durationSec, 0) * 1000);
   await query(
     `INSERT INTO vod_ad_breaks (session_id, account_id, vod_asset_id, break_index, position, content_ms, break_ms, ad_ms, house_ms, ad_server_id, elapsed_ms, fallback, problems)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb) ON CONFLICT (session_id, break_index) DO NOTHING`,
     [i.sessionId, i.asset.account_id, i.asset.id, i.brk.index, i.brk.position, Math.round(i.brk.atSec * 1000), Math.round(breakSec * 1000), adMs, houseMs,
-     server?.id ?? null, Math.round(elapsedMs), pod.length ? plan.fallback : (plan.fallback ?? 'no-ads'), JSON.stringify(problems)]).catch(() => null);
+     server?.id ?? null, Math.round(elapsedMs), i.brk.vmapFailed ? `vmap-${i.brk.vmapFailed}` : pod.length ? plan.fallback : (plan.fallback ?? 'no-ads'), JSON.stringify(problems)]).catch(() => null);
   return pod;
 }
 
@@ -513,10 +624,13 @@ export async function sessionText(row: any, k: number, repId: string): Promise<s
  * The guided playlists' version: changes when the rule, the asset's cues or
  * (catch-up) the stream's broadcast breaks change, so a CDN copy is never stale.
  */
-export async function guidedVersion(asset: AssetRow, rule: VodAdRuleRow): Promise<string> {
-  const { cuts } = asset.master_key ? await breaksFor(asset, resolveVodAdPolicy(rule.policy)) : { cuts: [] as CutWindow[] };
-  const cutKey = cuts.map((w) => `${w.fromSec}-${w.toSec}`).join(',');
-  return createHash('sha256').update(`${rule.id}|${new Date(rule.updated_at).getTime()}|${(asset.break_cues_ms ?? []).join(',')}|${titleRule(asset.metadata)}${cutKey ? `|${cutKey}` : ''}`).digest('base64url').slice(0, 10);
+export async function guidedVersion(asset: AssetRow, rule: VodAdRuleRow, fetcher?: Fetcher): Promise<string> {
+  const resolved = resolveVodAdPolicy(rule.policy);
+  const got = asset.master_key ? await breaksForRule(asset, { ...rule, resolved }, null, fetcher) : { cuts: [] as CutWindow[], vmap: null, breaks: [] };
+  const cutKey = got.cuts.map((w) => `${w.fromSec}-${w.toSec}`).join(',');
+  // Under VMAP the ad server's schedule is part of the playlist: a new schedule is a new version.
+  const vmapKey = got.vmap ? `|vmap:${got.breaks.map((b) => `${b.position}${b.atSec}`).join(',')}` : '';
+  return createHash('sha256').update(`${rule.id}|${new Date(rule.updated_at).getTime()}|${(asset.break_cues_ms ?? []).join(',')}|${titleRule(asset.metadata)}${cutKey ? `|${cutKey}` : ''}${vmapKey}`).digest('base64url').slice(0, 10);
 }
 export const guidedBase = (assetId: string, ver: string) => `/vod-ads/g/${assetId}/${ver}`;
 
@@ -529,7 +643,8 @@ export async function guidedPlaylist(asset: AssetRow, rule: VodAdRuleRow & { res
   const h = await assetHls(asset.master_key!);
   const recorded = h.media.get(track);
   if (!recorded) return null;
-  const { breaks, cuts } = await breaksFor(asset, rule.resolved);
+  // Shared by every viewer and cached by the CDN: under VMAP, the title's schedule (no viewer macros).
+  const { breaks, cuts } = await breaksForRule(asset, rule);
   const content = cuts.length ? cutMedia(recorded, cuts) : recorded;
   return guidedMedia(content, breaks.map((b) => ({ index: b.index, atSec: b.atSec, durationSec: b.durationSec, position: b.position })),
     (b) => `${guidedBase(asset.id, ver)}/list/${b.index}.json`);
@@ -548,7 +663,14 @@ export async function guidedAssetList(asset: AssetRow, rule: VodAdRuleRow & { re
     row = await sessionRow(sid);
   }
   const plan = row.plan as SessionPlan;
-  const b = plan.breaks.find((x) => x.index === breakIndex);
+  let b = plan.breaks.find((x) => x.index === breakIndex);
+  if (rule.resolved.schedule === 'vmap') {
+    // The shared playlist's break `breakIndex` is a moment of the title's
+    // schedule; this viewer's own schedule (asked with their macros) fills it
+    // when it has a break at the same moment, and leaves it empty when not.
+    const shared = (await breaksForRule(asset, rule, null, fetcher)).breaks.find((x) => x.index === breakIndex);
+    b = shared ? plan.breaks.find((x) => x.position === shared.position && Math.abs(x.atSec - shared.atSec) < 0.01) : undefined;
+  }
   if (!b) return { ASSETS: [] as { URI: string; DURATION: number }[], sessionId: sid };
   if (b.pod == null) {
     b.pod = await decideVodBreak({ sessionId: sid, asset, brk: b, rule, ctx, fetcher }).catch(() => []);
@@ -602,6 +724,10 @@ export function eventsDueAt(entry: PodEntry, segStartSec: number, isLast: boolea
     const urls = ev === 'impression' ? entry.impressions : entry.tracking?.[ev] ?? [];
     out.push({ event: ev, offsetSec: off, urls });
   }
+  // VMAP's break trackers ride on the pod's first ad (breakStart) and last ad
+  // (breakEnd), only where the ad server gave some (decideVodBreak).
+  if (entry.tracking?.breakStart?.length) out.unshift({ event: 'breakStart', offsetSec: 0, urls: entry.tracking.breakStart });
+  if (isLast && entry.tracking?.breakEnd?.length) out.push({ event: 'breakEnd', offsetSec: d, urls: entry.tracking.breakEnd });
   for (const [k, urls] of Object.entries(entry.tracking ?? {})) {
     if (!k.startsWith('progress@')) continue;
     const off = progressOffsetSec(k.slice(9), d);
@@ -717,6 +843,9 @@ export function timelineOf(row: any) {
     eventsUrl: `${sessionBase(row.id)}/events`,
     // Catch-up: where the broadcast's own breaks were cut out (content time, and the recording's seconds).
     replaced: replacedView(plan.cuts),
+    // Who placed the breaks: Volt's rule, or the ad server's VMAP schedule (and how asking it went).
+    schedule: plan.vmap ? 'vmap' : 'rules',
+    vmap: plan.vmap ?? null,
   };
 }
 
@@ -757,13 +886,18 @@ export async function adsForPlay(i: {
   const want = i.preferred && i.preferred !== 'auto' ? i.preferred : pol.delivery;
   const delivery: 'stitched' | 'guided' = want === 'guided' ? (canGuided ? 'guided' : 'stitched')
     : want === 'stitched' ? 'stitched' : canGuided ? 'guided' : 'stitched';
-  const { breaks } = await breaksFor(asset, pol);
-  if (!breaks.length) return null;
+  // Stitched under VMAP: the viewer's own schedule is asked as the session opens, not twice.
+  if (!(pol.schedule === 'vmap' && delivery === 'stitched')) {
+    const { breaks } = await breaksForRule(asset, rule, null, i.fetcher);
+    if (!breaks.length) return null;
+  }
   if (delivery === 'guided') {
     // Guided DASH (alternative content) is not built: a guided viewer gets HLS only.
-    return { delivery, hls: `${guidedBase(asset.id, await guidedVersion(asset, rule))}/master.m3u8`, dash: null, sessionId: null, timelineUrl: null };
+    return { delivery, hls: `${guidedBase(asset.id, await guidedVersion(asset, rule, i.fetcher))}/master.m3u8`, dash: null, sessionId: null, timelineUrl: null };
   }
   const s = await openSession({ accountId: i.accountId, assetId: asset.id, delivery: 'stitched', playSid: i.playSid, ctx: i.ctx, rule, fetcher: i.fetcher });
+  // The ad server's schedule for this viewer has no breaks: play the title as it is.
+  if (!s.plan.breaks.length) return null;
   const dash = !s.plan.cuts?.length && await assetMpd(asset).catch(() => null) ? `${sessionBase(s.id)}/manifest.mpd` : null;
   return { delivery, hls: `${sessionBase(s.id)}/master.m3u8`, dash, sessionId: s.id, timelineUrl: `${sessionBase(s.id)}/timeline.json` };
 }

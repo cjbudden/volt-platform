@@ -34,6 +34,8 @@
 //  PURE. test/vod-ads.check.ts, test/vod-ads-catchup.check.ts.
 // ============================================================================
 
+import { offsetSec, type VmapBreak, type VmapSource } from './vmap';
+
 export type Position = 'pre' | 'mid' | 'post';
 export type Delivery = 'auto' | 'stitched' | 'guided';
 
@@ -52,6 +54,15 @@ export interface VodAdPolicy {
   prerollOnResume: boolean;
   /** How the ads reach the player: guided where the player supports interstitials, else stitched. */
   delivery: Delivery;
+  /**
+   * Who decides where the breaks go: Volt's own pre, mid and post settings
+   * above ('rules'), or the ad server's VMAP schedule ('vmap', SSAI.md 5.1).
+   * Under VMAP the settings above still say how long a break is when the ad
+   * server cannot be reached and house spots fill it.
+   */
+  schedule: 'rules' | 'vmap';
+  /** The VMAP request (macros as in a VAST tag); empty: the ad server's own tag is the VMAP request. */
+  vmapUrl: string;
 }
 
 export const DEFAULT_VOD_AD_POLICY: VodAdPolicy = {
@@ -64,6 +75,8 @@ export const DEFAULT_VOD_AD_POLICY: VodAdPolicy = {
   snapback: true,
   prerollOnResume: false,
   delivery: 'auto',
+  schedule: 'rules',
+  vmapUrl: '',
 };
 
 const num = (v: unknown, lo: number, hi: number, d: number) => {
@@ -93,6 +106,8 @@ export function resolveVodAdPolicy(raw: unknown): VodAdPolicy {
     snapback: bool(r.snapback, d.snapback),
     prerollOnResume: bool(r.prerollOnResume, d.prerollOnResume),
     delivery: (['auto', 'stitched', 'guided'] as const).includes(r.delivery) ? r.delivery : d.delivery,
+    schedule: r.schedule === 'vmap' ? 'vmap' : 'rules',
+    vmapUrl: typeof r.vmapUrl === 'string' && /^https?:\/\/\S+$/i.test(r.vmapUrl.trim()) ? r.vmapUrl.trim().slice(0, 4000) : '',
   };
 }
 
@@ -111,8 +126,19 @@ export interface PlannedBreak {
   atSec: number;
   /** The break's planned length; the pod decided for it may be shorter. */
   durationSec: number;
-  /** Where the moment came from ('replace': a broadcast break cut out of a catch-up title). */
-  source: 'pre' | 'cue' | 'interval' | 'post' | 'replace';
+  /** Where the moment came from ('replace': a broadcast break cut out of a catch-up title; 'vmap': the ad server's schedule). */
+  source: 'pre' | 'cue' | 'interval' | 'post' | 'replace' | 'vmap';
+  /** VMAP: what the ad server said for this moment (its sources in order, its break trackers). */
+  vmap?: VmapPlaced;
+}
+
+/** One or more VMAP AdBreaks that landed on the same moment, played as one pod. */
+export interface VmapPlaced {
+  breakIds: string[];
+  /** As written by the ad server, for the console. */
+  timeOffsets: string[];
+  sources: VmapSource[];
+  tracking: { breakStart: string[]; breakEnd: string[]; error: string[] };
 }
 
 /** Nearest segment start to `t` (boundaries ascending, starting at 0). */
@@ -165,6 +191,54 @@ export function planVodBreaks(contentSec: number, policy: VodAdPolicy, opts: { c
   }
   if (policy.postroll.on && contentSec >= policy.postroll.minContentSec) out.push({ position: 'post', atSec: contentSec, durationSec: policy.postroll.sec, source: 'post' });
   return out.map((b, index) => ({ ...b, index }));
+}
+
+// ---------------------------------------------------------------- VMAP: the ad server's schedule
+
+/**
+ * The ad server's breaks (VMAP) as a plan: each offset moved to the nearest
+ * segment start, exactly as Volt's own mid-rolls are, so stitched and guided
+ * delivery put them in the same places. 'start' or a moment that lands on 0
+ * is the pre-roll; 'end' or one that lands on the end is the post-roll.
+ * Several AdBreaks on one moment (an ad server that sends a pre-roll in two
+ * parts) are one break playing their pods in order. A title that is ad-free
+ * gets nothing, a no_mid title its pre and post only: the title's own say
+ * wins over the ad server's, as it does over Volt's rule.
+ *
+ * VMAP gives no break length: `durationSec` is the rule's length for that
+ * position, used only when the ad server returns nothing for the break and
+ * house spots fill it. A decided pod is as long as its ads.
+ */
+export function planVmapBreaks(contentSec: number, vmap: VmapBreak[], policy: VodAdPolicy, opts: { cuesSec?: number[]; boundaries?: number[]; titleRule?: 'default' | 'none' | 'no_mid' } = {}): PlannedBreak[] {
+  const rule = opts.titleRule ?? 'default';
+  if (rule === 'none' || !(contentSec > 0)) return [];
+  const edges = opts.boundaries?.length ? [...opts.boundaries.filter((b) => b >= 0 && b < contentSec), contentSec] : null;
+  const placed = new Map<string, Omit<PlannedBreak, 'index'> & { vmap: VmapPlaced }>();
+  for (const b of vmap) {
+    const t = offsetSec(b.offset, contentSec, opts.cuesSec ?? []);
+    if (t == null) continue;
+    const at = b.offset.kind === 'start' ? 0 : b.offset.kind === 'end' ? contentSec : edges ? snapToBoundary(t, edges) : t;
+    const position: Position = at <= 0.001 ? 'pre' : at >= contentSec - 0.001 ? 'post' : 'mid';
+    if (position === 'mid' && rule === 'no_mid') continue;
+    const atSec = position === 'pre' ? 0 : position === 'post' ? contentSec : at;
+    const key = `${position}@${atSec.toFixed(3)}`;
+    let p = placed.get(key);
+    if (!p) {
+      const durationSec = position === 'pre' ? policy.preroll.sec : position === 'post' ? policy.postroll.sec : policy.midroll.sec;
+      p = { position, atSec, durationSec, source: 'vmap', vmap: { breakIds: [], timeOffsets: [], sources: [], tracking: { breakStart: [], breakEnd: [], error: [] } } };
+      placed.set(key, p);
+    }
+    if (b.breakId) p.vmap.breakIds.push(b.breakId);
+    p.vmap.timeOffsets.push(b.timeOffset);
+    if (b.source) p.vmap.sources.push(b.source);
+    p.vmap.tracking.breakStart.push(...b.tracking.breakStart);
+    p.vmap.tracking.breakEnd.push(...b.tracking.breakEnd);
+    p.vmap.tracking.error.push(...b.tracking.error);
+  }
+  const order: Record<Position, number> = { pre: 0, mid: 1, post: 2 };
+  return [...placed.values()]
+    .sort((a, b) => order[a.position] - order[b.position] || a.atSec - b.atSec)
+    .map((b, index) => ({ ...b, index }));
 }
 
 // ---------------------------------------------------------------- the two clocks

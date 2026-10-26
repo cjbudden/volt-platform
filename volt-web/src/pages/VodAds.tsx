@@ -14,6 +14,9 @@ import { useAccess } from '../access'
    title's own cue points or every N minutes, post-roll, the ad server and the
    house spots that fill what it leaves, who plays ad-free, snapback, and how
    the ads reach the player (guided where the player can, stitched otherwise).
+   Or the ad server decides where the breaks go (VMAP, as Google Ad Manager's
+   ad rules and FreeWheel do): the pre, mid and post settings then only shape
+   the breaks played with house spots when the ad server cannot be reached.
    A title can opt out in its metadata (adRule: none). The report at the top is
    the last seven days. Ad servers are shared with FAST channels.
    ========================================================================== */
@@ -26,6 +29,7 @@ interface Policy {
   adFreeFor: ('entitlement' | 'members')[]
   snapback: boolean; prerollOnResume: boolean
   delivery: 'auto' | 'stitched' | 'guided'
+  schedule: 'rules' | 'vmap'; vmapUrl: string
 }
 interface Rule { id: string | null; contentTypeId: string | null; contentTypeName?: string | null; mode: 'off' | 'on'; policy: Policy; adServerId: string | null; houseAds: { assetId: string; weight?: number }[] }
 interface Server { id: string; name: string; vendor: string; enabled: boolean }
@@ -80,6 +84,22 @@ function RuleEditor({ rule, servers, spots, canEdit, onSave, onRemove }: {
         <Toggle on={r.mode === 'on'} label={r.contentTypeId ? 'Ads in this content type' : 'Ads in on-demand titles'} onChange={(v) => setR({ ...r, mode: v ? 'on' : 'off' })} />
         {r.mode === 'on' && <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
+            <div className="field" style={{ margin: 0 }}><label>Where the breaks go</label>
+              <select className="inp" value={p.schedule} onChange={e => set({ schedule: e.target.value as Policy['schedule'] })}>
+                <option value="rules">Volt places them, by the settings below</option>
+                <option value="vmap">The ad server places them (VMAP)</option>
+              </select>
+              <div className="hintxt">{p.schedule === 'vmap'
+                ? 'Volt asks the ad server for each playback\'s schedule and puts each break on the nearest segment start. The settings below only shape the breaks played with house spots when the ad server cannot be reached.'
+                : 'Pre-roll, mid-rolls and post-roll as set below; the ad server fills each break.'}</div></div>
+            {p.schedule === 'vmap' && <div className="field" style={{ margin: 0 }}><label htmlFor="vmap-url">VMAP address</label>
+              <input id="vmap-url" className="inp" type="url" value={p.vmapUrl} placeholder="Leave empty to use the ad server's tag"
+                onChange={e => set({ vmapUrl: e.target.value })} />
+              <div className="hintxt">The same macros as a VAST tag, plus [CONTENT_DURATION] and [CUE_POINTS] (the title's cue points in seconds).</div></div>}
+            {/* keeps the choice at the width of the Ad server choice below */}
+            {p.schedule !== 'vmap' && <div />}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
             <div>
               <Toggle on={p.preroll.on} label="Pre-roll" onChange={(on) => set({ preroll: { ...p.preroll, on } })} />
               {p.preroll.on && <div style={{ marginTop: 8 }}>
@@ -111,10 +131,12 @@ function RuleEditor({ rule, servers, spots, canEdit, onSave, onRemove }: {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
             <div className="field" style={{ margin: 0 }}><label>Ad server</label>
               <select className="inp" value={r.adServerId ?? ''} onChange={e => setR({ ...r, adServerId: e.target.value || null })}>
-                <option value="">None: house spots only</option>
+                <option value="">{p.schedule === 'vmap' ? 'Choose the ad server that sends the schedule' : 'None: house spots only'}</option>
                 {servers.map(s => <option key={s.id} value={s.id}>{s.name}{s.enabled ? '' : ' (off)'}</option>)}
               </select>
-              <div className="hintxt">Asked for each break. Whatever it does not fill, or if it is slow, plays your house spots.</div></div>
+              <div className="hintxt">{p.schedule === 'vmap'
+                ? 'Asked once per playback for the schedule, then for each break\'s ads. Whatever it does not fill, or if it is slow, plays your house spots.'
+                : 'Asked for each break. Whatever it does not fill, or if it is slow, plays your house spots.'}</div></div>
             <div className="field" style={{ margin: 0 }}><label>How ads reach the player</label>
               <select className="inp" value={p.delivery} onChange={e => set({ delivery: e.target.value as Policy['delivery'] })}>
                 <option value="auto">Automatic: guided where the player supports it, stitched otherwise</option>

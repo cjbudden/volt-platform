@@ -13,7 +13,7 @@ guide: section
 
 ## What it is for
 
-- **Where the breaks go.** A pre-roll (only for titles long enough to deserve one), mid-rolls at the title's own cue points or every few minutes, never in the first or last minutes, and a post-roll if you want one.
+- **Where the breaks go.** A pre-roll (only for titles long enough to deserve one), mid-rolls at the title's own cue points or every few minutes, never in the first or last minutes, and a post-roll if you want one. Or let your ad server decide where the breaks go (VMAP), as Google Ad Manager's ad rules and FreeWheel do.
 - **Catch-up without the broadcast's ads.** A recording of a live channel or event (a full replay, or a programme cut from it) plays without the ads that were on air: each broadcast break is left out and filled with ads decided for the viewer.
 - **Who fills them.** Your ad server first, then your house spots. A break is never left empty and the title never waits for a slow ad server.
 - **Who sees none.** Viewers who paid, and if you choose signed-in members, play without ads. A title can also opt out on its own.
@@ -46,6 +46,26 @@ New plays follow the rule at once. Plays already started keep the ads they were 
 2. A copy of the account default appears for it. Change what differs (for a kids series, turn ads off) and choose **Save**.
 3. **Use the account default** removes the content type's own rule.
 
+### Let the ad server decide where the breaks go (VMAP)
+
+Some ad servers decide the breaks themselves: Google Ad Manager with ad rules, FreeWheel, and others that answer with a VMAP schedule (a list of breaks: before the title, at a time or a percentage into it, at the title's nth cue point, after it). Volt can take the breaks from there instead of from its own settings.
+
+1. On the rule, under **Where the breaks go**, choose **The ad server places them (VMAP)**.
+2. In **VMAP address**, paste the ad server's VMAP request, or leave it empty if the ad server's own tag already asks for VMAP. It takes the same macros as a VAST tag (such as `[CONTENT_ID]`, `[IP]`, `[CLIENTUA]`), plus `[CONTENT_DURATION]` (the title's length in seconds) and `[CUE_POINTS]` (the title's cue points in seconds, comma separated, so the ad server can place mid-rolls on them).
+3. Under **Ad server**, choose the ad server that sends the schedule. VMAP needs one.
+4. Choose **Save**.
+
+What happens then:
+
+- Volt asks for the schedule once for each playback, with that viewer's details, and puts each break on the nearest point where the video can switch (a segment start), exactly as it does with its own mid-rolls. A break at the very start is the pre-roll, one at the end the post-roll.
+- Each break plays what the ad server lists for it, in its order: a VAST tag Volt asks, or the ads written into the schedule itself. Several breaks at the same moment play as one. A break is as long as its ads.
+- The ad server's break trackers (break start and break end) are sent with the break's first and last ad.
+- Only breaks that play in the stream are used: overlay (non-linear) breaks and breaks with offsets Volt cannot read are left out. `GET /api/vod/ads/assets/{id}/plan` lists them under `vmap.problems`.
+- A schedule with no breaks plays the title without ads.
+- When the ad server is slow or down, the viewer is not held up: the title plays the breaks your **Pre-roll**, **Mid-rolls** and **Post-roll** settings describe, filled with your house spots, and the ad server is not asked again for that play. The report counts these breaks as `vmap-timeout` or `vmap-error`.
+- The title's own say still wins: a title marked `adRule: none` gets no ads, and `no_mid` keeps only the ad server's pre-roll and post-roll.
+- A player that fetches each break's ads itself (HLS Interstitials) is given one copy of the title's breaks, taken from the ad server's schedule asked without a viewer and kept for five minutes; when the viewer reaches a break, Volt fills it from that viewer's own schedule, and leaves it empty if the viewer's schedule has no break there.
+
 ### Keep one title free of ads
 
 In the title's metadata, set **adRule** to `none`. To keep only the pre-roll (no mid-rolls), set it to `no_mid`. FAST channels read the same setting.
@@ -64,7 +84,7 @@ A recording of a live channel or event already knows where its ad breaks were: e
 
 ### See where a title's breaks would go
 
-`GET /api/vod/ads/assets/{id}/plan` lists the breaks a title would get under its rule, or says why it gets none. For a catch-up title, `replaced` lists the broadcast breaks it cuts out, and those breaks have `source` `replace`. Mid-rolls are moved to the nearest point where the video can switch (a segment start), so they may sit a second or two from the time you set.
+`GET /api/vod/ads/assets/{id}/plan` lists the breaks a title would get under its rule, or says why it gets none. Under VMAP it shows the ad server's schedule for the title (asked without a viewer): `schedule` is `vmap`, each break has `source` `vmap` with the ad server's break ids and offsets, and `vmap` says whether asking worked. For a catch-up title, `replaced` lists the broadcast breaks it cuts out, and those breaks have `source` `replace`. Mid-rolls are moved to the nearest point where the video can switch (a segment start), so they may sit a second or two from the time you set.
 
 ### What viewers see
 
@@ -100,6 +120,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A title plays without ads | Ads are off for its content type, the title is marked `adRule: none`, it is shorter than the pre-roll needs and has no mid-roll, or the viewer paid | Check with `GET /api/vod/ads/assets/{id}/plan`, which says why |
 | Breaks play only house spots | The ad server did not answer in time, returned nothing, or offered an ad Volt has not prepared yet. A new ad is prepared the first time it is offered and plays from the next time on | Check **Fill rate**; check the ad server's tag in **Ad servers** |
 | **Fill rate** is low and timeouts are high | The ad server is slow | Ask your ad server to answer faster, or raise its time budget on the FAST page |
+| Under VMAP, breaks play only house spots and the report shows `vmap-timeout` or `vmap-error` | The ad server did not send its schedule in time, or answered with an error | Check the **VMAP address** and the ad server's time budget; `GET /api/vod/ads/assets/{id}/plan` shows what the ad server answered |
+| Under VMAP, a title plays without ads | The ad server's schedule has no breaks for it, or only breaks Volt cannot play | `vmap.problems` in `GET /api/vod/ads/assets/{id}/plan` lists what was left out |
 | A replay still shows the broadcast's ads | The rule has no mid-rolls, the title is marked `no_mid` or `none`, the viewer plays without ads, the break was not recorded as a break on the channel or event, or the item is highlights joined from several parts | Check `replaced` in `GET /api/vod/ads/assets/{id}/plan` |
 | No **Learn more** on an ad | The ad has no click-through page in the ad server | Add one in the ad server |
 | A DASH player gets no stream with ads, HLS plays | One of the ads chosen for that viewer exists only as an older TS file, which cannot be part of a DASH stream | Play the HLS address the play gate gives; ads prepared by Volt are always ready for both |
@@ -120,6 +142,14 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   "https://your-volt-host/api/vod/ads/rules/default" \
   -d '{"mode":"on","policy":{"preroll":{"on":true,"sec":15},"midroll":{"on":true,"sec":60,"everyMin":10}},"houseAds":[{"assetId":"<a short promo>"}]}'
+```
+
+To let the ad server place the breaks, set `policy.schedule` to `vmap`, give the ad server, and optionally its VMAP request:
+
+```bash
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "https://your-volt-host/api/vod/ads/rules/default" \
+  -d '{"mode":"on","adServerId":"<your ad server>","policy":{"schedule":"vmap","vmapUrl":"https://ads.example.com/vmap?cid=[CONTENT_ID]&dur=[CONTENT_DURATION]&cues=[CUE_POINTS]"},"houseAds":[{"assetId":"<a short promo>"}]}'
 ```
 
 What the play gate returns for a title with ads, and how a player of your own handles them, is in [The play gate](../api/play-gate.md#on-demand-ads). Every route is in the [API reference](/api-reference).

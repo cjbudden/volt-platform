@@ -31,7 +31,7 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { actor, writeAudit } from '../services/audit';
 import { resolveVodAdPolicy } from '../services/vodAds/plan';
 import {
-  ruleForAsset, assetFor, breaksFor, replacedView, sessionRow, readySession, sessionMaster, sessionMedia, sessionMpd, sessionText, segmentRedirect, adMaster, adMedia,
+  ruleForAsset, assetFor, breaksForRule, replacedView, sessionRow, readySession, sessionMaster, sessionMedia, sessionMpd, sessionText, segmentRedirect, adMaster, adMedia,
   timelineOf, playerEvents, clickThrough, guidedVersion, guidedMaster, guidedPlaylist, guidedAssetList, vodAdReport, PLAYER_EVENTS, validSid,
   type SessionCtx,
 } from '../services/vodAds';
@@ -77,6 +77,10 @@ async function saveRule(req: Request, res: Response, schemaId: string | null) {
   if (schemaId && !(await one(`SELECT 1 FROM metadata_schemas WHERE id = $1 AND account_id = $2`, [schemaId, acct]))) throw notFound('Content type not found');
   await checkRefs(acct, b);
   const policy = resolveVodAdPolicy(b.policy);
+  // VMAP: the ad server places the breaks, so there must be one to ask, at an address that can be asked.
+  const rawVmap = typeof b.policy.vmapUrl === 'string' ? b.policy.vmapUrl.trim() : '';
+  if (rawVmap && !policy.vmapUrl) throw badRequest('The VMAP address must be a web address (http or https)');
+  if (policy.schedule === 'vmap' && b.mode === 'on' && !b.adServerId) throw badRequest('Choose the ad server that sends the schedule (VMAP)');
   const before = await one<any>(`SELECT * FROM vod_ad_rules WHERE account_id = $1 AND schema_id IS NOT DISTINCT FROM $2`, [acct, schemaId]);
   const row = before
     ? await one<any>(`UPDATE vod_ad_rules SET mode = $2, policy = $3::jsonb, ad_server_id = $4, house_ads = $5::jsonb, updated_at = now() WHERE id = $1 RETURNING *`,
@@ -111,9 +115,14 @@ vodAdsRouter.get('/assets/:id/plan', asyncHandler(async (req, res) => {
   const rule = await ruleForAsset(accountId(req), asset.schema_id);
   if (!rule) return res.json({ assetId: asset.id, rule: null, breaks: [], why: 'No on-demand ad rule is on for this item\'s content type or the account.' });
   if (!asset.master_key) return res.json({ assetId: asset.id, rule: view(rule), breaks: [], why: 'This item has no playlist yet.' });
-  const { contentSec, breaks, cuts } = await breaksFor(asset, rule.resolved);
-  res.json({ assetId: asset.id, rule: view(rule), contentSec, breaks, replaced: replacedView(cuts),
-    why: breaks.length ? null : asset.metadata?.adRule === 'none' || asset.metadata?.ads === false ? 'This item is marked ad-free.' : 'No break fits this item under the rule.' });
+  // Under VMAP: the title's schedule as the ad server gives it without a viewer (what the guided playlist shows).
+  const { contentSec, breaks, cuts, vmap } = await breaksForRule(asset, rule);
+  res.json({ assetId: asset.id, rule: view(rule), contentSec,
+    breaks: breaks.map((b: any) => ({ index: b.index, position: b.position, atSec: b.atSec, durationSec: b.durationSec, source: b.source,
+      ...(b.vmap ? { vmapBreakIds: b.vmap.breakIds, vmapOffsets: b.vmap.timeOffsets } : {}), ...(b.vmapFailed ? { vmapFailed: b.vmapFailed } : {}) })),
+    replaced: replacedView(cuts), schedule: rule.resolved.schedule, vmap,
+    why: breaks.length ? null : asset.metadata?.adRule === 'none' || asset.metadata?.ads === false ? 'This item is marked ad-free.'
+      : vmap?.state === 'ok' ? 'The ad server\'s schedule has no break for this item.' : 'No break fits this item under the rule.' });
 }));
 
 // AD SERVERS ARE THE ACCOUNT'S, shared with FAST channels (modules/fast.ts
