@@ -44,6 +44,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from events import EventLog  # noqa: E402  (same reporter the encoder uses)
+import logstamp  # noqa: E402
 
 WORK_DIR = os.environ.get("WORK_DIR", "/work")
 
@@ -57,7 +58,7 @@ _said_up = False
 
 
 def log(msg):
-    print(f"[volt-radio] {msg}", flush=True)
+    print(logstamp.stamped(f"[volt-radio] {msg}"), flush=True)
 
 
 def die(msg, code=1):
@@ -447,7 +448,8 @@ def failure_hint(log_path, limit=200):
         return None
     # Drop ffmpeg's "[tcp @ 0x600000840080] " component prefixes: they are noise
     # to everyone except someone debugging ffmpeg itself.
-    lines = [re.sub(r"^\[[^\]]+\]\s*", "", ln).strip()
+    # and the time stamp (logstamp.py) in front of each line.
+    lines = [re.sub(r"^\[[^\]]+\]\s*", "", re.sub(r"^\d{4}-\d\d-\d\dT[\d:.]+Z\s+", "", ln)).strip()
              for ln in tail.splitlines() if ln.strip()]
     if not lines:
         return None
@@ -650,7 +652,10 @@ def main():
     signal.signal(signal.SIGINT, shutdown)
 
     logf = open(os.path.join(paths["run"], "radio.log"), "ab")
-    _proc = subprocess.Popen(["ffmpeg"] + args, stdout=subprocess.DEVNULL, stderr=logf)
+    # STAMPED (logstamp.py): ffmpeg's lines get the time they were written, so the
+    # station's event log can say when, not only what.
+    _proc = subprocess.Popen(["ffmpeg"] + args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    _log_pump = logstamp.start_pump(_proc.stderr, out=logf, binary_out=True, name="log:radio")
 
     if not is_local(cfg):
         _uploader = start_uploader(cfg, paths["run"])
@@ -734,6 +739,9 @@ def main():
     threading.Thread(target=beat, daemon=True).start()
 
     rc = _proc.wait()
+    # ffmpeg's last words are still in the pump: let it finish writing them
+    # before anything reads radio.log for the reason.
+    _log_pump.join(timeout=3)
     if not _stopping:
         # A CLEAN END IS NOT A FAULT, and the two must not be reported the same
         # way. rc=0 means the source went away or the stream finished, which is

@@ -44,6 +44,7 @@ import gop_align
 from ladder_args import gop_for, video_rung_args, audio_track_args
 from packager_log import PackagerLogFilter, resolve_mode as resolve_packager_log_mode
 import events as events_mod
+import logstamp
 
 WORK_DIR = os.environ.get("WORK_DIR", "/work")
 OUT_DIR = os.path.join(WORK_DIR, "out")
@@ -100,7 +101,8 @@ _events = None   # EventLog (status snapshot + per-stream event log)
 
 
 def log(msg):
-    print(f"[volt-encoder] {msg}", flush=True)
+    # Stamped (logstamp.py): the console shows WHEN each line happened.
+    print(logstamp.stamped(f"[volt-encoder] {msg}"), flush=True)
 
 
 def die(msg, code=1):
@@ -1110,7 +1112,11 @@ def spawn(name, cmd, critical=True, log_filter=None):
     # must not trip the whole-container teardown below.
     log(f"start {name}: {' '.join(shlex.quote(c) for c in cmd)}")
     if log_filter is None:
-        proc = subprocess.Popen(cmd)
+        # STAMPED STDERR (logstamp.py): ffmpeg's errors carry no time of their own,
+        # so they are read here and written with one, and with the child's name.
+        # stdout is still inherited; only the error stream goes through the pump.
+        proc = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+        logstamp.start_pump(proc.stderr, tag=name, name=f"log:{name}")
     else:
         # FILTERED STDERR (packager only, see packager_log.py): the child's stderr is
         # read line by line and rewritten through the filter. The pump must never
@@ -1131,18 +1137,15 @@ def _pump_filtered(name, proc, log_filter):
         if ok:
             try:
                 for out in log_filter.feed(line):
-                    sys.stderr.write(out + "\n")
-                sys.stderr.flush()
+                    logstamp.write_line(out, tag=name)
                 continue
             except Exception as e:  # noqa: BLE001
                 ok = False
                 log(f"{name}: log filter failed ({e}); passing output through unfiltered")
-        sys.stderr.write(line + "\n")
-        sys.stderr.flush()
+        logstamp.write_line(line, tag=name)
     try:
         for out in log_filter.flush():
-            sys.stderr.write(out + "\n")
-        sys.stderr.flush()
+            logstamp.write_line(out, tag=name)
     except Exception:  # noqa: BLE001
         pass
 

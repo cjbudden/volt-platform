@@ -26,6 +26,7 @@ import { runningSinceMs, scopeToRun, scopeStatusToRun } from '../channelDetail';
 import { radioRunState } from './state';
 import { radioMonitorState } from './monitor';
 import { icyState } from './icyMeta';
+import { splitStamp, foldRepeats, newestFirst, type EncoderLogRow } from '../encoderLog';
 
 /** ms since the station's live audio playlist last advanced (null = none yet). */
 export function radioOutputAgeMs(channelId: string, nowMs = Date.now()): number | null {
@@ -43,7 +44,7 @@ export function radioHasValidContent(channelId: string): boolean {
 }
 
 /** Error lines from THIS run's ffmpeg log, newest-first (event log + gates). */
-export function radioLogTail(channelId: string): { ts: string; level: string; title: string; detail: string }[] {
+export function radioLogTail(channelId: string): EncoderLogRow[] {
   try {
     const p = join(liveDirFor(channelId), 'radio.log');
     if (!existsSync(p)) return [];
@@ -55,9 +56,13 @@ export function radioLogTail(channelId: string): { ts: string; level: string; ti
     // so surfacing them as faults paints a permanently red log on a healthy
     // station. Real faults (connection, 4xx/5xx, exits) still come through.
     const noise = /invalid concatenated file|Error submitting packet to decoder|Audio packet of size|Header missing|skipping \d+ bytes|Estimating duration|missing picture in access unit|Could not update timestamps|non-existing (PPS|SPS)|Discarding interlaced/i;
-    return lines.filter((l) => rx.test(l) && !noise.test(l)).slice(-10).map((l) => ({
-      ts: 'encoder', level: bad.test(l) ? 'down' : 'warn', title: 'Encoder', detail: l.slice(0, 300),
-    }));
+    // Time first (encoderLog.ts); the radio log's rows carry ISO times in `ts`.
+    const rows = lines.map(splitStamp).filter(({ text }) => rx.test(text) && !noise.test(text))
+      .map(({ at, text }): EncoderLogRow => ({
+        ts: at ?? 'encoder', at, count: 1, level: bad.test(text) ? 'down' : 'warn', title: 'Encoder',
+        detail: text.replace(/^\[volt-radio\]\s*/, '').slice(0, 300),
+      }));
+    return foldRepeats(rows).slice(-10);
   } catch { return []; }
 }
 
@@ -112,7 +117,7 @@ export interface RadioDetailExtras {
     staticSinceMs: number | null;
     level: { peakDb: number; rmsDb: number; crestDb: number; entropy: number } | null;
   };
-  log: { ts: string; level: string; title: string; detail: string }[];
+  log: { ts: string; at?: string | null; firstAt?: string | null; count?: number; level: string; title: string; detail: string }[];
   statusBoard: { output: string; input: string; encoder: string; onAir: string };
 }
 
@@ -136,13 +141,14 @@ export async function radioEventLog(channelId: string) {
   const rows = evs.map((e) => {
     const d = typeof e.detail === 'string' ? (() => { try { return JSON.parse(e.detail); } catch { return { text: e.detail }; } })() : (e.detail || {});
     return {
-      ts: new Date(e.ts).toISOString(),
+      ts: new Date(e.ts).toISOString(), at: new Date(e.ts).toISOString(),
       level: LEVEL_NAME[LEVEL[e.type]] || 'info',
       title: TITLE[e.type] || e.type,
       detail: String(d.message || d.reason || Object.entries(d).map(([k, v]) => `${k}=${v}`).join(' ') || ''),
     };
   });
-  return [...rows, ...radioLogTail(channelId)].slice(0, 40);
+  // One log in time order, newest first, now that encoder lines carry a time.
+  return newestFirst<any>([...rows, ...radioLogTail(channelId)]).slice(0, 40);
 }
 
 export function radioQc(channelId: string): RadioDetailExtras['qc'] {

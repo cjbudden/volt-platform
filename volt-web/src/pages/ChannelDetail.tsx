@@ -29,6 +29,7 @@ import { PanelLayout } from '../panelLayout'
 import { RightsPreview } from '../RightsPreview'
 import { useStatsPanel } from '../useStatsPanel'
 import { LiveGraphicsButton } from '../graphics/LiveGraphicsButton'
+import { LogWhen, logClock, logClockTitle, useNow } from '../logWhen'
 function fmtOffset(sec: number) {
   if (sec <= 0) return 'LIVE'
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60)
@@ -2339,13 +2340,15 @@ export function StatusBoard({ d, live }: { d: CD; live: boolean }) {
 const LOG_COLOR: Record<string, string> = { live: 'var(--live)', warn: 'var(--warn)', down: 'var(--down)', sched: 'var(--sched)', filler: 'var(--filler)' }
 /** Shared with the event page (EventDetail.tsx). */
 export function EventLog({ d }: { d: CD }) {
+  // Every row has its time now, encoder lines included (logWhen.tsx).
+  const now = useNow()
   return (
     <div className="card">
       <div className="card-h"><h3>Connection issues &amp; event log</h3><div className="spacer" /><span className="tag warn">{d.log.filter(l => l.level === 'warn' || l.level === 'down').length} today</span></div>
       <div className="card-b" style={{ padding: '8px 18px' }}>
         <div className="log">
           {d.log.map((l, i) => (
-            <div className="logrow" key={i}><span className="ts">{l.ts}</span><span className="ic" style={{ background: LOG_COLOR[l.level] || 'var(--sched)' }} /><span className="tx">{l.title}<LogDetail text={l.detail} small /></span></div>
+            <div className="logrow" key={i}><span className="ts" title={logClockTitle(l)}>{logClock(l)}</span><span className="ic" style={{ background: LOG_COLOR[l.level] || 'var(--sched)' }} /><span className="tx">{l.title}<LogWhen r={l} now={now} /><LogDetail text={l.detail} small /></span></div>
           ))}
         </div>
       </div>

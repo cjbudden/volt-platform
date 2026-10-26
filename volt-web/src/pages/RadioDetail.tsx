@@ -11,6 +11,7 @@ import { RadioDrawer, ClassChip } from './Radio'
 import { ShareDrawer } from '../ShareDrawer'
 import { pressable } from '../a11y'
 import { PanelLayout } from '../panelLayout'
+import { LogWhen, logClock, logClockTitle, useNow } from '../logWhen'
 
 /* ============================================================================
    Radio station detail — the audio-only counterpart of the channel detail
@@ -32,6 +33,8 @@ const isImg = (u?: string | null) => !!u && /\.(png|jpe?g|gif|webp|avif)(\?|$)/i
 const toDayInput = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 export default function RadioDetail({ id, onBack }: { id: string; onBack: () => void }) {
+  // Encoder rows have their time now; "2 min ago" keeps up between polls (logWhen.tsx).
+  const logNow = useNow()
   // ACCESS (access.tsx): view opens this page; operate = start/stop, on/off
   // air, auto connect, clear recovery; manage = settings and clearing the log.
   const { can, isAdminTier } = useAccess()
@@ -720,10 +723,10 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
                     color: e.level === 'down' ? 'var(--down,#f87171)' : e.level === 'warn' ? 'var(--warn,#fbbf24)' : 'var(--faint)',
                   }}>{e.level}</span>
                   <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)', width: 74, flex: 'none', fontVariantNumeric: 'tabular-nums' }}>
-                    {e.ts === 'encoder' ? 'encoder' : fmtClock(e.ts)}
+                    <span title={logClockTitle(e)}>{logClock(e)}</span>
                   </span>
                   <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, width: 128, flex: 'none' }}>{e.title}</span>
-                  <span title={e.detail} style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.detail}</span>
+                  <span title={e.detail} style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}><LogWhen r={e} now={logNow} /> {e.detail}</span>
                 </div>
               ))}
             </div>
@@ -930,9 +933,9 @@ function RadioQcPanel({ st, verdict, levels, onClose, onRefresh }: {
           {(st.log || []).slice(0, 15).map((e, i) => (
             <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
               <span style={{ fontSize: 'var(--fs-micro)', fontWeight: 700, width: 46, flex: 'none', textTransform: 'uppercase', color: e.level === 'down' ? 'var(--down,#f87171)' : e.level === 'warn' ? 'var(--warn,#fbbf24)' : 'var(--faint)' }}>{e.level}</span>
-              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)', width: 74, flex: 'none' }}>{e.ts === 'encoder' ? 'encoder' : fmtClock(e.ts)}</span>
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)', width: 74, flex: 'none' }}><span title={logClockTitle(e)}>{logClock(e)}</span></span>
               <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, width: 128, flex: 'none' }}>{e.title}</span>
-              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.detail}</span>
+              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}><LogWhen r={e} now={Date.now()} /> {e.detail}</span>
             </div>
           ))}
         </div>

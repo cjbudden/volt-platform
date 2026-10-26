@@ -14,6 +14,7 @@ import { fleetContext } from './fleetContext';
 import { computePipelineHealth, recoveryOf, type PipelineHealth } from './pipelineHealth';
 import { recommendInstance, buildBilling, type Billing } from './billing';
 import { serverStatusFor, type ServerStatus } from './fleet/serverStatus';
+import { splitStamp, foldRepeats, newestFirst, type EncoderLogRow } from './encoderLog';
 
 const DVR_MAX_SEC = 14400; // 4h cap for 24x7 channels
 
@@ -116,7 +117,7 @@ export interface ChannelDetail {
   viewers: { current: number; peak: number; peakAt: string; trendPct: number; series: { t: number; v: number }[] };
   epg: { now: any; next: any; lane: any[] };
   statusBoard: { output: string; activeSource: string; fallback: string; packager: string; inputs: any[] };
-  log: { ts: string; level: string; title: string; detail: string }[];
+  log: { ts: string; at?: string | null; firstAt?: string | null; count?: number; level: string; title: string; detail: string }[];
   health: PipelineHealth;
   billing: Billing;
   /** Is there a server for it, and if anything is wrong, what to do (no load figures). */
@@ -152,7 +153,7 @@ function readTail(path: string, bytes: number): string {
   } finally { closeSync(fd); }
 }
 
-function encoderLogTail(channelId: string): { ts: string; level: string; title: string; detail: string }[] {
+function encoderLogTail(channelId: string): EncoderLogRow[] {
   try {
     const p = join(config.testStream.originDir, channelId, 'encoder.log');
     if (!existsSync(p)) return [];
@@ -179,12 +180,21 @@ function encoderLogTail(channelId: string): { ts: string; level: string; title: 
     // codec parameters' for every rendition it probed but never downloaded. Harmless
     // start-up chatter, not a fault: keep it out of the error feed entirely.
     const probeNoise = /Could not find codec parameters/i;
-    return lines.filter((l) => rx.test(l) && !spawn.test(l) && !probeNoise.test(l)).slice(-10).map((l) => ({
-      ts: 'encoder',
-      level: bad.test(l) ? 'down' : 'warn',
-      title: 'Encoder',
-      detail: l.replace(/^\[volt-encoder\]\s*/, '').slice(0, 300),
-    }));
+    // Each line's time comes off the front first (encoderLog.ts), so the
+    // anchored patterns below see the text exactly as before.
+    const rows = lines.map(splitStamp)
+      .filter(({ text }) => rx.test(text) && !spawn.test(text) && !probeNoise.test(text))
+      .map(({ at, text }): EncoderLogRow => ({
+        ts: at ? hhmm(Date.parse(at)) : 'encoder',
+        at,
+        count: 1,
+        level: bad.test(text) ? 'down' : 'warn',
+        title: 'Encoder',
+        detail: text.replace(/^\[volt-encoder\]\s*/, '').slice(0, 300),
+      }));
+    // Fold repeats BEFORE keeping ten, so one message written fifty times
+    // cannot push every other line out of the window.
+    return foldRepeats(rows).slice(-10);
   } catch { return []; }
 }
 
@@ -454,18 +464,19 @@ export async function buildStreamDetail(channel: any, nowMs: number, kind: Owner
     const dd = (e.detail && typeof e.detail === 'object') ? e.detail : {};
     if (e.type === 'output.timeline') {
       const fault = dd.state === 'fault';
-      return { ts: hhmm(new Date(e.ts).getTime()), level: fault ? 'warn' : 'live',
+      return { ts: hhmm(new Date(e.ts).getTime()), at: new Date(e.ts).toISOString(), level: fault ? 'warn' : 'live',
         title: fault ? 'Output timing fault' : 'Output timing OK',
         detail: fault ? String(dd.message || '') : `cleared: ${(dd.cleared || []).join(', ')}` };
     }
     if (e.type === 'source.waiting') {
-      return { ts: hhmm(new Date(e.ts).getTime()), level: 'warn', title: 'No source pushed',
+      return { ts: hhmm(new Date(e.ts).getTime()), at: new Date(e.ts).toISOString(), level: 'warn', title: 'No source pushed',
         detail: `${dd.source || 'primary'} has not arrived after ${dd.waited_s ?? '?'}s` };
     }
-    return { ts: hhmm(new Date(e.ts).getTime()), level: levelFor(String(e.type)), title: String(e.type), detail };
+    return { ts: hhmm(new Date(e.ts).getTime()), at: new Date(e.ts).toISOString(), level: levelFor(String(e.type)), title: String(e.type), detail };
   });
 
-  const log = [...encTail, ...eventsLog];
+  // One log in time order, newest first: encoder lines now have their time too.
+  const log = newestFirst<{ at?: string | null }>([...encTail, ...eventsLog]) as typeof eventsLog;
 
   // EPG — real programmes around now; empty when the channel has no schedule
   const progs = await query<any>(
