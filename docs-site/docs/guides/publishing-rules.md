@@ -117,6 +117,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Publish to** reads **nowhere (publishing is a no-op)** | No publishing point is ticked on the rung that decides | Tick **Catalogue (portal)** or an app, and save |
 | **No registered apps yet. Register one under API Keys & Apps to publish to it.** | There are no apps to publish to | Register an app in API Keys & Apps, or publish to the catalogue only |
 | **No social accounts configured for this account.** | No social account has been added | Add one under Social accounts |
+| An X account marked **off: X is not on for this account** | X is off for your account, so it cannot be published to; the account is kept | Untick it, or have X switched on (see [Social accounts](social-accounts.md#turn-on-x-with-your-own-x-developer-app)). A rule that still names it publishes everywhere else and skips X |
 | An app shows **disabled** | The app is switched off in API Keys & Apps | Switch it on there if it should receive content |
 | A stream's **Access** tab says to create the event (or station) first | Rules belong to a stream that exists | Create it, then open its settings again |
 | A stream's **Access** tab shows a message about your role instead of the rule | Stream rules are part of Account settings | Ask an administrator for Account settings access, or to set the rule |

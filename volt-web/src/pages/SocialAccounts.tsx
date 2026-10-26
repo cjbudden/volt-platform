@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, type SocialAccount, type SocialPlatformsStatus } from '../api'
+import { api, apiRequest, type SocialAccount, type SocialPlatformsStatus } from '../api'
 import { PageHead } from '../scaffold'
 import { navigate } from '../router'
 import { pressable } from '../a11y'
@@ -20,7 +20,72 @@ import { useAccess } from '../access'
    user is told their Volt provider sets it up, since they cannot act on the
    server's settings (and the API leaves them out for them). A SANDBOX account is one that behaves like the platform (progress, a post page, views)
    without sending anything anywhere, so the publishing flow can be tried now.
+
+   X IS OFF BY DEFAULT (build queue 1.14h): X bills its API per post and per
+   read. It shows here only when a system administrator has switched it on for
+   the account, or the account added its own X developer app (X then bills the
+   customer). Without either there is no X card; linked X accounts are kept and
+   shown as Off, and the X panel below says how to get it. The secret of the
+   account's own app is sent once and never shown again.
    ========================================================================== */
+interface XState { enabled: boolean; allowed: boolean; ownApp: { clientId: string; hasSecret: boolean; updatedAt: string | null } | null
+  canSwitch: boolean; switchReason: string | null; callbackUrl: string }
+type Account = SocialAccount & { off?: boolean }
+
+/** X: the platform switch (system administrators) and the account's own X app. */
+function XPanel({ x, canManage, onChange }: { x: XState; canManage: boolean; onChange: (x: XState) => void }) {
+  const [open, setOpen] = useState(false)
+  const [id, setId] = useState('')
+  const [secret, setSecret] = useState('')
+  const [busy, setBusy] = useState(false)
+  const notify = useNotify()
+  const run = async (f: () => Promise<XState>) => {
+    setBusy(true)
+    try { onChange(await f()); setOpen(false); setId(''); setSecret('') } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy(false) }
+  }
+  const send = (method: string, path: string, body?: any) => apiRequest(path, { method, ...(body ? { body: JSON.stringify(body) } : {}) }) as Promise<XState>
+  return (
+    <div className="card" style={{ padding: 0, marginTop: 12 }}>
+      <div className="nt-row">
+        <span style={{ color: 'var(--muted)', display: 'grid', placeItems: 'center' }}><Glyph /></span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600 }}>X
+            <span className={`nt-pill ${x.allowed ? 'ok' : 'muted'}`}>{x.ownApp ? 'On, with your own X app' : x.enabled ? 'On for this account' : 'Off'}</span>
+          </div>
+          <div className="hintxt" style={{ marginTop: 2 }}>
+            {x.ownApp
+              ? `Posts go through your X app (client id ${x.ownApp.clientId}), so X bills you directly.`
+              : x.enabled
+                ? 'Switched on by your Volt provider: posts go through their X app.'
+                : 'X charges for every post and every read, so it is off unless your Volt provider switches it on for this account, or you add your own X developer app.'}
+          </div>
+        </div>
+        {x.canSwitch && (
+          <div className={`sw ${x.enabled ? '' : 'off'}`} title={x.enabled ? 'X is on for this account' : 'X is off for this account'}
+            {...pressable(() => { if (!busy) run(() => send('PATCH', '/social/x', { enabled: !x.enabled })) }, { label: x.enabled ? 'Switch X off for this account' : 'Switch X on for this account' })}><i /></div>
+        )}
+        {canManage && !x.ownApp && <button className="btn ghost" onClick={() => setOpen(o => !o)}>Use your own X app</button>}
+        {canManage && x.ownApp && <button className="btn ghost" onClick={() => setOpen(o => !o)}>Change X app</button>}
+        {canManage && x.ownApp && <button className="btn ghost" disabled={busy} onClick={() => {
+          if (window.confirm('Remove your own X app? Linked X accounts are kept, but X turns off unless your Volt provider has switched it on.')) run(() => send('DELETE', '/social/x/app'))
+        }}>Remove X app</button>}
+      </div>
+      {open && (
+        <div className="nt-setup">
+          Create an app in the X developer portal with OAuth 2.0 turned on, add this callback address to it, and enter its client id and secret here. The secret is stored encrypted and never shown again.
+          <div className="nt-kv"><span>Callback URL</span><code>{x.callbackUrl}</code></div>
+          <div className="nt-kv"><span>Permissions</span><code>tweet.read tweet.write users.read media.write offline.access</code></div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+            <input className="inp" aria-label="X client id" placeholder="Client id" value={id} onChange={e => setId(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
+            <input className="inp" aria-label="X client secret" type="password" autoComplete="off" placeholder="Client secret" value={secret} onChange={e => setSecret(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
+            <button className="btn primary" disabled={busy || id.trim().length < 4 || secret.trim().length < 4}
+              onClick={() => run(() => send('PUT', '/social/x/app', { clientId: id.trim(), clientSecret: secret.trim() }))}>{busy ? 'Saving…' : 'Save X app'}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 const STATUS: Record<string, { label: string; cls: string }> = {
   connected: { label: 'Connected', cls: 'ok' }, expired: { label: 'Reconnect needed', cls: 'bad' }, error: { label: 'Problem', cls: 'warn' },
 }
@@ -33,18 +98,20 @@ function Glyph() {
 
 export default function SocialAccountsPage() {
   const [st, setSt] = useState<SocialPlatformsStatus | null>(null)
-  const [accounts, setAccounts] = useState<SocialAccount[] | null>(null)
+  const [accounts, setAccounts] = useState<Account[] | null>(null)
+  const [x, setX] = useState<XState | null>(null)
   const [err, setErr] = useState('')
   const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState('')
   const [setupOpen, setSetupOpen] = useState<string | null>(null)
   const notify = useNotify()
-  const { seesServerSetup } = useAccess()
+  const { seesServerSetup, can } = useAccess()
   const fail = (e: any) => notify({ kind: 'error', message: e.message })
 
   const load = () => {
     api.socialPlatforms().then(setSt).catch(e => setErr(e.message))
     api.socialAccounts().then(setAccounts).catch(e => setErr(e.message))
+    ;(apiRequest('/social/x') as Promise<XState>).then(setX).catch(e => setErr(e.message))
   }
   useEffect(() => {
     // The platform sent the browser back here: say what happened, then tidy the URL.
@@ -86,7 +153,7 @@ export default function SocialAccountsPage() {
                   <span className={`nt-pill ${p.configured ? 'ok' : 'muted'}`}>{p.configured ? 'Ready to connect' : 'Not set up'}</span>
                 </div>
                 <div className="hintxt" style={{ marginTop: 2 }}>
-                  {p.configured ? `Publishes to a ${p.accountNoun}.` : seesServerSetup ? `Needs ${p.label} app credentials on this deployment.` : 'Your Volt provider sets this up.'}
+                  {p.configured ? `Publishes to ${/^[aeiou]/i.test(p.accountNoun) ? 'an' : 'a'} ${p.accountNoun}.` : seesServerSetup ? `Needs ${p.label} app credentials on this deployment.` : 'Your Volt provider sets this up.'}
                   {' '}{p.limits.title != null ? `Title up to ${p.limits.title} characters, description up to ${p.limits.description}.` : `Caption up to ${p.limits.description} characters, hashtags included.`}
                 </div>
               </div>
@@ -116,6 +183,7 @@ export default function SocialAccountsPage() {
                           {a.mode === 'sandbox' && <span className="nt-pill muted">Sandbox</span>}
                           <span className={`nt-pill ${s.cls}`}>{s.label}</span>
                           {!a.enabled && <span className="nt-pill muted">Disabled</span>}
+                          {a.off && <span className="nt-pill muted">Off: X is not on for this account</span>}
                         </div>
                         <div className="hintxt" style={{ marginTop: 2 }}>
                           {a.published} published{a.last_published_at ? `, last ${fmt(a.last_published_at)}` : ''}
@@ -138,6 +206,23 @@ export default function SocialAccountsPage() {
           </div>
         )
       })}
+      {/* Someone who can neither switch X on nor add an app gets no X card at all. */}
+      {x && st && accounts && (x.allowed || x.canSwitch || can('settings', 'manage')) && (
+        <XPanel x={x} canManage={can('settings', 'manage')} onChange={(nx) => { setX(nx); api.socialPlatforms().then(setSt).catch(() => {}); api.socialAccounts().then(setAccounts).catch(() => {}) }} />
+      )}
+      {x && !x.allowed && accounts && accounts.some(a => a.platform === 'x') && (
+        <div className="card" style={{ padding: 0, marginTop: 8 }}>
+          {accounts.filter(a => a.platform === 'x').map((a, i) => (
+            <div key={a.id} className="nt-row" style={{ borderTop: i ? '1px solid var(--border)' : undefined, opacity: 0.6 }}>
+              <span className="nt-avatar" aria-hidden="true">{(a.account_label ?? a.name).replace('@', '').slice(0, 1).toUpperCase()}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600 }}>{a.account_label ?? a.name}{a.mode === 'sandbox' && <span className="nt-pill muted">Sandbox</span>}<span className="nt-pill muted">Off</span></div>
+                <div className="hintxt" style={{ marginTop: 2 }}>Kept while X is off: {a.published} published. Nothing is posted to it or read from it until X is on again.</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="hintxt" style={{ marginTop: 12 }}>A sandbox account goes through every step of publishing, with progress and a post page, without sending anything to the platform. Put "[fail]" in a post's title to see how a rejected post looks.</div>
     </>
   )

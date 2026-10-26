@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
-import { asyncHandler, notFound, badRequest } from '../util/http';
+import { asyncHandler, notFound, badRequest, forbidden } from '../util/http';
 import { publish, NotPublishable } from '../services/availability';
 import { validateTargets, type Target } from '../services/publishingRules';
 import { actorLabel } from '../util/actor';
@@ -80,6 +80,10 @@ publishTargetsRouter.post(
   '/',
   asyncHandler(async (req, res) => {
     const b = targetSchema.parse(req.body);
+    if (b.platform === 'x') {
+      const { xAccess, X_OFF } = await import('../services/social');
+      if (!(await xAccess(accountId(req))).allowed) throw forbidden(X_OFF);
+    }
     const row = await one(
       `INSERT INTO publish_targets(account_id, platform, name, external_account, credentials_ref, enabled)
        VALUES ($1,$2::publish_platform,$3,$4,$5,$6) RETURNING id, platform, name, external_account, enabled`,

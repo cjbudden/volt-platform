@@ -111,6 +111,8 @@ export async function publish(assetId: string, by: string, opts: { targets?: Tar
       const target = await one<any>(
         `SELECT * FROM publish_targets WHERE id = $1 AND account_id = $2 AND enabled = true`, [t.targetId, accountId]);
       if (!target) continue;
+      // An X account is skipped while X is off for the account (build queue 1.14h), as a disabled one is.
+      if (target.platform === 'x' && !(await (await import('./social')).xAccess(accountId)).allowed) continue;
       // THE REAL UPLOAD, as a job (services/social): the row starts pending
       // with the post the person wrote (or the asset's own title, description
       // and tags), and the job moves it to published or failed with progress.

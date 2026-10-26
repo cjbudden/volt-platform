@@ -55,8 +55,9 @@ export interface Platform {
   /** What the platform calls the thing the account publishes as. */
   accountNoun: string;
   authorizeUrl(clientId: string, redirect: string, state: string, challenge: string | null): string;
-  exchange(code: string, redirect: string, verifier: string | null): Promise<Tokens>;
-  refresh?(refreshToken: string): Promise<Tokens>;
+  /** `app` is the account's own developer app when it has one (X only, so far); otherwise the deployment's. */
+  exchange(code: string, redirect: string, verifier: string | null, app?: AppCreds | null): Promise<Tokens>;
+  refresh?(refreshToken: string, app?: AppCreds | null): Promise<Tokens>;
   accounts(t: Tokens): Promise<LinkedAccount[]>;
   upload(c: UploadCtx): Promise<UploadResult>;
   views?(token: string, externalAccount: string, externalId: string): Promise<number | null>;
@@ -82,7 +83,8 @@ export function host(platform: PlatformId, key: string): string {
 }
 const FB = 'v21.0';
 const env = (name: string) => process.env[name] ?? '';
-export function appCreds(p: Platform): { id: string; secret: string } | null {
+export type AppCreds = { id: string; secret: string };
+export function appCreds(p: Platform): AppCreds | null {
   const id = env(p.env.id), secret = env(p.env.secret);
   return id && secret ? { id, secret } : null;
 }
@@ -245,14 +247,14 @@ const x: Platform = {
       code_challenge: challenge ?? '', code_challenge_method: 'S256' });
     return `${host('x', 'auth')}/i/oauth2/authorize?${q}`;
   },
-  async exchange(code, redirect, verifier) {
-    const c = creds(this);
+  async exchange(code, redirect, verifier, app) {
+    const c = app ?? creds(this);
     return tokenFrom(await call('X sign-in', `${host('x', 'api')}/2/oauth2/token`, { method: 'POST',
       headers: { ...FORM, authorization: `Basic ${Buffer.from(`${c.id}:${c.secret}`).toString('base64')}` },
       body: form({ code, grant_type: 'authorization_code', redirect_uri: redirect, code_verifier: verifier ?? '' }) }));
   },
-  async refresh(rt) {
-    const c = creds(this);
+  async refresh(rt, app) {
+    const c = app ?? creds(this);
     return tokenFrom(await call('X token refresh', `${host('x', 'api')}/2/oauth2/token`, { method: 'POST',
       headers: { ...FORM, authorization: `Basic ${Buffer.from(`${c.id}:${c.secret}`).toString('base64')}` },
       body: form({ refresh_token: rt, grant_type: 'refresh_token' }) }));

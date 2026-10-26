@@ -60,6 +60,8 @@ const USER = '0000000b-0000-0000-0000-000000000501';
   check('callback URL is on the public host', S.platformStatus().platforms[0].callbackUrl, 'https://volt.example/api/social/callback/youtube');
 
   await query(`INSERT INTO accounts(id,name) VALUES ($1,'SocialCo') ON CONFLICT (id) DO NOTHING`, [ACC]);
+  // X is off by default (build queue 1.14h): this suite exercises it switched on.
+  await query(`UPDATE accounts SET x_enabled = true WHERE id = $1`, [ACC]);
   await query(`INSERT INTO users(id,account_id,email,password_hash,role,status) VALUES ($1,$2,'owner@social.example','x','owner','active') ON CONFLICT (id) DO NOTHING`, [USER, ACC]);
   await query(`INSERT INTO output_profiles(id,account_id,name,rungs,workflow_type) VALUES ('0000000c-0000-0000-0000-000000000501',$1,'HD','[{"height":360,"bitrate_kbps":800}]','transcode') ON CONFLICT (id) DO NOTHING`, [ACC]);
   await query(`INSERT INTO groups(id,account_id,name,output_profile_id) VALUES ('0000000d-0000-0000-0000-000000000501',$1,'G','0000000c-0000-0000-0000-000000000501') ON CONFLICT (id) DO NOTHING`, [ACC]);

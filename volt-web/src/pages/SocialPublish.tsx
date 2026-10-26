@@ -51,7 +51,8 @@ export function SocialComposer({ assetId, onClose, onPublished }: { assetId: str
 
   useEffect(() => {
     api.socialPlatforms().then(setSt).catch(e => setErr(e.message))
-    api.socialAccounts().then(a => setAccounts(a.filter(x => x.enabled))).catch(e => setErr(e.message))
+    // An X account is kept while X is off for the account (build queue 1.14h), but not offered.
+    api.socialAccounts().then(a => setAccounts(a.filter(x => x.enabled && !(x as { off?: boolean }).off))).catch(e => setErr(e.message))
     api.socialDefaults(assetId).then(d => {
       setDefaults(d)
       const y = d.youtube

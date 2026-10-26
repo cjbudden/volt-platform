@@ -12,6 +12,10 @@
 //   POST   /api/social/publications/:id/remove take it down on the platform
 //   POST   /api/social/sync-views             pull view counts now
 //   GET    /social-sandbox/:id                PUBLIC: what a sandbox post "looks like"
+//   GET    /api/social/x                      whether X is on for the account, and how
+//   PATCH  /api/social/x                      {enabled}: the platform switch (system administrators)
+//   PUT    /api/social/x/app                  {clientId, clientSecret}: the account's own X app
+//   DELETE /api/social/x/app                  forget the account's own X app
 // ============================================================================
 import { Router } from 'express';
 import { z } from 'zod';
@@ -24,7 +28,10 @@ import { actorLabel } from '../util/actor';
 import {
   PLATFORMS, PLATFORM_IDS, SocialError, platformStatus, startConnect, finishConnect, addSandbox,
   fitPost, defaultPost, queueSocialPublication, syncViews, removeFromPlatform, type PlatformId,
+  xAccess, setOwnXApp, callbackUrl, X_OFF,
 } from '../services/social';
+import { planEditor } from '../services/plan';
+import { actor, writeAudit } from '../services/audit';
 import { publish, NotPublishable } from '../services/availability';
 import { seesServerSetup } from '../services/serverSetup';
 
@@ -83,7 +90,69 @@ function requireAdmin(req: any) {
   if (!can(req, 'settings', 'manage')) throw forbidden('Linking social accounts needs manage on account settings');
 }
 
-socialRouter.get('/platforms', asyncHandler(async (req, res) => { res.json(platformStatus(seesServerSetup(req))); }));
+socialRouter.get('/platforms', asyncHandler(async (req, res) => { res.json(platformStatus(seesServerSetup(req), await xAccess(accountId(req)))); }));
+
+/** Refuse X outright for an account it is off for: 403, with how it gets switched on. */
+async function assertX(platform: PlatformId, acct: string) {
+  if (platform === 'x' && !(await xAccess(acct)).allowed) throw forbidden(X_OFF);
+}
+
+// ---------------------------------------------------------------- X access (build queue 1.14h)
+
+async function xView(req: any) {
+  const x = await xAccess(accountId(req));
+  const ed = await planEditor(req);
+  return {
+    enabled: x.switchOn, allowed: x.allowed,
+    // Never the secret: only that one is held.
+    ownApp: x.ownApp ? { clientId: x.ownApp.clientId, hasSecret: true, updatedAt: x.ownApp.updatedAt } : null,
+    canSwitch: ed.ok, switchReason: ed.ok ? null : 'X is switched on by your Volt provider. Or add your own X developer app below, and X bills you directly.',
+    callbackUrl: callbackUrl('x'),
+  };
+}
+
+socialRouter.get('/x', asyncHandler(async (req, res) => { res.json(await xView(req)); }));
+
+socialRouter.patch('/x', asyncHandler(async (req, res) => {
+  const b = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
+  const ed = await planEditor(req);
+  if (!ed.ok) throw forbidden('Only a system administrator switches X on or off for an account');
+  const acct = accountId(req);
+  const before = await xAccess(acct);
+  await query(`UPDATE accounts SET x_enabled = $2, updated_at = now() WHERE id = $1`, [acct, b.enabled]);
+  if (before.switchOn !== b.enabled) {
+    const who = actor(req);
+    await writeAudit(null, { accountId: acct, userId: who.userId, label: who.label, action: 'update', entityType: 'social_x', entityId: acct,
+      changes: { x_enabled: { from: before.switchOn, to: b.enabled } } });
+  }
+  res.json(await xView(req));
+}));
+
+socialRouter.put('/x/app', asyncHandler(async (req, res) => {
+  requireAdmin(req);
+  const b = z.object({ clientId: z.string().trim().min(4).max(200), clientSecret: z.string().trim().min(4).max(400) }).parse(req.body ?? {});
+  const acct = accountId(req);
+  const before = await xAccess(acct);
+  await setOwnXApp(acct, b);
+  const who = actor(req);
+  // The audit names the client id, never the secret.
+  await writeAudit(null, { accountId: acct, userId: who.userId, label: who.label, action: before.ownApp ? 'update' : 'create', entityType: 'social_x_app', entityId: acct,
+    changes: { client_id: { from: before.ownApp?.clientId ?? null, to: b.clientId } } });
+  res.json(await xView(req));
+}));
+
+socialRouter.delete('/x/app', asyncHandler(async (req, res) => {
+  requireAdmin(req);
+  const acct = accountId(req);
+  const before = await xAccess(acct);
+  if (before.ownApp) {
+    await setOwnXApp(acct, null);
+    const who = actor(req);
+    await writeAudit(null, { accountId: acct, userId: who.userId, label: who.label, action: 'delete', entityType: 'social_x_app', entityId: acct,
+      changes: { client_id: { from: before.ownApp.clientId, to: null } } });
+  }
+  res.json(await xView(req));
+}));
 
 socialRouter.get('/accounts', asyncHandler(async (req, res) => {
   const rows = await query<any>(
@@ -93,12 +162,15 @@ socialRouter.get('/accounts', asyncHandler(async (req, res) => {
             (SELECT max(p.published_at) FROM publications p WHERE p.target_id = t.id) AS last_published_at
        FROM publish_targets t LEFT JOIN users u ON u.id = t.linked_by
       WHERE t.account_id = $1 ORDER BY t.platform, t.mode, lower(coalesce(t.account_label, t.name))`, [accountId(req)]);
-  res.json(rows);
+  // Linked X accounts are kept while X is off, and listed as off.
+  const xOn = rows.some((r) => r.platform === 'x') ? (await xAccess(accountId(req))).allowed : true;
+  res.json(rows.map((r) => ({ ...r, off: r.platform === 'x' && !xOn })));
 }));
 
 socialRouter.post('/connect/:platform', asyncHandler(async (req, res) => {
   requireAdmin(req);
   const platform = platformParam(req.params.platform);
+  await assertX(platform, accountId(req));
   try { res.json({ url: await startConnect(platform, accountId(req), req.auth?.sub && UUID.test(req.auth.sub) ? req.auth.sub : null) }); }
   catch (e: any) { if (e instanceof SocialError) throw badRequest(e.message); throw e; }
 }));
@@ -106,6 +178,7 @@ socialRouter.post('/connect/:platform', asyncHandler(async (req, res) => {
 socialRouter.post('/sandbox/:platform', asyncHandler(async (req, res) => {
   requireAdmin(req);
   const platform = platformParam(req.params.platform);
+  await assertX(platform, accountId(req));
   const b = z.object({ label: z.string().max(80).optional() }).parse(req.body ?? {});
   const row = await addSandbox(accountId(req), req.auth?.sub && UUID.test(req.auth.sub) ? req.auth.sub : null, platform, b.label);
   res.status(201).json({ id: row.id, platform: row.platform, name: row.name, mode: row.mode, account_label: row.account_label });
@@ -143,8 +216,10 @@ socialRouter.post('/publish/:assetId', asyncHandler(async (req, res) => {
   if (targets.length !== new Set(b.targets.map((t) => t.targetId)).size) throw badRequest('One of the accounts is not linked to this Volt account');
   const problems: string[] = [];
   const posts: Record<string, any> = {};
+  const xOn = targets.some((t) => t.platform === 'x') ? (await xAccess(acct)).allowed : true;
   for (const t of b.targets) {
     const row = targets.find((x) => x.id === t.targetId)!;
+    if (row.platform === 'x' && !xOn) problems.push(`${row.account_label ?? row.name}: ${X_OFF}`);
     if (!row.enabled) problems.push(`${row.account_label ?? row.name} is disabled`);
     if (row.link_status === 'expired') problems.push(`${row.account_label ?? row.name}: access expired, connect it again`);
     const fit = fitPost(row.platform, t.post);
@@ -181,6 +256,7 @@ async function ownedPublication(id: string, acct: string) {
 socialRouter.post('/publications/:id/retry', asyncHandler(async (req, res) => {
   const pub = await ownedPublication(req.params.id, accountId(req));
   if (!pub) throw notFound('Publication not found');
+  await assertX(pub.target_platform, accountId(req));
   if (pub.status === 'published') throw conflict('This is already published');
   if (pub.status === 'pending' && pub.stage && pub.stage !== 'will retry') throw conflict('This is still being published');
   const b = z.object({ post: postSchema.optional() }).parse(req.body ?? {});

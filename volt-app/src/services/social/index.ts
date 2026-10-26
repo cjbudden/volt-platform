@@ -29,7 +29,7 @@ import { spawn } from 'node:child_process';
 import { query, one } from '../../db';
 import { config } from '../../config';
 import { seal, open, tokenKeyConfigured } from './crypto';
-import { PLATFORMS, PLATFORM_IDS, appCreds, SocialError, type PlatformId, type PostSpec, type Privacy, type LinkedAccount } from './platforms';
+import { PLATFORMS, PLATFORM_IDS, appCreds, SocialError, type PlatformId, type PostSpec, type Privacy, type LinkedAccount, type AppCreds } from './platforms';
 
 export { PLATFORMS, PLATFORM_IDS, SocialError };
 export type { PlatformId, PostSpec, Privacy };
@@ -40,20 +40,66 @@ const STATE_TTL_MIN = 10;
 const publicBase = () => config.publicBaseUrl.replace(/\/$/, '');
 export const callbackUrl = (p: PlatformId) => `${publicBase()}/api/social/callback/${p}`;
 
+// ---------------------------------------------------------------- X access
+
+/**
+ * WHETHER AN ACCOUNT MAY USE X (build queue 1.14h). X bills its API per post
+ * and per read, so X is off unless the platform's switch is on for the account
+ * (a system administrator sets it: X then runs on the deployment's X app) or
+ * the account brought its own X developer app (X bills the customer). With
+ * neither, X is hidden and refused everywhere: linking, sandbox, publishing,
+ * publishing rules, view syncing and take-downs. Linked X accounts are kept.
+ */
+export interface XAccess { switchOn: boolean; ownApp: { clientId: string; updatedAt: string | null } | null; allowed: boolean }
+
+export async function xAccess(accountId: string | null | undefined): Promise<XAccess> {
+  const r = accountId ? await one<any>(`SELECT x_enabled, x_client_id, x_client_secret_enc, x_app_updated_at FROM accounts WHERE id = $1`, [accountId]) : null;
+  const switchOn = !!r?.x_enabled;
+  const ownApp = r?.x_client_id && r?.x_client_secret_enc ? { clientId: r.x_client_id as string, updatedAt: r.x_app_updated_at ? new Date(r.x_app_updated_at).toISOString() : null } : null;
+  return { switchOn, ownApp, allowed: switchOn || !!ownApp };
+}
+
+export const X_OFF = 'X is not switched on for this account. A system administrator switches it on, or the account adds its own X developer app under Social accounts.';
+
+export async function assertPlatformAllowed(platform: string, accountId: string | null | undefined): Promise<void> {
+  if (platform !== 'x') return;
+  if (!(await xAccess(accountId)).allowed) throw new SocialError(X_OFF, { permanent: true });
+}
+
+/** The app credentials a sign-in or token refresh for this account uses: its own X app first, else the deployment's. */
+export async function appFor(platform: PlatformId, accountId: string | null | undefined): Promise<AppCreds | null> {
+  if (platform === 'x' && accountId) {
+    const r = await one<any>(`SELECT x_enabled, x_client_id, x_client_secret_enc FROM accounts WHERE id = $1`, [accountId]);
+    if (r?.x_client_id && r?.x_client_secret_enc) return { id: r.x_client_id, secret: open(r.x_client_secret_enc)! };
+    if (!r?.x_enabled) throw new SocialError(X_OFF, { permanent: true });
+  }
+  return appCreds(PLATFORMS[platform]);
+}
+
+/** Save (or clear, with null) the account's own X developer app. The secret is sealed and never read back out. */
+export async function setOwnXApp(accountId: string, app: { clientId: string; clientSecret: string } | null): Promise<void> {
+  await query(`UPDATE accounts SET x_client_id = $2, x_client_secret_enc = $3, x_app_updated_at = now(), updated_at = now() WHERE id = $1`,
+    [accountId, app?.clientId ?? null, app ? seal(app.clientSecret) : null]);
+}
+
 /**
  * Which platforms can be linked here. `setup` adds what whoever runs the
  * deployment needs to set one up (the token key, each platform's two settings,
  * its redirect URL and permissions); an account user gets only whether each is
  * ready, because they cannot act on the rest (services/serverSetup.ts).
  */
-export function platformStatus(setup = true) {
+export function platformStatus(setup = true, x?: XAccess) {
   return {
     ...(setup ? { tokenKeyConfigured: tokenKeyConfigured(), callbackBase: `${publicBase()}/api/social/callback/` } : {}),
     setupDetail: setup,
-    platforms: PLATFORM_IDS.map((id) => {
+    // An account X is off for gets no X card at all (`x` given and not allowed).
+    platforms: PLATFORM_IDS.filter((id) => id !== 'x' || !x || x.allowed).map((id) => {
       const p = PLATFORMS[id];
+      // With its own X app the account is ready whatever the deployment has.
+      const configured = id === 'x' && x?.ownApp ? true : id === 'x' && x && !x.switchOn ? false : !!appCreds(p);
       return {
-        id, label: p.label, accountNoun: p.accountNoun, configured: !!appCreds(p),
+        id, label: p.label, accountNoun: p.accountNoun, configured,
+        ...(id === 'x' && x ? { ownApp: !!x.ownApp } : {}),
         ...(setup ? { env: [p.env.id, p.env.secret], callbackUrl: callbackUrl(id), scopes: p.scopes } : {}),
         limits: p.limits, privacy: p.privacy,
       };
@@ -65,7 +111,7 @@ export function platformStatus(setup = true) {
 
 export async function startConnect(platform: PlatformId, accountId: string, userId: string | null): Promise<string> {
   const p = PLATFORMS[platform];
-  const c = appCreds(p);
+  const c = await appFor(platform, accountId);
   if (!c) throw new SocialError(`${p.label} is not set up on this deployment: set ${p.env.id} and ${p.env.secret}.`, { permanent: true });
   const state = randomBytes(24).toString('base64url');
   const verifier = p.pkce ? randomBytes(48).toString('base64url') : null;
@@ -109,7 +155,7 @@ export async function finishConnect(platform: PlatformId, state: string, code: s
   if (error || !code) return { accountId: st.account_id, linked: [], error: error ? `${PLATFORMS[platform].label} said: ${error}` : 'No authorization code came back.' };
   try {
     const p = PLATFORMS[platform];
-    const tokens = await p.exchange(code, callbackUrl(platform), st.code_verifier);
+    const tokens = await p.exchange(code, callbackUrl(platform), st.code_verifier, await appFor(platform, st.account_id));
     const accounts = await p.accounts(tokens);
     const linked: string[] = [];
     for (const a of accounts) { await upsertTarget(st.account_id, st.user_id, platform, a, 'live'); linked.push(a.label); }
@@ -121,6 +167,7 @@ export async function finishConnect(platform: PlatformId, state: string, code: s
 
 /** A sandbox account: behaves like the platform without calling it. */
 export async function addSandbox(accountId: string, userId: string | null, platform: PlatformId, label?: string) {
+  await assertPlatformAllowed(platform, accountId);
   const p = PLATFORMS[platform];
   const name = label?.trim() || `Volt test ${p.accountNoun}`;
   return upsertTarget(accountId, userId, platform, {
@@ -145,7 +192,7 @@ export async function validToken(target: any): Promise<string> {
       throw new SocialError(`${target.account_label ?? target.name}: access expired. Connect the account again.`, { permanent: true });
     }
     try {
-      const t = await p.refresh(rt);
+      const t = await p.refresh(rt, await appFor(target.platform, target.account_id));
       token = t.accessToken;
       await query(`UPDATE publish_targets SET access_token_enc=$2, refresh_token_enc=COALESCE($3, refresh_token_enc), token_expires_at=$4,
                           link_status='connected', link_detail=NULL, updated_at=now() WHERE id=$1`,
@@ -292,6 +339,8 @@ export async function handleSocialPublish(ctx: { job: any; progress: (pct: numbe
   try {
     if (!target || !target.enabled) throw new SocialError('The account this was going to is disconnected or disabled.', { permanent: true });
     if (!asset) throw new SocialError('The asset no longer exists.', { permanent: true });
+    // X switched off after this was queued (or an old rule still names an X account).
+    await assertPlatformAllowed(target.platform, target.account_id);
     const p = PLATFORMS[target.platform as PlatformId];
     const post: PostSpec = pub.post ?? defaultPost(asset, target.platform);
     let result: { externalId: string; url: string | null };
@@ -348,8 +397,10 @@ export async function registerSocialHandlers() {
 export async function syncViews(opts: { accountId?: string; force?: boolean; limit?: number } = {}): Promise<number> {
   const rows = await query<any>(
     `SELECT p.id, p.external_id, p.published_at, p.views, t.*, p.id AS pub_id
-       FROM publications p JOIN publish_targets t ON t.id = p.target_id
+       FROM publications p JOIN publish_targets t ON t.id = p.target_id JOIN accounts a ON a.id = t.account_id
       WHERE p.status = 'published' AND p.external_id IS NOT NULL AND t.enabled
+        -- X bills every read: no view syncing for an account X is off for.
+        AND (t.platform <> 'x' OR a.x_enabled OR (a.x_client_id IS NOT NULL AND a.x_client_secret_enc IS NOT NULL))
         AND ($1::uuid IS NULL OR t.account_id = $1)
         AND ($2 OR p.last_synced_at IS NULL OR p.last_synced_at < now() - interval '1 hour')
       ORDER BY p.last_synced_at NULLS FIRST LIMIT $3`, [opts.accountId ?? null, !!opts.force, opts.limit ?? 50]);
@@ -378,6 +429,7 @@ export async function syncViews(opts: { accountId?: string; force?: boolean; lim
 export async function removeFromPlatform(pubId: string): Promise<void> {
   const r = await one<any>(`SELECT p.external_id, t.* FROM publications p JOIN publish_targets t ON t.id=p.target_id WHERE p.id=$1`, [pubId]);
   if (!r?.external_id) throw new SocialError('Nothing was published here to take down.', { permanent: true });
+  await assertPlatformAllowed(r.platform, r.account_id);
   if (r.mode !== 'sandbox') {
     const p = PLATFORMS[r.platform as PlatformId];
     if (!p.remove) throw new SocialError(`${p.label} does not let apps delete posts: remove it in the ${p.label} app.`, { permanent: true });

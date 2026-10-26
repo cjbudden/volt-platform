@@ -76,7 +76,7 @@ platformRouter.get(
   asyncHandler(async (_req, res) => {
     const rows = await query(
       `SELECT a.id, a.name, a.plan_tier, a.max_channels, a.max_concurrent_sources,
-              COALESCE(a.status,'active') AS status, a.created_at,
+              COALESCE(a.status,'active') AS status, a.created_at, a.x_enabled, (a.x_client_id IS NOT NULL) AS x_own_app,
               (SELECT count(*) FROM channels c JOIN groups g ON g.id=c.group_id WHERE g.account_id=a.id) AS channels,
               (SELECT count(*) FROM users u WHERE u.account_id=a.id) AS users
          FROM accounts a ORDER BY a.name`
@@ -160,6 +160,8 @@ const patchAccountSchema = z.object({
   maxChannels: z.number().int().min(1).max(500).optional(),
   maxConcurrentSources: z.number().int().min(1).max(500).optional(),
   status: z.enum(['active', 'suspended']).optional(),
+  /** X for this account on the deployment's X app (build queue 1.14h); off by default. */
+  xEnabled: z.boolean().optional(),
 });
 
 platformRouter.patch(
@@ -181,10 +183,11 @@ platformRouter.patch(
          max_channels=COALESCE($4,max_channels),
          max_concurrent_sources=COALESCE($5,max_concurrent_sources),
          status=COALESCE($6,status),
+         x_enabled=COALESCE($7,x_enabled),
          updated_at=now()
        WHERE id=$1
-       RETURNING id, name, plan_tier, max_channels, max_concurrent_sources, status, created_at`,
-      [req.params.id, b.name ?? null, b.planTier ?? null, b.maxChannels ?? null, b.maxConcurrentSources ?? null, b.status ?? null]
+       RETURNING id, name, plan_tier, max_channels, max_concurrent_sources, status, x_enabled, created_at`,
+      [req.params.id, b.name ?? null, b.planTier ?? null, b.maxChannels ?? null, b.maxConcurrentSources ?? null, b.status ?? null, b.xEnabled ?? null]
     );
     if (!row) throw notFound('account not found');
     if (b.status === 'suspended') {

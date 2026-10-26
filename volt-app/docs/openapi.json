@@ -27275,6 +27275,106 @@
     }
    }
   },
+  "/api/social/x": {
+   "get": {
+    "operationId": "getSocialX",
+    "summary": "Whether X is on for the account",
+    "tags": [
+     "Social"
+    ],
+    "description": "X charges for its API per post and per read, so it is off for an account unless a system administrator switches it on (`enabled`, posts then go through the Volt deployment's X app) or the account adds its own X developer app (`ownApp`, X then bills the account directly). `allowed` is true when either is set. `ownApp` gives the client id only: the secret is never returned. `canSwitch` says whether the caller may change the switch, and `callbackUrl` is the address to register in an own X app.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "patch": {
+    "operationId": "patchSocialX",
+    "summary": "Switch X on or off for the account",
+    "tags": [
+     "Social"
+    ],
+    "description": "Body `{\"enabled\": true}`. System administrators only (on a Volt the account runs itself, its owner). Recorded in the audit log. Turning X off keeps the linked X accounts: they are listed with `off: true` and nothing is posted to them or read from them until X is on again.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/social/x/app": {
+   "delete": {
+    "operationId": "deleteSocialXApp",
+    "summary": "Stop using the account's own X app",
+    "tags": [
+     "Social"
+    ],
+    "description": "Forgets the client id and secret. Linked X accounts are kept; X turns off unless the platform switch is on for the account. Needs `settings: manage`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putSocialXApp",
+    "summary": "Use the account's own X developer app",
+    "tags": [
+     "Social"
+    ],
+    "description": "Body `{\"clientId\": \"...\", \"clientSecret\": \"...\"}` from an X app with OAuth 2.0 turned on and `callbackUrl` from `GET /api/social/x` registered in it. With its own app the account can use X without the platform switch, and X bills it directly. The secret is stored encrypted and never returned. Needs `settings: manage`. Recorded in the audit log by client id.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/sources/hls": {
    "post": {
     "operationId": "postSourcesHLS",

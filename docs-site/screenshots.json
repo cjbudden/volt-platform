@@ -294,7 +294,7 @@
       "waitFor": "h1",
       "customerView": true,
       "_why": "Shown as a customer account sees it (customerView): the server's setting names and machine names are only for whoever runs the Volt deployment (build queue 1.14-G4a).",
-      "alt": "The Social accounts page: one card per platform, with a linked sandbox account under YouTube"
+      "alt": "The Social accounts page: one card per platform, with a linked sandbox account under YouTube, and X off at the bottom with Use your own X app"
     },
     {
       "name": "notifications",

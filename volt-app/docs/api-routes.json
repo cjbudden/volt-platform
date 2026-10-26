@@ -4834,6 +4834,42 @@
  },
  {
   "method": "GET",
+  "path": "/api/social/x",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/social/x",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/social/x/app",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/social/x/app",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "GET",
   "path": "/api/source-preview/:token/index.m3u8",
   "api": "public",
   "credential": "none or per-route",

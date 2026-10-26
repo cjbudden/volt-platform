@@ -128,6 +128,8 @@ export async function validateTargets(accountId: string, targets: Target[] | und
     if (t.kind === 'social') {
       const tg = await one<any>(`SELECT id, platform FROM publish_targets WHERE id = $1 AND account_id = $2`, [t.targetId, accountId]);
       if (!tg) throw new Error(`social account ${t.targetId} is not configured for this account`);
+      // X is off unless switched on or the account has its own X app (build queue 1.14h).
+      if (tg.platform === 'x') { const { xAccess, X_OFF } = await import('./social'); if (!(await xAccess(accountId)).allowed) throw new Error(X_OFF); }
       out.push({ kind: 'social', targetId: t.targetId, platform: tg.platform }); continue;
     }
     throw new Error(`unknown target kind ${(t as any).kind}`);
@@ -148,9 +150,14 @@ export function windowFor(s: typeof BASELINE, now = new Date()): { from: Date; u
 export async function publishingPoints(accountId: string) {
   const apps = await query<any>(`SELECT id, name, type, enabled FROM apps WHERE account_id = $1 ORDER BY name`, [accountId]);
   const social = await query<any>(`SELECT id, platform, name, external_account, enabled FROM publish_targets WHERE account_id = $1 ORDER BY platform, name`, [accountId]);
+  // Linked X accounts stay listed while X is off, as off, so a rule naming one can be seen and changed.
+  const xOn = social.some((s) => s.platform === 'x') ? (await (await import('./social')).xAccess(accountId)).allowed : true;
   return {
     portal: { kind: 'portal', name: 'Catalogue (portal)' },
     apps: apps.map((a) => ({ kind: 'app', appId: a.id, name: a.name, type: a.type, enabled: a.enabled })),
-    social: social.map((s) => ({ kind: 'social', targetId: s.id, platform: s.platform, name: s.name, account: s.external_account, enabled: s.enabled })),
+    social: social.map((s) => {
+      const off = s.platform === 'x' && !xOn;
+      return { kind: 'social', targetId: s.id, platform: s.platform, name: s.name, account: s.external_account, enabled: s.enabled && !off, ...(off ? { off: true } : {}) };
+    }),
   };
 }

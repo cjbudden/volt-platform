@@ -19,6 +19,8 @@ jget(){ python3 -c "import json,sys; d=json.load(sys.stdin); print(eval(sys.argv
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q <<SQL
 INSERT INTO accounts(id,name) VALUES ('$ACC','PostCo'),('$OTH','OtherPostCo') ON CONFLICT (id) DO NOTHING;
+-- X is off by default (build queue 1.14h): this suite uses an X sandbox, so PostCo has it on.
+UPDATE accounts SET x_enabled = true WHERE id = '$ACC';
 INSERT INTO users(id,account_id,email,password_hash,role,status,display_name) VALUES
   ('0000000b-0000-0000-0000-000000000601','$ACC','owner@postco.example','x','owner','active','Owner'),
   ('0000000b-0000-0000-0000-000000000602','$ACC','op@postco.example','x','operator','active','Operator'),

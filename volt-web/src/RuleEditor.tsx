@@ -198,7 +198,7 @@ function FieldControl({ k, value, points, onChange, scopeKind }: { k: RuleKey; v
           {points.social.map(s => (
             <label key={s.targetId} style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: s.enabled ? 1 : .6 }}>
               <input type="checkbox" checked={has(x => x.kind === 'social' && x.targetId === s.targetId)} onChange={e => flip(e.target.checked, { kind: 'social', targetId: s.targetId, platform: s.platform }, x => x.kind === 'social' && x.targetId === s.targetId)} />
-              {s.platform}: {s.name} <span style={{ color: 'var(--faint)' }}>{s.account ? `(${s.account})` : ''}{s.enabled ? '' : ' disabled'}</span>
+              {s.platform}: {s.name} <span style={{ color: 'var(--faint)' }}>{s.account ? `(${s.account})` : ''}{(s as { off?: boolean }).off ? ' off: X is not on for this account' : s.enabled ? '' : ' disabled'}</span>
             </label>
           ))}
         </div>
