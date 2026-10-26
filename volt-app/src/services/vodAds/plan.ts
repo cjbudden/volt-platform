@@ -23,7 +23,15 @@
 //  convert, and `snapbackFor` says which break a seek skipped over and must
 //  play first (the rule's snapback setting, on by default).
 //
-//  PURE. test/vod-ads.check.ts.
+//  CATCH-UP (SSAI.md 5.2). A recording of a live channel or event already
+//  knows where its broadcast breaks were (stream_breaks: an operator's Go to
+//  break, the source's SCTE-35). Those stretches are cut out of the catch-up
+//  title (`catchupWindows`, then hls.ts `cutMedia`: the playlist simply leaves
+//  their segments out, nothing is re-encoded) and each becomes a mid-roll the
+//  on-demand rule fills (`planVodBreaks` with `replace`). Content time of a
+//  catch-up title is the programme without the broadcast's ads.
+//
+//  PURE. test/vod-ads.check.ts, test/vod-ads-catchup.check.ts.
 // ============================================================================
 
 export type Position = 'pre' | 'mid' | 'post';
@@ -103,8 +111,8 @@ export interface PlannedBreak {
   atSec: number;
   /** The break's planned length; the pod decided for it may be shorter. */
   durationSec: number;
-  /** Where the moment came from. */
-  source: 'pre' | 'cue' | 'interval' | 'post';
+  /** Where the moment came from ('replace': a broadcast break cut out of a catch-up title). */
+  source: 'pre' | 'cue' | 'interval' | 'post' | 'replace';
 }
 
 /** Nearest segment start to `t` (boundaries ascending, starting at 0). */
@@ -119,13 +127,22 @@ export function snapToBoundary(t: number, boundaries: number[]): number {
  * The breaks for a title of `contentSec`, in order. `cuesSec` are the title's
  * own cue points; `boundaries` its segment start times (from its playlist).
  */
-export function planVodBreaks(contentSec: number, policy: VodAdPolicy, opts: { cuesSec?: number[]; boundaries?: number[]; titleRule?: 'default' | 'none' | 'no_mid' } = {}): PlannedBreak[] {
+export function planVodBreaks(contentSec: number, policy: VodAdPolicy, opts: { cuesSec?: number[]; boundaries?: number[]; titleRule?: 'default' | 'none' | 'no_mid'; replace?: ReplaceBreak[] } = {}): PlannedBreak[] {
   const rule = opts.titleRule ?? 'default';
   if (rule === 'none' || !(contentSec > 0)) return [];
   const out: Omit<PlannedBreak, 'index'>[] = [];
   if (policy.preroll.on && contentSec >= policy.preroll.minContentSec) out.push({ position: 'pre', atSec: 0, durationSec: policy.preroll.sec, source: 'pre' });
   const m = policy.midroll;
-  if (m.on && rule !== 'no_mid' && m.maxBreaks > 0) {
+  const replace = (opts.replace ?? []).filter((r) => r.atSec > 0.01 && r.atSec < contentSec - 0.01 && r.durationSec > 0);
+  if (m.on && rule !== 'no_mid' && m.maxBreaks > 0 && opts.replace?.length) {
+    // A catch-up title: the broadcast's own breaks ARE its mid-rolls. They are
+    // where the programme already paused for ads, so the opening minutes, the
+    // end guard and the minimum gap do not apply, and no interval or cue
+    // mid-rolls are added on top. Each plays for as long as the broadcast
+    // break it replaces (a cut at the very start or end is covered by the
+    // pre-roll or post-roll instead).
+    for (const r of replace) out.push({ position: 'mid', atSec: r.atSec, durationSec: Math.round(r.durationSec * 1000) / 1000, source: 'replace' });
+  } else if (m.on && rule !== 'no_mid' && m.maxBreaks > 0) {
     const first = m.firstAfterMin * 60, guard = contentSec - m.endGuardMin * 60, gap = m.minGapMin * 60;
     const cues = (opts.cuesSec ?? []).filter((c) => Number.isFinite(c)).sort((a, b) => a - b);
     let wanted: { t: number; source: 'cue' | 'interval' }[];
@@ -196,4 +213,59 @@ export function snapbackFor(fromSec: number, toSec: number, breaks: (ClockBreak 
   if (toSec <= fromSec) return null;
   const skipped = breaks.filter((b) => (b.position ?? 'mid') === 'mid' && b.atSec > fromSec && b.atSec <= toSec && !watched.has(b.index));
   return skipped.length ? skipped[skipped.length - 1] : null;
+}
+
+// ---------------------------------------------------------------- catch-up: the broadcast's breaks replaced
+
+/** A broadcast break as the recording knows it: when it started on the wall clock and how long it ran. */
+export interface BroadcastBreak { startMs: number; durationMs: number }
+/** A stretch of the recording left out of the catch-up title, in the recording's own seconds, on segment starts. */
+export interface CutWindow { fromSec: number; toSec: number }
+/** A replaced break in catch-up content time, and how long the broadcast break was. */
+export interface ReplaceBreak { atSec: number; durationSec: number }
+
+/**
+ * Where a recording's broadcast breaks are, as stretches to cut: each break
+ * moved to the nearest segment starts (a playlist can only leave out whole
+ * segments; the most a cut can be off is half a segment at either edge),
+ * kept inside the recording, overlapping ones merged. `recStartMs` is the
+ * wall clock of the recording's first segment, `boundaries` its segment
+ * starts, `recordedSec` its length. A cut that would leave nothing to play
+ * is dropped.
+ */
+export function catchupWindows(breaks: BroadcastBreak[], recStartMs: number, recordedSec: number, boundaries: number[]): CutWindow[] {
+  if (!(recordedSec > 0)) return [];
+  const edges = [...boundaries.filter((b) => b >= 0 && b < recordedSec - 1e-6), recordedSec];
+  const raw = breaks
+    .filter((b) => Number.isFinite(b.startMs) && b.durationMs > 0)
+    .map((b) => ({ from: (b.startMs - recStartMs) / 1000, to: (b.startMs + b.durationMs - recStartMs) / 1000 }))
+    .filter((w) => w.to > 0 && w.from < recordedSec)
+    .map((w) => ({ fromSec: snapToBoundary(Math.max(0, w.from), edges), toSec: snapToBoundary(Math.min(recordedSec, w.to), edges) }))
+    .filter((w) => w.toSec - w.fromSec > 0.01)
+    .sort((a, b) => a.fromSec - b.fromSec);
+  const out: CutWindow[] = [];
+  for (const w of raw) {
+    const last = out[out.length - 1];
+    if (last && w.fromSec <= last.toSec + 0.01) last.toSec = Math.max(last.toSec, w.toSec);
+    else out.push({ ...w });
+  }
+  const cut = out.reduce((n, w) => n + w.toSec - w.fromSec, 0);
+  return recordedSec - cut > 0.01 ? out : [];
+}
+
+/** Each cut as a replaced break: where it falls in catch-up content time, and its broadcast length. */
+export function replaceBreaks(cuts: CutWindow[]): ReplaceBreak[] {
+  let before = 0;
+  return cuts.map((w) => { const r = { atSec: Math.round((w.fromSec - before) * 1000) / 1000, durationSec: w.toSec - w.fromSec }; before += w.toSec - w.fromSec; return r; });
+}
+
+/** A moment of the recording in catch-up content time (inside a cut: where the cut is). */
+export function recordedToCatchup(recSec: number, cuts: CutWindow[]): number {
+  let before = 0;
+  for (const w of cuts) {
+    if (recSec < w.fromSec) break;
+    if (recSec < w.toSec) return w.fromSec - before;
+    before += w.toSec - w.fromSec;
+  }
+  return recSec - before;
 }

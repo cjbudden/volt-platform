@@ -27,7 +27,14 @@
 //  states the content's key again where the content resumes: the key changes
 //  at the discontinuity, never inside a part.
 //
-//  PURE: text in, text out. test/vod-ads.check.ts.
+//  CATCH-UP CUTS. A recording's broadcast breaks are left out of its catch-up
+//  playlists (`cutMedia`): whole segments, nothing re-encoded. The content
+//  after a cut carries on with timestamps that jump by the cut's length, so
+//  its first segment is marked `disc` and written after a DISCONTINUITY even
+//  when no ad fills the gap (the guided form restates PROGRAM-DATE-TIME
+//  there, so the interstitials stay where the plan puts them).
+//
+//  PURE: text in, text out. test/vod-ads.check.ts, test/vod-ads-catchup.check.ts.
 // ============================================================================
 
 export const INTERSTITIAL_CLASS = 'com.apple.hls.interstitial';
@@ -131,9 +138,15 @@ export interface Segment {
   init: string;
   /** Tags that must stay with the segment (BYTERANGE, KEY). */
   tags: string[];
+  /** The first segment after a cut (cutMedia): its timestamps do not follow on from the one before. */
+  disc?: boolean;
 }
 
-export interface Media { version: number; segments: Segment[] }
+export interface Media {
+  version: number; segments: Segment[];
+  /** Wall clock of the first segment, from the playlist's PROGRAM-DATE-TIME (a recording has one). */
+  startMs?: number;
+}
 
 /** A VOD media playlist, every URL absolute. Null when it is not one. */
 export function parseMedia(text: string, url: string): Media | null {
@@ -141,9 +154,17 @@ export function parseMedia(text: string, url: string): Media | null {
   if (lines[0] !== '#EXTM3U') return null;
   let version = 3, init = '', dur: number | null = null;
   let tags: string[] = [];
+  let startMs: number | undefined;
+  let elapsed = 0;
   const segments: Segment[] = [];
   for (const l of lines.slice(1)) {
     if (l.startsWith('#EXT-X-VERSION:')) { version = Number(l.split(':')[1]) || 3; continue; }
+    if (l.startsWith('#EXT-X-PROGRAM-DATE-TIME:') && startMs == null) {
+      // The first one dates the segment after it; the title's start is that less what came before.
+      const at = Date.parse(l.slice(25));
+      if (Number.isFinite(at)) startMs = Math.round(at - elapsed * 1000);
+      continue;
+    }
     if (l.startsWith('#EXT-X-MAP:')) {
       const u = l.match(/URI="([^"]+)"/)?.[1];
       init = u ? absUrl(url, u) : '';
@@ -157,9 +178,31 @@ export function parseMedia(text: string, url: string): Media | null {
     if (l.startsWith('#')) continue;
     if (dur == null) return null;
     segments.push({ dur, url: absUrl(url, l), init, tags });
+    elapsed += dur;
     dur = null; tags = [];
   }
-  return { version, segments };
+  return startMs == null ? { version, segments } : { version, segments, startMs };
+}
+
+/**
+ * The media with the cut stretches (recording seconds, cutWindows in plan.ts)
+ * left out. A segment goes with the stretch its middle falls in, as the DASH
+ * cut does, so audio segments that do not line up exactly with the video's
+ * follow the picture and nothing plays twice. The first segment after a cut
+ * is marked `disc`.
+ */
+export function cutMedia(m: Media, cuts: { fromSec: number; toSec: number }[]): Media {
+  if (!cuts.length) return m;
+  const out: Segment[] = [];
+  let t = 0, dropped = false;
+  for (const s of m.segments) {
+    const mid = t + s.dur / 2;
+    t += s.dur;
+    if (cuts.some((w) => mid >= w.fromSec && mid < w.toSec)) { dropped = true; continue; }
+    out.push(dropped && out.length ? { ...s, disc: true } : s);
+    dropped = false;
+  }
+  return { ...m, segments: out };
 }
 
 /** Segment start times (content time), 0 first. */
@@ -229,7 +272,7 @@ export function stitchMedia(content: Media, breaks: StitchBreak[]): string {
   for (const s of content.segments) {
     while (pending.length && pending[0].atSec <= t + 0.01) pod(pending.shift()!);
     contentKeys = keysAfter(contentKeys, s.tags);
-    writeSeg(lines, s, state, afterPod, contentKeys);
+    writeSeg(lines, s, state, afterPod || (!!s.disc && !first), contentKeys);
     afterPod = false; first = false;
     t += s.dur;
   }
@@ -260,9 +303,17 @@ export function guidedMedia(content: Media, breaks: GuidedBreak[], listUrl: (b: 
     lines.push(`#EXT-X-DATERANGE:${attrs.join(',')}`);
   }
   const state: WriteState = { map: '', keys: [] };
+  let t = 0;
   content.segments.forEach((s, i) => {
     if (i === 0) lines.push(`#EXT-X-PROGRAM-DATE-TIME:${iso(GUIDED_EPOCH_MS)}`);
+    else if (s.disc) {
+      // After a cut: the clock the interstitials hang on carries on from where
+      // the content left off, and the init segment is sent again.
+      lines.push('#EXT-X-DISCONTINUITY', `#EXT-X-PROGRAM-DATE-TIME:${iso(GUIDED_EPOCH_MS + Math.round(t * 1000))}`);
+      state.map = '';
+    }
     writeSeg(lines, s, state, false);
+    t += s.dur;
   });
   lines.push('#EXT-X-ENDLIST');
   return lines.join('\n') + '\n';

@@ -106,6 +106,7 @@ What Volt reports to the ad server needs nothing from your player: impressions, 
 
 - **A click**: open `clickUrl` (a Volt address) in a new window. Volt records the click, tells the ad server and sends the viewer on to the advertiser's page.
 - **Pause, resume, mute, unmute, fullscreen**: `POST` `{"events":[{"b":<break index>,"p":<ad index>,"event":"pause"}]}` to the timeline's `eventsUrl`.
+- **Catch-up titles**: for a recording of a live stream, the timeline's `replaced` lists where the broadcast's own breaks were cut out (`contentSec` in the title's time, `recordedFromSec` and `recordedToSec` in the recording's). The title's time is the programme without them.
 - **Snapback**: when the timeline's `snapback` is true and a viewer seeks past a mid-roll they have not seen, play that break first. Resume, bookmarks and chapters use the title's own time; convert with the timeline's `stitchedStartSec` and `durationSec`.
 - **Captions and DRM** need nothing either: captions go quiet during ads in both HLS and DASH, ads are clear, and a protected title's keys apply again after each break (in HLS the key changes at the discontinuity, in DASH at the Period).
 

@@ -14,6 +14,7 @@ guide: section
 ## What it is for
 
 - **Where the breaks go.** A pre-roll (only for titles long enough to deserve one), mid-rolls at the title's own cue points or every few minutes, never in the first or last minutes, and a post-roll if you want one.
+- **Catch-up without the broadcast's ads.** A recording of a live channel or event (a full replay, or a programme cut from it) plays without the ads that were on air: each broadcast break is left out and filled with ads decided for the viewer.
 - **Who fills them.** Your ad server first, then your house spots. A break is never left empty and the title never waits for a slow ad server.
 - **Who sees none.** Viewers who paid, and if you choose signed-in members, play without ads. A title can also opt out on its own.
 - **How the ads reach the player.** Volt picks for each viewer. Where the player can fetch each break's ads itself (HLS Interstitials: the Volt player in any modern browser, Android and smart TVs, and Apple devices), it does; everywhere else the ads are stitched into the stream, in HLS and, for titles encoded with DASH, in DASH too. You can force one or the other.
@@ -49,9 +50,21 @@ New plays follow the rule at once. Plays already started keep the ads they were 
 
 In the title's metadata, set **adRule** to `none`. To keep only the pre-roll (no mid-rolls), set it to `no_mid`. FAST channels read the same setting.
 
+### Catch-up: the broadcast's ad breaks replaced
+
+A recording of a live channel or event already knows where its ad breaks were: every break an operator started with **Go to break**, and every break signalled in the source (SCTE-35). When on-demand ads are on with mid-rolls, a replay of that recording, or a programme clipped from it, plays without those breaks: Volt leaves them out of the stream (nothing is re-encoded) and plays a break decided for the viewer in each place, as long as the broadcast break was. There is nothing to mark by hand.
+
+- Breaks are cut where the video can switch (a segment start), so a cut can be a second or two from the moment the break was signalled.
+- The catch-up title's own time is the programme without the broadcast's ads: a one hour recording with eight minutes of breaks is a 52 minute title, and resume and bookmarks use that time.
+- The broadcast breaks are the title's mid-rolls: no others are added every few minutes. The pre-roll and post-roll follow the rule as usual.
+- A break cancelled before it aired is not cut. Changing a break changes the stream for new plays.
+- Without mid-rolls (off in the rule, or the title is marked `adRule: no_mid` or `none`), and for viewers who play without ads, the recording plays as it was broadcast, ads included.
+- Highlights joined from several parts of a recording have no single broadcast clock and get the rule's ordinary mid-rolls.
+- A catch-up title with ads plays as HLS; a DASH stream with ads is not offered for it yet.
+
 ### See where a title's breaks would go
 
-`GET /api/vod/ads/assets/{id}/plan` lists the breaks a title would get under its rule, or says why it gets none. Mid-rolls are moved to the nearest point where the video can switch (a segment start), so they may sit a second or two from the time you set.
+`GET /api/vod/ads/assets/{id}/plan` lists the breaks a title would get under its rule, or says why it gets none. For a catch-up title, `replaced` lists the broadcast breaks it cuts out, and those breaks have `source` `replace`. Mid-rolls are moved to the nearest point where the video can switch (a segment start), so they may sit a second or two from the time you set.
 
 ### What viewers see
 
@@ -87,6 +100,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A title plays without ads | Ads are off for its content type, the title is marked `adRule: none`, it is shorter than the pre-roll needs and has no mid-roll, or the viewer paid | Check with `GET /api/vod/ads/assets/{id}/plan`, which says why |
 | Breaks play only house spots | The ad server did not answer in time, returned nothing, or offered an ad Volt has not prepared yet. A new ad is prepared the first time it is offered and plays from the next time on | Check **Fill rate**; check the ad server's tag in **Ad servers** |
 | **Fill rate** is low and timeouts are high | The ad server is slow | Ask your ad server to answer faster, or raise its time budget on the FAST page |
+| A replay still shows the broadcast's ads | The rule has no mid-rolls, the title is marked `no_mid` or `none`, the viewer plays without ads, the break was not recorded as a break on the channel or event, or the item is highlights joined from several parts | Check `replaced` in `GET /api/vod/ads/assets/{id}/plan` |
 | No **Learn more** on an ad | The ad has no click-through page in the ad server | Add one in the ad server |
 | A DASH player gets no stream with ads, HLS plays | One of the ads chosen for that viewer exists only as an older TS file, which cannot be part of a DASH stream | Play the HLS address the play gate gives; ads prepared by Volt are always ready for both |
 | **Couldn't load on-demand ads.** | The page could not reach Volt | Choose **Retry** |

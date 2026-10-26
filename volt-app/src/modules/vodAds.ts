@@ -31,7 +31,7 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { actor, writeAudit } from '../services/audit';
 import { resolveVodAdPolicy } from '../services/vodAds/plan';
 import {
-  ruleForAsset, assetFor, breaksFor, sessionRow, readySession, sessionMaster, sessionMedia, sessionMpd, sessionText, segmentRedirect, adMaster, adMedia,
+  ruleForAsset, assetFor, breaksFor, replacedView, sessionRow, readySession, sessionMaster, sessionMedia, sessionMpd, sessionText, segmentRedirect, adMaster, adMedia,
   timelineOf, playerEvents, clickThrough, guidedVersion, guidedMaster, guidedPlaylist, guidedAssetList, vodAdReport, PLAYER_EVENTS, validSid,
   type SessionCtx,
 } from '../services/vodAds';
@@ -111,8 +111,8 @@ vodAdsRouter.get('/assets/:id/plan', asyncHandler(async (req, res) => {
   const rule = await ruleForAsset(accountId(req), asset.schema_id);
   if (!rule) return res.json({ assetId: asset.id, rule: null, breaks: [], why: 'No on-demand ad rule is on for this item\'s content type or the account.' });
   if (!asset.master_key) return res.json({ assetId: asset.id, rule: view(rule), breaks: [], why: 'This item has no playlist yet.' });
-  const { contentSec, breaks } = await breaksFor(asset, rule.resolved);
-  res.json({ assetId: asset.id, rule: view(rule), contentSec, breaks,
+  const { contentSec, breaks, cuts } = await breaksFor(asset, rule.resolved);
+  res.json({ assetId: asset.id, rule: view(rule), contentSec, breaks, replaced: replacedView(cuts),
     why: breaks.length ? null : asset.metadata?.adRule === 'none' || asset.metadata?.ads === false ? 'This item is marked ad-free.' : 'No break fits this item under the rule.' });
 }));
 

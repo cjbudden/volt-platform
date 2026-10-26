@@ -34,9 +34,12 @@ import { readKey, fastConfig } from '../fast/media';
 import { defaultFetcher } from '../fast/store';
 import { fetchTracker } from '../fast/beaconSender';
 import { fillBeaconUrl, progressOffsetSec } from '../fast/beacons';
-import { resolveVodAdPolicy, planVodBreaks, titleRule, stitchedStarts, type VodAdPolicy, type Position, type Delivery } from './plan';
 import {
-  masterEntries, rewriteMaster, parseMedia, stitchMedia, guidedMedia, boundariesOf, durationOf, matchEntry,
+  resolveVodAdPolicy, planVodBreaks, titleRule, stitchedStarts, catchupWindows, replaceBreaks,
+  type VodAdPolicy, type Position, type Delivery, type CutWindow, type BroadcastBreak,
+} from './plan';
+import {
+  masterEntries, rewriteMaster, parseMedia, stitchMedia, guidedMedia, boundariesOf, durationOf, matchEntry, cutMedia,
   type MasterEntry, type Media, type Segment,
 } from './hls';
 import { parseMpd, stitchMpd, contentEdges, sidecarText, cutVtt, type Mpd, type DashAd, type DashAdTrack } from './dash';
@@ -109,30 +112,102 @@ const firstVideo = (h: AssetHls) => h.entries.find((e) => e.kind === 'video' && 
 
 // ---------------------------------------------------------------- assets
 
-interface AssetRow { id: string; account_id: string; title: string | null; master_key: string | null; duration_ms: number | null; metadata: any; break_cues_ms: number[] | null; schema_id: string | null; formats?: { hls?: boolean; dash?: boolean } | null }
+interface AssetRow {
+  id: string; account_id: string; title: string | null; master_key: string | null; duration_ms: number | null; metadata: any; break_cues_ms: number[] | null; schema_id: string | null; formats?: { hls?: boolean; dash?: boolean } | null;
+  /** What catch-up needs: the stream it was recorded from, what kind of asset it is, where it starts on the wall clock. */
+  channel_id?: string | null; event_id?: string | null; kind?: string | null; source_kind?: string | null;
+  start_epoch_ms?: number | string | null; clip_spec?: any; rec_start_ms?: number | string | null;
+}
 
 export async function assetFor(assetId: string, accountId?: string): Promise<AssetRow | null> {
   return one<AssetRow>(
-    `SELECT v.id, COALESCE(g.account_id, v.account_id) AS account_id, v.title, v.master_key, v.duration_ms, v.metadata, v.break_cues_ms, v.schema_id, v.formats
+    `SELECT v.id, COALESCE(g.account_id, v.account_id) AS account_id, v.title, v.master_key, v.duration_ms, v.metadata, v.break_cues_ms, v.schema_id, v.formats,
+            v.channel_id, v.event_id, v.kind::text AS kind, v.source_kind, v.start_epoch_ms, v.clip_spec, r.start_epoch_ms AS rec_start_ms
        FROM vod_assets v LEFT JOIN channels c ON c.id = v.channel_id LEFT JOIN events e ON e.id = v.event_id
+       LEFT JOIN recordings r ON r.id = v.recording_id
        LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
       WHERE v.id = $1 ${accountId ? 'AND COALESCE(g.account_id, v.account_id) = $2' : ''}`, accountId ? [assetId, accountId] : [assetId]);
 }
 
-/** The breaks a title gets under a rule: on its segment boundaries, with its cue points. */
+// ---------------------------------------------------------------- catch-up (SSAI.md 5.2)
+
+/**
+ * Where a recorded title starts on the wall clock, or null when it is not a
+ * straight piece of one recording (an upload, a clip joined from several
+ * ranges, an export). The playlist's own PROGRAM-DATE-TIME first; else a
+ * full-event replay starts where its recording does (deriveEventVod stores
+ * 0 in the asset), and a single-range clip where its range does.
+ */
+export function recordedStartMs(asset: AssetRow, media: Media): number | null {
+  if (!asset.channel_id && !asset.event_id) return null;
+  if (asset.source_kind && asset.source_kind !== 'recording') return null;
+  if (asset.kind !== 'full_event' && asset.kind !== 'clip') return null;
+  const spec = Array.isArray(asset.clip_spec) ? asset.clip_spec : null;
+  if (asset.kind === 'clip' && spec && spec.length > 1) return null;
+  if (media.startMs != null) return media.startMs;
+  const n = (v: unknown) => (v == null ? null : Number(v));
+  if (asset.kind === 'full_event') return n(asset.rec_start_ms);
+  const s = n(asset.start_epoch_ms);
+  // Recording ranges are wall clock milliseconds; 0-based ones (made outside a recording) are not.
+  return s != null && s > 1e12 ? s : null;
+}
+
+/** The stream's broadcast breaks that fall inside a recorded title (cancelled ones never aired). */
+async function broadcastBreaks(asset: AssetRow, startMs: number, endMs: number): Promise<BroadcastBreak[]> {
+  const col = asset.channel_id ? 'channel_id' : 'event_id';
+  const rows = await query<any>(
+    `SELECT (extract(epoch FROM starts_at) * 1000)::bigint AS start_ms, duration_ms FROM stream_breaks
+      WHERE ${col} = $1 AND status <> 'cancelled'
+        AND starts_at < to_timestamp($3::double precision / 1000)
+        AND starts_at + duration_ms * interval '1 millisecond' > to_timestamp($2::double precision / 1000)
+      ORDER BY starts_at`, [asset.channel_id ?? asset.event_id, startMs, endMs]);
+  return rows.map((r) => ({ startMs: Number(r.start_ms), durationMs: Number(r.duration_ms) }));
+}
+
+/**
+ * The stretches of a recorded title to cut and fill: its broadcast breaks,
+ * when the rule puts mid-rolls in this title. Without mid-rolls (off in the
+ * rule, or the title is no_mid or ad-free) a catch-up title plays as it was
+ * recorded, broadcast ads and all: replacing means replacing.
+ */
+export async function catchupCuts(asset: AssetRow, policy: VodAdPolicy, media: Media | null): Promise<CutWindow[]> {
+  if (!media || !policy.midroll.on || policy.midroll.maxBreaks <= 0 || titleRule(asset.metadata) !== 'default') return [];
+  const startMs = recordedStartMs(asset, media);
+  if (startMs == null) return [];
+  const recordedSec = durationOf(media);
+  const breaks = await broadcastBreaks(asset, startMs, startMs + recordedSec * 1000);
+  return catchupWindows(breaks, startMs, recordedSec, boundariesOf(media));
+}
+
+/**
+ * The breaks a title gets under a rule: on its segment boundaries, with its
+ * cue points; for a recording of a live stream, its broadcast breaks cut out
+ * and replaced (`cuts`, in the recording's seconds; content time is then the
+ * title without them).
+ */
 export async function breaksFor(asset: AssetRow, policy: VodAdPolicy) {
   const h = await assetHls(asset.master_key!);
   const v = firstVideo(h);
-  const media = v ? h.media.get(v.track)! : null;
+  const recorded = v ? h.media.get(v.track)! : null;
+  const cuts = await catchupCuts(asset, policy, recorded);
+  const media = recorded && cuts.length ? cutMedia(recorded, cuts) : recorded;
   const contentSec = media ? durationOf(media) : Number(asset.duration_ms ?? 0) / 1000;
   return {
     contentSec,
+    cuts,
     breaks: planVodBreaks(contentSec, policy, {
       cuesSec: (asset.break_cues_ms ?? []).map((ms) => ms / 1000),
       boundaries: media ? boundariesOf(media) : undefined,
       titleRule: titleRule(asset.metadata),
+      replace: cuts.length ? replaceBreaks(cuts) : undefined,
     }),
   };
+}
+
+/** The replaced broadcast breaks as the plan and the timeline report them. */
+export function replacedView(cuts: CutWindow[] | undefined) {
+  const r = replaceBreaks(cuts ?? []);
+  return (cuts ?? []).map((w, i) => ({ contentSec: r[i].atSec, recordedFromSec: w.fromSec, recordedToSec: w.toSec }));
 }
 
 // ---------------------------------------------------------------- sessions
@@ -155,7 +230,11 @@ export interface SessionBreak {
   /** null until decided; [] = decided, nothing to play (the break is dropped). */
   pod: PodEntry[] | null;
 }
-export interface SessionPlan { contentSec: number; snapback: boolean; prerollOnResume: boolean; breaks: SessionBreak[] }
+export interface SessionPlan {
+  contentSec: number; snapback: boolean; prerollOnResume: boolean; breaks: SessionBreak[];
+  /** Catch-up: the broadcast breaks left out of the recording (its seconds), fixed for the session. */
+  cuts?: CutWindow[];
+}
 export interface SessionCtx { ip?: string | null; userAgent?: string | null; country?: string | null; appId?: string | null; ifa?: string | null; lmt?: boolean; gdpr?: string | null; usPrivacy?: string | null }
 
 export const newSessionId = () => `va${randomBytes(18).toString('base64url')}`;
@@ -177,10 +256,11 @@ export interface OpenInput {
 export async function openSession(i: OpenInput): Promise<{ id: string; plan: SessionPlan }> {
   const asset = await assetFor(i.assetId, i.accountId);
   if (!asset?.master_key) throw new Error('asset has no playlist');
-  const { contentSec, breaks } = await breaksFor(asset, i.rule.resolved);
+  const { contentSec, breaks, cuts } = await breaksFor(asset, i.rule.resolved);
   const plan: SessionPlan = {
     contentSec, snapback: i.rule.resolved.snapback, prerollOnResume: i.rule.resolved.prerollOnResume,
     breaks: breaks.map((b) => ({ index: b.index, position: b.position, atSec: b.atSec, plannedSec: b.durationSec, pod: null })),
+    ...(cuts.length ? { cuts } : {}),
   };
   const id = i.id ?? newSessionId();
   await query(
@@ -332,9 +412,11 @@ export async function sessionMedia(row: any, track: string): Promise<string | nu
   const asset = await assetFor(row.vod_asset_id);
   const h = await assetHls(asset!.master_key!);
   const entry = h.entries.find((e) => e.track === track);
-  const content = entry ? h.media.get(track) : null;
-  if (!entry || !content) return null;
   const plan = row.plan as SessionPlan;
+  const recorded = entry ? h.media.get(track) : null;
+  // Every rendition is cut at the same stretches, so audio and captions stay with the picture.
+  const content = recorded && plan.cuts?.length ? cutMedia(recorded, plan.cuts) : recorded;
+  if (!entry || !content) return null;
   const breaks = [];
   for (const b of playedBreaks(plan)) {
     const podSec = b.pod!.reduce((n, x) => n + x.durationSec, 0);
@@ -390,6 +472,9 @@ async function dashAd(sid: string, b: SessionBreak, p: number): Promise<DashAd |
 
 /** The session's stitched MPD, or null when the asset or one of its ads cannot be DASH. */
 export async function sessionMpd(row: any): Promise<string | null> {
+  // A catch-up session leaves stretches of the recording out; the DASH cut
+  // does not do that yet, so such a session plays HLS (the gate offers no MPD).
+  if ((row.plan as SessionPlan).cuts?.length) return null;
   const asset = await assetFor(row.vod_asset_id);
   if (!asset) return null;
   const mpd = await assetMpd(asset);
@@ -409,6 +494,7 @@ export async function sessionMpd(row: any): Promise<string | null> {
 
 /** A content Period's part of the asset's sidecar WebVTT, on that Period's clock (dash.ts cutVtt). */
 export async function sessionText(row: any, k: number, repId: string): Promise<string | null> {
+  if ((row.plan as SessionPlan).cuts?.length) return null;
   const asset = await assetFor(row.vod_asset_id);
   if (!asset) return null;
   const mpd = await assetMpd(asset);
@@ -423,9 +509,14 @@ export async function sessionText(row: any, k: number, repId: string): Promise<s
 
 // ---------------------------------------------------------------- guided playlists
 
-/** The guided playlists' version: changes when the rule or the asset's cues change, so a CDN copy is never stale. */
+/**
+ * The guided playlists' version: changes when the rule, the asset's cues or
+ * (catch-up) the stream's broadcast breaks change, so a CDN copy is never stale.
+ */
 export async function guidedVersion(asset: AssetRow, rule: VodAdRuleRow): Promise<string> {
-  return createHash('sha256').update(`${rule.id}|${new Date(rule.updated_at).getTime()}|${(asset.break_cues_ms ?? []).join(',')}|${titleRule(asset.metadata)}`).digest('base64url').slice(0, 10);
+  const { cuts } = asset.master_key ? await breaksFor(asset, resolveVodAdPolicy(rule.policy)) : { cuts: [] as CutWindow[] };
+  const cutKey = cuts.map((w) => `${w.fromSec}-${w.toSec}`).join(',');
+  return createHash('sha256').update(`${rule.id}|${new Date(rule.updated_at).getTime()}|${(asset.break_cues_ms ?? []).join(',')}|${titleRule(asset.metadata)}${cutKey ? `|${cutKey}` : ''}`).digest('base64url').slice(0, 10);
 }
 export const guidedBase = (assetId: string, ver: string) => `/vod-ads/g/${assetId}/${ver}`;
 
@@ -436,9 +527,10 @@ export async function guidedMaster(asset: AssetRow, ver: string): Promise<string
 
 export async function guidedPlaylist(asset: AssetRow, rule: VodAdRuleRow & { resolved: VodAdPolicy }, ver: string, track: string): Promise<string | null> {
   const h = await assetHls(asset.master_key!);
-  const content = h.media.get(track);
-  if (!content) return null;
-  const { breaks } = await breaksFor(asset, rule.resolved);
+  const recorded = h.media.get(track);
+  if (!recorded) return null;
+  const { breaks, cuts } = await breaksFor(asset, rule.resolved);
+  const content = cuts.length ? cutMedia(recorded, cuts) : recorded;
   return guidedMedia(content, breaks.map((b) => ({ index: b.index, atSec: b.atSec, durationSec: b.durationSec, position: b.position })),
     (b) => `${guidedBase(asset.id, ver)}/list/${b.index}.json`);
 }
@@ -623,6 +715,8 @@ export function timelineOf(row: any) {
       };
     }),
     eventsUrl: `${sessionBase(row.id)}/events`,
+    // Catch-up: where the broadcast's own breaks were cut out (content time, and the recording's seconds).
+    replaced: replacedView(plan.cuts),
   };
 }
 
@@ -670,7 +764,7 @@ export async function adsForPlay(i: {
     return { delivery, hls: `${guidedBase(asset.id, await guidedVersion(asset, rule))}/master.m3u8`, dash: null, sessionId: null, timelineUrl: null };
   }
   const s = await openSession({ accountId: i.accountId, assetId: asset.id, delivery: 'stitched', playSid: i.playSid, ctx: i.ctx, rule, fetcher: i.fetcher });
-  const dash = await assetMpd(asset).catch(() => null) ? `${sessionBase(s.id)}/manifest.mpd` : null;
+  const dash = !s.plan.cuts?.length && await assetMpd(asset).catch(() => null) ? `${sessionBase(s.id)}/manifest.mpd` : null;
   return { delivery, hls: `${sessionBase(s.id)}/master.m3u8`, dash, sessionId: s.id, timelineUrl: `${sessionBase(s.id)}/timeline.json` };
 }
 
