@@ -25,6 +25,7 @@ import { VoltPlayerCore } from './core'
 import type { VoltPlayerOptions } from './types'
 import {
   VoltPlayer, registerSkin, skinNames, isSdkSkin, resolveTheme, themeFromConfig, kit, BUILT_IN_SKINS, SDK_VERSION,
+  VoltJourney, ga4Forward,
 } from './sdk'
 import type { VoltPlayerSdkOptions, Theme } from './sdk'
 
@@ -136,6 +137,7 @@ if (typeof document !== 'undefined') {
   else scan()
 }
 
-export { create, scan, VoltPlayerCore, VoltPlayer, registerSkin, skinNames, resolveTheme, kit, BUILT_IN_SKINS }
+// Journey to play (sdk/journey.ts): new VoltPlayer.VoltJourney({...}), passed to create() as `journey`.
+export { create, scan, VoltPlayerCore, VoltPlayer, registerSkin, skinNames, resolveTheme, kit, BUILT_IN_SKINS, VoltJourney, ga4Forward }
 export type { VoltPlayerOptions, PlayerConfig, NowPlaying, Layout, LayoutState, PlayerEvent } from './types'
-export default { create, scan, registerSkin, skinNames, resolveTheme, kit, version, VoltPlayer }
+export default { create, scan, registerSkin, skinNames, resolveTheme, kit, version, VoltPlayer, VoltJourney, ga4Forward }

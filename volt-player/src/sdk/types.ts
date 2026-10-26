@@ -452,6 +452,12 @@ export interface VoltPlayerSdkOptions {
     app?: string; appVersion?: string; deviceModel?: string;
     heartbeatMs?: number; rrSampleEvery?: number;
   };
+  /**
+   * Journey to play (QOE_REPORTING.md section 13, sdk/journey.ts): the app's
+   * VoltJourney. Each play attempt then carries the journey (entry point,
+   * screens before the play) and records its play_intent.
+   */
+  journey?: import('./journey').VoltJourney;
   /** DRM: licence servers by key system, and headers for licence requests. */
   drm?: { servers?: Record<string, string>; headers?: Record<string, string> };
   cast?: false | { receiverAppId?: string };

@@ -34,6 +34,8 @@ const VIEW_COLS = [
   'latency_first_ms', 'latency_last_ms', 'latency_min_ms', 'latency_max_ms', 'rate_changes', 'catchup_ms', 'slowdown_ms',
   'ad_breaks', 'ad_breaks_ended', 'ad_ms', 'ad_playing_ms', 'ad_rebuffer_ms', 'ad_stalls', 'ad_errors',
   'ad_start_ms', 'ad_start_n', 'ad_start_max_ms', 'ad_return_ms', 'ad_return_n', 'ad_return_max_ms', 'ads_started', 'ads_ended', 'left_in_ad',
+  // definitions version 3 (journey to play)
+  'journey_id', 'app_session_id', 'entry_point', 'session_depth',
 ];
 const MIN_KEY = ['account_id', 'minute', 'content_id', 'stream_type', 'country', 'device_class', 'cdn'];
 const MIN_ADD = ['attempts', 'starts', 'failures', 'fatal_after', 'stalls', 'playing_ms', 'rebuffer_ms', 'switches'];

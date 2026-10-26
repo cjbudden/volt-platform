@@ -38,7 +38,8 @@ locals {
     # /channel/*/v/*, /event/*/v/*: variant manifests (services/variantManifest.ts)
     ["/api/public/*", "/gfx/*", "/fast/*", "/channel/*/v/*", "/event/*/v/*"],
     # /api/cmcd: players' CMCD v2 event reports (modules/cmcd.ts)
-    ["/api/cmcd", "/api/cmcd/*"],
+    # /api/journey: apps' journey to play events (modules/journey.ts)
+    ["/api/cmcd", "/api/cmcd/*", "/api/journey", "/api/journey/*"],
   ]
 }
 

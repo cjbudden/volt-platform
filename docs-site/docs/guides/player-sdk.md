@@ -116,6 +116,21 @@ A custom skin is a `mount` and an `update`. It is given state and commands, neve
 - **`cmcd`**: the player reports what the viewer saw in the CMCD v2 standard, on by default whenever there is an app key: a `CMCD` argument on every playlist and segment request (so the CDN logs carry it), and batched reports to Volt from the moment the play gate is asked. `app` and `appVersion` name your app in the reports; `false` turns reporting off. Read the results in **Analytics > Playback** or through the [QoE API](../api/playback-reporting.md).
 - The player's `sessionId` is this play attempt's id. The play gate, the viewer reports and the CDN logs all carry it, so one viewer's problem can be followed from end to end.
 
+## Journey to play
+
+With `VoltJourney` your app also tells Volt how the viewer got to the play button: the app opened, the screens on the way, the title picked and where from, a paywall. **Analytics > Playback** then shows where viewers give up between opening the app and the first frame, and which rows, searches, links and notifications lead to watching. It is a fixed set of about ten events, not a page analytics tool, so it sits beside Google Analytics or yours rather than replacing it.
+
+```html file=player/journey.html
+```
+
+- **Screens** come from the browser's address by themselves, single-page apps included, named by `routes` (`:id` is the title's id) or by the path. A router that does not change the address calls `journey.screen('detail', { type: 'detail', contentId })`.
+- **`select(contentId, { entry, position })`** starts a journey. `entry` is `row:<row name>`, `search`, `continue`, `epg`, `related`, `deeplink` or `push`. A page opened from a link or a push notification starts one by itself.
+- **The play.** Pass the journey to the player as `journey` and set `apiBase` to your Volt address, as for the player: each play then carries the journey and how many screens came before it, so every view in the reports knows where it came from.
+- **`search(results, query)`** counts a search. The query is left out unless you set `searchQuery: 'hash'`, and then only a SHA-256 of it is sent. **`paywall(product)`** and **`purchase('success' | 'failed' | 'cancelled', product)`** mark the paywall. **`track(name, props)`** sends a custom event (up to 20 names per app session, ten short props each).
+- **Privacy.** `consent: false` sends, keeps and forwards nothing until `setConsent(true)`; `setConsent(false)` stops again. No user ids, no advertising ids, no IP address. After 30 minutes in the background a new app session starts.
+
+An app that does not use the SDK can send the same events itself: see [Journey to play](../api/playback-reporting.md#5-journey-to-play-how-viewers-got-to-the-play-button).
+
 ## Events: countdown, phases and paid access
 
 The `event` skin follows the event through its life. Volt decides the phase. The player never guesses it from its own clock.
@@ -153,4 +168,5 @@ Both are off on private share links, so a private preview stays on the device it
 | `VoltPlayer is not defined` | Your code ran before the script loaded | Put your code after the `<script src>` tag, or wait for `volt-player-ready` |
 | An `error` with `stage: 'autoplay-blocked'` | The browser blocked sound starting by itself | Start muted (`muted: true`) and let the viewer unmute |
 | A protected stream fails at the licence | No licence server for the device's key system, or the server refused | Add the key system to `drm.servers`; check the licence server's own logs |
+| **Journey to play** stays empty | The journey was made with `consent: false` and `setConsent(true)` was never called, or the app key is not a publishable key | Call `setConsent(true)` once the viewer agrees; use the app's `pk_live_...` key |
 | `registerSkin` throws | The name is a built-in skin, or not 2 to 41 lowercase letters, digits, `-` or `_` | Pick another name |

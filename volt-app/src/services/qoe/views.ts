@@ -56,12 +56,20 @@
 //  - Live: latency is the player's ltc; the first, last, lowest and highest
 //    per view are kept and drift is last minus first. Catch-up is playing
 //    time at a rate above 1 (pr), slow-down below 1.
+//
+//  ADDED IN VERSION 3 (build queue 1.14g, journey to play)
+//  - A view knows the app journey that led to it: the SDK puts the journey
+//    id, the app session id, the entry point (row, search, deeplink, push,
+//    epg, continue, related, other) and the session depth (screens the
+//    viewer saw in the app session before pressing play) on the attempt's
+//    first report (com.volt-jid, -asid, -entry, -depth). A player without
+//    the journey part of the SDK sends none, and the four stay empty.
 // ============================================================================
 import { parseCmcdLine, type CmcdValue } from './cmcdParse';
 import { parseUa } from './ua';
 import * as sk from './sketch';
 
-export const DEFINITIONS_VERSION = 2;
+export const DEFINITIONS_VERSION = 3;
 export const SILENCE_MS = 60_000;
 export const RESUME_MS = 60 * 60_000;
 const OSC_MS = 10_000;
@@ -77,6 +85,8 @@ export interface Ev { ts: number; rt: number; sn: number | null; e: string; r: R
 const KNOWN = new Set(['v', 'ts', 'e', 'sid', 'sn', 'cid', 'sf', 'st', 'sta', 'msd', 'br', 'bl', 'mtp', 'pb', 'tpb', 'tb', 'dfa', 'ltc',
   'pr', 'bg', 'ec', 'su', 'bs', 'url', 'rc', 'ot', 'ttfb', 'ttlb', 'cmsds', 'cmsdd', 'd', 'nor', 'rtp', 'dl', 'df', 'ab', 'lb', 'tab', 'tbl', 'bsa', 'bsd', 'bsda', 'nr', 'sid', 'pt', 'cs', 'ts']);
 const VOLT = 'com.volt-';
+/** The entry points a journey can start from (journeys.ts says what each is). */
+export const ENTRY_KINDS = new Set(['row', 'search', 'deeplink', 'push', 'epg', 'continue', 'related', 'other']);
 
 export interface ViewRow {
   account_id: string; view_id: string; day: string; def_version: number; sid: string; attempt: number; app_id: string | null;
@@ -104,6 +114,8 @@ export interface ViewRow {
   ad_breaks: number; ad_breaks_ended: number; ad_ms: number; ad_playing_ms: number; ad_rebuffer_ms: number; ad_stalls: number; ad_errors: number;
   ad_start_ms: number; ad_start_n: number; ad_start_max_ms: number | null; ad_return_ms: number; ad_return_n: number; ad_return_max_ms: number | null;
   ads_started: number; ads_ended: number; left_in_ad: boolean;
+  // version 3: the journey that led to the view (journey to play, reports 28 and 29)
+  journey_id: string | null; app_session_id: string | null; entry_point: string | null; session_depth: number | null;
   events: number; sn_missing: number; no_sn: number; late_events: number; clock_skew_ms: number | null; unknown_keys: Record<string, number>;
 }
 
@@ -213,6 +225,7 @@ export class ViewBuilder {
       ad_breaks: 0, ad_breaks_ended: 0, ad_ms: 0, ad_playing_ms: 0, ad_rebuffer_ms: 0, ad_stalls: 0, ad_errors: 0,
       ad_start_ms: 0, ad_start_n: 0, ad_start_max_ms: null, ad_return_ms: 0, ad_return_n: 0, ad_return_max_ms: null,
       ads_started: 0, ads_ended: 0, left_in_ad: false,
+      journey_id: null, app_session_id: null, entry_point: null, session_depth: null,
     };
   }
 
@@ -250,6 +263,10 @@ export class ViewBuilder {
     if (!v.network && r[VOLT + 'net'] != null) v.network = str(r[VOLT + 'net']);
     if (v.hw_decode == null && r[VOLT + 'hwdec'] != null) { const h = str(r[VOLT + 'hwdec']); v.hw_decode = h === 'true' || h === '1' ? true : h === 'false' || h === '0' ? false : null; }
     if (!v.key_system && r[VOLT + 'drm'] != null) v.key_system = str(r[VOLT + 'drm']);
+    if (!v.journey_id && r[VOLT + 'jid'] != null) v.journey_id = str(r[VOLT + 'jid'])?.slice(0, 64) ?? null;
+    if (!v.app_session_id && r[VOLT + 'asid'] != null) v.app_session_id = str(r[VOLT + 'asid'])?.slice(0, 64) ?? null;
+    if (!v.entry_point && r[VOLT + 'entry'] != null) { const e = str(r[VOLT + 'entry']); v.entry_point = e && ENTRY_KINDS.has(e) ? e : e ? 'other' : null; }
+    if (v.session_depth == null && r[VOLT + 'depth'] != null) { const d = num(r[VOLT + 'depth']); v.session_depth = d != null && d >= 0 ? Math.min(1000, Math.floor(d)) : null; }
     if (!v.cdn && ev.e === 'rr') v.cdn = cdnOf(r);
     if (!this.ctxSeen && ev.ctx) {
       this.ctxSeen = true;

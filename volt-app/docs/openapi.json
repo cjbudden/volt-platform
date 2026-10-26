@@ -164,6 +164,11 @@
    "description": "Jobs track long-running work in your account, such as conversions and remote ingest, with progress and a reason when something fails.\n\n**Use it to:**\n- List and filter jobs with `GET /api/jobs`\n- Follow one job's progress and result with `GET /api/jobs/{id}`\n- Retry a failed job or cancel one in progress with `POST /api/jobs/{id}/retry` and `POST /api/jobs/{id}/cancel`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read and `media: operate` to retry or cancel.\n\n**Good to know:** long operations return a job id instead of blocking. Poll the job rather than repeating the original request."
   },
   {
+   "name": "Journey",
+   "x-displayName": "Journey to play",
+   "description": "Your apps tell Volt how a viewer got to the play button (the app opened, the screens on the way, the title picked and where from, a paywall), so the way to a play can be joined to what happened after it: the play gate, payment, startup and watch time.\n\n**Use it to:**\n- Send an app's journey events with `POST /api/public/journey`\n\n**Credential:** publishable key.\n\n**Good to know:** a fixed set of about ten events, not page analytics. The Volt SDK sends them with `VoltJourney` once the viewer's consent allows it; read the results with `GET /api/analytics/qoe/journeys` and `GET /api/analytics/qoe/discovery`."
+  },
+  {
    "name": "Library",
    "x-displayName": "Library originals",
    "description": "Serves the original bytes of an image in your account's library by its path.\n\n**Use it to:**\n- Fetch an original image with `GET /library/*`\n- Use it where you need the untouched file rather than a rendered size, for example to download a master\n\n**Credential:** none.\n\n**Good to know:** for display, prefer signed `/img/*` URLs, which are resized and cached at the edge."
@@ -381,6 +386,7 @@
     "Auth",
     "Availability",
     "Cmcd",
+    "Journey",
     "Me",
     "Onboarding",
     "Payments",
@@ -2210,6 +2216,58 @@
      "Analytics"
     ],
     "description": "The values seen for each filter in the window, most views first.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/analytics/qoe/discovery": {
+   "get": {
+    "operationId": "getAnalyticsQoeDiscovery",
+    "summary": "Where plays come from",
+    "tags": [
+     "Analytics"
+    ],
+    "description": "Report 29 of QOE_REPORTING.md: the journeys that started in the window per entry point (`by=entry`, default) or per row or campaign within it (`by=detail`): `journeys`, `plays`, `started`, `playRate`, `startRate`, `watchMs`, `completion` (views played to the end / started views), `startupFailureRate`, `startupP50`, `rebufferRatio`, `depthP50` and `positionP50`. `neverPlayed` lists titles whose detail page was viewed in an app session and not played in it (`limit`, default 20).\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/analytics/qoe/journeys": {
+   "get": {
+    "operationId": "getAnalyticsQoeJourneys",
+    "summary": "Journey to play",
+    "tags": [
+     "Analytics"
+    ],
+    "description": "Report 28 of QOE_REPORTING.md: app sessions that opened in the window as a funnel from app open to first frame. `steps` are `open`, `browse` (a home, browse or search screen, a search, or a select from a row), `detail` (a detail screen), `play` (play pressed), `entitled` (the play gate did not refuse, or refused only for payment), `paid` (no paywall needed, or a purchase succeeded) and `first_frame`, each with `sessions`, `rate`, `fromPrevious`, `dropOff` and `msSinceOpen` (`p50`, `p95`, `n`, ms after the app opened). A session counts at a step when it got there or further. Also `openToFirstFrame`, `paywall` (`shown`, `purchased`, `abandoned`) and `refusedByGate`. Filters: `entry_point` and the app's own `app_name`, `app_version`, `os`, `browser`, `device_class`, `country`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
     "security": [
      {
       "adminBearer": []
@@ -17344,6 +17402,29 @@
     }
    }
   },
+  "/api/journey": {
+   "post": {
+    "operationId": "postJourney",
+    "summary": "Send journey to play events (alias)",
+    "tags": [
+     "Journey"
+    ],
+    "description": "The same as `POST /api/public/journey`.\n\n**Credential:** publishable key",
+    "security": [
+     {
+      "publishableKey": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   }
+  },
   "/api/live-streams": {
    "get": {
     "operationId": "getLiveStreams",
@@ -21119,6 +21200,29 @@
      "Cmcd"
     ],
     "description": "Event mode of CMCD v2 (CTA-5004): one report per line, `Content-Type: application/cmcd` (`text/cmcd` also accepted), with the app's publishable key as `?appKey=`. Every report must carry `v=2`, `ts`, `e` and `sid`; the Volt player SDK also sends `sn` and does this for you. A play attempt is reported from the moment the viewer presses play, before the play gate answers, so a refused entitlement or a failed licence is still counted. Answers: 204 received; 400 nothing valid; 410 stop reporting (unknown key); 413 more than 200 reports; 415 wrong content type; 429 slow down (Retry-After). Reports are kept exactly as sent.\n\n**Credential:** publishable key",
+    "security": [
+     {
+      "publishableKey": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   }
+  },
+  "/api/public/journey": {
+   "post": {
+    "operationId": "postPublicJourney",
+    "summary": "Send journey to play events",
+    "tags": [
+     "Journey"
+    ],
+    "description": "The app's journey events (QOE_REPORTING.md section 13), one JSON event per line as `Content-Type: application/x-ndjson` (or a JSON array as `application/json`), with the app's publishable key as `?appKey=`. Every event has `v: 1`, `e`, `ts` (ms), `asid` (the app session) and `sn`; `jid` names the journey from the content select or deep link on. Events: `app_open` (`launch`, `cold`, `cid`), `screen` (`name`, `type`, `cid`), `content_select` (`cid`, `entry`, `ed`, `pos`; needs `jid`), `search` (`n`, `qh` a SHA-256 of the query), `paywall_show` and `purchase` (`product`, `outcome`), `play_intent` (`sid`, the play attempt's CMCD sid, and `cid`), `background`, `foreground`, `app_close`, `track` (`name`, up to ten `props`). Fields outside the set are not kept; `x-journey-dropped-fields` says how many. Answers: 204 received; 400 nothing valid; 410 unknown key; 413 more than 200 events; 415 wrong content type; 429 slow down. The Volt SDK sends these with `VoltJourney`.\n\n**Credential:** publishable key",
     "security": [
      {
       "publishableKey": []

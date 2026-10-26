@@ -73,6 +73,7 @@ const LEFTOVER = /your-volt-host|\b(pk|sk)_live_\.\.\.|whsec_\.\.\.|<[a-z][^<>="
   const { createServer } = await import('../src/server');
   const { query, one } = await import('../src/db');
   const coll = await import('../src/services/qoe/collector');
+  const jn = await import('../src/services/qoe/journeys');
   const app: any = createServer();
 
   // ---- the player bundle, served from the API's address as a deployment does ----
@@ -90,7 +91,7 @@ const LEFTOVER = /your-volt-host|\b(pk|sk)_live_\.\.\.|whsec_\.\.\.|<[a-z][^<>="
       res.setHeader('access-control-allow-origin', '*');
       return res.end(bundle);
     }
-    if (/^\/api\/(public\/)?(cmcd|availability)/.test(path)) {
+    if (/^\/api\/(public\/)?(cmcd|availability|journey)/.test(path)) {
       // Keep what the player sent, for the browser checks, without consuming the body.
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
@@ -291,6 +292,17 @@ const LEFTOVER = /your-volt-host|\b(pk|sk)_live_\.\.\.|whsec_\.\.\.|<[a-z][^<>="
   ran('playback-reporting/session.sh', r);
   ok(r.out[0]?.reports >= 2 && r.out[0]?.events?.[0] === 'Play pressed' && r.out[0]?.events?.some((l: string) => l.startsWith('First frame')) && Array.isArray(r.out[0]?.missingSequence)
     && r.out[0]?.spans?.some((x: any) => x.state === 'playing'), 'session: the newest view\'s timeline, from play pressed to the first frame', r.out[0]);
+  // Journey to play (build queue 1.14g)
+  const sessionsBefore = Number((await j('GET', '/api/analytics/qoe/journeys?days=1', undefined, skAuth)).data?.sessions ?? 0);
+  r = await run('playback-reporting/send-journey.sh');
+  ran('playback-reporting/send-journey.sh', r);
+  ok(/HTTP 204/.test(r.stdout), 'send-journey: the collector takes the app\'s five events (204)', r.stdout);
+  await jn.flushJourneys();
+  r = await run('playback-reporting/journeys.sh');
+  ran('playback-reporting/journeys.sh', r);
+  const jst = Object.fromEntries((r.out[0]?.steps ?? []).map((x: any) => [x.step, x.sessions]));
+  ok(r.out[0]?.sessions === sessionsBefore + 1 && jst.open === r.out[0]?.sessions && jst.play >= 1 && jst.detail >= 1, 'journeys: the app session is counted, up to play pressed', r.out[0]);
+  ok(r.out[1]?.rows?.some((x: any) => x.entry === 'row' && x.detail === 'Trending' && x.journeys >= 1 && x.plays >= 1), 'journeys: the play is credited to the Trending row', r.out[1]);
 
   // ========================================================================
   console.log('== webhooks, then an upload that fires one ==');
@@ -410,7 +422,7 @@ const LEFTOVER = /your-volt-host|\b(pk|sk)_live_\.\.\.|whsec_\.\.\.|<[a-z][^<>="
     if (pw) break;
     try { pw = require(require.resolve(name, { paths: [ROOT, process.cwd(), ...(process.env.PLAYWRIGHT_CORE_DIR ? [process.env.PLAYWRIGHT_CORE_DIR] : [])] })); } catch { /* next */ }
   }
-  const htmlSamples = ['player/create-player.html', 'player/custom-skin.html', 'player/drm-and-reporting.html', 'player/tag.html', 'player/scan.html'];
+  const htmlSamples = ['player/create-player.html', 'player/custom-skin.html', 'player/drm-and-reporting.html', 'player/tag.html', 'player/scan.html', 'player/journey.html'];
   const chromium = process.env.CHROMIUM_PATH || (existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
   if (!pw || !bundle) {
     console.log(`SKIP the browser samples: ${!pw ? 'playwright is not installed' : 'the player bundle did not build'}`);
@@ -461,6 +473,16 @@ const LEFTOVER = /your-volt-host|\b(pk|sk)_live_\.\.\.|whsec_\.\.\.|<[a-z][^<>="
       ok(await until(() => P.asked().length >= 1, 15_000), 'drm-and-reporting: the player starts with the drm and cmcd options');
       const cmcdPosts = await until(() => { const c = P.sent().filter((x) => /cmcd/.test(x.path)); return c.length ? c : null; }, 15_000);
       ok(cmcdPosts?.some((x) => x.body.includes('"Example website"') && x.body.includes('"4.2.0"')), 'its reports name the app and version', cmcdPosts?.map((x) => x.body.slice(0, 200)));
+      ok(!P.errors.length, 'no page errors', P.errors);
+      await P.ctx.close();
+
+      // journey.html (build queue 1.14g)
+      P = await page('player/journey.html');
+      const jPosts = await until(() => { const c = P.sent().filter((x) => /\/journey/.test(x.path)); const b = c.map((x) => x.body).join('\n'); return /content_select/.test(b) ? c : null; }, 15_000);
+      const jBody = (jPosts ?? []).map((x) => x.body).join('\n');
+      ok(/"app_open"/.test(jBody) && /"screen"/.test(jBody) && /"entry":"row"/.test(jBody) && /"ed":"Trending"/.test(jBody), 'journey: after consent, the app session, its screen and the select from the Trending row reach the collector', jBody.slice(0, 400));
+      const jCmcd = await until(() => { const c = P.sent().filter((x) => /cmcd/.test(x.path) && /com\.volt-jid/.test(x.body)); return c.length ? c : null; }, 15_000);
+      ok(!!jCmcd && /com\.volt-entry="row"/.test(jCmcd[0].body), 'and the play attempt\'s reports carry the journey (play_intent itself is sent when the viewer presses play: test/journey.check.ts)', P.sent().filter((x) => /cmcd/.test(x.path)).map((x) => x.body.slice(0, 200)));
       ok(!P.errors.length, 'no page errors', P.errors);
       await P.ctx.close();
 

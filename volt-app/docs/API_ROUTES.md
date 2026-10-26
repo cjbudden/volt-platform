@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**683 routes.** Public API: 73 · Sign-in (no session yet): 7 · Admin API: 543 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 15 · Health and discovery: 8
+**687 routes.** Public API: 75 · Sign-in (no session yet): 7 · Admin API: 545 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 15 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -37,6 +37,12 @@ For apps and players. A publishable key (`pk_…`) names the client account. Vie
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | POST | `/api/cmcd` | publishable key | public (legacy alias of /api/public/cmcd) | ✓ |
+
+### `/api/journey`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| POST | `/api/journey` | publishable key | public (legacy alias of /api/public/journey) | ✓ |
 
 ### `/api/onboarding`
 
@@ -105,6 +111,12 @@ For apps and players. A publishable key (`pk_…`) names the client account. Vie
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | POST | `/api/public/cmcd` | publishable key | public API | ✓ |
+
+### `/api/public/journey`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| POST | `/api/public/journey` | publishable key | public API | ✓ |
 
 ### `/api/public/me`
 
@@ -250,6 +262,8 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/analytics/qoe/collector` | admin session (Bearer) or account secret key | analytics: view |  |
 | GET | `/api/analytics/qoe/definitions` | admin session (Bearer) or account secret key | analytics: view |  |
 | GET | `/api/analytics/qoe/dimensions` | admin session (Bearer) or account secret key | analytics: view |  |
+| GET | `/api/analytics/qoe/discovery` | admin session (Bearer) or account secret key | analytics: view |  |
+| GET | `/api/analytics/qoe/journeys` | admin session (Bearer) or account secret key | analytics: view |  |
 | GET | `/api/analytics/qoe/overview` | admin session (Bearer) or account secret key | analytics: view |  |
 | POST | `/api/analytics/qoe/replay` | admin session (Bearer) or account secret key | analytics: manage |  |
 | GET | `/api/analytics/qoe/series` | admin session (Bearer) or account secret key | analytics: view |  |

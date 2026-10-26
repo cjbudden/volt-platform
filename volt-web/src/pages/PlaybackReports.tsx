@@ -4,7 +4,7 @@ import { PageError, usePageNotice } from '../notices'
 import { AnalyticsViewSwitch } from './OperatingReports'
 
 /* ============================================================================
-   PLAYBACK EXPERIENCE  (QOE_REPORTING.md, build queue 1.14e and 1.14f)
+   PLAYBACK EXPERIENCE  (QOE_REPORTING.md, build queue 1.14e, 1.14f and 1.14g)
 
    The third view under Analytics: what each viewer actually saw, from the
    Volt SDK's CMCD v2 reports. The reports on one page (playback success,
@@ -13,7 +13,10 @@ import { AnalyticsViewSwitch } from './OperatingReports'
    bar, plus the worst segments of any dimension so a bad device or app
    release stands out instead of being averaged away, and the sessions behind
    the numbers: open one to see everything that happened to that viewer, in
-   order (report 11).
+   order (report 11). Journey to play (reports 28 and 29) joins the app's
+   own events (app open, screens, the title picked and where from, paywall)
+   to the plays, so the funnel from opening the app to the first frame and
+   the entry points that lead to watching are on the same page.
 
    Everything comes from GET /api/analytics/qoe/* (modules/qoe.ts), which
    reads the separate analytics database. The definitions behind each number
@@ -68,6 +71,15 @@ const GATE_REASON: Record<string, string> = {
 const STEP: Record<string, string> = { entitlement: 'Entitlement (play gate)', drm: 'DRM licence', manifest: 'Manifest', segment: 'Segment', decode: 'Decode', playback: 'Playback' }
 const SPAN_COLOUR: Record<string, string> = { starting: 'var(--brand-dim, var(--faint))', playing: 'var(--live)', stalled: 'var(--down)', seeking: 'var(--sched)', paused: 'var(--idle)', backgrounded: 'var(--faint)', ad: 'var(--warn)' }
 const PROBLEMS = [{ key: 'all', label: 'All' }, { key: 'error', label: 'Ended by an error' }, { key: 'failed', label: 'Failed to start' }, { key: 'stalled', label: 'Stalled' }, { key: 'exited', label: 'Left before the first frame' }, { key: 'ad', label: 'Left during an ad' }]
+interface Funnel { sessions: number; truncated: boolean; steps: Array<{ step: string; sessions: number; rate: number | null; fromPrevious: number | null; dropOff: number; msSinceOpen: { p50: number | null; p95: number | null; n: number } }>
+  openToFirstFrame: { p50: number | null; p95: number | null; n: number }; paywall: { shown: number; purchased: number; abandoned: number }; refusedByGate: number }
+interface Discovery { journeys: number; rows: Array<{ entry: string; detail: string | null; journeys: number; plays: number; started: number; playRate: number | null; startRate: number | null; views: number
+  watchMs: number; watchMsPerJourney: number | null; completion: number | null; startupFailureRate: number | null; startupP50: number | null; rebufferRatio: number | null; depthP50: number | null; positionP50: number | null }>
+  neverPlayed: Array<{ contentId: string; contentName: string | null; detailViews: number; sessions: number; playedIn: number; neverPlayed: number }> }
+/** Funnel steps and entry points in the words an operator uses. */
+const FUNNEL_LABEL: Record<string, string> = { open: 'Opened the app', browse: 'Browsed', detail: 'Opened a title', play: 'Pressed play', entitled: 'Allowed to watch', paid: 'Paid where needed', first_frame: 'First frame' }
+const ENTRY_LABEL: Record<string, string> = { row: 'A row', search: 'Search', deeplink: 'Deep link', push: 'Push notification', epg: 'Guide (EPG)', continue: 'Continue watching', related: 'Related titles', other: 'Other' }
+const entryLabel = (v: string | null) => (v == null ? 'Not reported' : ENTRY_LABEL[v] ?? v)
 interface Series { bucketMs: number; ignoredFilters: string[]; points: Array<{ at: string; attempts: number; starts: number; failures: number; stalls: number; startupP50: number | null; startupP95: number | null; rebufferRatio: number | null }> }
 interface Breakdown { label: string; rows: Array<{ value: string | null; name?: string | null; views: number; sessions: number; affected: number; measure: number | null }> }
 
@@ -78,6 +90,7 @@ const FILTERS: Array<{ key: string; label: string }> = [
   { key: 'app_name', label: 'App' }, { key: 'app_version', label: 'App version' }, { key: 'sdk_version', label: 'SDK version' },
   { key: 'codec', label: 'Codec' }, { key: 'cdn', label: 'CDN' }, { key: 'country', label: 'Country' }, { key: 'region', label: 'Region' },
   { key: 'asn', label: 'Network (ASN)' }, { key: 'network', label: 'Connection' },
+  { key: 'entry_point', label: 'Came from' }, { key: 'session_depth', label: 'Screens before play' },
 ]
 const MEASURES: Array<{ key: string; label: string; kind: 'rate' | 'ms' | 'kbps' }> = [
   { key: 'failure', label: 'Startup failure rate', kind: 'rate' }, { key: 'ebff', label: 'Exit before first frame', kind: 'rate' },
@@ -112,6 +125,7 @@ const Ic = {
   lock: <><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></>,
   live: <><circle cx="12" cy="12" r="2" /><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8" /></>,
   ad: <><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M7 15l2-6 2 6M7.7 13h2.6M14 9v6h1.5a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2z" /></>,
+  route: <><circle cx="6" cy="18" r="2" /><circle cx="18" cy="6" r="2" /><path d="M8 18h6a4 4 0 0 0 0-8H10a4 4 0 0 1 0-8h6" /></>,
   list: <><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4.5" cy="6" r="1" /><circle cx="4.5" cy="12" r="1" /><circle cx="4.5" cy="18" r="1" /></>,
 }
 
@@ -266,6 +280,9 @@ export default function PlaybackReports() {
   const [timeline, setTimeline] = useState<Timeline | null>(null)
   const [openErr, setOpenErr] = useState('')
   const [err, setErr] = useState('')
+  const [funnel, setFunnel] = useState<Funnel | null>(null)
+  const [disc, setDisc] = useState<Discovery | null>(null)
+  const [discBy, setDiscBy] = useState<'entry' | 'detail'>('entry')
 
   const qs = useMemo(() => {
     const p = new URLSearchParams({ hours: String(hours) })
@@ -282,6 +299,8 @@ export default function PlaybackReports() {
   useEffect(() => { load() /* eslint-disable-next-line */ }, [qs])
   useEffect(() => { apiRequest(`/analytics/qoe/dimensions?hours=${hours}`).then(setDims).catch(() => {}) }, [hours])
   useEffect(() => { apiRequest('/analytics/qoe/definitions').then(setDefs).catch(() => {}) }, [])
+  useEffect(() => { apiRequest(`/analytics/qoe/journeys?${qs}`).then(setFunnel).catch(() => setFunnel(null)) }, [qs])
+  useEffect(() => { apiRequest(`/analytics/qoe/discovery?${qs}&by=${discBy}`).then(setDisc).catch(() => setDisc(null)) }, [qs, discBy])
   useEffect(() => {
     apiRequest(`/analytics/qoe/breakdown?${qs}&by=${by}&measure=${measure}&minViews=${minViews}`).then(setBd).catch(() => setBd(null))
   }, [qs, by, measure, minViews])
@@ -336,7 +355,7 @@ export default function PlaybackReports() {
                 {f.label}
                 <select value={filters[f.key] ?? ''} onChange={(ev) => setFilters({ ...filters, [f.key]: ev.target.value })} disabled={!vals.length && !filters[f.key]} style={{ minWidth: 0 }}>
                   <option value="">All</option>
-                  {vals.map((v) => <option key={v.value ?? '__none'} value={v.value ?? '__none'}>{valueLabel(v.value)} ({fmtInt(v.views)})</option>)}
+                  {vals.map((v) => <option key={v.value ?? '__none'} value={v.value ?? '__none'}>{f.key === 'entry_point' ? entryLabel(v.value) : valueLabel(v.value == null ? null : String(v.value))} ({fmtInt(v.views)})</option>)}
                 </select>
               </label>
             )
@@ -462,6 +481,40 @@ export default function PlaybackReports() {
               <Stat label="Exit before first frame" value={fmtPct(e.ebffRate)} />
             </div>
             {e.byContent.length > 0 && <Table head={['Content', 'Views', 'Playing hours', 'Stalled', 'Left after a problem']} rows={e.byContent.map((c) => [c.name ?? valueLabel(c.contentId), fmtInt(c.views), c.playingHours.toFixed(2), fmtPct(c.stalledShare), fmtInt(c.leftAfterProblem)])} />}
+          </Report>
+
+          <Report icon={Ic.route} title="Journey to play" question="Where do viewers give up between opening the app and the first frame? App sessions that opened in the period; a session counts at a step when it got there or further.">
+            {!funnel || funnel.sessions === 0
+              ? <p style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', margin: 0 }}>No app sessions in this period. Apps built on the Volt SDK send them with <code>VoltJourney</code> (journey to play), once the viewer's consent allows it.</p>
+              : <>
+                  <div style={statGrid}>
+                    <Stat label="App sessions" value={fmtInt(funnel.sessions)} sub={funnel.truncated ? 'the first 200,000 in the period' : undefined} />
+                    <Stat label="Reached a first frame" value={fmtPct(funnel.steps[funnel.steps.length - 1].rate)} sub={`${fmtInt(funnel.steps[funnel.steps.length - 1].sessions)} sessions`} />
+                    <Stat label="App open to first frame" value={fmtMs(funnel.openToFirstFrame.p50)} sub={`p50; p95 ${fmtMs(funnel.openToFirstFrame.p95)}`} />
+                    <Stat label="Left at the paywall" value={fmtInt(funnel.paywall.abandoned)} sub={`of ${pl(funnel.paywall.shown, 'session')} shown one; ${fmtInt(funnel.paywall.purchased)} bought`} tone={funnel.paywall.abandoned ? 'var(--warn)' : undefined} />
+                    <Stat label="Refused by the gate" value={fmtInt(funnel.refusedByGate)} sub="sessions (geo, rights, sign in, ...)" />
+                  </div>
+                  <Bars data={funnel.steps.map((x) => ({ label: FUNNEL_LABEL[x.step] ?? x.step, share: x.rate ?? 0 }))} />
+                  <Table head={['Step', 'Sessions', 'Left here', 'Of the step before', 'Reached after (p50)', 'p95']} rows={funnel.steps.map((x, i) => [
+                    FUNNEL_LABEL[x.step] ?? x.step, fmtInt(x.sessions), i ? fmtInt(x.dropOff) : '–', i ? fmtPct(x.fromPrevious) : '–', i ? fmtMs(x.msSinceOpen.p50) : '–', i ? fmtMs(x.msSinceOpen.p95) : '–'])} />
+                </>}
+          </Report>
+
+          <Report icon={Ic.route} title="Where plays come from" question="Which rows, searches, links and notifications lead to watching, and how well those plays went. Journeys counted by when the viewer picked the title.">
+            <div className="flex flex-wrap gap-2">
+              <button className={`btn ${discBy === 'entry' ? 'primary' : 'ghost'}`} style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }} onClick={() => setDiscBy('entry')}>By entry point</button>
+              <button className={`btn ${discBy === 'detail' ? 'primary' : 'ghost'}`} style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }} onClick={() => setDiscBy('detail')}>By row or campaign</button>
+            </div>
+            {disc && disc.rows.length > 0
+              ? <Table head={['Came from', 'Journeys', 'Played', 'Started', 'Watch time', 'Completed', 'Startup p50', 'Rebuffer ratio']} rows={disc.rows.map((r) => [
+                  discBy === 'detail' && r.detail ? `${entryLabel(r.entry)}: ${r.detail}` : entryLabel(r.entry), fmtInt(r.journeys), fmtPct(r.playRate), fmtPct(r.startRate),
+                  fmtMs(r.watchMs), fmtPct(r.completion), fmtMs(r.startupP50), fmtPct(r.rebufferRatio, 2)])} />
+              : <p style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', margin: '12px 0 0' }}>No journeys in this period.</p>}
+            {disc && disc.neverPlayed.some((x) => x.neverPlayed > 0) && <>
+              <h4 style={{ margin: '18px 0 0' }}>Viewed, never played</h4>
+              <Table head={['Title', 'Detail page views', 'App sessions', 'Played in', 'Not played']} rows={disc.neverPlayed.filter((x) => x.neverPlayed > 0).map((x) => [
+                x.contentName ?? x.contentId, fmtInt(x.detailViews), fmtInt(x.sessions), fmtInt(x.playedIn), fmtInt(x.neverPlayed)])} />
+            </>}
           </Report>
 
           <Report icon={Ic.bars} title="Worst segments" question="Which device, app release, network or place is worse than the rest? Only values with enough views to mean something are ranked.">

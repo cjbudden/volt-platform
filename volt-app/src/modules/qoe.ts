@@ -9,14 +9,19 @@
  *   GET  /breakdown    worst segments: one dimension ranked by one measure
  *   GET  /dimensions   the values seen for every filter
  *   GET  /definitions  the definitions the numbers use (section 4)
+ *   GET  /journeys     report 28: journey to play, app open to first frame as a funnel
+ *   GET  /discovery    report 29: plays, watch time, completion and QoE by entry point (?by=detail per row)
  *   GET  /collector    what the collector holds in memory and its write health
  *   POST /replay       rebuild days from the raw reports (analytics manage)
  *
  * Window: ?from&to (ISO) or ?hours or ?days (default 1 day). Filters: any of
  * content_id, stream_type (live|vod), device_model, device_class, os,
  * os_version, browser, browser_version, app_name, app_version, sdk_version,
- * player_version, codec, cdn, country, region, asn, network; values comma
- * separated, `__none` for "not reported".
+ * player_version, codec, cdn, country, region, asn, network, entry_point
+ * (row, search, deeplink, push, epg, continue, related, other) and
+ * session_depth (`2`, `3-5`, `6+`); values comma separated, `__none` for
+ * "not reported". The journey reports take the app's own dimensions
+ * (app_name, app_version, os, browser, device_class, country) and entry_point.
  *
  * Everything here reads the analytics database, except two small lookups in
  * the control plane's: content names, and the stitcher's server-side ad
@@ -32,6 +37,7 @@ import { sessionTimeline, type BeaconRow } from '../services/qoe/timeline';
 import { replayRange } from '../services/qoe/replay';
 import { collectorState } from '../services/qoe/collector';
 import { DEFINITIONS_VERSION } from '../services/qoe/views';
+import { discovery, journeyState, journeyToPlay } from '../services/qoe/journeys';
 
 export const qoeRouter = Router();
 
@@ -109,6 +115,22 @@ qoeRouter.get('/sessions/:sid', asyncHandler(async (req, res) => {
   res.json({ ...t, contentNames: names });
 }));
 
+qoeRouter.get('/journeys', asyncHandler(async (req, res) => {
+  const q = parseQuery(req.query as any);
+  res.json({ from: q.from.toISOString(), to: q.to.toISOString(), filters: q.filters, ...await journeyToPlay(accountId(req), q) });
+}));
+
+qoeRouter.get('/discovery', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const q = parseQuery(req.query as any);
+  const by = String(req.query.by ?? 'entry');
+  if (by !== 'entry' && by !== 'detail') throw badRequest('by must be entry or detail');
+  const out = await discovery(acct, q, { by, limit: Math.min(100, Math.max(1, Number(req.query.limit ?? 20) || 20)) });
+  const names = await contentNames(acct, out.neverPlayed.map((d) => d.contentId));
+  res.json({ from: q.from.toISOString(), to: q.to.toISOString(), filters: q.filters, ...out,
+    neverPlayed: out.neverPlayed.map((d) => ({ ...d, contentName: names[d.contentId] ?? null })) });
+}));
+
 qoeRouter.get('/series', asyncHandler(async (req, res) => {
   res.json(await series(accountId(req), parseQuery(req.query as any)));
 }));
@@ -163,12 +185,16 @@ qoeRouter.get('/definitions', (_req, res) => {
       adStartup: 'break start to the ad playing (0 when it was already playing)',
       returnToContent: 'break end to the programme playing (0 when it was already playing)',
       leftDuringAd: 'views the viewer left (quit or went quiet) while a break was on',
+      journeyToPlay: 'app sessions that opened in the window as a funnel: open, browse (a home, browse or search screen, a search, or a select from a row), detail (a detail screen), play pressed, entitled (the gate did not refuse, or refused only for payment), paid (no paywall needed, or a purchase succeeded), first frame. A session has reached a step when it got to it or to a later one; times are ms after the app opened. The gate and first frame steps read the play\'s view, so a play still going counts there once its view closes (quit, the end, an error, or a minute without reports), as for reports 1 to 10',
+      entryPoint: 'where the journey to a play started: row (with its name and position), search, deeplink, push, epg, continue (continue watching), related, other',
+      sessionDepth: 'screens the viewer saw in the app session before pressing play',
+      discovery: 'per entry point: journeys, the share that led to a play and to a first frame, watch time, completion (views played to the end / started views) and the startup and buffering of those plays; detail pages viewed in an app session and never played in it',
       sessionTimeline: 'every report one session sent, in the player\'s order, with the gate\'s decisions and the stitcher\'s ad beacons for it; missing sequence numbers are listed',
     },
   });
 });
 
-qoeRouter.get('/collector', (_req, res) => { res.json(collectorState()); });
+qoeRouter.get('/collector', (_req, res) => { res.json({ ...collectorState(), journeys: journeyState() }); });
 
 qoeRouter.post('/replay', asyncHandler(async (req, res) => {
   const b = z.object({ day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).parse(req.body ?? {});

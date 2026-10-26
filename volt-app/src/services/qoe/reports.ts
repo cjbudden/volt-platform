@@ -18,7 +18,9 @@ import { DEFINITIONS_VERSION } from './views';
 
 /** The filters every report takes (section 6), each a column of qoe_views. */
 export const FILTERS = ['content_id', 'stream_type', 'device_model', 'device_class', 'os', 'os_version', 'browser', 'browser_version',
-  'app_name', 'app_version', 'sdk_version', 'player_version', 'codec', 'cdn', 'country', 'region', 'asn', 'network'] as const;
+  'app_name', 'app_version', 'sdk_version', 'player_version', 'codec', 'cdn', 'country', 'region', 'asn', 'network',
+  // journey to play (build queue 1.14g): where the viewer came from, and how many screens before the play
+  'entry_point', 'session_depth'] as const;
 export type FilterName = (typeof FILTERS)[number];
 /** The filters the minute aggregates carry, so the trend lines honour them. */
 export const MINUTE_FILTERS: FilterName[] = ['content_id', 'stream_type', 'country', 'device_class', 'cdn'];
@@ -46,6 +48,21 @@ export function parseQuery(q: Record<string, unknown>, now = Date.now()): Report
   return { from, to, filters };
 }
 
+/**
+ * session_depth is a number: its filter values are a depth (`2`), a range
+ * (`3-5`) or an open end (`6+`); anything else is ignored.
+ */
+function depthPart(vals: string[], p: unknown[]): string[] {
+  const parts: string[] = [];
+  for (const v of vals) {
+    let m: RegExpMatchArray | null;
+    if ((m = v.match(/^(\d{1,4})$/))) { p.push(Number(m[1])); parts.push(`session_depth = $${p.length}`); }
+    else if ((m = v.match(/^(\d{1,4})-(\d{1,4})$/))) { p.push(Number(m[1]), Number(m[2])); parts.push(`session_depth BETWEEN $${p.length - 1} AND $${p.length}`); }
+    else if ((m = v.match(/^(\d{1,4})\+$/))) { p.push(Number(m[1])); parts.push(`session_depth >= $${p.length}`); }
+  }
+  return parts;
+}
+
 /** WHERE for qoe_views: account, window (by end or start), filters. `__none` matches an unknown value. */
 function where(acct: string, q: ReportQuery, by: 'ended_at' | 'started_at', p: unknown[]): string {
   p.push(acct, q.from.toISOString(), q.to.toISOString());
@@ -54,9 +71,10 @@ function where(acct: string, q: ReportQuery, by: 'ended_at' | 'started_at', p: u
     if (!(FILTERS as readonly string[]).includes(f) || !vals?.length) continue;
     const known = vals.filter((v) => v !== '__none');
     const parts: string[] = [];
-    if (known.length) { p.push(known); parts.push(`${f} = ANY($${p.length}::text[])`); }
+    if (f === 'session_depth') parts.push(...depthPart(known, p));
+    else if (known.length) { p.push(known); parts.push(`${f} = ANY($${p.length}::text[])`); }
     if (vals.includes('__none')) parts.push(`${f} IS NULL`);
-    w.push(`(${parts.join(' OR ')})`);
+    if (parts.length) w.push(`(${parts.join(' OR ')})`);
   }
   return w.join(' AND ');
 }

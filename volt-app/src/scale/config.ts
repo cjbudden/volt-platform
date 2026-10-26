@@ -171,7 +171,7 @@ export const scaleConfig = {
    */
   publicPrefixes: (process.env.PUBLIC_PATH_PREFIXES ??
     '/health,/live/,/share/,/api/share/,/xmltv/,/img/,/library/,/player,/clips/,/gfx/,/fast/,/channel/,/event/,' +
-    '/api/public/,/api/availability,/api/access,/api/player/,/api/analytics/beacon,/api/cmcd,/api/payments/verify')
+    '/api/public/,/api/availability,/api/access,/api/player/,/api/analytics/beacon,/api/cmcd,/api/journey,/api/payments/verify')
     .split(',').map((s) => s.trim()).filter(Boolean),
 };
 

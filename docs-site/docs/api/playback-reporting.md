@@ -115,6 +115,37 @@ For trend lines, `GET /api/analytics/qoe/series` returns minute buckets for the 
 
 `GET /api/analytics/qoe/sessions` lists views, newest first, with the same window and filters as the overview; `problem` narrows it to `error` (ended by an error), `failed` (never started), `stalled`, `exited` (left before the first frame) or `ad` (left during an ad). `GET /api/analytics/qoe/sessions/{sid}` returns every report of that play attempt in the player's order (`events`, each with `label`, `kind`, `problem`, `offsetMs`), the states as `spans`, the reports that never arrived (`missingSequence`), the view rows made of them (`views`), the play gate's answers for it (`gate`) and the server-side ad beacons sent for it (`beacons`). Another account's session answers `404`.
 
+### 5. Journey to play: how viewers got to the play button
+
+Volt can join the way a viewer reached a play (the app opened, a row, a detail page, search, a deep link or a push) to what happened after it: the play gate, payment, the startup and the watch time. It is not a general analytics tool: a fixed set of about ten events, and Google Analytics or your own tool keeps doing page analytics. The Volt SDK sends them with `VoltJourney` (see [Player SDK](../guides/player-sdk.md#journey-to-play)); an app of its own posts them as JSON lines with its publishable key:
+
+```bash file=playback-reporting/send-journey.sh
+```
+
+```
+HTTP 204
+```
+
+The events are `app_open` (`launch`: `icon`, `deeplink`, `push`; `cold`), `screen` (`name`, `type`: `home`, `browse`, `detail`, `search`, `player`, `account`, `other`; `cid` for a page about one title), `content_select` (`cid`, `entry`: `row`, `search`, `deeplink`, `push`, `epg`, `continue`, `related`, `other`; `ed` the row or campaign; `pos`), `search` (`n` results; `qh` a SHA-256 of the query, never the query), `paywall_show` and `purchase` (`product`, `outcome`: `success`, `failed`, `cancelled`), `play_intent` (`sid`, the play attempt's CMCD `sid`), `background`, `foreground`, `app_close` and `track` (`name` like `trailer_play`, up to ten short `props`). Every event has `v: 1`, `ts`, `asid` (one per app session) and `sn`; `jid` names the journey from the select (or deep link) on. Anything else in an event is not kept, and the answer says how many fields were left out (`x-journey-dropped-fields`).
+
+So that each view also knows its journey, put the same ids on the play attempt's first CMCD report: `com.volt-jid`, `com.volt-asid`, `com.volt-entry` and `com.volt-depth` (the screens seen before the play). Reports 1 to 10 then filter by `entry_point` and `session_depth` (`2`, `3-5`, `6+`).
+
+```bash file=playback-reporting/journeys.sh
+```
+
+```json
+{
+  "sessions": 1,
+  "steps": [{ "step": "open", "sessions": 1 }, { "step": "browse", "sessions": 1 }, { "step": "detail", "sessions": 1 }, { "step": "play", "sessions": 1 },
+            { "step": "entitled", "sessions": 0 }, { "step": "paid", "sessions": 0 }, { "step": "first_frame", "sessions": 0 }]
+}
+{
+  "rows": [{ "entry": "row", "detail": "Trending", "journeys": 1, "plays": 1, "watchMs": 0 }]
+}
+```
+
+`GET /api/analytics/qoe/journeys` is the funnel over app sessions that opened in the window: each step with `sessions`, `dropOff`, `fromPrevious` and `msSinceOpen` (`p50`, `p95`), plus `openToFirstFrame`, `paywall` (`shown`, `purchased`, `abandoned`) and `refusedByGate`. A session counts at a step when it got there or further, so a deep link straight to a detail page has passed browse. `GET /api/analytics/qoe/discovery` gives per entry point (`by=detail`: per row or campaign) the journeys, `plays`, `started`, `watchMs`, `completion`, `startupFailureRate`, `startupP50` and `rebufferRatio`, and `neverPlayed`: titles whose detail page was viewed in an app session and not played in it. Both take the window, `entry_point` and the app's own filters (`app_name`, `app_version`, `os`, `browser`, `device_class`, `country`). In the example the play is still waiting for its CMCD reports, so it has not passed the gate yet.
+
 ## Troubleshooting
 
 | You see | Means | Do |
@@ -127,3 +158,7 @@ For trend lines, `GET /api/analytics/qoe/series` returns minute buckets for the 
 | `403` reading reports | The user lacks **Analytics: View** | Use the secret key or a user with that access |
 | `access.failures` says `not in the gate log` | The view failed at the entitlement step but the gate has no answer for its `sid` | Send the same `sid` to the play gate's `POST` |
 | `404` for a session | Not in your account, or its raw reports are no longer kept | Use a recent `sid` from `GET /api/analytics/qoe/sessions` |
+| `400 no valid journey events` | Every event lacked `v: 1`, `ts`, `asid` (8 to 64 letters, digits, `.`, `_`, `:` or `-`), named an event outside the set, or a `content_select` had no `jid` | `rejected` in the answer says why |
+| `415 use Content-Type: application/x-ndjson` | The journey events were sent as form data or text | One JSON event per line with that type, or a JSON array as `application/json` |
+| `x-journey-dropped-fields` on a `204` | Fields outside the event set were left out (a plain search query, an e-mail address) | Remove them; send `qh`, a SHA-256 of the query, if you want searches grouped |
+| A play in the funnel never passes **entitled** | No CMCD view arrived for its `sid` | Send the same `sid` in `play_intent` and in the player's reports |

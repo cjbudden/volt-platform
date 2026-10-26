@@ -16,3 +16,5 @@ export {
 } from './stats';
 export type { StatsSample, StatsProbe, StatsRow, AttachedStats } from './stats';
 export { PlayAttempt, CmcdSender, cmcdEventLine, cmcdRequestUrl, newSid } from './cmcd';
+export { VoltJourney, ga4Forward, parseEntry } from './journey';
+export type { JourneyOptions, JourneyEvent, JourneyForward, EntryKind, ScreenType, RouteMap } from './journey';

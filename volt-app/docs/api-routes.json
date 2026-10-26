@@ -307,6 +307,24 @@
  },
  {
   "method": "GET",
+  "path": "/api/analytics/qoe/discovery",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analytics/qoe/journeys",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
   "path": "/api/analytics/qoe/overview",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -2916,6 +2934,15 @@
   "group": "/api/jobs"
  },
  {
+  "method": "POST",
+  "path": "/api/journey",
+  "api": "public",
+  "credential": "publishable key",
+  "access": "public (legacy alias of /api/public/journey)",
+  "viewerTier": true,
+  "group": "/api/journey"
+ },
+ {
   "method": "GET",
   "path": "/api/live-streams",
   "api": "admin",
@@ -3841,6 +3868,15 @@
   "access": "public API",
   "viewerTier": true,
   "group": "/api/public/cmcd"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/journey",
+  "api": "public",
+  "credential": "publishable key",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/journey"
  },
  {
   "method": "DELETE",

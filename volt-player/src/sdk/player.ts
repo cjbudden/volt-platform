@@ -646,8 +646,10 @@ export class VoltPlayer {
     const sender = eventMode ? new CmcdSender({ url: `${cfg.url ?? `${this.api}/api/cmcd`}?appKey=${encodeURIComponent(key!)}` }) : null;
     const a = new PlayAttempt({
       cid: item.assetId ?? item.id ?? null, live: item.live ?? null, sender, requestMode, autoplay,
-      identity: identityKeys({ app: cfg.app ?? null, appVersion: cfg.appVersion ?? null, sdkVersion: SDK_VERSION, deviceModel: cfg.deviceModel ?? deviceModel() }),
+      // The app's journey (sdk/journey.ts): which entry point and how many screens led here, and play_intent with this sid.
+      identity: { ...identityKeys({ app: cfg.app ?? null, appVersion: cfg.appVersion ?? null, sdkVersion: SDK_VERSION, deviceModel: cfg.deviceModel ?? deviceModel() }), ...(this.o.journey?.attemptKeys() ?? {}) },
       probe: this.engine.playbackProbe(), heartbeatMs: cfg.heartbeatMs, rrSampleEvery: cfg.rrSampleEvery,
+      onPlay: this.o.journey ? (sid) => this.o.journey!.playIntent(sid, item.assetId ?? item.id ?? null) : undefined,
     });
     this.attempt = a;
     this.engine.attempt = a;

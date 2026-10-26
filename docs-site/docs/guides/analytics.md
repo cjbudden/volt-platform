@@ -15,7 +15,7 @@ guide: section
 
 - **Audience.** Views, unique viewers, watch hours and the peak number watching at once, by day, with the split by device, country and app, and the most watched channels, events and on-demand items. **Watching now** is live and refreshes every 15 seconds.
 - **Operating.** Every channel, radio station and event that ran in a period: how many runs, hours run, hours on air, availability, unplanned stops and the time to recover from a fault. Open a stream for each run and why it ended. Download either as CSV.
-- **Playback.** The player's own reports from players built on the Volt SDK: whether playback started, how long it took, how often it stalled, the quality chosen, how smoothly the device played it, whether access checks or DRM got in the way, how far behind live viewers were, how ads played and whether viewers stayed. Filter by content, device, app, country, network and more, rank the worst segments, and open any one viewer's session to see everything that happened to it, in order.
+- **Playback.** The player's own reports from players built on the Volt SDK: whether playback started, how long it took, how often it stalled, the quality chosen, how smoothly the device played it, whether access checks or DRM got in the way, how far behind live viewers were, how ads played and whether viewers stayed. Filter by content, device, app, country, network and more, rank the worst segments, and open any one viewer's session to see everything that happened to it, in order. Apps that send their journey events also show where viewers give up between opening the app and the first frame, and which rows, searches, links and notifications lead to watching.
 
 Audience and Operating are read from daily totals that Volt keeps after the raw viewing events age out, so a report for last quarter still answers. Today is a partial day: it is drawn dashed and called **not final** until it closes.
 
@@ -23,7 +23,7 @@ Programme and marketing staff use Audience; operations staff use Operating to pr
 
 ## Before you start
 
-- Something must have been watched or run. Audience fills from your players' viewing sessions; Operating from each run of a channel, station or event; Playback only from players built on the Volt SDK with its reporting (`cmcd`) on (see [Player SDK](player-sdk.md)).
+- Something must have been watched or run. Audience fills from your players' viewing sessions; Operating from each run of a channel, station or event; Playback only from players built on the Volt SDK with its reporting (`cmcd`) on (see [Player SDK](player-sdk.md)); **Journey to play** and **Where plays come from** only from apps that also send their journey events (`VoltJourney` in the SDK, once the viewer's consent allows it).
 - Access: **Analytics & reports: View** to read any of the three views (see [Who can do it](#who-can-do-it)).
 
 ## Step by step
@@ -83,7 +83,7 @@ Programme and marketing staff use Audience; operations staff use Operating to pr
 
 1. In **Analytics**, choose **Playback**.
 2. Choose **1 hour**, **24 hours**, **7 days** or **30 days**.
-3. Under **Filters**, pick a value in any list (**Content**, **Live or on demand**, **Device class**, **Device model**, **OS**, **Browser**, **App**, **App version**, **SDK version**, **Codec**, **CDN**, **Country**, **Region**, **Network (ASN)**, **Connection**). Each value shows how many views it had. **Clear filters** removes them all.
+3. Under **Filters**, pick a value in any list (**Content**, **Live or on demand**, **Device class**, **Device model**, **OS**, **Browser**, **App**, **App version**, **SDK version**, **Codec**, **CDN**, **Country**, **Region**, **Network (ASN)**, **Connection**, **Came from**, **Screens before play**). Each value shows how many views it had. **Came from** is where the viewer picked the title (a row, search, a deep link, a push notification, the guide, continue watching, related titles); **Screens before play** how many screens the app showed before play was pressed. **Clear filters** removes them all.
 4. Read the reports from the top:
 
    | Report | Answers |
@@ -98,6 +98,8 @@ Programme and marketing staff use Audience; operations staff use Operating to pr
    | **Live streams** | How far behind live viewers were, how much that grew during a view (drift), and time spent catching up, by device. Shown when live views are in the period |
    | **Advertising** | Breaks watched to the end, ad startup, buffering inside breaks, the time back to the programme, viewers who left during an ad, and the beacons the ad stitcher sent. Shown when the period has ad breaks |
    | **Engagement and abandonment** | Playing time, viewers who left after a stall or an error, and the same by content |
+   | **Journey to play** | Where viewers give up between opening the app and the first frame: opened the app, browsed, opened a title, pressed play, allowed to watch, paid where needed, first frame, with how many left at each step and how long after opening they got there. Also who left at the paywall and how long from opening the app to the first frame. A play still going is counted at **Allowed to watch** and **First frame** once it ends, or a minute after the player last reported |
+   | **Where plays come from** | For each entry point (**By entry point**) or each row and campaign (**By row or campaign**): journeys, how many played and started, watch time, how many were watched to the end, startup and buffering. **Viewed, never played** lists titles whose page was opened and not played |
    | **Worst segments** | Which values of a dimension do worst on a measure you choose |
    | **Sessions** | The views behind the numbers, newest first, to open one viewer's timeline |
    | **Telemetry health** | Whether the numbers can be trusted: reports lost, late or refused |
@@ -159,6 +161,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Not in the gate log** under **Why, from the gate** | The view failed at the entitlement step, but the play gate has no answer for its session: the answer came from an edge cache, or the player did not send its session to the gate | Use a player built on the Volt SDK, which sends it |
 | **No view row: the session never reached play.** in a timeline | The play gate answered for this session but the player never reported pressing play | Check the app: it asked for the stream and did not play it |
 | **Couldn't open that session** | The session is not in your account, or its raw reports are no longer kept | Choose a more recent session |
+| **No app sessions in this period.** under Journey to play | No app sent journey events, the viewers' consent does not allow it yet, or none in this period | Send them with `VoltJourney` in the Volt SDK (see [Player SDK](player-sdk.md)), or choose a longer period |
 | **The trend is not filtered by ...** | The minute-by-minute trend keeps only content, live or on demand, country, device class and CDN | The reports below it are filtered by everything chosen |
 | **Couldn't load analytics.** (or operating or playback reports) | The page could not reach Volt | Choose **Retry** |
 
@@ -175,6 +178,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/analytics/qoe/breakdown` | Worst segments (`by`, `measure`, `minViews`) |
 | `GET /api/analytics/qoe/sessions` | The views behind the numbers (`problem`: `all`, `error`, `failed`, `stalled`, `exited`, `ad`) |
 | `GET /api/analytics/qoe/sessions/{sid}` | One session's timeline: every report in order, the states, the gate's answers and the ad beacons |
+| `GET /api/analytics/qoe/journeys` | Journey to play: the funnel from app open to first frame |
+| `GET /api/analytics/qoe/discovery` | Where plays come from (`by=entry` or `by=detail`) and titles viewed and never played |
 | `GET /api/analytics/qoe/definitions` | How each figure is measured |
 
 ```bash

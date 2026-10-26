@@ -88,6 +88,8 @@ export interface SenderOptions {
   /** Most reports kept while the collector cannot be reached; older ones are dropped (the sn gap shows it). */
   maxQueue?: number;
   fetchImpl?: typeof fetch;
+  /** The body's type: application/cmcd here; the journey events (journey.ts) reuse this transport as application/x-ndjson. */
+  contentType?: string;
 }
 
 /**
@@ -148,7 +150,7 @@ export class CmcdSender {
     let status = 0;
     try {
       const f = this.o.fetchImpl ?? fetch;
-      const r = await f(this.o.url, { method: 'POST', headers: { 'content-type': 'application/cmcd' }, body: lines.join('\n'), keepalive: last, credentials: 'omit' } as RequestInit);
+      const r = await f(this.o.url, { method: 'POST', headers: { 'content-type': this.o.contentType ?? 'application/cmcd' }, body: lines.join('\n'), keepalive: last, credentials: 'omit' } as RequestInit);
       status = r.status;
       if (status === 429) {
         const ra = Number((r.headers as any)?.get?.('retry-after'));
@@ -256,6 +258,11 @@ export interface AttemptOptions {
   heartbeatMs?: number;
   rrSampleEvery?: number;
   now?: () => number;
+  /**
+   * Called once when the viewer presses play (or autoplay begins): the app's
+   * journey records its play_intent with this attempt's sid (journey.ts).
+   */
+  onPlay?: (sid: string) => void;
 }
 
 type Sta = 's' | 'p' | 'k' | 'r' | 'a' | 'w' | 'e' | 'f' | 'q' | 'd';
@@ -292,6 +299,14 @@ export class PlayAttempt {
     this.cid = o.cid;
     this.t0 = this.now();
     this.state(o.autoplay ? 's' : 'd');
+    if (o.autoplay) this.played();
+  }
+
+  private playNoted = false;
+  private played() {
+    if (this.playNoted) return;
+    this.playNoted = true;
+    try { this.o.onPlay?.(this.sid); } catch { /* reporting never breaks playback */ }
   }
 
   private now(): number { return this.o.now ? this.o.now() : (typeof performance !== 'undefined' ? performance.now() : Date.now()); }
@@ -337,7 +352,7 @@ export class PlayAttempt {
   /** The viewer pressed play (or autoplay began): startup is timed from here. */
   playRequested(): void {
     if (this.started || this.closed) return;
-    if (this.sta === 'd') { this.t0 = this.now(); this.spans.clear(); this.state('s'); }
+    if (this.sta === 'd') { this.t0 = this.now(); this.spans.clear(); this.state('s'); this.played(); }
   }
 
   /** Autoplay was refused: the attempt waits for the viewer to press play (startup is timed from then). */

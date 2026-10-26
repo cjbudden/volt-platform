@@ -34,6 +34,17 @@ import type { RawCtx } from './views';
 
 export interface RawRow { rt: number; app: string | null; sid: string; e: string; line: string; ctx?: RawCtx }
 
+/**
+ * Two streams share the store and its rules: the players' CMCD reports and
+ * the apps' journey events (journeys.ts, build queue 1.14g). Journey events
+ * sit in their own subtree, `journey/<account>/<day>/...`, locally and on
+ * S3, so a replay of either never reads the other and the account listing
+ * of the CMCD stream skips them (`journey` is not an account id).
+ */
+export type RawStream = 'cmcd' | 'journey';
+const sub = (stream: RawStream) => (stream === 'journey' ? 'journey/' : '');
+const localRoot = (stream: RawStream) => (stream === 'journey' ? join(rawDir(), 'journey') : rawDir());
+
 export function rawDir(): string {
   return process.env.QOE_RAW_DIR || join(process.cwd(), 'qoe-raw');
 }
@@ -97,13 +108,13 @@ export async function flushRawS3(): Promise<number> {
 const chains = new Map<string, Promise<void>>();
 
 /** Append accepted reports for one account. Resolves when they are on disk (or, on S3, in the write buffer). */
-export async function appendRaw(acct: string, rows: RawRow[]): Promise<void> {
+export async function appendRaw(acct: string, rows: RawRow[], stream: RawStream = 'cmcd'): Promise<void> {
   if (!rows.length) return;
   if (!SAFE.test(acct)) throw new Error('bad account id');
   const { day, hour } = dayHour(rows[0].rt);
   const body = rows.map((r) => JSON.stringify(r));
   if (bucket()) {
-    const part = `${acct}/${day}/${hour}`;
+    const part = `${sub(stream)}${acct}/${day}/${hour}`;
     const buf = buffers.get(part) ?? { lines: [], bytes: 0 };
     let bytes = 0; for (const l of body) bytes += l.length + 1;
     buf.lines.push(...body); buf.bytes += bytes; bufferedBytes += bytes;
@@ -112,7 +123,7 @@ export async function appendRaw(acct: string, rows: RawRow[]): Promise<void> {
     if (bufferedBytes >= S3_FLUSH_BYTES) void flushRawS3();
     return;
   }
-  const dir = join(rawDir(), acct, day);
+  const dir = join(localRoot(stream), acct, day);
   const file = join(dir, `${hour}-${process.pid}.ndjson`);
   const prev = chains.get(file) ?? Promise.resolve();
   const next = prev.catch(() => {}).then(async () => { await mkdir(dir, { recursive: true }); await appendFile(file, body.join('\n') + '\n'); });
@@ -130,7 +141,7 @@ function parseLines(text: string, out: RawRow[], want?: (r: RawRow) => boolean) 
 }
 
 /** The accounts with raw reports on a day. */
-export async function accountsOnDay(day: string): Promise<string[]> {
+export async function accountsOnDay(day: string, stream: RawStream = 'cmcd'): Promise<string[]> {
   if (!DAY.test(day)) return [];
   if (bucket()) {
     const { ListObjectsV2Command } = await import('@aws-sdk/client-s3');
@@ -138,21 +149,22 @@ export async function accountsOnDay(day: string): Promise<string[]> {
     const out = new Set<string>();
     let token: string | undefined;
     do {
-      const r = await c.send(new ListObjectsV2Command({ Bucket: bucket(), Prefix: `${prefix()}/`, Delimiter: '/', ContinuationToken: token }));
-      for (const p of r.CommonPrefixes ?? []) { const a = String(p.Prefix).slice(prefix().length + 1).replace(/\/$/, ''); if (SAFE.test(a)) out.add(a); }
+      const base = `${prefix()}/${sub(stream)}`;
+      const r = await c.send(new ListObjectsV2Command({ Bucket: bucket(), Prefix: base, Delimiter: '/', ContinuationToken: token }));
+      for (const p of r.CommonPrefixes ?? []) { const a = String(p.Prefix).slice(base.length).replace(/\/$/, ''); if (SAFE.test(a)) out.add(a); }
       token = r.IsTruncated ? r.NextContinuationToken : undefined;
     } while (token);
     return [...out];
   }
   let accts: string[] = [];
-  try { accts = (await readdir(rawDir())).filter((a) => SAFE.test(a)); } catch { return []; }
+  try { accts = (await readdir(localRoot(stream))).filter((a) => SAFE.test(a)); } catch { return []; }
   const out: string[] = [];
-  for (const a of accts) { try { await readdir(join(rawDir(), a, day)); out.push(a); } catch { /* none that day */ } }
+  for (const a of accts) { try { await readdir(join(localRoot(stream), a, day)); out.push(a); } catch { /* none that day */ } }
   return out;
 }
 
 /** Every raw report of one account on one UTC day partition (by receive time). */
-export async function readDay(acct: string, day: string, want?: (r: RawRow) => boolean): Promise<RawRow[]> {
+export async function readDay(acct: string, day: string, want?: (r: RawRow) => boolean, stream: RawStream = 'cmcd'): Promise<RawRow[]> {
   if (!SAFE.test(acct) || !DAY.test(day)) return [];
   const out: RawRow[] = [];
   if (bucket()) {
@@ -160,7 +172,7 @@ export async function readDay(acct: string, day: string, want?: (r: RawRow) => b
     const c = await s3Client();
     let token: string | undefined;
     do {
-      const r = await c.send(new ListObjectsV2Command({ Bucket: bucket(), Prefix: `${prefix()}/${acct}/${day}/`, ContinuationToken: token }));
+      const r = await c.send(new ListObjectsV2Command({ Bucket: bucket(), Prefix: `${prefix()}/${sub(stream)}${acct}/${day}/`, ContinuationToken: token }));
       for (const o of r.Contents ?? []) {
         const g = await c.send(new GetObjectCommand({ Bucket: bucket(), Key: o.Key }));
         const bytes = Buffer.from(await g.Body.transformToByteArray());
@@ -170,7 +182,7 @@ export async function readDay(acct: string, day: string, want?: (r: RawRow) => b
     } while (token);
     return out;
   }
-  const dir = join(rawDir(), acct, day);
+  const dir = join(localRoot(stream), acct, day);
   let files: string[] = [];
   try { files = (await readdir(dir)).filter((f) => f.endsWith('.ndjson')).sort(); } catch { return out; }
   for (const f of files) parseLines(await readFile(join(dir, f), 'utf8').catch(() => ''), out, want);

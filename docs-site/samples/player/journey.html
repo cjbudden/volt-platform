@@ -1,0 +1,24 @@
+<div id="player"></div>
+<script src="https://your-volt-host/player/volt-player.js"></script>
+<script>
+  // Journey to play: how the viewer got to the play button. Nothing is sent until consent says yes.
+  const journey = new VoltPlayer.VoltJourney({
+    appKey: 'pk_live_...',
+    apiBase: 'https://your-volt-host',
+    app: 'Example website', appVersion: '4.2.0',
+    consent: false,
+    // Screen names for your paths (`:id` is the title's id); other paths are named by the path itself.
+    routes: { '/': 'home', '/watch/:id': 'detail', '/search': 'search' },
+    // The same events to Google Analytics 4, when gtag is on the page.
+    forward: VoltPlayer.ga4Forward(),
+  });
+
+  // From your consent banner, once the viewer agrees:
+  journey.setConsent(true);
+
+  // When the viewer picks a title, say where from:
+  journey.select('<asset id>', { entry: 'row:Trending', position: 3 });
+
+  // The player carries the journey into the play: when the viewer presses play, the journey records it.
+  VoltPlayer.VoltPlayer.create({ el: '#player', appKey: 'pk_live_...', assetId: '<asset id>', journey });
+</script>

@@ -41,7 +41,7 @@ export function analyticsUrl(): string {
 function dbName(url: string): string { return decodeURIComponent(new URL(url).pathname.replace(/^\//, '')); }
 
 /** Bump when the schema below changes shape (the tables are rebuildable, so a bump may drop them). */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS qoe_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
@@ -143,6 +143,12 @@ ALTER TABLE qoe_views
   ADD COLUMN IF NOT EXISTS ads_started INT NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS ads_ended INT NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS left_in_ad BOOLEAN NOT NULL DEFAULT false;
+-- Version 3 (build queue 1.14g): the journey that led to each view.
+ALTER TABLE qoe_views
+  ADD COLUMN IF NOT EXISTS journey_id TEXT,
+  ADD COLUMN IF NOT EXISTS app_session_id TEXT,
+  ADD COLUMN IF NOT EXISTS entry_point TEXT,
+  ADD COLUMN IF NOT EXISTS session_depth INT;
 CREATE INDEX IF NOT EXISTS qoe_views_day ON qoe_views (account_id, day);
 CREATE INDEX IF NOT EXISTS qoe_views_sid ON qoe_views (account_id, sid);
 CREATE INDEX IF NOT EXISTS qoe_views_ended ON qoe_views (account_id, ended_at);
@@ -206,6 +212,63 @@ CREATE TABLE IF NOT EXISTS qoe_gate (
 );
 CREATE INDEX IF NOT EXISTS qoe_gate_at ON qoe_gate (account_id, at);
 CREATE INDEX IF NOT EXISTS qoe_gate_sid ON qoe_gate (account_id, sid);
+
+-- JOURNEY TO PLAY (QOE_REPORTING.md section 13, services/qoe/journeys.ts).
+-- Derived from the app's journey events, which are kept raw first like the
+-- CMCD reports, so both tables are rebuildable by a replay. One row per app
+-- session and one per journey (content select, or a deep link, to the play
+-- or to nothing); the ids are the SDK's, so a replay writes the same rows.
+CREATE TABLE IF NOT EXISTS qoe_app_sessions (
+  account_id   UUID NOT NULL,
+  asid         TEXT NOT NULL,
+  day          DATE NOT NULL,
+  app_id       UUID,
+  app_name     TEXT, app_version TEXT, sdk_version TEXT,
+  launch       TEXT,                      -- icon | deeplink | push | other
+  cold         BOOLEAN,
+  os           TEXT, browser TEXT, device_class TEXT, country TEXT,
+  started_at   TIMESTAMPTZ NOT NULL,
+  ended_at     TIMESTAMPTZ NOT NULL,
+  ended_by     TEXT NOT NULL,             -- close | silence
+  screens      INT NOT NULL DEFAULT 0,
+  journeys     INT NOT NULL DEFAULT 0,
+  searches     INT NOT NULL DEFAULT 0,
+  background_ms BIGINT NOT NULL DEFAULT 0,
+  browse_ms    INT,                       -- first home, browse or search screen, ms after the app opened
+  detail_ms    INT,                       -- first detail screen
+  play_ms      INT,                       -- first play pressed
+  paywall_ms   INT,                       -- first paywall shown
+  purchase_ms  INT,                       -- first successful purchase
+  purchase_ok  BOOLEAN NOT NULL DEFAULT false,
+  plays        JSONB NOT NULL DEFAULT '[]'::jsonb,  -- [{sid, at, jid}] each play attempt, at = ms after the app opened
+  details      JSONB NOT NULL DEFAULT '{}'::jsonb,  -- {content id: detail screens}
+  played       JSONB NOT NULL DEFAULT '[]'::jsonb,  -- content ids played
+  PRIMARY KEY (account_id, asid)
+);
+CREATE INDEX IF NOT EXISTS qoe_app_sessions_started ON qoe_app_sessions (account_id, started_at);
+CREATE TABLE IF NOT EXISTS qoe_journeys (
+  account_id   UUID NOT NULL,
+  journey_id   TEXT NOT NULL,
+  asid         TEXT NOT NULL,
+  day          DATE NOT NULL,
+  app_id       UUID,
+  app_name     TEXT, app_version TEXT,
+  os           TEXT, browser TEXT, device_class TEXT, country TEXT,
+  started_at   TIMESTAMPTZ NOT NULL,
+  entry        TEXT NOT NULL,             -- row | search | deeplink | push | epg | continue | related | other
+  entry_detail TEXT,                      -- the row's name, the push campaign, ...
+  position     INT,
+  content_id   TEXT,
+  depth        INT NOT NULL DEFAULT 0,    -- screens in the app session before the select
+  since_open_ms INT,
+  detail_ms    INT,                       -- select to the detail screen
+  play_ms      INT,                       -- select to the first play pressed
+  paywall      BOOLEAN NOT NULL DEFAULT false,
+  purchase     TEXT,                      -- success | failed | cancelled
+  plays        JSONB NOT NULL DEFAULT '[]'::jsonb,  -- [{sid, at}] at = ms after the select
+  PRIMARY KEY (account_id, journey_id)
+);
+CREATE INDEX IF NOT EXISTS qoe_journeys_started ON qoe_journeys (account_id, started_at);
 `;
 
 async function createIfMissing(url: string): Promise<void> {
