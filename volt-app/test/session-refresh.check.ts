@@ -138,6 +138,72 @@ const usable = async (access: string) =>
   check('logout succeeds', outRes.status, 204);
   check('and the refresh token is dead afterwards', (await refresh(s.body.refresh)).status, 401);
 
+  // ---- the console: refresh token as an HttpOnly cookie ---------------------
+  // Held in memory only, the session ended at every page load: a reload, a new
+  // tab, the dev server reloading after an edit. The cookie survives those and
+  // no script on the page can read it.
+  console.log('\n== a reload keeps the session: the refresh cookie ==');
+  const cookieOf = (r: Response) => {
+    const raw = (r.headers as any).getSetCookie?.() as string[] ?? [];
+    return raw.find((c) => c.startsWith('volt_rt=')) ?? '';
+  };
+  const valOf = (c: string) => c.split(';')[0].slice('volt_rt='.length);
+  const viaCookie = (p: string, v: string, extra: Record<string, string> = {}) =>
+    fetch(`${API}/api${p}`, { method: 'POST', headers: { ...J, cookie: `other=1; volt_rt=${v}`, ...extra }, body: '{}' });
+
+  const lr = await post('/auth/login', { email: EMAIL, password: PW });
+  const lc = cookieOf(lr);
+  check('login sets the refresh cookie', lc !== '', true);
+  check('HttpOnly, so no script on the page can read it', /;\s*HttpOnly/i.test(lc), true);
+  check('SameSite=Strict, so no other site can make the browser send it', /;\s*SameSite=Strict/i.test(lc), true);
+  check('scoped to /api/auth and nothing else', /;\s*Path=\/api\/auth(;|$)/i.test(lc), true);
+  check('lasting the session, not the tab', /;\s*Max-Age=\d{6,}/i.test(lc), true);
+  const c1 = valOf(lc);
+
+  const rc = await viaCookie('/auth/refresh', c1);
+  check('a page load restores the session from the cookie alone', rc.status, 200);
+  const rcBody = await rc.json();
+  check('with a working access token', await usable(rcBody.access), 200);
+  check('and the token itself is NOT in the body the page can read', rcBody.refresh, undefined);
+  const c2 = valOf(cookieOf(rc));
+  check('the cookie is rotated in the same answer', c2 !== '' && c2 !== c1, true);
+  check('the rotated cookie works', (await viaCookie('/auth/refresh', c2)).status, 200);
+
+  console.log('\n== two tabs, one cookie: the second refresh is not a sign-out ==');
+  const t0 = valOf(cookieOf(await post('/auth/login', { email: EMAIL, password: PW })));
+  const [ta, tb] = await Promise.all([viaCookie('/auth/refresh', t0), viaCookie('/auth/refresh', t0)]);
+  check('both tabs refreshing at once are both served', `${ta.status}/${tb.status}`, '200/200');
+  const late = await viaCookie('/auth/refresh', t0);
+  check('a tab a moment behind still gets an access token', late.status, 200);
+  check('but no new cookie (the browser holds the replacement)', cookieOf(late), '');
+  check('the same spent token in a BODY is still a refused replay', (await refresh(t0)).status, 401);
+
+  console.log('\n== the grace is short ==');
+  const g0 = valOf(cookieOf(await post('/auth/login', { email: EMAIL, password: PW })));
+  await viaCookie('/auth/refresh', g0);
+  await query(`UPDATE refresh_tokens SET rotated_at = now() - interval '31 seconds' WHERE token_hash = encode(sha256($1::bytea),'hex') OR rotated_at > now() - interval '5 seconds'`, [g0]);
+  check('a token spent 31 s ago is refused', (await viaCookie('/auth/refresh', g0)).status, 401);
+
+  console.log('\n== revoking everything ends the grace too ==');
+  const v0 = valOf(cookieOf(await post('/auth/login', { email: EMAIL, password: PW })));
+  check('rotate once', (await viaCookie('/auth/refresh', v0)).status, 200);
+  // What a password change, disabling the user or a platform action does.
+  await query(`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, [u.id]);
+  check('the just-spent token is refused once nothing in its chain is live', (await viaCookie('/auth/refresh', v0)).status, 401);
+
+  console.log('\n== signing out from the console ==');
+  const o0 = valOf(cookieOf(await post('/auth/login', { email: EMAIL, password: PW })));
+  const o1r = await viaCookie('/auth/refresh', o0);
+  const o1 = valOf(cookieOf(o1r));
+  // No bearer: a console whose access token lapsed must still be able to sign out.
+  const out = await viaCookie('/auth/logout', o1);
+  check('logout with the cookie alone succeeds', out.status, 204);
+  check('and clears the cookie', /volt_rt=;/.test(cookieOf(out)) || /Expires=Thu, 01 Jan 1970/i.test(cookieOf(out)), true);
+  check('a reload afterwards does not sign back in', (await viaCookie('/auth/refresh', o1)).status, 401);
+  check('nor does the token it replaced, inside the grace', (await viaCookie('/auth/refresh', o0)).status, 401);
+  const none = await fetch(`${API}/api/auth/refresh`, { method: 'POST', headers: J, body: '{}' });
+  check('no cookie and no body is simply not signed in', none.status, 401);
+
   console.log('\n== nonsense is refused rather than accepted ==');
   check('an unknown refresh token is 401', (await refresh('not-a-real-token')).status, 401);
   check('an access token is not a refresh token', (await refresh(s.body.access)).status, 401);

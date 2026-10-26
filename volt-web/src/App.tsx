@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type ReactElement } from 'react'
-import { api, setSession, clearSession, getToken, accessExpiresIn, noteActivity, setUnauthorizedHandler, isMfaStep, ensureImageSigning, type SearchHit, type Me, type MfaStep, type Session } from './api'
+import { api, setSession, clearSession, restoreSession, getToken, accessExpiresIn, noteActivity, setUnauthorizedHandler, isMfaStep, ensureImageSigning, type SearchHit, type Me, type MfaStep, type Session } from './api'
 import { useImageSigning } from './imageSigning'
 import { SignInSecondStep } from './security'
 import { OnboardingFlow, onboardingKindFor } from './Onboarding'
@@ -197,6 +197,19 @@ export default function App() {
   const [pw, setPw] = useState(import.meta.env.DEV ? 'volt1234' : '')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  // A PAGE LOAD IS NOT A SIGN-OUT. Until the refresh cookie has been tried
+  // (api.ts restoreSession), show nothing rather than flash the sign-in form.
+  const [restoring, setRestoring] = useState(true)
+  const ssoReturning = useRef(false)
+  useEffect(() => {
+    // Returning from single sign-on is its own sign-in; do not race it.
+    if (ssoReturning.current) { setRestoring(false); return }
+    let live = true
+    restoreSession()
+      .then((s) => { if (live && s && !getToken()) finishSignIn(s as Session) })
+      .finally(() => { if (live) setRestoring(false) })
+    return () => { live = false }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [me, setMe] = useState<Me | null>(null)
   // Whether /auth/me has ANSWERED, separate from what it said. Absent this,
   // "the access map has not arrived" and "the access map says nothing" were
@@ -426,6 +439,10 @@ export default function App() {
           onSignIn={toSignIn} />
       </div>
     )
+  }
+
+  if (!authed && restoring && !step) {
+    return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}><div className="loading">Signing in…</div></div>
   }
 
   if (!authed) {

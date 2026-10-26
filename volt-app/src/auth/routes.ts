@@ -9,6 +9,7 @@ import { asyncHandler, badRequest, unauthorized } from '../util/http';
 import { requireAuth } from './middleware';
 import { config } from '../config';
 import { limit } from '../scale/ratelimit';
+import { readRefreshCookie, setRefreshCookie, clearRefreshCookie } from './sessionCookie';
 
 // argon2id hash of a random string: verified against when the user does not exist.
 const DUMMY_HASH = '$argon2id$v=19$m=65536,t=3,p=4$eL6q5o0WKgB5aO6DOLe1aw$lB1UHTGgzSW5xk3DzObUpW2YY+mL3HMCaywzS2n5+8I';
@@ -100,8 +101,8 @@ export async function issueAdminSession(userId: string, amr: string[]) {
   const { token: refresh, hash } = newRefreshToken();
   await one(
     `INSERT INTO refresh_tokens(user_id, token_hash, expires_at, amr)
-     VALUES ($1,$2, now() + interval '14 days', $3)`,
-    [u.id, hash, amr]
+     VALUES ($1,$2, now() + make_interval(secs => $4), $3)`,
+    [u.id, hash, amr, config.jwt.refreshTtl]
   );
   // expiresIn is the CONFIGURED ttl, not a repeated literal. It was 900 in
   // two places while ACCESS_TTL sat in config; raising the env var moved the
@@ -136,21 +137,51 @@ const refreshSchema = z.object({ refresh: z.string() });
  *     sliding one that never expires, which is the opposite of a cap. So an
  *     operator working continuously is signed out fourteen days after they
  *     logged in, exactly as before, and is never signed out mid-shift.
+ *
+ *  3. A PAGE LOAD IS NOT THE END OF A SESSION. The console's refresh token is
+ *     also an HttpOnly cookie (sessionCookie.ts), so reloading or opening a new
+ *     tab restores the session instead of showing the sign-in form. A body
+ *     `refresh` still works and wins, for scripts and API clients.
+ *
+ *  4. TWO TABS, ONE COOKIE. Both can present the same token within a moment
+ *     of each other. The first rotates it; the second would otherwise be
+ *     refused and sign that tab out. A token spent by rotation in the last
+ *     GRACE_SEC still buys an access token, but no new refresh token (the
+ *     browser already holds the replacement). Only while that replacement is
+ *     still live, so sign-out, a password change or disabling the user ends
+ *     the grace as well.
  * ========================================================================= */
+const GRACE_SEC = 30;
+
 authRouter.post(
   '/refresh',
   asyncHandler(async (req, res) => {
-    const { refresh } = refreshSchema.parse(req.body);
+    const fromBody = typeof req.body?.refresh === 'string' && req.body.refresh ? req.body.refresh as string : undefined;
+    const presented = fromBody ?? readRefreshCookie(req);
+    if (!presented) throw unauthorized('Not signed in');
     const row = await one<any>(
       `SELECT rt.id, rt.user_id, rt.expires_at, rt.amr, u.account_id, u.role,
+              (rt.revoked_at IS NOT NULL) AS in_grace,
               u.status AS user_status, a.status AS account_status, a.require_admin_mfa
          FROM refresh_tokens rt
          JOIN users u ON u.id = rt.user_id
          JOIN accounts a ON a.id = u.account_id
-        WHERE rt.token_hash = $1 AND rt.revoked_at IS NULL AND rt.expires_at > now()`,
-      [hashRefresh(refresh)]
+        WHERE rt.token_hash = $1 AND rt.expires_at > now()
+          AND (rt.revoked_at IS NULL
+               OR (rt.rotated_at IS NOT NULL AND rt.rotated_at > now() - make_interval(secs => $2)
+                   -- and its replacement is still live: a password change, a
+                   -- disabled user or any other revoke-all ends the grace too
+                   AND EXISTS (SELECT 1 FROM refresh_tokens nx
+                                WHERE nx.user_id = rt.user_id AND nx.revoked_at IS NULL
+                                  AND nx.expires_at > now() AND nx.created_at >= rt.rotated_at)))`,
+      // Grace is for tabs sharing the cookie only. A spent token in a body is
+      // a replay, which is exactly what rotation exists to refuse.
+      [hashRefresh(presented), fromBody ? 0 : GRACE_SEC]
     );
-    if (!row) throw unauthorized('Invalid refresh token');
+    if (!row) {
+      if (!fromBody) clearRefreshCookie(req, res);
+      throw unauthorized('Invalid refresh token');
+    }
     // The same two gates login applies. A session may not outlive the standing
     // of the user holding it.
     if (row.user_status === 'disabled') throw unauthorized('This account has been disabled');
@@ -164,27 +195,46 @@ authRouter.post(
 
     const access = signAccess({ sub: row.user_id, account_id: row.account_id, role: row.role }, { amr });
 
+    // Grace (4): access only. The replacement already exists and is in the cookie.
+    if (row.in_grace) return res.json({ access, expiresIn: config.jwt.accessTtl });
+
     // Rotate inside one transaction: a crash between the revoke and the insert
     // would otherwise leave the operator holding a token that no longer exists.
     const { token: next, hash } = newRefreshToken();
     await tx(async (c) => {
-      await c.query(`UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1`, [row.id]);
+      await c.query(`UPDATE refresh_tokens SET revoked_at = now(), rotated_at = now() WHERE id = $1`, [row.id]);
       await c.query(
         `INSERT INTO refresh_tokens(user_id, token_hash, expires_at, amr) VALUES ($1,$2,$3,$4)`,
         [row.user_id, hash, row.expires_at, amr]   // INHERITED, never reissued
       );
     });
 
+    // Cookie in, cookie out: the console never sees the token itself.
+    if (!fromBody) {
+      setRefreshCookie(req, res, next, row.expires_at);
+      return res.json({ access, expiresIn: config.jwt.accessTtl });
+    }
     res.json({ access, refresh: next, expiresIn: config.jwt.accessTtl });
   })
 );
 
+/** Sign out. Holding the refresh token (body or cookie) is the proof, so no
+ *  access token is needed: a console whose access token has lapsed must still
+ *  be able to end its session, or the cookie would sign it back in on reload.
+ *  Tokens this user rotated in the last moments lose their grace too. */
 authRouter.post(
   '/logout',
-  requireAuth,
   asyncHandler(async (req, res) => {
-    const { refresh } = req.body ?? {};
-    if (refresh) await one('UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1', [hashRefresh(refresh)]);
+    const presented = (typeof req.body?.refresh === 'string' && req.body.refresh) || readRefreshCookie(req);
+    if (presented) {
+      const r = await one<any>(
+        `UPDATE refresh_tokens SET revoked_at = COALESCE(revoked_at, now()) WHERE token_hash = $1 RETURNING user_id`,
+        [hashRefresh(presented)]);
+      if (r) await one(
+        `UPDATE refresh_tokens SET rotated_at = NULL
+          WHERE user_id = $1 AND rotated_at > now() - make_interval(secs => $2)`, [r.user_id, GRACE_SEC]);
+    }
+    clearRefreshCookie(req, res);
     res.status(204).end();
   })
 );

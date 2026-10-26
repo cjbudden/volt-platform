@@ -11,6 +11,7 @@ import { config, staleConsoleWarning } from './config';
 import { currentRunId } from './services/liveOrigin';
 import { errorHandler } from './util/http';
 import { authRouter } from './auth/routes';
+import { sessionCookies } from './auth/sessionCookie';
 import { channelsRouter } from './modules/channels';
 import { searchRouter } from './modules/search';
 import { sourcesRouter } from './modules/sources';
@@ -330,6 +331,8 @@ export function createServer() {
   app.use(hypermediaNegotiation);
   app.use('/api', hypermediaRouter); // GET /api (entrypoint), /api/context.jsonld, /api/doc
 
+  // The console's refresh token as an HttpOnly cookie on every sign-in answer (auth/sessionCookie.ts).
+  app.use(['/api/auth', '/api/onboarding'], sessionCookies);
   app.use('/api/auth', authRouter);
   app.use('/api/onboarding', onboardingRouter);           // welcome + reset links -> code -> password (docs/ONBOARDING.md)
   app.use('/api/signup', signupRouter);                   // promo site registration: waitlist, trial or paid (docs/ONBOARDING.md)

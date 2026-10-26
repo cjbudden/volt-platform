@@ -29,11 +29,14 @@ import { showGlobal, dismissGlobal } from './notices'
  *  request. If the retry is refused too then the session really is over, and
  *  saying so once beats a page that reloads itself forever.
  *
- *  THE REFRESH TOKEN LIVES IN MEMORY, exactly where the access token already
- *  lived. Persisting it would keep a session across a page reload, which is
- *  worth having and is a DIFFERENT decision with a different risk: anything in
- *  localStorage is readable by any script that gets onto the page. Not smuggled
- *  in under a bug fix.
+ *  THE REFRESH TOKEN IS AN HttpOnly COOKIE, never held by this page. It used
+ *  to live in memory, so every page load (reload, a new tab, the dev server
+ *  reloading after an edit) signed the operator out mid-work. localStorage
+ *  would fix that and let any script on the page read it; a cookie scoped to
+ *  /api/auth that script cannot read does not (volt-app auth/sessionCookie.ts).
+ *  On load, restoreSession() trades the cookie for an access token. Two tabs
+ *  share the cookie; the server gives a near-simultaneous second refresh a
+ *  short grace so they never sign each other out.
  *
  *  IDLE IS NOT ACTIVITY, and that distinction matters here more than in most
  *  apps, because this console polls whether or not a human is present. A tab
@@ -45,7 +48,8 @@ import { showGlobal, dismissGlobal } from './notices'
  *  must work rather than dump the operator at a login screen.
  * ========================================================================= */
 let token = ''
-let refreshToken = ''
+/** Whether a refresh is worth trying: the cookie may be there. Never the token itself. */
+let canRefresh = false
 /** Epoch ms when the current access token expires. 0 = unknown. */
 let accessExpiresAt = 0
 /** Last real user input. Deliberately NOT updated by API traffic. */
@@ -62,7 +66,7 @@ export function getToken() { return token }
 /** Called by the sign-in screen with the whole login response. */
 export function setSession(s: { access: string; refresh?: string; expiresIn?: number }) {
   token = s.access
-  if (s.refresh) refreshToken = s.refresh
+  canRefresh = true
   accessExpiresAt = s.expiresIn ? Date.now() + s.expiresIn * 1000 : 0
   lastInputAt = Date.now()
 }
@@ -70,10 +74,8 @@ export function setSession(s: { access: string; refresh?: string; expiresIn?: nu
 /** Seconds left on the access token (0 when unknown). Used to hand the
  *  session to the graphics live-control window, which never holds a refresh token. */
 export function accessExpiresIn(): number { return accessExpiresAt ? Math.max(0, Math.floor((accessExpiresAt - Date.now()) / 1000)) : 0 }
-export function clearSession() { token = ''; refreshToken = ''; accessExpiresAt = 0; platformToken = ''; platformExpiresAt = 0; setImageSigning(null); signingLoad = null }
+export function clearSession() { token = ''; canRefresh = false; accessExpiresAt = 0; platformToken = ''; platformExpiresAt = 0; setImageSigning(null); signingLoad = null }
 
-/** The refresh token, for the logout call that revokes it server-side. */
-export function getRefreshToken() { return refreshToken }
 
 /** Mark real operator input. Wired to pointer and key events in App.tsx. */
 export function noteActivity() { lastInputAt = Date.now() }
@@ -83,30 +85,27 @@ const activeRecently = () => Date.now() - lastInputAt < ACTIVE_WINDOW_MS
 let refreshing: Promise<boolean> | null = null
 
 async function refreshAccess(): Promise<boolean> {
-  if (!refreshToken) return false
+  if (!canRefresh) return false
   if (refreshing) return refreshing
   refreshing = (async () => {
     try {
       const r = await fetch('/api/auth/refresh', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ refresh: refreshToken }),
+        credentials: 'same-origin',   // the HttpOnly refresh cookie
+        body: '{}',
       })
       if (!r.ok) {
         // The server has REFUSED this credential: expired, revoked, or the user
         // disabled. It will not start working again, so drop it and let the
         // caller's 401 reach the sign-out handler.
-        refreshToken = ''
+        canRefresh = false
         return false
       }
       const d = await r.json()
-      if (!d?.access) { refreshToken = ''; return false }
+      if (!d?.access) { canRefresh = false; return false }
       token = d.access
-      // The server ROTATES, so the reply carries the next refresh token and the
-      // one just sent is already revoked. Dropping it here would sign the
-      // operator out at the FOLLOWING refresh rather than this one, which is
-      // the kind of bug that presents as intermittent.
-      if (d.refresh) refreshToken = d.refresh
+      // The server ROTATES the cookie in the same answer; nothing to keep here.
       accessExpiresAt = d.expiresIn ? Date.now() + d.expiresIn * 1000 : 0
       return true
     } catch {
@@ -121,9 +120,23 @@ async function refreshAccess(): Promise<boolean> {
   return refreshing
 }
 
+/** On page load: trade the refresh cookie for an access token, so a reload or
+ *  a new tab carries on signed in. null when there is no session to restore
+ *  (no cookie, expired, revoked, or the user disabled). */
+export async function restoreSession(): Promise<{ access: string; expiresIn?: number } | null> {
+  try {
+    const r = await fetch('/api/auth/refresh', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: '{}',
+    })
+    if (!r.ok) return null
+    const d = await r.json()
+    return d?.access ? { access: d.access, expiresIn: d.expiresIn } : null
+  } catch { return null }
+}
+
 /** Renew before the token lapses, but only for a console someone is using. */
 async function refreshIfDueSoon() {
-  if (!refreshToken || !accessExpiresAt) return
+  if (!canRefresh || !accessExpiresAt) return
   if (Date.now() < accessExpiresAt - REFRESH_LEAD_MS) return
   if (!activeRecently()) return
   await refreshAccess()
@@ -214,7 +227,7 @@ async function req(path: string, opts: RequestInit = {}) {
   // one retry; `refreshAccess` is single-flight, so ten simultaneous 401s cause
   // one refresh and ten retries rather than ten refreshes that revoke each
   // other. The retry cannot itself retry: there is no recursion here.
-  if (r.status === 401 && token && refreshToken) {
+  if (r.status === 401 && token && canRefresh) {
     if (await refreshAccess()) r = await send(path, opts)
   }
 
@@ -1130,7 +1143,9 @@ export const api = {
   /** Revoke the refresh token server-side. Signing out without this leaves a
    *  fourteen-day credential live for a session the operator believes is over. */
   logout: () =>
-    req('/auth/logout', { method: 'POST', body: JSON.stringify({ refresh: getRefreshToken() }) }),
+    // The refresh cookie is the proof (no access token needed), and the answer
+    // clears it, so a reload afterwards does not sign back in.
+    fetch('/api/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: '{}' }).then(() => null),
   groups: (): Promise<Group[]> => req('/groups'),
   /** A signed pass to the customer docs site (separate static site; see docsLink.tsx). */
   docsSession: (): Promise<{ url: string; signed: boolean; expiresAt: string | null }> => req('/docs/session'),
@@ -3269,7 +3284,7 @@ export const apiRequest = req
 export async function apiRequestWithHeaders(path: string, opts: RequestInit = {}): Promise<{ body: any; headers: Headers }> {
   await refreshIfDueSoon()
   let r = await send(path, opts)
-  if (r.status === 401 && token && refreshToken) {
+  if (r.status === 401 && token && canRefresh) {
     if (await refreshAccess()) r = await send(path, opts)
   }
   if (!r.ok) {
