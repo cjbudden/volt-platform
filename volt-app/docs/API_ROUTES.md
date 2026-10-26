@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**694 routes.** Public API: 75 · Sign-in (no session yet): 7 · Admin API: 552 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 15 · Health and discovery: 8
+**714 routes.** Public API: 75 · Sign-in (no session yet): 7 · Admin API: 561 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 26 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -1009,6 +1009,15 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/vod/:id/target-metadata` | admin session (Bearer) or account secret key | vod: view |  |
 | PATCH | `/api/vod/:id/trim` | admin session (Bearer) or account secret key | vod: manage |  |
 | POST | `/api/vod/:id/withdraw` | admin session (Bearer) or account secret key | vod: operate |  |
+| GET | `/api/vod/ads/ad-servers` | admin session (Bearer) or account secret key | vod: view |  |
+| POST | `/api/vod/ads/ad-servers` | admin session (Bearer) or account secret key | vod: manage |  |
+| GET | `/api/vod/ads/assets/:id/plan` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/vod/ads/house-candidates` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/vod/ads/report` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/vod/ads/rules` | admin session (Bearer) or account secret key | vod: view |  |
+| DELETE | `/api/vod/ads/rules/content-type/:id` | admin session (Bearer) or account secret key | vod: manage |  |
+| PUT | `/api/vod/ads/rules/content-type/:id` | admin session (Bearer) or account secret key | vod: manage |  |
+| PUT | `/api/vod/ads/rules/default` | admin session (Bearer) or account secret key | vod: manage |  |
 | POST | `/api/vod/epg-fill` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/facets` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/music-lookup` | admin session (Bearer) or account secret key | vod: manage |  |
@@ -1201,6 +1210,8 @@ Streams, images, share pages and players. The admin console web app is also serv
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | GET | `/fast/:id/s/:sid/:file` | none, share token or playback token | public delivery | ✓ |
+| GET | `/fast/:id/s/:sid/ads.json` | none, share token or playback token | public delivery | ✓ |
+| GET | `/fast/:id/s/:sid/click/:bid/:p` | none, share token or playback token | public delivery | ✓ |
 
 ### `/gfx`
 
@@ -1252,6 +1263,20 @@ Streams, images, share pages and players. The admin console web app is also serv
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | GET | `/social-sandbox/:id` | admin session or internal | preview / internal |  |
+
+### `/vod-ads`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/vod-ads/blank.vtt` | none, share token or playback token | public delivery | ✓ |
+| GET | `/vod-ads/g/:assetId/:ver/:file` | none, share token or playback token | public delivery | ✓ |
+| GET | `/vod-ads/g/:assetId/:ver/list/:b` | none, share token or playback token | public delivery | ✓ |
+| GET | `/vod-ads/s/:sid/:file` | none, share token or playback token | public delivery | ✓ |
+| GET | `/vod-ads/s/:sid/ad/:b/:p/:file` | none, share token or playback token | public delivery | ✓ |
+| GET | `/vod-ads/s/:sid/click/:b/:p` | none, share token or playback token | public delivery | ✓ |
+| POST | `/vod-ads/s/:sid/events` | none, share token or playback token | public delivery | ✓ |
+| GET | `/vod-ads/s/:sid/seg/:b/:p/:track/:n` | none, share token or playback token | public delivery | ✓ |
+| GET | `/vod-ads/s/:sid/timeline.json` | none, share token or playback token | public delivery | ✓ |
 
 ### `/xmltv`
 

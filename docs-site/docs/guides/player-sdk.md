@@ -73,13 +73,13 @@ A tag embed dispatches `volt-player-ready` on the page, with the player in `even
 
 ### Commands
 
-`play`, `pause`, `toggle`, `seek`, `seekBy`, `goLive`, `startOver`, `setQuality`, `setTextTrack`, `setAudioTrack`, `setVolume`, `toggleMute`, `setRate`, `next`, `previous`, `playItem`, `cancelUpNext`, `toggleFullscreen`, `togglePip`, `cast`, `airplay`, `purchase`, `signIn`, `playReplay`, `refreshAccess`, and `setTheme`, `setViewerToken`.
+`play`, `pause`, `toggle`, `seek`, `seekBy`, `goLive`, `startOver`, `setQuality`, `setTextTrack`, `setAudioTrack`, `setVolume`, `toggleMute`, `setRate`, `next`, `previous`, `playItem`, `cancelUpNext`, `adClick`, `toggleFullscreen`, `togglePip`, `cast`, `airplay`, `purchase`, `signIn`, `playReplay`, `refreshAccess`, and `setTheme`, `setViewerToken`.
 
 The example above wires **Next** to `player.next()` and calls `player.setTheme(...)`; every command works the same way.
 
 ### State
 
-The player's state includes: `status` (idle, loading, ready, playing, paused, buffering, ended, error, offline, or `locked` when a purchase or sign-in is needed), `playing`, `error`, `currentTime`, `duration`, `live`, `dvr`, `atLiveEdge`, `behindLive`, `programme`, `nextProgramme`, `schedule`, `canStartOver`, `qualities`, `quality`, `textTracks`, `audioTracks`, `items`, `index`, `item`, `upNext`, `nowPlaying`, `history`, `cast`, `airplay`, `fullscreen`, `pip`, `volume`, `muted`, and for events `event`, `presentation`, `msToStart`, `access` and `replaying`.
+The player's state includes: `status` (idle, loading, ready, playing, paused, buffering, ended, error, offline, or `locked` when a purchase or sign-in is needed), `playing`, `error`, `currentTime`, `duration`, `live`, `dvr`, `atLiveEdge`, `behindLive`, `programme`, `nextProgramme`, `schedule`, `canStartOver`, `qualities`, `quality`, `textTracks`, `audioTracks`, `items`, `index`, `item`, `upNext`, `ad` (an on-demand ad on screen), `nowPlaying`, `history`, `cast`, `airplay`, `fullscreen`, `pip`, `volume`, `muted`, and for events `event`, `presentation`, `msToStart`, `access` and `replaying`.
 
 ## Themes
 
@@ -115,6 +115,15 @@ A custom skin is a `mount` and an `update`. It is given state and commands, neve
 - **`drm`**: `servers` maps each key system to its licence server address (`com.widevine.alpha`, `com.microsoft.playready`, `org.w3.clearkey`), and `headers` are sent with every licence request. The player picks the system the device supports. FairPlay on Apple devices is not offered yet: Safari plays with its own player, without these settings.
 - **`cmcd`**: the player reports what the viewer saw in the CMCD v2 standard, on by default whenever there is an app key: a `CMCD` argument on every playlist and segment request (so the CDN logs carry it), and batched reports to Volt from the moment the play gate is asked. `app` and `appVersion` name your app in the reports; `false` turns reporting off. Read the results in **Analytics > Playback** or through the [QoE API](../api/playback-reporting.md).
 - The player's `sessionId` is this play attempt's id. The play gate, the viewer reports and the CDN logs all carry it, so one viewer's problem can be followed from end to end.
+
+## On-demand ads
+
+When a title has ad breaks ([On-demand ads](on-demand-ads.md)), the player asks the play gate for them and plays them without anything from you:
+
+- On Apple devices playing HLS natively, the ads come as HLS Interstitials and the device plays them.
+- Everywhere else they are stitched into the stream. While an ad plays the player shows **Ad 1 of 2 · 0:12** and **Learn more** when the ad has a page, does not let the viewer seek inside the ad, and with snapback plays a skipped mid-roll before landing where the viewer asked.
+- `player.getState().ad` is the ad on screen (`number`, `of`, `remainingSec`, `canClick`), or `null`; a custom skin can draw its own and call `player.commands.adClick()`.
+- Impressions and quarters are reported by Volt as the ad's video is fetched; clicks, pause and mute go through Volt to the ad server.
 
 ## Journey to play
 

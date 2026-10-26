@@ -128,5 +128,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `POST /api/fast/channels/{id}/on-air` | Opens or closes it to viewers (opening needs an active run order, 409 otherwise) |
 | `PUT /api/fast/channels/{id}/ads` | Sets its ads |
 | `GET /api/fast/channels/{id}/ad-report` | Ad delivery for the last days |
+| `GET /fast/{id}/s/{session}/ads.json` | For a player of your own: the paid ads in a viewer's recent breaks, when each plays and its `clickUrl` |
+| `GET /fast/{id}/s/{session}/click/{break}/{ad}` | A viewer's click: Volt records it, tells the ad server and opens the advertiser's page |
 
 Every route is in the [API reference](/api-reference).

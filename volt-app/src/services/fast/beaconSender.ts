@@ -66,6 +66,15 @@ async function get(url: string, v: BeaconViewer): Promise<{ status: number | nul
   return { status: null, error: `more than ${MAX_REDIRECTS} redirects` };
 }
 
+/**
+ * One tracking request, checked and sent as the beacons are (private
+ * addresses refused, redirects checked hop by hop, the viewer's address and
+ * player in the IAB headers). On-demand ads and clicks use it too.
+ */
+export function fetchTracker(url: string, v: { ip?: string | null; userAgent?: string | null }) {
+  return get(url, { channelId: '', sessionId: '', ...v });
+}
+
 /** Send one event's URLs (claimed first). Resolves when every one has an answer. */
 async function sendEvent(v: BeaconViewer, b: DueBeacon, nowMs: number): Promise<void> {
   const breakId = b.breakId.replace(/^brk:/, '');

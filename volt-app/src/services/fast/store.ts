@@ -418,7 +418,8 @@ export interface DecideInput {
   fetcher?: Fetcher;
 }
 
-const defaultFetcher: Fetcher = async (url, timeoutMs) => {
+/** The plain HTTP fetch the ad decisions use (on-demand ads reuse it). */
+export const defaultFetcher: Fetcher = async (url, timeoutMs) => {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), timeoutMs);
   try {

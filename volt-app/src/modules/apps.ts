@@ -26,6 +26,7 @@ import { config } from '../config';
 import { manifestUrls } from '../services/shareLinks';
 import { publicMp3Url } from '../services/radio/jobConfig';
 import { classifyGate, recordGate, type GateNote } from '../services/qoe/gateLog';
+import { adsForPlay } from '../services/vodAds';
 
 // ---- management (JWT-auth) --------------------------------------------------
 export const appsRouter = Router();
@@ -189,6 +190,13 @@ const availSchema = z.object({
   viewer: z.object({ externalId: z.string().min(1), email: z.string().email().optional(), groups: z.array(z.string()).optional() }).optional(),
   /** The player's play attempt (its CMCD session id), carried into the playback token. */
   sid: z.string().regex(/^[A-Za-z0-9._:-]{8,64}$/).optional(),
+  /**
+   * On-demand ads (services/vodAds): how the app wants them (auto, stitched,
+   * guided) and what its player can do ('hls-interstitials' for guided).
+   * Ignored where no on-demand ad rule applies.
+   */
+  adDelivery: z.enum(['auto', 'stitched', 'guided']).optional(),
+  caps: z.array(z.string().max(40)).max(20).optional(),
 });
 
 /**
@@ -355,10 +363,24 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
     };
   }
   const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: b.assetId, assetKind: kind, geo, sid: b.sid });
+  let delivery = await deliveryFor(kind, b.assetId, key.account_id, b.sid);
+  // ON-DEMAND ADS (services/vodAds). A viewer the rule makes ad-free (paid, a
+  // member) gets the asset as it is. Otherwise the HLS address carries the ads
+  // (a stitched session, or the guided interstitial playlist) and DASH is left
+  // out: it would play the content without them. The answer then belongs to
+  // this viewer (a session of their own), so it is never shared at the edge.
+  let ads: Awaited<ReturnType<typeof adsForPlay>> = null;
+  if (kind === 'vod' && delivery) {
+    ads = await adsForPlay({ accountId: key.account_id, assetId: b.assetId, via: (rights as any).rule?.allowed ? (rights as any).rule.via : (rights as any).via ?? null, preferred: b.adDelivery ?? null, caps: b.caps,
+      playSid: b.sid ?? null, ctx: { ip: req.ip ?? null, userAgent: req.get('user-agent') ?? null, country: geo ?? null, appId: key.app_id ?? null } })
+      .catch((e) => { console.warn('[vod-ads] play gate: playing without ads:', e?.message ?? e); return null; });
+    if (ads) { delivery = { hls: ads.hls, dash: null }; edgeSec = 0; }
+  }
   return {
     status: 200, edgeSec,
     body: { available: true, mode: 'play', assetId: b.assetId, playbackToken: tok.token, expiresIn: tok.expiresIn,
-      delivery: await deliveryFor(kind, b.assetId, key.account_id, b.sid),
+      delivery,
+      ...(ads ? { ads: { delivery: ads.delivery, sessionId: ads.sessionId, timelineUrl: ads.timelineUrl } } : {}),
       meta: await metaFor(key.account_id, kind, b.assetId) },
   };
 }

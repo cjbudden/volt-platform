@@ -30,6 +30,7 @@
     { "key": "workflows", "label": "Workflows", "batch": "G3", "guides": ["guides/workflows.md"] },
     { "key": "content-types", "label": "Content Types", "batch": "G3", "guides": ["guides/content-types.md"] },
     { "key": "publishing", "label": "Publishing Rules", "batch": "G3", "guides": ["guides/publishing-rules.md"] },
+    { "key": "on-demand-ads", "label": "On-demand ads", "batch": "G3", "guides": ["guides/on-demand-ads.md"] },
     { "key": "ingest", "label": "Ingest Rules", "batch": "G3", "guides": ["guides/ingest-rules.md"] },
     { "key": "groups", "label": "Channel Groups", "batch": "G3", "guides": ["guides/channel-groups.md"] },
     { "key": "captions", "label": "Captions", "batch": "G2", "guides": ["guides/captions.md"] },

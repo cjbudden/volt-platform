@@ -351,6 +351,11 @@
    "description": "VOD assets are your on-demand videos, from recordings, clips or uploads, with their metadata, review state and availability.\n\n**Use it to:**\n- List and open assets with `GET /api/vod` and `GET /api/vod/{id}`, and edit metadata with `PUT /api/vod/{id}`\n- Review, QC and trim with `POST /api/vod/{id}/review`, `POST /api/vod/{id}/qc` and `PATCH /api/vod/{id}/trim`\n- Publish or withdraw with `POST /api/vod/{id}/publish` and `POST /api/vod/{id}/withdraw`, and set availability with `PATCH /api/vod/{id}/availability`\n- Get schema.org JSON-LD for SEO with `GET /api/vod/{id}/schema.org`\n\n**Credential:** admin session (Bearer) or account secret key, with `vod: view` to read, `vod: operate` to publish or withdraw and `vod: manage` to change.\n\n**Good to know:** metadata is validated against the asset's assigned schema."
   },
   {
+   "name": "VOD Ads",
+   "x-displayName": "On-demand ads",
+   "description": "On-demand ads put ad breaks in your on-demand titles, filled by your ad server and your house spots, with ad-free viewing for viewers who paid.\n\n**Use it to:**\n- Set where breaks go and who fills them with `PUT /api/vod/ads/rules/default`, or for one content type with `PUT /api/vod/ads/rules/content-type/{id}`\n- See where a title's breaks would go with `GET /api/vod/ads/assets/{id}/plan`\n- Follow fill, completion and clicks with `GET /api/vod/ads/report`\n\n**Credential:** admin session (Bearer) or account secret key, with `vod: view` to read and `vod: manage` to change.\n\n**Good to know:** players get the ads through the play gate (`ads` in its answer); a viewer's ad timeline, clicks and player events are under `/vod-ads/s/{session}/`."
+  },
+  {
    "name": "Viewers",
    "x-displayName": "Viewers",
    "description": "Viewers are the public users of your apps, as your team sees them for support and access management.\n\n**Use it to:**\n- Find viewers with `GET /api/viewers` and open one, with entitlements and sessions, with `GET /api/viewers/{id}`\n- Change a viewer's groups or status with `PATCH /api/viewers/{id}`\n- Sign a viewer out everywhere or reset their two-step sign-in with `POST /api/viewers/{id}/sign-out` and `.../mfa/reset`\n\n**Credential:** admin session (Bearer) or account secret key, with `viewers: view` to read, `viewers: operate` to sign out and `viewers: manage` to change.\n\n**Good to know:** to grant paid access, use `POST /api/payments/grants`."
@@ -460,6 +465,7 @@
     "Live",
     "Radio",
     "Share",
+    "VOD Ads",
     "XMLTV"
    ]
   }
@@ -34449,6 +34455,266 @@
     }
    }
   },
+  "/api/vod/ads/ad-servers": {
+   "get": {
+    "operationId": "getVODAdsAdServers",
+    "summary": "The account's ad servers",
+    "tags": [
+     "VOD"
+    ],
+    "description": "Shared with FAST channels.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postVODAdsAdServers",
+    "summary": "Add an ad server",
+    "tags": [
+     "VOD"
+    ],
+    "description": "Body `{\"name\": \"...\", \"vendor\": \"gam\", \"tagTemplate\": \"https://...\", \"timeoutMs\": 1500}`. The VAST tag URL takes IAB macros such as `[CACHEBUSTING]`, `[BREAK_POSITION]` and `[CONTENT_ID]`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/ads/assets/{id}/plan": {
+   "get": {
+    "operationId": "getVODAdsAssetsByIDPlan",
+    "summary": "Where a title's ad breaks would go",
+    "tags": [
+     "VOD"
+    ],
+    "description": "The rule the title plays under and its breaks (position, content time, planned length). Mid-rolls are moved to the nearest segment start. `why` says why there are none: no rule on, the title is marked `adRule: none`, or no break fits.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/ads/house-candidates": {
+   "get": {
+    "operationId": "getVODAdsHouseCandidates",
+    "summary": "Library items that can be house spots",
+    "tags": [
+     "VOD"
+    ],
+    "description": "Items of two minutes or less with a playlist.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/ads/report": {
+   "get": {
+    "operationId": "getVODAdsReport",
+    "summary": "On-demand ad report",
+    "tags": [
+     "VOD"
+    ],
+    "description": "For the last `days` (1 to 90, default 7), optionally one `assetId`: plays with ads, breaks, fill rate, house share, ad server timeouts and errors, impressions, completion rate, clicks and click rate.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/ads/rules": {
+   "get": {
+    "operationId": "getVODAdsRules",
+    "summary": "On-demand ad rules",
+    "tags": [
+     "VOD"
+    ],
+    "description": "The account default and each content type's own rule: whether titles get ads, where the breaks go (pre-roll, mid-rolls at cue points or every N minutes, post-roll), the ad server, the house spots, who plays ad-free and how ads reach the player.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/ads/rules/content-type/{id}": {
+   "delete": {
+    "operationId": "deleteVODAdsRulesContentTypeByID",
+    "summary": "Back to the account default for a content type",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putVODAdsRulesContentTypeByID",
+    "summary": "Set a content type's own on-demand ad rule",
+    "tags": [
+     "VOD"
+    ],
+    "description": "The same body as the account default. A title of this content type plays under this rule instead of the default; `mode: off` keeps the content type free of ads.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/ads/rules/default": {
+   "put": {
+    "operationId": "putVODAdsRulesDefault",
+    "summary": "Set the account's on-demand ad rule",
+    "tags": [
+     "VOD"
+    ],
+    "description": "Body `{\"mode\": \"on\", \"policy\": {...}, \"adServerId\": \"...\", \"houseAds\": [{\"assetId\": \"...\"}]}`. `policy` takes `preroll`, `midroll`, `postroll`, `podMaxAds`, `maxAdSec`, `adFreeFor` (`entitlement`, `members`), `snapback`, `prerollOnResume` and `delivery` (`auto`, `stitched`, `guided`); values out of range are brought into range. New plays follow it at once. Recorded in the audit log.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/vod/epg-fill": {
    "post": {
     "operationId": "postVODEPGFill",
@@ -35861,6 +36127,88 @@
     }
    }
   },
+  "/fast/{id}/s/{sid}/ads.json": {
+   "get": {
+    "operationId": "getFastByIDSBySidAdsJson",
+    "summary": "The ads in a FAST viewer's breaks",
+    "tags": [
+     "Fast"
+    ],
+    "description": "The paid ads in the viewer's recent stitched breaks: when each plays (wall clock) and its `clickUrl`, for a player of your own.\n\n**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/fast/{id}/s/{sid}/click/{bid}/{p}": {
+   "get": {
+    "operationId": "getFastByIDSBySidClickByBidByP",
+    "summary": "A click on a FAST ad",
+    "tags": [
+     "Fast"
+    ],
+    "description": "Records the click with the break's beacons, sends the ad's click trackers, then redirects (302) to the advertiser's page.\n\n**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "bid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "p",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
   "/gfx/{versionId}/*": {
    "get": {
     "operationId": "getGfxByVersionId",
@@ -36328,6 +36676,333 @@
     "parameters": [
      {
       "name": "token",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/vod-ads/blank.vtt": {
+   "get": {
+    "operationId": "getVODAdsBlankVtt",
+    "summary": "Get VOD ads blank vtt",
+    "tags": [
+     "VOD Ads"
+    ],
+    "description": "**Credential:** none, share token or playback token",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/vod-ads/g/{assetId}/{ver}/{file}": {
+   "get": {
+    "operationId": "getVODAdsGByAssetIdByVerByFile",
+    "summary": "Get a :ver",
+    "tags": [
+     "VOD Ads"
+    ],
+    "description": "**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "assetId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "ver",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "file",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/vod-ads/g/{assetId}/{ver}/list/{b}": {
+   "get": {
+    "operationId": "getVODAdsGByAssetIdByVerListByB",
+    "summary": "One break's ads (HLS Interstitials asset list)",
+    "tags": [
+     "VOD Ads"
+    ],
+    "description": "Asked by the player when it reaches a break of a guided playlist, with `_HLS_primary_id` (or `sid`). Decided for that playback: `ASSETS` with each ad's `URI` and `DURATION`.\n\n**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "assetId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "ver",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "b",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/vod-ads/s/{sid}/{file}": {
+   "get": {
+    "operationId": "getVODAdsSBySidByFile",
+    "summary": "Get a :sid",
+    "tags": [
+     "VOD Ads"
+    ],
+    "description": "**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "file",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/vod-ads/s/{sid}/ad/{b}/{p}/{file}": {
+   "get": {
+    "operationId": "getVODAdsSBySidAdByBByPByFile",
+    "summary": "Get a :p",
+    "tags": [
+     "VOD Ads"
+    ],
+    "description": "**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "b",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "p",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "file",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/vod-ads/s/{sid}/click/{b}/{p}": {
+   "get": {
+    "operationId": "getVODAdsSBySidClickByBByP",
+    "summary": "A click on an ad",
+    "tags": [
+     "VOD Ads"
+    ],
+    "description": "Open it in a new window when the viewer clicks an ad. Volt records the click, sends the ad's click trackers with the viewer's address and player, then redirects (302) to the advertiser's page. 404 when the ad has no page.\n\n**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "b",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "p",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/vod-ads/s/{sid}/events": {
+   "post": {
+    "operationId": "postVODAdsSBySidEvents",
+    "summary": "Report player events on an ad",
+    "tags": [
+     "VOD Ads"
+    ],
+    "description": "Body `{\"events\": [{\"b\": 1, \"p\": 0, \"event\": \"pause\"}]}`, `b` the break index and `p` the ad's place in it. Events: pause, resume, mute, unmute, rewind, fullscreen, exitFullscreen, playerExpand, playerCollapse, skip, closeLinear. Volt sends the ad's trackers for them. Impressions and quarters are sent by Volt itself.\n\n**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/vod-ads/s/{sid}/seg/{b}/{p}/{track}/{n}": {
+   "get": {
+    "operationId": "getVODAdsSBySidSegByBByPByTrackByN",
+    "summary": "Get a :track",
+    "tags": [
+     "VOD Ads"
+    ],
+    "description": "**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "b",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "p",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "track",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "n",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/vod-ads/s/{sid}/timeline.json": {
+   "get": {
+    "operationId": "getVODAdsSBySidTimelineJson",
+    "summary": "A viewer's ad timeline",
+    "tags": [
+     "VOD Ads"
+    ],
+    "description": "For a stitched play (from the play gate's `ads.timelineUrl`): each break's place in the title (`contentSec`) and in the stream (`stitchedStartSec`), its length, its ads with `clickUrl`, `snapback`, and the `eventsUrl` for player events.\n\n**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "sid",
       "in": "path",
       "required": true,
       "schema": {

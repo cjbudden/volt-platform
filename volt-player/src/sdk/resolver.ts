@@ -9,6 +9,7 @@
 // ============================================================================
 import type { EventInfo, PlaylistItem, Product, Programme, Source, TrackInfo } from './types';
 import { cleanSchedule } from './schedule';
+import type { ItemAds } from './ads';
 
 /** The origin the bundle was served from, captured while the script runs. */
 const SCRIPT_ORIGIN: string | null = (() => {
@@ -55,6 +56,8 @@ export interface ResolvedItem {
   durationMs?: number | null;
   live?: boolean;
   kind?: string;
+  /** On-demand ads for this play (volt-app services/vodAds), when the gate gave any. */
+  ads?: ItemAds | null;
 }
 
 /**
@@ -62,13 +65,15 @@ export interface ResolvedItem {
  * puts it in the playback token, so its decision, the beacons and the CDN logs
  * join on one id.
  */
-export async function resolveAsset(apiBase: string, appKey: string, assetId: string, viewerToken?: string | null, sid?: string | null): Promise<ResolvedItem> {
+export async function resolveAsset(apiBase: string, appKey: string, assetId: string, viewerToken?: string | null, sid?: string | null,
+  ads?: { delivery?: 'auto' | 'stitched' | 'guided'; caps?: string[] }): Promise<ResolvedItem> {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   // A signed-in viewer: purchases and memberships are checked against them.
   if (viewerToken) headers.authorization = `Bearer ${viewerToken}`;
   const r = await fetch(`${apiBase}/api/availability`, {
     method: 'POST', credentials: 'omit', headers,
-    body: JSON.stringify({ appKey, assetId, ...(sid ? { sid } : {}) }),
+    // How on-demand ads should arrive, and what this player can do (guided needs HLS Interstitials).
+    body: JSON.stringify({ appKey, assetId, ...(sid ? { sid } : {}), ...(ads ? { adDelivery: ads.delivery ?? 'auto', caps: ads.caps ?? [] } : {}) }),
   });
   const j: any = await r.json().catch(() => ({}));
   if (!r.ok || j.available === false) {
@@ -82,6 +87,7 @@ export async function resolveAsset(apiBase: string, appKey: string, assetId: str
     token: j.playbackToken ?? null,
     title: m.title ?? null, description: m.description ?? null, artworkUrl: m.artworkUrl ?? null,
     durationMs: m.durationMs ?? null, live: m.live ?? undefined, kind: m.kind,
+    ads: j.ads && (j.ads.delivery === 'stitched' || j.ads.delivery === 'guided') ? { delivery: j.ads.delivery, sessionId: j.ads.sessionId ?? null, timelineUrl: j.ads.timelineUrl ?? null } : null,
   };
 }
 
@@ -128,6 +134,7 @@ export function mergeResolved(item: PlaylistItem, r: ResolvedItem): PlaylistItem
     artworkUrl: item.artworkUrl ?? r.artworkUrl ?? null,
     durationMs: item.durationMs ?? r.durationMs ?? null,
     live: item.live ?? r.live,
+    ads: r.ads ?? item.ads ?? null,
   };
 }
 

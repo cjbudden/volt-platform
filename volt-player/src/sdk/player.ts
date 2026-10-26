@@ -27,6 +27,7 @@ import { activeAt, adBreakAt, fromDashRegion, fromHlsRegions, fromNativeCues, me
 import type { TriggerReport } from './engine';
 import { errorCode, errorStep } from './engine';
 import { CmcdSender, PlayAttempt, deviceModel, identityKeys } from './cmcd';
+import { VodAds } from './ads';
 import { StatsPanel, bindDebugMenu, combineProbes, mediaProbe, SDK_VERSION, type StatsSample } from './stats';
 
 const EPG_REFRESH_MS = 5 * 60_000;
@@ -43,7 +44,7 @@ export function initialState(): PlayerState {
     programme: null, nextProgramme: null, schedule: [], canStartOver: false,
     volume: 1, muted: false, rate: 1,
     qualities: [], quality: 'auto', activeQuality: null, textTracks: [], textTrack: null, audioTracks: [], audioTrack: null,
-    items: [], index: -1, item: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null,
+    items: [], index: -1, item: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null, ad: null,
     nowPlaying: null, history: [], nextTrack: null,
     cast: { available: false, state: 'none', device: null },
     airplay: { available: false, active: false },
@@ -71,6 +72,8 @@ export class VoltPlayer {
   private tick: ReturnType<typeof setInterval> | null = null;
   private timers: Array<ReturnType<typeof setInterval>> = [];
   private beacons: Beacons | null = null;
+  /** On-demand ads of the item playing (sdk/ads.ts): the ad on screen, snapback, clicks. */
+  private vodAds: VodAds | null = null;
   /** CMCD v2 (sdk/cmcd.ts): the play attempt of the item now loading or playing. */
   private attempt: PlayAttempt | null = null;
   private caster: Caster | null = null;
@@ -185,6 +188,7 @@ export class VoltPlayer {
     this.attempt = null;
     this.engine.attempt = null;
     this.beacons?.destroy();
+    this.vodAds?.dispose();
     if (this.gfxTimer) clearTimeout(this.gfxTimer);
     this.overlay?.destroy();
     if (this.tick) clearInterval(this.tick);
@@ -544,6 +548,8 @@ export class VoltPlayer {
     const seq = ++this.loadSeq;
     this.beacons?.destroy();
     this.beacons = null;
+    this.vodAds?.dispose();
+    this.vodAds = null;
     this.attempt?.close();
     this.attempt = null;
     this.engine.attempt = null;
@@ -564,7 +570,9 @@ export class VoltPlayer {
       if (item.assetId && !hasSource(item.source)) {
         if (!this.o.appKey) throw new GateError(401, 'This player needs an app key to play asset ids.', null);
         attempt?.spanStart('entitlement');
-        const r = await resolveAsset(this.api, this.o.appKey, item.assetId, this.o.viewerToken, attempt?.sid);
+        // On-demand ads: guided (HLS Interstitials) where this player plays HLS natively on Apple, stitched otherwise.
+        const caps = isApple() && this.o.airplay !== false && !!this.media.canPlayType?.('application/vnd.apple.mpegurl') ? ['hls-interstitials'] : [];
+        const r = await resolveAsset(this.api, this.o.appKey, item.assetId, this.o.viewerToken, attempt?.sid, { delivery: 'auto', caps });
         attempt?.spanEnd('entitlement');
         if (seq !== this.loadSeq) return;
         item = mergeResolved(item, r);
@@ -592,6 +600,7 @@ export class VoltPlayer {
       const lang = store.get('textLang');
       if (lang) { const id = this.engine.textByLang(lang); if (id) this.engine.setTextTrack(id); }
       this.startBeacons(item);
+      if (item.ads) this.vodAds = new VodAds(this.media, this.api, item.ads, (ad) => this.set({ ad }), this.stage);
       if (this.caster?.connected) await this.castCurrent();
       else if (autoplay) this.cmd.play();
     } catch (e: any) {
@@ -859,6 +868,7 @@ export class VoltPlayer {
       this.cmd.seek(sk.to + 0.05);
       this.set({ skip: null });
     },
+    adClick: () => { this.vodAds?.click(); },
     cancelUpNext: () => {
       const g = this.s.graphics.find((x) => x.graphic === 'up-next');
       this.dismissedFor = g ? `g:${g.id}` : this.s.programme ? `p:${this.s.programme.id}` : `i:${this.s.index}`;

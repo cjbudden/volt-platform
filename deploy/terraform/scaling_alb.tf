@@ -37,6 +37,8 @@ locals {
     # /fast/*: the FAST ad stitcher's per-viewer playlists (modules/fast.ts)
     # /channel/*/v/*, /event/*/v/*: variant manifests (services/variantManifest.ts)
     ["/api/public/*", "/gfx/*", "/fast/*", "/channel/*/v/*", "/event/*/v/*"],
+    # /vod-ads/*: on-demand ads, a viewer's playlists, ad segments, timeline, clicks (modules/vodAds.ts)
+    ["/vod-ads/*"],
     # /api/cmcd: players' CMCD v2 event reports (modules/cmcd.ts)
     # /api/journey: apps' journey to play events (modules/journey.ts)
     ["/api/cmcd", "/api/cmcd/*", "/api/journey", "/api/journey/*"],

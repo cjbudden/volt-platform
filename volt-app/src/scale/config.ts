@@ -168,9 +168,11 @@ export const scaleConfig = {
    * FAST ad stitcher's per-viewer playlists (modules/fast.ts fastPublicRouter).
    * /channel/ and /event/ carry only the variant manifests the CDN sends
    * replaced viewers to (/<kind>/<id>/v/<key>/, services/variantManifest.ts).
+   * /vod-ads/ is on-demand ads: a viewer's stitched or guided playlists, ad
+   * segment redirects (the beacons), the ad timeline and clicks (modules/vodAds.ts).
    */
   publicPrefixes: (process.env.PUBLIC_PATH_PREFIXES ??
-    '/health,/live/,/share/,/api/share/,/xmltv/,/img/,/library/,/player,/clips/,/gfx/,/fast/,/channel/,/event/,' +
+    '/health,/live/,/share/,/api/share/,/xmltv/,/img/,/library/,/player,/clips/,/gfx/,/fast/,/vod-ads/,/channel/,/event/,' +
     '/api/public/,/api/availability,/api/access,/api/player/,/api/analytics/beacon,/api/cmcd,/api/journey,/api/payments/verify')
     .split(',').map((s) => s.trim()).filter(Boolean),
 };

@@ -41,6 +41,7 @@ import { tusRouter } from './modules/tus';
 import { paymentsRouter, paymentsAppRouter, paymentsWebhookRouter } from './modules/payments';
 import { epgRouter } from './modules/epg';
 import { fastRouter, fastPlayoutRouter, fastPublicRouter } from './modules/fast';
+import { vodAdsRouter, vodAdsPublicRouter } from './modules/vodAds';
 import { xmltvAdminRouter, xmltvPublicRouter } from './modules/xmltv';
 import { xmltvImportRouter } from './modules/xmltvImport';
 import { appsRouter, availabilityRouter, accessRouter } from './modules/apps';
@@ -409,6 +410,7 @@ export function createServer() {
   // and what retention will do to it next. NOT /api/media — that prefix is the
   // thumbnailer's ingest callback and belongs to a different concern entirely.
   app.use('/api/storage', storageRouter);
+  app.use('/api/vod/ads', vodAdsRouter);                // on-demand ad rules, plans, report (before vodRouter's /:id)
   app.use('/api/vod', reframeRouter);                    // social formats per asset: /:id/reframe... (modules/reframe.ts)
   app.use('/api/vod', vodImageRouter);                   // the image that represents an asset (before vodRouter's /:id)
   app.use('/api/vod', vodRouter);                        // derived VOD assets + metadata
@@ -435,6 +437,7 @@ export function createServer() {
   app.use('/api/fast-playout', fastPlayoutRouter);
   app.use('/api/fast', fastRouter);
   app.use('/fast', fastPublicRouter);
+  app.use('/vod-ads', vodAdsPublicRouter);              // on-demand ads: a viewer's stitched or guided playlists, beacons, clicks (public)
   // Icecast asks this before admitting a listener; it is the on-air gate now
   // that the control plane is not the one holding the socket. Mounted BEFORE
   // the authed radio router because the caller is the relay, not a user.

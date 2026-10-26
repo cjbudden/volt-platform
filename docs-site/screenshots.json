@@ -288,6 +288,13 @@
       "alt": "The Payments page: four provider cards, the products made from your access rules with each provider's id, and the viewer look-up"
     },
     {
+      "name": "on-demand-ads",
+      "guide": "guides/on-demand-ads.md",
+      "path": "/on-demand-ads",
+      "waitFor": "h1",
+      "alt": "The On-demand ads page: the last seven days at the top, then the account default with a pre-roll and mid-rolls every 10 minutes, house spots and the ad server"
+    },
+    {
       "name": "social-accounts",
       "guide": "guides/social-accounts.md",
       "path": "/social",

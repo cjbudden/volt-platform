@@ -235,7 +235,8 @@ export async function onDemandAccess(assetId: string, geo?: string, appId?: stri
   if ((s.access === 'entitled' || s.access === 'paid') && !hasEntitlement) {
     return { allowed: false, reason: s.access === 'paid' ? 'payment required' : 'entitlement required', paywall: s.paywall ?? null };
   }
-  return { allowed: true };
+  // A viewer let in by what they paid for: on-demand ads (services/vodAds) make them ad-free.
+  return (s.access === 'entitled' || s.access === 'paid') ? { allowed: true, rule: { allowed: true, via: 'entitlement' } as AccessOutcome } : { allowed: true };
 }
 
 /**

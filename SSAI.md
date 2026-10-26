@@ -1,7 +1,9 @@
 # Server-side ads for FAST and VOD
 
-**Status: FAST between-content scheduling built 26 Oct 2026 (section 3). FAST options in section 4 and VOD SSAI
-(sections 5 to 7) are designed, not built.** Companion to `volt-app/docs/DESIGN_fast_channels.md`, which covers the playout, the
+**Status: FAST between-content scheduling built 26 Oct 2026 (section 3). VOD SSAI and SGAI first slice built
+26 Oct 2026 (build queue 1.14k, section 9): rules, planning, stitched HLS, guided HLS Interstitials, beacons,
+clicks, the ad timeline and snapback. FAST options in section 4, VOD DASH, catch-up DAR and VMAP are designed,
+not built.** Companion to `volt-app/docs/DESIGN_fast_channels.md`, which covers the playout, the
 stitcher, the VAST client, house fill and beacons that this builds on.
 
 ## 1. What we offer
@@ -195,6 +197,9 @@ discontinuity). Captions: empty WebVTT for ad parts so subtitle tracks stay cont
 
 ## 8. Decisions needed
 
+Decided 26 Oct 2026 (Christian): VOD delivery is **guided first** where the player supports it, stitched
+otherwise; **snapback on** by default; **no ads offline** (downloads play without ads). Still open:
+
 1. **Inventory split:** do we expect to syndicate to FAST platforms with a provider/distributor split from day one?
    If yes, item 2's SCTE-35 work moves ahead of bumpers.
 2. **VOD default delivery:** SGAI first with stitched fallback (recommended), or stitched only to start?
@@ -202,3 +207,24 @@ discontinuity). Captions: empty WebVTT for ad parts so subtitle tracks stay cont
 4. **Downloads:** no ads, or ads baked in at download?
 5. **Earned between breaks as the default** for new FAST channels (recommended for VOD-built channels), or keep
    fixed as the default?
+
+## 9. VOD: what is built (26 Oct 2026, build queue 1.14k)
+
+| Piece | Where | Notes |
+|---|---|---|
+| Ad rules: account default, one per content type | `vod_ad_rules` (0086), `modules/vodAds.ts`, console **Admin > On-demand ads** | pre, mid (cue points or every N minutes, first-after, end guard, min gap, max), post; ad server; house spots; ad-free for paid (default) or members; snapback; delivery auto, stitched, guided. A title opts out with `adRule: none`, or keeps pre and post only with `no_mid` |
+| Break planning | `services/vodAds/plan.ts` | mid-rolls on the nearest segment start, so stitched and guided put ads in the same places |
+| Decisions | `services/vodAds/index.ts` `decideVodBreak` | FAST's engine as is: VAST with wrappers and one budget, pod fill, house spots, conditioning cache, `ad.condition`; no slate (nothing waits on a clock) |
+| Stitched HLS | `/vod-ads/s/<session>/...` | all breaks decided in parallel at the play gate; the playlist waits at most the budget; DISCONTINUITY each side of a pod and between its items; subtitles kept in step with blank WebVTT; I-frame playlists dropped; DASH not offered while ads apply |
+| Guided HLS (Interstitials) | `/vod-ads/g/<asset>/<version>/...` | shared and CDN-cacheable per asset and rule version; asset list decided per playback (`_HLS_primary_id`); each ad is its own small stream through the session |
+| Server-side beacons | `segmentRedirect` | ad segments go through `/vod-ads/s/<session>/seg/...` (302 to the CDN): impression and start on the first, a quartile when a later segment starts after it, complete on the last; works for any player, ours or not |
+| Player events and clicks | `POST .../events`, `GET .../click/<b>/<p>` | pause, mute and the rest sent on the viewer's behalf; a click is recorded, its ClickTracking (wrappers included) sent with X-Device-IP and X-Device-User-Agent, then 302 to the ClickThrough. FAST got the same: `/fast/<id>/s/<sid>/ads.json` and `.../click/<break>/<pod>` |
+| Play gate | `modules/apps.ts` | `adDelivery` and `caps` in, `ads {delivery, sessionId, timelineUrl}` out; a viewer let in by an entitlement is ad-free |
+| SDK | `volt-player/src/sdk/ads.ts` | the ad on screen ("Ad 1 of 2 · 0:12", Learn more), snapback, no seeking inside an ad, watched breaks jumped over, content time, `state.ad`, `commands.adClick()`; asks for guided only when it plays HLS natively on Apple |
+| Report | `GET /api/vod/ads/report` | plays with ads, fill, house share, timeouts, impressions, completion, clicks and click rate |
+
+**Not yet (queued as 1.14k-2 to 1.14k-5):** guided playback in the SDK's own engine (Shaka interstitials) and
+DASH (multi-Period stitch); catch-up dynamic ad replacement (section 5.2); VMAP from the ad server; ad markers
+on the built-in skins' scrubber and the overlay's words in the player's string table; repeat player events
+(each event is sent once per ad); a real ad server and real devices (Safari, Apple TV) are Christian's to try.
+

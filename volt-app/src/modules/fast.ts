@@ -7,7 +7,10 @@
  *                           ad report.
  *   /api/fast-playout/...   the playout process (ingest token): the timeline.
  *   /fast/<id>/s/<sid>/...  the session stitcher (public): a viewer's own
- *                           playlists with that viewer's ads in each break.
+ *                           playlists with that viewer's ads in each break,
+ *                           the ads in them (ads.json) and a click on one
+ *                           (click/<break>/<pod>: trackers sent, then on to
+ *                           the advertiser's page).
  *
  * A FAST channel is an ordinary channel row with origin = 'playlist', so the
  * guide, graphics, player, share links and reports all work on it as is.
@@ -36,7 +39,7 @@ import { stitchHls, type SessionState, type PodRendition } from '../services/fas
 import { isTimeZone } from '../services/epgRepeat';
 import { sessionStore } from '../services/fast/sessionStore';
 import { adSchedule, dueBeacons, playheadOf, type BeaconState, type ScheduledAd } from '../services/fast/beacons';
-import { sendBeacons, beaconReport, breakBeacons } from '../services/fast/beaconSender';
+import { sendBeacons, beaconReport, breakBeacons, fetchTracker } from '../services/fast/beaconSender';
 import { fastConfig, channelPlaylistUrl, readKey, readChannelPlaylist, assetUrlBase } from '../services/fast/media';
 
 export const fastRouter = Router();
@@ -627,6 +630,67 @@ async function podSegments(plan: any, track: string, slateMaster: string | null)
 }
 
 export const fastPublicRouter = Router();
+
+/** The session whose decisions a viewer's stitched playlist uses (one per channel when the channel decides once for everyone). */
+async function decisionSidFor(channelId: string, sid: string) {
+  const ads = await adsFor(channelId);
+  return ads.scope === 'channel' ? `channel-${channelId}` : sid;
+}
+
+/**
+ * THE ADS IN A VIEWER'S BREAKS, for the player: when each paid ad plays (wall
+ * clock, the playlist's PROGRAM-DATE-TIME) and where a click on it goes.
+ * A server cannot see a click, so this is how the player learns which ad is
+ * on screen and what to open.
+ */
+fastPublicRouter.get('/:id/s/:sid/ads.json', asyncHandler(async (req, res) => {
+  const id = String(req.params.id), sid = String(req.params.sid);
+  if (!/^[0-9a-f-]{36}$/i.test(id) || !/^[A-Za-z0-9_-]{8,80}$/.test(sid)) throw notFound();
+  res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Cache-Control', 'no-store');
+  const dsid = await decisionSidFor(id, sid);
+  const recent = await query<any>(
+    `SELECT id, starts_at, duration_ms FROM stream_breaks WHERE channel_id = $1 AND status = 'scheduled'
+        AND starts_at BETWEEN now() - interval '15 minutes' AND now() + interval '2 minutes' ORDER BY starts_at`, [id]);
+  const out = [];
+  for (const b of recent) {
+    const plan = await sessionStore.pod<any>(dsid, b.id);
+    if (!plan?.items) continue;
+    const startMs = new Date(b.starts_at).getTime();
+    let t = startMs;
+    const ads = [];
+    for (let p = 0; p < plan.items.length; p++) {
+      const it = plan.items[p];
+      if (it.kind === 'ad') ads.push({ podIndex: p, title: it.title ?? null, startsAt: new Date(t).toISOString(), durationSec: it.durationSec,
+        clickUrl: it.clickThrough ? `/fast/${id}/s/${sid}/click/${b.id}/${p}` : null });
+      t += it.durationSec * 1000;
+    }
+    out.push({ breakId: b.id, startsAt: b.starts_at, durationSec: Number(b.duration_ms) / 1000, ads });
+  }
+  res.json({ breaks: out });
+}));
+
+/** A click on a stitched ad: recorded with the beacons, its click trackers sent, then on to the advertiser. */
+fastPublicRouter.get('/:id/s/:sid/click/:bid/:p', asyncHandler(async (req, res) => {
+  const id = String(req.params.id), sid = String(req.params.sid), bid = String(req.params.bid), p = Number(req.params.p);
+  if (!/^[0-9a-f-]{36}$/i.test(id) || !/^[A-Za-z0-9_-]{8,80}$/.test(sid) || !/^[0-9a-f-]{36}$/i.test(bid) || !Number.isInteger(p) || p < 0 || p > 100) throw notFound();
+  const plan = await sessionStore.pod<any>(await decisionSidFor(id, sid), bid);
+  const it = plan?.items?.[p];
+  if (!it || it.kind !== 'ad' || !it.clickThrough || !/^https?:\/\//i.test(it.clickThrough)) throw notFound('This ad has no page to open');
+  const ctx = await sessionStore.context(sid, () => ({ channelId: id, ip: req.ip, userAgent: req.header('user-agent') ?? null }));
+  const urls: (string | null)[] = (it.clickTracking ?? []).length ? it.clickTracking : [null];
+  void Promise.all(urls.map(async (url, urlIndex) => {
+    const claimed = await one<{ id: string }>(
+      `INSERT INTO ad_beacons (channel_id, break_id, session_id, pod_index, ad_id, creative_key, event, url_index, url, due_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'click',$7,$8, now()) ON CONFLICT (session_id, break_id, pod_index, event, url_index) DO NOTHING RETURNING id`,
+      [id, bid, sid, p, it.adId, it.creativeKey, url ? urlIndex : -1, url ?? '']).catch(() => null);
+    if (!claimed || !url) return;
+    const t0 = Date.now();
+    const r = await fetchTracker(url, { ip: (ctx as any).ip ?? null, userAgent: (ctx as any).userAgent ?? null });
+    await query(`UPDATE ad_beacons SET status = $2, ok = $3, error = $4, elapsed_ms = $5, sent_at = now() WHERE id = $1`, [claimed.id, r.status, r.error == null, r.error, Date.now() - t0]).catch(() => null);
+  })).catch(() => null);
+  res.setHeader('Cache-Control', 'no-store');
+  res.redirect(302, it.clickThrough);
+}));
 fastPublicRouter.get('/:id/s/:sid/:file', asyncHandler(async (req, res) => {
   const id = String(req.params.id), sid = String(req.params.sid), file = String(req.params.file);
   if (!/^[0-9a-f-]{36}$/i.test(id) || !/^[A-Za-z0-9_-]{8,80}$/.test(sid) || !/^(master|v\d+|audio)\.m3u8$/.test(file)) throw notFound();

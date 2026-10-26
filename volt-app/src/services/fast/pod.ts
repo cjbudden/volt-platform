@@ -43,7 +43,9 @@ export interface Conditioned {
 }
 
 export type PodItem =
-  | { kind: 'ad'; adId: string; creativeKey: string; assetId: string; durationSec: number; title?: string; impressions: string[]; tracking: Record<string, string[]> }
+  | { kind: 'ad'; adId: string; creativeKey: string; assetId: string; durationSec: number; title?: string; impressions: string[]; tracking: Record<string, string[]>;
+      /** Where a click on the ad goes, and the pixels a click owes (vast.ts). */
+      clickThrough?: string | null; clickTracking?: string[] }
   | { kind: 'house'; assetId: string; durationSec: number; title: string }
   | { kind: 'slate'; durationSec: number };
 
@@ -109,7 +111,8 @@ export function fillBreak(i: FillInput): PodPlan {
         continue;
       }
       if (c.durationSec > left + tol) { skipped.push({ adId: ad.id, reason: 'too-long' }); continue; }
-      items.push({ kind: 'ad', adId: ad.id, creativeKey: ad.creativeKey, assetId: c.assetId, durationSec: c.durationSec, title: ad.title, impressions: ad.impressions, tracking: ad.tracking });
+      items.push({ kind: 'ad', adId: ad.id, creativeKey: ad.creativeKey, assetId: c.assetId, durationSec: c.durationSec, title: ad.title, impressions: ad.impressions, tracking: ad.tracking,
+        clickThrough: ad.clickThrough ?? null, clickTracking: ad.clickTracking ?? [] });
       usedCreatives.add(ad.creativeKey);
       if (sepKey) usedSeparation.add(sepKey);
       paid++;

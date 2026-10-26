@@ -46,6 +46,8 @@ export interface PlaylistItem {
   live?: boolean;
   /** The playback token for beacons when the caller already has one (share page). */
   playbackToken?: string | null;
+  /** On-demand ads the play gate gave this item (sdk/ads.ts). */
+  ads?: import('./ads').ItemAds | null;
   meta?: Record<string, unknown>;
 }
 
@@ -245,6 +247,8 @@ export interface PlayerState {
    * player draws no graphics of its own and offers no Up next.
    */
   adBreak: { id: string; endsAt: number | null } | null;
+  /** An on-demand ad on screen now (sdk/ads.ts): which of the break's ads, time left, whether it has a page to open. */
+  ad: import('./ads').AdState | null;
 
   /** Audio services. */
   nowPlaying: TrackInfo | null;
@@ -280,6 +284,8 @@ export interface Commands {
   seek(seconds: number): void;
   seekBy(delta: number): void;
   goLive(): void;
+  /** The on-demand ad on screen: open its page (Volt records the click and sends its trackers). */
+  adClick(): void;
   /** Back to the start of the current programme (EPG) when the DVR window reaches it. */
   startOver(): void;
   setQuality(id: string | 'auto'): void;

@@ -5859,6 +5859,87 @@
   "group": "/api/vod"
  },
  {
+  "method": "GET",
+  "path": "/api/vod/ads/ad-servers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/ads/ad-servers",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/ads/assets/:id/plan",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/ads/house-candidates",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/ads/report",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/ads/rules",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/vod/ads/rules/content-type/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/vod/ads/rules/content-type/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/vod/ads/rules/default",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
   "method": "POST",
   "path": "/api/vod/epg-fill",
   "api": "admin",
@@ -6112,6 +6193,24 @@
  },
  {
   "method": "GET",
+  "path": "/fast/:id/s/:sid/ads.json",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/fast"
+ },
+ {
+  "method": "GET",
+  "path": "/fast/:id/s/:sid/click/:bid/:p",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/fast"
+ },
+ {
+  "method": "GET",
   "path": "/gfx/:versionId/*",
   "api": "delivery",
   "credential": "none, share token or playback token",
@@ -6235,6 +6334,87 @@
   "access": "preview / internal",
   "viewerTier": false,
   "group": "/social-sandbox"
+ },
+ {
+  "method": "GET",
+  "path": "/vod-ads/blank.vtt",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/vod-ads"
+ },
+ {
+  "method": "GET",
+  "path": "/vod-ads/g/:assetId/:ver/:file",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/vod-ads"
+ },
+ {
+  "method": "GET",
+  "path": "/vod-ads/g/:assetId/:ver/list/:b",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/vod-ads"
+ },
+ {
+  "method": "GET",
+  "path": "/vod-ads/s/:sid/:file",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/vod-ads"
+ },
+ {
+  "method": "GET",
+  "path": "/vod-ads/s/:sid/ad/:b/:p/:file",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/vod-ads"
+ },
+ {
+  "method": "GET",
+  "path": "/vod-ads/s/:sid/click/:b/:p",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/vod-ads"
+ },
+ {
+  "method": "POST",
+  "path": "/vod-ads/s/:sid/events",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/vod-ads"
+ },
+ {
+  "method": "GET",
+  "path": "/vod-ads/s/:sid/seg/:b/:p/:track/:n",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/vod-ads"
+ },
+ {
+  "method": "GET",
+  "path": "/vod-ads/s/:sid/timeline.json",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/vod-ads"
  },
  {
   "method": "GET",

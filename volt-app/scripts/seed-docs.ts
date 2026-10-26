@@ -349,6 +349,21 @@ async function seedAccountSections() {
   await query(`DELETE FROM publish_targets WHERE account_id=$1 AND mode='sandbox'`, [ACCOUNT]);
   await addSandbox(ACCOUNT, ADMIN, 'youtube', 'Example Broadcaster');
 
+  // On-demand ads (build queue 1.14k): the account default on, an ad server and
+  // a house promo, so the guide shows a set-up page rather than the empty one.
+  const PROMO = '6b1f0d2e-7a3c-4e5f-9a1b-2c3d4e5f6a01', ADSRV = '6b1f0d2e-7a3c-4e5f-9a1b-2c3d4e5f6a02';
+  await query(
+    `INSERT INTO vod_assets(id, account_id, source_kind, kind, title, master_key, start_epoch_ms, end_epoch_ms, duration_ms, metadata, created_at)
+     VALUES ($1,$2,'upload','clip','Station promo',$3,0,20000,20000,'{"title":"Station promo"}'::jsonb, now() - interval '5 days')
+     ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title`, [PROMO, ACCOUNT, `/clips/vod/${PROMO}/master.m3u8`]);
+  await query(
+    `INSERT INTO ad_servers(id, account_id, name, vendor, tag_template) VALUES ($1,$2,'Example ad server','vast','https://ads.example.com/vast?pod=[BREAK_POSITION]&dur=[BREAK_DURATION]&cb=[CACHEBUSTING]')
+     ON CONFLICT (id) DO NOTHING`, [ADSRV, ACCOUNT]);
+  await query(
+    `INSERT INTO vod_ad_rules(account_id, schema_id, mode, policy, ad_server_id, house_ads) VALUES ($1, NULL, 'on', '{}'::jsonb, $2, $3::jsonb)
+     ON CONFLICT (account_id) WHERE schema_id IS NULL DO UPDATE SET mode='on', ad_server_id=EXCLUDED.ad_server_id, house_ads=EXCLUDED.house_ads`,
+    [ACCOUNT, ADSRV, JSON.stringify([{ assetId: PROMO }])]);
+
   // Payments: a month pass on Sport One, and a viewer who bought it elsewhere.
   const term = { kind: 'period', count: 1, unit: 'month', priceCents: 999, currency: 'AUD', productKey: 'sport-month', name: 'Sport One monthly pass' };
   await query(

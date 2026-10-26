@@ -10,7 +10,8 @@
 //  WHAT THIS MODULE DOES, all of it pure apart from the injected fetch:
 //    expandTag     fill the tag URL's macros for one break and one viewer
 //    parseVast     VAST XML -> ads (InLine or Wrapper), creatives, media files,
-//                  impressions, quartile trackers, error URLs
+//                  impressions, quartile trackers, click-through and click
+//                  trackers, error URLs
 //    resolve       follow Wrappers to the InLine (depth limit, one overall
 //                  time budget), merging each wrapper's trackers into the ad
 //    errorUrl      fill [ERRORCODE] for the error pixels we owe the server
@@ -50,6 +51,12 @@ export interface VastAd {
   tracking: Record<string, string[]>;
   errors: string[];
   clickThrough?: string | null;
+  /**
+   * <VideoClicks><ClickTracking>: pixels owed when a viewer clicks the ad.
+   * A server cannot see a click; the player reports it (the click routes) and
+   * the server then sends these. Wrappers add their own, merged like the rest.
+   */
+  clickTracking?: string[];
   /** Wrapper only: where the next VAST document is. */
   wrapperUri?: string | null;
 }
@@ -184,6 +191,7 @@ export function parseVast(xml: string): VastDoc {
       tracking,
       errors: urls(kids(body, 'Error')),
       clickThrough: text(kid(kid(linear, 'VideoClicks'), 'ClickThrough')) || null,
+      clickTracking: urls(kids(kid(linear, 'VideoClicks'), 'ClickTracking')),
       wrapperUri: wrapper ? text(kid(wrapper, 'VASTAdTagURI')) || null : null,
     });
   }, (attrs) => { version = attrs.version ?? ''; });
@@ -238,11 +246,12 @@ export async function resolve(tagUrl: string, fetcher: Fetcher, opts: { budgetMs
     }
   }
 
-  async function follow(ad: VastAd, depth: number, inherited: { impressions: string[]; tracking: Record<string, string[]>; errors: string[] }): Promise<VastAd[]> {
+  async function follow(ad: VastAd, depth: number, inherited: { impressions: string[]; tracking: Record<string, string[]>; errors: string[]; clickTracking: string[] }): Promise<VastAd[]> {
     const merged = {
       impressions: [...inherited.impressions, ...ad.impressions],
       tracking: mergeTracking(inherited.tracking, ad.tracking),
       errors: [...inherited.errors, ...ad.errors],
+      clickTracking: [...inherited.clickTracking, ...(ad.clickTracking ?? [])],
     };
     if (!ad.wrapperUri) return [{ ...ad, ...merged }];
     if (depth >= maxDepth) { problems.push({ code: VAST_ERR.WRAPPER_LIMIT, message: `More than ${maxDepth} wrappers`, adId: ad.id, errorUrls: merged.errors }); return []; }
@@ -266,7 +275,7 @@ export async function resolve(tagUrl: string, fetcher: Fetcher, opts: { budgetMs
   // pod ads in sequence order, then buffet ads
   const ordered = [...top.ads].sort((a, b) => (a.sequence ?? 1e9) - (b.sequence ?? 1e9));
   const ads: VastAd[] = [];
-  for (const a of ordered) ads.push(...(await follow(a, 0, { impressions: [], tracking: {}, errors: [] })));
+  for (const a of ordered) ads.push(...(await follow(a, 0, { impressions: [], tracking: {}, errors: [], clickTracking: [] })));
   if (!top.ads.length && top.errors.length) problems.push({ code: VAST_ERR.WRAPPER_NO_ADS, message: 'No ads', errorUrls: top.errors });
   return { ads, problems, elapsedMs: now() - t0, requests };
 }
