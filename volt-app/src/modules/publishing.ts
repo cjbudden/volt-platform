@@ -18,7 +18,7 @@ import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, f
  * The platform push, account linking (OAuth) and view sync are in
  * services/social and modules/social.ts (/api/social).
  */
-const PLATFORMS = ['portal', 'youtube', 'facebook', 'x', 'tiktok', 'dailymotion', 'instagram'] as const;
+const PLATFORMS = ['portal', 'youtube', 'facebook', 'x', 'tiktok', 'dailymotion', 'instagram', 'threads'] as const;
 
 // ---- publish targets (config) -------------------------------------------
 export const publishTargetsRouter = Router();
@@ -28,7 +28,7 @@ const PUBLISH_TARGETS_LIST = defineList({
   path: '/api/publish-targets',
   fields: {
     id: { sql: 'id', type: 'uuid' },
-    platform: { sql: 'platform', type: 'string', doc: 'portal, youtube, facebook, x, tiktok, dailymotion or instagram' },
+    platform: { sql: 'platform', type: 'string', doc: 'portal, youtube, facebook, x, tiktok, dailymotion, instagram or threads' },
     name: { sql: 'name', type: 'string' },
     external_account: { sql: 'external_account', type: 'string' },
     enabled: { sql: 'enabled', type: 'boolean' },

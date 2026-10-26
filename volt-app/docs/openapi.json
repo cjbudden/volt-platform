@@ -245,7 +245,7 @@
   {
    "name": "Publish Targets",
    "x-displayName": "Publish targets",
-   "description": "Publish targets are the destinations your VOD assets can be sent to, such as linked YouTube, Facebook, Instagram, X, TikTok or Dailymotion accounts and your portal.\n\n**Use it to:**\n- List configured targets with `GET /api/publish-targets`\n- Add a target with `POST /api/publish-targets`\n- Rename, change or remove a target with `PATCH /api/publish-targets/{id}` and `DELETE /api/publish-targets/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: manage` to change.\n\n**Good to know:** to link a social account through the platform's own sign-in, use `POST /api/social/connect/{platform}`."
+   "description": "Publish targets are the destinations your VOD assets can be sent to, such as linked YouTube, Facebook, Instagram, Threads, X, TikTok or Dailymotion accounts and your portal.\n\n**Use it to:**\n- List configured targets with `GET /api/publish-targets`\n- Add a target with `POST /api/publish-targets`\n- Rename, change or remove a target with `PATCH /api/publish-targets/{id}` and `DELETE /api/publish-targets/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: manage` to change.\n\n**Good to know:** to link a social account through the platform's own sign-in, use `POST /api/social/connect/{platform}`."
   },
   {
    "name": "Publishing Rules",
@@ -293,7 +293,7 @@
   {
    "name": "Social",
    "x-displayName": "Social publishing",
-   "description": "Social publishing sends your VOD assets to linked social accounts and tracks each post.\n\n**Use it to:**\n- See which platforms are available with `GET /api/social/platforms` and link an account with `POST /api/social/connect/{platform}`\n- Publish an asset to one or more accounts with `POST /api/social/publish/{assetId}` (prefill from `GET /api/social/publish/{assetId}/defaults`)\n- Publish an Image Library picture as an Instagram feed post with `POST /api/social/publish-image/{fileId}`, after checking the account's 24 hour publishing limit with `GET /api/social/accounts/{id}/publishing-limit`\n- Follow, retry or take down posts with `GET /api/social/publications` and the `retry` and `remove` requests\n- Refresh view counts (and likes and follower counts, where the platform gives them) with `POST /api/social/sync-views`\n\n**Credential:** admin session (Bearer) or account secret key, with `vod: view` to read, `vod: operate` to publish or retry and `vod: manage` to link, remove or sync.\n\n**Good to know:** a sandbox account (`POST /api/social/sandbox/{platform}`) behaves like a platform without posting, for testing."
+   "description": "Social publishing sends your VOD assets to linked social accounts and tracks each post.\n\n**Use it to:**\n- See which platforms are available with `GET /api/social/platforms` and link an account with `POST /api/social/connect/{platform}`\n- Publish an asset to one or more accounts with `POST /api/social/publish/{assetId}` (prefill from `GET /api/social/publish/{assetId}/defaults`)\n- Publish an Image Library picture as an Instagram feed post or a Threads post with `POST /api/social/publish-image/{fileId}`, after checking the account's 24 hour publishing limit with `GET /api/social/accounts/{id}/publishing-limit`\n- Follow, retry or take down posts with `GET /api/social/publications` and the `retry` and `remove` requests\n- Refresh view counts (and likes and follower counts, where the platform gives them) with `POST /api/social/sync-views`\n\n**Credential:** admin session (Bearer) or account secret key, with `vod: view` to read, `vod: operate` to publish or retry and `vod: manage` to link, remove or sync.\n\n**Good to know:** a sandbox account (`POST /api/social/sandbox/{platform}`) behaves like a platform without posting, for testing."
   },
   {
    "name": "Sources",
@@ -23235,7 +23235,7 @@
       "schema": {
        "type": "string"
       },
-      "description": "portal, youtube, facebook, x, tiktok, dailymotion or instagram. Filter: `platform=value` (comma list = any of), or `platform[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+      "description": "portal, youtube, facebook, x, tiktok, dailymotion, instagram or threads. Filter: `platform=value` (comma list = any of), or `platform[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
      },
      {
       "name": "name",
@@ -26994,7 +26994,7 @@
     "tags": [
      "Social"
     ],
-    "description": "For a platform with a publishing limit (Instagram: a set number of API posts in a moving 24 hours, read from Instagram's content_publishing_limit), how many posts this linked account has used (`used`), is allowed (`total`) and has left (`remaining`), over `windowHours`. `applies` is false for a platform without one. A sandbox account counts its own posts. Publishing to an account with none left is refused with 422.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "description": "For a platform with a publishing limit (Instagram and Threads: a set number of API posts in a moving 24 hours, read from Instagram's content_publishing_limit or Threads' threads_publishing_limit), how many posts this linked account has used (`used`), is allowed (`total`) and has left (`remaining`), over `windowHours`. `applies` is false for a platform without one. A sandbox account counts its own posts. Publishing to an account with none left is refused with 422.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
     "security": [
      {
       "adminBearer": []
@@ -27055,6 +27055,31 @@
      },
      "403": {
       "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/social/media/{file}": {
+   "get": {
+    "operationId": "getSocialMediaByFile",
+    "summary": "The video Threads fetches for a post",
+    "tags": [
+     "Social"
+    ],
+    "description": "Threads takes no upload: the publish job gives it this address and Threads fetches the file. Answers only with the job's signature (`exp`, `sig`) and until it expires; anything else is 404. Not for clients: Volt makes these links itself when it publishes to Threads.\n\n**Credential:** none or per-route",
+    "parameters": [
+     {
+      "name": "file",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
      }
     }
    }
@@ -27190,7 +27215,7 @@
     "tags": [
      "Social"
     ],
-    "description": "Publishes a picture from the Image Library as a feed post to the linked accounts in `targets`, each with its own `post`. Only platforms that post pictures are accepted (Instagram); another platform, a caption over its limits (Instagram: 2,200 characters, 30 hashtags) or an account at its publishing limit answers 422 with the reasons. Instagram fetches the picture itself as a signed JPEG from the Volt's public address, so a Volt without one reachable from the internet fails the post with a message saying so. Returns the new publications, which move from pending to published or failed; list them with `GET /api/social/publications?imageId=`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: operate",
+    "description": "Publishes a picture from the Image Library as a feed post to the linked accounts in `targets`, each with its own `post`. Only platforms that post pictures are accepted (Instagram, Threads); another platform, a caption over its limits (Instagram: 2,200 characters, 30 hashtags; Threads: 500 characters, one hashtag) or an account at its publishing limit answers 422 with the reasons. Instagram and Threads fetch the picture themselves as a signed JPEG from the Volt's public address, so a Volt without one reachable from the internet fails the post with a message saying so. Returns the new publications, which move from pending to published or failed; list them with `GET /api/social/publications?imageId=`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: operate",
     "security": [
      {
       "adminBearer": []
@@ -27226,7 +27251,7 @@
     "tags": [
      "Social"
     ],
-    "description": "Per platform that posts pictures (Instagram), the post a picture gets by default: its name as the caption and its tags as hashtags.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "description": "Per platform that posts pictures (Instagram, Threads), the post a picture gets by default: its name as the caption and its tags as hashtags.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
     "security": [
      {
       "adminBearer": []

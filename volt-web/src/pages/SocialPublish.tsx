@@ -23,9 +23,13 @@ import { FormStatus, Notice, useNotify, usePageNotice } from '../notices'
    pictures (Instagram feed posts). An Instagram account shows how much of its
    24 hour publishing limit is used before anything is sent, and one with
    none left cannot be picked.
+
+   THREADS (build queue 1.14j) is a caption platform like Instagram, with 500
+   characters and one hashtag (its topic): the shared tags give it only the
+   first, so the post Threads gets fits without editing.
    ========================================================================== */
-const LABEL: Record<string, string> = { youtube: 'YouTube', facebook: 'Facebook', x: 'X', tiktok: 'TikTok', dailymotion: 'Dailymotion', instagram: 'Instagram' }
-const ORDER: SocialPlatformId[] = ['youtube', 'instagram', 'facebook', 'x', 'tiktok', 'dailymotion']
+const LABEL: Record<string, string> = { youtube: 'YouTube', facebook: 'Facebook', x: 'X', tiktok: 'TikTok', dailymotion: 'Dailymotion', instagram: 'Instagram', threads: 'Threads' }
+const ORDER: SocialPlatformId[] = ['youtube', 'instagram', 'threads', 'facebook', 'x', 'tiktok', 'dailymotion']
 const hashtagsIn = (s: string) => (s.match(/(^|\s)#[^\s#]+/g) ?? []).length
 const PRIVACY_LABEL: Record<string, string> = { public: 'Public', unlisted: 'Unlisted', private: 'Private' }
 
@@ -108,7 +112,8 @@ export function SocialComposer({ assetId, imageId, onClose, onPublished }: { ass
   function postFor(p: SocialPlatformId): SocialPost {
     if (over[p]) return over[p]
     const l = limitsOf(p)
-    const tags = tagText.split(',').map(t => t.trim()).filter(Boolean)
+    // A platform that allows one hashtag (Threads) gets the first tag only.
+    const tags = tagText.split(',').map(t => t.trim()).filter(Boolean).slice(0, l.limits.hashtags === 1 ? 1 : undefined)
     const privacy = l.privacy.includes(base.privacy) ? base.privacy : l.privacy[0]
     if (l.limits.title == null) return { title: '', description: [base.title, base.description].filter(s => s.trim()).join('\n\n'), tags, privacy }
     return { ...base, tags, privacy }
@@ -139,7 +144,7 @@ export function SocialComposer({ assetId, imageId, onClose, onPublished }: { ass
         <div className="drawer-h"><div className="t">Publish to social</div><button className="xbtn" onClick={onClose} aria-label="Close">✕</button></div>
         <div className="drawer-b">
           {!st || !accounts || !defaults ? <div className="loading">Loading…</div> : accounts.length === 0 ? (
-            <div className="hintxt">{imageId ? 'No linked account takes pictures: Instagram does.' : 'No social accounts are linked.'} <button className="btn ghost" onClick={() => navigate('/social')}>Link one</button></div>
+            <div className="hintxt">{imageId ? 'No linked account takes pictures: Instagram and Threads do.' : 'No social accounts are linked.'} <button className="btn ghost" onClick={() => navigate('/social')}>Link one</button></div>
           ) : (
             <>
               <div className="sec-label">Publish to</div>
@@ -173,7 +178,7 @@ export function SocialComposer({ assetId, imageId, onClose, onPublished }: { ass
               </div>
               <div className="hintxt" style={{ marginBottom: 8 }}>
                 {editing ? <>This is the {LABEL[editing]} version. {over[editing] ? <button className="btn ghost" onClick={() => setOver(o => { const n = { ...o }; delete n[editing]; return n })}>Go back to the shared post</button> : 'Change anything here and it stops following the shared post.'}</>
-                  : 'Written once for every account. Open a platform to adjust its version: X, TikTok and Instagram use one caption, with tags as hashtags.'}
+                  : 'Written once for every account. Open a platform to adjust its version: X, TikTok, Instagram and Threads use one caption, with tags as hashtags (Threads takes the first tag only).'}
               </div>
 
               {/* A picture goes only to caption platforms (Instagram): no title to write. */}
@@ -200,7 +205,7 @@ export function SocialComposer({ assetId, imageId, onClose, onPublished }: { ass
                 <select className="inp" value={cur.privacy} onChange={e => setCur({ privacy: e.target.value as any })}>
                   {(l ? l.privacy : (['public', 'unlisted', 'private'] as const)).map(p => <option key={p} value={p}>{PRIVACY_LABEL[p]}</option>)}
                 </select>
-                {!editing && <div className="hintxt">A platform without that option uses its nearest: Facebook, X and Instagram posts are public. TikTok posts privately until TikTok has audited the app.</div>}
+                {!editing && <div className="hintxt">A platform without that option uses its nearest: Facebook, X, Instagram and Threads posts are public. TikTok posts privately until TikTok has audited the app.</div>}
               </div>
             </>
           )}

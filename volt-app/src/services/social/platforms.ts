@@ -10,6 +10,9 @@
 //    Instagram    Instagram API (Instagram Login or Facebook Login), the
 //                 container flow: create, upload or point at the media, wait
 //                 until it is finished, publish (build queue 1.14i)
+//    Threads      Threads API (graph.threads.net), the same container flow;
+//                 Threads fetches the video or picture from Volt's public
+//                 address itself (build queue 1.14j)
 //
 //  Platform app credentials come from the environment (see PLATFORM.env*): the
 //  account owner registers an app with each platform and sets them, and until
@@ -26,7 +29,7 @@
 // ============================================================================
 import { openAsBlob } from 'node:fs';
 
-export type PlatformId = 'youtube' | 'facebook' | 'x' | 'tiktok' | 'dailymotion' | 'instagram';
+export type PlatformId = 'youtube' | 'facebook' | 'x' | 'tiktok' | 'dailymotion' | 'instagram' | 'threads';
 export type Privacy = 'public' | 'unlisted' | 'private';
 
 export interface PostSpec { title: string; description: string; tags: string[]; privacy: Privacy }
@@ -41,6 +44,8 @@ export interface UploadCtx {
   /** A picture rather than a video (Instagram feed posts). The platform fetches it from `imageUrl`. */
   kind?: 'video' | 'image';
   imageUrl?: string | null;
+  /** The video at an address the platform fetches it from, for a platform that takes no upload (Threads). */
+  videoUrl?: string | null;
   /** What a multi-step upload has done so far, kept on the publication so a retry carries on (Instagram's container). */
   state?: Record<string, any> | null;
   saveState?: (s: Record<string, any> | null) => Promise<void>;
@@ -65,6 +70,8 @@ export interface Platform {
   variants?: Variant[];
   /** Posts pictures as well as videos. */
   images?: boolean;
+  /** Takes no upload: the platform fetches the video from a public address (Threads). */
+  fetchesVideo?: boolean;
   /** Environment variables holding the app's client id and secret. */
   env: { id: string; secret: string };
   scopes: string[];
@@ -99,6 +106,7 @@ const HOSTS: Record<string, string> = {
   'dailymotion:auth': 'https://www.dailymotion.com', 'dailymotion:api': 'https://api.dailymotion.com',
   'instagram:auth': 'https://www.instagram.com', 'instagram:api': 'https://api.instagram.com',
   'instagram:graph': 'https://graph.instagram.com', 'instagram:rupload': 'https://rupload.facebook.com',
+  'threads:auth': 'https://threads.net', 'threads:graph': 'https://graph.threads.net',
 };
 export function host(platform: PlatformId, key: string): string {
   const test = process.env.SOCIAL_TEST_BASE;
@@ -625,6 +633,130 @@ const instagram: Platform = {
   },
 };
 
-// Listed in this order on Social accounts: Instagram beside Facebook, the other Meta platform.
-export const PLATFORMS: Record<PlatformId, Platform> = { youtube, facebook, instagram, x, tiktok, dailymotion };
+// ---------------------------------------------------------------- Threads
+
+// Threads profiles (build queue 1.14j), on the Threads API at graph.threads.net
+// with the profile's own long-lived token (60 days, renewed with
+// th_refresh_token, like Instagram Login's). Same Meta app family, its own app
+// id and secret (Threads use case in the Meta app dashboard).
+//
+// Publishing is the container flow: create a container (VIDEO by video_url or
+// IMAGE by image_url, the text with it), wait until its status is FINISHED,
+// then threads_publish. Unlike Instagram there is NO upload: Threads fetches
+// the file from the address it is given, so the publish job hands it a signed,
+// expiring link on Volt's public address (services/social fetchableVideo). The
+// container id is kept on the publication, so a retry carries on with it.
+//
+// Limits (Threads API documentation): 500 characters of text, one hashtag
+// (the post's topic tag), 250 API posts in a moving 24 hours
+// (threads_publishing_limit). Views, likes and follower counts need
+// threads_manage_insights. The API offers apps no way to delete a post.
+const TH = 'v1.0';
+const thGraph = () => `${host('threads', 'graph')}/${TH}`;
+const TH_POLL_MAX = 120;
+const threads: Platform = {
+  id: 'threads', label: 'Threads', accountNoun: 'profile',
+  env: { id: 'THREADS_APP_ID', secret: 'THREADS_APP_SECRET' },
+  scopes: ['threads_basic', 'threads_content_publish', 'threads_manage_insights'],
+  images: true,
+  fetchesVideo: true,
+  pkce: false,
+  limits: { title: null, description: 500, tags: true, hashtags: 1 },
+  privacy: ['public'],
+  authorizeUrl(clientId, redirect, state) {
+    const q = new URLSearchParams({ client_id: clientId, redirect_uri: redirect, scope: this.scopes.join(','), response_type: 'code', state });
+    return `${host('threads', 'auth')}/oauth/authorize?${q}`;
+  },
+  async exchange(code, redirect) {
+    const c = creds(this);
+    const short = tokenFrom(await call('Threads sign-in', `${host('threads', 'graph')}/oauth/access_token`, { method: 'POST', headers: FORM,
+      body: form({ client_id: c.id, client_secret: c.secret, grant_type: 'authorization_code', redirect_uri: redirect, code }) }));
+    const long = tokenFrom(await call('Threads sign-in', `${host('threads', 'graph')}/access_token?${form({ grant_type: 'th_exchange_token', client_secret: c.secret, access_token: short.accessToken })}`));
+    // The long-lived token renews itself: it is its own refresh token.
+    return { ...long, refreshToken: long.accessToken, scopes: long.scopes ?? short.scopes };
+  },
+  async refresh(rt) {
+    const t = tokenFrom(await call('Threads token renewal', `${host('threads', 'graph')}/refresh_access_token?${form({ grant_type: 'th_refresh_token', access_token: rt })}`));
+    return { ...t, refreshToken: t.accessToken };
+  },
+  async accounts(t) {
+    const me = await call('Threads profile', `${thGraph()}/me?fields=id,username,threads_profile_picture_url`, { headers: bearer(t.accessToken) });
+    if (!me.id) throw new SocialError('Threads did not say which profile this is.', { permanent: true });
+    let followers: number | null = null;
+    try { followers = await this.followers!(t.accessToken, String(me.id)); } catch { /* read again with the views */ }
+    return [{ ...t, externalId: String(me.id), label: me.username ? `@${me.username}` : String(me.id), avatar: me.threads_profile_picture_url ?? null, followers }];
+  },
+  async upload(c) {
+    const g = thGraph();
+    const auth = bearer(c.token);
+    const image = c.kind === 'image';
+    const what = image ? 'picture' : 'video';
+    let st: Record<string, any> = { ...(c.state ?? {}) };
+    const save = async (next: Record<string, any> | null) => { st = next ?? {}; await c.saveState?.(next); };
+    const permalink = async (mediaId: string) => {
+      try { return (await call('Threads post', `${g}/${encodeURIComponent(mediaId)}?fields=permalink`, { headers: auth })).permalink ?? null; } catch { return null; }
+    };
+    // Published already on an earlier try (the answer was lost): do not post twice.
+    if (st.mediaId) return { externalId: String(st.mediaId), url: await permalink(String(st.mediaId)) };
+
+    if (st.container) {
+      const s0 = await call('Threads status', `${g}/${encodeURIComponent(st.container)}?fields=status,error_message`, { headers: auth });
+      if (s0.status === 'EXPIRED' || s0.status === 'ERROR') await save(null);   // start again with a fresh container
+      else if (s0.status === 'PUBLISHED' && s0.id) await save({ ...st, mediaId: s0.id });
+    }
+    if (st.mediaId) return { externalId: String(st.mediaId), url: await permalink(String(st.mediaId)) };
+    if (!st.container) {
+      const url = image ? c.imageUrl : c.videoUrl;
+      if (!url) throw new SocialError(`Threads needs the ${what} at an address it can fetch.`, { permanent: true });
+      await c.progress(10, 'creating the Threads post');
+      const body: Record<string, string> = { media_type: image ? 'IMAGE' : 'VIDEO', text: c.post.description.slice(0, 500) };
+      if (image) body.image_url = url; else body.video_url = url;
+      const made = await call('Threads container', `${g}/${encodeURIComponent(c.externalAccount)}/threads`, { method: 'POST', headers: { ...auth, ...FORM }, body: form(body) });
+      if (!made.id) throw new SocialError('Threads did not return a container id');
+      await save({ container: String(made.id) });
+      await c.progress(40, `Threads is fetching the ${what}`);
+    }
+    for (let n = 0; ; n++) {
+      const s = await call('Threads status', `${g}/${encodeURIComponent(st.container)}?fields=status,error_message`, { headers: auth });
+      if (s.status === 'FINISHED') break;
+      if (s.status === 'PUBLISHED') { if (s.id) await save({ ...st, mediaId: s.id }); break; }
+      if (s.status === 'ERROR') { await save(null); throw new SocialError(`Threads could not process the ${what}: ${s.error_message ?? 'error'}`, { permanent: true }); }
+      if (s.status === 'EXPIRED') { await save(null); throw new SocialError('The Threads container expired before it was published. Retry to start again.'); }
+      // Kept on the row: the next try waits on the same container.
+      if (n >= TH_POLL_MAX) throw new SocialError(`Threads is still processing the ${what}; it will be checked again`);
+      await c.progress(85, `Threads is processing the ${what}`);
+      await sleep(pollMs());
+    }
+    if (!st.mediaId) {
+      await c.progress(92, 'publishing');
+      const pub = await call('Threads publish', `${g}/${encodeURIComponent(c.externalAccount)}/threads_publish`, { method: 'POST', headers: { ...auth, ...FORM }, body: form({ creation_id: st.container }) });
+      if (!pub.id) throw new SocialError('Threads did not return the post id');
+      await save({ ...st, mediaId: String(pub.id) });
+    }
+    return { externalId: String(st.mediaId), url: await permalink(String(st.mediaId)) };
+  },
+  async stats(token, _acct, id) {
+    const j = await call('Threads views', `${thGraph()}/${encodeURIComponent(id)}/insights?metric=views,likes`, { headers: bearer(token) });
+    const val = (name: string) => {
+      const d = (j.data ?? []).find((x: any) => x.name === name);
+      const v = d?.total_value?.value ?? d?.values?.[0]?.value;
+      return v != null ? Number(v) : null;
+    };
+    return { views: val('views'), likes: val('likes') };
+  },
+  async followers(token, acct) {
+    const j = await call('Threads followers', `${thGraph()}/${encodeURIComponent(acct)}/threads_insights?metric=followers_count`, { headers: bearer(token) });
+    const d = (j.data ?? []).find((x: any) => x.name === 'followers_count');
+    const v = d?.total_value?.value ?? d?.values?.[0]?.value;
+    return v != null ? Number(v) : null;
+  },
+  async publishingLimit(token, acct) {
+    const j = await call('Threads publishing limit', `${thGraph()}/${encodeURIComponent(acct)}/threads_publishing_limit?fields=quota_usage,config`, { headers: bearer(token) });
+    const d = j.data?.[0] ?? {};
+    return { used: Number(d.quota_usage ?? 0), total: Number(d.config?.quota_total ?? 250) };
+  },
+};
+
+// Listed in this order on Social accounts: Instagram and Threads beside Facebook, the other Meta platforms.
+export const PLATFORMS: Record<PlatformId, Platform> = { youtube, facebook, instagram, threads, x, tiktok, dailymotion };
 export const PLATFORM_IDS = Object.keys(PLATFORMS) as PlatformId[];

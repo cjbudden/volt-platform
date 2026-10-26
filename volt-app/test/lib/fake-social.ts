@@ -1,6 +1,6 @@
 // ============================================================================
-//  A local stand-in for YouTube, Facebook, X, TikTok, Dailymotion and
-//  Instagram (both login paths and the container flow), for the
+//  A local stand-in for YouTube, Facebook, X, TikTok, Dailymotion,
+//  Instagram (both login paths and the container flow) and Threads, for the
 //  social publishing checks. Mounted at SOCIAL_TEST_BASE: every platform host
 //  becomes <base>/<platform>/<host key>, as services/social/platforms.ts maps
 //  it. It answers the request sequences the adapters make, checks the parts
@@ -10,7 +10,9 @@
 //  Knobs on the returned object: `reject` (a title containing it gets a 400),
 //  `revoked` (that bearer token gets a 401), `flaky` (the next N calls of a
 //  given route answer 503), and for Instagram `igPersonal` (the profile is a
-//  personal account), `igQuotaUsed` (posts used of the 24 hour limit).
+//  personal account), `igQuotaUsed` (posts used of the 24 hour limit); for
+//  Threads `thQuotaUsed`, and `thFetch`, which fetches each video or picture
+//  URL it is given, as Threads does (off: the URL is only recorded).
 // ============================================================================
 import { createServer, type IncomingMessage } from 'node:http';
 
@@ -23,6 +25,8 @@ export async function startFakeSocial() {
     xStatusPolls: 0, ttStatusPolls: 0, refreshes: 0,
     igPersonal: false, igQuotaUsed: 0, igRefreshes: 0, igContainers: 0,
     igContainer: new Map<string, { kind: 'video' | 'image'; ig: string; uploaded: boolean; polls: number; fail: boolean; published: string | null; imageUrl: string | null; caption: string }>(),
+    thQuotaUsed: 0, thContainers: 0, thRefreshes: 0, thFetch: true, thFetchBase: '' as string, thFetched: [] as { url: string; status: number; bytes: number; ctype: string }[],
+    thContainer: new Map<string, { kind: 'VIDEO' | 'IMAGE' | 'TEXT'; user: string; polls: number; fail: string | null; published: string | null; url: string | null; text: string }>(),
   };
   let base = '';
   const srv = createServer(async (req, res) => {
@@ -217,6 +221,81 @@ export async function startFakeSocial() {
         if (fields.includes('like_count')) return send(200, { id: m[1], like_count: 31 });
       }
       if ((m = /^(\d+)$/.exec(rest)) && (call.query.get('fields') ?? '').includes('followers_count')) return send(200, { id: m[1], followers_count: m[1] === '1789' ? 4321 : 950 });
+    }
+
+
+    // ---------------- Threads (graph.threads.net, v1.0)
+    if (p === '/threads/graph/oauth/access_token' && call.method === 'POST') {
+      const f = form();
+      if (f.get('grant_type') !== 'authorization_code' || !f.get('client_secret') || !f.get('code')) return send(400, { error: { message: 'bad grant', type: 'OAuthException' } });
+      return send(200, { access_token: 'th-short', user_id: '7001' });
+    }
+    if (p === '/threads/graph/access_token') {
+      if (call.query.get('grant_type') !== 'th_exchange_token' || call.query.get('access_token') !== 'th-short' || !call.query.get('client_secret')) return send(400, { error: { message: 'expected the short token' } });
+      return send(200, { access_token: 'th-long', token_type: 'bearer', expires_in: 5184000 });
+    }
+    if (p === '/threads/graph/refresh_access_token') {
+      if (call.query.get('grant_type') !== 'th_refresh_token') return send(400, { error: { message: 'expected th_refresh_token' } });
+      state.thRefreshes++;
+      return send(200, { access_token: `th-long-r${state.thRefreshes}`, token_type: 'bearer', expires_in: 5184000 });
+    }
+    const th = /^\/threads\/graph\/v1\.0\/(.+)$/.exec(p);
+    if (th) {
+      if (!tok.startsWith('th-long')) return send(400, { error: { message: 'expected the long-lived token', code: 190 } });
+      const rest = th[1];
+      let m: RegExpExecArray | null;
+      if (rest === 'me') return send(200, { id: '7001', username: 'voltnews', threads_profile_picture_url: 'https://img.example/th.png' });
+      if ((m = /^(\d+)\/threads_insights$/.exec(rest))) {
+        return call.query.get('metric') === 'followers_count' ? send(200, { data: [{ name: 'followers_count', period: 'day', title: 'followers_count', total_value: { value: 880 } }] }) : send(400, { error: { message: 'metric' } });
+      }
+      if ((m = /^(\d+)\/threads_publishing_limit$/.exec(rest))) return send(200, { data: [{ quota_usage: state.thQuotaUsed, config: { quota_total: 250, quota_duration: 86400 } }] });
+      if ((m = /^(\d+)\/threads$/.exec(rest)) && call.method === 'POST') {
+        const f = form();
+        const text = f.get('text') ?? '';
+        const kind = (f.get('media_type') ?? '') as 'VIDEO' | 'IMAGE' | 'TEXT';
+        if (text.includes(state.reject)) return send(400, { error: { message: 'The text was rejected', code: 100 } });
+        if (text.length > 500) return send(400, { error: { message: 'Text is too long: at most 500 characters' } });
+        if ((text.match(/(^|\s)#[^\s#]+/g) ?? []).length > 1) return send(400, { error: { message: 'Only one tag is allowed per post' } });
+        const url = kind === 'VIDEO' ? f.get('video_url') : kind === 'IMAGE' ? f.get('image_url') : null;
+        if (kind !== 'TEXT' && !url) return send(400, { error: { message: `${kind === 'VIDEO' ? 'video_url' : 'image_url'} is required` } });
+        const id = `t${++state.thContainers}`;
+        let fail: string | null = text.includes('THERROR') ? 'Media processing failed: the video is in an unsupported format.' : null;
+        // Threads fetches the media itself. The fake does too (Volt's public
+        // address swapped for the test server), so a bad link fails as it would.
+        if (url && state.thFetch) {
+          const target = state.thFetchBase ? url.replace(/^https:\/\/volt\.example/, state.thFetchBase) : url;
+          try {
+            const r = await fetch(target);
+            const b = Buffer.from(await r.arrayBuffer());
+            state.thFetched.push({ url, status: r.status, bytes: b.length, ctype: r.headers.get('content-type') ?? '' });
+            if (r.status !== 200) fail = fail ?? `Media download has failed. The media URI doesn't meet our requirements (HTTP ${r.status}).`;
+          } catch (e: any) { state.thFetched.push({ url, status: 0, bytes: 0, ctype: '' }); fail = fail ?? `Media download has failed (${e?.message ?? e}).`; }
+        }
+        state.thContainer.set(id, { kind, user: m[1], polls: 0, fail, published: null, url, text });
+        return send(200, { id });
+      }
+      if ((m = /^(\d+)\/threads_publish$/.exec(rest)) && call.method === 'POST') {
+        const id = form().get('creation_id') ?? '';
+        const c = state.thContainer.get(id);
+        if (!c || c.user !== m[1]) return send(400, { error: { message: 'unknown creation_id' } });
+        if (c.fail || c.polls < 2) return send(400, { error: { message: 'The media is not ready to be published', code: 24 } });
+        c.published = `p${id}`;
+        state.thQuotaUsed++;
+        return send(200, { id: c.published });
+      }
+      if ((m = /^(t\d+)$/.exec(rest))) {
+        const c = state.thContainer.get(m[1]);
+        if (!c) return send(400, { error: { message: 'unknown container' } });
+        if (c.published) return send(200, { id: c.published, status: 'PUBLISHED' });
+        c.polls++;
+        if (c.fail) return send(200, { id: m[1], status: 'ERROR', error_message: c.fail });
+        return send(200, { id: m[1], status: c.polls < 2 ? 'IN_PROGRESS' : 'FINISHED' });
+      }
+      if ((m = /^(pt\d+)\/insights$/.exec(rest))) {
+        const metrics = (call.query.get('metric') ?? '').split(',');
+        return send(200, { data: metrics.map((n) => ({ name: n, period: 'lifetime', values: [{ value: n === 'views' ? 410 : n === 'likes' ? 22 : 0 }] })) });
+      }
+      if ((m = /^(pt\d+)$/.exec(rest)) && (call.query.get('fields') ?? '').includes('permalink')) return send(200, { id: m[1], permalink: `https://www.threads.net/@voltnews/post/${m[1]}` });
     }
 
     send(404, { error: { message: `fake: no route ${call.method} ${p}` } });

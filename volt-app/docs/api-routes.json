@@ -4771,6 +4771,15 @@
  },
  {
   "method": "GET",
+  "path": "/api/social/media/:file",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "GET",
   "path": "/api/social/platforms",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

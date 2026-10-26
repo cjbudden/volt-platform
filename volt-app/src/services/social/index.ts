@@ -23,19 +23,26 @@
 //  publication of `image_key` instead of an asset), through the container
 //  flow kept in `platform_state`, and holds to its 24 hour publishing limit.
 //
+//  THREADS (build queue 1.14j) is the same container flow on the Threads API,
+//  with two differences that shape this file: Threads takes no upload, it
+//  fetches the video (and the picture) from Volt's public address, so the job
+//  places the file where /api/social/media/<publication>.mp4 serves it under a
+//  signed, expiring link (fetchableVideo); and Threads allows one hashtag, its
+//  topic tag, per post, so only the first tag goes.
+//
 //  A failure that retrying cannot fix (the platform rejected the video, the
 //  account's access was revoked) fails the publication at once with the
 //  platform's own words and tells the account's admins. Anything else is
 //  retried by the job queue, and fails the publication only on the last try.
 // ============================================================================
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, statSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, existsSync, mkdirSync, copyFileSync, linkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { query, one } from '../../db';
 import { config } from '../../config';
-import { seal, open, tokenKeyConfigured } from './crypto';
+import { seal, open, tokenKeyConfigured, signMedia, mediaSignatureOk } from './crypto';
 import { PLATFORMS, PLATFORM_IDS, appCreds, SocialError, type PlatformId, type PostSpec, type Privacy, type LinkedAccount, type AppCreds } from './platforms';
 
 export { PLATFORMS, PLATFORM_IDS, SocialError };
@@ -198,9 +205,10 @@ export async function addSandbox(accountId: string, userId: string | null, platf
   const p = PLATFORMS[platform];
   // "Volt test professional account" is a mouthful for a handle: Instagram's sandbox is plainly an account.
   const name = label?.trim() || `Volt test ${platform === 'instagram' ? 'account' : p.accountNoun}`;
+  const handle = platform === 'x' || platform === 'tiktok' || platform === 'instagram' || platform === 'threads';
   return upsertTarget(accountId, userId, platform, {
-    externalId: `sandbox-${randomBytes(6).toString('hex')}`, label: platform === 'x' || platform === 'tiktok' || platform === 'instagram' ? `@${name.replace(/\s+/g, '_').toLowerCase()}` : name,
-    accessToken: 'sandbox', refreshToken: null, expiresIn: null, followers: platform === 'instagram' ? 1200 : null,
+    externalId: `sandbox-${randomBytes(6).toString('hex')}`, label: handle ? `@${name.replace(/\s+/g, '_').toLowerCase()}` : name,
+    accessToken: 'sandbox', refreshToken: null, expiresIn: null, followers: platform === 'instagram' ? 1200 : platform === 'threads' ? 300 : null,
   }, 'sandbox');
 }
 
@@ -215,7 +223,8 @@ export async function validToken(target: any): Promise<string> {
   const exp = target.token_expires_at ? new Date(target.token_expires_at).getTime() : null;
   // An Instagram token lasts 60 days and renews only while it is still valid:
   // renew it in its last week, not in its last two minutes.
-  const ahead = target.platform === 'instagram' && target.variant !== 'facebook' ? 7 * 86_400_000 : 120_000;
+  // A Threads token is the same: 60 days, renewed with th_refresh_token while valid.
+  const ahead = (target.platform === 'instagram' && target.variant !== 'facebook') || target.platform === 'threads' ? 7 * 86_400_000 : 120_000;
   if (exp && exp < Date.now() + ahead) {
     const rt = open(target.refresh_token_enc);
     if (!rt || !p.refresh) {
@@ -307,7 +316,8 @@ export function defaultPost(asset: any, platform: PlatformId): PostSpec {
   const md = asset.metadata ?? {};
   const p = PLATFORMS[platform];
   const description = String(md.description ?? md.synopsis ?? '').trim();
-  const tags = asList(md.tags ?? md.keywords);
+  // Threads allows one hashtag per post (its topic tag): the asset's first tag.
+  const tags = asList(md.tags ?? md.keywords).slice(0, p.limits.hashtags === 1 ? 1 : undefined);
   const title = String(asset.title ?? md.title ?? 'Untitled').trim();
   // For caption-only platforms (X, TikTok) the caption is the title and the description.
   const caption = p.limits.title == null ? [title, description].filter(Boolean).join('\n\n') : description;
@@ -329,15 +339,25 @@ export function fitPost(platform: PlatformId, post: Partial<PostSpec>): { post: 
   const full = hashtags && !description.includes(hashtags) ? `${description}${description ? ' ' : ''}${hashtags}` : description;
   if (full.length > p.limits.description) problems.push(`${p.label} ${p.limits.title == null ? 'captions' : 'descriptions'} are limited to ${p.limits.description} characters (this one is ${full.length})`);
   const hashtagCount = (full.match(/(^|\s)#[^\s#]+/g) ?? []).length;
-  if (p.limits.hashtags != null && hashtagCount > p.limits.hashtags) problems.push(`${p.label} allows at most ${p.limits.hashtags} hashtags in a caption (this one has ${hashtagCount})`);
+  if (p.limits.hashtags != null && hashtagCount > p.limits.hashtags) {
+    problems.push(p.limits.hashtags === 1
+      ? `${p.label} allows one hashtag in a post, its topic (this one has ${hashtagCount})`
+      : `${p.label} allows at most ${p.limits.hashtags} hashtags in a caption (this one has ${hashtagCount})`);
+  }
   if (!full && p.limits.title == null) problems.push(`${p.label} needs a caption`);
   return { post: { title, description: full, tags: p.limits.tags ? tags : [], privacy }, problems };
 }
 
-// ---------------------------------------------------------------- publishing limit (Instagram)
+// ---------------------------------------------------------------- publishing limit (Instagram, Threads)
 
-/** Posts a sandbox account may make in 24 hours: Instagram's documented 100, or SOCIAL_SANDBOX_IG_LIMIT for a test. */
-const sandboxLimit = () => Number(process.env.SOCIAL_SANDBOX_IG_LIMIT ?? 100);
+/**
+ * Posts a sandbox account may make in 24 hours: the platform's documented
+ * number (Instagram 100, Threads 250), or SOCIAL_SANDBOX_IG_LIMIT /
+ * SOCIAL_SANDBOX_TH_LIMIT for a test.
+ */
+const sandboxLimit = (platform: string) => platform === 'threads'
+  ? Number(process.env.SOCIAL_SANDBOX_TH_LIMIT ?? 250)
+  : Number(process.env.SOCIAL_SANDBOX_IG_LIMIT ?? 100);
 
 /**
  * How much of the platform's publishing limit a target has used: Instagram
@@ -351,15 +371,16 @@ export async function publishingLimit(target: any): Promise<{ used: number; tota
   let used: number, total: number;
   if (target.mode === 'sandbox') {
     used = (await one<any>(`SELECT count(*)::int AS n FROM publications WHERE target_id = $1 AND status = 'published' AND published_at > now() - interval '24 hours'`, [target.id]))!.n;
-    total = sandboxLimit();
+    total = sandboxLimit(target.platform);
   } else {
     ({ used, total } = await p.publishingLimit(await validToken(target), target.external_account, target.variant));
   }
   return { used, total, remaining: Math.max(0, total - used), windowHours: 24 };
 }
 
-export const limitReached = (label: string, l: { used: number; total: number }) =>
-  `${label} has used ${l.used} of its ${l.total} posts in the last 24 hours, Instagram's publishing limit. Retry once older posts fall out of the 24 hours.`;
+export const limitReached = (label: string, l: { used: number; total: number }, platform: string = 'instagram') =>
+  `${label} has used ${l.used} of its ${l.total} posts in the last 24 hours, ${possessive(PLATFORMS[platform as PlatformId]?.label ?? 'the platform')} publishing limit. Retry once older posts fall out of the 24 hours.`;
+const possessive = (name: string) => name.endsWith('s') ? `${name}'` : `${name}'s`;
 
 /** An Image Library picture, by its media file id, for this account. */
 export async function ownedImage(fileId: string, accountId: string) {
@@ -389,6 +410,45 @@ export async function publishImage(img: any, targets: any[], posts: Record<strin
 /** A local address cannot be fetched by Instagram: say so before Meta does, less clearly. */
 const localAddress = (u: string) => /^https?:\/\/(localhost|127\.|10\.|192\.168\.|\[::1\]|[^/]*\.local(?::|\/|$))/i.test(u);
 
+// ---------------------------------------------------------------- videos a platform fetches (Threads)
+
+/** How long a fetch link works: long enough for Threads to fetch and process, short enough not to be a share link. */
+const FETCH_HOURS = 6;
+/** Where the files a platform fetches are placed: beside the clips, on the disk the API serves them from. */
+const fetchDir = () => join(config.clips.dir, '.social-fetch');
+const fetchFile = (pubId: string) => join(fetchDir(), `${pubId}.mp4`);
+
+/**
+ * Put a publication's video where GET /api/social/media/<id>.mp4 serves it,
+ * and the signed, expiring link the platform is given. A hard link when the
+ * file is on the same disk (no copy of a long video), else a copy. The API and
+ * the job worker must share this disk: true on the Mac (one process); in the
+ * cloud the workers and the API mount the same clips volume.
+ */
+export function fetchableVideo(pubId: string, path: string, now = Date.now()): { url: string; cleanup: () => void } {
+  mkdirSync(fetchDir(), { recursive: true });
+  const dest = fetchFile(pubId);
+  try { rmSync(dest, { force: true }); } catch { /* replaced below */ }
+  try { linkSync(path, dest); } catch { copyFileSync(path, dest); }
+  const exp = Math.floor(now / 1000) + FETCH_HOURS * 3600;
+  const sig = signMedia(`${pubId}.${exp}`);
+  return { url: `${publicBase()}/api/social/media/${pubId}.mp4?exp=${exp}&sig=${encodeURIComponent(sig)}`, cleanup: () => dropFetchable(pubId) };
+}
+
+/** Remove a publication's fetchable copy (published, or failed for good). */
+export function dropFetchable(pubId: string): void {
+  try { rmSync(fetchFile(pubId), { force: true }); } catch { /* already gone */ }
+}
+
+/** The file behind a fetch link, or null when the signature is wrong, the link expired or the file is gone. */
+export function fetchablePath(pubId: string, exp: number, sig: string): string | null {
+  if (!/^[0-9a-f-]{36}$/i.test(pubId) || !Number.isFinite(exp) || !sig) return null;
+  if (exp * 1000 < Date.now()) return null;
+  if (!mediaSignatureOk(`${pubId}.${exp}`, sig)) return null;
+  const f = fetchFile(pubId);
+  return existsSync(f) ? resolve(f) : null;
+}
+
 // ---------------------------------------------------------------- publish job
 
 async function setProgress(pubId: string, pct: number, stage: string) {
@@ -406,7 +466,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function sandboxUpload(pub: any, target: any, progress: (p: number, s: string) => Promise<void>) {
   const step = Number(process.env.SOCIAL_SANDBOX_STEP_MS ?? 400);
   const what = pub.image_key ? 'picture' : target.platform === 'instagram' ? 'Reel' : 'video';
-  const steps = target.platform === 'instagram'
+  const steps = target.platform === 'threads'
+    ? [[10, `creating the Threads post`], [40, `Threads is fetching the ${what}`], [85, `Threads is processing the ${what}`], [92, 'publishing']] as const
+    : target.platform === 'instagram'
     ? [[10, `creating the Instagram ${what}`], [40, 'uploading'], [75, 'uploaded'], [85, `Instagram is processing the ${what}`], [92, 'publishing']] as const
     : [[10, 'uploading'], [40, 'uploading'], [75, 'uploading'], [90, `${PLATFORMS[target.platform as PlatformId].label} is processing the video`]] as const;
   for (const [pct, stage] of steps) {
@@ -437,6 +499,8 @@ export async function handleSocialPublish(ctx: { job: any; progress: (pct: numbe
   const progress = async (pct: number, stage: string) => { await setProgress(pub.id, pct, stage); await ctx.progress(pct, stage); };
   await query(`UPDATE publications SET attempts=attempts+1, error=NULL WHERE id=$1`, [pub.id]);
   let media: { path: string; cleanup: () => void } | null = null;
+  // A copy Threads fetches from (fetchableVideo): kept while a retry may still need it.
+  let fetchable: { url: string; cleanup: () => void } | null = null;
   try {
     if (!target || !target.enabled) throw new SocialError('The account this was going to is disconnected or disabled.', { permanent: true });
     if (!subject) throw new SocialError(pub.image_key ? 'The picture is no longer in the Image Library.' : 'The asset no longer exists.', { permanent: true });
@@ -448,7 +512,7 @@ export async function handleSocialPublish(ctx: { job: any; progress: (pct: numbe
     // Instagram's 24 hour publishing limit, unless this try is finishing a post already made.
     if (p.publishingLimit && !pub.platform_state?.mediaId) {
       const l = await publishingLimit(target);
-      if (l && l.remaining <= 0) throw new SocialError(limitReached(target.account_label ?? target.name, l), { permanent: true });
+      if (l && l.remaining <= 0) throw new SocialError(limitReached(target.account_label ?? target.name, l, target.platform), { permanent: true });
     }
     let result: { externalId: string; url: string | null };
     const saveState = async (st: Record<string, any> | null) => { await query(`UPDATE publications SET platform_state = $2::jsonb WHERE id = $1`, [pub.id, st ? JSON.stringify(st) : null]); };
@@ -458,12 +522,12 @@ export async function handleSocialPublish(ctx: { job: any; progress: (pct: numbe
     } else if (image) {
       const token = await validToken(target);
       await progress(2, 'preparing the picture');
-      // Instagram fetches the picture itself and takes JPEG only: a signed JPEG
+      // Instagram and Threads fetch the picture themselves (Instagram takes JPEG only): a signed JPEG
       // from the image service, at most 1440 px wide, on Volt's public address.
       const { signedImageUrl } = await import('../../modules/images');
       const imageUrl = signedImageUrl(image.store_key, { width: 1440, fit: 'inside', format: 'jpeg', quality: 90 } as any);
       if (localAddress(imageUrl)) {
-        throw new SocialError(`Instagram fetches the picture from Volt's public address, and this Volt has none it can reach (${new URL(imageUrl).origin}). Set PUBLIC_BASE_URL (or IMAGE_PUBLIC_BASE_URL) to an address reachable from the internet.`, { permanent: true });
+        throw new SocialError(`${p.label} fetches the picture from Volt's public address, and this Volt has none it can reach (${new URL(imageUrl).origin}). Set PUBLIC_BASE_URL (or IMAGE_PUBLIC_BASE_URL) to an address reachable from the internet.`, { permanent: true });
       }
       result = await p.upload({ token, externalAccount: target.external_account, accountLabel: target.account_label, file: '', size: 0, post, progress,
         variant: target.variant, kind: 'image', imageUrl, state: pub.platform_state, saveState });
@@ -482,11 +546,21 @@ export async function handleSocialPublish(ctx: { job: any; progress: (pct: numbe
       }
       media = shaped ? { path: shaped, cleanup: () => {} } : await mediaFile(asset);
       const size = statSync(media.path).size;
+      // Threads takes no upload: it fetches the file from Volt's public address.
+      // Placed on every try that may still have to make a container (one that
+      // errored is started again), and not once the post exists.
+      if (p.fetchesVideo && !pub.platform_state?.mediaId) {
+        fetchable = fetchableVideo(pub.id, media.path);
+        if (localAddress(fetchable.url)) {
+          throw new SocialError(`${p.label} fetches the video from Volt's public address, and this Volt has none it can reach (${new URL(fetchable.url).origin}). Set PUBLIC_BASE_URL to an address reachable from the internet.`, { permanent: true });
+        }
+      }
       result = await p.upload({ token, externalAccount: target.external_account, accountLabel: target.account_label, file: media.path, size, post, progress,
-        variant: target.variant, kind: 'video', state: pub.platform_state, saveState });
+        variant: target.variant, kind: 'video', videoUrl: fetchable?.url ?? null, state: pub.platform_state, saveState });
     }
     await query(`UPDATE publications SET status='published', external_id=$2, external_url=$3, published_at=now(), progress=100, stage=NULL, error=NULL WHERE id=$1`,
       [pub.id, result.externalId, result.url]);
+    fetchable?.cleanup();
     return { externalId: result.externalId, url: result.url };
   } catch (e: any) {
     const se = e instanceof SocialError ? e : new SocialError(String(e?.message ?? e));
@@ -501,6 +575,8 @@ export async function handleSocialPublish(ctx: { job: any; progress: (pct: numbe
         `${se.message}\n\n${asset ? 'Open the clip in the Media Library' : 'Open the picture in the Image Library'} to retry or change the post.`,
         { publicationId: pub.id, ...(asset ? { assetId: asset.id } : { imageKey: pub.image_key }) });
     }
+    // Nothing more will fetch it once the publication has failed for good.
+    if (final) { fetchable?.cleanup(); dropFetchable(pub.id); }
     if (final) throw new PermanentError(se.message, se.auth ? 'auth' : 'rejected');
     throw se;
   } finally {
@@ -553,7 +629,7 @@ export async function syncViews(opts: { accountId?: string; force?: boolean; lim
   return n;
 }
 
-/** Follower counts, for the platforms that give them (Instagram), hourly per account or on demand. */
+/** Follower counts, for the platforms that give them (Instagram, Threads), hourly per account or on demand. */
 export async function syncFollowers(opts: { accountId?: string; force?: boolean } = {}): Promise<number> {
   const ids = PLATFORM_IDS.filter((id) => PLATFORMS[id].followers);
   const rows = await query<any>(

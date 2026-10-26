@@ -14,6 +14,7 @@
 //   POST   /api/social/publications/:id/remove take it down on the platform
 //   POST   /api/social/sync-views             pull view counts now
 //   GET    /social-sandbox/:id                PUBLIC: what a sandbox post "looks like"
+//   GET    /api/social/media/:id.mp4          PUBLIC, signed: the video Threads fetches for a post
 //   GET    /api/social/x                      whether X is on for the account, and how
 //   PATCH  /api/social/x                      {enabled}: the platform switch (system administrators)
 //   PUT    /api/social/x/app                  {clientId, clientSecret}: the account's own X app
@@ -31,7 +32,7 @@ import {
   PLATFORMS, PLATFORM_IDS, SocialError, platformStatus, startConnect, finishConnect, addSandbox,
   fitPost, defaultPost, queueSocialPublication, syncViews, removeFromPlatform, type PlatformId,
   xAccess, setOwnXApp, callbackUrl, X_OFF,
-  publishingLimit, limitReached, ownedImage, defaultImagePost, publishImage,
+  publishingLimit, limitReached, ownedImage, defaultImagePost, publishImage, fetchablePath,
 } from '../services/social';
 import { planEditor } from '../services/plan';
 import { actor, writeAudit } from '../services/audit';
@@ -61,6 +62,20 @@ socialPublicRouter.get('/api/social/callback/:platform', asyncHandler(async (req
   if (r.error) q.set('error', r.error);
   // Back to the console's Social accounts page, which reads these and says what happened.
   res.redirect(302, `/social?${q}`);
+}));
+
+// THE VIDEO THREADS FETCHES (build queue 1.14j). Threads takes no upload: it
+// is given this address and fetches the file. Public, so Meta's fetcher can
+// reach it, but only with the publish job's signature, and only until it
+// expires (a few hours). Range requests are answered, as video fetchers use them.
+socialPublicRouter.get('/api/social/media/:file', asyncHandler(async (req, res) => {
+  const m = /^([0-9a-f-]{36})\.mp4$/i.exec(req.params.file);
+  const exp = Number(req.query.exp);
+  const sig = typeof req.query.sig === 'string' ? req.query.sig : '';
+  const path = m ? fetchablePath(m[1], exp, sig) : null;
+  if (!path) throw notFound('Not found');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.sendFile(path, { headers: { 'Content-Type': 'video/mp4' } });
 }));
 
 socialPublicRouter.get('/social-sandbox/:id', asyncHandler(async (req, res) => {
@@ -246,7 +261,7 @@ socialRouter.post('/publish/:assetId', asyncHandler(async (req, res) => {
   }
 }));
 
-/** Instagram's 24 hour publishing limit, checked before anything is queued. A platform without one, or a failed read, says nothing. */
+/** Instagram's and Threads' 24 hour publishing limits, checked before anything is queued. A platform without one, or a failed read, says nothing. */
 async function limitProblems(acct: string, targets: any[]): Promise<string[]> {
   const out: string[] = [];
   for (const t of targets) {
@@ -255,7 +270,7 @@ async function limitProblems(acct: string, targets: any[]): Promise<string[]> {
     try {
       const l = full ? await publishingLimit(full) : null;
       // This post would be one more: refuse only when none is left.
-      if (l && l.remaining <= 0) out.push(limitReached(t.account_label ?? t.name, l));
+      if (l && l.remaining <= 0) out.push(limitReached(t.account_label ?? t.name, l, t.platform));
     } catch (e: any) { console.warn('[social] publishing limit read failed', t.id, e?.message ?? e); }
   }
   return out;

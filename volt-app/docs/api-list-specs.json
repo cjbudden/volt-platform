@@ -2838,7 +2838,7 @@
      "starts",
      "exists"
     ],
-    "doc": "portal, youtube, facebook, x, tiktok, dailymotion or instagram"
+    "doc": "portal, youtube, facebook, x, tiktok, dailymotion, instagram or threads"
    },
    "name": {
     "type": "string",

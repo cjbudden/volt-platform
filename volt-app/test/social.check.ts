@@ -47,16 +47,16 @@ const USER = '0000000b-0000-0000-0000-000000000501';
   truthy('a tampered value is refused, not decrypted to garbage', tampered);
 
   console.log('\n== set up ==');
-  check('nothing configured: every platform says not set up', S.platformStatus().platforms.map((p) => p.configured), [false, false, false, false, false, false]);
+  check('nothing configured: every platform says not set up', S.platformStatus().platforms.map((p) => p.configured), [false, false, false, false, false, false, false]);
   let refused = '';
   try { await S.startConnect('youtube', ACC, null); } catch (e: any) { refused = e.message; }
   truthy('connecting an unconfigured platform names the variables to set', /YOUTUBE_CLIENT_ID/.test(refused), refused);
   Object.assign(process.env, {
     YOUTUBE_CLIENT_ID: 'yt-id', YOUTUBE_CLIENT_SECRET: 'yt-secret', FACEBOOK_APP_ID: 'fb-id', FACEBOOK_APP_SECRET: 'fb-secret',
     X_CLIENT_ID: 'x-id', X_CLIENT_SECRET: 'x-secret', TIKTOK_CLIENT_KEY: 'tt-key', TIKTOK_CLIENT_SECRET: 'tt-secret',
-    DAILYMOTION_API_KEY: 'dm-key', DAILYMOTION_API_SECRET: 'dm-secret',
+    DAILYMOTION_API_KEY: 'dm-key', DAILYMOTION_API_SECRET: 'dm-secret', THREADS_APP_ID: 'th-id', THREADS_APP_SECRET: 'th-secret',
   });
-  check('configured from the environment', S.platformStatus().platforms.map((p) => p.configured), [true, true, true, true, true, true]);
+  check('configured from the environment', S.platformStatus().platforms.map((p) => p.configured), [true, true, true, true, true, true, true]);
   check('callback URL is on the public host', S.platformStatus().platforms[0].callbackUrl, 'https://volt.example/api/social/callback/youtube');
 
   await query(`INSERT INTO accounts(id,name) VALUES ($1,'SocialCo') ON CONFLICT (id) DO NOTHING`, [ACC]);

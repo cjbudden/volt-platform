@@ -1,15 +1,15 @@
 ---
 title: Social accounts
 sidebar_position: 10.5
-description: Link the YouTube channels, Facebook Pages, Instagram professional accounts and TikTok, Dailymotion and X accounts your clips and pictures are published to, and how X is switched on.
+description: Link the YouTube channels, Facebook Pages, Instagram professional accounts, Threads profiles and TikTok, Dailymotion and X accounts your clips and pictures are published to, and how X is switched on.
 guide: section
 ---
 
 # Social accounts
 
-**Social accounts** links Volt to the YouTube channels, Facebook Pages, Instagram professional accounts and TikTok, Dailymotion and X accounts your clips, programmes and (for Instagram) pictures are published to. Each is linked by signing in on the platform itself: Volt never sees the password and keeps only an access token, encrypted. Most people come here once per platform, to link the account, and again when a platform asks for it to be reconnected.
+**Social accounts** links Volt to the YouTube channels, Facebook Pages, Instagram professional accounts, Threads profiles and TikTok, Dailymotion and X accounts your clips, programmes and (for Instagram and Threads) pictures are published to. Each is linked by signing in on the platform itself: Volt never sees the password and keeps only an access token, encrypted. Most people come here once per platform, to link the account, and again when a platform asks for it to be reconnected.
 
-![The Social accounts page: one card per platform, YouTube with a linked sandbox account, Facebook, Instagram, TikTok and Dailymotion, and X off at the bottom with Use your own X app](/img/screens/social-accounts.png)
+![The Social accounts page: one card per platform, YouTube with a linked sandbox account, Facebook, Instagram, Threads, TikTok and Dailymotion, and X off at the bottom with Use your own X app](/img/screens/social-accounts.png)
 
 ## What it is for
 
@@ -20,6 +20,8 @@ guide: section
 Each card also says the platform's limits, for example the longest title and description.
 
 **Instagram** takes Business and Creator accounts (not personal ones), linked one of two ways: **Connect Instagram** signs in with Instagram itself, and **Connect through a Facebook Page** signs in with Facebook, for an Instagram account tied to a Page you manage. Either way, a clip goes out as a Reel (the vertical 9:16 version from [Formats & reframing](formats-and-reframing.md) when it has one) and an [Image Library](images-and-thumbnails.md) picture as a feed post. Each linked Instagram account shows its follower count, and Instagram allows a set number of posts made through apps in any 24 hours (100 at the time of writing): the publish window shows how many each account has used before you send anything.
+
+**Threads** takes any Threads profile, linked with **Connect Threads**. A clip goes out as a video post and an [Image Library](images-and-thumbnails.md) picture as an image post, each with its text: up to 500 characters and one hashtag, which Threads uses as the post's topic (when a clip has several tags, only the first goes). Each linked profile shows its follower count, and Threads allows 250 posts made through apps in any 24 hours (at the time of writing), shown in the publish window like Instagram's. Threads takes no upload: it fetches the video or picture from your Volt's public address, through a link that works for a few hours and only for that post.
 
 **X is off until it is switched on for your account.** X charges for its API by the post and by the read, so a Volt does not offer it to every account. Until X is on there is no X card to connect, and the **X** panel at the bottom says **Off**. There are two ways to turn it on:
 
@@ -48,13 +50,19 @@ Each card also says the platform's limits, for example the longest title and des
 3. Allow Volt to read the profile and publish.
 4. You come back with **Linked @... on instagram.** The account is listed with its followers and how it was linked. Through a Facebook Page, every Page you manage that has an Instagram account is linked; Pages without one are left out.
 
+### Link a Threads profile
+
+1. On the **Threads** card, choose **Connect Threads**.
+2. Sign in to Threads (with the Instagram account the Threads profile belongs to) and allow Volt to read the profile, publish and read the post insights.
+3. You come back with **Linked @... on threads.** The profile is listed with its followers.
+
 ### Publish a picture to Instagram
 
 1. Open the picture in the [Image Library](images-and-thumbnails.md) and choose **Publish to social…**.
-2. Tick the Instagram accounts (only platforms that take pictures are offered), write the caption and choose **Publish**.
+2. Tick the Instagram accounts or Threads profiles (only platforms that take pictures are offered), write the caption and choose **Publish**.
 3. The picture's **Social** list shows the progress, then **Published** with **Open**, the views and the likes.
 
-Instagram fetches the picture from your Volt's public address, as a JPEG Volt makes from it. A Volt that is not reachable from the internet (a Mac on a home network, for example) can publish Reels, which are uploaded, but not pictures.
+Instagram and Threads fetch the picture from your Volt's public address, as a JPEG Volt makes from it. A Volt that is not reachable from the internet (a Mac on a home network, for example) can publish Reels to Instagram, which are uploaded, but not pictures, and nothing to Threads, which fetches videos too.
 
 ### Try publishing with a sandbox account
 
@@ -126,6 +134,11 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Instagram could not process the Reel: ...** | Instagram refused the video (its own words follow) | Check the clip's format and length against Instagram's Reels rules, then retry |
 | **Instagram fetches the picture from Volt's public address, ...** | Your Volt has no address Instagram can reach | Ask whoever runs your Volt to give it a public address, or publish a clip instead |
 | **Instagram does not let apps delete posts: remove it in the Instagram app.** | You chose **Take down** on an Instagram post | Delete it in the Instagram app |
+| **Threads allows one hashtag in a post, its topic ...** | The text has more than one hashtag | Keep one hashtag, in the text or as the only tag |
+| **Threads fetches the video from Volt's public address, ...** | Your Volt has no address Threads can reach | Ask whoever runs your Volt to give it a public address |
+| **Threads could not process the video: ...** | Threads refused the video or could not fetch it (its own words follow) | Check the clip against Threads' video rules, then retry |
+| **... Threads' publishing limit. ...** | Threads' 24 hour limit of posts made through apps is used up | Wait until older posts fall out of the 24 hours |
+| **Threads does not let apps delete posts: remove it in the Threads app.** | You chose **Take down** on a Threads post | Delete it in the Threads app |
 | No X card, and the **X** panel says **Off** | X is not switched on for your account | Ask your Volt provider to switch it on, or add your own X app |
 | An X account marked **Off** | X was switched off, or your own X app removed | Turn X on again; the account is kept |
 | **X is not switched on for this account. ...** when publishing | The post was going to an X account while X is off | Untick the X account, or turn X on |
@@ -137,8 +150,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/social/platforms` | Each platform, whether it is ready to connect, and its limits |
 | `GET /api/social/accounts` | The linked accounts |
 | `POST /api/social/connect/{platform}` | Starts a link; answers with the address to send the browser to. For Instagram, `{"variant": "facebook"}` signs in through a Facebook Page (the default is Instagram Login) |
-| `GET /api/social/accounts/{id}/publishing-limit` | Posts used and left in Instagram's 24 hour limit |
-| `POST /api/social/publish-image/{fileId}` | Publishes an Image Library picture as an Instagram feed post |
+| `GET /api/social/accounts/{id}/publishing-limit` | Posts used and left in Instagram's or Threads' 24 hour limit |
+| `POST /api/social/publish-image/{fileId}` | Publishes an Image Library picture as an Instagram feed post or a Threads post |
 | `POST /api/social/sandbox/{platform}` | Adds a sandbox account |
 | `PATCH /api/publish-targets/{id}` | Turns an account on or off (`{"enabled": false}`) |
 | `DELETE /api/publish-targets/{id}` | Disconnects it |

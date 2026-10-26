@@ -39,6 +39,7 @@ const PLATFORM_TYPE: Record<string, string> = {
   tiktok: 'PublicationEvent',
   dailymotion: 'BroadcastEvent',
   instagram: 'PublicationEvent',
+  threads: 'PublicationEvent',
 };
 
 export interface AssetForSchema {

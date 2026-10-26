@@ -152,7 +152,7 @@ const truthy = (m: string, v: unknown, d = '') => (v ? ok(m) : bad(m, d || `got 
 
   console.log('\n== a picture ==');
   r = await call('GET', `/api/social/publish-image/${img}/defaults`);
-  check('a picture\'s default post: its name and tags, Instagram only', [Object.keys(r.j), r.j.instagram?.description, r.j.instagram?.tags], [['instagram'], 'final whistle', ['matchday']]);
+  check('a picture\'s default post: its name and tags, for the platforms that take pictures', [Object.keys(r.j), r.j.instagram?.description, r.j.instagram?.tags], [['instagram', 'threads'], 'final whistle', ['matchday']]);
   r = await call('POST', `/api/social/publish-image/${img}`, { targets: [{ targetId: pgT.id, post: { description: 'Final whistle #matchday' } }] });
   check('publishing the picture is accepted', r.s, 201);
   const imgPub = r.j.publications[0].id;

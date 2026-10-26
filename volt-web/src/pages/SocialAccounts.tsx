@@ -8,8 +8,9 @@ import { useAccess } from '../access'
 
 /* ============================================================================
    SOCIAL ACCOUNTS (Admin). Link the YouTube channels, Facebook Pages,
-   Instagram professional accounts and X, TikTok and Dailymotion accounts
-   clips (and, for Instagram, pictures) are published to.
+   Instagram professional accounts, Threads profiles and X, TikTok and
+   Dailymotion accounts clips (and, for Instagram and Threads, pictures) are
+   published to.
 
    INSTAGRAM (build queue 1.14i) links two ways, each its own button: with
    Instagram Login, or with Facebook Login for an Instagram account tied to a
@@ -159,8 +160,8 @@ export default function SocialAccountsPage() {
                 </div>
                 <div className="hintxt" style={{ marginTop: 2 }}>
                   {p.configured ? `Publishes to ${/^[aeiou]/i.test(p.accountNoun) ? 'an' : 'a'} ${p.accountNoun}.` : seesServerSetup ? `Needs ${p.label} app credentials on this deployment.` : 'Your Volt provider sets this up.'}
-                  {' '}{p.limits.title != null ? `Title up to ${p.limits.title} characters, description up to ${p.limits.description}.` : `Caption up to ${p.limits.description} characters, hashtags included${p.limits.hashtags != null ? `, at most ${p.limits.hashtags} hashtags` : ''}.`}
-                  {p.images ? ' Clips go as Reels, Image Library pictures as feed posts.' : ''}
+                  {' '}{p.limits.title != null ? `Title up to ${p.limits.title} characters, description up to ${p.limits.description}.` : `Caption up to ${p.limits.description} characters, hashtags included${p.limits.hashtags === 1 ? ', one hashtag' : p.limits.hashtags != null ? `, at most ${p.limits.hashtags} hashtags` : ''}.`}
+                  {p.images ? (p.id === 'threads' ? ' Clips and Image Library pictures go as posts with their text. Threads fetches them from this Volt\'s public address.' : ' Clips go as Reels, Image Library pictures as feed posts.') : ''}
                 </div>
               </div>
               {!p.configured && seesServerSetup && p.env && <button className="btn ghost" onClick={() => setSetupOpen(o => o === p.id ? null : p.id)}>How to set up</button>}

@@ -40,6 +40,7 @@ Administrators set the default; the people who run a channel, an event or the li
 1. Open **Admin** and choose **Publishing Rules** (under **Media setup**).
 2. **Publishing points** lists where content can be published: **Catalogue** is always there, then each registered app (**App:**, its name and type) and each social account (the platform and its name). A faded one is switched off.
    An Instagram account is a publishing point like any other: a rule that ticks it sends the clip as a Reel (the 9:16 version when it has one). Instagram's limit of posts made through apps in any 24 hours still applies, so a rule that publishes often can reach it; a post past the limit fails, says so, and can be retried later.
+   A Threads profile works the same way: the clip goes as a video post with the clip's title and its first tag (Threads allows one hashtag), within Threads' own 24 hour limit.
 3. To add one, choose **Register an app or add a social account**.
 
 ### Set the account default

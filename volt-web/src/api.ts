@@ -2939,7 +2939,7 @@ export interface ImportAlias {
   /** The linked Volt channel's own image (guide icon, else logo). The guide uses this, not theirs. */
   channelIconRef: string | null
 }
-export type SocialPlatformId = 'youtube' | 'facebook' | 'x' | 'tiktok' | 'dailymotion' | 'instagram'
+export type SocialPlatformId = 'youtube' | 'facebook' | 'x' | 'tiktok' | 'dailymotion' | 'instagram' | 'threads'
 export interface SocialPost { title: string; description: string; tags: string[]; privacy: 'public' | 'unlisted' | 'private' }
 export interface SocialPlatformsStatus {
   tokenKeyConfigured: boolean; callbackBase: string

@@ -7,7 +7,7 @@
 //  that secret: rotating it would orphan every linked account. Set
 //  SOCIAL_TOKEN_KEY in production; the platform page says when it is missing.
 // ============================================================================
-import { createCipheriv, createDecipheriv, randomBytes, hkdfSync } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, hkdfSync, timingSafeEqual } from 'node:crypto';
 
 let cached: { src: string; key: Buffer } | null = null;
 
@@ -45,4 +45,20 @@ export function open(sealed: string | null | undefined): string | null {
   const d = createDecipheriv('aes-256-gcm', key(), Buffer.from(iv, 'base64url'));
   d.setAuthTag(Buffer.from(tag, 'base64url'));
   return Buffer.concat([d.update(Buffer.from(body, 'base64url')), d.final()]).toString('utf8');
+}
+
+// MEDIA ADDRESSES (build queue 1.14j). Threads fetches a post's video itself,
+// so the publish job hands it a link that works for a few hours and for that
+// one publication only. The signing key is derived from the token key, under
+// its own label, so a media link can never be turned into a token.
+function mediaKey(): Buffer {
+  return Buffer.from(hkdfSync('sha256', key(), 'volt-social-media', 'url-signing', 32));
+}
+export function signMedia(msg: string): string {
+  return createHmac('sha256', mediaKey()).update(msg).digest('base64url');
+}
+export function mediaSignatureOk(msg: string, sig: string): boolean {
+  const want = Buffer.from(signMedia(msg));
+  const got = Buffer.from(String(sig));
+  return got.length === want.length && timingSafeEqual(got, want);
 }

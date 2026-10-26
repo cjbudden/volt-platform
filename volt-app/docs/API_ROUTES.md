@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**716 routes.** Public API: 75 · Sign-in (no session yet): 7 · Admin API: 561 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 28 · Health and discovery: 8
+**717 routes.** Public API: 76 · Sign-in (no session yet): 7 · Admin API: 561 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 28 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -179,6 +179,12 @@ For apps and players. A publishable key (`pk_…`) names the client account. Vie
 | POST | `/api/signup/checkout-status` | none or per-route | open |  |
 | GET | `/api/signup/config` | none or per-route | open |  |
 | POST | `/api/signup/webhooks/stripe` | none or per-route | open |  |
+
+### `/api/social`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/social/media/:file` | none or per-route | open |  |
 
 ### `/api/source-preview`
 

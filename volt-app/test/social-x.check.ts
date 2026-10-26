@@ -81,7 +81,7 @@ const truthy = (m: string, v: unknown, d = '') => (v ? ok(m) : bad(m, d || `got 
 
   console.log('== an account with neither ==');
   let st = (await call('GET', '/api/social/platforms')).j;
-  check('no X card: the platforms leave X out', ids(st), ['youtube', 'facebook', 'instagram', 'tiktok', 'dailymotion']);
+  check('no X card: the platforms leave X out', ids(st), ['youtube', 'facebook', 'instagram', 'threads', 'tiktok', 'dailymotion']);
   let xs = (await call('GET', '/api/social/x')).j;
   check('X state: off, no own app, the owner of a customer account cannot switch it', [xs.enabled, xs.allowed, xs.ownApp, xs.canSwitch], [false, false, null, false]);
   let r = await call('POST', '/api/social/connect/x');
