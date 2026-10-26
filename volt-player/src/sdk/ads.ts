@@ -19,8 +19,14 @@
 //      and quartiles need nothing from here: the server sends them as the ad's
 //      segments are fetched, for any player.
 //
-//  GUIDED (HLS Interstitials) needs none of this: Safari and AVPlayer play
-//  the interstitials themselves and enforce their restrictions.
+//  GUIDED (HLS Interstitials) needs none of the clock work: the player plays
+//  the interstitials itself and enforces their restrictions (no skipping, no
+//  seeking in an ad, a break watched once). Safari and AVPlayer do it
+//  natively; everywhere else the engine's Shaka does (engine.ts guided) and
+//  hands each ad to `guidedAd()`, so the same overlay shows "Ad 1 of 2 · 0:12"
+//  and Learn more, and pause and mute still reach the ad's trackers. The ad's
+//  address names its session, break and place (/vod-ads/s/<session>/ad/<b>/<p>/),
+//  which is all the click and the events need.
 // ============================================================================
 
 export interface ItemAds {
@@ -32,6 +38,15 @@ export interface ItemAds {
 export interface TimelineAd { podIndex: number; kind: 'ad' | 'house'; title: string | null; startSec: number; durationSec: number; clickUrl: string | null }
 export interface TimelineBreak { index: number; position: 'pre' | 'mid' | 'post'; contentSec: number; stitchedStartSec: number | null; durationSec: number; ads: TimelineAd[] }
 export interface AdTimeline { sessionId: string; delivery: 'stitched' | 'guided'; contentSec: number; snapback: boolean; prerollOnResume: boolean; breaks: TimelineBreak[]; eventsUrl: string }
+
+/** An ad the engine is playing in a guided break (engine.ts onAd). */
+export interface GuidedAd { number: number; of: number; remainingSec: number; mediaUrl: string | null }
+
+/** Session, break and place of a guided ad, from its address. */
+export function guidedRef(mediaUrl: string | null): { sid: string; b: number; p: number } | null {
+  const m = mediaUrl?.match(/\/vod-ads\/s\/([A-Za-z0-9_-]{20,42})\/ad\/(\d+)\/(\d+)\//);
+  return m ? { sid: m[1], b: Number(m[2]), p: Number(m[3]) } : null;
+}
 
 /** What the player state carries while an ad plays. */
 export interface AdState {
@@ -92,8 +107,46 @@ export class VodAds {
 
   constructor(media: HTMLMediaElement, apiBase: string, ads: ItemAds, onChange: (ad: AdState | null) => void, root?: HTMLElement) {
     this.media = media; this.apiBase = apiBase; this.ads = ads; this.onChange = onChange; this.root = root;
+    if (ads.delivery === 'guided') { this.wireGuided(); return; }
     if (ads.delivery !== 'stitched' || !ads.timelineUrl) return;
     void this.load();
+  }
+
+  // ---- guided: the engine plays the ads, this shows them and reports for them
+
+  /** The guided session's timeline, read once per session: which ads have a page to open. */
+  private guidedTl = new Map<string, Promise<AdTimeline | null>>();
+  private guidedRef: { sid: string; b: number; p: number } | null = null;
+
+  private wireGuided() {
+    const on = (ev: string, fn: () => void) => { this.media.addEventListener(ev, fn); this.off.push(() => this.media.removeEventListener(ev, fn)); };
+    on('pause', () => this.report('pause'));
+    on('play', () => this.report('play'));
+    on('volumechange', () => this.report(this.media.muted || this.media.volume === 0 ? 'mute' : 'unmute'));
+    if (this.root) this.mountOverlay();
+  }
+
+  /** The engine's ad (or null when the content resumes) in a guided break. */
+  guidedAd(ad: GuidedAd | null) {
+    const ref = ad ? guidedRef(ad.mediaUrl) : null;
+    this.guidedRef = ref;
+    if (!ad) { this.setCurrent(null); return; }
+    const state = (canClick: boolean): AdState => ({ breakIndex: ref?.b ?? 0, number: ad.number, of: ad.of, title: null, remainingSec: ad.remainingSec, canClick });
+    if (!ref) { this.setCurrent(state(false)); return; }
+    let tl = this.guidedTl.get(ref.sid);
+    if (!tl) {
+      tl = fetch(this.abs(`/vod-ads/s/${ref.sid}/timeline.json`), { credentials: 'omit' }).then((r) => r.ok ? r.json() as Promise<AdTimeline> : null).catch(() => null);
+      this.guidedTl.set(ref.sid, tl);
+    }
+    // Shown at once; Learn more appears when the timeline says the ad has a page.
+    if (!this.current || this.current.breakIndex !== ref.b || this.current.number !== ad.number) this.setCurrent(state(false));
+    else this.setCurrent({ ...this.current, remainingSec: ad.remainingSec });
+    void tl.then((t) => {
+      if (!t || this.guidedRef?.sid !== ref.sid || this.guidedRef.b !== ref.b || this.guidedRef.p !== ref.p || !this.current) return;
+      if (!this.t) this.t = t;
+      const x = t.breaks.find((b) => b.index === ref.b)?.ads[ref.p];
+      this.setCurrent({ ...this.current, title: x?.title ?? null, canClick: !!x?.clickUrl });
+    });
   }
 
   private abs(u: string) { return /^https?:/i.test(u) ? u : `${this.apiBase}${u}`; }
@@ -182,7 +235,7 @@ export class VodAds {
     const a = this.current;
     if (!a || !this.t) return;
     const b = this.t.breaks.find((x) => x.index === a.breakIndex);
-    const ad = b?.ads[a.number - 1];
+    const ad = b?.ads[this.guidedRef ? this.guidedRef.p : a.number - 1];
     if (!ad?.clickUrl) return;
     this.media.pause();
     window.open(this.abs(ad.clickUrl), '_blank', 'noopener');
@@ -190,13 +243,16 @@ export class VodAds {
 
   private report(ev: string) {
     const a = this.current;
-    if (!a || !this.t) return;
+    if (!a || (!this.t && !this.guidedRef)) return;
     const event = PLAYER_EVENTS[ev] ?? ev;
-    const key = `${a.breakIndex}/${a.number}/${event}`;
+    const g = this.guidedRef;
+    const p = g ? g.p : a.number - 1;
+    const key = `${g?.sid ?? ''}/${a.breakIndex}/${p}/${event}`;
     if (this.sent.has(key)) return;
     this.sent.add(key);
-    void fetch(this.abs(this.t.eventsUrl), { method: 'POST', credentials: 'omit', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ events: [{ b: a.breakIndex, p: a.number - 1, event }] }), keepalive: true }).catch(() => null);
+    const url = g ? `/vod-ads/s/${g.sid}/events` : this.t!.eventsUrl;
+    void fetch(this.abs(url), { method: 'POST', credentials: 'omit', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ events: [{ b: a.breakIndex, p, event }] }), keepalive: true }).catch(() => null);
   }
 
   // ---- a small overlay of its own, so any skin shows the ad

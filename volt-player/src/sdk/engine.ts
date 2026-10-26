@@ -14,6 +14,7 @@ import type { AudioTrackInfo, Quality, Source, TextTrackInfo } from './types';
 import { qualityLabel, qualityList, sourceKind } from './schedule';
 import { cdnFromHeaders, optimalFor, type StatsSample } from './stats';
 import type { PlayAttempt, PlaybackProbe, RequestInfo, RequestKind } from './cmcd';
+import type { GuidedAd } from './ads';
 
 let polyfilled = false;
 
@@ -143,6 +144,23 @@ function langName(code: string): string {
 export class Engine {
   /** In-stream triggers (graphics), reported as they are parsed, before they are due. */
   onTrigger: ((r: TriggerReport) => void) | null = null;
+  /**
+   * GUIDED ON-DEMAND ADS (HLS Interstitials, volt-app services/vodAds): set by
+   * the player before load() when the play gate gave a guided playlist. Shaka's
+   * interstitial manager then fetches each break's asset list as playback gets
+   * there, plays the ads in this same media element (one element is what every
+   * TV and set-top box has) and resumes the content where it left off. Safari's
+   * own HLS does the same by itself (mode 'native').
+   */
+  guided = false;
+  /** The ad Shaka is playing in a guided break, then null when the content resumes. */
+  onAd: ((ad: GuidedAd | null) => void) | null = null;
+  private adTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Can this browser play guided ads through Shaka (MSE, and a Shaka with interstitials)? */
+  static guidedCapable(): boolean {
+    try { return shaka.Player.isBrowserSupported() && typeof (shaka as any).ads?.AdManager?.prototype?.initInterstitial === 'function'; } catch { return false; }
+  }
   readonly media: HTMLVideoElement;
   mode: EngineMode | null = null;
   private sp: any = null;
@@ -272,8 +290,14 @@ export class Engine {
     // CMCD REQUEST MODE and the startup spans (sdk/cmcd.ts). The CMCD query is
     // added after any caller headers; a licence request gets its headers and
     // no CMCD (licence servers are often someone else's and strict).
+    // An interstitial's asset list names the playback it is for (HLS
+    // _HLS_primary_id): Safari adds it, Shaka does not, and Volt decides one
+    // set of ads per playback with it. The play attempt's id is that playback.
+    const primaryId = this.attempt?.sid ?? `p${Math.random().toString(36).slice(2, 12)}`;
     try {
       sp.getNetworkingEngine()?.registerRequestFilter((type: number, req: any, ctx: any) => {
+        if (type === 7 /* ADS */ && (ctx?.type === 11 /* INTERSTITIAL_ASSET_LIST */ || /\/list\/\d+\.json/.test(req.uris?.[0] ?? '')))
+          req.uris = (req.uris ?? []).map((u: string) => /[?&]_HLS_primary_id=/.test(u) ? u : `${u}${u.includes('?') ? '&' : '?'}_HLS_primary_id=${encodeURIComponent(primaryId)}`);
         if (type === 2 && drm?.headers) Object.assign(req.headers, drm.headers);
         const a = this.attempt;
         if (!a) return;
@@ -351,6 +375,7 @@ export class Engine {
       else if (d?.severity === 2) this.pendingErr = d;
       if (d?.severity === 2 /* CRITICAL */) this.onError(readableError(d), d?.code ?? null);
     });
+    if (this.guided) this.startInterstitials(sp);
     await sp.load(url, startAt ?? null);
     // Subtitles start off; the viewer turns them on. A remembered choice is applied by the player.
     sp.setTextTrackVisibility(this.textOn);
@@ -382,7 +407,39 @@ export class Engine {
     this.stopCues = () => { clearInterval(iv); tracks.removeEventListener?.('addtrack', onAdd); };
   }
 
+  /**
+   * Shaka's interstitial manager on this player, in this media element (no
+   * second element: TVs have one decoder, and the skin's controls stay on
+   * what is playing). While an ad plays, onAd hears its place in the break and
+   * the time left, twice a second.
+   */
+  private startInterstitials(sp: any) {
+    const am = sp.getAdManager?.();
+    if (!am?.initInterstitial) return;
+    try {
+      sp.configure({ ads: { supportsMultipleMediaElements: false } });
+      am.initInterstitial(null, sp, this.media);
+    } catch { return; }
+    const U = (shaka as any).ads?.Utils ?? {};
+    const stop = () => { if (this.adTimer) clearInterval(this.adTimer); this.adTimer = null; };
+    const report = (ad: any) => {
+      if (!ad) return;
+      const n = (f: string, d: number) => { try { const v = Number(ad[f]?.()); return Number.isFinite(v) ? v : d; } catch { return d; } };
+      let mediaUrl: string | null = null;
+      try { mediaUrl = ad.getMediaUrl?.() ?? null; } catch { /* */ }
+      this.onAd?.({ number: Math.max(1, n('getPositionInSequence', 1)), of: Math.max(1, n('getSequenceLength', 1)), remainingSec: Math.max(0, Math.ceil(n('getRemainingTime', 0))), mediaUrl });
+    };
+    am.addEventListener(U.AD_STARTED ?? 'ad-started', (ev: any) => {
+      const ad = ev?.ad;
+      stop();
+      report(ad);
+      this.adTimer = setInterval(() => report(ad), 500);
+    });
+    am.addEventListener(U.AD_STOPPED ?? 'ad-stopped', () => { stop(); this.onAd?.(null); });
+  }
+
   async unload(): Promise<void> {
+    if (this.adTimer) { clearInterval(this.adTimer); this.adTimer = null; this.onAd?.(null); }
     this.stopCues?.();
     this.stopCues = null;
     const sp = this.sp;

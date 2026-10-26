@@ -120,8 +120,9 @@ A custom skin is a `mount` and an `update`. It is given state and commands, neve
 
 When a title has ad breaks ([On-demand ads](on-demand-ads.md)), the player asks the play gate for them and plays them without anything from you:
 
-- On Apple devices playing HLS natively, the ads come as HLS Interstitials and the device plays them.
-- Everywhere else they are stitched into the stream. While an ad plays the player shows **Ad 1 of 2 · 0:12** and **Learn more** when the ad has a page, does not let the viewer seek inside the ad, and with snapback plays a skipped mid-roll before landing where the viewer asked.
+- The player tells the gate it plays HLS Interstitials, so the ads come guided: on Apple devices playing HLS natively the device plays them, and in every other browser, on Android and on TVs the player plays them itself, in the same video element, then carries on with the title where it stopped. A break already watched is not played again.
+- When the rule asks for stitched ads they are in the stream instead (HLS, or DASH for titles encoded with it), and the player does not let the viewer seek inside an ad and, with snapback, plays a skipped mid-roll before landing where the viewer asked.
+- Either way, while an ad plays the player shows **Ad 1 of 2 · 0:12** and **Learn more** when the ad has a page.
 - `player.getState().ad` is the ad on screen (`number`, `of`, `remainingSec`, `canClick`), or `null`; a custom skin can draw its own and call `player.commands.adClick()`.
 - Impressions and quarters are reported by Volt as the ad's video is fetched; clicks, pause and mute go through Volt to the ad server.
 

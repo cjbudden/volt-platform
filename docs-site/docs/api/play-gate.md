@@ -84,14 +84,14 @@ To tie the gate, the reports and the CDN logs together, pass your play attempt's
 
 ### 6. On-demand ads
 
-When an on-demand title has ad breaks for this viewer (see [On-demand ads](../guides/on-demand-ads.md)), the answer carries `ads`, `delivery.hls` already includes them, and `delivery.dash` is `null` (DASH would play the title without its ads). Tell the gate how your player wants them and what it can do:
+When an on-demand title has ad breaks for this viewer (see [On-demand ads](../guides/on-demand-ads.md)), the answer carries `ads` and the addresses in `delivery` already include them. `delivery.hls` always does. `delivery.dash` is the viewer's own DASH stream with the ads (`/vod-ads/s/va.../manifest.mpd`, one Period per ad) when the ads are stitched and the title was encoded with DASH, and `null` otherwise: the title's plain DASH would play it without its ads. Tell the gate how your player wants them and what it can do:
 
 ```json
 { "appKey": "pk_...", "assetId": "<title>", "sid": "<play attempt>", "adDelivery": "auto", "caps": ["hls-interstitials"] }
 ```
 
 - `adDelivery`: `auto` (the default: the rule decides), `stitched` or `guided`.
-- `caps`: `hls-interstitials` when your player plays HLS Interstitials (Safari, AVPlayer, recent hls.js). Without it, ads are stitched into the stream, which every HLS player plays.
+- `caps`: `hls-interstitials` when your player plays HLS Interstitials (Safari, AVPlayer, Shaka Player 4.16 and later with its interstitials on, recent hls.js). Without it, ads are stitched into the stream, which every HLS and DASH player plays.
 
 ```json
 "ads": { "delivery": "stitched", "sessionId": "va...", "timelineUrl": "/vod-ads/s/va.../timeline.json" }
@@ -99,14 +99,15 @@ When an on-demand title has ad breaks for this viewer (see [On-demand ads](../gu
 
 | `ads.delivery` | What your player does |
 |---|---|
-| `stitched` | Play `delivery.hls`. The ads are in the stream. Fetch `timelineUrl` for where each break sits (in the title's own time and in the stream's), which ad is on screen, and each ad's `clickUrl` |
-| `guided` | Play `delivery.hls`. The player fetches each break's ads when it gets there, and keeps them in place itself |
+| `stitched` | Play `delivery.hls`, or `delivery.dash` when it is there and your player prefers DASH. The ads are in the stream. Fetch `timelineUrl` for where each break sits (in the title's own time and in the stream's), which ad is on screen, and each ad's `clickUrl` |
+| `guided` | Play `delivery.hls`. The player fetches each break's ads when it gets there (add `_HLS_primary_id`, one id per playback, to each asset list request if your player does not), and keeps them in place itself |
 
 What Volt reports to the ad server needs nothing from your player: impressions, starts, quarters and completes are sent as the ad's video is fetched. What only a player knows, it reports:
 
 - **A click**: open `clickUrl` (a Volt address) in a new window. Volt records the click, tells the ad server and sends the viewer on to the advertiser's page.
 - **Pause, resume, mute, unmute, fullscreen**: `POST` `{"events":[{"b":<break index>,"p":<ad index>,"event":"pause"}]}` to the timeline's `eventsUrl`.
 - **Snapback**: when the timeline's `snapback` is true and a viewer seeks past a mid-roll they have not seen, play that break first. Resume, bookmarks and chapters use the title's own time; convert with the timeline's `stitchedStartSec` and `durationSec`.
+- **Captions and DRM** need nothing either: captions go quiet during ads in both HLS and DASH, ads are clear, and a protected title's keys apply again after each break (in HLS the key changes at the discontinuity, in DASH at the Period).
 
 A viewer who paid for the title (and, if the rule says so, a signed-in member) gets no `ads` and plays the title as it is. The Volt player handles all of this itself (`player.getState().ad`, `player.commands.adClick()`, see [Player SDK](../guides/player-sdk.md)).
 
@@ -124,4 +125,5 @@ A viewer who paid for the title (and, if the rule says so, a signed-in member) g
 | `404 unknown asset` | Not an id in this account (or not an id at all) | Check the id; ids from another account always answer 404 |
 | Members get `sign_in` although your app knows them | A `viewer` or `entitled` sent in the body is ignored from browsers and phones | Sign them in, or use the [token exchange](authentication.md) from your server |
 | `200` with `delivery: null` | The live channel is off air, or its output is not ready | Show "not on air" and try again |
-| `200` with `ads` and `delivery.dash: null` | The title has ad breaks for this viewer, carried in the HLS address | Play `delivery.hls` |
+| `200` with `ads` and `delivery.dash: null` | The title has ad breaks for this viewer, carried in the HLS address: the ads are guided, or the title has no DASH encode | Play `delivery.hls` |
+| `404` on `delivery.dash` with ads | One of the ads chosen for this viewer has no fMP4 version and cannot be a DASH Period | Play `delivery.hls` |

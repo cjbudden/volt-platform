@@ -2,8 +2,9 @@
 
 **Status: FAST between-content scheduling built 26 Oct 2026 (section 3). VOD SSAI and SGAI first slice built
 26 Oct 2026 (build queue 1.14k, section 9): rules, planning, stitched HLS, guided HLS Interstitials, beacons,
-clicks, the ad timeline and snapback. FAST options in section 4, VOD DASH, catch-up DAR and VMAP are designed,
-not built.** Companion to `volt-app/docs/DESIGN_fast_channels.md`, which covers the playout, the
+clicks, the ad timeline and snapback. Second slice 26 Oct 2026 (1.14k-2): guided through the SDK's own Shaka
+engine, stitched DASH as multi-Period, keys and captions across ad parts. FAST options in section 4, catch-up DAR
+and VMAP are designed, not built.** Companion to `volt-app/docs/DESIGN_fast_channels.md`, which covers the playout, the
 stitcher, the VAST client, house fill and beacons that this builds on.
 
 ## 1. What we offer
@@ -220,11 +221,16 @@ otherwise; **snapback on** by default; **no ads offline** (downloads play withou
 | Server-side beacons | `segmentRedirect` | ad segments go through `/vod-ads/s/<session>/seg/...` (302 to the CDN): impression and start on the first, a quartile when a later segment starts after it, complete on the last; works for any player, ours or not |
 | Player events and clicks | `POST .../events`, `GET .../click/<b>/<p>` | pause, mute and the rest sent on the viewer's behalf; a click is recorded, its ClickTracking (wrappers included) sent with X-Device-IP and X-Device-User-Agent, then 302 to the ClickThrough. FAST got the same: `/fast/<id>/s/<sid>/ads.json` and `.../click/<break>/<pod>` |
 | Play gate | `modules/apps.ts` | `adDelivery` and `caps` in, `ads {delivery, sessionId, timelineUrl}` out; a viewer let in by an entitlement is ad-free |
-| SDK | `volt-player/src/sdk/ads.ts` | the ad on screen ("Ad 1 of 2 · 0:12", Learn more), snapback, no seeking inside an ad, watched breaks jumped over, content time, `state.ad`, `commands.adClick()`; asks for guided only when it plays HLS natively on Apple |
+| SDK | `volt-player/src/sdk/ads.ts` | the ad on screen ("Ad 1 of 2 · 0:12", Learn more), snapback, no seeking inside an ad, watched breaks jumped over, content time, `state.ad`, `commands.adClick()` |
+| Guided in the SDK's engine (1.14k-2) | `volt-player/src/sdk/engine.ts` `guided`, `startInterstitials` | Shaka's interstitial manager in the same video element (TVs have one decoder); `_HLS_primary_id` added to each asset list request (Shaka does not send it) from the play attempt's sid; the ad's place from its address feeds the same overlay, Learn more and player events. The SDK asks for guided wherever Shaka can play interstitials, natively on Apple as before. Mid-rolls carry `CUE="ONCE"` (a watched break is not replayed, and Shaka resuming at the break's moment does not restart it); pre and post carry `CUE`, not `X-CUE` |
+| Stitched DASH (1.14k-2) | `services/vodAds/dash.ts`, `/vod-ads/s/<session>/manifest.mpd` | the asset's static MPD (SegmentTemplate) cut into content Periods at each break (startNumber and presentationTimeOffset moved, audio split where its segments fall), a Period per ad from its fMP4 HLS renditions as a SegmentList through the segment route (beacons as in HLS), protection kept on content and none on ads, a blank WebVTT twin of each text AdaptationSet in ad Periods, a sidecar WebVTT cut per content Period (`/text/<k>/<rep>.vtt`); offered by the play gate as `delivery.dash` for stitched sessions of titles encoded with DASH; 404 (play HLS) when an ad is TS only |
+| Keys across a pod (1.14k-2) | `services/vodAds/hls.ts` `writeSeg` | stitched HLS closes the content's EXT-X-KEY (METHOD=NONE) before a clear pod and states it again where the content resumes, before the init segment; an ad's own key is kept |
 | Report | `GET /api/vod/ads/report` | plays with ads, fill, house share, timeouts, impressions, completion, clicks and click rate |
 
-**Not yet (queued as 1.14k-2 to 1.14k-5):** guided playback in the SDK's own engine (Shaka interstitials) and
-DASH (multi-Period stitch); catch-up dynamic ad replacement (section 5.2); VMAP from the ad server; ad markers
-on the built-in skins' scrubber and the overlay's words in the player's string table; repeat player events
-(each event is sent once per ad); a real ad server and real devices (Safari, Apple TV) are Christian's to try.
+**Not yet (queued as 1.14k-3 to 1.14k-5):** catch-up dynamic ad replacement (section 5.2); VMAP from the ad server;
+ad markers on the built-in skins' scrubber and the overlay's words in the player's string table; repeat player
+events (each event is sent once per ad). Guided DASH (alternative content) is not built: a guided viewer gets HLS.
+dash.js 4.7 puts a sidecar WebVTT of a multi-Period MPD on the presentation clock (Shaka on the Period's, as the
+spec says), so DASH captions in dash.js need segmented WebVTT. Playing an encrypted title through a real licence
+server, a real ad server and real devices (Safari, Apple TV, Android TV) are Christian's to try.
 

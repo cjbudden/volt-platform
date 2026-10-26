@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**714 routes.** Public API: 75 · Sign-in (no session yet): 7 · Admin API: 561 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 26 · Health and discovery: 8
+**716 routes.** Public API: 75 · Sign-in (no session yet): 7 · Admin API: 561 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 28 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -1275,7 +1275,9 @@ Streams, images, share pages and players. The admin console web app is also serv
 | GET | `/vod-ads/s/:sid/ad/:b/:p/:file` | none, share token or playback token | public delivery | ✓ |
 | GET | `/vod-ads/s/:sid/click/:b/:p` | none, share token or playback token | public delivery | ✓ |
 | POST | `/vod-ads/s/:sid/events` | none, share token or playback token | public delivery | ✓ |
+| GET | `/vod-ads/s/:sid/manifest.mpd` | none, share token or playback token | public delivery | ✓ |
 | GET | `/vod-ads/s/:sid/seg/:b/:p/:track/:n` | none, share token or playback token | public delivery | ✓ |
+| GET | `/vod-ads/s/:sid/text/:k/:rep` | none, share token or playback token | public delivery | ✓ |
 | GET | `/vod-ads/s/:sid/timeline.json` | none, share token or playback token | public delivery | ✓ |
 
 ### `/xmltv`

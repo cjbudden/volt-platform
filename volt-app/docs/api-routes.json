@@ -6400,7 +6400,25 @@
  },
  {
   "method": "GET",
+  "path": "/vod-ads/s/:sid/manifest.mpd",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/vod-ads"
+ },
+ {
+  "method": "GET",
   "path": "/vod-ads/s/:sid/seg/:b/:p/:track/:n",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/vod-ads"
+ },
+ {
+  "method": "GET",
+  "path": "/vod-ads/s/:sid/text/:k/:rep",
   "api": "delivery",
   "credential": "none, share token or playback token",
   "access": "public delivery",

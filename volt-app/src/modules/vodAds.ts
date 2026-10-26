@@ -31,7 +31,7 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { actor, writeAudit } from '../services/audit';
 import { resolveVodAdPolicy } from '../services/vodAds/plan';
 import {
-  ruleForAsset, assetFor, breaksFor, sessionRow, readySession, sessionMaster, sessionMedia, segmentRedirect, adMaster, adMedia,
+  ruleForAsset, assetFor, breaksFor, sessionRow, readySession, sessionMaster, sessionMedia, sessionMpd, sessionText, segmentRedirect, adMaster, adMedia,
   timelineOf, playerEvents, clickThrough, guidedVersion, guidedMaster, guidedPlaylist, guidedAssetList, vodAdReport, PLAYER_EVENTS, validSid,
   type SessionCtx,
 } from '../services/vodAds';
@@ -213,6 +213,30 @@ vodAdsPublicRouter.get('/s/:sid/click/:b/:p', asyncHandler(async (req, res) => {
   if (!to) throw notFound('This ad has no page to open');
   res.setHeader('Cache-Control', 'no-store');
   res.redirect(302, to);
+}));
+
+// The session's stitched DASH (services/vodAds/dash.ts): content Periods cut at
+// each break, a Period per ad. 404 when the asset or one of the ads decided
+// for this viewer has no DASH-ready (fMP4) rendition: the player has HLS.
+vodAdsPublicRouter.get('/s/:sid/manifest.mpd', asyncHandler(async (req, res) => {
+  const row = await session(req, true);
+  if (row.delivery !== 'stitched') throw notFound();
+  const text = await sessionMpd(row);
+  if (!text) throw notFound('This session is not available as DASH: play its HLS');
+  res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Cache-Control', 'no-store');
+  res.type('application/dash+xml').send(text);
+}));
+
+// A content Period's captions, cut from the asset's sidecar WebVTT (dash.ts cutVtt).
+vodAdsPublicRouter.get('/s/:sid/text/:k/:rep', asyncHandler(async (req, res) => {
+  const m = String(req.params.rep).match(/^([A-Za-z0-9_.-]{1,64})\.vtt$/);
+  if (!m) throw notFound();
+  const row = await session(req, true);
+  if (row.delivery !== 'stitched') throw notFound();
+  const text = await sessionText(row, int(req.params.k, 1000), m[1]);
+  if (text == null) throw notFound();
+  res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Cache-Control', 'no-store');
+  res.type('text/vtt').send(text);
 }));
 
 vodAdsPublicRouter.get('/s/:sid/:file', asyncHandler(async (req, res) => {

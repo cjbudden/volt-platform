@@ -16,7 +16,7 @@ guide: section
 - **Where the breaks go.** A pre-roll (only for titles long enough to deserve one), mid-rolls at the title's own cue points or every few minutes, never in the first or last minutes, and a post-roll if you want one.
 - **Who fills them.** Your ad server first, then your house spots. A break is never left empty and the title never waits for a slow ad server.
 - **Who sees none.** Viewers who paid, and if you choose signed-in members, play without ads. A title can also opt out on its own.
-- **How the ads reach the player.** Volt picks for each viewer: on Apple devices the player fetches each break's ads itself (HLS Interstitials), everywhere else the ads are stitched into the stream. You can force one or the other.
+- **How the ads reach the player.** Volt picks for each viewer. Where the player can fetch each break's ads itself (HLS Interstitials: the Volt player in any modern browser, Android and smart TVs, and Apple devices), it does; everywhere else the ads are stitched into the stream, in HLS and, for titles encoded with DASH, in DASH too. You can force one or the other.
 - **Measuring.** Volt tells your ad server what was seen (impression, start, quarters, complete), and when a viewer clicks **Learn more**, it records the click, tells the ad server, and opens the advertiser's page.
 
 ## Before you start
@@ -55,7 +55,9 @@ In the title's metadata, set **adRule** to `none`. To keep only the pre-roll (no
 
 ### What viewers see
 
-In the Volt player an ad shows **Ad 1 of 2 · 0:12** in the corner, with **Learn more** when the ad has a page. A viewer cannot seek inside an ad. With **Snapback** on, a viewer who skips past mid-rolls they have not seen plays the last of them first, then lands where they asked; a break already played is not played again. On iPhone, iPad, Apple TV and Safari the device plays the ads itself and keeps them in place.
+In the Volt player an ad shows **Ad 1 of 2 · 0:12** in the corner, with **Learn more** when the ad has a page. A viewer cannot seek inside an ad. With **Snapback** on, a viewer who skips past mid-rolls they have not seen plays the last of them first, then lands where they asked; a break already played is not played again. When the player fetches the ads itself (in a browser, on Android, on a TV), it plays them in the same picture and then carries on with the title where it stopped; on iPhone, iPad, Apple TV and Safari the device does the same with its own player.
+
+Captions carry on across a break: they go quiet during the ads and come back in step with the title. Titles protected with DRM play their ads in the clear, and the title's protection applies again as soon as it resumes.
 
 ## How it connects
 
@@ -86,6 +88,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | Breaks play only house spots | The ad server did not answer in time, returned nothing, or offered an ad Volt has not prepared yet. A new ad is prepared the first time it is offered and plays from the next time on | Check **Fill rate**; check the ad server's tag in **Ad servers** |
 | **Fill rate** is low and timeouts are high | The ad server is slow | Ask your ad server to answer faster, or raise its time budget on the FAST page |
 | No **Learn more** on an ad | The ad has no click-through page in the ad server | Add one in the ad server |
+| A DASH player gets no stream with ads, HLS plays | One of the ads chosen for that viewer exists only as an older TS file, which cannot be part of a DASH stream | Play the HLS address the play gate gives; ads prepared by Volt are always ready for both |
 | **Couldn't load on-demand ads.** | The page could not reach Volt | Choose **Retry** |
 
 ## Through the API

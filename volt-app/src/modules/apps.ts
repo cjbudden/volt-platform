@@ -366,15 +366,17 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
   let delivery = await deliveryFor(kind, b.assetId, key.account_id, b.sid);
   // ON-DEMAND ADS (services/vodAds). A viewer the rule makes ad-free (paid, a
   // member) gets the asset as it is. Otherwise the HLS address carries the ads
-  // (a stitched session, or the guided interstitial playlist) and DASH is left
-  // out: it would play the content without them. The answer then belongs to
-  // this viewer (a session of their own), so it is never shared at the edge.
+  // (a stitched session, or the guided interstitial playlist), and DASH is the
+  // session's own multi-Period MPD when the asset has a DASH encode it can cut
+  // (stitched only); the asset's plain MPD is never handed out, it would play
+  // the content without them. The answer then belongs to this viewer (a session
+  // of their own), so it is never shared at the edge.
   let ads: Awaited<ReturnType<typeof adsForPlay>> = null;
   if (kind === 'vod' && delivery) {
     ads = await adsForPlay({ accountId: key.account_id, assetId: b.assetId, via: (rights as any).rule?.allowed ? (rights as any).rule.via : (rights as any).via ?? null, preferred: b.adDelivery ?? null, caps: b.caps,
       playSid: b.sid ?? null, ctx: { ip: req.ip ?? null, userAgent: req.get('user-agent') ?? null, country: geo ?? null, appId: key.app_id ?? null } })
       .catch((e) => { console.warn('[vod-ads] play gate: playing without ads:', e?.message ?? e); return null; });
-    if (ads) { delivery = { hls: ads.hls, dash: null }; edgeSec = 0; }
+    if (ads) { delivery = { hls: ads.hls, dash: ads.dash }; edgeSec = 0; }
   }
   return {
     status: 200, edgeSec,

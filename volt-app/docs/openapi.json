@@ -36935,6 +36935,31 @@
     }
    }
   },
+  "/vod-ads/s/{sid}/manifest.mpd": {
+   "get": {
+    "operationId": "getVODAdsSBySidManifestMpd",
+    "summary": "A viewer's stitched DASH (multi-Period MPD)",
+    "tags": [
+     "VOD Ads"
+    ],
+    "description": "For a stitched play, the play gate's `delivery.dash` when the title was encoded with DASH. The title's own Periods cut at each break, with a Period per ad between them (its segments through the session, so impressions and quartiles are sent for any player); captions continue with a blank WebVTT during ads; protection stays on the content and ads are clear. 404 when one of the ads decided for this viewer has no fMP4 rendition: play the session's HLS instead.\n\n**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
   "/vod-ads/s/{sid}/seg/{b}/{p}/{track}/{n}": {
    "get": {
     "operationId": "getVODAdsSBySidSegByBByPByTrackByN",
@@ -36978,6 +37003,47 @@
      },
      {
       "name": "n",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/vod-ads/s/{sid}/text/{k}/{rep}": {
+   "get": {
+    "operationId": "getVODAdsSBySidTextByKByRep",
+    "summary": "A content Period's captions",
+    "tags": [
+     "VOD Ads"
+    ],
+    "description": "Named by the stitched MPD, `:rep` is `<Representation id>.vtt`: the title's sidecar WebVTT between Period `k`'s start and end, its cue times on that Period's clock.\n\n**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "k",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "rep",
       "in": "path",
       "required": true,
       "schema": {

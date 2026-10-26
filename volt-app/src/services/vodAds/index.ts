@@ -39,6 +39,7 @@ import {
   masterEntries, rewriteMaster, parseMedia, stitchMedia, guidedMedia, boundariesOf, durationOf, matchEntry,
   type MasterEntry, type Media, type Segment,
 } from './hls';
+import { parseMpd, stitchMpd, contentEdges, sidecarText, cutVtt, type Mpd, type DashAd, type DashAdTrack } from './dash';
 
 // ---------------------------------------------------------------- rules
 
@@ -108,11 +109,11 @@ const firstVideo = (h: AssetHls) => h.entries.find((e) => e.kind === 'video' && 
 
 // ---------------------------------------------------------------- assets
 
-interface AssetRow { id: string; account_id: string; title: string | null; master_key: string | null; duration_ms: number | null; metadata: any; break_cues_ms: number[] | null; schema_id: string | null }
+interface AssetRow { id: string; account_id: string; title: string | null; master_key: string | null; duration_ms: number | null; metadata: any; break_cues_ms: number[] | null; schema_id: string | null; formats?: { hls?: boolean; dash?: boolean } | null }
 
 export async function assetFor(assetId: string, accountId?: string): Promise<AssetRow | null> {
   return one<AssetRow>(
-    `SELECT v.id, COALESCE(g.account_id, v.account_id) AS account_id, v.title, v.master_key, v.duration_ms, v.metadata, v.break_cues_ms, v.schema_id
+    `SELECT v.id, COALESCE(g.account_id, v.account_id) AS account_id, v.title, v.master_key, v.duration_ms, v.metadata, v.break_cues_ms, v.schema_id, v.formats
        FROM vod_assets v LEFT JOIN channels c ON c.id = v.channel_id LEFT JOIN events e ON e.id = v.event_id
        LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
       WHERE v.id = $1 ${accountId ? 'AND COALESCE(g.account_id, v.account_id) = $2' : ''}`, accountId ? [assetId, accountId] : [assetId]);
@@ -345,6 +346,81 @@ export async function sessionMedia(row: any, track: string): Promise<string | nu
   return stitchMedia(content, breaks);
 }
 
+// ---------------------------------------------------------------- stitched DASH
+
+/** Where an asset's MPD is: beside master.m3u8 when it was encoded with DASH (shareLinks.manifestUrls). */
+export function mpdKeyOf(asset: AssetRow): string | null {
+  if (!asset.master_key || !asset.formats?.dash || !/\/master\.m3u8$/i.test(asset.master_key)) return null;
+  return asset.master_key.replace(/master\.m3u8$/i, 'manifest.mpd');
+}
+
+const mpdCache = new Map<string, { mpd: Mpd | null; at: number }>();
+/** The asset's MPD when it can be stitched (dash.ts parseMpd), read once and kept ten minutes. */
+export async function assetMpd(asset: AssetRow): Promise<Mpd | null> {
+  const key = mpdKeyOf(asset);
+  if (!key) return null;
+  const hit = mpdCache.get(key);
+  if (hit && Date.now() - hit.at < 600_000) return hit.mpd;
+  const mpd = parseMpd(await readKey(key).catch(() => ''));
+  mpdCache.set(key, { mpd, at: Date.now() });
+  if (mpdCache.size > 500) mpdCache.delete(mpdCache.keys().next().value!);
+  return mpd;
+}
+
+/**
+ * One ad as a DASH Period's renditions: its fMP4 video and audio, each
+ * segment through the session's segment route (the beacons). Null when the ad
+ * has a rendition with no init segment (TS): it cannot be a DASH Period.
+ */
+async function dashAd(sid: string, b: SessionBreak, p: number): Promise<DashAd | null> {
+  const entry = b.pod![p];
+  const ah = await assetHls(entry.masterKey);
+  const tracks: DashAdTrack[] = [];
+  for (const e of ah.entries) {
+    if (e.kind === 'subtitles') continue;
+    const m = ah.media.get(e.track);
+    if (!m?.segments.length) continue;
+    if (!m.segments[0].init) return null;
+    tracks.push({ kind: e.kind, id: `ad${b.index}-${p}-${e.track}`, init: m.segments[0].init,
+      codecs: e.codecs ?? (e.kind === 'audio' ? 'mp4a.40.2' : 'avc1.64001f'), bandwidth: e.bandwidth ?? 0, width: e.width, height: e.height || undefined,
+      segments: m.segments.map((s, n) => ({ dur: s.dur, url: `${sessionBase(sid)}/seg/${b.index}/${p}/${e.track}/${n}` })) });
+  }
+  return tracks.length ? { id: `ad-${b.index}-${p}`, tracks } : null;
+}
+
+/** The session's stitched MPD, or null when the asset or one of its ads cannot be DASH. */
+export async function sessionMpd(row: any): Promise<string | null> {
+  const asset = await assetFor(row.vod_asset_id);
+  if (!asset) return null;
+  const mpd = await assetMpd(asset);
+  if (!mpd) return null;
+  const breaks = [];
+  for (const b of playedBreaks(row.plan as SessionPlan)) {
+    const ads: DashAd[] = [];
+    for (let p = 0; p < b.pod!.length; p++) {
+      const a = await dashAd(row.id, b, p);
+      if (!a) return null;
+      ads.push(a);
+    }
+    breaks.push({ index: b.index, atSec: b.atSec, ads });
+  }
+  return stitchMpd(mpd, keyUrl(mpdKeyOf(asset)!), breaks, BLANK_VTT, (k, rep) => `${sessionBase(row.id)}/text/${k}/${encodeURIComponent(rep)}.vtt`);
+}
+
+/** A content Period's part of the asset's sidecar WebVTT, on that Period's clock (dash.ts cutVtt). */
+export async function sessionText(row: any, k: number, repId: string): Promise<string | null> {
+  const asset = await assetFor(row.vod_asset_id);
+  if (!asset) return null;
+  const mpd = await assetMpd(asset);
+  if (!mpd) return null;
+  const url = sidecarText(mpd, keyUrl(mpdKeyOf(asset)!), repId);
+  if (!url) return null;
+  const edges = contentEdges(mpd, playedBreaks(row.plan as SessionPlan).map((b) => b.atSec));
+  if (k < 0 || k >= edges.length - 1) return null;
+  const text = await readKey(urlKey(url)).catch(() => null);
+  return text == null ? null : cutVtt(text, edges[k], edges[k + 1]);
+}
+
 // ---------------------------------------------------------------- guided playlists
 
 /** The guided playlists' version: changes when the rule or the asset's cues change, so a CDN copy is never stale. */
@@ -555,6 +631,8 @@ export function timelineOf(row: any) {
 export interface PlayAds {
   delivery: 'stitched' | 'guided';
   hls: string;
+  /** Stitched only, when the asset has a DASH encode it can cut: the session's multi-Period MPD. */
+  dash: string | null;
   sessionId: string | null;
   timelineUrl: string | null;
 }
@@ -588,10 +666,12 @@ export async function adsForPlay(i: {
   const { breaks } = await breaksFor(asset, pol);
   if (!breaks.length) return null;
   if (delivery === 'guided') {
-    return { delivery, hls: `${guidedBase(asset.id, await guidedVersion(asset, rule))}/master.m3u8`, sessionId: null, timelineUrl: null };
+    // Guided DASH (alternative content) is not built: a guided viewer gets HLS only.
+    return { delivery, hls: `${guidedBase(asset.id, await guidedVersion(asset, rule))}/master.m3u8`, dash: null, sessionId: null, timelineUrl: null };
   }
   const s = await openSession({ accountId: i.accountId, assetId: asset.id, delivery: 'stitched', playSid: i.playSid, ctx: i.ctx, rule, fetcher: i.fetcher });
-  return { delivery, hls: `${sessionBase(s.id)}/master.m3u8`, sessionId: s.id, timelineUrl: `${sessionBase(s.id)}/timeline.json` };
+  const dash = await assetMpd(asset).catch(() => null) ? `${sessionBase(s.id)}/manifest.mpd` : null;
+  return { delivery, hls: `${sessionBase(s.id)}/master.m3u8`, dash, sessionId: s.id, timelineUrl: `${sessionBase(s.id)}/timeline.json` };
 }
 
 // ---------------------------------------------------------------- the report

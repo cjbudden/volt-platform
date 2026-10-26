@@ -130,7 +130,7 @@ function writeAsset(dir: string, totalSec: number, seg: number, withExtras: bool
     st.includes('#EXT-X-PLAYLIST-TYPE:VOD') && st.trim().endsWith('#EXT-X-ENDLIST') && st.includes('#EXT-X-TARGETDURATION:5') && st.split('#EXT-X-MAP:URI="https://cdn.example/vod/x/i.mp4"').length === 3);
   const gd = H.guidedMedia(cmed, [{ index: 0, atSec: 0, durationSec: 15, position: 'pre' }, { index: 1, atSec: 8, durationSec: 30, position: 'mid' }], (b) => `/list/${b.index}.json`);
   truthy('guided: interstitial DATERANGEs with asset lists, PRE cue, restrictions, a program date time',
-    gd.includes('CLASS="com.apple.hls.interstitial"') && gd.includes('X-ASSET-LIST="/list/1.json"') && gd.includes('X-CUE="PRE"') && gd.includes('X-RESTRICT="SKIP,JUMP"')
+    gd.includes('CLASS="com.apple.hls.interstitial"') && gd.includes('X-ASSET-LIST="/list/1.json"') && gd.includes('CUE="PRE"') && !gd.includes('X-CUE') && gd.includes('X-RESTRICT="SKIP,JUMP"')
     && gd.includes('START-DATE="2000-01-01T00:00:08.000Z"') && gd.includes('#EXT-X-PROGRAM-DATE-TIME:2000-01-01T00:00:00.000Z'));
 
   console.log('\n== VAST click trackers ==');

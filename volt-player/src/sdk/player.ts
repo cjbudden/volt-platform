@@ -570,8 +570,10 @@ export class VoltPlayer {
       if (item.assetId && !hasSource(item.source)) {
         if (!this.o.appKey) throw new GateError(401, 'This player needs an app key to play asset ids.', null);
         attempt?.spanStart('entitlement');
-        // On-demand ads: guided (HLS Interstitials) where this player plays HLS natively on Apple, stitched otherwise.
-        const caps = isApple() && this.o.airplay !== false && !!this.media.canPlayType?.('application/vnd.apple.mpegurl') ? ['hls-interstitials'] : [];
+        // On-demand ads: guided (HLS Interstitials) where this player plays them, natively
+        // on Apple or through Shaka's interstitials anywhere with MSE; stitched otherwise.
+        const nativeApple = isApple() && this.o.airplay !== false && !!this.media.canPlayType?.('application/vnd.apple.mpegurl');
+        const caps = nativeApple || Engine.guidedCapable() ? ['hls-interstitials'] : [];
         const r = await resolveAsset(this.api, this.o.appKey, item.assetId, this.o.viewerToken, attempt?.sid, { delivery: 'auto', caps });
         attempt?.spanEnd('entitlement');
         if (seq !== this.loadSeq) return;
@@ -590,6 +592,14 @@ export class VoltPlayer {
       }
       if (item.artworkUrl && !this.o.poster && this.ownsMedia) this.media.poster = item.artworkUrl;
       const startAt = index === (this.o.startIndex ?? 0) ? this.o.startAt : undefined;
+      // Guided ads: Shaka plays the interstitials (engine.ts); the overlay is ready
+      // before the first frame, since a pre-roll starts at once.
+      this.engine.guided = item.ads?.delivery === 'guided';
+      if (item.ads?.delivery === 'guided') {
+        const va = new VodAds(this.media, this.api, item.ads, (ad) => this.set({ ad }), this.stage);
+        this.vodAds = va;
+        this.engine.onAd = (ad) => va.guidedAd(ad);
+      } else this.engine.onAd = null;
       const used = await this.engine.load(item.source!, startAt);
       if (seq !== this.loadSeq) return;
       this.kind = used.kind; this.url = used.url;
@@ -600,7 +610,7 @@ export class VoltPlayer {
       const lang = store.get('textLang');
       if (lang) { const id = this.engine.textByLang(lang); if (id) this.engine.setTextTrack(id); }
       this.startBeacons(item);
-      if (item.ads) this.vodAds = new VodAds(this.media, this.api, item.ads, (ad) => this.set({ ad }), this.stage);
+      if (item.ads && item.ads.delivery !== 'guided') this.vodAds = new VodAds(this.media, this.api, item.ads, (ad) => this.set({ ad }), this.stage);
       if (this.caster?.connected) await this.castCurrent();
       else if (autoplay) this.cmd.play();
     } catch (e: any) {
