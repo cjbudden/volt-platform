@@ -32,7 +32,7 @@ import { actor, writeAudit } from '../services/audit';
 import { resolveVodAdPolicy } from '../services/vodAds/plan';
 import {
   ruleForAsset, assetFor, breaksForRule, replacedView, sessionRow, readySession, sessionMaster, sessionMedia, sessionMpd, sessionText, segmentRedirect, adMaster, adMedia,
-  timelineOf, playerEvents, clickThrough, guidedVersion, guidedMaster, guidedPlaylist, guidedAssetList, vodAdReport, PLAYER_EVENTS, validSid,
+  timelineOf, playerEvents, clickThrough, guidedVersion, guidedMaster, guidedPlaylist, guidedAssetList, vodAdReport, PLAYER_EVENTS, PLAYER_EVENT_REPEATS, validSid,
   type SessionCtx,
 } from '../services/vodAds';
 
@@ -211,7 +211,7 @@ vodAdsPublicRouter.get('/s/:sid/ad/:b/:p/:file', asyncHandler(async (req, res) =
 
 vodAdsPublicRouter.post('/s/:sid/events', asyncHandler(async (req, res) => {
   const row = await session(req);
-  const b = z.object({ events: z.array(z.object({ b: z.number().int().min(0), p: z.number().int().min(0), event: z.enum(PLAYER_EVENTS) })).max(50) }).parse(req.body ?? {});
+  const b = z.object({ events: z.array(z.object({ b: z.number().int().min(0), p: z.number().int().min(0), event: z.enum(PLAYER_EVENTS), n: z.number().int().min(0).max(PLAYER_EVENT_REPEATS - 1).optional() })).max(50) }).parse(req.body ?? {});
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.json({ accepted: await playerEvents(row, b.events) });
 }));

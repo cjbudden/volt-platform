@@ -436,6 +436,8 @@ export async function advertising(acct: string, q: ReportQuery, beacons?: () => 
     returnToContentMs: { avg: Number(r.return_n) ? Math.round(Number(r.return_ms) / Number(r.return_n)) : null, p95: n(r.return_p95) },
     leftDuringAd: Number(r.left_in_ad), leftDuringAdSessions: Number(r.left_in_ad_sessions),
     adsStarted: Number(r.ads_started), adsEnded: Number(r.ads_ended),
+    // Ads in a break watched to their end (an ad the viewer left during has no end).
+    adCompletion: ratio(Number(r.ads_ended), Number(r.ads_started)),
     server,
     serverCompletion: server && server.impressions ? server.complete / server.impressions : null,
   };
@@ -457,13 +459,13 @@ export async function listViews(acct: string, q: ReportQuery, problem = 'all', l
   p.push(Math.min(200, Math.max(1, limit)));
   const rows = await aquery<any>(
     `SELECT sid, attempt, started_at, ended_at, ended_by, content_id, stream_type, device_class, device_model, os, browser, app_name, app_version, country,
-       outcome, startup_ms, error_code, error_step, fatal_after_start, stalls, rebuffer_ms, playing_ms, ad_breaks, left_in_ad, latency_avg_ms
+       outcome, startup_ms, error_code, error_step, fatal_after_start, stalls, rebuffer_ms, playing_ms, ad_breaks, ads_started, ads_ended, left_in_ad, latency_avg_ms
      FROM qoe_views WHERE ${w} ORDER BY ended_at DESC, sid, attempt LIMIT $${p.length}`, p);
   return rows.map((v) => ({
     sid: v.sid, attempt: Number(v.attempt), startedAt: new Date(v.started_at).toISOString(), endedAt: new Date(v.ended_at).toISOString(), endedBy: v.ended_by,
     contentId: v.content_id, streamType: v.stream_type, device: v.device_model ?? v.device_class, os: v.os, browser: v.browser, app: v.app_name, appVersion: v.app_version,
     country: v.country, outcome: v.outcome, startupMs: v.startup_ms, errorCode: v.error_code, errorStep: v.error_step, fatalAfterStart: v.fatal_after_start,
-    stalls: Number(v.stalls), rebufferMs: Number(v.rebuffer_ms), playingMs: Number(v.playing_ms), adBreaks: Number(v.ad_breaks), leftInAd: v.left_in_ad, latencyAvgMs: v.latency_avg_ms,
+    stalls: Number(v.stalls), rebufferMs: Number(v.rebuffer_ms), playingMs: Number(v.playing_ms), adBreaks: Number(v.ad_breaks), adsStarted: Number(v.ads_started), adsEnded: Number(v.ads_ended), leftInAd: v.left_in_ad, latencyAvgMs: v.latency_avg_ms,
   }));
 }
 

@@ -12,6 +12,7 @@ export const STRINGS: Record<string, string> = {
   cast: 'Cast to a TV', stopCasting: 'Stop casting', castingTo: 'Playing on {device}', airplay: 'AirPlay',
   upNext: 'Up next', skipIntro: 'Skip intro', skipRecap: 'Skip recap', skipCredits: 'Skip credits', skip: 'Skip', nextIn: 'Next in {time}', startsIn: 'Starts in {time}', playNow: 'Play now', cancel: 'Cancel',
   schedule: 'Schedule', playlist: 'Playlist', now: 'Now', next: 'Next', later: 'Later', onNow: 'On now',
+  ad: 'Ad', adOf: 'Ad {number} of {of}', learnMore: 'Learn more', adBreak: 'Ad break', adBreakWatched: 'Ad break, watched',
   nowPlaying: 'Now playing', recentlyPlayed: 'Recently played', comingUp: 'Coming up',
   comingUpIn: 'Coming up in {time}', startsAt: 'Starts at {time}', dismiss: 'Dismiss', onAir: 'On air',
   timeLeft: '{time} left', nextAt: 'Next at {time}', laterToday: 'Later',

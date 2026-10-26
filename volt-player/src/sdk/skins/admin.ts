@@ -90,7 +90,12 @@ export function adminSkin(): Skin {
     label(p.play, st.playing ? t('pause') : t('play'));
     const r = range(st);
     show(prog.root, !!r);
-    if (r) prog.set((st.currentTime - r.start) / Math.max(0.001, r.end - r.start));
+    if (r) {
+      const span = Math.max(0.001, r.end - r.start);
+      prog.set((st.currentTime - r.start) / span);
+      // On-demand ad breaks, as the viewer's scrubber shows them.
+      prog.marks(st.live ? [] : st.adMarkers.map((m) => ({ from: (m.startSec - r.start) / span, to: (m.startSec + m.durationSec - r.start) / span, watched: m.watched })));
+    }
     show(p.back, !!r); show(p.fwd, !!r && !(st.live && st.atLiveEdge));
     setIcon(p.mute, st.muted || st.volume === 0 ? 'mute' : 'volume');
     vol.set(st.muted ? 0 : st.volume);

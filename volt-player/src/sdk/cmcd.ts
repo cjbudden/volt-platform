@@ -288,6 +288,7 @@ export class PlayAttempt {
   private lastBr: number | null = null;
   private identitySent = false;
   private breakId: string | null = null;
+  private adOn = false;
   sf: 'h' | 'd' | 'o' | null = null;
   closed = false;
   /** Every report made, in order (the debug panel; tests). */
@@ -423,9 +424,28 @@ export class PlayAttempt {
     if (this.closed) return;
     const next = id ? String(id).slice(0, 64) : null;
     if (next === this.breakId) return;
+    // An ad still on when its break ends has ended with it.
+    if (this.adOn) this.adEnd();
     if (this.breakId) this.emit('abe', { [VOLT_KEY + 'brk']: this.breakId });
     this.breakId = next;
     if (next) this.emit('abs', { [VOLT_KEY + 'brk']: next });
+  }
+
+  /**
+   * One ad started or ended inside a break (an on-demand ad, sdk/ads.ts), so
+   * the playback reports can count the ads played and those watched to the
+   * end. Call adBreak() first: an ad outside a break is not reported. An ad
+   * that never ended (the viewer left) sends no ae.
+   */
+  adStart(): void {
+    if (this.closed || !this.breakId || this.adOn) return;
+    this.adOn = true;
+    this.emit('as');
+  }
+  adEnd(): void {
+    if (this.closed || !this.adOn) return;
+    this.adOn = false;
+    this.emit('ae');
   }
 
   /**

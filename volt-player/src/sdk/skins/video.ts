@@ -8,6 +8,8 @@
 //  time or LIVE / Go live, Start over, then subtitles (only when the stream
 //  has them), quality, schedule/playlist, picture in picture, full screen.
 //  Up next appears bottom right before the end of an item or a programme.
+//  On-demand ad breaks are marked on the scrubber, and the ad on screen is
+//  named by the ads overlay (sdk/ads.ts) in the player's own words.
 // ============================================================================
 import type { PlayerState, Programme, Skin, SkinContext } from '../types';
 import { autoHide, button, el, fmtClock, fmtTime, label, menu, setIcon, show, skipButton, slider, text, upNextCard, type MenuItem, type UpNextCard } from './kit';
@@ -220,7 +222,8 @@ export function videoSkin(): Skin {
     const sub = st.live && st.programme ? (st.programme.subtitle ?? item?.title ?? '') : item?.subtitle ?? '';
     text(parts.title as HTMLElement, ctl.title ? title : '');
     text(parts.sub as HTMLElement, ctl.title && sub !== title ? sub : '');
-    show(parts.top.querySelector('.vpv-title') as HTMLElement, ctl.title && !!title);
+    // While an on-demand ad plays, its overlay (top left) names it instead.
+    show(parts.top.querySelector('.vpv-title') as HTMLElement, ctl.title && !!title && !st.ad);
 
     // Cast / AirPlay
     show(parts.cast, ctl.cast && (st.cast.available || st.cast.state !== 'none'));
@@ -254,6 +257,10 @@ export function videoSkin(): Skin {
     if (r) {
       const f = (st.currentTime - r.start) / Math.max(0.001, r.end - r.start);
       prog.set(f);
+      // On-demand ad breaks on the scrubber: yellow ahead, grey once watched.
+      const span = Math.max(0.001, r.end - r.start);
+      prog.marks(st.live ? [] : st.adMarkers.map((m) => ({ from: (m.startSec - r.start) / span, to: (m.startSec + m.durationSec - r.start) / span,
+        watched: m.watched, title: t(m.watched ? 'adBreakWatched' : 'adBreak') })));
     }
     const seekable = !!r;
     show(parts.back, ctl.seekButtons && seekable);

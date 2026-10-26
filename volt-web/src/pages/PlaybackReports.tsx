@@ -50,11 +50,11 @@ export interface QoeOverview {
     byDevice: Array<{ deviceClass: string | null; deviceModel: string | null; views: number; latencyAvgMs: number | null; latencyP95Ms: number | null; driftAvgMs: number | null; highestLatencyMs: number | null; catchUpShare: number | null }> }
   ads?: { views: number; sessions: number; breaks: number; breaksCompleted: number; breakCompletion: number | null; avgBreakMs: number | null; adStartupMs: { avg: number | null; p50: number | null; p95: number | null }
     adRebufferRatio: number | null; adStalls: number; viewsWithAdStalls: number; adErrors: number; returnToContentMs: { avg: number | null; p95: number | null }
-    leftDuringAd: number; leftDuringAdSessions: number; server: null | { impressions: number; starts: number; firstQuartile: number; midpoint: number; thirdQuartile: number; complete: number; failed: number; sessions: number }
+    leftDuringAd: number; leftDuringAdSessions: number; adsStarted: number; adsEnded: number; adCompletion: number | null; server: null | { impressions: number; starts: number; firstQuartile: number; midpoint: number; thirdQuartile: number; complete: number; failed: number; sessions: number }
     serverCompletion: number | null }
 }
 interface SessionRow { sid: string; attempt: number; startedAt: string; endedAt: string; contentId: string | null; contentName: string | null; device: string | null; os: string | null; browser: string | null
-  country: string | null; outcome: string; startupMs: number | null; errorCode: string | null; errorStep: string | null; fatalAfterStart: boolean; stalls: number; adBreaks: number; leftInAd: boolean }
+  country: string | null; outcome: string; startupMs: number | null; errorCode: string | null; errorStep: string | null; fatalAfterStart: boolean; stalls: number; adBreaks: number; adsStarted?: number; leftInAd: boolean }
 interface Timeline { sid: string; from: string; reports: number; duplicates: number; missingSequence: number[]; viewer: { userAgent: string | null; country: string | null } | null
   views: any[]; contentNames: Record<string, string>
   spans: Array<{ state: string; fromOffsetMs: number; toOffsetMs: number; ms: number }>
@@ -459,6 +459,7 @@ export default function PlaybackReports() {
           {ad && ad.breaks > 0 && (
             <Report icon={Ic.ad} title="Advertising" question="Are ads hurting playback or revenue? Time in a break is the ad's, so it is not in the buffering and quality figures above.">
               <div style={statGrid}>
+                <Stat label="Ads played" value={fmtInt(ad.adsStarted)} sub={ad.adsStarted ? `${fmtInt(ad.adsEnded)} watched to the end (${fmtPct(ad.adCompletion)})` : 'none reported by a player yet'} />
                 <Stat label="Breaks watched to the end" value={fmtPct(ad.breakCompletion)} sub={`${fmtInt(ad.breaksCompleted)} of ${fmtInt(ad.breaks)}; average ${fmtMs(ad.avgBreakMs)}`} />
                 <Stat label="Ad startup" value={fmtMs(ad.adStartupMs.avg)} sub={`average; p95 ${fmtMs(ad.adStartupMs.p95)}`} />
                 <Stat label="Ad buffering" value={fmtPct(ad.adRebufferRatio, 2)} sub={`${pl(ad.adStalls, 'stall')} in ${pl(ad.viewsWithAdStalls, 'view')}`} tone={ad.adStalls ? 'var(--warn)' : undefined} />
@@ -543,7 +544,7 @@ export default function PlaybackReports() {
                   <button key="o" className="btn ghost" style={{ padding: '2px 10px', fontSize: 'var(--fs-sm)' }} onClick={() => openSession(x.sid)} aria-label={`Open the timeline of session ${x.sid}`}>
                     <span className="flex items-center gap-2"><Icon d={Ic.list} />Timeline</span></button>,
                   x.outcome === 'failed' ? `Failed at ${STEP[x.errorStep ?? ''] ?? x.errorStep ?? '?'} (${x.errorCode ?? 'no code'})` : x.outcome === 'exited' ? 'Left before the first frame'
-                    : x.fatalAfterStart ? `Stopped by ${x.errorCode ?? 'an error'}` : x.leftInAd ? 'Left during an ad' : `${pl(x.stalls, 'stall')}, started in ${fmtMs(x.startupMs)}`,
+                    : x.fatalAfterStart ? `Stopped by ${x.errorCode ?? 'an error'}` : x.leftInAd ? 'Left during an ad' : `${pl(x.stalls, 'stall')}, started in ${fmtMs(x.startupMs)}${x.adsStarted ? `, ${pl(x.adsStarted, 'ad')}` : ''}`,
                   x.contentName ?? valueLabel(x.contentId), [x.device, x.country].filter(Boolean).join(', ') || '–', new Date(x.endedAt).toLocaleString(),
                 ])} />
               : <p style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', margin: '12px 0 0' }}>No sessions like this in the period.</p>}

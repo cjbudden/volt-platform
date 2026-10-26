@@ -44,7 +44,7 @@ export function initialState(): PlayerState {
     programme: null, nextProgramme: null, schedule: [], canStartOver: false,
     volume: 1, muted: false, rate: 1,
     qualities: [], quality: 'auto', activeQuality: null, textTracks: [], textTrack: null, audioTracks: [], audioTrack: null,
-    items: [], index: -1, item: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null, ad: null,
+    items: [], index: -1, item: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null, ad: null, adMarkers: [],
     nowPlaying: null, history: [], nextTrack: null,
     cast: { available: false, state: 'none', device: null },
     airplay: { available: false, active: false },
@@ -446,7 +446,8 @@ export class VoltPlayer {
       for (const g of graphics) if (!before.has(g.id)) this.emit('graphic', g);
     }
     // The playback reports count a break's time as the ad's (sdk/cmcd.ts adBreak; only a change is reported).
-    if (!casting) this.attempt?.adBreak(adBreak ? (adBreak.data.break || adBreak.id) : null);
+    // An on-demand break (sdk/ads.ts) is one too, so the stream's own break and ours never undo each other.
+    if (!casting) this.attempt?.adBreak(adBreak ? (adBreak.data.break || adBreak.id) : this.s.ad ? vodBreakId(this.s.ad) : null);
     this.set({
       currentTime, behindLive, atLiveEdge: !e.live || behindLive < 8, wallClock: e.live ? wallClock : null,
       programme, nextProgramme, upNext, skip, graphics, overlays,
@@ -563,7 +564,7 @@ export class VoltPlayer {
     // step and code (QOE_REPORTING.md principle 2).
     const attempt = this.openAttempt(item, autoplay);
     this.startGraphicsFeed(item.assetId ?? null);
-    this.set({ index, item, status: 'loading', error: null, errorCode: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null, hasPicture: false, audioOnly: false, qualities: [], textTracks: [], audioTracks: [],
+    this.set({ index, item, status: 'loading', error: null, errorCode: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null, ad: null, adMarkers: [], hasPicture: false, audioOnly: false, qualities: [], textTracks: [], audioTracks: [],
       access: { mode: null, message: null, products: [] } });
     this.emit('itemchange', { index, item });
     try {
@@ -596,7 +597,7 @@ export class VoltPlayer {
       // before the first frame, since a pre-roll starts at once.
       this.engine.guided = item.ads?.delivery === 'guided';
       if (item.ads?.delivery === 'guided') {
-        const va = new VodAds(this.media, this.api, item.ads, (ad) => this.set({ ad }), this.stage);
+        const va = this.newVodAds(item.ads);
         this.vodAds = va;
         this.engine.onAd = (ad) => va.guidedAd(ad);
       } else this.engine.onAd = null;
@@ -610,7 +611,7 @@ export class VoltPlayer {
       const lang = store.get('textLang');
       if (lang) { const id = this.engine.textByLang(lang); if (id) this.engine.setTextTrack(id); }
       this.startBeacons(item);
-      if (item.ads && item.ads.delivery !== 'guided') this.vodAds = new VodAds(this.media, this.api, item.ads, (ad) => this.set({ ad }), this.stage);
+      if (item.ads && item.ads.delivery !== 'guided') this.vodAds = this.newVodAds(item.ads);
       if (this.caster?.connected) await this.castCurrent();
       else if (autoplay) this.cmd.play();
     } catch (e: any) {
@@ -808,6 +809,28 @@ export class VoltPlayer {
     });
   }
 
+  // ---------------------------------------------------------------- on-demand ads
+  /**
+   * The on-demand ads controller for an item (sdk/ads.ts): the ad on screen
+   * and the breaks for the scrubber go into the state, the overlay speaks the
+   * player's strings, and each ad is reported to the playback reports (an ad
+   * started, an ad watched to its end) inside its break.
+   */
+  private newVodAds(ads: NonNullable<PlaylistItem['ads']>): VodAds {
+    let prev: import('./ads').AdState | null = null;
+    return new VodAds(this.media, this.api, ads, (ad) => {
+      const a = this.attempt;
+      const same = !!ad && !!prev && ad.breakIndex === prev.breakIndex && ad.number === prev.number;
+      if (a && !same) {
+        if (prev) a.adEnd();
+        a.adBreak(ad ? vodBreakId(ad) : null);
+        if (ad) a.adStart();
+      }
+      prev = ad;
+      this.set({ ad });
+    }, this.stage, { t: (k, v) => this.t(k, v), onMarkers: (adMarkers) => this.set({ adMarkers }) });
+  }
+
   // ---------------------------------------------------------------- commands
   private t(k: string, v?: Record<string, string | number>) { return format(this.o.strings?.[k] ?? STRINGS[k] ?? k, v); }
 
@@ -960,3 +983,6 @@ export class VoltPlayer {
     } catch { this.analyser = null; return null; }
   }
 }
+
+/** The id an on-demand break is reported under (sdk/cmcd.ts adBreak). */
+function vodBreakId(ad: import('./ads').AdState): string { return `vod-${ad.breakIndex}`; }

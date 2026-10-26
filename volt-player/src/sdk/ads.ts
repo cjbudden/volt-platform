@@ -27,6 +27,13 @@
 //  and Learn more, and pause and mute still reach the ad's trackers. The ad's
 //  address names its session, break and place (/vod-ads/s/<session>/ad/<b>/<p>/),
 //  which is all the click and the events need.
+//
+//  FOR THE SKINS: `onMarkers` gets the breaks for a scrubber (stitched time,
+//  watched or not) whenever they change; the overlay's words come from the
+//  player's string table (`t`), so a client translating the player translates
+//  the ad too. Pause, resume, mute and unmute are reported every time they
+//  happen during an ad (VAST counts each one), numbered so a resend after a
+//  network error is still sent once.
 // ============================================================================
 
 export interface ItemAds {
@@ -47,6 +54,23 @@ export function guidedRef(mediaUrl: string | null): { sid: string; b: number; p:
   const m = mediaUrl?.match(/\/vod-ads\/s\/([A-Za-z0-9_-]{20,42})\/ad\/(\d+)\/(\d+)\//);
   return m ? { sid: m[1], b: Number(m[2]), p: Number(m[3]) } : null;
 }
+
+/** A break on the scrubber, in the player's (stitched) time. Guided breaks sit at a moment (length 0). */
+export interface AdMarker { startSec: number; durationSec: number; watched: boolean }
+
+export interface VodAdsOptions {
+  /** The player's strings (sdk/strings.ts, with the client's own): ad, adOf, learnMore. */
+  t?: (k: string, v?: Record<string, string | number>) => string;
+  /** The breaks for a scrubber, each time they change. */
+  onMarkers?: (m: AdMarker[]) => void;
+}
+
+/** The overlay's words when no translator is given (the same as sdk/strings.ts). */
+const WORDS: Record<string, string> = { ad: 'Ad', adOf: 'Ad {number} of {of}', learnMore: 'Learn more' };
+const fill = (s: string, v?: Record<string, string | number>) => (v ? s.replace(/\{(\w+)\}/g, (_m, k) => (v[k] != null ? String(v[k]) : '')) : s);
+
+/** Most times one ad reports the same player event (a viewer pausing again and again). */
+const MAX_REPEATS = 20;
 
 /** What the player state carries while an ad plays. */
 export interface AdState {
@@ -84,8 +108,6 @@ export function toStitched(content: number, cs: Clock[]): number {
 }
 const breakAt = (stitched: number, cs: Clock[]) => cs.find((c) => stitched >= c.startSec && stitched < c.startSec + c.durationSec) ?? null;
 
-const PLAYER_EVENTS: Record<string, string> = { pause: 'pause', play: 'resume' };
-
 export class VodAds {
   private t: AdTimeline | null = null;
   private cs: Clock[] = [];
@@ -97,7 +119,13 @@ export class VodAds {
   private guard = false;
   private el: HTMLElement | null = null;
   private current: AdState | null = null;
-  private sent = new Set<string>();
+  /** Per ad (`sid/b/p`): how many of each event were sent, and the last of each pair (pause/resume, mute/unmute). */
+  private counts = new Map<string, number>();
+  private lastOf = new Map<string, string>();
+  /** Muted (or volume 0) as last seen, so only a change is an event. */
+  private wasMuted = false;
+  private lastMarkers = '';
+  private opts: VodAdsOptions;
 
   private media: HTMLMediaElement;
   private apiBase: string;
@@ -105,8 +133,9 @@ export class VodAds {
   private onChange: (ad: AdState | null) => void;
   private root?: HTMLElement;
 
-  constructor(media: HTMLMediaElement, apiBase: string, ads: ItemAds, onChange: (ad: AdState | null) => void, root?: HTMLElement) {
-    this.media = media; this.apiBase = apiBase; this.ads = ads; this.onChange = onChange; this.root = root;
+  constructor(media: HTMLMediaElement, apiBase: string, ads: ItemAds, onChange: (ad: AdState | null) => void, root?: HTMLElement, opts: VodAdsOptions = {}) {
+    this.media = media; this.apiBase = apiBase; this.ads = ads; this.onChange = onChange; this.root = root; this.opts = opts;
+    this.wasMuted = media.muted || media.volume === 0;
     if (ads.delivery === 'guided') { this.wireGuided(); return; }
     if (ads.delivery !== 'stitched' || !ads.timelineUrl) return;
     void this.load();
@@ -119,18 +148,37 @@ export class VodAds {
   private guidedRef: { sid: string; b: number; p: number } | null = null;
 
   private wireGuided() {
-    const on = (ev: string, fn: () => void) => { this.media.addEventListener(ev, fn); this.off.push(() => this.media.removeEventListener(ev, fn)); };
-    on('pause', () => this.report('pause'));
-    on('play', () => this.report('play'));
-    on('volumechange', () => this.report(this.media.muted || this.media.volume === 0 ? 'mute' : 'unmute'));
+    this.wirePlayerEvents();
     if (this.root) this.mountOverlay();
   }
+
+  /** Pause, resume, mute and unmute while an ad is on screen. */
+  private wirePlayerEvents() {
+    const on = (ev: string, fn: () => void) => { this.media.addEventListener(ev, fn); this.off.push(() => this.media.removeEventListener(ev, fn)); };
+    on('pause', () => this.report('pause'));
+    on('play', () => this.report('resume'));
+    // volumechange fires for every step of a volume drag: only muting or unmuting is news.
+    on('volumechange', () => {
+      const m = this.media.muted || this.media.volume === 0;
+      if (m === this.wasMuted) return;
+      this.wasMuted = m;
+      this.report(m ? 'mute' : 'unmute');
+    });
+  }
+
+  /** Guided breaks the viewer has been through (the content resumed after them). */
+  private guidedDone = new Set<number>();
 
   /** The engine's ad (or null when the content resumes) in a guided break. */
   guidedAd(ad: GuidedAd | null) {
     const ref = ad ? guidedRef(ad.mediaUrl) : null;
+    const was = this.guidedRef;
     this.guidedRef = ref;
-    if (!ad) { this.setCurrent(null); return; }
+    if (!ad) {
+      if (was) { this.guidedDone.add(was.b); this.emitMarkers(); }
+      this.setCurrent(null);
+      return;
+    }
     const state = (canClick: boolean): AdState => ({ breakIndex: ref?.b ?? 0, number: ad.number, of: ad.of, title: null, remainingSec: ad.remainingSec, canClick });
     if (!ref) { this.setCurrent(state(false)); return; }
     let tl = this.guidedTl.get(ref.sid);
@@ -143,7 +191,7 @@ export class VodAds {
     else this.setCurrent({ ...this.current, remainingSec: ad.remainingSec });
     void tl.then((t) => {
       if (!t || this.guidedRef?.sid !== ref.sid || this.guidedRef.b !== ref.b || this.guidedRef.p !== ref.p || !this.current) return;
-      if (!this.t) this.t = t;
+      if (!this.t) { this.t = t; this.emitMarkers(); }
       const x = t.breaks.find((b) => b.index === ref.b)?.ads[ref.p];
       this.setCurrent({ ...this.current, title: x?.title ?? null, canClick: !!x?.clickUrl });
     });
@@ -161,17 +209,36 @@ export class VodAds {
     const on = (ev: string, fn: () => void) => { this.media.addEventListener(ev, fn); this.off.push(() => this.media.removeEventListener(ev, fn)); };
     on('timeupdate', () => this.onTime());
     on('seeking', () => this.onSeek());
-    on('pause', () => this.report('pause'));
-    on('play', () => this.report('play'));
-    on('volumechange', () => this.report(this.media.muted || this.media.volume === 0 ? 'mute' : 'unmute'));
+    this.wirePlayerEvents();
     if (this.root) this.mountOverlay();
     this.onTime();
+    this.emitMarkers();
   }
 
   /** Where the viewer is in the content, whatever ads came before. */
   get contentTime(): number { return this.cs.length ? toContent(this.media.currentTime, this.cs) : this.media.currentTime; }
-  /** Breaks for a scrubber: stitched start and length, and whether watched. */
-  get markers() { return this.cs.map((c) => ({ startSec: c.startSec, durationSec: c.durationSec, watched: this.watched.has(c.index) })); }
+  /**
+   * Breaks for a scrubber: stitched start and length, and whether watched.
+   * Guided: each break at its moment in the title (the player's own clock is
+   * the title's), watched once the title resumed after it; a pre-roll is not
+   * marked (it sits at 0, under the thumb).
+   */
+  get markers(): AdMarker[] {
+    if (this.cs.length) return this.cs.map((c) => ({ startSec: c.startSec, durationSec: c.durationSec, watched: this.watched.has(c.index) }));
+    if (this.ads.delivery === 'guided' && this.t) {
+      return this.t.breaks.filter((b) => b.position !== 'pre').map((b) => ({ startSec: b.contentSec, durationSec: 0, watched: this.guidedDone.has(b.index) }));
+    }
+    return [];
+  }
+
+  private emitMarkers() {
+    if (!this.opts.onMarkers) return;
+    const m = this.markers;
+    const key = JSON.stringify(m);
+    if (key === this.lastMarkers) return;
+    this.lastMarkers = key;
+    this.opts.onMarkers(m);
+  }
   /** Seek in content time (a bookmark, resume): lands after the breaks before it. */
   seekContent(sec: number) { this.media.currentTime = toStitched(sec, this.cs); }
 
@@ -180,7 +247,9 @@ export class VodAds {
     if (!this.guard) this.last = now;
     const c = breakAt(now, this.cs);
     // a break is watched once playback has passed its end
+    const before = this.watched.size;
     for (const x of this.cs) if (now >= x.startSec + x.durationSec - 0.25 && this.last >= x.startSec) this.watched.add(x.index);
+    if (this.watched.size !== before) this.emitMarkers();
     if (this.pendingTo != null && (!c || this.watched.has(c.index))) {
       const to = this.pendingTo; this.pendingTo = null;
       this.jump(toStitched(to, this.cs));
@@ -241,18 +310,30 @@ export class VodAds {
     window.open(this.abs(ad.clickUrl), '_blank', 'noopener');
   }
 
-  private report(ev: string) {
+  /**
+   * A player event during the ad on screen. Each pause, resume, mute and
+   * unmute is sent (an ad's trackers count every one); a resume needs a pause
+   * before it in the same ad (playing at the ad's start is not a resume), and
+   * the same event twice in a row is one. `n` numbers the repeats, so the
+   * server sends each once even if the request is retried.
+   */
+  private report(event: string) {
     const a = this.current;
     if (!a || (!this.t && !this.guidedRef)) return;
-    const event = PLAYER_EVENTS[ev] ?? ev;
     const g = this.guidedRef;
     const p = g ? g.p : a.number - 1;
-    const key = `${g?.sid ?? ''}/${a.breakIndex}/${p}/${event}`;
-    if (this.sent.has(key)) return;
-    this.sent.add(key);
+    const ad = `${g?.sid ?? ''}/${a.breakIndex}/${p}`;
+    const pair = event === 'pause' || event === 'resume' ? 'play' : event === 'mute' || event === 'unmute' ? 'sound' : event;
+    const last = this.lastOf.get(`${ad}/${pair}`);
+    if (last === event) return;
+    if (event === 'resume' && last !== 'pause') return;
+    const n = this.counts.get(`${ad}/${event}`) ?? 0;
+    if (n >= MAX_REPEATS) return;
+    this.lastOf.set(`${ad}/${pair}`, event);
+    this.counts.set(`${ad}/${event}`, n + 1);
     const url = g ? `/vod-ads/s/${g.sid}/events` : this.t!.eventsUrl;
     void fetch(this.abs(url), { method: 'POST', credentials: 'omit', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ events: [{ b: a.breakIndex, p, event }] }), keepalive: true }).catch(() => null);
+      body: JSON.stringify({ events: [{ b: a.breakIndex, p, event, n }] }), keepalive: true }).catch(() => null);
   }
 
   // ---- a small overlay of its own, so any skin shows the ad
@@ -277,17 +358,20 @@ export class VodAds {
     if (!a) return;
     const pill = document.createElement('span');
     pill.style.cssText = 'background:rgba(0,0,0,.65);border-radius:999px;padding:5px 10px';
-    pill.textContent = `Ad${a.of > 1 ? ` ${a.number} of ${a.of}` : ''} · ${Math.floor(a.remainingSec / 60)}:${String(a.remainingSec % 60).padStart(2, '0')}`;
+    const label = a.of > 1 ? this.word('adOf', { number: a.number, of: a.of }) : this.word('ad');
+    pill.textContent = `${label} · ${Math.floor(a.remainingSec / 60)}:${String(a.remainingSec % 60).padStart(2, '0')}`;
     el.appendChild(pill);
     if (a.canClick) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.textContent = 'Learn more';
+      btn.textContent = this.word('learnMore');
       btn.style.cssText = 'background:#fff;color:#111;border:0;border-radius:999px;padding:5px 12px;font:inherit;cursor:pointer';
       btn.addEventListener('click', (e) => { e.stopPropagation(); this.click(); });
       el.appendChild(btn);
     }
   }
+
+  private word(k: string, v?: Record<string, string | number>) { return this.opts.t ? this.opts.t(k, v) : fill(WORDS[k] ?? k, v); }
 
   dispose() { for (const f of this.off) f(); this.off = []; this.el = null; }
 }

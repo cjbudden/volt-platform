@@ -131,13 +131,24 @@ export function menu(host: HTMLElement, title: string, items: MenuItem[], pick: 
  * A slider: scrubber or volume. `value` 0..1. Drag, click, touch and the
  * arrow keys. `preview(frac)` lets a scrubber show the time under the pointer.
  */
-export interface Slider { root: HTMLElement; set(v: number, extra?: number): void; dragging(): boolean }
+export interface Slider {
+  root: HTMLElement; set(v: number, extra?: number): void; dragging(): boolean;
+  /**
+   * Marks on the track (a scrubber's ad breaks): from and to as 0..1, a
+   * watched mark drawn quieter. `title` is read by screen readers and shown
+   * on hover. Painted only when the list changes.
+   */
+  marks(list: { from: number; to: number; watched: boolean; title?: string }[]): void;
+}
 export function slider(cls: string, aria: string, onInput: (v: number, final: boolean) => void, preview?: (v: number | null) => void): Slider {
   const fill = el('div', 'vp-sl-fill');
   const extra = el('div', 'vp-sl-extra');
   const thumb = el('div', 'vp-sl-thumb');
+  // Above the fill, so a break the viewer has passed still shows where it was.
+  const marksEl = el('div', 'vp-sl-marks', { 'aria-hidden': 'true' });
+  let marksKey = '';
   const root = el('div', `vp-sl ${cls}`, { role: 'slider', tabindex: '0', 'aria-label': aria, 'aria-valuemin': '0', 'aria-valuemax': '100' },
-    el('div', 'vp-sl-track', undefined, extra, fill), thumb);
+    el('div', 'vp-sl-track', undefined, extra, fill), marksEl, thumb);
   let drag = false, v = 0;
   const at = (x: number) => { const r = root.getBoundingClientRect(); return Math.min(1, Math.max(0, (x - r.left) / Math.max(1, r.width))); };
   root.addEventListener('pointerdown', (e) => {
@@ -166,7 +177,19 @@ export function slider(cls: string, aria: string, onInput: (v: number, final: bo
     if (x != null) extra.style.width = `${Math.max(0, Math.min(1, x)) * 100}%`;
     root.setAttribute('aria-valuenow', String(Math.round(f * 100)));
   }
-  return { root, set: (f, x) => { if (drag) return; v = Number.isFinite(f) ? f : 0; paint(v, x); }, dragging: () => drag };
+  function marks(list: { from: number; to: number; watched: boolean; title?: string }[]) {
+    const key = JSON.stringify(list);
+    if (key === marksKey) return;
+    marksKey = key;
+    marksEl.replaceChildren(...list.map((m) => {
+      const from = Math.min(1, Math.max(0, m.from)), to = Math.min(1, Math.max(from, m.to));
+      const d = el('div', `vp-sl-mark${m.watched ? ' watched' : ''}`, m.title ? { title: m.title } : undefined);
+      d.style.left = `${from * 100}%`;
+      d.style.width = `${(to - from) * 100}%`;
+      return d;
+    }));
+  }
+  return { root, set: (f, x) => { if (drag) return; v = Number.isFinite(f) ? f : 0; paint(v, x); }, dragging: () => drag, marks };
 }
 
 /** Hide controls after a few idle seconds while playing; any movement shows them. */
@@ -328,6 +351,10 @@ const CSS = `
 .vp .vp-sl:hover .vp-sl-track,.vp .vp-sl.drag .vp-sl-track{height:6px}
 .vp .vp-sl-extra{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.35)}
 .vp .vp-sl-fill{position:absolute;left:0;top:0;bottom:0;background:var(--vp-primary)}
+.vp .vp-sl-marks{position:absolute;left:0;right:0;top:50%;height:4px;margin-top:-2px;pointer-events:none;transition:height .12s,margin .12s}
+.vp .vp-sl:hover .vp-sl-marks,.vp .vp-sl.drag .vp-sl-marks{height:6px;margin-top:-3px}
+.vp .vp-sl-mark{position:absolute;top:0;bottom:0;min-width:4px;margin-left:-2px;border-radius:2px;background:#facc15}
+.vp .vp-sl-mark.watched{background:rgba(255,255,255,.55)}
 .vp .vp-sl-thumb{position:absolute;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:var(--vp-primary);box-shadow:0 0 0 3px rgba(0,0,0,.25);transform:scale(0);transition:transform .12s}
 .vp .vp-sl:hover .vp-sl-thumb,.vp .vp-sl.drag .vp-sl-thumb,.vp .vp-sl:focus-visible .vp-sl-thumb{transform:scale(1)}
 .vp .vp-menu{position:absolute;z-index:30;min-width:180px;max-height:70%;overflow:auto;background:rgba(14,16,22,.96);color:#fff;border-radius:12px;padding:6px;box-shadow:0 12px 40px rgba(0,0,0,.45)}

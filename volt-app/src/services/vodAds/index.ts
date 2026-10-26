@@ -756,8 +756,12 @@ export async function segmentRedirect(row: any, b: number, p: number, track: str
 
 const chains = new Map<string, Promise<void>>();
 
-/** Claim and send events in order, per session (one chain), each URL once. */
-export function sendSessionEvents(row: any, b: number, p: number, e: PodEntry, due: { event: string; offsetSec: number; urls: string[] }[]): Promise<void> {
+/**
+ * Claim and send events in order, per session (one chain), each URL once.
+ * `seq` numbers a repeated player event (the second pause is seq 1), so each
+ * repeat is sent once too; everything the server sends itself is seq 0.
+ */
+export function sendSessionEvents(row: any, b: number, p: number, e: PodEntry, due: { event: string; offsetSec: number; urls: string[]; seq?: number }[]): Promise<void> {
   if (!due.length) return Promise.resolve();
   const ctx = (row.ctx ?? {}) as SessionCtx;
   const prev = chains.get(row.id) ?? Promise.resolve();
@@ -767,9 +771,9 @@ export function sendSessionEvents(row: any, b: number, p: number, e: PodEntry, d
       await Promise.all(urls.map(async (raw, urlIndex) => {
         const url = raw ? fillBeaconUrl(raw, { nowMs: Date.now(), adPlayheadSec: ev.offsetSec, breakPosition: positionCode(row, b) }) : null;
         const claimed = await one<{ id: string }>(
-          `INSERT INTO vod_ad_events (session_id, account_id, vod_asset_id, break_index, pod_index, ad_id, creative_key, event, url_index, url)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (session_id, break_index, pod_index, event, url_index) DO NOTHING RETURNING id`,
-          [row.id, row.account_id, row.vod_asset_id, b, p, e.adId, e.creativeKey, ev.event, raw ? urlIndex : -1, url]).catch(() => null);
+          `INSERT INTO vod_ad_events (session_id, account_id, vod_asset_id, break_index, pod_index, ad_id, creative_key, event, url_index, url, seq)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (session_id, break_index, pod_index, event, url_index, seq) DO NOTHING RETURNING id`,
+          [row.id, row.account_id, row.vod_asset_id, b, p, e.adId, e.creativeKey, ev.event, raw ? urlIndex : -1, url, ev.seq ?? 0]).catch(() => null);
         if (!claimed || !url) return;
         const t0 = Date.now();
         const r = await fetchTracker(url, { ip: ctx.ip ?? null, userAgent: ctx.userAgent ?? null });
@@ -794,13 +798,23 @@ function positionCode(row: any, b: number): number {
 /** Player events the server sends on the viewer's behalf (VAST tracking events a server cannot see). */
 export const PLAYER_EVENTS = ['pause', 'resume', 'mute', 'unmute', 'rewind', 'fullscreen', 'exitFullscreen', 'playerExpand', 'playerCollapse', 'skip', 'closeLinear'] as const;
 
-export async function playerEvents(row: any, events: { b: number; p: number; event: string }[]): Promise<number> {
+/** How many times one ad's player event is sent (the player stops at 20 too). */
+export const PLAYER_EVENT_REPEATS = 20;
+
+/**
+ * Player events for the ad servers. `n` is the event's number for that ad
+ * (0 the first pause, 1 the second...): every repeat is sent, a resent one is
+ * not. Players before 1.14k-5 send no `n` and are counted once, as before.
+ */
+export async function playerEvents(row: any, events: { b: number; p: number; event: string; n?: number }[]): Promise<number> {
   let n = 0;
   for (const ev of events) {
     if (!(PLAYER_EVENTS as readonly string[]).includes(ev.event)) continue;
+    const seq = ev.n ?? 0;
+    if (!Number.isInteger(seq) || seq < 0 || seq >= PLAYER_EVENT_REPEATS) continue;
     const e = podEntry(row, ev.b, ev.p);
     if (!e || e.kind !== 'ad') continue;
-    await sendSessionEvents(row, ev.b, ev.p, e, [{ event: ev.event, offsetSec: 0, urls: e.tracking?.[ev.event] ?? [] }]);
+    await sendSessionEvents(row, ev.b, ev.p, e, [{ event: ev.event, offsetSec: 0, urls: e.tracking?.[ev.event] ?? [], seq }]);
     n++;
   }
   return n;

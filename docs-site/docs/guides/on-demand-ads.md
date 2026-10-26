@@ -88,7 +88,9 @@ A recording of a live channel or event already knows where its ad breaks were: e
 
 ### What viewers see
 
-In the Volt player an ad shows **Ad 1 of 2 · 0:12** in the corner, with **Learn more** when the ad has a page. A viewer cannot seek inside an ad. With **Snapback** on, a viewer who skips past mid-rolls they have not seen plays the last of them first, then lands where they asked; a break already played is not played again. When the player fetches the ads itself (in a browser, on Android, on a TV), it plays them in the same picture and then carries on with the title where it stopped; on iPhone, iPad, Apple TV and Safari the device does the same with its own player.
+In the Volt player an ad shows **Ad 1 of 2 · 0:12** in the corner, with **Learn more** when the ad has a page. A viewer cannot seek inside an ad. The progress bar marks where the breaks are: yellow for a break still ahead, grey once it has been watched. These words follow the player's translations, so a site that translates the player shows the ad in the same language (see [Player SDK](player-sdk.md)).
+
+When a viewer pauses, resumes, mutes or unmutes during an ad, Volt tells the ad server each time it happens, not just the first time. With **Snapback** on, a viewer who skips past mid-rolls they have not seen plays the last of them first, then lands where they asked; a break already played is not played again. When the player fetches the ads itself (in a browser, on Android, on a TV), it plays them in the same picture and then carries on with the title where it stopped; on iPhone, iPad, Apple TV and Safari the device does the same with its own player.
 
 Captions carry on across a break: they go quiet during the ads and come back in step with the title. Titles protected with DRM play their ads in the clear, and the title's protection applies again as soon as it resumes.
 
@@ -100,7 +102,7 @@ Captions carry on across a break: they go quiet during the ads and come back in 
 | [Content Types](content-types.md) | A content type can have its own rule |
 | [Publishing Rules](publishing-rules.md) | Paid access decides who plays ad-free |
 | [FAST](fast.md) | Shares the ad servers, the house-spot fill and the reporting |
-| [Analytics](analytics.md) | The playback reports count ad time apart from the title |
+| [Analytics](analytics.md) | The playback reports count ad time apart from the title, and the ads played and watched to the end |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 

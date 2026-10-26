@@ -249,6 +249,8 @@ export interface PlayerState {
   adBreak: { id: string; endsAt: number | null } | null;
   /** An on-demand ad on screen now (sdk/ads.ts): which of the break's ads, time left, whether it has a page to open. */
   ad: import('./ads').AdState | null;
+  /** On-demand ad breaks for a scrubber, in this player's time: where, how long, watched or not. Empty without ads. */
+  adMarkers: import('./ads').AdMarker[];
 
   /** Audio services. */
   nowPlaying: TrackInfo | null;
