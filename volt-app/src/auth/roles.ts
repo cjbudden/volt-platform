@@ -116,7 +116,7 @@ export const CATALOGUE: FeatureDef[] = [
     operate: [new RegExp(`^/api/recordings/${ID}/publish$`)], operateMeans: 'Publish recordings' },
   { key: 'vod', label: 'Media library & publishing', area: 'content', prefixes: ['/api/vod', '/api/publications', '/api/social'],
     operate: [new RegExp(`^/api/vod/${ID}/(publish|withdraw)$`), new RegExp(`^/api/publications/vod/${ID}/publish$`),
-      new RegExp(`^/api/social/publish/${ID}$`), new RegExp(`^/api/social/publications/${ID}/retry$`)],
+      new RegExp(`^/api/social/publish/${ID}$`), new RegExp(`^/api/social/publish-image/${ID}$`), new RegExp(`^/api/social/publications/${ID}/retry$`)],
     operateMeans: 'Publish and withdraw' },
   { key: 'media', label: 'Files, uploads & storage', area: 'content',
     prefixes: ['/api/files', '/api/filler-assets', '/api/uploads', '/api/tus', '/api/watchfolders', '/api/storage', '/api/jobs'],

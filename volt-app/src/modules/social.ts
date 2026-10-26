@@ -3,11 +3,13 @@
 //
 //   GET    /api/social/platforms              which platforms are set up, limits, callback URLs
 //   GET    /api/social/accounts               linked accounts (publish targets) with status
-//   POST   /api/social/connect/:platform      -> { url } to send the browser to
+//   POST   /api/social/connect/:platform      {variant?} -> { url } to send the browser to (Instagram: instagram | facebook)
 //   GET    /api/social/callback/:platform     PUBLIC: the platform sends the browser back here
 //   POST   /api/social/sandbox/:platform      add a sandbox account
 //   POST   /api/social/publish/:assetId       publish to accounts, one post each
-//   GET    /api/social/publications?assetId=  where an asset went, with progress
+//   POST   /api/social/publish-image/:fileId  publish an Image Library picture (Instagram feed posts)
+//   GET    /api/social/accounts/:id/publishing-limit  posts used of the platform's 24 hour limit (Instagram)
+//   GET    /api/social/publications?assetId= | ?imageId=  where an asset or a picture went, with progress
 //   POST   /api/social/publications/:id/retry retry (optionally with an edited post)
 //   POST   /api/social/publications/:id/remove take it down on the platform
 //   POST   /api/social/sync-views             pull view counts now
@@ -29,6 +31,7 @@ import {
   PLATFORMS, PLATFORM_IDS, SocialError, platformStatus, startConnect, finishConnect, addSandbox,
   fitPost, defaultPost, queueSocialPublication, syncViews, removeFromPlatform, type PlatformId,
   xAccess, setOwnXApp, callbackUrl, X_OFF,
+  publishingLimit, limitReached, ownedImage, defaultImagePost, publishImage,
 } from '../services/social';
 import { planEditor } from '../services/plan';
 import { actor, writeAudit } from '../services/audit';
@@ -63,19 +66,22 @@ socialPublicRouter.get('/api/social/callback/:platform', asyncHandler(async (req
 socialPublicRouter.get('/social-sandbox/:id', asyncHandler(async (req, res) => {
   if (!UUID.test(req.params.id)) throw notFound('Not found');
   const r = await one<any>(
-    `SELECT p.post, p.views, p.published_at, p.platform, t.account_label, t.mode, v.title, v.export_mp4_key, v.master_key, v.progressive_key
-       FROM publications p JOIN publish_targets t ON t.id = p.target_id JOIN vod_assets v ON v.id = p.vod_asset_id
+    `SELECT p.post, p.views, p.likes, p.published_at, p.platform, p.image_key, t.account_label, t.mode, t.account_id, v.title, v.export_mp4_key, v.master_key, v.progressive_key
+       FROM publications p JOIN publish_targets t ON t.id = p.target_id LEFT JOIN vod_assets v ON v.id = p.vod_asset_id
       WHERE p.id = $1 AND t.mode = 'sandbox' AND p.status = 'published'`, [req.params.id]);
   if (!r) throw notFound('Not found');
   const label = PLATFORMS[r.platform as PlatformId]?.label ?? r.platform;
   const src = r.export_mp4_key ?? r.progressive_key ?? null;
+  // A sandbox picture post shows the JPEG Instagram would have fetched.
+  let img: string | null = null;
+  if (r.image_key) { try { const { signedImageUrl } = await import('./images'); img = signedImageUrl(r.image_key, { width: 1080, fit: 'inside', format: 'jpeg' }, ''); } catch { img = null; } }
   res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sandbox post · ${esc(label)}</title><style>body{margin:0;background:#0f1218;color:#e9ecf4;font:15px/1.5 system-ui,sans-serif}main{max-width:720px;margin:0 auto;padding:24px 16px}
 .tag{display:inline-block;border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:1px 10px;font-size:12px;color:#98a1b6}h1{font-size:20px;margin:12px 0 4px}
 p{white-space:pre-wrap;color:#c8cede}video{width:100%;border-radius:8px;background:#000;margin-top:12px}small{color:#6a7387}</style></head><body><main>
 <span class="tag">Sandbox ${esc(label)} post: nothing was sent to ${esc(label)}</span>
-<h1>${esc(r.post?.title || r.title)}</h1><small>${esc(r.account_label)} · ${esc(new Date(r.published_at).toUTCString())} · ${esc(r.views)} views · ${esc(r.post?.privacy ?? 'public')}</small>
-${src ? `<video controls src="${esc(src)}"></video>` : ''}
+<h1>${esc(r.post?.title || r.title || (r.image_key ? 'Picture' : ''))}</h1><small>${esc(r.account_label)} · ${esc(new Date(r.published_at).toUTCString())} · ${esc(r.views)} views${r.likes != null ? ` · ${esc(r.likes)} likes` : ''} · ${esc(r.post?.privacy ?? 'public')}</small>
+${img ? `<img alt="" style="width:100%;border-radius:8px;margin-top:12px" src="${esc(img)}">` : src ? `<video controls src="${esc(src)}"></video>` : ''}
 <p>${esc(r.post?.description ?? '')}</p>${(r.post?.tags ?? []).length ? `<small>Tags: ${esc(r.post.tags.join(', '))}</small>` : ''}
 </main></body></html>`);
 }));
@@ -157,7 +163,7 @@ socialRouter.delete('/x/app', asyncHandler(async (req, res) => {
 socialRouter.get('/accounts', asyncHandler(async (req, res) => {
   const rows = await query<any>(
     `SELECT t.id, t.platform, t.name, t.external_account, t.enabled, t.mode, t.account_label, t.avatar_url, t.link_status, t.link_detail,
-            t.token_expires_at, t.linked_at, u.email AS linked_by_email,
+            t.token_expires_at, t.linked_at, u.email AS linked_by_email, t.variant, t.followers, t.followers_synced_at,
             (SELECT count(*)::int FROM publications p WHERE p.target_id = t.id AND p.status = 'published') AS published,
             (SELECT max(p.published_at) FROM publications p WHERE p.target_id = t.id) AS last_published_at
        FROM publish_targets t LEFT JOIN users u ON u.id = t.linked_by
@@ -171,7 +177,8 @@ socialRouter.post('/connect/:platform', asyncHandler(async (req, res) => {
   requireAdmin(req);
   const platform = platformParam(req.params.platform);
   await assertX(platform, accountId(req));
-  try { res.json({ url: await startConnect(platform, accountId(req), req.auth?.sub && UUID.test(req.auth.sub) ? req.auth.sub : null) }); }
+  const b = z.object({ variant: z.string().max(40).optional() }).parse(req.body ?? {});
+  try { res.json({ url: await startConnect(platform, accountId(req), req.auth?.sub && UUID.test(req.auth.sub) ? req.auth.sub : null, b.variant ?? null) }); }
   catch (e: any) { if (e instanceof SocialError) throw badRequest(e.message); throw e; }
 }));
 
@@ -226,6 +233,7 @@ socialRouter.post('/publish/:assetId', asyncHandler(async (req, res) => {
     problems.push(...fit.problems.map((p) => `${row.account_label ?? row.name}: ${p}`));
     posts[t.targetId] = fit.post;
   }
+  problems.push(...await limitProblems(acct, targets));
   if (problems.length) return res.status(422).json({ error: problems.join('. '), problems });
   try {
     const out = await publish(asset.id, await actorLabel(req), {
@@ -238,15 +246,86 @@ socialRouter.post('/publish/:assetId', asyncHandler(async (req, res) => {
   }
 }));
 
+/** Instagram's 24 hour publishing limit, checked before anything is queued. A platform without one, or a failed read, says nothing. */
+async function limitProblems(acct: string, targets: any[]): Promise<string[]> {
+  const out: string[] = [];
+  for (const t of targets) {
+    if (!PLATFORMS[t.platform as PlatformId]?.publishingLimit) continue;
+    const full = await one<any>(`SELECT * FROM publish_targets WHERE id = $1 AND account_id = $2`, [t.id, acct]);
+    try {
+      const l = full ? await publishingLimit(full) : null;
+      // This post would be one more: refuse only when none is left.
+      if (l && l.remaining <= 0) out.push(limitReached(t.account_label ?? t.name, l));
+    } catch (e: any) { console.warn('[social] publishing limit read failed', t.id, e?.message ?? e); }
+  }
+  return out;
+}
+
+socialRouter.get('/accounts/:id/publishing-limit', asyncHandler(async (req, res) => {
+  if (!UUID.test(req.params.id)) throw notFound('Account not found');
+  const t = await one<any>(`SELECT * FROM publish_targets WHERE id = $1 AND account_id = $2`, [req.params.id, accountId(req)]);
+  if (!t) throw notFound('Account not found');
+  try {
+    const l = await publishingLimit(t);
+    res.json(l ? { applies: true, ...l } : { applies: false });
+  } catch (e: any) { if (e instanceof SocialError) throw badRequest(e.message); throw e; }
+}));
+
+/** Defaults for a picture's post, per platform that takes pictures. */
+socialRouter.get('/publish-image/:fileId/defaults', asyncHandler(async (req, res) => {
+  if (!UUID.test(req.params.fileId)) throw notFound('Picture not found');
+  const img = await ownedImage(req.params.fileId, accountId(req));
+  if (!img) throw notFound('Picture not found');
+  const out: Record<string, any> = {};
+  for (const id of PLATFORM_IDS) if (PLATFORMS[id].images) out[id] = defaultImagePost(img, id);
+  res.json(out);
+}));
+
+socialRouter.post('/publish-image/:fileId', asyncHandler(async (req, res) => {
+  if (!UUID.test(req.params.fileId)) throw notFound('Picture not found');
+  const b = z.object({ targets: z.array(z.object({ targetId: z.string().uuid(), post: postSchema })).min(1).max(20) }).parse(req.body ?? {});
+  const acct = accountId(req);
+  const img = await ownedImage(req.params.fileId, acct);
+  if (!img) throw notFound('Picture not found');
+  const targets = await query<any>(`SELECT id, platform, enabled, link_status, account_label, name FROM publish_targets WHERE account_id=$1 AND id = ANY($2::uuid[])`,
+    [acct, b.targets.map((t) => t.targetId)]);
+  if (targets.length !== new Set(b.targets.map((t) => t.targetId)).size) throw badRequest('One of the accounts is not linked to this Volt account');
+  const problems: string[] = [];
+  const posts: Record<string, any> = {};
+  for (const t of b.targets) {
+    const row = targets.find((x) => x.id === t.targetId)!;
+    const who = row.account_label ?? row.name;
+    if (!PLATFORMS[row.platform as PlatformId]?.images) problems.push(`${who}: ${PLATFORMS[row.platform as PlatformId]?.label ?? row.platform} takes videos, not pictures`);
+    if (!row.enabled) problems.push(`${who} is disabled`);
+    if (row.link_status === 'expired') problems.push(`${who}: access expired, connect it again`);
+    const fit = fitPost(row.platform, t.post);
+    problems.push(...fit.problems.map((p) => `${who}: ${p}`));
+    posts[t.targetId] = fit.post;
+  }
+  if (!problems.length) problems.push(...await limitProblems(acct, targets));
+  if (problems.length) return res.status(422).json({ error: problems.join('. '), problems });
+  const pubs = await publishImage(img, targets, posts, await actorLabel(req));
+  res.status(201).json({ publications: pubs });
+}));
+
 socialRouter.get('/publications', asyncHandler(async (req, res) => {
   const assetId = typeof req.query.assetId === 'string' ? req.query.assetId : '';
-  if (!assetId || !(await ownedAsset(assetId, accountId(req)))) throw notFound('Asset not found');
+  const imageId = typeof req.query.imageId === 'string' ? req.query.imageId : '';
+  let where: string, arg: string;
+  if (imageId) {
+    const img = UUID.test(imageId) ? await ownedImage(imageId, accountId(req)) : null;
+    if (!img) throw notFound('Picture not found');
+    where = 'p.image_key = $1'; arg = img.store_key;
+  } else {
+    if (!assetId || !(await ownedAsset(assetId, accountId(req)))) throw notFound('Asset not found');
+    where = 'p.vod_asset_id = $1'; arg = assetId;
+  }
   res.json(await query(
-    `SELECT p.id, p.platform, p.status, p.external_id, p.external_url, p.views, p.error, p.published_at, p.last_synced_at, p.created_at,
+    `SELECT p.id, p.platform, p.status, p.external_id, p.external_url, p.views, p.likes, p.error, p.published_at, p.last_synced_at, p.created_at,
             p.post, p.progress, p.stage, p.attempts, p.stale, p.target_id, t.account_label,
             COALESCE(t.name, 'Disconnected account') AS target_name, COALESCE(t.mode, 'live') AS mode, t.avatar_url
        FROM publications p LEFT JOIN publish_targets t ON t.id = p.target_id
-      WHERE p.vod_asset_id = $1 AND p.platform NOT IN ('portal', 'app') ORDER BY p.created_at DESC`, [assetId]));
+      WHERE ${where} AND p.platform NOT IN ('portal', 'app') ORDER BY p.created_at DESC`, [arg]));
 }));
 
 async function ownedPublication(id: string, acct: string) {

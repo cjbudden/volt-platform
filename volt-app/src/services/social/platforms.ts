@@ -7,6 +7,9 @@
 //    X            API v2, chunked media upload then a post with the media
 //    TikTok       Content Posting API, direct post with FILE_UPLOAD
 //    Dailymotion  REST API, upload URL then create the video
+//    Instagram    Instagram API (Instagram Login or Facebook Login), the
+//                 container flow: create, upload or point at the media, wait
+//                 until it is finished, publish (build queue 1.14i)
 //
 //  Platform app credentials come from the environment (see PLATFORM.env*): the
 //  account owner registers an app with each platform and sets them, and until
@@ -23,16 +26,24 @@
 // ============================================================================
 import { openAsBlob } from 'node:fs';
 
-export type PlatformId = 'youtube' | 'facebook' | 'x' | 'tiktok' | 'dailymotion';
+export type PlatformId = 'youtube' | 'facebook' | 'x' | 'tiktok' | 'dailymotion' | 'instagram';
 export type Privacy = 'public' | 'unlisted' | 'private';
 
 export interface PostSpec { title: string; description: string; tags: string[]; privacy: Privacy }
 export interface Tokens { accessToken: string; refreshToken?: string | null; expiresIn?: number | null; scopes?: string[] }
-export interface LinkedAccount extends Tokens { externalId: string; label: string; avatar?: string | null }
+export interface LinkedAccount extends Tokens { externalId: string; label: string; avatar?: string | null; followers?: number | null }
 export interface UploadCtx {
   token: string; externalAccount: string; accountLabel: string | null;
   file: string; size: number; post: PostSpec;
   progress: (pct: number, stage: string) => Promise<void>;
+  /** How the target was linked, where a platform has more than one way (Instagram: 'instagram' or 'facebook'). */
+  variant?: string | null;
+  /** A picture rather than a video (Instagram feed posts). The platform fetches it from `imageUrl`. */
+  kind?: 'video' | 'image';
+  imageUrl?: string | null;
+  /** What a multi-step upload has done so far, kept on the publication so a retry carries on (Instagram's container). */
+  state?: Record<string, any> | null;
+  saveState?: (s: Record<string, any> | null) => Promise<void>;
 }
 export interface UploadResult { externalId: string; url: string | null }
 
@@ -43,24 +54,37 @@ export class SocialError extends Error {
   }
 }
 
+/** A second way to sign in to the same platform, with its own app and permissions (Instagram through Facebook). */
+export interface Variant { id: string; label: string; env: { id: string; secret: string }; scopes: string[] }
+export interface PostStats { views: number | null; likes?: number | null }
+
 export interface Platform {
   id: PlatformId;
   label: string;
+  /** Ways to link an account. The first is the default; without this, one way (the platform's own env and scopes). */
+  variants?: Variant[];
+  /** Posts pictures as well as videos. */
+  images?: boolean;
   /** Environment variables holding the app's client id and secret. */
   env: { id: string; secret: string };
   scopes: string[];
   pkce: boolean;
-  limits: { title: number | null; description: number; tags: boolean };
+  limits: { title: number | null; description: number; tags: boolean; hashtags?: number };
   privacy: Privacy[];
   /** What the platform calls the thing the account publishes as. */
   accountNoun: string;
-  authorizeUrl(clientId: string, redirect: string, state: string, challenge: string | null): string;
+  authorizeUrl(clientId: string, redirect: string, state: string, challenge: string | null, variant?: string | null): string;
   /** `app` is the account's own developer app when it has one (X only, so far); otherwise the deployment's. */
-  exchange(code: string, redirect: string, verifier: string | null, app?: AppCreds | null): Promise<Tokens>;
-  refresh?(refreshToken: string, app?: AppCreds | null): Promise<Tokens>;
-  accounts(t: Tokens): Promise<LinkedAccount[]>;
+  exchange(code: string, redirect: string, verifier: string | null, app?: AppCreds | null, variant?: string | null): Promise<Tokens>;
+  refresh?(refreshToken: string, app?: AppCreds | null, variant?: string | null): Promise<Tokens>;
+  accounts(t: Tokens, variant?: string | null): Promise<LinkedAccount[]>;
   upload(c: UploadCtx): Promise<UploadResult>;
   views?(token: string, externalAccount: string, externalId: string): Promise<number | null>;
+  /** Views and likes together, where the platform gives both (used instead of `views` when present). */
+  stats?(token: string, externalAccount: string, externalId: string, variant?: string | null): Promise<PostStats>;
+  followers?(token: string, externalAccount: string, variant?: string | null): Promise<number | null>;
+  /** Posts used and allowed in the platform's moving window (Instagram: 24 hours). */
+  publishingLimit?(token: string, externalAccount: string, variant?: string | null): Promise<{ used: number; total: number }>;
   remove?(token: string, externalAccount: string, externalId: string): Promise<void>;
 }
 
@@ -73,6 +97,8 @@ const HOSTS: Record<string, string> = {
   'x:auth': 'https://x.com', 'x:api': 'https://api.x.com',
   'tiktok:auth': 'https://www.tiktok.com', 'tiktok:api': 'https://open.tiktokapis.com',
   'dailymotion:auth': 'https://www.dailymotion.com', 'dailymotion:api': 'https://api.dailymotion.com',
+  'instagram:auth': 'https://www.instagram.com', 'instagram:api': 'https://api.instagram.com',
+  'instagram:graph': 'https://graph.instagram.com', 'instagram:rupload': 'https://rupload.facebook.com',
 };
 export function host(platform: PlatformId, key: string): string {
   const test = process.env.SOCIAL_TEST_BASE;
@@ -81,16 +107,26 @@ export function host(platform: PlatformId, key: string): string {
   if (!h) throw new Error(`no host ${platform}:${key}`);
   return h;
 }
-const FB = 'v21.0';
+// Meta Graph API version, for Facebook and Instagram alike. v21.0 expires on
+// 21 Jan 2027; v25.0 (Feb 2026) is current. Every Facebook call here was
+// checked against the v25.0 changelog: none of them changed. Its removed
+// insights metrics are the *_unique video ones, not total_video_views.
+export const FB = 'v25.0';
 const env = (name: string) => process.env[name] ?? '';
 export type AppCreds = { id: string; secret: string };
-export function appCreds(p: Platform): AppCreds | null {
-  const id = env(p.env.id), secret = env(p.env.secret);
+/** The env pair a sign-in uses: the variant's own where it has one. */
+function envOf(p: Platform, variant?: string | null) {
+  return (variant && p.variants?.find((v) => v.id === variant)?.env) || p.env;
+}
+export function appCreds(p: Platform, variant?: string | null): AppCreds | null {
+  const e = envOf(p, variant);
+  const id = env(e.id), secret = env(e.secret);
   return id && secret ? { id, secret } : null;
 }
-function creds(p: Platform) {
-  const c = appCreds(p);
-  if (!c) throw new SocialError(`${p.label} is not set up on this deployment (${p.env.id}, ${p.env.secret}).`, { permanent: true });
+function creds(p: Platform, variant?: string | null) {
+  const c = appCreds(p, variant);
+  const e = envOf(p, variant);
+  if (!c) throw new SocialError(`${p.label} is not set up on this deployment (${e.id}, ${e.secret}).`, { permanent: true });
   return c;
 }
 
@@ -429,5 +465,166 @@ const dailymotion: Platform = {
   },
 };
 
-export const PLATFORMS: Record<PlatformId, Platform> = { youtube, facebook, x, tiktok, dailymotion };
+// ---------------------------------------------------------------- Instagram
+
+// Instagram professional accounts (Business or Creator), two ways in:
+//   instagram  Instagram Login: graph.instagram.com, the account's own
+//              long-lived token (60 days, renewed with ig_refresh_token).
+//   facebook   Facebook Login: an Instagram account tied to a Facebook Page,
+//              on graph.facebook.com with the Page's token (does not expire).
+// Publishing is the container flow: create a container (a Reel uploaded to
+// Meta resumably, so the Mac needs no public address for video; a picture by
+// its URL, which Meta fetches and which must be a JPEG), wait until its
+// status_code is FINISHED, then media_publish. The container id is kept on the
+// publication (UploadCtx.saveState) so a retry carries on with it.
+const IG_POLL_MAX = 120;
+const igGraph = (variant?: string | null) => variant === 'facebook' ? `${host('facebook', 'graph')}/${FB}` : `${host('instagram', 'graph')}/${FB}`;
+const instagram: Platform = {
+  id: 'instagram', label: 'Instagram', accountNoun: 'professional account',
+  env: { id: 'INSTAGRAM_APP_ID', secret: 'INSTAGRAM_APP_SECRET' },
+  scopes: ['instagram_business_basic', 'instagram_business_content_publish'],
+  variants: [
+    { id: 'instagram', label: 'Instagram Login', env: { id: 'INSTAGRAM_APP_ID', secret: 'INSTAGRAM_APP_SECRET' },
+      scopes: ['instagram_business_basic', 'instagram_business_content_publish'] },
+    { id: 'facebook', label: 'Facebook Login (account tied to a Page)', env: { id: 'FACEBOOK_APP_ID', secret: 'FACEBOOK_APP_SECRET' },
+      scopes: ['instagram_basic', 'instagram_content_publish', 'pages_show_list', 'pages_read_engagement'] },
+  ],
+  images: true,
+  pkce: false,
+  // 2,200 characters and at most 30 hashtags per caption.
+  limits: { title: null, description: 2200, tags: true, hashtags: 30 },
+  privacy: ['public'],
+  authorizeUrl(clientId, redirect, state, _challenge, variant) {
+    if (variant === 'facebook') {
+      const scope = this.variants![1].scopes.join(',');
+      const q = new URLSearchParams({ client_id: clientId, redirect_uri: redirect, state, scope, response_type: 'code' });
+      return `${host('facebook', 'auth')}/${FB}/dialog/oauth?${q}`;
+    }
+    const q = new URLSearchParams({ client_id: clientId, redirect_uri: redirect, response_type: 'code', scope: this.variants![0].scopes.join(','), state });
+    return `${host('instagram', 'auth')}/oauth/authorize?${q}`;
+  },
+  async exchange(code, redirect, _verifier, _app, variant) {
+    const c = creds(this, variant);
+    if (variant === 'facebook') {
+      const short = tokenFrom(await call('Instagram sign-in', `${host('facebook', 'graph')}/${FB}/oauth/access_token?${form({ client_id: c.id, client_secret: c.secret, redirect_uri: redirect, code })}`));
+      return tokenFrom(await call('Instagram sign-in', `${host('facebook', 'graph')}/${FB}/oauth/access_token?${form({ grant_type: 'fb_exchange_token', client_id: c.id, client_secret: c.secret, fb_exchange_token: short.accessToken })}`));
+    }
+    const j = await call('Instagram sign-in', `${host('instagram', 'api')}/oauth/access_token`, { method: 'POST', headers: FORM,
+      body: form({ client_id: c.id, client_secret: c.secret, grant_type: 'authorization_code', redirect_uri: redirect, code }) });
+    // Older answers are flat, newer ones wrap it in data[0].
+    const short = tokenFrom(j?.data?.[0] ?? j);
+    const long = tokenFrom(await call('Instagram sign-in', `${host('instagram', 'graph')}/access_token?${form({ grant_type: 'ig_exchange_token', client_secret: c.secret, access_token: short.accessToken })}`));
+    // The long-lived token renews itself: it is its own refresh token.
+    return { ...long, refreshToken: long.accessToken, scopes: long.scopes ?? short.scopes };
+  },
+  async refresh(rt, _app, variant) {
+    if (variant === 'facebook') throw new SocialError('A Page token does not expire: connect the account again.', { permanent: true });
+    const t = tokenFrom(await call('Instagram token renewal', `${host('instagram', 'graph')}/refresh_access_token?${form({ grant_type: 'ig_refresh_token', access_token: rt })}`));
+    return { ...t, refreshToken: t.accessToken };
+  },
+  async accounts(t, variant) {
+    if (variant === 'facebook') {
+      const j = await call('Instagram accounts', `${host('facebook', 'graph')}/${FB}/me/accounts?fields=id,name,access_token,instagram_business_account{id,username,profile_picture_url,followers_count}&limit=100`, { headers: bearer(t.accessToken) });
+      const withIg = (j.data ?? []).filter((p: any) => p.instagram_business_account?.id);
+      if (!withIg.length) throw new SocialError('None of the Pages this Facebook account manages has an Instagram professional account tied to it. Tie one in the Page settings, or use Instagram Login.', { permanent: true });
+      return withIg.map((p: any) => {
+        const ig = p.instagram_business_account;
+        return { accessToken: p.access_token, refreshToken: null, expiresIn: null, externalId: String(ig.id), label: ig.username ? `@${ig.username}` : p.name,
+          avatar: ig.profile_picture_url ?? null, followers: ig.followers_count != null ? Number(ig.followers_count) : null };
+      });
+    }
+    const me = await call('Instagram profile', `${igGraph(variant)}/me?fields=user_id,username,profile_picture_url,followers_count,account_type`, { headers: bearer(t.accessToken) });
+    if (me.account_type && !['BUSINESS', 'MEDIA_CREATOR', 'CREATOR'].includes(String(me.account_type).toUpperCase())) {
+      throw new SocialError('This is a personal Instagram account. Only Business and Creator accounts can be published to: switch it to a professional account in the Instagram app.', { permanent: true });
+    }
+    return [{ ...t, externalId: String(me.user_id ?? me.id), label: me.username ? `@${me.username}` : String(me.user_id ?? me.id),
+      avatar: me.profile_picture_url ?? null, followers: me.followers_count != null ? Number(me.followers_count) : null }];
+  },
+  async upload(c) {
+    const g = igGraph(c.variant);
+    const auth = bearer(c.token);
+    const image = c.kind === 'image';
+    const what = image ? 'picture' : 'Reel';
+    let st: Record<string, any> = { ...(c.state ?? {}) };
+    const save = async (next: Record<string, any> | null) => { st = next ?? {}; await c.saveState?.(next); };
+    const permalink = async (mediaId: string) => {
+      try { return (await call('Instagram post', `${g}/${encodeURIComponent(mediaId)}?fields=permalink`, { headers: auth })).permalink ?? null; } catch { return null; }
+    };
+    // Published already on an earlier try (the answer was lost): do not post twice.
+    if (st.mediaId) return { externalId: String(st.mediaId), url: await permalink(String(st.mediaId)) };
+
+    if (st.container) {
+      const s0 = await call('Instagram status', `${g}/${encodeURIComponent(st.container)}?fields=status_code,status`, { headers: auth });
+      if (s0.status_code === 'EXPIRED' || s0.status_code === 'ERROR' && !st.uploaded) await save(null);   // start again with a fresh container
+      else if (s0.status_code === 'PUBLISHED' && s0.id) await save({ ...st, mediaId: s0.id });
+    }
+    if (!st.container) {
+      await c.progress(5, `creating the Instagram ${what}`);
+      const body: Record<string, string> = { caption: c.post.description.slice(0, 2200) };
+      if (image) {
+        if (!c.imageUrl) throw new SocialError('Instagram needs the picture at an address it can fetch.', { permanent: true });
+        body.image_url = c.imageUrl;
+      } else {
+        body.media_type = 'REELS'; body.upload_type = 'resumable';
+      }
+      const made = await call('Instagram container', `${g}/${encodeURIComponent(c.externalAccount)}/media`, { method: 'POST', headers: { ...auth, ...FORM }, body: form(body) });
+      if (!made.id) throw new SocialError('Instagram did not return a container id');
+      await save({ container: String(made.id), uri: made.uri ?? null, uploaded: image });
+    }
+    if (!image && !st.uploaded) {
+      await c.progress(10, 'uploading');
+      const url = st.uri || `${host('instagram', 'rupload')}/ig-api-upload/${FB}/${encodeURIComponent(st.container)}`;
+      const r = await fetch(url, { method: 'POST', headers: { authorization: `OAuth ${c.token}`, offset: '0', file_size: String(c.size), 'content-type': 'application/octet-stream' },
+        body: await openAsBlob(c.file) as any }).catch((e) => { throw new SocialError(`Instagram upload: could not reach the platform (${e.message})`); });
+      const text = await r.text();
+      if (!r.ok) throw new SocialError(`Instagram upload: ${r.status} ${text.slice(0, 300)}`, { permanent: r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 429, auth: r.status === 401, status: r.status });
+      await save({ ...st, uploaded: true });
+      await c.progress(70, 'uploaded');
+    }
+    if (!st.mediaId) {
+      for (let n = 0; ; n++) {
+        const s = await call('Instagram status', `${g}/${encodeURIComponent(st.container)}?fields=status_code,status`, { headers: auth });
+        if (s.status_code === 'FINISHED') break;
+        if (s.status_code === 'PUBLISHED') { if (s.id) await save({ ...st, mediaId: s.id }); break; }
+        if (s.status_code === 'ERROR') { await save(null); throw new SocialError(`Instagram could not process the ${what}: ${s.status ?? 'error'}`, { permanent: true }); }
+        if (s.status_code === 'EXPIRED') { await save(null); throw new SocialError(`The Instagram container expired before it was published. Retry to start again.`); }
+        // Kept on the row: the next try waits on the same container.
+        if (n >= IG_POLL_MAX) throw new SocialError(`Instagram is still processing the ${what}; it will be checked again`);
+        await c.progress(80, `Instagram is processing the ${what}`);
+        await sleep(pollMs());
+      }
+    }
+    if (!st.mediaId) {
+      await c.progress(92, 'publishing');
+      const pub = await call('Instagram publish', `${g}/${encodeURIComponent(c.externalAccount)}/media_publish`, { method: 'POST', headers: { ...auth, ...FORM }, body: form({ creation_id: st.container }) });
+      if (!pub.id) throw new SocialError('Instagram did not return the post id');
+      await save({ ...st, mediaId: String(pub.id) });
+    }
+    return { externalId: String(st.mediaId), url: await permalink(String(st.mediaId)) };
+  },
+  async stats(token, _acct, id, variant) {
+    const g = igGraph(variant);
+    const m = await call('Instagram likes', `${g}/${encodeURIComponent(id)}?fields=like_count`, { headers: bearer(token) });
+    let views: number | null = null;
+    try {
+      const i = await call('Instagram views', `${g}/${encodeURIComponent(id)}/insights?metric=views`, { headers: bearer(token) });
+      const d = i.data?.[0];
+      const v = d?.total_value?.value ?? d?.values?.[0]?.value;
+      views = v != null ? Number(v) : null;
+    } catch (e) { if (e instanceof SocialError && e.auth) throw e; }
+    return { views, likes: m.like_count != null ? Number(m.like_count) : null };
+  },
+  async followers(token, acct, variant) {
+    const j = await call('Instagram followers', `${igGraph(variant)}/${encodeURIComponent(acct)}?fields=followers_count`, { headers: bearer(token) });
+    return j.followers_count != null ? Number(j.followers_count) : null;
+  },
+  async publishingLimit(token, acct, variant) {
+    const j = await call('Instagram publishing limit', `${igGraph(variant)}/${encodeURIComponent(acct)}/content_publishing_limit?fields=config,quota_usage`, { headers: bearer(token) });
+    const d = j.data?.[0] ?? {};
+    return { used: Number(d.quota_usage ?? 0), total: Number(d.config?.quota_total ?? 100) };
+  },
+};
+
+// Listed in this order on Social accounts: Instagram beside Facebook, the other Meta platform.
+export const PLATFORMS: Record<PlatformId, Platform> = { youtube, facebook, instagram, x, tiktok, dailymotion };
 export const PLATFORM_IDS = Object.keys(PLATFORMS) as PlatformId[];

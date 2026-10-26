@@ -14,7 +14,14 @@
 //      writes back the platform's id and URL, with progress on the row so the
 //      console can show it.
 //   3. Views: synced from each platform on the orchestrator tick, hourly per
-//      publication, and on demand.
+//      publication, and on demand. Likes and follower counts too, where the
+//      platform gives them (Instagram).
+//
+//  INSTAGRAM (build queue 1.14i) links two ways (Instagram Login, or Facebook
+//  Login for an account tied to a Page; kept per target as `variant`), posts
+//  a clip as a Reel and an Image Library picture as a feed post (a
+//  publication of `image_key` instead of an asset), through the container
+//  flow kept in `platform_state`, and holds to its 24 hour publishing limit.
 //
 //  A failure that retrying cannot fix (the platform rejected the video, the
 //  account's access was revoked) fails the publication at once with the
@@ -66,14 +73,25 @@ export async function assertPlatformAllowed(platform: string, accountId: string 
   if (!(await xAccess(accountId)).allowed) throw new SocialError(X_OFF, { permanent: true });
 }
 
-/** The app credentials a sign-in or token refresh for this account uses: its own X app first, else the deployment's. */
-export async function appFor(platform: PlatformId, accountId: string | null | undefined): Promise<AppCreds | null> {
+/** The app credentials a sign-in or token refresh for this account uses: its own X app first, else the deployment's (the variant's, where the platform has several ways in). */
+export async function appFor(platform: PlatformId, accountId: string | null | undefined, variant?: string | null): Promise<AppCreds | null> {
   if (platform === 'x' && accountId) {
     const r = await one<any>(`SELECT x_enabled, x_client_id, x_client_secret_enc FROM accounts WHERE id = $1`, [accountId]);
     if (r?.x_client_id && r?.x_client_secret_enc) return { id: r.x_client_id, secret: open(r.x_client_secret_enc)! };
     if (!r?.x_enabled) throw new SocialError(X_OFF, { permanent: true });
   }
-  return appCreds(PLATFORMS[platform]);
+  return appCreds(PLATFORMS[platform], variant);
+}
+
+/** The way in a sign-in takes: the one asked for, else the first the deployment has an app for, else the first. */
+export function pickVariant(platform: PlatformId, wanted?: string | null): string | null {
+  const vs = PLATFORMS[platform].variants;
+  if (!vs?.length) return null;
+  if (wanted) {
+    if (!vs.some((v) => v.id === wanted)) throw new SocialError(`${PLATFORMS[platform].label} has no sign-in called "${wanted}" (${vs.map((v) => v.id).join(', ')}).`, { permanent: true });
+    return wanted;
+  }
+  return (vs.find((v) => appCreds(PLATFORMS[platform], v.id)) ?? vs[0]).id;
 }
 
 /** Save (or clear, with null) the account's own X developer app. The secret is sealed and never read back out. */
@@ -96,10 +114,14 @@ export function platformStatus(setup = true, x?: XAccess) {
     platforms: PLATFORM_IDS.filter((id) => id !== 'x' || !x || x.allowed).map((id) => {
       const p = PLATFORMS[id];
       // With its own X app the account is ready whatever the deployment has.
-      const configured = id === 'x' && x?.ownApp ? true : id === 'x' && x && !x.switchOn ? false : !!appCreds(p);
+      const variants = p.variants?.map((v) => ({ id: v.id, label: v.label, configured: !!appCreds(p, v.id),
+        ...(setup ? { env: [v.env.id, v.env.secret], scopes: v.scopes } : {}) }));
+      const configured = id === 'x' && x?.ownApp ? true : id === 'x' && x && !x.switchOn ? false : variants ? variants.some((v) => v.configured) : !!appCreds(p);
       return {
         id, label: p.label, accountNoun: p.accountNoun, configured,
         ...(id === 'x' && x ? { ownApp: !!x.ownApp } : {}),
+        ...(variants ? { variants } : {}),
+        images: !!p.images, publishingLimit: !!p.publishingLimit,
         ...(setup ? { env: [p.env.id, p.env.secret], callbackUrl: callbackUrl(id), scopes: p.scopes } : {}),
         limits: p.limits, privacy: p.privacy,
       };
@@ -109,21 +131,23 @@ export function platformStatus(setup = true, x?: XAccess) {
 
 // ---------------------------------------------------------------- connect
 
-export async function startConnect(platform: PlatformId, accountId: string, userId: string | null): Promise<string> {
+export async function startConnect(platform: PlatformId, accountId: string, userId: string | null, wantedVariant?: string | null): Promise<string> {
   const p = PLATFORMS[platform];
-  const c = await appFor(platform, accountId);
-  if (!c) throw new SocialError(`${p.label} is not set up on this deployment: set ${p.env.id} and ${p.env.secret}.`, { permanent: true });
+  const variant = pickVariant(platform, wantedVariant);
+  const c = await appFor(platform, accountId, variant);
+  const e = (variant && p.variants?.find((v) => v.id === variant)?.env) || p.env;
+  if (!c) throw new SocialError(`${p.label} is not set up on this deployment: set ${e.id} and ${e.secret}.`, { permanent: true });
   const state = randomBytes(24).toString('base64url');
   const verifier = p.pkce ? randomBytes(48).toString('base64url') : null;
   const challenge = verifier ? createHash('sha256').update(verifier).digest('base64url') : null;
   await query(`DELETE FROM social_oauth_states WHERE created_at < now() - make_interval(mins => $1)`, [STATE_TTL_MIN]);
-  await query(`INSERT INTO social_oauth_states(id, account_id, user_id, platform, code_verifier) VALUES ($1,$2,$3,$4,$5)`,
-    [state, accountId, userId, platform, verifier]);
-  return p.authorizeUrl(c.id, callbackUrl(platform), state, challenge);
+  await query(`INSERT INTO social_oauth_states(id, account_id, user_id, platform, code_verifier, variant) VALUES ($1,$2,$3,$4,$5,$6)`,
+    [state, accountId, userId, platform, verifier, variant]);
+  return p.authorizeUrl(c.id, callbackUrl(platform), state, challenge, variant);
 }
 
 /** Store (or refresh) one linked account as a publish target. */
-async function upsertTarget(accountId: string, userId: string | null, platform: PlatformId, a: LinkedAccount, mode: 'live' | 'sandbox'): Promise<any> {
+async function upsertTarget(accountId: string, userId: string | null, platform: PlatformId, a: LinkedAccount, mode: 'live' | 'sandbox', variant: string | null = null): Promise<any> {
   const expires = a.expiresIn ? new Date(Date.now() + a.expiresIn * 1000).toISOString() : null;
   const existing = await one<any>(
     `SELECT id FROM publish_targets WHERE account_id=$1 AND platform=$2 AND external_account=$3 AND mode=$4`,
@@ -131,9 +155,10 @@ async function upsertTarget(accountId: string, userId: string | null, platform: 
   if (existing) {
     return one(`UPDATE publish_targets SET access_token_enc=$2, refresh_token_enc=COALESCE($3, refresh_token_enc), token_expires_at=$4,
                        scopes=COALESCE($5, scopes), account_label=$6, avatar_url=$7, link_status='connected', link_detail=NULL,
-                       linked_by=$8, linked_at=now(), enabled=true, updated_at=now()
+                       linked_by=$8, linked_at=now(), enabled=true, updated_at=now(),
+                       variant=$9, followers=COALESCE($10, followers), followers_synced_at=CASE WHEN $10::bigint IS NULL THEN followers_synced_at ELSE now() END
                  WHERE id=$1 RETURNING *`,
-      [existing.id, seal(a.accessToken), seal(a.refreshToken ?? null), expires, a.scopes ?? null, a.label, a.avatar ?? null, userId]);
+      [existing.id, seal(a.accessToken), seal(a.refreshToken ?? null), expires, a.scopes ?? null, a.label, a.avatar ?? null, userId, variant, a.followers ?? null]);
   }
   // `name` is unique per account and platform; two Pages can share a name.
   let name = mode === 'sandbox' ? `${a.label} (sandbox)` : a.label;
@@ -142,10 +167,11 @@ async function upsertTarget(accountId: string, userId: string | null, platform: 
   }
   return one(
     `INSERT INTO publish_targets(account_id, platform, name, external_account, enabled, mode, access_token_enc, refresh_token_enc,
-                                 token_expires_at, scopes, account_label, avatar_url, link_status, linked_by, linked_at)
-     VALUES ($1,$2,$3,$4,true,$5,$6,$7,$8,$9,$10,$11,'connected',$12, now()) RETURNING *`,
+                                 token_expires_at, scopes, account_label, avatar_url, link_status, linked_by, linked_at,
+                                 variant, followers, followers_synced_at)
+     VALUES ($1,$2,$3,$4,true,$5,$6,$7,$8,$9,$10,$11,'connected',$12, now(), $13, $14, CASE WHEN $14::bigint IS NULL THEN NULL ELSE now() END) RETURNING *`,
     [accountId, platform, name, a.externalId, mode, seal(a.accessToken), seal(a.refreshToken ?? null), expires, a.scopes ?? null,
-     a.label, a.avatar ?? null, userId]);
+     a.label, a.avatar ?? null, userId, variant, a.followers ?? null]);
 }
 
 export async function finishConnect(platform: PlatformId, state: string, code: string | null, error: string | null): Promise<{ accountId: string | null; linked: string[]; error?: string }> {
@@ -155,10 +181,11 @@ export async function finishConnect(platform: PlatformId, state: string, code: s
   if (error || !code) return { accountId: st.account_id, linked: [], error: error ? `${PLATFORMS[platform].label} said: ${error}` : 'No authorization code came back.' };
   try {
     const p = PLATFORMS[platform];
-    const tokens = await p.exchange(code, callbackUrl(platform), st.code_verifier, await appFor(platform, st.account_id));
-    const accounts = await p.accounts(tokens);
+    const variant: string | null = st.variant ?? null;
+    const tokens = await p.exchange(code, callbackUrl(platform), st.code_verifier, await appFor(platform, st.account_id, variant), variant);
+    const accounts = await p.accounts(tokens, variant);
     const linked: string[] = [];
-    for (const a of accounts) { await upsertTarget(st.account_id, st.user_id, platform, a, 'live'); linked.push(a.label); }
+    for (const a of accounts) { await upsertTarget(st.account_id, st.user_id, platform, a, 'live', variant); linked.push(a.label); }
     return { accountId: st.account_id, linked };
   } catch (e: any) {
     return { accountId: st.account_id, linked: [], error: e.message };
@@ -169,10 +196,11 @@ export async function finishConnect(platform: PlatformId, state: string, code: s
 export async function addSandbox(accountId: string, userId: string | null, platform: PlatformId, label?: string) {
   await assertPlatformAllowed(platform, accountId);
   const p = PLATFORMS[platform];
-  const name = label?.trim() || `Volt test ${p.accountNoun}`;
+  // "Volt test professional account" is a mouthful for a handle: Instagram's sandbox is plainly an account.
+  const name = label?.trim() || `Volt test ${platform === 'instagram' ? 'account' : p.accountNoun}`;
   return upsertTarget(accountId, userId, platform, {
-    externalId: `sandbox-${randomBytes(6).toString('hex')}`, label: platform === 'x' || platform === 'tiktok' ? `@${name.replace(/\s+/g, '_').toLowerCase()}` : name,
-    accessToken: 'sandbox', refreshToken: null, expiresIn: null,
+    externalId: `sandbox-${randomBytes(6).toString('hex')}`, label: platform === 'x' || platform === 'tiktok' || platform === 'instagram' ? `@${name.replace(/\s+/g, '_').toLowerCase()}` : name,
+    accessToken: 'sandbox', refreshToken: null, expiresIn: null, followers: platform === 'instagram' ? 1200 : null,
   }, 'sandbox');
 }
 
@@ -185,19 +213,27 @@ export async function validToken(target: any): Promise<string> {
   let token = open(target.access_token_enc);
   if (!token) throw new SocialError(`${target.account_label ?? target.name} is not linked: connect it again.`, { permanent: true });
   const exp = target.token_expires_at ? new Date(target.token_expires_at).getTime() : null;
-  if (exp && exp < Date.now() + 120_000) {
+  // An Instagram token lasts 60 days and renews only while it is still valid:
+  // renew it in its last week, not in its last two minutes.
+  const ahead = target.platform === 'instagram' && target.variant !== 'facebook' ? 7 * 86_400_000 : 120_000;
+  if (exp && exp < Date.now() + ahead) {
     const rt = open(target.refresh_token_enc);
     if (!rt || !p.refresh) {
       await markLink(target.id, 'expired', 'The access token expired and the platform gave no way to renew it. Connect the account again.');
       throw new SocialError(`${target.account_label ?? target.name}: access expired. Connect the account again.`, { permanent: true });
     }
     try {
-      const t = await p.refresh(rt, await appFor(target.platform, target.account_id));
+      const t = await p.refresh(rt, await appFor(target.platform, target.account_id, target.variant), target.variant);
       token = t.accessToken;
       await query(`UPDATE publish_targets SET access_token_enc=$2, refresh_token_enc=COALESCE($3, refresh_token_enc), token_expires_at=$4,
                           link_status='connected', link_detail=NULL, updated_at=now() WHERE id=$1`,
         [target.id, seal(t.accessToken), seal(t.refreshToken ?? null), t.expiresIn ? new Date(Date.now() + t.expiresIn * 1000).toISOString() : null]);
     } catch (e: any) {
+      // Renewing early (Instagram's last week) and the token still works: use it, renew next time.
+      if (exp > Date.now() + 120_000 && !(e instanceof SocialError && (e.auth || e.permanent))) {
+        console.warn('[social] early token renewal failed, the current token is still valid', target.id, e?.message ?? e);
+        return token;
+      }
       if (e instanceof SocialError && e.permanent) await markLink(target.id, 'expired', `Renewing access failed: ${e.message}. Connect the account again.`);
       throw e;
     }
@@ -292,9 +328,66 @@ export function fitPost(platform: PlatformId, post: Partial<PostSpec>): { post: 
   const hashtags = !p.limits.tags || p.limits.title != null ? '' : tags.map((t) => `#${t.replace(/\s+/g, '')}`).join(' ');
   const full = hashtags && !description.includes(hashtags) ? `${description}${description ? ' ' : ''}${hashtags}` : description;
   if (full.length > p.limits.description) problems.push(`${p.label} ${p.limits.title == null ? 'captions' : 'descriptions'} are limited to ${p.limits.description} characters (this one is ${full.length})`);
+  const hashtagCount = (full.match(/(^|\s)#[^\s#]+/g) ?? []).length;
+  if (p.limits.hashtags != null && hashtagCount > p.limits.hashtags) problems.push(`${p.label} allows at most ${p.limits.hashtags} hashtags in a caption (this one has ${hashtagCount})`);
   if (!full && p.limits.title == null) problems.push(`${p.label} needs a caption`);
   return { post: { title, description: full, tags: p.limits.tags ? tags : [], privacy }, problems };
 }
+
+// ---------------------------------------------------------------- publishing limit (Instagram)
+
+/** Posts a sandbox account may make in 24 hours: Instagram's documented 100, or SOCIAL_SANDBOX_IG_LIMIT for a test. */
+const sandboxLimit = () => Number(process.env.SOCIAL_SANDBOX_IG_LIMIT ?? 100);
+
+/**
+ * How much of the platform's publishing limit a target has used: Instagram
+ * allows a set number of API posts in a moving 24 hours, read from
+ * content_publishing_limit. A sandbox counts its own posts of the last 24 hours.
+ * Null for a platform without such a limit.
+ */
+export async function publishingLimit(target: any): Promise<{ used: number; total: number; remaining: number; windowHours: number } | null> {
+  const p = PLATFORMS[target.platform as PlatformId];
+  if (!p?.publishingLimit) return null;
+  let used: number, total: number;
+  if (target.mode === 'sandbox') {
+    used = (await one<any>(`SELECT count(*)::int AS n FROM publications WHERE target_id = $1 AND status = 'published' AND published_at > now() - interval '24 hours'`, [target.id]))!.n;
+    total = sandboxLimit();
+  } else {
+    ({ used, total } = await p.publishingLimit(await validToken(target), target.external_account, target.variant));
+  }
+  return { used, total, remaining: Math.max(0, total - used), windowHours: 24 };
+}
+
+export const limitReached = (label: string, l: { used: number; total: number }) =>
+  `${label} has used ${l.used} of its ${l.total} posts in the last 24 hours, Instagram's publishing limit. Retry once older posts fall out of the 24 hours.`;
+
+/** An Image Library picture, by its media file id, for this account. */
+export async function ownedImage(fileId: string, accountId: string) {
+  return one<any>(`SELECT id, name, path, tags, store_key, content_type, width, height FROM media_files WHERE id = $1 AND account_id = $2`, [fileId, accountId]);
+}
+
+/** The post a picture gets by default: its name (without the extension) and its tags as hashtags. */
+export function defaultImagePost(img: any, platform: PlatformId): PostSpec {
+  const title = String(img?.name ?? '').replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[_-]+/g, ' ').trim();
+  return { title: '', description: title, tags: (img?.tags ?? []).map((t: any) => String(t)), privacy: PLATFORMS[platform].privacy[0] };
+}
+
+/** Insert and queue one image publication per target. Only platforms that post pictures. */
+export async function publishImage(img: any, targets: any[], posts: Record<string, PostSpec>, by: string | null) {
+  const out: any[] = [];
+  for (const t of targets) {
+    const post = posts[t.id] ?? fitPost(t.platform, defaultImagePost(img, t.platform)).post;
+    const pub = await one<any>(
+      `INSERT INTO publications(image_key, platform, target_id, status, post, progress, stage, published_by)
+       VALUES ($1,$2::text,$3,'pending',$4::jsonb,0,'queued',$5) RETURNING id`, [img.store_key, t.platform, t.id, JSON.stringify(post), by]);
+    await queueSocialPublication(pub!.id, null);
+    out.push(await one(`SELECT * FROM publications WHERE id = $1`, [pub!.id]));
+  }
+  return out;
+}
+
+/** A local address cannot be fetched by Instagram: say so before Meta does, less clearly. */
+const localAddress = (u: string) => /^https?:\/\/(localhost|127\.|10\.|192\.168\.|\[::1\]|[^/]*\.local(?::|\/|$))/i.test(u);
 
 // ---------------------------------------------------------------- publish job
 
@@ -312,7 +405,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function sandboxUpload(pub: any, target: any, progress: (p: number, s: string) => Promise<void>) {
   const step = Number(process.env.SOCIAL_SANDBOX_STEP_MS ?? 400);
-  for (const [pct, stage] of [[10, 'uploading'], [40, 'uploading'], [75, 'uploading'], [90, `${PLATFORMS[target.platform as PlatformId].label} is processing the video`]] as const) {
+  const what = pub.image_key ? 'picture' : target.platform === 'instagram' ? 'Reel' : 'video';
+  const steps = target.platform === 'instagram'
+    ? [[10, `creating the Instagram ${what}`], [40, 'uploading'], [75, 'uploaded'], [85, `Instagram is processing the ${what}`], [92, 'publishing']] as const
+    : [[10, 'uploading'], [40, 'uploading'], [75, 'uploading'], [90, `${PLATFORMS[target.platform as PlatformId].label} is processing the video`]] as const;
+  for (const [pct, stage] of steps) {
     await progress(pct, stage); await sleep(step);
   }
   if (/\[fail\]/i.test(pub.post?.title ?? '') || /\[fail\]/i.test(pub.post?.description ?? '')) {
@@ -330,23 +427,46 @@ export async function handleSocialPublish(ctx: { job: any; progress: (pct: numbe
   if (!pub) throw new PermanentError('publication no longer exists', 'gone');
   if (pub.status === 'published') return { already: true };
   const target = await one<any>(`SELECT * FROM publish_targets WHERE id=$1`, [pub.target_id]);
-  const asset = await one<any>(`SELECT v.*, g.account_id FROM vod_assets v LEFT JOIN channels c ON c.id=v.channel_id LEFT JOIN events e ON e.id=v.event_id
-                                  LEFT JOIN groups g ON g.id=COALESCE(c.group_id, e.group_id) WHERE v.id=$1`, [pub.vod_asset_id]);
+  const asset = pub.vod_asset_id ? await one<any>(`SELECT v.*, COALESCE(g.account_id, v.account_id) AS account_id FROM vod_assets v LEFT JOIN channels c ON c.id=v.channel_id LEFT JOIN events e ON e.id=v.event_id
+                                  LEFT JOIN groups g ON g.id=COALESCE(c.group_id, e.group_id) WHERE v.id=$1`, [pub.vod_asset_id]) : null;
+  // A picture from the Image Library (Instagram feed posts), by its store key.
+  const image = pub.image_key && target ? await one<any>(`SELECT id, name, store_key, account_id FROM media_files WHERE store_key = $1 AND account_id = $2`, [pub.image_key, target.account_id]) : null;
+  const subject = asset ?? image;
+  const ownerAccount = asset?.account_id ?? image?.account_id ?? target?.account_id ?? null;
   const lastTry = (ctx.job.attempts ?? 1) >= (ctx.job.max_attempts ?? 1);
   const progress = async (pct: number, stage: string) => { await setProgress(pub.id, pct, stage); await ctx.progress(pct, stage); };
   await query(`UPDATE publications SET attempts=attempts+1, error=NULL WHERE id=$1`, [pub.id]);
   let media: { path: string; cleanup: () => void } | null = null;
   try {
     if (!target || !target.enabled) throw new SocialError('The account this was going to is disconnected or disabled.', { permanent: true });
-    if (!asset) throw new SocialError('The asset no longer exists.', { permanent: true });
+    if (!subject) throw new SocialError(pub.image_key ? 'The picture is no longer in the Image Library.' : 'The asset no longer exists.', { permanent: true });
     // X switched off after this was queued (or an old rule still names an X account).
     await assertPlatformAllowed(target.platform, target.account_id);
     const p = PLATFORMS[target.platform as PlatformId];
-    const post: PostSpec = pub.post ?? defaultPost(asset, target.platform);
+    if (image && !p.images) throw new SocialError(`${p.label} does not take pictures from Volt, only videos.`, { permanent: true });
+    const post: PostSpec = pub.post ?? (asset ? defaultPost(asset, target.platform) : defaultImagePost(image, target.platform));
+    // Instagram's 24 hour publishing limit, unless this try is finishing a post already made.
+    if (p.publishingLimit && !pub.platform_state?.mediaId) {
+      const l = await publishingLimit(target);
+      if (l && l.remaining <= 0) throw new SocialError(limitReached(target.account_label ?? target.name, l), { permanent: true });
+    }
     let result: { externalId: string; url: string | null };
+    const saveState = async (st: Record<string, any> | null) => { await query(`UPDATE publications SET platform_state = $2::jsonb WHERE id = $1`, [pub.id, st ? JSON.stringify(st) : null]); };
     if (target.mode === 'sandbox') {
-      await progress(3, 'preparing the video');
+      await progress(3, image ? 'preparing the picture' : 'preparing the video');
       result = await sandboxUpload(pub, target, progress);
+    } else if (image) {
+      const token = await validToken(target);
+      await progress(2, 'preparing the picture');
+      // Instagram fetches the picture itself and takes JPEG only: a signed JPEG
+      // from the image service, at most 1440 px wide, on Volt's public address.
+      const { signedImageUrl } = await import('../../modules/images');
+      const imageUrl = signedImageUrl(image.store_key, { width: 1440, fit: 'inside', format: 'jpeg', quality: 90 } as any);
+      if (localAddress(imageUrl)) {
+        throw new SocialError(`Instagram fetches the picture from Volt's public address, and this Volt has none it can reach (${new URL(imageUrl).origin}). Set PUBLIC_BASE_URL (or IMAGE_PUBLIC_BASE_URL) to an address reachable from the internet.`, { permanent: true });
+      }
+      result = await p.upload({ token, externalAccount: target.external_account, accountLabel: target.account_label, file: '', size: 0, post, progress,
+        variant: target.variant, kind: 'image', imageUrl, state: pub.platform_state, saveState });
     } else {
       const token = await validToken(target);
       await progress(2, 'preparing the video');
@@ -362,7 +482,8 @@ export async function handleSocialPublish(ctx: { job: any; progress: (pct: numbe
       }
       media = shaped ? { path: shaped, cleanup: () => {} } : await mediaFile(asset);
       const size = statSync(media.path).size;
-      result = await p.upload({ token, externalAccount: target.external_account, accountLabel: target.account_label, file: media.path, size, post, progress });
+      result = await p.upload({ token, externalAccount: target.external_account, accountLabel: target.account_label, file: media.path, size, post, progress,
+        variant: target.variant, kind: 'video', state: pub.platform_state, saveState });
     }
     await query(`UPDATE publications SET status='published', external_id=$2, external_url=$3, published_at=now(), progress=100, stage=NULL, error=NULL WHERE id=$1`,
       [pub.id, result.externalId, result.url]);
@@ -373,11 +494,12 @@ export async function handleSocialPublish(ctx: { job: any; progress: (pct: numbe
     const final = se.permanent || se.auth || lastTry;
     await query(`UPDATE publications SET status=$2, error=$3, stage=$4 WHERE id=$1`,
       [pub.id, final ? 'failed' : 'pending', se.message.slice(0, 500), final ? null : 'will retry']);
-    if (final && asset?.account_id) {
+    if (final && ownerAccount && subject) {
       const { notifyAccountAdmins } = await import('../notifications');
-      await notifyAccountAdmins(asset.account_id, 'publish.failed',
-        `Could not publish "${asset.title ?? 'clip'}" to ${target ? PLATFORMS[target.platform as PlatformId]?.label ?? target.platform : 'social'}`,
-        `${se.message}\n\nOpen the clip in the Media Library to retry or change the post.`, { publicationId: pub.id, assetId: asset.id });
+      await notifyAccountAdmins(ownerAccount, 'publish.failed',
+        `Could not publish "${asset ? asset.title ?? 'clip' : image.name}" to ${target ? PLATFORMS[target.platform as PlatformId]?.label ?? target.platform : 'social'}`,
+        `${se.message}\n\n${asset ? 'Open the clip in the Media Library' : 'Open the picture in the Image Library'} to retry or change the post.`,
+        { publicationId: pub.id, ...(asset ? { assetId: asset.id } : { imageKey: pub.image_key }) });
     }
     if (final) throw new PermanentError(se.message, se.auth ? 'auth' : 'rejected');
     throw se;
@@ -396,7 +518,7 @@ export async function registerSocialHandlers() {
 /** Pull view counts for published social posts. `force` ignores the hourly spacing. */
 export async function syncViews(opts: { accountId?: string; force?: boolean; limit?: number } = {}): Promise<number> {
   const rows = await query<any>(
-    `SELECT p.id, p.external_id, p.published_at, p.views, t.*, p.id AS pub_id
+    `SELECT p.id, p.external_id, p.published_at, p.views, p.likes AS pub_likes, t.*, p.id AS pub_id
        FROM publications p JOIN publish_targets t ON t.id = p.target_id JOIN accounts a ON a.id = t.account_id
       WHERE p.status = 'published' AND p.external_id IS NOT NULL AND t.enabled
         -- X bills every read: no view syncing for an account X is off for.
@@ -408,18 +530,47 @@ export async function syncViews(opts: { accountId?: string; force?: boolean; lim
   for (const r of rows) {
     try {
       let views: number | null;
+      let likes: number | null = null;
+      const p = PLATFORMS[r.platform as PlatformId];
       if (r.mode === 'sandbox') {
-        views = Math.floor((Date.now() - new Date(r.published_at).getTime()) / 60000) * 3 + 1;
+        const mins = Math.floor((Date.now() - new Date(r.published_at).getTime()) / 60000);
+        views = mins * 3 + 1;
+        if (p?.stats) likes = Math.floor(views / 4);
+      } else if (p.stats) {
+        ({ views, likes = null } = await p.stats(await validToken(r), r.external_account, r.external_id, r.variant));
       } else {
-        const p = PLATFORMS[r.platform as PlatformId];
         if (!p.views) continue;
         views = await p.views(await validToken(r), r.external_account, r.external_id);
       }
-      await query(`UPDATE publications SET views = COALESCE($2, views), last_synced_at = now() WHERE id = $1`, [r.pub_id, views]);
+      await query(`UPDATE publications SET views = COALESCE($2, views), likes = COALESCE($3, likes), last_synced_at = now() WHERE id = $1`, [r.pub_id, views, likes]);
       n++;
     } catch (e: any) {
       await query(`UPDATE publications SET last_synced_at = now() WHERE id = $1`, [r.pub_id]);
       console.warn('[social] view sync failed', r.pub_id, e?.message ?? e);
+    }
+  }
+  await syncFollowers(opts).catch((e) => console.warn('[social] follower sync failed', e?.message ?? e));
+  return n;
+}
+
+/** Follower counts, for the platforms that give them (Instagram), hourly per account or on demand. */
+export async function syncFollowers(opts: { accountId?: string; force?: boolean } = {}): Promise<number> {
+  const ids = PLATFORM_IDS.filter((id) => PLATFORMS[id].followers);
+  const rows = await query<any>(
+    `SELECT * FROM publish_targets WHERE platform = ANY($1::text[]) AND enabled AND link_status = 'connected'
+        AND ($2::uuid IS NULL OR account_id = $2) AND ($3 OR followers_synced_at IS NULL OR followers_synced_at < now() - interval '1 hour')
+      ORDER BY followers_synced_at NULLS FIRST LIMIT 50`, [ids, opts.accountId ?? null, !!opts.force]);
+  let n = 0;
+  for (const t of rows) {
+    try {
+      // A sandbox account gains a follower every ten minutes, so the number visibly moves.
+      const f = t.mode === 'sandbox' ? Number(t.followers ?? 1200) + Math.max(1, Math.floor((Date.now() - new Date(t.followers_synced_at ?? t.linked_at ?? Date.now()).getTime()) / 600_000))
+        : await PLATFORMS[t.platform as PlatformId].followers!(await validToken(t), t.external_account, t.variant);
+      await query(`UPDATE publish_targets SET followers = COALESCE($2, followers), followers_synced_at = now() WHERE id = $1`, [t.id, f]);
+      n++;
+    } catch (e: any) {
+      await query(`UPDATE publish_targets SET followers_synced_at = now() WHERE id = $1`, [t.id]);
+      console.warn('[social] follower sync failed', t.id, e?.message ?? e);
     }
   }
   return n;

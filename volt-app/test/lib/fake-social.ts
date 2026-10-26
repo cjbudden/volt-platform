@@ -1,5 +1,6 @@
 // ============================================================================
-//  A local stand-in for YouTube, Facebook, X, TikTok and Dailymotion, for the
+//  A local stand-in for YouTube, Facebook, X, TikTok, Dailymotion and
+//  Instagram (both login paths and the container flow), for the
 //  social publishing checks. Mounted at SOCIAL_TEST_BASE: every platform host
 //  becomes <base>/<platform>/<host key>, as services/social/platforms.ts maps
 //  it. It answers the request sequences the adapters make, checks the parts
@@ -8,7 +9,8 @@
 //
 //  Knobs on the returned object: `reject` (a title containing it gets a 400),
 //  `revoked` (that bearer token gets a 401), `flaky` (the next N calls of a
-//  given route answer 503).
+//  given route answer 503), and for Instagram `igPersonal` (the profile is a
+//  personal account), `igQuotaUsed` (posts used of the 24 hour limit).
 // ============================================================================
 import { createServer, type IncomingMessage } from 'node:http';
 
@@ -19,6 +21,8 @@ export async function startFakeSocial() {
   const state = {
     reject: 'REJECT', revoked: new Set<string>(), flaky: new Map<string, number>(),
     xStatusPolls: 0, ttStatusPolls: 0, refreshes: 0,
+    igPersonal: false, igQuotaUsed: 0, igRefreshes: 0, igContainers: 0,
+    igContainer: new Map<string, { kind: 'video' | 'image'; ig: string; uploaded: boolean; polls: number; fail: boolean; published: string | null; imageUrl: string | null; caption: string }>(),
   };
   let base = '';
   const srv = createServer(async (req, res) => {
@@ -63,20 +67,25 @@ export async function startFakeSocial() {
     if (p === '/youtube/api/youtube/v3/videos' && call.method === 'DELETE') return send(204, null);
 
     // ---------------- Facebook
-    if (p === '/facebook/graph/v21.0/oauth/access_token') {
+    if (p === '/facebook/graph/v25.0/oauth/access_token') {
       if (call.query.get('grant_type') === 'fb_exchange_token') return send(200, { access_token: 'fb-long', token_type: 'bearer', expires_in: 5184000 });
       return send(200, { access_token: 'fb-short', expires_in: 3600 });
     }
-    if (p === '/facebook/graph/v21.0/me/accounts') {
+    if (p === '/facebook/graph/v25.0/me/accounts') {
       if (tok !== 'fb-long') return send(400, { error: { message: 'expected the long-lived token' } });
+      // Instagram through Facebook Login asks for the Page's Instagram account; only p1 has one.
+      if ((call.query.get('fields') ?? '').includes('instagram_business_account')) {
+        return send(200, { data: [{ id: 'p1', name: 'Volt News', access_token: 'fb-page-1', instagram_business_account: { id: '1790', username: 'voltnews.page', followers_count: 900 } },
+          { id: 'p2', name: 'Volt Sport', access_token: 'fb-page-2' }] });
+      }
       return send(200, { data: [{ id: 'p1', name: 'Volt News', access_token: 'fb-page-1' }, { id: 'p2', name: 'Volt Sport', access_token: 'fb-page-2' }] });
     }
-    if (/^\/facebook\/video\/v21\.0\/p\d\/videos$/.test(p)) {
+    if (/^\/facebook\/video\/v25\.0\/p\d\/videos$/.test(p)) {
       if (!call.ctype.startsWith('multipart/form-data')) return send(400, { error: { message: 'expected multipart' } });
       if (call.body.includes(state.reject)) return send(400, { error: { message: '(#100) Invalid title' } });
       return send(200, { id: 'fbvid1' });
     }
-    if (p === '/facebook/graph/v21.0/fbvid1/video_insights') return send(200, { data: [{ values: [{ value: 77 }] }] });
+    if (p === '/facebook/graph/v25.0/fbvid1/video_insights') return send(200, { data: [{ values: [{ value: 77 }] }] });
 
     // ---------------- X
     if (p === '/x/api/2/oauth2/token') {
@@ -134,6 +143,81 @@ export async function startFakeSocial() {
     }
     if (p === '/dailymotion/api/video/xdm1' && call.method === 'GET') return send(200, { views_total: 12 });
     if (p === '/dailymotion/api/video/xdm1' && call.method === 'DELETE') return send(200, {});
+
+    // ---------------- Instagram (Instagram Login and Facebook Login share the graph routes)
+    if (p === '/instagram/api/oauth/access_token' && call.method === 'POST') {
+      const f = form();
+      if (f.get('grant_type') !== 'authorization_code' || !f.get('client_secret')) return send(400, { error_type: 'OAuthException', error_message: 'bad grant' });
+      return send(200, { data: [{ access_token: 'ig-short', user_id: '1789', permissions: 'instagram_business_basic,instagram_business_content_publish' }] });
+    }
+    if (p === '/instagram/graph/access_token') {
+      if (call.query.get('grant_type') !== 'ig_exchange_token' || call.query.get('access_token') !== 'ig-short') return send(400, { error: { message: 'expected the short token' } });
+      return send(200, { access_token: 'ig-long', token_type: 'bearer', expires_in: 5184000 });
+    }
+    if (p === '/instagram/graph/refresh_access_token') {
+      state.igRefreshes++;
+      return send(200, { access_token: `ig-long-r${state.igRefreshes}`, token_type: 'bearer', expires_in: 5184000 });
+    }
+    if (p === '/instagram/graph/v25.0/me') {
+      if (!tok.startsWith('ig-long')) return send(400, { error: { message: 'expected the long-lived token' } });
+      return send(200, { id: 'scoped-1', user_id: '1789', username: 'voltnews', profile_picture_url: 'https://img.example/ig.png', followers_count: 4200, account_type: state.igPersonal ? 'PERSONAL' : 'BUSINESS' });
+    }
+    const up = /^\/instagram\/rupload\/ig-api-upload\/v25\.0\/(c\d+)$/.exec(p);
+    if (up && call.method === 'POST') {
+      const c = state.igContainer.get(up[1]);
+      if (!c) return send(404, { debug_info: { message: 'no container' } });
+      if (!String(call.auth).startsWith('OAuth ')) return send(401, { debug_info: { message: 'expected OAuth authorization' } });
+      if (req.headers.offset !== '0' || String(call.bytes) !== String(req.headers.file_size)) return send(400, { debug_info: { message: `got ${call.bytes} bytes, file_size ${req.headers.file_size}, offset ${req.headers.offset}` } });
+      c.uploaded = true;
+      return send(200, { success: true, message: 'Upload successful.' });
+    }
+    const ig = /^\/(instagram|facebook)\/graph\/v25\.0\/(.+)$/.exec(p);
+    if (ig) {
+      const rest = ig[2];
+      let m: RegExpExecArray | null;
+      if ((m = /^(\d+)\/media$/.exec(rest)) && call.method === 'POST') {
+        const f = form();
+        const caption = f.get('caption') ?? '';
+        if (caption.includes(state.reject)) return send(400, { error: { message: '(#100) The caption was rejected', code: 100 } });
+        if (caption.length > 2200) return send(400, { error: { message: '(#100) caption too long' } });
+        const id = `c${++state.igContainers}`;
+        if (f.get('media_type') === 'REELS') {
+          if (f.get('upload_type') !== 'resumable') return send(400, { error: { message: 'expected a resumable upload' } });
+          state.igContainer.set(id, { kind: 'video', ig: m[1], uploaded: false, polls: 0, fail: caption.includes('IGERROR'), published: null, imageUrl: null, caption });
+          return send(200, { id, uri: `${base}/instagram/rupload/ig-api-upload/v25.0/${id}` });
+        }
+        const url = f.get('image_url');
+        if (!url) return send(400, { error: { message: 'image_url or media_type is required' } });
+        state.igContainer.set(id, { kind: 'image', ig: m[1], uploaded: true, polls: 0, fail: caption.includes('IGERROR'), published: null, imageUrl: url, caption });
+        return send(200, { id });
+      }
+      if ((m = /^(\d+)\/media_publish$/.exec(rest)) && call.method === 'POST') {
+        const id = form().get('creation_id') ?? '';
+        const c = state.igContainer.get(id);
+        if (!c || c.ig !== m[1]) return send(400, { error: { message: 'unknown creation_id' } });
+        if (!c.uploaded || c.fail || c.polls < 2) return send(400, { error: { message: 'Media ID is not available', code: 9007 } });
+        c.published = `m${id}`;
+        state.igQuotaUsed++;
+        return send(200, { id: c.published });
+      }
+      if ((m = /^(\d+)\/content_publishing_limit$/.exec(rest))) return send(200, { data: [{ quota_usage: state.igQuotaUsed, config: { quota_total: 100, quota_duration: 86400 } }] });
+      if ((m = /^(mc\d+)\/insights$/.exec(rest))) return call.query.get('metric') === 'views' ? send(200, { data: [{ name: 'views', period: 'lifetime', values: [{ value: 640 }] }] }) : send(400, { error: { message: 'metric' } });
+      if ((m = /^(c\d+)$/.exec(rest))) {
+        const c = state.igContainer.get(m[1]);
+        if (!c) return send(400, { error: { message: 'unknown container' } });
+        if (c.published) return send(200, { id: c.published, status_code: 'PUBLISHED', status: 'Published' });
+        if (!c.uploaded) return send(200, { id: m[1], status_code: 'IN_PROGRESS', status: 'Waiting for the upload' });
+        c.polls++;
+        if (c.fail) return send(200, { id: m[1], status_code: 'ERROR', status: 'Error: 2207026 The video format is not supported.' });
+        return send(200, { id: m[1], status_code: c.polls < 2 ? 'IN_PROGRESS' : 'FINISHED', status: c.polls < 2 ? 'In progress' : 'Finished' });
+      }
+      if ((m = /^(mc\d+)$/.exec(rest))) {
+        const fields = call.query.get('fields') ?? '';
+        if (fields.includes('permalink')) return send(200, { id: m[1], permalink: `https://www.instagram.com/reel/${m[1]}/` });
+        if (fields.includes('like_count')) return send(200, { id: m[1], like_count: 31 });
+      }
+      if ((m = /^(\d+)$/.exec(rest)) && (call.query.get('fields') ?? '').includes('followers_count')) return send(200, { id: m[1], followers_count: m[1] === '1789' ? 4321 : 950 });
+    }
 
     send(404, { error: { message: `fake: no route ${call.method} ${p}` } });
   });

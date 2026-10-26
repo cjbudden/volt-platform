@@ -47,7 +47,7 @@ const USER = '0000000b-0000-0000-0000-000000000501';
   truthy('a tampered value is refused, not decrypted to garbage', tampered);
 
   console.log('\n== set up ==');
-  check('nothing configured: every platform says not set up', S.platformStatus().platforms.map((p) => p.configured), [false, false, false, false, false]);
+  check('nothing configured: every platform says not set up', S.platformStatus().platforms.map((p) => p.configured), [false, false, false, false, false, false]);
   let refused = '';
   try { await S.startConnect('youtube', ACC, null); } catch (e: any) { refused = e.message; }
   truthy('connecting an unconfigured platform names the variables to set', /YOUTUBE_CLIENT_ID/.test(refused), refused);
@@ -56,7 +56,7 @@ const USER = '0000000b-0000-0000-0000-000000000501';
     X_CLIENT_ID: 'x-id', X_CLIENT_SECRET: 'x-secret', TIKTOK_CLIENT_KEY: 'tt-key', TIKTOK_CLIENT_SECRET: 'tt-secret',
     DAILYMOTION_API_KEY: 'dm-key', DAILYMOTION_API_SECRET: 'dm-secret',
   });
-  check('configured from the environment', S.platformStatus().platforms.map((p) => p.configured), [true, true, true, true, true]);
+  check('configured from the environment', S.platformStatus().platforms.map((p) => p.configured), [true, true, true, true, true, true]);
   check('callback URL is on the public host', S.platformStatus().platforms[0].callbackUrl, 'https://volt.example/api/social/callback/youtube');
 
   await query(`INSERT INTO accounts(id,name) VALUES ($1,'SocialCo') ON CONFLICT (id) DO NOTHING`, [ACC]);
@@ -107,7 +107,7 @@ const USER = '0000000b-0000-0000-0000-000000000501';
   truthy('a state cannot be used twice', reuse.error && /already been used/.test(reuse.error), JSON.stringify(reuse));
   const fb = await link('facebook');
   check('Facebook links every Page the person manages', fb.r.linked, ['Volt News', 'Volt Sport']);
-  truthy('Facebook exchanged for the long-lived token before listing Pages', fake.routes().filter((r) => r.includes('/facebook/graph/v21.0/oauth/access_token')).length === 2);
+  truthy('Facebook exchanged for the long-lived token before listing Pages', fake.routes().filter((r) => r.includes('/facebook/graph/v25.0/oauth/access_token')).length === 2);
   const xl = await link('x');
   check('X account linked as its handle', xl.r.linked, ['@voltnews']);
   const tt = await link('tiktok');
@@ -146,7 +146,7 @@ const USER = '0000000b-0000-0000-0000-000000000501';
 
   r = await runJob((await publishTo(await T('facebook', 'Volt Sport'))).id);
   check('Facebook: posted as the Page, with the Page token', [r.status, r.external_url], ['published', 'https://www.facebook.com/p2/videos/fbvid1']);
-  truthy('Facebook used the Page token, not the user token', fake.calls.some((c) => c.path === '/facebook/video/v21.0/p2/videos' && c.auth === 'Bearer fb-page-2' && c.bytes > size));
+  truthy('Facebook used the Page token, not the user token', fake.calls.some((c) => c.path === '/facebook/video/v25.0/p2/videos' && c.auth === 'Bearer fb-page-2' && c.bytes > size));
 
   r = await runJob((await publishTo(await T('x'))).id);
   check('X: posted with the media, link to the post', [r.status, r.external_url], ['published', 'https://x.com/voltnews/status/t99']);

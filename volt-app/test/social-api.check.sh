@@ -39,7 +39,7 @@ login(){ curl -s -X POST "$B/api/auth/login" -H "$J" -d "{\"email\":\"$1\",\"pas
 A="authorization: Bearer $(login owner@postco.example)"; OP="authorization: Bearer $(login op@postco.example)"; A2="authorization: Bearer $(login owner@other.example)"
 
 P=$(curl -s "$B/api/social/platforms" -H "$A")
-ok "platforms listed, none set up, callback on the public host" '[ "$(echo "$P" | jget "[p[\"configured\"] for p in d[\"platforms\"]]")" = "[False, False, False, False, False]" ] && echo "$P" | grep -q "localhost:$PORT/api/social/callback/youtube"'
+ok "platforms listed, none set up, callback on the public host" '[ "$(echo "$P" | jget "[p[\"configured\"] for p in d[\"platforms\"]]")" = "[False, False, False, False, False, False]" ] && echo "$P" | grep -q "localhost:$PORT/api/social/callback/youtube"'
 C=$(curl -s -o /tmp/sa_body -w '%{http_code}' -X POST "$B/api/social/connect/youtube" -H "$A")
 ok "connecting an unset platform is a 400 naming the settings ($C)" '[ "$C" = 400 ] && grep -q YOUTUBE_CLIENT_ID /tmp/sa_body'
 C=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/social/sandbox/youtube" -H "$OP" -H "$J" -d '{}')

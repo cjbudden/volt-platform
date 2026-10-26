@@ -42,6 +42,8 @@ Account administrators set it up; social and digital producers check and approve
 
 1. Under **Publish targets**, turn on **Send each platform its own format**. When it is off, every platform receives the 16:9 file.
 2. For each platform, choose **16:9 source**, **9:16 vertical**, **1:1 square** or **4:5 portrait**.
+
+**Instagram is the exception when the switch is off.** Reels are vertical, so Instagram starts on **9:16 vertical**, and even with **Send each platform its own format** off, a clip whose 9:16 version is already made (and approved, when approval is required) goes to Instagram as that version. Nothing is rendered for it then: a clip without a made 9:16 version goes as its 16:9 file. Turn the switch on to have Volt make the 9:16 version when you publish.
 3. Choose **Save changes**. When you publish, a format not made yet is rendered first, and with approval required it is refused until approved.
 
 ### Decide when it runs and who approves

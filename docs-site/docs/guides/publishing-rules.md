@@ -39,6 +39,7 @@ Administrators set the default; the people who run a channel, an event or the li
 
 1. Open **Admin** and choose **Publishing Rules** (under **Media setup**).
 2. **Publishing points** lists where content can be published: **Catalogue** is always there, then each registered app (**App:**, its name and type) and each social account (the platform and its name). A faded one is switched off.
+   An Instagram account is a publishing point like any other: a rule that ticks it sends the clip as a Reel (the 9:16 version when it has one). Instagram's limit of posts made through apps in any 24 hours still applies, so a rule that publishes often can reach it; a post past the limit fails, says so, and can be retried later.
 3. To add one, choose **Register an app or add a social account**.
 
 ### Set the account default
@@ -118,6 +119,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **No registered apps yet. Register one under API Keys & Apps to publish to it.** | There are no apps to publish to | Register an app in API Keys & Apps, or publish to the catalogue only |
 | **No social accounts configured for this account.** | No social account has been added | Add one under Social accounts |
 | An X account marked **off: X is not on for this account** | X is off for your account, so it cannot be published to; the account is kept | Untick it, or have X switched on (see [Social accounts](social-accounts.md#turn-on-x-with-your-own-x-developer-app)). A rule that still names it publishes everywhere else and skips X |
+| A post to Instagram failed with **... has used ... of its ... posts in the last 24 hours, Instagram's publishing limit.** | Instagram's 24 hour limit for the account was used up when the rule published | Retry the post from the clip once older posts fall out of the 24 hours |
 | An app shows **disabled** | The app is switched off in API Keys & Apps | Switch it on there if it should receive content |
 | A stream's **Access** tab says to create the event (or station) first | Rules belong to a stream that exists | Create it, then open its settings again |
 | A stream's **Access** tab shows a message about your role instead of the rule | Stream rules are part of Account settings | Ask an administrator for Account settings access, or to set the rule |

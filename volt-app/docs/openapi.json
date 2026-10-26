@@ -245,7 +245,7 @@
   {
    "name": "Publish Targets",
    "x-displayName": "Publish targets",
-   "description": "Publish targets are the destinations your VOD assets can be sent to, such as linked YouTube, Facebook, X, TikTok or Dailymotion accounts and your portal.\n\n**Use it to:**\n- List configured targets with `GET /api/publish-targets`\n- Add a target with `POST /api/publish-targets`\n- Rename, change or remove a target with `PATCH /api/publish-targets/{id}` and `DELETE /api/publish-targets/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: manage` to change.\n\n**Good to know:** to link a social account through the platform's own sign-in, use `POST /api/social/connect/{platform}`."
+   "description": "Publish targets are the destinations your VOD assets can be sent to, such as linked YouTube, Facebook, Instagram, X, TikTok or Dailymotion accounts and your portal.\n\n**Use it to:**\n- List configured targets with `GET /api/publish-targets`\n- Add a target with `POST /api/publish-targets`\n- Rename, change or remove a target with `PATCH /api/publish-targets/{id}` and `DELETE /api/publish-targets/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: manage` to change.\n\n**Good to know:** to link a social account through the platform's own sign-in, use `POST /api/social/connect/{platform}`."
   },
   {
    "name": "Publishing Rules",
@@ -293,7 +293,7 @@
   {
    "name": "Social",
    "x-displayName": "Social publishing",
-   "description": "Social publishing sends your VOD assets to linked social accounts and tracks each post.\n\n**Use it to:**\n- See which platforms are available with `GET /api/social/platforms` and link an account with `POST /api/social/connect/{platform}`\n- Publish an asset to one or more accounts with `POST /api/social/publish/{assetId}` (prefill from `GET /api/social/publish/{assetId}/defaults`)\n- Follow, retry or take down posts with `GET /api/social/publications` and the `retry` and `remove` requests\n- Refresh view counts with `POST /api/social/sync-views`\n\n**Credential:** admin session (Bearer) or account secret key, with `vod: view` to read, `vod: operate` to publish or retry and `vod: manage` to link, remove or sync.\n\n**Good to know:** a sandbox account (`POST /api/social/sandbox/{platform}`) behaves like a platform without posting, for testing."
+   "description": "Social publishing sends your VOD assets to linked social accounts and tracks each post.\n\n**Use it to:**\n- See which platforms are available with `GET /api/social/platforms` and link an account with `POST /api/social/connect/{platform}`\n- Publish an asset to one or more accounts with `POST /api/social/publish/{assetId}` (prefill from `GET /api/social/publish/{assetId}/defaults`)\n- Publish an Image Library picture as an Instagram feed post with `POST /api/social/publish-image/{fileId}`, after checking the account's 24 hour publishing limit with `GET /api/social/accounts/{id}/publishing-limit`\n- Follow, retry or take down posts with `GET /api/social/publications` and the `retry` and `remove` requests\n- Refresh view counts (and likes and follower counts, where the platform gives them) with `POST /api/social/sync-views`\n\n**Credential:** admin session (Bearer) or account secret key, with `vod: view` to read, `vod: operate` to publish or retry and `vod: manage` to link, remove or sync.\n\n**Good to know:** a sandbox account (`POST /api/social/sandbox/{platform}`) behaves like a platform without posting, for testing."
   },
   {
    "name": "Sources",
@@ -17209,7 +17209,7 @@
       "schema": {
        "type": "string"
       },
-      "description": "Name of the channel or event. Filter: `source_name=value` (comma list = any of), or `source_name[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+      "description": "Name of the channel or event, or the title of the library asset. Filter: `source_name=value` (comma list = any of), or `source_name[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
      },
      {
       "name": "created_at",
@@ -23229,7 +23229,7 @@
       "schema": {
        "type": "string"
       },
-      "description": "portal, youtube, facebook, x, tiktok or dailymotion. Filter: `platform=value` (comma list = any of), or `platform[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+      "description": "portal, youtube, facebook, x, tiktok, dailymotion or instagram. Filter: `platform=value` (comma list = any of), or `platform[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
      },
      {
       "name": "name",
@@ -26981,6 +26981,42 @@
     }
    }
   },
+  "/api/social/accounts/{id}/publishing-limit": {
+   "get": {
+    "operationId": "getSocialAccountsByIDPublishingLimit",
+    "summary": "Posts used of the platform's publishing limit",
+    "tags": [
+     "Social"
+    ],
+    "description": "For a platform with a publishing limit (Instagram: a set number of API posts in a moving 24 hours, read from Instagram's content_publishing_limit), how many posts this linked account has used (`used`), is allowed (`total`) and has left (`remaining`), over `windowHours`. `applies` is false for a platform without one. A sandbox account counts its own posts. Publishing to an account with none left is refused with 422.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/social/connect/{platform}": {
    "post": {
     "operationId": "postSocialConnectByPlatform",
@@ -27121,6 +27157,78 @@
     "parameters": [
      {
       "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/social/publish-image/{fileId}": {
+   "post": {
+    "operationId": "postSocialPublishImageByFileId",
+    "summary": "Publish an Image Library picture",
+    "tags": [
+     "Social"
+    ],
+    "description": "Publishes a picture from the Image Library as a feed post to the linked accounts in `targets`, each with its own `post`. Only platforms that post pictures are accepted (Instagram); another platform, a caption over its limits (Instagram: 2,200 characters, 30 hashtags) or an account at its publishing limit answers 422 with the reasons. Instagram fetches the picture itself as a signed JPEG from the Volt's public address, so a Volt without one reachable from the internet fails the post with a message saying so. Returns the new publications, which move from pending to published or failed; list them with `GET /api/social/publications?imageId=`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: operate",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "fileId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/social/publish-image/{fileId}/defaults": {
+   "get": {
+    "operationId": "getSocialPublishImageByFileIdDefaults",
+    "summary": "The default post for an Image Library picture",
+    "tags": [
+     "Social"
+    ],
+    "description": "Per platform that posts pictures (Instagram), the post a picture gets by default: its name as the caption and its tags as hashtags.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "fileId",
       "in": "path",
       "required": true,
       "schema": {

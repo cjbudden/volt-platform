@@ -16,7 +16,7 @@ export class ReframeNotReady extends Error {
   constructor(message: string) { super(message); this.name = 'ReframeNotReady'; }
 }
 
-const PLATFORM_LABEL: Record<string, string> = { youtube: 'YouTube', tiktok: 'TikTok', facebook: 'Facebook', x: 'X', dailymotion: 'Dailymotion' };
+const PLATFORM_LABEL: Record<string, string> = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', x: 'X', dailymotion: 'Dailymotion' };
 
 /**
  * The local path of the file to upload for this platform, or null when the
@@ -28,7 +28,16 @@ export async function formatMediaFor(asset: any, platform: string, progress: (pc
   const owner = (await assetWithAccount(asset.id))?.owner_account ?? null;
   const settings = await settingsFor(owner);
   const fmt = settings.targets[platform];
-  if (!settings.renderOnPublish || !fmt || fmt === '16x9') return null;
+  if (!fmt || fmt === '16x9') return null;
+  if (!settings.renderOnPublish) {
+    // Instagram Reels are vertical (build queue 1.14i): with render-on-publish
+    // off, a 9:16 version that is already made (and approved, where approval is
+    // required) still goes, rather than the 16:9 picture. Nothing is rendered.
+    if (platform !== 'instagram') return null;
+    const made = await formatRow(asset.id, fmt as FormatKey);
+    const path = made && made.render_state === 'ready' && (!settings.requireApproval || made.review === 'approved') ? localPath(made.output_key) : null;
+    return path && existsSync(path) ? path : null;
+  }
   const f = fmt as FormatKey;
   const ratio = FORMATS[f].ratio;
   const who = PLATFORM_LABEL[platform] ?? platform;

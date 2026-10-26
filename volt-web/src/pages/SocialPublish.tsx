@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, type SocialAccount, type SocialPlatformsStatus, type SocialPost, type SocialPublication, type SocialPlatformId } from '../api'
+import { api, type SocialAccount, type SocialPlatformsStatus, type SocialPost, type SocialPublication, type SocialPlatformId, type SocialPublishingLimit } from '../api'
 import { navigate } from '../router'
 import { pressable } from '../a11y'
 import { FormStatus, Notice, useNotify, usePageNotice } from '../notices'
@@ -17,8 +17,16 @@ import { FormStatus, Notice, useNotify, usePageNotice } from '../notices'
    THE STATUS LIST polls while anything is still going up, shows the stage the
    platform is at, and for a failure shows the platform's own words with a
    Retry that can carry an edited post.
+
+   PICTURES (build queue 1.14i): the same composer publishes an Image Library
+   picture (`imageId`), offering only the accounts whose platform posts
+   pictures (Instagram feed posts). An Instagram account shows how much of its
+   24 hour publishing limit is used before anything is sent, and one with
+   none left cannot be picked.
    ========================================================================== */
-const LABEL: Record<string, string> = { youtube: 'YouTube', facebook: 'Facebook', x: 'X', tiktok: 'TikTok', dailymotion: 'Dailymotion' }
+const LABEL: Record<string, string> = { youtube: 'YouTube', facebook: 'Facebook', x: 'X', tiktok: 'TikTok', dailymotion: 'Dailymotion', instagram: 'Instagram' }
+const ORDER: SocialPlatformId[] = ['youtube', 'instagram', 'facebook', 'x', 'tiktok', 'dailymotion']
+const hashtagsIn = (s: string) => (s.match(/(^|\s)#[^\s#]+/g) ?? []).length
 const PRIVACY_LABEL: Record<string, string> = { public: 'Public', unlisted: 'Unlisted', private: 'Private' }
 
 type Limits = SocialPlatformsStatus['platforms'][number]
@@ -34,10 +42,15 @@ export function postProblems(l: Limits, p: SocialPost): string[] {
   const n = captionLength(l, p)
   if (n > l.limits.description) out.push(`${l.limits.title == null ? 'caption' : 'description'} is ${n} of ${l.limits.description} characters`)
   if (l.limits.title == null && n === 0) out.push('needs a caption')
+  if (l.limits.hashtags != null) {
+    const tags = l.limits.tags && l.limits.title == null ? p.tags.filter(t => t.trim()).length : 0
+    const h = hashtagsIn(p.description) + tags
+    if (h > l.limits.hashtags) out.push(`${h} hashtags, at most ${l.limits.hashtags}`)
+  }
   return out
 }
 
-export function SocialComposer({ assetId, onClose, onPublished }: { assetId: string; onClose: () => void; onPublished: () => void }) {
+export function SocialComposer({ assetId, imageId, onClose, onPublished }: { assetId?: string; imageId?: string; onClose: () => void; onPublished: () => void }) {
   const [st, setSt] = useState<SocialPlatformsStatus | null>(null)
   const [accounts, setAccounts] = useState<SocialAccount[] | null>(null)
   const [defaults, setDefaults] = useState<Record<string, SocialPost> | null>(null)
@@ -48,22 +61,46 @@ export function SocialComposer({ assetId, onClose, onPublished }: { assetId: str
   const [tab, setTab] = useState<'all' | SocialPlatformId>('all')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [limits, setLimits] = useState<Record<string, SocialPublishingLimit>>({})
 
   useEffect(() => {
-    api.socialPlatforms().then(setSt).catch(e => setErr(e.message))
-    // An X account is kept while X is off for the account (build queue 1.14h), but not offered.
-    api.socialAccounts().then(a => setAccounts(a.filter(x => x.enabled && !(x as { off?: boolean }).off))).catch(e => setErr(e.message))
-    api.socialDefaults(assetId).then(d => {
+    let alive = true
+    api.socialPlatforms().then(p => {
+      if (!alive) return
+      setSt(p)
+      const imageOk = new Set(p.platforms.filter(x => x.images).map(x => x.id))
+      // An X account is kept while X is off for the account (build queue 1.14h), but not offered.
+      // A picture goes only to platforms that post pictures.
+      api.socialAccounts().then(a => {
+        if (!alive) return
+        const usable = a.filter(x => x.enabled && !(x as { off?: boolean }).off && (!imageId || imageOk.has(x.platform)))
+        setAccounts(usable)
+        // Instagram's 24 hour publishing limit, read before anything is sent.
+        for (const acc of usable.filter(x => p.platforms.find(q => q.id === x.platform)?.publishingLimit)) {
+          api.socialPublishingLimit(acc.id).then(l => { if (alive) setLimits(m => ({ ...m, [acc.id]: l })) }).catch(() => {})
+        }
+      }).catch(e => setErr(e.message))
+    }).catch(e => setErr(e.message))
+    const defs = imageId ? api.socialImageDefaults(imageId) : api.socialDefaults(assetId!)
+    defs.then(d => {
+      if (!alive) return
       setDefaults(d)
-      const y = d.youtube
+      const y = d.youtube ?? d.instagram ?? Object.values(d)[0] ?? { title: '', description: '', tags: [], privacy: 'public' }
       setBase({ title: y.title, description: y.description, tags: y.tags, privacy: 'public' })
       setTagText(y.tags.join(', '))
     }).catch(e => setErr(e.message))
-  }, [assetId])
+    return () => { alive = false }
+  }, [assetId, imageId])
+
+  const limitNote = (id: string) => {
+    const l = limits[id]
+    if (!l || !l.applies) return null
+    return { full: l.remaining <= 0, text: `${l.used} of ${l.total} posts used in the last ${l.windowHours} hours` }
+  }
 
   const platformsPicked = useMemo(() => {
     const set = new Set((accounts ?? []).filter(a => picked.includes(a.id)).map(a => a.platform))
-    return (['youtube', 'facebook', 'x', 'tiktok', 'dailymotion'] as SocialPlatformId[]).filter(p => set.has(p))
+    return ORDER.filter(p => set.has(p))
   }, [accounts, picked])
 
   const limitsOf = (p: SocialPlatformId) => st!.platforms.find(x => x.id === p)!
@@ -84,7 +121,9 @@ export function SocialComposer({ assetId, onClose, onPublished }: { assetId: str
     if (problems.length) { setErr(problems.join('. ')); return }
     setBusy(true)
     try {
-      await api.socialPublish(assetId, (accounts ?? []).filter(a => picked.includes(a.id)).map(a => ({ targetId: a.id, post: postFor(a.platform) })))
+      const targets = (accounts ?? []).filter(a => picked.includes(a.id)).map(a => ({ targetId: a.id, post: postFor(a.platform) }))
+      if (imageId) await api.socialPublishImage(imageId, targets)
+      else await api.socialPublish(assetId!, targets)
       onPublished(); onClose()
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
@@ -100,20 +139,22 @@ export function SocialComposer({ assetId, onClose, onPublished }: { assetId: str
         <div className="drawer-h"><div className="t">Publish to social</div><button className="xbtn" onClick={onClose} aria-label="Close">✕</button></div>
         <div className="drawer-b">
           {!st || !accounts || !defaults ? <div className="loading">Loading…</div> : accounts.length === 0 ? (
-            <div className="hintxt">No social accounts are linked. <button className="btn ghost" onClick={() => navigate('/social')}>Link one</button></div>
+            <div className="hintxt">{imageId ? 'No linked account takes pictures: Instagram does.' : 'No social accounts are linked.'} <button className="btn ghost" onClick={() => navigate('/social')}>Link one</button></div>
           ) : (
             <>
               <div className="sec-label">Publish to</div>
               <div className="sp-accounts">
                 {accounts.map(a => {
-                  const off = a.link_status === 'expired'
+                  const ln = limitNote(a.id)
+                  const off = a.link_status === 'expired' || !!ln?.full
                   return (
                     <label key={a.id} className={`sp-acct ${picked.includes(a.id) ? 'on' : ''}`} style={{ opacity: off ? 0.55 : 1 }}>
                       <input type="checkbox" disabled={off} checked={picked.includes(a.id)}
                         onChange={e => setPicked(p => e.target.checked ? [...p, a.id] : p.filter(x => x !== a.id))} />
                       <span style={{ minWidth: 0 }}>
-                        <span style={{ fontWeight: 600 }}>{a.account_label ?? a.name}</span>
-                        <span className="hintxt" style={{ display: 'block', marginTop: 0 }}>{LABEL[a.platform]}{a.mode === 'sandbox' ? ' · sandbox' : ''}{off ? ' · reconnect needed' : ''}</span>
+                        <span style={{ fontWeight: 600, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.account_label ?? a.name}>{a.account_label ?? a.name}</span>
+                        <span className="hintxt" style={{ display: 'block', marginTop: 0 }}>{LABEL[a.platform]}{a.mode === 'sandbox' ? ' · sandbox' : ''}{a.link_status === 'expired' ? ' · reconnect needed' : ''}</span>
+                        {ln && <span className="hintxt" style={{ display: 'block', marginTop: 0, color: ln.full ? 'var(--down)' : undefined }}>{ln.full ? `Publishing limit reached: ${ln.text}` : ln.text}</span>}
                       </span>
                     </label>
                   )
@@ -132,18 +173,22 @@ export function SocialComposer({ assetId, onClose, onPublished }: { assetId: str
               </div>
               <div className="hintxt" style={{ marginBottom: 8 }}>
                 {editing ? <>This is the {LABEL[editing]} version. {over[editing] ? <button className="btn ghost" onClick={() => setOver(o => { const n = { ...o }; delete n[editing]; return n })}>Go back to the shared post</button> : 'Change anything here and it stops following the shared post.'}</>
-                  : 'Written once for every account. Open a platform to adjust its version: X and TikTok use one caption, with tags as hashtags.'}
+                  : 'Written once for every account. Open a platform to adjust its version: X, TikTok and Instagram use one caption, with tags as hashtags.'}
               </div>
 
-              {(!l || l.limits.title != null) && (
+              {/* A picture goes only to caption platforms (Instagram): no title to write. */}
+              {(!l || l.limits.title != null) && !imageId && (
                 <div className="field"><label>Title {l?.limits.title ? <span className="sp-count">{cur.title.trim().length}/{l.limits.title}</span> : null}</label>
                   <input className="inp" value={cur.title} onChange={e => setCur({ title: e.target.value })} />
                 </div>
               )}
-              <div className="field"><label>{l && l.limits.title == null ? 'Caption' : 'Description'} {l ? <span className={`sp-count ${captionLength(l, cur) > l.limits.description ? 'bad' : ''}`}>{captionLength(l, cur)}/{l.limits.description}</span> : null}</label>
+              <div className="field"><label>{(l && l.limits.title == null) || imageId ? 'Caption' : 'Description'} {l ? <span className={`sp-count ${captionLength(l, cur) > l.limits.description ? 'bad' : ''}`}>{captionLength(l, cur)}/{l.limits.description}</span> : null}</label>
                 <textarea className="inp" rows={l && l.limits.title == null ? 4 : 5} value={cur.description} onChange={e => setCur({ description: e.target.value })} />
                 {l && l.limits.title == null && cur.tags.length > 0 && (
                   <div className="hintxt">Added at the end, and counted: {cur.tags.map(t => `#${t.replace(/^#/, '').replace(/\s+/g, '')}`).join(' ')}</div>
+                )}
+                {l && l.limits.hashtags != null && (
+                  <div className="hintxt"><span className={`sp-count ${hashtagsIn(cur.description) + cur.tags.length > l.limits.hashtags ? 'bad' : ''}`}>{hashtagsIn(cur.description) + cur.tags.length}/{l.limits.hashtags}</span> hashtags</div>
                 )}
               </div>
               {!editing && (
@@ -155,7 +200,7 @@ export function SocialComposer({ assetId, onClose, onPublished }: { assetId: str
                 <select className="inp" value={cur.privacy} onChange={e => setCur({ privacy: e.target.value as any })}>
                   {(l ? l.privacy : (['public', 'unlisted', 'private'] as const)).map(p => <option key={p} value={p}>{PRIVACY_LABEL[p]}</option>)}
                 </select>
-                {!editing && <div className="hintxt">A platform without that option uses its nearest: Facebook and X posts are public. TikTok posts privately until TikTok has audited the app.</div>}
+                {!editing && <div className="hintxt">A platform without that option uses its nearest: Facebook, X and Instagram posts are public. TikTok posts privately until TikTok has audited the app.</div>}
               </div>
             </>
           )}
@@ -176,19 +221,19 @@ const ST: Record<string, { label: string; cls: string }> = {
 }
 
 /** Where this asset went on social, live while anything is still going up. */
-export function SocialPanel({ assetId, refreshKey }: { assetId: string; refreshKey: number }) {
+export function SocialPanel({ assetId, imageId, refreshKey }: { assetId?: string; imageId?: string; refreshKey: number }) {
   const [rows, setRows] = useState<SocialPublication[] | null>(null)
   const [err, setErr] = useState('')
   const notify = useNotify()
   const fail = (e: any) => notify({ kind: 'error', message: e.message })
-  const load = () => api.socialPublications(assetId).then(r => { setRows(r); setErr('') }).catch(e => setErr(e.message))
-  useEffect(() => { load() }, [assetId, refreshKey])
+  const load = () => (imageId ? api.socialImagePublications(imageId) : api.socialPublications(assetId!)).then(r => { setRows(r); setErr('') }).catch(e => setErr(e.message))
+  useEffect(() => { load() }, [assetId, imageId, refreshKey])
   const active = (rows ?? []).some(r => r.status === 'pending')
   useEffect(() => {
     if (!active) return
     const t = setInterval(load, 1500)
     return () => clearInterval(t)
-  }, [active, assetId])
+  }, [active, assetId, imageId])
 
   usePageNotice('social-load', err && rows ? { kind: 'error', title: "Couldn't refresh the social posts.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
@@ -216,12 +261,12 @@ export function SocialPanel({ assetId, refreshKey }: { assetId: string; refreshK
                 )}
                 {r.status === 'pending' && r.stage && <div className="hintxt" style={{ marginTop: 2 }}>{r.stage === 'will retry' ? `Will retry: ${r.error ?? ''}` : r.stage}</div>}
                 {r.status === 'failed' && r.error && <div className="err" style={{ marginTop: 4 }}>{r.error}</div>}
-                {r.status === 'published' && <div className="hintxt" style={{ marginTop: 2 }}>{r.views} views{r.last_synced_at ? ` (checked ${new Date(r.last_synced_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}{r.published_at ? ` · ${new Date(r.published_at).toLocaleString()}` : ''}</div>}
+                {r.status === 'published' && <div className="hintxt" style={{ marginTop: 2 }}>{r.views} views{r.likes != null ? ` · ${r.likes} likes` : ''}{r.last_synced_at ? ` (checked ${new Date(r.last_synced_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}{r.published_at ? ` · ${new Date(r.published_at).toLocaleString()}` : ''}</div>}
               </div>
               {r.external_url && r.status === 'published' && <a className="btn ghost" href={r.external_url} target="_blank" rel="noreferrer">Open</a>}
               {r.status === 'failed' && <button className="btn" onClick={() => api.socialRetry(r.id).then(load).catch(fail)}>Retry</button>}
               {r.status === 'published' && <button className="btn ghost" onClick={() => {
-                if (window.confirm(`Take this down from ${LABEL[r.platform]}? It is deleted there; the clip stays in Volt.`)) api.socialTakeDown(r.id).then(load).catch(fail)
+                if (window.confirm(`Take this down from ${LABEL[r.platform]}? It is deleted there; the ${imageId ? 'picture' : 'clip'} stays in Volt.`)) api.socialTakeDown(r.id).then(load).catch(fail)
               }}>Take down</button>}
             </div>
           )

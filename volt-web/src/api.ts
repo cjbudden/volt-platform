@@ -1483,7 +1483,7 @@ export const api = {
   // ---- social publishing (modules/social.ts) ----
   socialPlatforms: (): Promise<SocialPlatformsStatus> => req('/social/platforms'),
   socialAccounts: (): Promise<SocialAccount[]> => req('/social/accounts'),
-  socialConnect: (platform: string): Promise<{ url: string }> => req(`/social/connect/${platform}`, { method: 'POST' }),
+  socialConnect: (platform: string, variant?: string): Promise<{ url: string }> => req(`/social/connect/${platform}`, { method: 'POST', body: JSON.stringify(variant ? { variant } : {}) }),
   socialSandbox: (platform: string, label?: string): Promise<SocialAccount> =>
     req(`/social/sandbox/${platform}`, { method: 'POST', body: JSON.stringify({ label }) }),
   socialSetEnabled: (id: string, enabled: boolean) => req(`/publish-targets/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
@@ -1495,6 +1495,12 @@ export const api = {
   socialPublish: (assetId: string, targets: { targetId: string; post: SocialPost }[]): Promise<{ publications: any[] }> =>
     req(`/social/publish/${assetId}`, { method: 'POST', body: JSON.stringify({ targets }) }),
   socialPublications: (assetId: string): Promise<SocialPublication[]> => req(`/social/publications?assetId=${encodeURIComponent(assetId)}`),
+  // Image Library pictures (Instagram feed posts) and the 24 hour publishing limit, build queue 1.14i.
+  socialImageDefaults: (fileId: string): Promise<Record<string, SocialPost>> => req(`/social/publish-image/${fileId}/defaults`),
+  socialPublishImage: (fileId: string, targets: { targetId: string; post: SocialPost }[]): Promise<{ publications: any[] }> =>
+    req(`/social/publish-image/${fileId}`, { method: 'POST', body: JSON.stringify({ targets }) }),
+  socialImagePublications: (fileId: string): Promise<SocialPublication[]> => req(`/social/publications?imageId=${encodeURIComponent(fileId)}`),
+  socialPublishingLimit: (targetId: string): Promise<SocialPublishingLimit> => req(`/social/accounts/${targetId}/publishing-limit`),
   socialRetry: (id: string, post?: SocialPost) => req(`/social/publications/${id}/retry`, { method: 'POST', body: JSON.stringify(post ? { post } : {}) }),
   socialTakeDown: (id: string) => req(`/social/publications/${id}/remove`, { method: 'POST' }),
   socialSyncViews: (): Promise<{ synced: number }> => req('/social/sync-views', { method: 'POST' }),
@@ -2933,21 +2939,26 @@ export interface ImportAlias {
   /** The linked Volt channel's own image (guide icon, else logo). The guide uses this, not theirs. */
   channelIconRef: string | null
 }
-export type SocialPlatformId = 'youtube' | 'facebook' | 'x' | 'tiktok' | 'dailymotion'
+export type SocialPlatformId = 'youtube' | 'facebook' | 'x' | 'tiktok' | 'dailymotion' | 'instagram'
 export interface SocialPost { title: string; description: string; tags: string[]; privacy: 'public' | 'unlisted' | 'private' }
 export interface SocialPlatformsStatus {
   tokenKeyConfigured: boolean; callbackBase: string
   platforms: { id: SocialPlatformId; label: string; accountNoun: string; configured: boolean; env: string[]; callbackUrl: string
-    limits: { title: number | null; description: number; tags: boolean }; privacy: SocialPost['privacy'][]; scopes: string[] }[]
+    limits: { title: number | null; description: number; tags: boolean; hashtags?: number }; privacy: SocialPost['privacy'][]; scopes: string[]
+    /** Ways to link (Instagram: Instagram Login, Facebook Login). */
+    variants?: { id: string; label: string; configured: boolean; env?: string[]; scopes?: string[] }[]
+    images?: boolean; publishingLimit?: boolean }[]
 }
+export type SocialPublishingLimit = { applies: false } | { applies: true; used: number; total: number; remaining: number; windowHours: number }
 export interface SocialAccount {
   id: string; platform: SocialPlatformId; name: string; external_account: string | null; enabled: boolean; mode: 'live' | 'sandbox'
   account_label: string | null; avatar_url: string | null; link_status: 'connected' | 'expired' | 'error'; link_detail: string | null
   token_expires_at: string | null; linked_at: string | null; linked_by_email: string | null; published: number; last_published_at: string | null
+  variant?: string | null; followers?: number | null; followers_synced_at?: string | null
 }
 export interface SocialPublication {
   id: string; platform: SocialPlatformId; status: 'pending' | 'published' | 'failed' | 'removed' | 'withdrawn'
-  external_id: string | null; external_url: string | null; views: number; error: string | null; published_at: string | null
+  external_id: string | null; external_url: string | null; views: number; likes?: number | null; error: string | null; published_at: string | null
   last_synced_at: string | null; created_at: string; post: SocialPost | null; progress: number | null; stage: string | null
   attempts: number; stale: boolean; target_id: string; account_label: string | null; target_name: string; mode: 'live' | 'sandbox'; avatar_url: string | null
 }

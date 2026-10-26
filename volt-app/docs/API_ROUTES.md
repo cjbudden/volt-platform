@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**691 routes.** Public API: 75 · Sign-in (no session yet): 7 · Admin API: 549 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 15 · Health and discovery: 8
+**694 routes.** Public API: 75 · Sign-in (no session yet): 7 · Admin API: 552 · Platform API: 23 · Machine-to-machine: 14 · Delivery and previews (outside /api): 15 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -832,11 +832,14 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | GET | `/api/social/accounts` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/social/accounts/:id/publishing-limit` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/social/connect/:platform` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/social/platforms` | admin session (Bearer) or account secret key | vod: view |  |
 | GET | `/api/social/publications` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/social/publications/:id/remove` | admin session (Bearer) or account secret key | vod: manage |  |
 | POST | `/api/social/publications/:id/retry` | admin session (Bearer) or account secret key | vod: operate |  |
+| POST | `/api/social/publish-image/:fileId` | admin session (Bearer) or account secret key | vod: operate |  |
+| GET | `/api/social/publish-image/:fileId/defaults` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/social/publish/:assetId` | admin session (Bearer) or account secret key | vod: operate |  |
 | GET | `/api/social/publish/:assetId/defaults` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/social/sandbox/:platform` | admin session (Bearer) or account secret key | vod: manage |  |

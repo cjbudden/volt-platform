@@ -194,7 +194,7 @@ reframeRouter.post('/:id/reframe/render', asyncHandler(async (req, res) => {
 export const reframeSettingsRouter = Router();
 reframeSettingsRouter.use(requireAuth);
 
-const PLATFORM_LABEL: Record<string, string> = { youtube: 'YouTube', tiktok: 'TikTok', facebook: 'Facebook', x: 'X', dailymotion: 'Dailymotion' };
+const PLATFORM_LABEL: Record<string, string> = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', x: 'X', dailymotion: 'Dailymotion' };
 
 async function settingsView(req: any) {
   const acct = accountId(req);

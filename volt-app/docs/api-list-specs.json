@@ -1944,7 +1944,7 @@
      "starts",
      "exists"
     ],
-    "doc": "Name of the channel or event"
+    "doc": "Name of the channel or event, or the title of the library asset"
    },
    "created_at": {
     "type": "timestamp",
@@ -2838,7 +2838,7 @@
      "starts",
      "exists"
     ],
-    "doc": "portal, youtube, facebook, x, tiktok or dailymotion"
+    "doc": "portal, youtube, facebook, x, tiktok, dailymotion or instagram"
    },
    "name": {
     "type": "string",

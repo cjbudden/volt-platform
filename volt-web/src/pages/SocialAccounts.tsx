@@ -7,8 +7,13 @@ import { useNotify, usePageNotice } from '../notices'
 import { useAccess } from '../access'
 
 /* ============================================================================
-   SOCIAL ACCOUNTS (Admin). Link the YouTube channels, Facebook Pages and X,
-   TikTok and Dailymotion accounts clips are published to.
+   SOCIAL ACCOUNTS (Admin). Link the YouTube channels, Facebook Pages,
+   Instagram professional accounts and X, TikTok and Dailymotion accounts
+   clips (and, for Instagram, pictures) are published to.
+
+   INSTAGRAM (build queue 1.14i) links two ways, each its own button: with
+   Instagram Login, or with Facebook Login for an Instagram account tied to a
+   Page. Each linked account shows its follower count and how it was linked.
 
    Connect sends the browser to the platform's own sign-in; the platform sends
    it back here with the outcome in the URL (?linked= or ?error=), which this
@@ -123,9 +128,9 @@ export default function SocialAccountsPage() {
     load()
   }, [])
 
-  async function connect(id: string) {
-    setBusy(id)
-    try { const { url } = await api.socialConnect(id); window.location.assign(url) }
+  async function connect(id: string, variant?: string | null) {
+    setBusy(variant ? `${id}:${variant}` : id)
+    try { const { url } = await api.socialConnect(id, variant ?? undefined); window.location.assign(url) }
     catch (e: any) { fail(e); setBusy('') }
   }
   async function sandbox(id: string) {
@@ -154,19 +159,33 @@ export default function SocialAccountsPage() {
                 </div>
                 <div className="hintxt" style={{ marginTop: 2 }}>
                   {p.configured ? `Publishes to ${/^[aeiou]/i.test(p.accountNoun) ? 'an' : 'a'} ${p.accountNoun}.` : seesServerSetup ? `Needs ${p.label} app credentials on this deployment.` : 'Your Volt provider sets this up.'}
-                  {' '}{p.limits.title != null ? `Title up to ${p.limits.title} characters, description up to ${p.limits.description}.` : `Caption up to ${p.limits.description} characters, hashtags included.`}
+                  {' '}{p.limits.title != null ? `Title up to ${p.limits.title} characters, description up to ${p.limits.description}.` : `Caption up to ${p.limits.description} characters, hashtags included${p.limits.hashtags != null ? `, at most ${p.limits.hashtags} hashtags` : ''}.`}
+                  {p.images ? ' Clips go as Reels, Image Library pictures as feed posts.' : ''}
                 </div>
               </div>
               {!p.configured && seesServerSetup && p.env && <button className="btn ghost" onClick={() => setSetupOpen(o => o === p.id ? null : p.id)}>How to set up</button>}
               <button className="btn ghost" disabled={busy === `sb-${p.id}`} onClick={() => sandbox(p.id)}>Add sandbox account</button>
-              {p.configured && <button className="btn primary" disabled={busy === p.id} onClick={() => connect(p.id)}>{busy === p.id ? 'Opening…' : `Connect ${p.label}`}</button>}
+              {p.configured && !p.variants && <button className="btn primary" disabled={busy === p.id} onClick={() => connect(p.id)}>{busy === p.id ? 'Opening…' : `Connect ${p.label}`}</button>}
+              {p.variants?.filter(v => v.configured).map((v, i) => (
+                <button key={v.id} className={`btn ${i === 0 ? 'primary' : ''}`} disabled={busy === `${p.id}:${v.id}`} onClick={() => connect(p.id, v.id)}>
+                  {busy === `${p.id}:${v.id}` ? 'Opening…' : v.id === 'facebook' ? 'Connect through a Facebook Page' : `Connect ${p.label}`}
+                </button>
+              ))}
+              {p.configured && p.variants?.some(v => !v.configured) && seesServerSetup && <button className="btn ghost" onClick={() => setSetupOpen(o => o === p.id ? null : p.id)}>How to set up</button>}
             </div>
             {setupOpen === p.id && p.env && (
               <div className="nt-setup">
                 Register an app with {p.label}, add this redirect URL to it, and set the two values on the server, then restart:
                 <div className="nt-kv"><span>Redirect URL</span><code>{p.callbackUrl}</code></div>
-                <div className="nt-kv"><span>Settings</span><code>{p.env[0]}</code><code>{p.env[1]}</code></div>
-                <div className="nt-kv"><span>Permissions</span><code>{(p.scopes ?? []).join(' ')}</code></div>
+                {p.variants ? p.variants.map(v => (
+                  <div key={v.id}>
+                    <div className="nt-kv"><span>{v.label}</span>{(v.env ?? []).map(e => <code key={e}>{e}</code>)}{v.configured && <span className="nt-pill ok">Set</span>}</div>
+                    <div className="nt-kv"><span>Permissions</span><code>{(v.scopes ?? []).join(' ')}</code></div>
+                  </div>
+                )) : <>
+                  <div className="nt-kv"><span>Settings</span><code>{p.env[0]}</code><code>{p.env[1]}</code></div>
+                  <div className="nt-kv"><span>Permissions</span><code>{(p.scopes ?? []).join(' ')}</code></div>
+                </>}
               </div>
             )}
             {mine.length > 0 && (
@@ -186,12 +205,13 @@ export default function SocialAccountsPage() {
                           {a.off && <span className="nt-pill muted">Off: X is not on for this account</span>}
                         </div>
                         <div className="hintxt" style={{ marginTop: 2 }}>
-                          {a.published} published{a.last_published_at ? `, last ${fmt(a.last_published_at)}` : ''}
+                          {a.followers != null ? `${a.followers.toLocaleString()} followers · ` : ''}{a.published} published{a.last_published_at ? `, last ${fmt(a.last_published_at)}` : ''}
+                          {a.variant && p.variants ? ` · linked with ${p.variants.find(v => v.id === a.variant)?.id === 'facebook' ? 'a Facebook Page' : `${p.label} Login`}` : ''}
                           {a.linked_at ? ` · linked ${fmt(a.linked_at)}${a.linked_by_email ? ` by ${a.linked_by_email}` : ''}` : ''}
                         </div>
                         {a.link_detail && <div className="hintxt" style={{ marginTop: 2, color: 'var(--warn)' }}>{a.link_detail}</div>}
                       </div>
-                      {a.link_status === 'expired' && a.mode === 'live' && <button className="btn" onClick={() => connect(p.id)}>Reconnect</button>}
+                      {a.link_status === 'expired' && a.mode === 'live' && <button className="btn" onClick={() => connect(p.id, a.variant)}>Reconnect</button>}
                       <div className={`sw ${a.enabled ? '' : 'off'}`} title={a.enabled ? 'Enabled: can be published to' : 'Disabled'}
                         {...pressable(() => { api.socialSetEnabled(a.id, !a.enabled).then(load).catch(fail) }, { label: a.enabled ? 'Disable account' : 'Enable account' })}><i /></div>
                       <button className="btn ghost" onClick={() => {

@@ -4744,6 +4744,15 @@
  },
  {
   "method": "GET",
+  "path": "/api/social/accounts/:id/publishing-limit",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "GET",
   "path": "/api/social/callback/:platform",
   "api": "machine",
   "credential": "OAuth redirect (state parameter)",
@@ -4793,6 +4802,24 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "vod: operate",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "POST",
+  "path": "/api/social/publish-image/:fileId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: operate",
+  "viewerTier": false,
+  "group": "/api/social"
+ },
+ {
+  "method": "GET",
+  "path": "/api/social/publish-image/:fileId/defaults",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
   "viewerTier": false,
   "group": "/api/social"
  },

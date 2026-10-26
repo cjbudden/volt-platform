@@ -73,6 +73,14 @@ Originals keep their GPS position. For anything public, share a URL from the URL
 
 URLs are signed for your account and do not expire, so they can be cached for a long time. The largest side is 4096 pixels.
 
+### Publish an image to Instagram
+
+1. Click an image and choose **Publish to social…**. Images made from your streams by the encoder do not offer it.
+2. Tick the Instagram accounts to post to (linked under [Social accounts](social-accounts.md); only platforms that take pictures are offered), and write the caption. Each account shows how many of Instagram's 24 hour posts it has used.
+3. Choose **Publish**. Open the image again to follow the post under **Social**: progress, then **Published** with **Open**, views and likes.
+
+Instagram fetches the picture from your Volt's public address as a JPEG at most 1440 pixels wide, so your Volt must be reachable from the internet. See [Social accounts](social-accounts.md#publish-a-picture-to-instagram).
+
 ### Delete an image
 
 1. Click the image, then the bin button (**Delete**).
@@ -106,6 +114,7 @@ Previews trail live by a couple of minutes. Older hours are built when someone a
 | [Loops & Fillers](loops-and-fillers.md) | Older fallback slates kept here can be copied into Loops & Fillers |
 | [Recordings](recordings.md) | Stream stills and scrub-bar previews show on the recording timelines |
 | [Player SDK](player-sdk.md), [Embedding](embedding.md) | URLs from the URL builder work as player posters and page images |
+| [Social accounts](social-accounts.md) | An image can be published to Instagram as a feed post |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 
@@ -117,6 +126,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | Upload, create folders, change usage type, **Re-read**, delete | Files, uploads & storage: Manage |
 | Pick an image in another section's form | Any access to that section; reading the library needs nothing more |
 | Sign image URLs through the API | Any role above the Viewer tier |
+| Publish an image to Instagram | Media library & publishing: Operate |
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).
 

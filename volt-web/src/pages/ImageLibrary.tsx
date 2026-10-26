@@ -6,6 +6,7 @@ import { signImage } from '../imageSigning'
 const MAX_DIM = 4096
 import { enqueueUploads, useUploads } from '../uploads'
 import { pressable } from '../a11y'
+import { SocialComposer, SocialPanel } from './SocialPublish'
 import { FieldError, FormStatus, Notice, useNotify, usePageNotice } from '../notices'
 
 const KINDS = ['all', 'slate', 'watermark', 'poster', 'brand', 'other', 'keyframe', 'storyboard'] as const
@@ -64,6 +65,9 @@ export default function ImageLibrary() {
   const [staged, setStaged] = useState<{ items: Staged[]; folder: string } | null>(null)
   const [preview, setPreview] = useState<MediaFile | null>(null)
   const [builder, setBuilder] = useState<MediaFile | null>(null)
+  // A picture to publish as an Instagram feed post (build queue 1.14i), and a nudge for its status list.
+  const [publishImg, setPublishImg] = useState<MediaFile | null>(null)
+  const [socialKey, setSocialKey] = useState(0)
   const [dragging, setDragging] = useState(false)
   const [toast, setToast] = useState('')
   const fileInput = useRef<HTMLInputElement | null>(null)
@@ -328,7 +332,9 @@ export default function ImageLibrary() {
                 <div className="hintxt">Controls where it appears in pickers (slate / watermark / brand / poster). Change any time.</div>
               </div>
               )}
+              <SocialPanel imageId={preview.id} refreshKey={socialKey} />
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                {preview.source !== 'encoder' && <button className="btn" onClick={() => { setPublishImg(preview); setPreview(null) }}>Publish to social…</button>}
                 <button className="btn primary" onClick={() => { setBuilder(preview); setPreview(null) }}>URL builder…</button>
                 <button className="btn ghost" onClick={() => setPreview(null)}>Close</button>
               </div>
@@ -337,6 +343,7 @@ export default function ImageLibrary() {
         </div>
       )}
 
+      {publishImg && <SocialComposer imageId={publishImg.id} onClose={() => setPublishImg(null)} onPublished={() => { setSocialKey(k => k + 1); setPreview(publishImg) }} />}
       {builder && <UrlBuilder file={builder} onClose={() => setBuilder(null)} notify={m => { setToast(m); setTimeout(() => setToast(''), 2200) }} />}
 
       {toast && (

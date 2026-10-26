@@ -18,7 +18,7 @@ import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, f
  * The platform push, account linking (OAuth) and view sync are in
  * services/social and modules/social.ts (/api/social).
  */
-const PLATFORMS = ['portal', 'youtube', 'facebook', 'x', 'tiktok', 'dailymotion'] as const;
+const PLATFORMS = ['portal', 'youtube', 'facebook', 'x', 'tiktok', 'dailymotion', 'instagram'] as const;
 
 // ---- publish targets (config) -------------------------------------------
 export const publishTargetsRouter = Router();
@@ -28,7 +28,7 @@ const PUBLISH_TARGETS_LIST = defineList({
   path: '/api/publish-targets',
   fields: {
     id: { sql: 'id', type: 'uuid' },
-    platform: { sql: 'platform', type: 'string', doc: 'portal, youtube, facebook, x, tiktok or dailymotion' },
+    platform: { sql: 'platform', type: 'string', doc: 'portal, youtube, facebook, x, tiktok, dailymotion or instagram' },
     name: { sql: 'name', type: 'string' },
     external_account: { sql: 'external_account', type: 'string' },
     enabled: { sql: 'enabled', type: 'boolean' },
@@ -86,7 +86,7 @@ publishTargetsRouter.post(
     }
     const row = await one(
       `INSERT INTO publish_targets(account_id, platform, name, external_account, credentials_ref, enabled)
-       VALUES ($1,$2::publish_platform,$3,$4,$5,$6) RETURNING id, platform, name, external_account, enabled`,
+       VALUES ($1,$2::text,$3,$4,$5,$6) RETURNING id, platform, name, external_account, enabled`,
       [accountId(req), b.platform, b.name, b.externalAccount ?? null, b.credentialsRef ?? null, b.enabled]
     );
     res.status(201).json(row);

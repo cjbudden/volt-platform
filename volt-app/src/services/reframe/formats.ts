@@ -25,7 +25,7 @@ export type TargetFormat = FormatKey | '16x9';
 export const TARGET_FORMATS: TargetFormat[] = ['16x9', ...FORMAT_KEYS];
 
 /** The platforms a publication can go to (publish_platform), less the portal. */
-export const SOCIAL_PLATFORMS = ['youtube', 'tiktok', 'facebook', 'x', 'dailymotion'] as const;
+export const SOCIAL_PLATFORMS = ['youtube', 'tiktok', 'instagram', 'facebook', 'x', 'dailymotion'] as const;
 
 export type Follow = 'faces' | 'people' | 'centre';
 
@@ -64,7 +64,7 @@ export const DEFAULT_SETTINGS: ReframeSettings = {
   renderOnPublish: false,
   requireApproval: true,
   autoApproveAbove: null,
-  targets: { youtube: '16x9', tiktok: '9x16', facebook: '1x1', x: '1x1', dailymotion: '16x9' },
+  targets: { youtube: '16x9', tiktok: '9x16', instagram: '9x16', facebook: '1x1', x: '1x1', dailymotion: '16x9' },
 };
 
 const followEnum = z.enum(['faces', 'people', 'centre']);
