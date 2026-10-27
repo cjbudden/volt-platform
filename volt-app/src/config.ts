@@ -339,6 +339,14 @@ export const config = {
     s3Endpoint: process.env.INGEST_S3_ENDPOINT || undefined,
     // S3 watchfolders are mirrored here before the local scanner sees them.
     s3StagingDir: process.env.INGEST_S3_STAGING_DIR ?? `${process.cwd()}/uploads-staging/s3-watch`,
+    // S3 WATCH FOLDERS, EVENT-DRIVEN (build queue 2.6). The queue the bucket's
+    // ObjectCreated notifications land on (deploy/terraform/watchfolders.tf).
+    // Set: the scheduler fetches each new object as it arrives and walks the
+    // folders only every WATCH_S3_BACKSTOP_MIN minutes. Unset (a Mac): every
+    // S3 folder is walked every minute, as before.
+    s3EventsQueueUrl: process.env.WATCH_S3_QUEUE_URL || '',
+    s3EventsEndpoint: process.env.WATCH_S3_QUEUE_ENDPOINT || undefined,
+    s3BackstopMinutes: Number(process.env.WATCH_S3_BACKSTOP_MIN ?? 60),
   },
   // MEDIA STORE — where recorded media lives, and whether this deployment has
   // an archive at all.

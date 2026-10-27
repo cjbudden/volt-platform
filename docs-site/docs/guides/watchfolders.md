@@ -36,6 +36,8 @@ Media operations staff and librarians use it day to day; an administrator usuall
 
 Volt scans every watchfolder automatically every minute. A file still being copied in is left until it has stopped changing.
 
+A watchfolder can also be a folder in a storage bucket instead of a path (set up through the API, see [Through the API](#through-the-api)). Where your Volt runs on AWS, a bucket folder under `watch/` in Volt's own bucket is taken in as soon as a file finishes uploading, usually within seconds, and Volt also looks through every bucket folder once an hour in case a file was missed.
+
 ### Add rules
 
 1. On the folder's page, under **Rules**, fill in the row at the bottom:
@@ -145,7 +147,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 
 | Request | Does |
 |---|---|
-| `GET /api/watchfolders`, `POST /api/watchfolders` | Lists watchfolders, or creates one (`name`, `config.path`) |
+| `GET /api/watchfolders`, `POST /api/watchfolders` | Lists watchfolders, or creates one (`name`, `config.path`; or `"kind": "s3"` with `config.bucket` and `config.prefix` for a folder in a bucket) |
 | `GET /api/watchfolders/{id}`, `PATCH /api/watchfolders/{id}`, `DELETE /api/watchfolders/{id}` | One watchfolder with its rules; rename it, switch it off (`enabled`), set a default target kind or the ladder; delete it |
 | `GET /api/watchfolders/{id}/rules`, `POST /api/watchfolders/{id}/rules` | Lists or adds rules. The API can also match by `regex`, `extension`, `prefix` or `suffix`, and add refusing rules (`"action": "reject"` with a `rejectReason`) |
 | `PATCH /api/watchfolders/{id}/rules/{ruleId}`, `DELETE /api/watchfolders/{id}/rules/{ruleId}` | Changes (including `ordinal` and `enabled`) or deletes a rule |
@@ -158,6 +160,14 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"filename": "slate_open.png"}' \
   "https://your-volt-host/api/watchfolders/$FOLDER_ID/dry-run"
+```
+
+A folder in a bucket. Give it a prefix under `watch/` when it is in Volt's own bucket, so each file is taken in as soon as it arrives; leave `config.bucket` out to use Volt's own bucket. A folder in a bucket of your own works the same way once your Volt contact has connected that bucket; until then it is looked through once an hour.
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "Agency drops", "kind": "s3", "config": {"prefix": "watch/agency/"}}' \
+  "https://your-volt-host/api/watchfolders"
 ```
 
 Every route is in the [API reference](/api-reference).

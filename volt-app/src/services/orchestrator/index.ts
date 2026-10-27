@@ -254,6 +254,17 @@ export function startScheduler(): () => void {
   );
   watch.unref?.();
 
+  // S3 WATCH FOLDERS, EVENT-DRIVEN (build queue 2.6): with a drop queue set,
+  // the leader long-polls it and fetches each new object as the bucket
+  // reports it, instead of waiting for the walk above. Its own loop and error
+  // boundary, like every pass here.
+  let stopS3Events: (() => Promise<void>) | null = null;
+  if (config.ingest.s3EventsQueueUrl) {
+    import('../watchfolder/s3events').then((m) => m.startFromConfig())
+      .then((stop) => { stopS3Events = stop; })
+      .catch((e) => console.error('[s3 watch] could not start the drop queue loop', e));
+  }
+
   tick.unref?.();
   sweep.unref?.();
   fleet.unref?.();
@@ -268,6 +279,7 @@ export function startScheduler(): () => void {
     if (edgeRights) clearInterval(edgeRights);
     clearInterval(asRun);
     clearInterval(watch);
+    void stopS3Events?.();
     if (thumbs) clearInterval(thumbs);
     if (resume) clearInterval(resume);
   };

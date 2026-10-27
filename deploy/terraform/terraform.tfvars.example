@@ -82,6 +82,13 @@ prewarm_origin_fraction = 0.1
 #   MEDIA_ARCHIVE_ENABLED. Lets the storage ladder move media to the cold and
 #   archive tiers (Glacier Instant Retrieval, then Glacier Flexible Retrieval).
 #   Off: media stays in S3 Standard until deleted.
+# watch_s3_prefix = "watch/"
+#   Keys under this prefix in the origin bucket are announced to the S3 watch
+#   folder queue, so a drop is taken in within seconds. Put S3 watch folders in
+#   the origin bucket under it; one anywhere else is found by the hourly walk.
+# watch_s3_extra_bucket_arns = []
+#   A customer's own buckets allowed to send their ObjectCreated notifications
+#   to the watch folder queue (output watch_drops_queue_url).
 # upload_cors_origins = []
 #   Browser origins allowed to PUT uploads into the origin bucket. Empty: the
 #   console's own address (public_base_url, else the API edge, else the ALB).

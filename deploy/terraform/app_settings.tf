@@ -78,6 +78,8 @@ locals {
     { name = "MEDIA_ARCHIVE_ENABLED", value = var.media_archive_enabled ? "true" : "false" },
     { name = "INGEST_DESTINATION", value = "s3" },
     { name = "INGEST_S3_ACCELERATE", value = var.ingest_s3_accelerate ? "true" : "false" },
+    # S3 watch folders hear about drops from the bucket (watchfolders.tf).
+    { name = "WATCH_S3_QUEUE_URL", value = aws_sqs_queue.watch_drops.url },
   ]
 
   app_settings_secrets = [

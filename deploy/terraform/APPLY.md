@@ -131,6 +131,13 @@ Library and a short video to the Media Library: the video should arrive in
 the origin bucket under `media/` (this is the check for the accelerate
 endpoint and the bucket's upload rule).
 
+S3 watch folders: create one through the API with `"kind": "s3"` and a
+prefix under `watch/` (`watch_s3_prefix`), add a rule, and copy a matching
+file to that prefix (`aws s3 cp slate_test.png s3://<origin bucket>/watch/test/`).
+It should be in the library within seconds, the control plane's log should
+show `[s3 watch] 1 message(s): 1 fetched`, and
+`terraform output -raw watch_drops_dlq_url` should stay empty.
+
 ## 9. What does not work on AWS yet
 
 These are queued, not forgotten (`BUILD_QUEUE.md`, and class

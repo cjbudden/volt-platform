@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { config } from '../../config';
 import { syncS3Folder, quarantineInS3, type S3Folder, type SyncResult } from './s3walk';
 import { realS3, type S3Api } from '../ingest/s3';
+import type { EventDeps } from './s3events';
 
 export function s3StagingRoot(folderId: string): string { return join(config.ingest.s3StagingDir, folderId); }
 
@@ -34,20 +35,84 @@ export async function loadS3Folder(id: string): Promise<S3Folder | null> {
            minAgeMs: Number(f.config?.min_age_ms ?? 60000), deleteAfterIngest: !!f.config?.delete_after_ingest, maxObjects: Number(f.config?.max_objects ?? 5000) };
 }
 
+async function s3(): Promise<S3Api> {
+  if (!s3api) s3api = await realS3({ region: config.aws.region, endpoint: config.ingest.s3Endpoint });
+  return s3api;
+}
+
+/** The scanner already recorded this object (same content, or closed). */
+async function knownObject(id: string, rel: string, etag: string): Promise<boolean> {
+  return !!(await one(`SELECT 1 FROM watchfolder_items WHERE watchfolder_id = $1 AND object_key = $2 AND (checksum = $3 OR status IN ('ingested','quarantined','skipped'))`, [id, rel, etag]));
+}
+
 /** Mirror an S3 folder's new objects into staging, then mirror any local quarantine decisions back. */
 export async function syncS3(id: string): Promise<SyncResult | null> {
   const f = await loadS3Folder(id);
   if (!f) return null;
-  if (!s3api) s3api = await realS3({ region: config.aws.region, endpoint: config.ingest.s3Endpoint });
-  const known = async (rel: string, etag: string) => !!(await one(`SELECT 1 FROM watchfolder_items WHERE watchfolder_id = $1 AND object_key = $2 AND (checksum = $3 OR status IN ('ingested','quarantined','skipped'))`, [id, rel, etag]));
-  return syncS3Folder(f, s3api, known);
+  const api = await s3();
+  lastWalk.set(id, Date.now());
+  return syncS3Folder(f, api, (rel, etag) => knownObject(id, rel, etag));
+}
+
+/*
+ * THE WALK AS A BACKSTOP (build queue 2.6). With the drop queue set
+ * (WATCH_S3_QUEUE_URL), the bucket tells the scheduler about each new object
+ * (s3events.ts), so listing every S3 folder every minute only costs LIST
+ * calls. The walk then runs once per WATCH_S3_BACKSTOP_MIN (an hour by
+ * default) per folder, and at the first pass after a start, to catch
+ * anything a notification missed (a queue outage, a folder in a bucket with
+ * no notification). Scan now still walks every time. Without the queue,
+ * every pass walks, as before.
+ */
+const lastWalk = new Map<string, number>();
+export function walkDue(id: string, now = Date.now()): boolean {
+  if (!config.ingest.s3EventsQueueUrl) return true;
+  return now - (lastWalk.get(id) ?? 0) >= Math.max(1, config.ingest.s3BackstopMinutes) * 60_000;
+}
+/** Tests: forget when each folder was last walked. */
+export function resetWalks(): void { lastWalk.clear(); }
+
+/**
+ * Take an S3 folder in now, after a notification put new objects in its
+ * mirror: the same scan, quarantine mirror and ingest as Scan now, minus the
+ * walk (the objects are already here).
+ */
+export async function takeInS3Folder(id: string): Promise<void> {
+  const loaded = await loadFolder(id);
+  if (!loaded) return;
+  try {
+    const result = await scanFolder(loaded, pgItemStore);
+    await mirrorQuarantines(id, result.quarantined);
+    await ingestFolder(id);
+    await query(`UPDATE watchfolders SET last_scan_at = now(), last_scan_error = NULL WHERE id = $1`, [id]);
+  } catch (e: any) {
+    await query(`UPDATE watchfolders SET last_scan_at = now(), last_scan_error = $2 WHERE id = $1`, [id, String(e?.message ?? e).slice(0, 500)])
+      .catch(() => { /* the report failing must not hide the fault */ });
+    throw e;
+  }
+}
+
+/** What the drop-queue loop (s3events.ts) needs from the database and the bucket. */
+export async function s3EventDeps(): Promise<EventDeps> {
+  return {
+    s3: await s3(),
+    async folders() {
+      const ids = await query<{ id: string }>(`SELECT id FROM watchfolders WHERE enabled AND kind = 's3' ORDER BY created_at`);
+      const out: S3Folder[] = [];
+      for (const { id } of ids) { const f = await loadS3Folder(id); if (f) out.push(f); }
+      return out;
+    },
+    known: knownObject,
+    takeIn: takeInS3Folder,
+  };
 }
 
 /** After a local scan of a mirrored folder, push its quarantines to the bucket's review prefix. */
 export async function mirrorQuarantines(id: string, quarantined: { objectKey: string; quarantineKey?: string | null }[]): Promise<void> {
   const f = await loadS3Folder(id);
-  if (!f || !s3api || !quarantined.length) return;
-  for (const q of quarantined) if (q.quarantineKey) await quarantineInS3(f, s3api, q.objectKey, q.quarantineKey).catch((e) => console.warn('[s3 watch] quarantine mirror failed', e));
+  if (!f || !quarantined.length) return;
+  const api = await s3();
+  for (const q of quarantined) if (q.quarantineKey) await quarantineInS3(f, api, q.objectKey, q.quarantineKey).catch((e) => console.warn('[s3 watch] quarantine mirror failed', e));
 }
 import { readImageFacts } from '../images/metadata';
 import { insertMediaRow } from '../mediaLibrary';
@@ -167,7 +232,7 @@ export async function scanAllFolders(): Promise<{ folderId: string; result?: Sca
     try {
       const f = await loadFolder(id);
       if (!f) continue;
-      if (kind === 's3') await syncS3(id);
+      if (kind === 's3' && walkDue(id)) await syncS3(id);
       const result = await scanFolder(f, pgItemStore);
       if (kind === 's3') await mirrorQuarantines(id, result.quarantined);
       await query(
@@ -269,18 +334,32 @@ export const pgIngestStore: IngestStore = {
 };
 
 /** The folder as the ingest step needs it: paths and policy, no rules. */
+/*
+ * WHERE A FOLDER'S FILES ARE ON THIS MACHINE: a local folder's own path, an S3
+ * folder's staging mirror. Both ingest loaders asked for kind 'local' only, so
+ * an S3 folder's files were accepted by the scan and then never ingested: they
+ * stayed 'seen' for good (found by build queue 2.6).
+ */
+function folderPath(f: { id: string; kind: string; config?: any }): string {
+  return f.kind === 's3' ? s3StagingRoot(f.id) : String(f.config?.path ?? '');
+}
+
 export async function loadIngestFolder(id: string): Promise<IngestFolder | null> {
   const f = await one<any>(
     `SELECT id, account_id, kind, config, enabled FROM watchfolders WHERE id = $1`, [id]);
-  if (!f || !f.enabled || f.kind !== 'local') return null;
-  const path = String(f.config?.path ?? '');
+  if (!f || !f.enabled || !['local', 's3'].includes(f.kind)) return null;
+  const path = folderPath(f);
   if (!path) return null;
   return {
     id: f.id,
     accountId: f.account_id,
     path,
     libraryFolder: f.config?.library_folder ?? null,
-    deleteAfterIngest: !!f.config?.delete_after_ingest,
+    // An S3 folder's files here are the staging mirror, a copy: once a file
+    // is in the library the bucket still has the original, so the copy goes
+    // rather than filling the task's disk. The walk and the drop queue both
+    // know an ingested object and do not fetch it again.
+    deleteAfterIngest: f.kind === 's3' || !!f.config?.delete_after_ingest,
     maxBytes: Number(f.config?.max_ingest_bytes ?? DEFAULT_MAX_INGEST_BYTES),
   };
 }
@@ -339,8 +418,8 @@ export async function loadVideoIngestFolder(id: string): Promise<VideoIngestFold
   const f = await one<any>(
     `SELECT id, account_id, kind, config, enabled, ladder_group_id
        FROM watchfolders WHERE id = $1`, [id]);
-  if (!f || !f.enabled || f.kind !== 'local') return null;
-  const path = String(f.config?.path ?? '');
+  if (!f || !f.enabled || !['local', 's3'].includes(f.kind)) return null;
+  const path = folderPath(f);
   if (!path) return null;
   return { id: f.id, accountId: f.account_id, path, ladderGroupId: f.ladder_group_id ?? null };
 }

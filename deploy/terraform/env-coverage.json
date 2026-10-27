@@ -724,6 +724,14 @@
       "why": "Deleted media waits here to be restored, on the task's disk.",
       "item": "2.1a"
     },
+    "WATCH_S3_BACKSTOP_MIN": {
+      "class": "default",
+      "why": "With the drop queue on, S3 watch folders are also walked once an hour to catch anything a notification missed; an hour suits AWS."
+    },
+    "WATCH_S3_QUEUE_ENDPOINT": {
+      "class": "local",
+      "why": "Point the drop queue client at a local SQS stand-in (ElasticMQ, LocalStack) for tests; unset on AWS so the regional endpoint is used."
+    },
     "WEB_DIST_DIR": {
       "class": "default",
       "why": "The image puts the console in /app/web and the player in /app/player, which is where the code looks first."

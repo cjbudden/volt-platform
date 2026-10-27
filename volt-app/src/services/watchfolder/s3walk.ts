@@ -8,9 +8,10 @@
 //  downloaded; a refused file is moved to the review prefix in the bucket as
 //  well as locally, so an operator looking at either sees the same thing.
 //
-//  Event-driven S3 (ObjectCreated to SQS) is the fast path for later; this
-//  sync is the backstop that never misses an object and is enough for a
-//  drop that is polled every minute.
+//  Event-driven S3 (ObjectCreated to SQS, s3events.ts, build queue 2.6) is
+//  the fast path: one object fetched when the bucket says it arrived. This
+//  sync is the backstop that never misses an object; with the queue on it
+//  runs once an hour instead of every minute.
 // ============================================================================
 import { createWriteStream, mkdirSync, existsSync, statSync, utimesSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -87,4 +88,41 @@ export async function removeIngestedFromS3(f: S3Folder, s3: S3Api, rel: string):
   if (!f.deleteAfterIngest) return;
   const p = norm(f.prefix);
   await s3.del(f.bucket, p ? `${p}/${rel}` : rel);
+}
+
+export type MirrorOutcome = 'downloaded' | 'known' | 'junk' | 'gone' | 'review';
+
+/**
+ * Mirror ONE object a bucket notification named (build queue 2.6).
+ *
+ * The same checks as the walk, minus the quiet time: S3 only sends
+ * ObjectCreated once an object is complete (a multipart upload when it is
+ * completed, not per part), so there is nothing still being written to wait
+ * for. The mirrored file's modified time is set past the folder's quiet time
+ * for the same reason, so the local scanner takes it in this pass instead of
+ * the next one.
+ *
+ * 'gone' is an object deleted (or replaced and deleted) between the
+ * notification and now; the walk would not have seen it either.
+ */
+export async function mirrorS3Object(f: S3Folder, s3: S3Api, rel: string,
+  known: (rel: string, etag: string) => Promise<boolean>, now = Date.now()): Promise<MirrorOutcome> {
+  const q = norm(f.quarantinePath);
+  if (rel === q || rel.startsWith(q + '/')) return 'review';
+  const p = norm(f.prefix);
+  const key = p ? `${p}/${rel}` : rel;
+  const h = await s3.head(f.bucket, key);
+  if (!h) return 'gone';
+  const leaf = rel.split('/').pop()!;
+  if (hygiene(leaf, h.bytes)) return 'junk';
+  if (await known(rel, h.etag)) return 'known';
+  const local = join(f.stagingRoot, ...rel.split('/'));
+  if (existsSync(local) && statSync(local).size === h.bytes) return 'known';
+  mkdirSync(dirname(local), { recursive: true });
+  const tmp = local + '.part';
+  await pipeline(await s3.getStream(f.bucket, key), createWriteStream(tmp));
+  require('node:fs').renameSync(tmp, local);
+  const settled = new Date(now - f.minAgeMs - 1000);
+  utimesSync(local, settled, settled);
+  return 'downloaded';
 }
