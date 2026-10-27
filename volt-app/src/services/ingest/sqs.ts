@@ -69,8 +69,8 @@ export function signV4(req: {
   return headers;
 }
 
-/** The credentials the S3 client resolves (task role, environment, profile). */
-async function s3Credentials(region: string): Promise<CredentialSource> {
+/** The credentials the S3 client resolves (task role, environment, profile). Also used by the CDN log reader (qoe/cdnStream.ts). */
+export async function s3Credentials(region: string): Promise<CredentialSource> {
   const { S3Client } = await import('@aws-sdk/client-s3');
   const c: any = new S3Client({ region });
   return async () => {

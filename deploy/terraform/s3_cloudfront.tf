@@ -173,6 +173,7 @@ resource "aws_cloudfront_distribution" "cdn" {
       cache_policy_id            = aws_cloudfront_cache_policy.manifest.id
       origin_request_policy_id   = aws_cloudfront_origin_request_policy.variants[0].id
       response_headers_policy_id = aws_cloudfront_response_headers_policy.delivery.id
+      realtime_log_config_arn    = local.cdn_logs ? aws_cloudfront_realtime_log_config.cdn[0].arn : null
       compress                   = true
       function_association {
         event_type   = "viewer-request"
@@ -189,7 +190,9 @@ resource "aws_cloudfront_distribution" "cdn" {
     cached_methods             = ["GET", "HEAD"]
     cache_policy_id            = aws_cloudfront_cache_policy.segment.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.delivery.id
-    compress                   = true
+    # Playback reporting's edge logs (cdn_logs.tf)
+    realtime_log_config_arn = local.cdn_logs ? aws_cloudfront_realtime_log_config.cdn[0].arn : null
+    compress                = true
   }
 
   # HLS manifests — short TTL.
@@ -201,7 +204,9 @@ resource "aws_cloudfront_distribution" "cdn" {
     cached_methods             = ["GET", "HEAD"]
     cache_policy_id            = aws_cloudfront_cache_policy.manifest.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.delivery.id
-    compress                   = true
+    # Playback reporting's edge logs (cdn_logs.tf)
+    realtime_log_config_arn = local.cdn_logs ? aws_cloudfront_realtime_log_config.cdn[0].arn : null
+    compress                = true
     # edge_rights.tf: per-stream geo and blackout, decided per manifest request
     dynamic "function_association" {
       for_each = var.edge_rights_enabled ? [1] : []
@@ -221,7 +226,9 @@ resource "aws_cloudfront_distribution" "cdn" {
     cached_methods             = ["GET", "HEAD"]
     cache_policy_id            = aws_cloudfront_cache_policy.manifest.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.delivery.id
-    compress                   = true
+    # Playback reporting's edge logs (cdn_logs.tf)
+    realtime_log_config_arn = local.cdn_logs ? aws_cloudfront_realtime_log_config.cdn[0].arn : null
+    compress                = true
     # edge_rights.tf: per-stream geo and blackout, decided per manifest request
     dynamic "function_association" {
       for_each = var.edge_rights_enabled ? [1] : []

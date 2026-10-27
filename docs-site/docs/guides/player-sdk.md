@@ -65,7 +65,7 @@ Everything is optional except `el`:
 
 `skin`, `theme`, `apiBase`, `appKey`, `source`, `item`, `playlist`, `startIndex`, `assetId`, `epg`, `stationId`, `autoplay`, `muted`, `poster`, `watermark`, `startAt`, `requestHeaders`, `beacons`, `cmcd`, `drm`, `debug`, `cast` (`false`, or `{ receiverAppId }`), `airplay`, `media`, `strings` (your own translations), `demo`, `onEvent`, and for events `eventId`, `viewerToken`, `purchaseUrl` and `signInUrl`.
 
-To translate the player, pass the words you want to change in `strings`; anything you leave out stays in English. The on-demand ad words are `ad` (**Ad**), `adOf` (**Ad {number} of {of}**), `learnMore` (**Learn more**), `adBreak` and `adBreakWatched` (the progress bar's labels for a break ahead and one already watched). For French, for example, `strings: { ad: 'Annonce', adOf: 'Annonce {number} sur {of}', learnMore: 'En savoir plus' }`.
+To translate the player, pass the words you want to change in `strings`; anything you leave out stays in English. The on-demand ad words are `ad` (**Ad**), `adOf` (**`Ad {number} of {of}`**), `learnMore` (**Learn more**), `adBreak` and `adBreakWatched` (the progress bar's labels for a break ahead and one already watched). For French, for example, `strings: { ad: 'Annonce', adOf: 'Annonce {number} sur {of}', learnMore: 'En savoir plus' }`.
 
 ### Events
 

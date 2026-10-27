@@ -6,7 +6,7 @@
 |---|---|---|---|
 | **Session beacons** | Every player posts `start`, a `heartbeat` (seconds watched, bitrate) and `end` to `POST /api/analytics/beacon`, carrying the playback token the play gate gave it | **Yes**, fully: beacons → `play_sessions`, `stream_concurrency`, `analytics_rollups` in Postgres → every report | Built. This is what the console's reports read |
 | **Firehose copy** | The same beacons copied to S3 for a data lake (`ANALYTICS_FIREHOSE_STREAM`) | Not needed | Built, optional, AWS only |
-| **CDN edge logs** | CloudFront real-time logs (Kinesis) counting every segment served, including players that send no beacons | No (AWS only) | **Designed, not built**. Until it is, a player that sends no beacons is not counted anywhere |
+| **CDN edge logs** | CloudFront real-time logs (Kinesis) of a sample of every playlist and segment request, counted as the whole, including players that send no beacons | No (AWS only) | **Built** (build queue 2.9, 27 Oct 2026): `deploy/terraform/cdn_logs.tf`, read by the scheduler's leader (`services/qoe/cdnStream.ts`) into the analytics database (`services/qoe/cdnLogs.ts`). Report 6 (Delivery) and report 12's reporting coverage read it; the sampling rate is kept near 1,000 lines a second. Not yet run against a real CloudFront distribution |
 
 So reporting does **not** need AWS. Everything the console shows works on a
 laptop or a local staging box, as long as the players send beacons.
@@ -18,7 +18,7 @@ laptop or a local staging box, as long as the players send beacons.
 | Your apps and the Volt web player (via the player API's playback token) | Yes |
 | **Share-link preview page** | **Yes**, since 17 Oct 2026. Filed as client "Share link" (and app "share") so previews can be told apart from the public audience |
 | The console's own players (channel page source and output, Multiview) | **No, by design**: operators checking a stream are not audience |
-| A raw HLS/DASH URL opened in a third-party player | No beacons, so not counted until the CDN-log path exists |
+| A raw HLS/DASH URL opened in a third-party player | No beacons; counted on AWS from the CDN's logs (Playback > Delivery: sessions that sent no reports), by an anonymous key from the address, user agent and content that is never stored as an address |
 
 Why the preview page did not count before: it played the stream but never sent
 a beacon. It now sends start (with time to first frame), a heartbeat every 30
@@ -87,4 +87,5 @@ refused. `test/analytics-retention.check.ts` (33) covers sealing and pruning.
 Nothing extra: the same build with Postgres. For many viewers set
 `REDIS_URL` (concurrency across several API processes) and leave
 `ANALYTICS_SESSIONS=postgres`. The CDN-log path is the only part that needs
-CloudFront, and it is not built yet.
+CloudFront; `test/cdn-logs.check.ts` runs it here against an in-memory
+Kinesis with sample CloudFront records.

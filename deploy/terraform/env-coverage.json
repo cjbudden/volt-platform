@@ -95,6 +95,10 @@
       "class": "default",
       "why": "false is right: the AWS encoder image is built without the CPU caption stack, so Whisper captions run as their own task on the GPU pool (CAPTIONS_TASK_DEF)."
     },
+    "CDN_LOG_ENDPOINT": {
+      "class": "local",
+      "why": "A stand-in Kinesis (LocalStack) for trying the CDN log reader off AWS; on AWS the regional endpoint is used."
+    },
     "CLIPS_DIR": {
       "class": "not-on-aws-yet",
       "why": "Clip, VOD encode and ad conditioning work is done here and downloads are served from here; the bucket copy exists for clips, but the local copy is still what is served.",
@@ -538,6 +542,10 @@
       "class": "not-on-aws-yet",
       "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
       "item": "2.1a"
+    },
+    "QOE_ANON_SALT": {
+      "class": "default",
+      "why": "The key for anonymous CDN session keys (cdnLogs.ts); unset it is the access-token secret, which is already a secret on AWS."
     },
     "QOE_DERIVE": {
       "class": "default",

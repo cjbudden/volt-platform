@@ -265,6 +265,16 @@ export function startScheduler(): () => void {
       .catch((e) => console.error('[s3 watch] could not start the drop queue loop', e));
   }
 
+  // CDN EDGE LOGS (build queue 2.9): with a log stream set (AWS), the leader
+  // reads CloudFront's real-time logs into reporting and keeps their
+  // sampling rate at what the reports need (services/qoe/cdnStream.ts).
+  let stopCdnLogs: (() => Promise<void>) | null = null;
+  if (process.env.CDN_LOG_STREAM) {
+    import('../qoe/cdnStream').then((m) => m.startFromConfig())
+      .then((stop) => { stopCdnLogs = stop; })
+      .catch((e) => console.error('[cdn logs] could not start the log reader', e));
+  }
+
   tick.unref?.();
   sweep.unref?.();
   fleet.unref?.();
@@ -280,6 +290,7 @@ export function startScheduler(): () => void {
     clearInterval(asRun);
     clearInterval(watch);
     void stopS3Events?.();
+    void stopCdnLogs?.();
     if (thumbs) clearInterval(thumbs);
     if (resume) clearInterval(resume);
   };

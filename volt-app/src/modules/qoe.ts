@@ -2,7 +2,7 @@
  * PLAYBACK EXPERIENCE (QoE) REPORTS, for the console (QOE_REPORTING.md 4 to 8).
  * Mounted under the tenant analytics router: /api/analytics/qoe/...
  *
- *   GET  /overview     reports 1 to 10 and 12 for a window and filters
+ *   GET  /overview     reports 1 to 10 and 12 for a window and filters (6, delivery, from the CDN's edge logs)
  *   GET  /sessions     the views behind the numbers, newest first (?problem=)
  *   GET  /sessions/:sid  report 11: one viewer's session, every report in order
  *   GET  /series       trend lines from the minute aggregates
@@ -11,7 +11,7 @@
  *   GET  /definitions  the definitions the numbers use (section 4)
  *   GET  /journeys     report 28: journey to play, app open to first frame as a funnel
  *   GET  /discovery    report 29: plays, watch time, completion and QoE by entry point (?by=detail per row)
- *   GET  /collector    what the collector holds in memory and its write health
+ *   GET  /collector    what the collector holds in memory and its write health, and the CDN log reader's
  *   POST /replay       rebuild days from the raw reports (analytics manage)
  *
  * Window: ?from&to (ISO) or ?hours or ?days (default 1 day). Filters: any of
@@ -27,6 +27,7 @@
  * the control plane's: content names, and the stitcher's server-side ad
  * beacons (ad_beacons, report 9 and the session timeline), both by index.
  */
+import { cdnReaderState } from '../services/qoe/cdnStream';
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, badRequest } from '../util/http';
@@ -194,7 +195,7 @@ qoeRouter.get('/definitions', (_req, res) => {
   });
 });
 
-qoeRouter.get('/collector', (_req, res) => { res.json({ ...collectorState(), journeys: journeyState() }); });
+qoeRouter.get('/collector', (_req, res) => { res.json({ ...collectorState(), journeys: journeyState(), cdn: cdnReaderState() }); });
 
 qoeRouter.post('/replay', asyncHandler(async (req, res) => {
   const b = z.object({ day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).parse(req.body ?? {});

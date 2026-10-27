@@ -18,13 +18,16 @@ import { accountsOnDay, readDay } from './rawStore';
 import { replaceDay } from './store';
 import { deriveAll, DEFINITIONS_VERSION } from './views';
 import { deriveJourneys, replaceJourneyDay } from './journeys';
+import { replayCdnDay } from './cdnLogs';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const shift = (day: string, n: number) => new Date(Date.parse(day + 'T00:00:00Z') + n * 86_400_000).toISOString().slice(0, 10);
 
 export interface ReplayResult { account: string; day: string; definitions: number; rawReports: number; views: number; minuteRows: number;
   /** Journey to play (journeys.ts): raw app events read, and the app sessions and journeys rebuilt for the day. */
-  journeyEvents: number; appSessions: number; journeys: number }
+  journeyEvents: number; appSessions: number; journeys: number;
+  /** CDN edge log lines (cdnLogs.ts): lines read, minute rows and sessions rebuilt, lines joined to a player's response report. */
+  cdnLines: number; cdnMinuteRows: number; cdnSessions: number; cdnJoined: number }
 
 export async function replayDay(acct: string, day: string): Promise<ReplayResult> {
   if (!DAY.test(day)) throw new Error('day must be YYYY-MM-DD');
@@ -41,8 +44,11 @@ export async function replayDay(acct: string, day: string): Promise<ReplayResult
   const j = deriveJourneys(jrows);
   const keepS = j.sessions.filter((s) => s.day === day), keepJ = j.journeys.filter((x) => x.day === day);
   if (jrows.length || keepS.length) await replaceJourneyDay(acct, day, keepS, keepJ);
+  // The CDN's edge log lines (build queue 2.9), joined to the players' response reports.
+  const cdn = await replayCdnDay(acct, day);
   return { account: acct, day, definitions: DEFINITIONS_VERSION, rawReports: rows.length, views: keepViews.length, minuteRows: keepMinutes.length,
-    journeyEvents: jrows.length, appSessions: keepS.length, journeys: keepJ.length };
+    journeyEvents: jrows.length, appSessions: keepS.length, journeys: keepJ.length,
+    cdnLines: cdn.lines, cdnMinuteRows: cdn.minuteRows, cdnSessions: cdn.sessions, cdnJoined: cdn.joined };
 }
 
 /** Every account with raw reports on each day of the range (inclusive). */
@@ -50,7 +56,7 @@ export async function replayRange(from: string, to = from, account?: string): Pr
   if (!DAY.test(from) || !DAY.test(to) || to < from) throw new Error('from and to must be YYYY-MM-DD, to not before from');
   const out: ReplayResult[] = [];
   for (let d = from; d <= to; d = shift(d, 1)) {
-    const accts = account ? [account] : [...new Set([...await accountsOnDay(d), ...await accountsOnDay(d, 'journey')])];
+    const accts = account ? [account] : [...new Set([...await accountsOnDay(d), ...await accountsOnDay(d, 'journey'), ...await accountsOnDay(d, 'cdn')])];
     for (const a of accts) out.push(await replayDay(a, d));
   }
   return out;

@@ -32,18 +32,23 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import type { RawCtx } from './views';
 
-export interface RawRow { rt: number; app: string | null; sid: string; e: string; line: string; ctx?: RawCtx }
+export interface RawRow { rt: number; app: string | null; sid: string; e: string; line: string; ctx?: RawCtx;
+  /** CDN edge log lines only (stream `cdn`, cdnLogs.ts): how many requests the line stands for, 100 / the sampling rate. */
+  w?: number }
 
 /**
  * Two streams share the store and its rules: the players' CMCD reports and
  * the apps' journey events (journeys.ts, build queue 1.14g). Journey events
  * sit in their own subtree, `journey/<account>/<day>/...`, locally and on
  * S3, so a replay of either never reads the other and the account listing
- * of the CMCD stream skips them (`journey` is not an account id).
+ * of the CMCD stream skips them (`journey` is not an account id). The CDN
+ * edge log lines (build queue 2.9) are kept the same way under `cdn/`.
  */
-export type RawStream = 'cmcd' | 'journey';
-const sub = (stream: RawStream) => (stream === 'journey' ? 'journey/' : '');
-const localRoot = (stream: RawStream) => (stream === 'journey' ? join(rawDir(), 'journey') : rawDir());
+export type RawStream = 'cmcd' | 'journey' | 'cdn';
+// The CDN's sampled edge log lines (build queue 2.9, cdnLogs.ts) are a third
+// stream with its own subtree, `cdn/<account>/<day>/...`, the same way.
+const sub = (stream: RawStream) => (stream === 'cmcd' ? '' : stream + '/');
+const localRoot = (stream: RawStream) => (stream === 'cmcd' ? rawDir() : join(rawDir(), stream));
 
 export function rawDir(): string {
   return process.env.QOE_RAW_DIR || join(process.cwd(), 'qoe-raw');

@@ -15,6 +15,7 @@
 import { aquery } from './analyticsDb';
 import * as sk from './sketch';
 import { DEFINITIONS_VERSION } from './views';
+import { cdnAudience } from './cdnLogs';
 
 /** The filters every report takes (section 6), each a column of qoe_views. */
 export const FILTERS = ['content_id', 'stream_type', 'device_model', 'device_class', 'os', 'os_version', 'browser', 'browser_version',
@@ -247,10 +248,83 @@ export async function telemetryHealth(acct: string, q: ReportQuery) {
     clockSkewMs: trio(r, 'skew'),
     unknownKeys: keys.map((k) => ({ key: k.key, reports: Number(k.n) })),
     collector: { accepted: Number(c.accepted), rejected: Number(c.rejected), rejectedShare: ratio(Number(c.rejected), Number(c.accepted) + Number(c.rejected)), reasons: c.reasons ?? {} },
-    // views with telemetry / sessions seen at the CDN needs the CDN logs (build queue 2.9)
-    coverage: null as null,
+    // Views with telemetry / sessions seen at the CDN (build queue 2.9): null
+    // until the edge logs have seen a session in the window (the Mac).
+    coverage: await coverage(acct, q),
   };
 }
+
+async function coverage(acct: string, q: ReportQuery) {
+  const a = await cdnAudience(acct, q.from, q.to);
+  if (!a.sessions) return null;
+  return { cdnSessions: a.sessions, withTelemetry: a.withTelemetry, share: ratio(a.withTelemetry, a.sessions) };
+}
+
+/**
+ * 6. CDN and origin delivery: is delivery responsible? From the CDN's
+ * sampled edge logs (cdnLogs.ts): every count is an estimate of all
+ * requests (each line weighted by its sampling rate), every percentile a
+ * merged DDSketch. Requests, errors, cache hits (and Origin Shield's share
+ * of the misses), edge time to first byte and total time per object type,
+ * origin first byte on a miss, segment delivery rate, requests made with
+ * the player's buffer empty, and the last mile where the players' response
+ * reports were joined by the edge request id (the day replay does that).
+ * The audience the edge saw is beside it: sessions, and how many sent no
+ * reports at all (a third-party player on a raw address), which no other
+ * report can count. Filters: content_id and country, the two the edge log
+ * carries; the others are player facts the edge does not know.
+ */
+export async function delivery(acct: string, q: ReportQuery) {
+  const p: unknown[] = [acct, q.from.toISOString(), q.to.toISOString()];
+  const w = ['account_id = $1', 'minute >= $2', 'minute < $3'];
+  for (const f of ['content_id', 'country'] as const) {
+    const vals = q.filters[f]?.filter((v) => v !== '__none');
+    if (vals?.length) { p.push(vals); w.push(`${f} = ANY($${p.length}::text[])`); }
+  }
+  const rows = await aquery<any>(
+    `SELECT ot, result, sum(lines) AS lines, sum(requests) AS requests, sum(errors_4xx) AS e4, sum(errors_5xx) AS e5, sum(bytes) AS bytes,
+       sum(shield_hits) AS shield, sum(starved) AS starved, sum(with_cmcd) AS cmcd, sum(with_sid) AS sid, sum(joined) AS joined,
+       jsonb_agg(ttfb_sketch) AS ttfb, jsonb_agg(time_sketch) AS tt, jsonb_agg(origin_sketch) AS origin, jsonb_agg(kbps_sketch) AS kbps, jsonb_agg(last_mile_sketch) AS lm
+     FROM qoe_cdn_minutes WHERE ${w.join(' AND ')} GROUP BY ot, result`, p);
+  const merged = (list: any[]) => list.reduce((a: sk.Sketch, b: any) => sk.merge(a, b ?? {}), {} as sk.Sketch);
+  const q3 = (s: sk.Sketch) => ({ p50: rnd(sk.quantile(s, 0.5)), p95: rnd(sk.quantile(s, 0.95)), p99: rnd(sk.quantile(s, 0.99)) });
+  const all = { lines: 0, requests: 0, e4: 0, e5: 0, bytes: 0, hits: 0, misses: 0, shield: 0, starved: 0, cmcd: 0, sid: 0, joined: 0 };
+  const sketches = { ttfb: {} as sk.Sketch, tt: {} as sk.Sketch, origin: {} as sk.Sketch, kbps: {} as sk.Sketch, lm: {} as sk.Sketch };
+  const byType = new Map<string, { requests: number; errors: number; ttfb: sk.Sketch; tt: sk.Sketch }>();
+  for (const r of rows) {
+    const reqs = Number(r.requests);
+    all.lines += Number(r.lines); all.requests += reqs; all.e4 += Number(r.e4); all.e5 += Number(r.e5); all.bytes += Number(r.bytes);
+    if (r.result === 'hit') all.hits += reqs;
+    if (r.result === 'miss') all.misses += reqs;
+    all.shield += Number(r.shield); all.starved += Number(r.starved); all.cmcd += Number(r.cmcd); all.sid += Number(r.sid); all.joined += Number(r.joined);
+    const t = merged(r.ttfb), tt = merged(r.tt);
+    sk.merge(sketches.ttfb, t); sk.merge(sketches.tt, tt); sk.merge(sketches.origin, merged(r.origin)); sk.merge(sketches.kbps, merged(r.kbps)); sk.merge(sketches.lm, merged(r.lm));
+    const b = byType.get(r.ot) ?? byType.set(r.ot, { requests: 0, errors: 0, ttfb: {}, tt: {} }).get(r.ot)!;
+    b.requests += reqs; b.errors += Number(r.e4) + Number(r.e5); sk.merge(b.ttfb, t); sk.merge(b.tt, tt);
+  }
+  const worst = await aquery<any>(
+    `SELECT content_id, country, sum(requests) AS requests, sum(errors_4xx + errors_5xx) AS errors, jsonb_agg(ttfb_sketch) AS ttfb
+     FROM qoe_cdn_minutes WHERE ${w.join(' AND ')} GROUP BY content_id, country HAVING sum(requests) >= 100
+     ORDER BY sum(errors_4xx + errors_5xx) / NULLIF(sum(requests), 0) DESC NULLS LAST LIMIT 10`, p);
+  const audience = await cdnAudience(acct, q.from, q.to);
+  return {
+    requests: Math.round(all.requests), sampledLines: all.lines,
+    errorRate: ratio(all.e4 + all.e5, all.requests), clientErrorRate: ratio(all.e4, all.requests), serverErrorRate: ratio(all.e5, all.requests),
+    cacheHitRatio: ratio(all.hits, all.hits + all.misses), originShieldShareOfMisses: ratio(all.shield, all.misses),
+    bytes: Math.round(all.bytes),
+    edgeTtfbMs: q3(sketches.ttfb), edgeTimeMs: q3(sketches.tt), originFirstByteMs: q3(sketches.origin),
+    // A rate's bad end is the low one: the slowest 5 % of segments were delivered under p5.
+    segmentKbps: { p5: rnd(sk.quantile(sketches.kbps, 0.05)), p50: rnd(sk.quantile(sketches.kbps, 0.5)), p95: rnd(sk.quantile(sketches.kbps, 0.95)) },
+    starvedShare: ratio(all.starved, all.cmcd), cmcdShare: ratio(all.cmcd, all.requests), sessionIdShare: ratio(all.sid, all.requests),
+    lastMileMs: { ...q3(sketches.lm), joinedRequests: all.joined },
+    byObjectType: [...byType.entries()].map(([ot, b]) => ({ ot, requests: Math.round(b.requests), errorRate: ratio(b.errors, b.requests), edgeTtfbMs: q3(b.ttfb), edgeTimeMs: q3(b.tt) }))
+      .sort((a, b) => b.requests - a.requests),
+    worst: worst.map((x) => ({ contentId: x.content_id || null, country: x.country || null, requests: Math.round(Number(x.requests)),
+      errorRate: ratio(Number(x.errors), Number(x.requests)), edgeTtfbP95Ms: rnd(sk.quantile(merged(x.ttfb), 0.95)) })),
+    audience,
+  };
+}
+const rnd = (v: number | null) => (v == null ? null : Math.round(v * 10) / 10);
 
 /**
  * 5. Rendering and device health: does it look smooth even when delivery is
@@ -469,14 +543,14 @@ export async function listViews(acct: string, q: ReportQuery, problem = 'all', l
   }));
 }
 
-/** Reports 1 to 10 and 12 at once, for the console page. */
+/** Reports 1 to 10 and 12 at once, for the console page (6, delivery, from the CDN's edge logs since build queue 2.9). */
 export async function overview(acct: string, q: ReportQuery, names?: (ids: string[]) => Promise<Record<string, string>>, beacons?: () => Promise<BeaconSummary | null>) {
-  const [success, startup, buf, qual, eng, telemetry, rend, acc, live, ads] = await Promise.all([
+  const [success, startup, buf, qual, eng, telemetry, rend, acc, live, ads, deliv] = await Promise.all([
     playbackSuccess(acct, q), startupPerformance(acct, q), buffering(acct, q), quality(acct, q), engagement(acct, q, names), telemetryHealth(acct, q),
-    rendering(acct, q), access(acct, q), liveHealth(acct, q), advertising(acct, q, beacons),
+    rendering(acct, q), access(acct, q), liveHealth(acct, q), advertising(acct, q, beacons), delivery(acct, q),
   ]);
   return { definitions: DEFINITIONS_VERSION, from: q.from.toISOString(), to: q.to.toISOString(), filters: q.filters, success, startup, buffering: buf, quality: qual, engagement: eng, telemetry,
-    rendering: rend, access: acc, live, ads };
+    rendering: rend, access: acc, live, ads, delivery: deliv };
 }
 
 /** The measures a breakdown can rank by. */

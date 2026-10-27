@@ -73,8 +73,9 @@ const containerOf = (cfgKey: string) => (launcherSrc.match(new RegExp(`config\\.
     ok(/name = "S3_BUCKET", value = aws_s3_bucket\.origin\.id/.test(b ?? ''), 'it is told the origin bucket');
     ok(/type = "GPU", value = "1"/.test(b ?? '') === c.gpu, c.gpu ? 'it asks ECS for one GPU' : 'it asks for no GPU');
   }
-  const passRole = (tfAll.match(/"iam:PassRole"\][\s\S]*?resources\s*=\s*\[([^\]]*)\]/) ?? [])[1] ?? '';
-  ok(/encoder_task\.arn/.test(passRole) && /task_execution\.arn/.test(passRole), 'the control plane may pass both roles those tasks use');
+  // Several statements grant PassRole (the CDN log role too, cdn_logs.tf): one of them must name both.
+  const passRoles = [...tfAll.matchAll(/"iam:PassRole"\][\s\S]*?resources\s*=\s*\[([^\]]*)\]/g)].map((m) => m[1]);
+  ok(passRoles.some((r) => /encoder_task\.arn/.test(r) && /task_execution\.arn/.test(r)), 'the control plane may pass both roles those tasks use');
 
   const cp = block('resource', 'aws_ecs_capacity_provider', 'gpu');
   ok(!!cp && attr(cp, 'name') === '${var.project}-gpu', `a GPU capacity provider (${attr(cp, 'name') ?? 'none'})`);

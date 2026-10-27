@@ -41,7 +41,7 @@ export function analyticsUrl(): string {
 function dbName(url: string): string { return decodeURIComponent(new URL(url).pathname.replace(/^\//, '')); }
 
 /** Bump when the schema below changes shape (the tables are rebuildable, so a bump may drop them). */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS qoe_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
@@ -269,6 +269,61 @@ CREATE TABLE IF NOT EXISTS qoe_journeys (
   PRIMARY KEY (account_id, journey_id)
 );
 CREATE INDEX IF NOT EXISTS qoe_journeys_started ON qoe_journeys (account_id, started_at);
+
+-- CDN EDGE LOGS (build queue 2.9, services/qoe/cdnLogs.ts): CloudFront's
+-- sampled real-time log lines, kept raw first (stream cdn) like the players'
+-- reports, so both tables are rebuildable by a replay. Counts and sketches
+-- are weighted by 100 / the sampling rate: estimates of ALL requests.
+-- Report 6 (delivery) reads the minutes; report 12's coverage and the count
+-- of players that send no reports read the sessions.
+CREATE TABLE IF NOT EXISTS qoe_cdn_minutes (
+  account_id   UUID NOT NULL,
+  minute       TIMESTAMPTZ NOT NULL,
+  content_id   TEXT NOT NULL DEFAULT '',
+  ot           TEXT NOT NULL DEFAULT '',  -- CMCD object type: m manifest, v video, a audio, av muxed, i init, c caption, o other
+  country      TEXT NOT NULL DEFAULT '',
+  result       TEXT NOT NULL DEFAULT '',  -- hit | miss | error | other (x-edge-result-type)
+  lines        INT NOT NULL DEFAULT 0,    -- log lines actually received
+  requests     DOUBLE PRECISION NOT NULL DEFAULT 0,
+  errors_4xx   DOUBLE PRECISION NOT NULL DEFAULT 0,
+  errors_5xx   DOUBLE PRECISION NOT NULL DEFAULT 0,
+  bytes        DOUBLE PRECISION NOT NULL DEFAULT 0,
+  shield_hits  DOUBLE PRECISION NOT NULL DEFAULT 0,  -- misses answered by Origin Shield
+  starved      DOUBLE PRECISION NOT NULL DEFAULT 0,  -- requests made with the player's buffer empty (CMCD bs)
+  with_cmcd    DOUBLE PRECISION NOT NULL DEFAULT 0,
+  with_sid     DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ttfb_sketch  JSONB NOT NULL DEFAULT '{}'::jsonb,   -- edge time to first byte, ms
+  time_sketch  JSONB NOT NULL DEFAULT '{}'::jsonb,   -- edge time taken, ms
+  origin_sketch JSONB NOT NULL DEFAULT '{}'::jsonb,  -- origin first byte on a miss, ms
+  kbps_sketch  JSONB NOT NULL DEFAULT '{}'::jsonb,   -- media segment delivery rate, kbit/s
+  joined       INT NOT NULL DEFAULT 0,               -- lines matched to a player's response report (replay)
+  last_mile_sketch JSONB NOT NULL DEFAULT '{}'::jsonb, -- player first byte minus edge first byte, ms (replay)
+  PRIMARY KEY (account_id, minute, content_id, ot, country, result)
+);
+CREATE TABLE IF NOT EXISTS qoe_cdn_sessions (
+  account_id   UUID NOT NULL,
+  day          DATE NOT NULL,
+  skey         TEXT NOT NULL,             -- the CMCD sid, or a: and an anonymous key (no sid sent)
+  sid          TEXT,
+  content_id   TEXT,
+  first_at     TIMESTAMPTZ NOT NULL,
+  last_at      TIMESTAMPTZ NOT NULL,
+  lines        INT NOT NULL DEFAULT 0,
+  requests     DOUBLE PRECISION NOT NULL DEFAULT 0,
+  country      TEXT,
+  device_class TEXT,
+  PRIMARY KEY (account_id, day, skey)
+);
+CREATE INDEX IF NOT EXISTS qoe_cdn_sessions_seen ON qoe_cdn_sessions (account_id, last_at);
+-- How far the Kinesis consumer has read each shard (cdnStream.ts).
+CREATE TABLE IF NOT EXISTS qoe_cdn_cursor (
+  stream     TEXT NOT NULL,
+  shard_id   TEXT NOT NULL,
+  seq        TEXT NOT NULL,
+  closed     BOOLEAN NOT NULL DEFAULT false,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (stream, shard_id)
+);
 `;
 
 async function createIfMissing(url: string): Promise<void> {

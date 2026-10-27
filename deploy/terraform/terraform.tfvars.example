@@ -244,6 +244,16 @@ prewarm_origin_fraction = 0.1
 #   Object Lock (governance) retention on each raw report object: nobody
 #   without the bypass permission can delete or overwrite it inside this many
 #   days. Not more than qoe_raw_retention_days.
+# cdn_realtime_logs_enabled = true
+#   CloudFront real-time logs of the delivery distribution into playback
+#   reporting (report 6, and viewers whose player sends no reports). About $29
+#   a month for the Kinesis stream plus a per-line cost the sampling caps.
+# cdn_log_sampling_rate = 100
+#   Starting percentage of requests logged; the control plane adjusts it.
+# cdn_log_target_lines_per_sec = 1000
+#   Lines a second the adjustment aims for.
+# cdn_log_adaptive = true
+#   Off: the sampling rate stays at cdn_log_sampling_rate.
 
 # enable_chaos_experiments = false
 #   Staging only: the Fault Injection Service templates the chaos harness

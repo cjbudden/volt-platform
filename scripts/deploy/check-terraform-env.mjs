@@ -159,12 +159,20 @@ export function controlPlaneSettings(tfDir) {
     const into = kind === 'environment' ? env : secrets;
     for (const n of namesIn(expr)) into.add(n);
     Object.assign(values, valuesIn(expr));
-    for (const l of expr.matchAll(/local\.([a-z_]+)/g)) {
-      locals.add(l[1]);
-      const span = localSpan(all, l[1]);
-      if (span == null) { missingLocals.push(l[1]); continue; }
+    // A local may itself concat another (qoe_env takes cdn_logs_env, build
+    // queue 2.9), so the locals are followed until none is new.
+    const todo = [...expr.matchAll(/local\.([a-z_]+)/g)].map((l) => l[1]);
+    const seen = new Set();
+    while (todo.length) {
+      const name = todo.shift();
+      if (seen.has(name)) continue;
+      seen.add(name);
+      locals.add(name);
+      const span = localSpan(all, name);
+      if (span == null) { missingLocals.push(name); continue; }
       for (const n of namesIn(span)) into.add(n);
       Object.assign(values, valuesIn(span));
+      for (const l of span.matchAll(/local\.([a-z_]+)/g)) todo.push(l[1]);
     }
   };
   take('environment');

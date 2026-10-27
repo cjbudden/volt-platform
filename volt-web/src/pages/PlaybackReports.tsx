@@ -9,7 +9,8 @@ import { AnalyticsViewSwitch } from './OperatingReports'
    The third view under Analytics: what each viewer actually saw, from the
    Volt SDK's CMCD v2 reports. The reports on one page (playback success,
    startup, buffering, quality, rendering, access and DRM, live streams,
-   advertising, engagement, telemetry health), every one filtered by the same
+   advertising, delivery from the CDN's edge logs (build queue 2.9),
+   engagement, telemetry health), every one filtered by the same
    bar, plus the worst segments of any dimension so a bad device or app
    release stands out instead of being averaged away, and the sessions behind
    the numbers: open one to see everything that happened to that viewer, in
@@ -37,7 +38,8 @@ export interface QoeOverview {
   engagement: { views: number; sessions: number; started: number; playingHours: number; avgPlayingMs: number | null; ebffRate: number | null; exitAfterStall: number; exitAfterError: number
     leftAfterStallShare: number | null; byContent: Array<{ contentId: string | null; name: string | null; views: number; started: number; playingHours: number; stalledShare: number | null; leftAfterProblem: number }> }
   telemetry: { views: number; reports: number; eventLoss: number | null; missingReports: number; viewsWithLoss: number; viewsWithoutSequence: number; lateReports: number; lateShare: number | null
-    clockSkewMs: Trio; unknownKeys: Array<{ key: string; reports: number }>; collector: { accepted: number; rejected: number; rejectedShare: number | null; reasons: Record<string, number> } }
+    clockSkewMs: Trio; unknownKeys: Array<{ key: string; reports: number }>; collector: { accepted: number; rejected: number; rejectedShare: number | null; reasons: Record<string, number> }
+    coverage?: { cdnSessions: number; withTelemetry: number; share: number | null } | null }
   rendering?: { views: number; viewsReportingFrames: number; droppedFrames: number; droppedPerMinute: number | null; perViewDroppedPerMinute: Trio; viewsWithDrops: number; dropSessions: number
     decodeErrors: number; viewsWithDecodeErrors: number; decodeFatal: number; hardwareDecode: { yes: number; no: number }; keySystems: Array<{ keySystem: string; views: number }>
     byDevice: Array<{ device: string | null; views: number; droppedPerMinute: number | null; decodeErrors: number }> }
@@ -52,6 +54,12 @@ export interface QoeOverview {
     adRebufferRatio: number | null; adStalls: number; viewsWithAdStalls: number; adErrors: number; returnToContentMs: { avg: number | null; p95: number | null }
     leftDuringAd: number; leftDuringAdSessions: number; adsStarted: number; adsEnded: number; adCompletion: number | null; server: null | { impressions: number; starts: number; firstQuartile: number; midpoint: number; thirdQuartile: number; complete: number; failed: number; sessions: number }
     serverCompletion: number | null }
+  delivery?: { requests: number; sampledLines: number; errorRate: number | null; clientErrorRate: number | null; serverErrorRate: number | null; cacheHitRatio: number | null
+    originShieldShareOfMisses: number | null; bytes: number; edgeTtfbMs: Trio; edgeTimeMs: Trio; originFirstByteMs: Trio; segmentKbps: { p5: number | null; p50: number | null; p95: number | null }; starvedShare: number | null
+    cmcdShare: number | null; sessionIdShare: number | null; lastMileMs: Trio & { joinedRequests: number }
+    byObjectType: Array<{ ot: string; requests: number; errorRate: number | null; edgeTtfbMs: Trio; edgeTimeMs: Trio }>
+    worst: Array<{ contentId: string | null; country: string | null; requests: number; errorRate: number | null; edgeTtfbP95Ms: number | null }>
+    audience: { sessions: number; withSessionId: number; withTelemetry: number; withoutTelemetry: number; withoutSessionId: number } }
 }
 interface SessionRow { sid: string; attempt: number; startedAt: string; endedAt: string; contentId: string | null; contentName: string | null; device: string | null; os: string | null; browser: string | null
   country: string | null; outcome: string; startupMs: number | null; errorCode: string | null; errorStep: string | null; fatalAfterStart: boolean; stalls: number; adBreaks: number; adsStarted?: number; leftInAd: boolean }
@@ -68,6 +76,8 @@ const GATE_REASON: Record<string, string> = {
   sign_in: 'Sign in needed', group: 'Not in the viewer group', rules: 'Access rule', availability: 'Not published or outside its window',
   app_restriction: 'The app\'s restrictions (origin, referrer, IP)', unknown_asset: 'Unknown asset', error: 'Server error', 'not in the gate log': 'Not in the gate log',
 }
+/** CMCD object types in plain words (the edge log's requests). */
+const OBJECT: Record<string, string> = { m: 'Playlists and manifests', v: 'Video segments', a: 'Audio segments', av: 'Segments', i: 'Init segments', c: 'Captions', tt: 'Timed text', k: 'Keys', o: 'Other' }
 const STEP: Record<string, string> = { entitlement: 'Entitlement (play gate)', drm: 'DRM licence', manifest: 'Manifest', segment: 'Segment', decode: 'Decode', playback: 'Playback' }
 const SPAN_COLOUR: Record<string, string> = { starting: 'var(--brand-dim, var(--faint))', playing: 'var(--live)', stalled: 'var(--down)', seeking: 'var(--sched)', paused: 'var(--idle)', backgrounded: 'var(--faint)', ad: 'var(--warn)' }
 const PROBLEMS = [{ key: 'all', label: 'All' }, { key: 'error', label: 'Ended by an error' }, { key: 'failed', label: 'Failed to start' }, { key: 'stalled', label: 'Stalled' }, { key: 'exited', label: 'Left before the first frame' }, { key: 'ad', label: 'Left during an ad' }]
@@ -127,6 +137,7 @@ const Ic = {
   ad: <><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M7 15l2-6 2 6M7.7 13h2.6M14 9v6h1.5a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2z" /></>,
   route: <><circle cx="6" cy="18" r="2" /><circle cx="18" cy="6" r="2" /><path d="M8 18h6a4 4 0 0 0 0-8H10a4 4 0 0 1 0-8h6" /></>,
   list: <><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4.5" cy="6" r="1" /><circle cx="4.5" cy="12" r="1" /><circle cx="4.5" cy="18" r="1" /></>,
+  globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></>,
 }
 
 /** One session's states as a strip (report 11), with a legend: what the viewer saw, second by second. */
@@ -320,10 +331,11 @@ export default function PlaybackReports() {
   if (!d) return <div className="loading">Loading playback reports…</div>
 
   const s = d.success, st = d.startup, b = d.buffering, q = d.quality, e = d.engagement, t = d.telemetry
-  const rd = d.rendering, ac = d.access, lv = d.live, ad = d.ads
+  const rd = d.rendering, ac = d.access, lv = d.live, ad = d.ads, dl = d.delivery
   const m = MEASURES.find((x) => x.key === measure)!
   const active = Object.entries(filters).filter(([, v]) => v)
-  const nothing = s.attempts === 0 && e.views === 0
+  // The CDN's edge logs count players that send no reports, so they alone can fill the page.
+  const nothing = s.attempts === 0 && e.views === 0 && !(dl && dl.requests > 0)
 
   return (
     <>
@@ -474,6 +486,26 @@ export default function PlaybackReports() {
             </Report>
           )}
 
+          {dl && dl.requests > 0 && (
+            <Report icon={Ic.globe} title="Delivery (CDN and origin)" question="Is delivery responsible? From the CDN's own logs of every request, sampled and counted as the whole, so players that send no reports are in it too. Filters other than content and country do not apply: the CDN does not know the device or app.">
+              <div style={statGrid}>
+                <Stat label="Requests" value={fmtInt(dl.requests)} sub={`from ${pl(dl.sampledLines, 'logged request')}`} />
+                <Stat label="Errors" value={fmtPct(dl.errorRate, 2)} sub={`client ${fmtPct(dl.clientErrorRate, 2)}, server ${fmtPct(dl.serverErrorRate, 2)}`} tone={dl.errorRate != null && dl.errorRate > 0.01 ? 'var(--warn)' : undefined} />
+                <Stat label="Cache hits" value={fmtPct(dl.cacheHitRatio)} sub={dl.originShieldShareOfMisses != null ? `Origin Shield answered ${fmtPct(dl.originShieldShareOfMisses, 0)} of the misses` : 'of requests answered from the edge'} />
+                <Stat label="First byte at the edge" value={fmtMs(dl.edgeTtfbMs.p50)} sub={`p50; p95 ${fmtMs(dl.edgeTtfbMs.p95)}, p99 ${fmtMs(dl.edgeTtfbMs.p99)}`} />
+                <Stat label="Origin on a miss" value={fmtMs(dl.originFirstByteMs.p50)} sub={`first byte p50; p95 ${fmtMs(dl.originFirstByteMs.p95)}`} />
+                <Stat label="Segment delivery rate" value={fmtKbps(dl.segmentKbps.p50)} sub={`median; the slowest 5 % under ${fmtKbps(dl.segmentKbps.p5)}`} />
+                <Stat label="Asked with an empty buffer" value={fmtPct(dl.starvedShare, 2)} sub="of requests from players that send CMCD" tone={dl.starvedShare != null && dl.starvedShare > 0.01 ? 'var(--warn)' : undefined} />
+                {dl.lastMileMs.joinedRequests > 0 && <Stat label="Last mile" value={fmtMs(dl.lastMileMs.p50)} sub={`p50 of what the player waited beyond the edge; ${pl(dl.lastMileMs.joinedRequests, 'response')} matched`} />}
+              </div>
+              <p style={{ margin: '14px 0 0', color: 'var(--muted)', fontSize: 'var(--fs-sm)' }}>
+                Seen at the CDN: {pl(dl.audience.sessions, 'session')}. {fmtInt(dl.audience.withTelemetry)} reported by their player; {fmtInt(dl.audience.withoutTelemetry)} sent no reports{dl.audience.withoutSessionId ? `, ${fmtInt(dl.audience.withoutSessionId)} of them without even a session id (a stream address opened in another player)` : ''}.
+              </p>
+              {dl.byObjectType.length > 0 && <Table head={['Requests for', 'Requests', 'Errors', 'First byte p50', 'p95', 'Time taken p95']} rows={dl.byObjectType.map((x) => [OBJECT[x.ot] ?? x.ot, fmtInt(x.requests), fmtPct(x.errorRate, 2), fmtMs(x.edgeTtfbMs.p50), fmtMs(x.edgeTtfbMs.p95), fmtMs(x.edgeTimeMs.p95)])} />}
+              {dl.worst.length > 0 && <Table head={['Content', 'Country', 'Requests', 'Errors', 'First byte p95']} rows={dl.worst.map((x) => [x.contentId ? (e.byContent.find((c) => c.contentId === x.contentId)?.name ?? x.contentId) : 'Not known', x.country ?? 'Not known', fmtInt(x.requests), fmtPct(x.errorRate, 2), fmtMs(x.edgeTtfbP95Ms)])} />}
+            </Report>
+          )}
+
           <Report icon={Ic.users} title="Engagement and abandonment" question="How does quality relate to retention? Views counted by when they started.">
             <div style={statGrid}>
               <Stat label="Playing time" value={`${e.playingHours >= 10 ? Math.round(e.playingHours).toLocaleString() : e.playingHours.toFixed(2)} h`} sub={`average ${fmtMs(e.avgPlayingMs)} per started view`} />
@@ -560,6 +592,7 @@ export default function PlaybackReports() {
               <Stat label="Refused by the collector" value={fmtPct(t.collector.rejectedShare, 2)} sub={`${fmtInt(t.collector.rejected)} of ${fmtInt(t.collector.accepted + t.collector.rejected)} lines`} />
               <Stat label="Device clock skew" value={fmtMs(t.clockSkewMs.p50)} sub={`p50; p95 ${fmtMs(t.clockSkewMs.p95)}`} />
               <Stat label="Without a sequence" value={fmtInt(t.viewsWithoutSequence)} sub="views (players other than the Volt SDK)" />
+              {t.coverage && <Stat label="Reporting coverage" value={fmtPct(t.coverage.share)} sub={`${fmtInt(t.coverage.withTelemetry)} of ${pl(t.coverage.cdnSessions, 'session')} seen at the CDN reported`} tone={t.coverage.share != null && t.coverage.share < 0.9 ? 'var(--warn)' : undefined} />}
             </div>
             {(Object.keys(t.collector.reasons).length > 0 || t.unknownKeys.length > 0) && (
               <Table head={['What', 'Count']} rows={[

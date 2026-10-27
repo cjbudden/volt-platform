@@ -115,9 +115,9 @@ resource "aws_iam_role_policy" "control_plane_qoe_raw" {
 
 # What every control-plane role runs with (ecs_services.tf, scaling_services.tf).
 locals {
-  qoe_env = [
+  qoe_env = concat([
     { name = "QOE_RAW_BUCKET", value = aws_s3_bucket.qoe_raw.id },
     { name = "QOE_RAW_PREFIX", value = "qoe-raw" },
     { name = "QOE_RAW_REGION", value = var.region },
-  ]
+  ], local.cdn_logs_env) # the CDN's real-time logs (cdn_logs.tf)
 }
