@@ -245,3 +245,8 @@ prewarm_origin_fraction = 0.1
 #   without the bypass permission can delete or overwrite it inside this many
 #   days. Not more than qoe_raw_retention_days.
 
+# enable_chaos_experiments = false
+#   Staging only: the Fault Injection Service templates the chaos harness
+#   starts (cut one zone off, interrupt a Spot server). deploy/loadtest/CHAOS.md.
+# chaos_fault_seconds = 600
+#   How long a zone stays cut off before it is restored by itself.

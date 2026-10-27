@@ -112,7 +112,7 @@ What makes Volt cheap to run is mostly in phase 2 of the queue:
 | Sizing that learns from every run, storage projected, placement that checks the task disk | `volt-app/src/services/fleet/loadFit.ts`, `volt-app/src/services/fleet/storageProjection.ts`, `PLACEMENT.md` | built (2.4a); disk check waits on 2.4c |
 | Watch folders picked up from S3 by event, not by a walk | `volt-app/src/services/watchfolder/s3events.ts`, `deploy/terraform/watchfolders.tf` | built (2.6) |
 | Edge rights decided in CloudFront, not at the origin | `deploy/edge/rights-viewer-request.js` | built (1.14a, 1.14b) |
-| Scaling and chaos runs against the deployment | `deploy/loadtest` | 2.8 |
+| Scaling and chaos runs against the deployment | `deploy/loadtest/chaos.mjs`, run sheet `deploy/loadtest/CHAOS.md`, `deploy/terraform/chaos.tf` (`enable_chaos_experiments`, staging only) | built (2.8); the real run waits on the AWS account |
 | CDN logs with CMCD counted at the edge | | 2.9 |
 
 ## Before you apply, check

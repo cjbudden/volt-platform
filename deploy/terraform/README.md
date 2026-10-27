@@ -166,6 +166,9 @@ snapshot and the bucket won't force‑empty — intentional guard rails.
 - **Scaling & chaos (Tier‑3)** builds on this: launch N synthetic channels to find
   the per‑node ceiling; kill a node and confirm ECS reschedules + S3‑origin
   continuity; force a Spot interruption and confirm the on‑demand base absorbs it.
+  The harness and run sheet are `deploy/loadtest/chaos.mjs` and
+  `deploy/loadtest/CHAOS.md`; set `enable_chaos_experiments = true` in the
+  staging stack for its Fault Injection Service templates (`chaos.tf`).
 
 ## Scaling for large audiences
 

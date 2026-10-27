@@ -1,5 +1,8 @@
 # Viewer-start load test
 
+Faults (kill an encoder, lose a source, lose a zone, Spot interruption) and
+scaling under this load are run with the chaos harness: see `CHAOS.md`.
+
 `viewer-start.js` (k6) simulates a kick-off: viewers arriving at a rising
 rate, each calling the play gate (`GET /api/availability`), sending a `start`
 beacon and a couple of heartbeats. It reports play-gate and beacon latency and
