@@ -1529,6 +1529,20 @@ the same 178/179 there.
 | xmltv-timezone.check.sh | pass | 16 passed, 0 failed |  |  |
 | xmltv.check.sh | pass | 49 passed, 0 failed |  |  |
 
+## 2026-10-27 - Mac end-to-end run sheet (build queue 1.15, not yet released)
+
+What: one command that runs the whole product path on the Mac and says PASS, FAIL or SKIP per step.
+
+- **Script** (`scripts/e2e-mac.sh`, `scripts/e2e-mac.mjs`, Node only, no packages): talks to the running Volt through its API (`VOLT_API`, the demo sign-in by default). Makes two synthetic live HLS sources with ffmpeg (colour RED primary, BLUE backup, spoken audio from `say` or espeak, else a tone) and serves them itself on port 8790; the radio source is `volt-app/test/icecast-sim.js` on the next port. Creates an output profile (x264 720p and 360p) and group of its own; when the plan has no room it uses an existing transcode group as it is and never edits its shared profile. Reads delivered output only: the newest frame of a playlist decoded to one pixel for the colour, `/filler/` segments in a rendition for the loop, the subtitle playlist and cue text, the recording's timeline and range playlist, the clip's own master with ffprobe, the FAST playlist's segments.
+- **Steps**: preflight, setup, sources, channel, start, air, captions, rights, failover, stop, record, clip, vod, publish, radio, event, fast (table in `TESTING_WORKFLOWS.md` section 8). A step skips when a tool is missing (packager, faster-whisper; it says what to install) or a step it needs did not pass; skips never count as passes; the exit code is 1 on any FAIL. `--plan`, `--only`, `--cleanup` (removes only what the run made, the profile only after its group), `E2E_TIME_SCALE` for a slow machine, `E2E_ENCODER=docker` and `E2E_SOURCE_HOST` for the Docker encoder. Ctrl-C stops what it started.
+- **Docs**: `TESTING_WORKFLOWS.md` section 8 rewritten as the run sheet; `docs/engineering/running-on-the-mac.md` gains a short section.
+
+Checked (cloud container, Postgres 16, HEAD 2e8bde65 plus this change): new `volt-app/test/e2e-runsheet.check.ts` **14/14**: `--plan` and its order, a row per step in section 8, all 46 API calls and 6 cleanup routes found in `docs/api-routes.json` (a renamed route fails it), then a real API (local launcher) on a fresh account: setup with its own group and profile, sources, channel, radio end to end (ICY title in now playing, public address 200), the encoder steps skipped with the packager made unusable, `--cleanup` leaving no stream or group. Whole sheet against the demo snapshot: **5 passed, 0 failed, 12 skipped** (start to FAST need Shaka Packager and faster-whisper, not in the container). engineering-guides 35/35, radio-id3 36/36. volt-app typechecks clean on the device and the suite on its own; the static part of the suite 5/5 on the device.
+
+Found, not fixed: `/origin/<id>/as/<CC>/` answers 451 for any replaced country, because nothing writes the `*_rp` playlists it serves any more (the variant service at `/origin/<id>/v/<key>/` replaced them) and no console page calls it. Remove it or point it at the variant.
+
+Not yet: the full run is Christian's on the Mac (`bash scripts/e2e-mac.sh` with Volt running); every step from start on has only been run in parts by the suites, never by this script. The demo plan gives all 20 places to the two RTM groups, so on the Mac the run uses RTM Transcode as it is (1080p ladder) and skips captions; lower RTM Packaging by 6 places, or set `E2E_GROUP` to a group with captions on, to have them checked. Not released: other sessions' uncommitted change notes and CHANGELOG are in the tree.
+
 ## 2026-10-26 - Threads publishing (build queue 1.14j, not yet released)
 
 What: Threads profiles as publish targets, a clip as a video post and an Image Library picture as an image post, through the Threads container flow.

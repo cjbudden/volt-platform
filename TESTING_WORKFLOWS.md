@@ -272,18 +272,78 @@ bash volt-station-check.sh          # end to end against a station
 8 Oct: 38 of 41 in `radio.check.sh`. The 3 failures are in metadata-log
 classification (song/advert), not playback.
 
-## 8. Full product path (what was run end to end on 8 Oct)
+## 8. Full product path: the run sheet
 
-API login, then create a transcode channel with an HLS source and a watermark,
-PATCH captions on, then Start. Checked:
+One command runs the whole product path against the Volt that `run-on-mac.sh`
+started, and prints PASS, FAIL or SKIP per step. Every step reads what was
+delivered (playlists, segments, decoded frames), not what the API says.
 
-- `master_cc.m3u8` carries the `SUBTITLES` group
-- `subs.m3u8` grows and its VTT holds real cues
-- `playcheck` through the control plane on :8090 shows no violations
-- all four gates are healthy
-- auto connect arms
-- Stop closes a recording
-- killing the encoder recovers (section 5)
+```bash
+bash run-on-mac.sh                       # in one terminal, as usual
+bash scripts/e2e-mac.sh --plan           # the steps, nothing changed
+bash scripts/e2e-mac.sh                  # everything, about 15 minutes
+bash scripts/e2e-mac.sh --only rights,failover
+bash scripts/e2e-mac.sh --cleanup        # the run removes what it made at the end
+```
+
+It makes its own synthetic sources (ffmpeg colour bars served from the script
+on port 8790: primary RED, backup BLUE, with spoken audio from `say` so live
+captions have words to find), and its own objects named `E2E <time>`: an
+output profile and group of its own when the plan has room, otherwise an
+existing transcode group used as it is (nothing in it is changed, so captions
+are checked only if that group already has them on). Without `--cleanup` the
+objects stay for a look; everything it started is stopped either way, also
+on Ctrl-C.
+
+| Step | What it does | Pass looks like |
+|---|---|---|
+| `preflight` | `/health`, sign in, tools | signed in; ffmpeg, packager, faster-whisper and a voice listed |
+| `setup` | output profile (x264 720p and 360p) and group | the run's own group, or the existing group it uses |
+| `sources` | two live HLS sources | the primary decodes RED |
+| `channel` | transcode channel: primary and backup, failover on, auto failback, slate on total loss, recording, captions | channel created and read back |
+| `start` | Start | `master_cc.m3u8` names a rendition with segments; the newest frame is RED; status `live` |
+| `air` | On air | `/live/<id>/master.m3u8` answers with a playlist |
+| `captions` | live captions (Whisper, English) on the run's own profile | `TYPE=SUBTITLES` in the master, the subtitle playlist grows, a cue has words |
+| `rights` | a programme from now for ten minutes that blocks AU with the loop | preview: AU `replace`, MY `allow`; AU's rendition carries `/filler/` segments, MY's none, both in the preview's play address and on the public address with `?as=AU` / `?as=MY` |
+| `failover` | kill the primary, then the backup, then restart both | BLUE, then the slate, then RED again (failback), with the seconds each took |
+| `stop` | off air, Stop | status `ended`; a recording for the run |
+| `record` | | at least 30 s recorded; the slate marked over the hole (`fallbacks`); no loop segment in the recording (the rights window changed AU's copy only) |
+| `clip` | 20 s from the recording | the clip build job succeeds |
+| `vod` | | the clip's own master plays: first segment loads, ffprobe says about 20 s |
+| `publish` | | publish answers `published` (or `scheduled`) |
+| `radio` | a station on a synthetic ICY source (`volt-app/test/icecast-sim.js`) | audio segments delivered, on air on `/live/<id>/master.m3u8`, a source title in now playing |
+| `event` | an event on the primary source | live, the picture RED, stopped, a recording |
+| `fast` | a FAST channel with a run order of the clip | prepared, public, its playlist airs the clip's segments |
+
+A step SKIPs when the machine lacks what it needs (it says what to install)
+or when a step it depends on did not pass; a SKIP is never counted as a pass,
+and the exit code is non-zero when anything failed.
+
+Settings, as environment variables: `VOLT_API` (`http://localhost:8080`),
+`VOLT_EMAIL` and `VOLT_PASSWORD` (the demo sign-in), `PACKAGER_BIN` (found on
+the PATH or in `packager-osx-arm64/` otherwise), `PYTHON_BIN` (the encoder
+venv), `E2E_GROUP` (a group to use as it is), `E2E_SOURCE_PORT`,
+`E2E_SOURCE_HOST` and `E2E_ENCODER=docker` (the Docker encoder reaches the
+sources at `host.docker.internal`), `E2E_TIME_SCALE=2` (every wait twice as
+long, for a busy laptop). Each run writes `result.json` with every step's
+notes; the path is printed at the end.
+
+`check.js e2e-runsheet` keeps it runnable: every API call in the script is a
+route the API has, each step has a row above, and the steps that need no
+video encoder (setup, sources, channel, radio, then `--cleanup`) run for real
+against a fresh account.
+
+27 Oct 2026, run in the build container (no Shaka Packager or
+faster-whisper there): preflight, setup (the demo plan is full, so the
+existing RTM Transcode group was used), sources, channel and radio passed;
+start to FAST skipped for the packager. **The full run is the Mac's**: it has
+not been run end to end yet.
+
+8 Oct, before the script, the same path was run by hand: API login, a
+transcode channel with an HLS source and a watermark, captions on, Start;
+`SUBTITLES` in `master_cc.m3u8`, a growing `subs.m3u8` with real cues,
+playcheck on :8090 with no violations, all four gates healthy, auto connect
+armed, Stop closed a recording, a killed encoder recovered (section 5).
 
 ## 9. Known open items
 

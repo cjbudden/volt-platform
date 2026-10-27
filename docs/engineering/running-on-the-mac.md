@@ -86,6 +86,22 @@ and the library: recordings, segments and the usage ledger go together. It
 asks you to type RESET. It deletes data, so it is never run by a check or by
 the build queue.
 
+## Check the whole product path
+
+With Volt running, one command walks the product end to end and prints PASS,
+FAIL or SKIP per step: start, captions, rights (AU at a replace time gets the
+loop, MY the normal stream), failover, record, clip, VOD, publish, radio, an
+event and FAST.
+
+```bash
+bash scripts/e2e-mac.sh --plan               # the steps, nothing changed
+bash scripts/e2e-mac.sh                      # everything, about 15 minutes
+bash scripts/e2e-mac.sh --cleanup            # remove what the run made at its end
+```
+
+What each step checks, the settings and what a pass looks like:
+`TESTING_WORKFLOWS.md` section 8.
+
 ## When something does not start
 
 - **API failed:** the script prints the last lines of
