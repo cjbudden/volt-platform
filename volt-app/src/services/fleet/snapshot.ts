@@ -30,7 +30,7 @@ interface TaskRow {
   pending: boolean; armed: boolean; status: string | null; fallback_in_use: boolean | null;
   drm: boolean | null; protocol: string | null; ingest_url: string | null;
   ends_in_min: string | number | null; since_move_min: string | number | null;
-  scratch_mib_per_hour: string | number | null; hours_running: string | number | null;
+  scratch_mib_per_hour: string | number | null; scratch_cap_mib: string | number | null; hours_running: string | number | null;
   vram_mib: string | number | null;
 }
 
@@ -80,6 +80,7 @@ export async function loadFleetSnapshot(s: FleetSettings = fleetSettings()): Pro
             CASE WHEN e.server_stop IS NOT NULL THEN EXTRACT(EPOCH FROM (e.server_stop - now())) / 60 END AS ends_in_min,
             CASE WHEN i.moved_at IS NOT NULL THEN EXTRACT(EPOCH FROM (now() - i.moved_at)) / 60 END AS since_move_min,
             (i.placement_decision->'storage'->>'scratchMibPerHour')::float AS scratch_mib_per_hour,
+            (i.placement_decision->'storage'->>'scratchCapMib')::float AS scratch_cap_mib,
             (i.placement_decision->>'vramMib')::float AS vram_mib,
             EXTRACT(EPOCH FROM (now() - i.launched_at)) / 3600 AS hours_running
        FROM instances i
@@ -159,7 +160,7 @@ function toTask(t: TaskRow, s: FleetSettings): TaskSnapshot {
     pending: t.pending,
     ...(t.scratch_mib_per_hour != null ? {
       diskMibAtHorizon: scratchMibAt(Number(t.scratch_mib_per_hour), n(t.hours_running) ?? 0,
-        horizonHours(s.diskHorizonHours, n(t.ends_in_min))),
+        horizonHours(s.diskHorizonHours, n(t.ends_in_min)), n(t.scratch_cap_mib)),
     } : {}),
   };
 }

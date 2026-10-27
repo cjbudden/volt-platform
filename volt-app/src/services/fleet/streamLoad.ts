@@ -39,7 +39,7 @@
 //  Pure: no DB, no clock, no IO.
 // ============================================================================
 import type { StreamLoad, Reservation } from './capacity';
-import { projectStorage, type StorageProjection } from './storageProjection';
+import { localWindowSeconds, projectStorage, type StorageProjection } from './storageProjection';
 
 export interface SourceProbe {
   video?: { codec?: string; width?: number; height?: number; fps?: number | null; bitrate_kbps?: number | null };
@@ -274,8 +274,9 @@ export function estimateEncoderLoad(job: Record<string, any>, probe?: SourceProb
     taskKind: workflow, load, reservation: reserve(load), needsGpu,
     signature: encoderSignature(job), basis: 'estimate', lines, notes,
     // The packaged output is what lands on the task disk and in S3; the
-    // Gladia upstream is not stored, so it is left out on purpose.
-    storage: projectStorage(outTotalKbps, job.recording?.retention_sec ?? null),
+    // Gladia upstream is not stored, so it is left out on purpose. On AWS the
+    // task disk only holds the uploader's local window (2.4c).
+    storage: projectStorage(outTotalKbps, job.recording?.retention_sec ?? null, localWindowSeconds(job)),
   };
 }
 

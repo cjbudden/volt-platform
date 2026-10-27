@@ -263,10 +263,6 @@
       "class": "default",
       "why": "24/7 channels stay on on-demand capacity unless this is turned on; off is the safe default."
     },
-    "FLEET_TASK_DISK_GIB": {
-      "class": "default",
-      "why": "Off by default (the disk is not checked). The encoder keeps a whole run on its task disk today, so with the AMI's 30 GiB root a full HD ladder outgrows any server within a day; set it once the encoder keeps only a short window locally (build queue 2.4c)."
-    },
     "FLEET_TASK_SLOTS": {
       "class": "default",
       "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."

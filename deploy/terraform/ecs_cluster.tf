@@ -10,6 +10,9 @@ locals {
     echo "ECS_CLUSTER=${var.project}" >> /etc/ecs/ecs.config
     echo "ECS_ENABLE_SPOT_INSTANCE_DRAINING=true" >> /etc/ecs/ecs.config
     echo "ECS_CONTAINER_STOP_TIMEOUT=120s" >> /etc/ecs/ecs.config
+    # A stopped task's container keeps its disk for 3 hours by default; an
+    # encoder's local window would then count twice on a busy server.
+    echo "ECS_ENGINE_TASK_CLEANUP_WAIT_DURATION=15m" >> /etc/ecs/ecs.config
   EOT
   )
 }
@@ -28,6 +31,21 @@ resource "aws_launch_template" "ecs" {
   image_id      = data.aws_ssm_parameter.ecs_ami.value
   instance_type = var.encoder_instance_types[0]
   user_data     = local.ecs_user_data
+
+  # THE TASK DISK (build queue 2.4c). The encoders package onto this volume and
+  # keep only encoder_local_keep_seconds of it once it is in S3, so its size is
+  # the OS, the images and those windows, not whole runs. gp3 is the cheapest
+  # SSD and needs no provisioned IOPS at these write rates. Placement knows the
+  # size (FLEET_TASK_DISK_GIB) and will not put more on a server than it holds.
+  block_device_mappings {
+    device_name = "/dev/xvda" # the root device of the ECS-optimised AL2023 AMI
+    ebs {
+      volume_size           = var.encoder_root_volume_gib
+      volume_type           = "gp3"
+      encrypted             = true
+      delete_on_termination = true
+    }
+  }
 
   iam_instance_profile {
     arn = aws_iam_instance_profile.ecs_instance.arn

@@ -189,6 +189,12 @@ async function main() {
   const big = await assignStream({ streamId: CH, streamClass: 'channel', accountId: A, estimate: estimateEncoderLoad(histJob(0), histProbe(0)) });
   ok('disk: a ladder that would outgrow an empty server\'s disk is unplaceable, launched with default sizing, and says why',
     (big.decision as any).action === 'unplaceable' && /task disk/.test((big.decision as any).reason) && big.hints === undefined, big.decision);
+  // An encoder that keeps only a local window (build queue 2.4c) stores its
+  // cap with the decision; the snapshot counts no more than that.
+  await query(`UPDATE instances SET placement_decision='{"storage":{"scratchMibPerHour":900,"scratchCapMib":1500}}'::jsonb WHERE task_arn='arn:learn:disk'`);
+  const capped = (await loadFleetSnapshot()).find((h) => h.externalId === 'i-learn-diskfull');
+  ok('snapshot: a stream keeping a local window holds no more than its cap (1500 MiB)', Math.round(occupancyOf(capped!, 'conservative')!.diskMib ?? 0) === 1500, occupancyOf(capped!, 'conservative'));
+  await query(`UPDATE instances SET placement_decision='{"storage":{"scratchMibPerHour":900}}'::jsonb WHERE task_arn='arn:learn:disk'`);
   delete process.env.FLEET_TASK_DISK_GIB;
   const noDisk = await assignStream({ streamId: CH, streamClass: 'channel', accountId: A, estimate: small });
   ok('disk: with no disk size set, placement is as before (the fuller server)', noDisk.hints?.ec2InstanceId === 'i-learn-diskfull', noDisk.hints);

@@ -203,6 +203,18 @@ prewarm_origin_fraction = 0.1
 #   Most GPU servers at once. The pool starts at zero and costs nothing until
 #   a captions task needs it. 0 removes the pool, and whisper captions do not
 #   run.
+# encoder_root_volume_gib = 30
+#   Root volume of every CPU encoder server (gp3, encrypted), in GiB: the OS,
+#   the container images and each stream's local window. Placement checks it
+#   (FLEET_TASK_DISK_GIB). Not below the AMI's 30 GiB.
+# gpu_root_volume_gib = 60
+#   Root volume of every GPU server (gp3, encrypted), in GiB. The CUDA captions
+#   images are large; captions write only subtitle segments.
+# encoder_local_keep_seconds = 1800
+#   Seconds of segments an encoder keeps on its own disk once they are in S3
+#   (never less than the stream's DVR window plus two minutes). 0 keeps the
+#   whole run on the disk, which fills a 30 GiB root in about six hours of a
+#   1080p ladder.
 # captions_gpu_sharing = false
 #   Several live captions streams share one GPU server (placement checks GPU
 #   memory and GPU time) instead of each reserving a whole GPU. Off until the

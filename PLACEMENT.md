@@ -95,9 +95,26 @@ so it fills that disk in about six hours whatever server it is on.
 Placement can now refuse a server whose task disk would run short: what each stream
 on it will have written by the end of the horizon (`FLEET_DISK_HORIZON_HOURS`, 24;
 a running event's own window when shorter), plus the new stream's share, must stay under
-85 % of `FLEET_TASK_DISK_GIB`. The check is **off until that is set**, because with
-today's encoder it would correctly refuse every full HD ladder on every server. Build
-queue 2.4c bounds the encoder's local copy and sizes the volume, and then turns it on.
+85 % of `FLEET_TASK_DISK_GIB`. The check is off until that is set.
+
+**A short window on AWS (build queue 2.4c, 27 Oct).** `s3-uploader.sh` now keeps
+only `LOCAL_KEEP_SECONDS` of segments on the task disk (Terraform
+`encoder_local_keep_seconds`, 1800 by default, never less than the stream's DVR
+window plus two minutes). After each segment sync that finishes without an error it
+removes numbered media segments (`seg_N.m4s`, `sub_N.vtt` and the like) last written
+more than the window before that sync began, so each one is in S3 before it goes; a
+failed sync removes nothing, and init segments, manifests and the end-of-run caption
+file stay. S3 keeps the whole run (the sync never deletes). On the Mac nothing
+changes: a local output never starts the uploader and the local run is the recording.
+
+The launch templates now set the root volume (gp3, encrypted): `encoder_root_volume_gib`
+(30) for the CPU pools and `gpu_root_volume_gib` (60) for the GPU pool, and stopped
+tasks give their disk back after 15 minutes (`ECS_ENGINE_TASK_CLEANUP_WAIT_DURATION`).
+Terraform sets `FLEET_TASK_DISK_GIB` to the CPU root and `ENCODER_LOCAL_KEEP_SECONDS`
+to the window, so the disk check is **on in AWS** and counts each stream as at most
+its rate over the window plus two minutes (`placement_decision.storage.scratchCapMib`),
+not the whole run. A 4-rung 1080p ladder then holds about 2.5 GiB, so seven or more
+fit a 30 GiB root by disk and the CPU, not the disk, is what fills a server.
 
 ## Projection against actual
 
@@ -241,7 +258,8 @@ advise mode, and nothing can move a running stream.
 | `FLEET_CAPTIONS_GPU_SHARING`, `CAPTIONS_SHARED_TASK_DEF` | false, set by Terraform | Captions share a GPU server (both needed) |
 | `FLEET_SHARED_GPU_CEILING` | 0.8 | GPU time captions sharing one GPU may fill together |
 | `FLEET_LEARN` | true | Learn the load model's coefficients from every measured run |
-| `FLEET_TASK_DISK_GIB` | not set (disk not checked) | Task disk per encoder server; turns on the disk check |
+| `FLEET_TASK_DISK_GIB` | not set (disk not checked); Terraform sets the CPU root size | Task disk per encoder server; turns on the disk check |
+| `ENCODER_LOCAL_KEEP_SECONDS` | not set (whole run); Terraform sets the window | The window each encoder keeps locally on AWS; caps each stream's disk share |
 | `FLEET_DISK_HORIZON_HOURS` | 24 | How far ahead the disk check looks |
 | `FLEET_CONSOLIDATE` | advise | `off` or `advise`. `act` is refused until the handoff exists |
 
@@ -266,8 +284,9 @@ relay-fleet suites still pass with these changes.
 - **Real runs for the learning.** The fit is tested on synthetic histories; it starts
   correcting real coefficients once the Tier-2 cluster has runs measured alone on a
   server. Event windows are not yet passed to the disk check (it uses the horizon).
-- **The task disk (2.4c):** keep only a short window on the task disk, size the root
-  volume, then set `FLEET_TASK_DISK_GIB`.
+- **The task disk on a real server (after 2.4c):** watch a long 1080p run on the Tier-2
+  cluster and confirm the root stays near the OS, the images and the window. The GPU
+  root default (60 GiB) is a judgement for the CUDA images, not measured.
 - **Enable ENI trunking.** Without it a server carries at most three tasks however light
   they are, and that, not CPU, caps how many package-only channels share a server.
 - **GPU sharing for NVENC.** Captions share a GPU (above); an NVENC encoder still

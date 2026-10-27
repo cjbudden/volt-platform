@@ -88,7 +88,7 @@ async function assignInner(args: {
     const decision = choosePlacement({
       streamId: args.streamId, streamClass: args.streamClass, accountId: args.accountId, isolation,
       load: estimate.load, reservation: estimate.reservation, needsGpu: estimate.needsGpu, sharesGpu: estimate.sharesGpu,
-      diskMib: scratchMibAt(estimate.storage?.scratchMibPerHour ?? 0, 0, args.horizonHours ?? s.diskHorizonHours),
+      diskMib: scratchMibAt(estimate.storage?.scratchMibPerHour ?? 0, 0, args.horizonHours ?? s.diskHorizonHours, estimate.storage?.scratchCapMib),
     }, hosts, s.placementPolicy);
 
     const sized = {

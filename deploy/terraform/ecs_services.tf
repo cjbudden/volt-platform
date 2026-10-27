@@ -118,6 +118,9 @@ resource "aws_ecs_task_definition" "encoder" {
       { name = "S3_BUCKET", value = aws_s3_bucket.origin.id },
       # volt-encoder/bin/health_server.py: /healthz /readyz /metrics /status
       { name = "HEALTH_PORT", value = "9090" },
+      # s3-uploader.sh: keep only this much of the run on the task disk once it
+      # is in S3 (build queue 2.4c); S3 holds the whole run.
+      { name = "LOCAL_KEEP_SECONDS", value = tostring(var.encoder_local_keep_seconds) },
     ]
     portMappings = [{ containerPort = 9090, protocol = "tcp" }]
     # LIVENESS only: a dead packager or a stalled supervisor. A lost source is
@@ -356,6 +359,11 @@ locals {
     # placementConfig.ts then configures no GPU pool and says so per stream.
     { name = "ECS_GPU_PROVIDER", value = join("", aws_ecs_capacity_provider.gpu[*].name) },
     { name = "FLEET_GPU_TYPES", value = join(",", var.gpu_instance_types) },
+    # The encoder servers' task disk (ecs_cluster.tf) and the window each
+    # encoder keeps on it: placement's disk check counts that window, not the
+    # whole run (services/fleet/storageProjection.ts). 0 keeps whole runs.
+    { name = "FLEET_TASK_DISK_GIB", value = tostring(var.encoder_root_volume_gib) },
+    { name = "ENCODER_LOCAL_KEEP_SECONDS", value = tostring(var.encoder_local_keep_seconds) },
     { name = "ECS_SUBNETS", value = join(",", aws_subnet.private[*].id) },
     { name = "ECS_SECURITY_GROUPS", value = aws_security_group.encoder.id },
     { name = "INTERNAL_API_BASE_URL", value = "http://${aws_lb.cp.dns_name}" },

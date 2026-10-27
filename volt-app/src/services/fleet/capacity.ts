@@ -234,10 +234,11 @@ export function fits(cap: Capacity, occ: Occupancy, add: { reservation: Reservat
     if (!p.gpuSharing && add.reservation.gpus > 0 && (occ.vramMib ?? 0) > 0) return no('GPU shared by captions tasks');
     if (p.gpuSharing && occ.gpuShare + add.load.gpuShare * p.safetyFactor > p.ceiling * cap.gpus) return no('GPU encoder would be too busy');
   }
-  // DISK. The encoder keeps its whole run on the task disk while the sidecar
-  // mirrors it to S3 (storageProjection.ts), so what matters is what every
-  // stream on the server will have written by the end of the planning
-  // horizon. No safety factor: the bitrates fix the bytes.
+  // DISK. The encoder writes its run to the task disk while the sidecar
+  // mirrors it to S3, keeping the whole run or, on AWS, only a window
+  // (storageProjection.ts), so what matters is what every stream on the server
+  // will hold by the end of the planning horizon. No safety factor: the
+  // bitrates fix the bytes.
   if (cap.diskMib != null && (add.diskMib ?? 0) > 0 && (occ.diskMib ?? 0) + (add.diskMib ?? 0) > cap.diskMib * DISK_USABLE) {
     return no(`task disk would run short (${Math.round(((occ.diskMib ?? 0) + (add.diskMib ?? 0)) / 1024)} of ${Math.round(cap.diskMib / 1024)} GiB)`);
   }

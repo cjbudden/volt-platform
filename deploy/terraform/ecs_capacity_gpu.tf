@@ -30,6 +30,7 @@ resource "aws_launch_template" "ecs_gpu" {
     echo "ECS_CLUSTER=${var.project}" >> /etc/ecs/ecs.config
     echo "ECS_ENABLE_GPU_SUPPORT=true" >> /etc/ecs/ecs.config
     echo "ECS_CONTAINER_STOP_TIMEOUT=120s" >> /etc/ecs/ecs.config
+    echo "ECS_ENGINE_TASK_CLEANUP_WAIT_DURATION=15m" >> /etc/ecs/ecs.config
     %{if var.captions_gpu_sharing~}
     # Captions sharing the GPU reserve none of it, so they reach it through
     # Docker's default runtime. The GPU AMI already makes that NVIDIA's; this
@@ -40,6 +41,17 @@ resource "aws_launch_template" "ecs_gpu" {
     %{endif~}
   EOT
   )
+
+  # Sized for the CUDA captions images (gpu_root_volume_gib); see ecs_cluster.tf.
+  block_device_mappings {
+    device_name = "/dev/xvda"
+    ebs {
+      volume_size           = var.gpu_root_volume_gib
+      volume_type           = "gp3"
+      encrypted             = true
+      delete_on_termination = true
+    }
+  }
 
   iam_instance_profile {
     arn = aws_iam_instance_profile.ecs_instance.arn

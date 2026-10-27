@@ -51,6 +51,25 @@ variable "gpu_max" {
   description = "Most GPU servers at once. The pool starts at zero and costs nothing until a captions task needs it. 0 removes the pool, and whisper captions do not run."
 }
 
+# ---- The encoder hosts' disk (build queue 2.4c) -------------------------------
+variable "encoder_root_volume_gib" {
+  type        = number
+  default     = 30
+  description = "Root volume of every CPU encoder server (gp3, encrypted), in GiB. It holds the OS, the container images and each stream's local window (encoder_local_keep_seconds); the whole run is in S3. Placement checks it (FLEET_TASK_DISK_GIB). Not below the AMI's 30 GiB."
+}
+
+variable "gpu_root_volume_gib" {
+  type        = number
+  default     = 60
+  description = "Root volume of every GPU server (gp3, encrypted), in GiB. The CUDA captions images are large; captions themselves write only subtitle segments."
+}
+
+variable "encoder_local_keep_seconds" {
+  type        = number
+  default     = 1800
+  description = "Seconds of segments an encoder keeps on its own disk after they are in S3 (s3-uploader.sh LOCAL_KEEP_SECONDS). Never less than the stream's DVR window plus two minutes. 0 keeps the whole run on the disk, which fills a 30 GiB root in about six hours of a 1080p ladder."
+}
+
 variable "captions_gpu_sharing" {
   type        = bool
   default     = false

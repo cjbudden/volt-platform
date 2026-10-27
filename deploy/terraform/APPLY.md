@@ -95,6 +95,13 @@ the first captioned stream. `gpu_max = 0` leaves the pool out.
 server instead of one server each (two `small` models on one g4dn.xlarge);
 leave it off until the real-T4 check in `PLACEMENT.md` has passed.
 
+Each encoder server has a 30 GiB gp3 root (`encoder_root_volume_gib`; GPU
+servers `gpu_root_volume_gib`, 60) and each encoder keeps only
+`encoder_local_keep_seconds` (1800) of its run on it once the segments are in
+S3, which holds the whole run. Placement checks that disk
+(`FLEET_TASK_DISK_GIB`, set from the same variable). Setting the window to 0
+keeps whole runs on the disk and fills it in about six hours of a 1080p ladder.
+
 ## 6. The database
 
 Nothing to run. The roles that own the schema (`all`, `api-admin`,

@@ -81,6 +81,10 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    a GPU pool that starts at zero servers (`deploy/terraform/ecs_capacity_gpu.tf`).
    With `captions_gpu_sharing = true` several captioned streams share one GPU
    server; leave it off until the real-T4 check in `PLACEMENT.md` has passed.
+   Encoders keep only `encoder_local_keep_seconds` of a run on their server's
+   disk once it is in S3 (`volt-encoder/bin/s3-uploader.sh`), and placement
+   checks that disk (`FLEET_TASK_DISK_GIB`); see `PLACEMENT.md`, "Storage, and
+   the task disk".
    Radio's MP3 output needs an Icecast relay, which has no home on AWS yet
    (queue item 2.1c); stations still deliver HLS and DASH.
 4. **Migrations.** The control plane applies every migration in
