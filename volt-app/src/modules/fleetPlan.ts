@@ -1,7 +1,8 @@
 /**
  * Fleet placement and consolidation, for the SaaS admin (requirePlatform).
  *
- *   GET /api/platform/fleet-plan             latest consolidation advice + 7-day summary
+ *   GET /api/platform/fleet-plan             latest consolidation advice + 7-day summary,
+ *                                            the learned load model and projection against actual
  *   GET /api/platform/fleet-plan/hosts       every server: capacity, measured and estimated load, streams
  *   GET /api/platform/fleet-plan/stream/:id  why a stream is sized and placed the way it is
  *
@@ -15,6 +16,7 @@ import { latestConsolidation, consolidationHistory } from '../services/fleet/adv
 import { loadFleetSnapshot } from '../services/fleet/snapshot';
 import { occupancyOf, telemetryTrusted } from '../services/fleet/fleetModel';
 import { fleetSettings } from '../services/fleet/placementConfig';
+import { currentLoadFits, projectionReport } from '../services/fleet/loadLearning';
 
 export const fleetPlanRouter = Router();
 
@@ -25,7 +27,14 @@ fleetPlanRouter.get('/', ...requirePlatform('read_only'), asyncHandler(async (_r
     placement: s.placement,
     latest: await latestConsolidation(),
     last7Days: await consolidationHistory(7),
-    policy: { consolidation: s.consolidationPolicy, pools: s.placementPolicy.pools, spotForChannels: s.placementPolicy.spotForChannels },
+    policy: {
+      consolidation: s.consolidationPolicy, pools: s.placementPolicy.pools, spotForChannels: s.placementPolicy.spotForChannels,
+      taskDiskGib: s.placementPolicy.taskDiskGib ?? null, diskHorizonHours: s.diskHorizonHours, learn: s.learn,
+    },
+    // What the load model has learned from the runs so far (multiplier per
+    // component and family) and how far its projections were from what ran.
+    loadModel: s.learn ? await currentLoadFits().catch(() => null) : null,
+    projection: await projectionReport(30).catch(() => null),
   });
 }));
 

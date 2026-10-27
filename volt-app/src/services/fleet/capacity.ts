@@ -45,6 +45,12 @@ export interface Capacity {
   gpus: number;
   /** How many awsvpc tasks it can carry at all (ENIs - 1 without trunking). */
   taskSlots: number;
+  /**
+   * Task disk the encoders share (MiB), when known (FLEET_TASK_DISK_GIB).
+   * Undefined means not checked: a guessed disk size would refuse or accept
+   * streams for a reason nobody measured.
+   */
+  diskMib?: number;
 }
 
 export interface InstanceProfile {
@@ -98,7 +104,7 @@ export function isGpuType(type: string | null | undefined): boolean {
 export function capacityOf(
   instanceType: string | null,
   registered: { vcpus?: number | null; memoryMib?: number | null },
-  opts: { taskSlotsOverride?: number | null } = {},
+  opts: { taskSlotsOverride?: number | null; diskGib?: number | null } = {},
 ): Capacity | null {
   const p = instanceProfile(instanceType);
   const vcpus = registered.vcpus ?? p?.vcpus ?? null;
@@ -110,6 +116,7 @@ export function capacityOf(
     netBps: p.netBaselineGbps * 1e9,
     gpus: p.gpus,
     taskSlots: opts.taskSlotsOverride ?? Math.max(1, p.enis - 1),
+    ...(opts.diskGib ? { diskMib: Math.round(opts.diskGib * 1024) } : {}),
   };
 }
 
@@ -144,7 +151,15 @@ export interface Occupancy {
   cpuUnits: number;
   netBps: number;
   gpuShare: number;
+  /** Task disk the streams on it will hold over the planning horizon (MiB). */
+  diskMib?: number;
 }
+
+/**
+ * Share of the task disk placement lets streams fill. The rest is the OS,
+ * the ECS agent, container images and logs, which also live on that volume.
+ */
+export const DISK_USABLE = 0.85;
 
 export interface FitResult { ok: boolean; reason: string | null; cpuAfter: number; netAfter: number }
 
@@ -161,7 +176,7 @@ export interface FitResult { ok: boolean; reason: string | null; cpuAfter: numbe
  * all back out to S3, so on package-only work the NIC, not the CPU, is what
  * runs out first.
  */
-export function fits(cap: Capacity, occ: Occupancy, add: { reservation: Reservation; load: StreamLoad }, p: FitPolicy = DEFAULT_FIT): FitResult {
+export function fits(cap: Capacity, occ: Occupancy, add: { reservation: Reservation; load: StreamLoad; diskMib?: number }, p: FitPolicy = DEFAULT_FIT): FitResult {
   const cpuAfter = (occ.cpuUnits + add.load.cpuUnits * p.safetyFactor) / cap.cpuUnits;
   const netAdd = (add.load.netInBps + add.load.netOutBps) * p.safetyFactor;
   const netAfter = (occ.netBps + netAdd) / cap.netBps;
@@ -175,13 +190,20 @@ export function fits(cap: Capacity, occ: Occupancy, add: { reservation: Reservat
     if (!p.gpuSharing && occ.reserved.gpus + add.reservation.gpus > cap.gpus) return no('GPU already taken');
     if (p.gpuSharing && occ.gpuShare + add.load.gpuShare * p.safetyFactor > p.ceiling * cap.gpus) return no('GPU encoder would be too busy');
   }
+  // DISK. The encoder keeps its whole run on the task disk while the sidecar
+  // mirrors it to S3 (storageProjection.ts), so what matters is what every
+  // stream on the server will have written by the end of the planning
+  // horizon. No safety factor: the bitrates fix the bytes.
+  if (cap.diskMib != null && (add.diskMib ?? 0) > 0 && (occ.diskMib ?? 0) + (add.diskMib ?? 0) > cap.diskMib * DISK_USABLE) {
+    return no(`task disk would run short (${Math.round(((occ.diskMib ?? 0) + (add.diskMib ?? 0)) / 1024)} of ${Math.round(cap.diskMib / 1024)} GiB)`);
+  }
   if (cpuAfter > p.ceiling) return no(`CPU would reach ${Math.round(cpuAfter * 100)}%`);
   if (netAfter > p.ceiling) return no(`network would reach ${Math.round(netAfter * 100)}%`);
   return { ok: true, reason: null, cpuAfter, netAfter };
 }
 
 /** Add a placed load to an occupancy (for planning several placements in a row). */
-export function occupy(occ: Occupancy, add: { reservation: Reservation; load: StreamLoad }): Occupancy {
+export function occupy(occ: Occupancy, add: { reservation: Reservation; load: StreamLoad; diskMib?: number }): Occupancy {
   return {
     tasks: occ.tasks + 1,
     reserved: {
@@ -192,6 +214,7 @@ export function occupy(occ: Occupancy, add: { reservation: Reservation; load: St
     cpuUnits: occ.cpuUnits + add.load.cpuUnits,
     netBps: occ.netBps + add.load.netInBps + add.load.netOutBps,
     gpuShare: occ.gpuShare + add.load.gpuShare,
+    diskMib: (occ.diskMib ?? 0) + (add.diskMib ?? 0),
   };
 }
 

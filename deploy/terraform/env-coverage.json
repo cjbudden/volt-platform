@@ -219,9 +219,17 @@
       "class": "default",
       "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
     },
+    "FLEET_DISK_HORIZON_HOURS": {
+      "class": "default",
+      "why": "How far ahead the task disk check looks (PLACEMENT.md); 24 hours suits 24/7 channels and events alike."
+    },
     "FLEET_GPU_SHARING": {
       "class": "default",
       "why": "false is right: each captions task reserves a whole GPU, which is also what its task definition asks ECS for."
+    },
+    "FLEET_LEARN": {
+      "class": "default",
+      "why": "The load model learns its coefficients from the runs the fleet measured (PLACEMENT.md); on is right on AWS."
     },
     "FLEET_MIN_UNDERUSED_HOSTS": {
       "class": "default",
@@ -250,6 +258,10 @@
     "FLEET_SPOT_FOR_CHANNELS": {
       "class": "default",
       "why": "24/7 channels stay on on-demand capacity unless this is turned on; off is the safe default."
+    },
+    "FLEET_TASK_DISK_GIB": {
+      "class": "default",
+      "why": "Off by default (the disk is not checked). The encoder keeps a whole run on its task disk today, so with the AMI's 30 GiB root a full HD ladder outgrows any server within a day; set it once the encoder keeps only a short window locally (build queue 2.4c)."
     },
     "FLEET_TASK_SLOTS": {
       "class": "default",

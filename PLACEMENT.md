@@ -54,6 +54,60 @@ from servers that were carrying that one stream alone (so the server reading *is
 stream reading), and it can never shrink a stream below half its estimate. That stops a
 run that sat on a slate for an hour from teaching the model that a ladder is free.
 
+## Learning from every run (build queue 2.4a)
+
+Per-signature history only helps a ladder that has already run three times, so a new
+ladder used to be sized from the constants however wrong they had proved elsewhere.
+Now the model also learns from **all** runs (`services/fleet/loadFit.ts`, read by
+`loadLearning.ts`):
+
+- Every estimate line carries a **component** (`encode:x264`, `encode:nvenc`,
+  `decode:h264`, `decode:hevc`, `decode:gpu`, `ingest`, `audio`, `package`, `drm`,
+  `graphics`, captions). Resolution and frame rate enter through output pixels per
+  second, bitrate through the ingest and packaging lines.
+- For every run of the last 30 days measured alone on its server, the estimate's lines
+  (stored at launch, unfitted, in `placement_decision.baseLines`) are set against the
+  measured p95 CPU, and a **multiplier per component** is fitted by least squares,
+  pulled towards 1 with the weight of three runs, per instance family (c7i, c6i, c5,
+  g4dn...) when the family has at least five runs and from all families together
+  otherwise. Network gets one multiplier on in plus out.
+- **Guards:** runs far off the fit (more than 4 median absolute deviations on the log
+  ratio) are set aside and the fit is repeated until that set is stable; every
+  multiplier is clamped between 0.5x and 2x; a run counts at most 24 hours.
+- At a start the fit for the family placement prefers (the first type of the first
+  shared pool) is applied before the per-signature calibration, and the basis reads
+  `fitted`. The fit is cached for ten minutes. `FLEET_LEARN=false` turns it off.
+
+## Storage, and the task disk
+
+Every estimate now projects storage from the bitrates (`storageProjection.ts`):
+bytes per hour written to the task disk and to S3 (every rendition, the audio
+tracks and the container overhead), and what S3 holds at steady state under the
+recording retention (null when the run is kept until deleted). It is stored at
+launch in `placement_decision.storage`.
+
+**Finding.** On AWS the packager keeps the whole run on the task disk
+(`--preserved_segments_outside_live_window 0`) while the sidecar mirrors it to S3, and
+the launch template sets no root volume size, so the ECS AMI's 30 GiB root is shared
+by every encoder on the server. A 4-rung 1080p ladder writes about 4.6 GiB an hour,
+so it fills that disk in about six hours whatever server it is on.
+
+Placement can now refuse a server whose task disk would run short: what each stream
+on it will have written by the end of the horizon (`FLEET_DISK_HORIZON_HOURS`, 24;
+a running event's own window when shorter), plus the new stream's share, must stay under
+85 % of `FLEET_TASK_DISK_GIB`. The check is **off until that is set**, because with
+today's encoder it would correctly refuse every full HD ladder on every server. Build
+queue 2.4c bounds the encoder's local copy and sizes the volume, and then turns it on.
+
+## Projection against actual
+
+`GET /api/platform/fleet-plan` now also returns `loadModel` (the multipliers per
+component and family, runs used and set aside, median error before and after) and
+`projection`: per class of work (transcode, package-only, radio, captions), the
+median actual/projected ratio, the median absolute error and the share of runs
+under-projected by more than 10 %, for CPU, network and storage (bytes the server
+sent per hour, which on an encoder host is what the uploader stored).
+
 ## Which server
 
 The same fit test (`capacity.fits()`) is used here and by consolidation, so the two can
@@ -137,6 +191,9 @@ advise mode, and nothing can move a running stream.
 | `FLEET_SPOT_FOR_CHANNELS` | false | Allow 24/7 channels on Spot |
 | `FLEET_CEILING`, `FLEET_SAFETY_FACTOR`, `FLEET_SOLO_CEILING` | 0.65, 1.25, 0.8 | Fit test |
 | `FLEET_TASK_SLOTS` | ENIs minus 1 | Tasks per server once ENI trunking is enabled |
+| `FLEET_LEARN` | true | Learn the load model's coefficients from every measured run |
+| `FLEET_TASK_DISK_GIB` | not set (disk not checked) | Task disk per encoder server; turns on the disk check |
+| `FLEET_DISK_HORIZON_HOURS` | 24 | How far ahead the disk check looks |
 | `FLEET_CONSOLIDATE` | advise | `off` or `advise`. `act` is refused until the handoff exists |
 
 ## Checks
@@ -148,14 +205,19 @@ advise mode, and nothing can move a running stream.
 | `test/consolidation-plan.check.ts` | 28 | nothing |
 | `test/server-status.check.ts` | 10 | nothing |
 | `test/placement-e2e.check.ts` | 21 | Postgres with migrations applied |
+| `test/load-fit.check.ts` | 47 | nothing |
+| `test/load-learning.check.ts` | 22 | Postgres with migrations applied |
 
 The existing orchestrator, auto-connect, captions-orchestration, crash-loop and
 relay-fleet suites still pass with these changes.
 
 ## Still to do
 
-- **Calibrate the coefficients** against real runs on the Tier-2 cluster, starting with
-  the transcode ladder figures.
+- **Real runs for the learning.** The fit is tested on synthetic histories; it starts
+  correcting real coefficients once the Tier-2 cluster has runs measured alone on a
+  server. Event windows are not yet passed to the disk check (it uses the horizon).
+- **The task disk (2.4c):** keep only a short window on the task disk, size the root
+  volume, then set `FLEET_TASK_DISK_GIB`.
 - **Enable ENI trunking.** Without it a server carries at most three tasks however light
   they are, and that, not CPU, caps how many package-only channels share a server.
 - **GPU sharing.** ECS reserves a whole GPU per task, so one NVENC stream occupies a

@@ -31,6 +31,14 @@ export interface FleetSettings {
   /** Task slots per host when ENI trunking is on (null = ENIs - 1). */
   taskSlotsOverride: number | null;
   windowMinutes: number;
+  /**
+   * Correct the load model's coefficients from every run (loadFit.ts) before
+   * sizing a stream. On by default; FLEET_LEARN=false sizes from the
+   * starting coefficients only (per-signature history still applies).
+   */
+  learn: boolean;
+  /** How far ahead the task disk check looks (hours). Events use their own window when shorter. */
+  diskHorizonHours: number;
 }
 
 function pools(): PoolSpec[] {
@@ -69,7 +77,12 @@ export function fleetSettings(): FleetSettings {
   return {
     placement: bool(process.env.FLEET_PLACEMENT, config.orchestrator.launcher === 'ecs'),
     consolidate: mode === 'off' ? 'off' : 'advise',
-    placementPolicy: { fit, spotForChannels: bool(process.env.FLEET_SPOT_FOR_CHANNELS, false), pools: pools() },
+    placementPolicy: {
+      fit, spotForChannels: bool(process.env.FLEET_SPOT_FOR_CHANNELS, false), pools: pools(),
+      // The encoder hosts' root volume size. Unset: the disk is not checked,
+      // because the size depends on the launch template (see PLACEMENT.md).
+      taskDiskGib: num(process.env.FLEET_TASK_DISK_GIB, 0) || null,
+    },
     consolidationPolicy: {
       ...DEFAULT_POLICY,
       fit,
@@ -80,5 +93,7 @@ export function fleetSettings(): FleetSettings {
     dedicatedTiers: list(process.env.FLEET_DEDICATED_TIERS, ['dedicated']),
     taskSlotsOverride: slots,
     windowMinutes: num(process.env.FLEET_WINDOW_MINUTES, 60),
+    learn: bool(process.env.FLEET_LEARN, true),
+    diskHorizonHours: Math.max(1, num(process.env.FLEET_DISK_HORIZON_HOURS, 24)),
   };
 }

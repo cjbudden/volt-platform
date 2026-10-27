@@ -13,6 +13,7 @@ import { capacityOf, isGpuType, type StreamLoad } from './capacity';
 import type { HostSnapshot, TaskSnapshot, Lifecycle } from './fleetModel';
 import type { ObservedHistory } from './streamLoad';
 import { fleetSettings, type FleetSettings } from './placementConfig';
+import { scratchMibAt } from './storageProjection';
 
 interface HostRow {
   id: string; external_id: string; instance_type: string | null; availability_zone: string | null;
@@ -29,6 +30,7 @@ interface TaskRow {
   pending: boolean; armed: boolean; status: string | null; fallback_in_use: boolean | null;
   drm: boolean | null; protocol: string | null; ingest_url: string | null;
   ends_in_min: string | number | null; since_move_min: string | number | null;
+  scratch_mib_per_hour: string | number | null; hours_running: string | number | null;
 }
 
 const n = (v: unknown) => (v == null ? null : Number(v));
@@ -75,7 +77,9 @@ export async function loadFleetSnapshot(s: FleetSettings = fleetSettings()): Pro
             COALESCE(op.drm_enabled, false) AS drm,
             si.protocol, si.ingest_url,
             CASE WHEN e.server_stop IS NOT NULL THEN EXTRACT(EPOCH FROM (e.server_stop - now())) / 60 END AS ends_in_min,
-            CASE WHEN i.moved_at IS NOT NULL THEN EXTRACT(EPOCH FROM (now() - i.moved_at)) / 60 END AS since_move_min
+            CASE WHEN i.moved_at IS NOT NULL THEN EXTRACT(EPOCH FROM (now() - i.moved_at)) / 60 END AS since_move_min,
+            (i.placement_decision->'storage'->>'scratchMibPerHour')::float AS scratch_mib_per_hour,
+            EXTRACT(EPOCH FROM (now() - i.launched_at)) / 3600 AS hours_running
        FROM instances i
        LEFT JOIN channels c ON c.id = i.channel_id
        LEFT JOIN events e ON e.id = i.event_id
@@ -99,7 +103,7 @@ export async function loadFleetSnapshot(s: FleetSettings = fleetSettings()): Pro
 
   const out: HostSnapshot[] = [];
   for (const h of hosts) {
-    const cap = capacityOf(h.instance_type, { vcpus: n(h.vcpus), memoryMib: h.memory_mib }, { taskSlotsOverride: s.taskSlotsOverride });
+    const cap = capacityOf(h.instance_type, { vcpus: n(h.vcpus), memoryMib: h.memory_mib }, { taskSlotsOverride: s.taskSlotsOverride, diskGib: s.placementPolicy.taskDiskGib });
     if (!cap) continue;
     const provider = providerOf.get(h.id) ?? null;
     const spec = provider ? specByProvider.get(provider) : undefined;
@@ -148,7 +152,16 @@ function toTask(t: TaskRow, s: FleetSettings): TaskSnapshot {
     endsInMinutes: n(t.ends_in_min),
     minutesSinceMove: n(t.since_move_min),
     pending: t.pending,
+    ...(t.scratch_mib_per_hour != null ? {
+      diskMibAtHorizon: scratchMibAt(Number(t.scratch_mib_per_hour), n(t.hours_running) ?? 0,
+        horizonHours(s.diskHorizonHours, n(t.ends_in_min))),
+    } : {}),
   };
+}
+
+/** Hours of writing still to come: the horizon, or less when an event's window closes sooner. */
+export function horizonHours(horizon: number, endsInMinutes: number | null): number {
+  return endsInMinutes != null ? Math.max(0, Math.min(horizon, endsInMinutes / 60)) : horizon;
 }
 
 /**

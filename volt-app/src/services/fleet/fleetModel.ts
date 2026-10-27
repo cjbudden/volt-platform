@@ -47,6 +47,12 @@ export interface TaskSnapshot {
   minutesSinceMove: number | null;
   /** Placed by a launch in the last few minutes and not yet seen by telemetry. */
   pending: boolean;
+  /**
+   * Task disk this stream will hold by the end of the planning horizon (MiB):
+   * what it has written so far plus what it will write, from its storage
+   * projection. Undefined for tasks launched before storage was projected.
+   */
+  diskMibAtHorizon?: number;
 }
 
 export interface HostSnapshot {
@@ -99,8 +105,8 @@ export function occupancyOf(h: HostSnapshot, mode: 'trusted' | 'conservative', e
   const tasks = h.tasks.filter((t) => !excludeInstanceIds.has(t.instanceId));
   const est = tasks.reduce((a, t) => {
     const l = taskLoad(t);
-    return { cpu: a.cpu + l.cpuUnits, net: a.net + l.netInBps + l.netOutBps, gpu: a.gpu + l.gpuShare };
-  }, { cpu: 0, net: 0, gpu: 0 });
+    return { cpu: a.cpu + l.cpuUnits, net: a.net + l.netInBps + l.netOutBps, gpu: a.gpu + l.gpuShare, disk: a.disk + (t.diskMibAtHorizon ?? 0) };
+  }, { cpu: 0, net: 0, gpu: 0, disk: 0 });
   const reserved = reservedOf({ ...h, tasks });
   if (mode === 'trusted') {
     if (!telemetryTrusted(h)) return null;
@@ -109,13 +115,13 @@ export function occupancyOf(h: HostSnapshot, mode: 'trusted' | 'conservative', e
     const rmCpu = removed.reduce((s, l) => s + l.cpuUnits, 0);
     const rmNet = removed.reduce((s, l) => s + l.netInBps + l.netOutBps, 0);
     return {
-      reserved, tasks: tasks.length, gpuShare: est.gpu,
+      reserved, tasks: tasks.length, gpuShare: est.gpu, diskMib: est.disk,
       cpuUnits: Math.max(0, h.observed!.cpuUnitsP95 - rmCpu),
       netBps: Math.max(0, h.observed!.netBpsP95 - rmNet),
     };
   }
   return {
-    reserved, tasks: tasks.length, gpuShare: est.gpu,
+    reserved, tasks: tasks.length, gpuShare: est.gpu, diskMib: est.disk,
     cpuUnits: Math.max(est.cpu, h.observed?.cpuUnitsP95 ?? 0),
     netBps: Math.max(est.net, h.observed?.netBpsP95 ?? 0),
   };

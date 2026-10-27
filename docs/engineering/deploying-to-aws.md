@@ -103,6 +103,7 @@ What makes Volt cheap to run is mostly in phase 2 of the queue:
 | Per-run S3 prefixes, so a recording is a time range over segments that move as a unit | encoder and origin pointer | 2.2 |
 | Retention, cooling and archive of recordings on S3 | `volt-app/src/services/clips` for clips and extracts | 2.3 |
 | Consolidation: move encoders off part-empty nodes, make before break | `CONSOLIDATION.md` | 2.4 |
+| Sizing that learns from every run, storage projected, placement that checks the task disk | `volt-app/src/services/fleet/loadFit.ts`, `volt-app/src/services/fleet/storageProjection.ts`, `PLACEMENT.md` | built (2.4a); disk check waits on 2.4c |
 | Watch folders picked up from S3 by event, not by a walk | `volt-app/src/services/watchfolder/s3events.ts`, `deploy/terraform/watchfolders.tf` | built (2.6) |
 | Edge rights decided in CloudFront, not at the origin | `deploy/edge/rights-viewer-request.js` | built (1.14a, 1.14b) |
 | Scaling and chaos runs against the deployment | `deploy/loadtest` | 2.8 |

@@ -21,6 +21,9 @@
 import { query } from '../../db';
 import type { LaunchHints } from '../orchestrator/launcher';
 import { calibrate, type LoadEstimate } from './streamLoad';
+import { applyFit, fitFor } from './loadFit';
+import { currentLoadFits, familyForPlacement } from './loadLearning';
+import { scratchMibAt } from './storageProjection';
 import { choosePlacement, type PlacementDecision, type StreamClass } from './placementPlanner';
 import { loadFleetSnapshot, signatureHistory } from './snapshot';
 import { fleetSettings } from './placementConfig';
@@ -36,9 +39,22 @@ export async function assignStream(args: {
   streamClass: StreamClass;
   accountId: string | null;
   estimate: LoadEstimate;
+  /** Hours the stream is expected to run, when known (an event's window); the disk horizon otherwise. */
+  horizonHours?: number;
 }): Promise<Assignment> {
   const s = fleetSettings();
   let estimate = args.estimate;
+  // LEARN FIRST, THEN CALIBRATE. The fit corrects the cost of each component
+  // from every run (so a new ladder starts from what its parts really cost);
+  // a signature with enough history of its own then replaces that with its
+  // own measurement, which is more exact still.
+  if (s.learn) {
+    try {
+      estimate = applyFit(estimate, fitFor(await currentLoadFits(), familyForPlacement(s.placementPolicy, estimate.needsGpu)));
+    } catch (e) {
+      console.warn('[fleet] learned fit unavailable; using the starting coefficients', e);
+    }
+  }
   try {
     estimate = calibrate(estimate, await signatureHistory(estimate.signature));
   } catch (e) {
@@ -58,6 +74,7 @@ export async function assignStream(args: {
     const decision = choosePlacement({
       streamId: args.streamId, streamClass: args.streamClass, accountId: args.accountId, isolation,
       load: estimate.load, reservation: estimate.reservation, needsGpu: estimate.needsGpu,
+      diskMib: scratchMibAt(estimate.storage?.scratchMibPerHour ?? 0, 0, args.horizonHours ?? s.diskHorizonHours),
     }, hosts, s.placementPolicy);
 
     const sized = { cpuUnits: estimate.reservation.cpuUnits, memoryMib: estimate.reservation.memoryMib, gpus: estimate.reservation.gpus };
@@ -91,6 +108,9 @@ export async function recordAssignment(taskArn: string, a: Assignment): Promise<
     [taskArn, l.cpuUnits, l.memoryMib, l.gpuShare, l.netInBps, l.netOutBps, a.estimate.signature, a.estimate.basis,
      a.hints?.cpuUnits ?? null, a.hints?.memoryMib ?? null, a.estimate.reservation.gpus,
      a.hints?.hostId ?? null, a.hints?.capacityProvider ?? null,
-     JSON.stringify({ ...a.decision, lines: a.estimate.lines, notes: a.estimate.notes, reservation: a.estimate.reservation })]
+     // baseLines (the unfitted model) is what learning compares measurements
+     // with; storage drives the disk check for the next placements.
+     JSON.stringify({ ...a.decision, lines: a.estimate.lines, baseLines: a.estimate.baseLines ?? a.estimate.lines,
+       notes: a.estimate.notes, reservation: a.estimate.reservation, storage: a.estimate.storage, fit: a.estimate.fit ?? null })]
   );
 }

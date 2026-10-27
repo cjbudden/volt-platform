@@ -39,6 +39,7 @@
 //  Pure: no DB, no clock, no IO.
 // ============================================================================
 import type { StreamLoad, Reservation } from './capacity';
+import { projectStorage, type StorageProjection } from './storageProjection';
 
 export interface SourceProbe {
   video?: { codec?: string; width?: number; height?: number; fps?: number | null; bitrate_kbps?: number | null };
@@ -46,7 +47,15 @@ export interface SourceProbe {
   audio?: Array<{ bitrate_kbps?: number | null }>;
 }
 
-export interface LoadLine { what: string; cpuUnits: number; memoryMib: number; gpuShare: number; netInBps: number; netOutBps: number }
+export interface LoadLine {
+  what: string; cpuUnits: number; memoryMib: number; gpuShare: number; netInBps: number; netOutBps: number;
+  /**
+   * Which coefficient this line's CPU comes from (encode:x264, decode:hevc,
+   * package...). loadFit.ts learns one multiplier per component from every
+   * run, so a new ladder is sized from what its parts cost elsewhere.
+   */
+  component?: string;
+}
 
 export interface LoadEstimate {
   taskKind: 'transcode' | 'package_only' | 'radio' | 'captions';
@@ -55,8 +64,15 @@ export interface LoadEstimate {
   needsGpu: boolean;
   /** Stable key for "streams that cost the same", used to calibrate from history. */
   signature: string;
-  basis: 'estimate' | 'observed';
+  /** estimate: the starting coefficients; fitted: corrected from all runs (loadFit.ts); observed: this signature's own history. */
+  basis: 'estimate' | 'fitted' | 'observed';
   lines: LoadLine[];
+  /** The lines before any fit, kept so learning always compares measurements with the unfitted model. */
+  baseLines?: LoadLine[];
+  /** Which learned fit was applied, when one was. */
+  fit?: { family: string; runs: number };
+  /** Task disk and S3 the stream will write, from its bitrates (storageProjection.ts). */
+  storage: StorageProjection;
   /** Things a person should know about how their settings were applied. */
   notes: string[];
 }
@@ -113,8 +129,8 @@ const widthFor = (h: number) => Math.round((h * 16) / 9 / 2) * 2;
 const ceilTo = (v: number, step: number) => Math.ceil(v / step) * step;
 const kbpsToBps = (k: number) => k * 1000;
 
-function line(what: string, l: Partial<LoadLine>): LoadLine {
-  return { what, cpuUnits: 0, memoryMib: 0, gpuShare: 0, netInBps: 0, netOutBps: 0, ...l };
+function line(what: string, l: Partial<LoadLine>, component?: string): LoadLine {
+  return { what, cpuUnits: 0, memoryMib: 0, gpuShare: 0, netInBps: 0, netOutBps: 0, ...l, ...(component ? { component } : {}) };
 }
 
 function total(lines: LoadLine[], gpus: number): StreamLoad {
@@ -171,10 +187,11 @@ export function estimateEncoderLoad(job: Record<string, any>, probe?: SourceProb
       netInBps: kbpsToBps(srcKbps) * sources,
       cpuUnits: K.ioPerMbps * (srcKbps / 1000) * sources,
       memoryMib: K.memPerRelay * (sources - 1),
-    }));
+    }, 'ingest'));
     lines.push(line(`decode ${hevc ? 'HEVC' : 'H.264'} ${srcH}p${needsGpu ? ' on GPU' : ''}`, needsGpu
       ? { cpuUnits: K.nvencDecodeCpu, gpuShare: srcMpxs / (K.gpuMpxsCapacity * 2), memoryMib: K.memDecoder1080 * (srcMpxs / 62.2) }
-      : { cpuUnits: K.decodePerMpxs * srcMpxs * (hevc ? 2 : 1), memoryMib: 64 + K.memDecoder1080 * (srcMpxs / 62.2) }));
+      : { cpuUnits: K.decodePerMpxs * srcMpxs * (hevc ? 2 : 1), memoryMib: 64 + K.memDecoder1080 * (srcMpxs / 62.2) },
+      needsGpu ? 'decode:gpu' : hevc ? 'decode:hevc' : 'decode:h264'));
 
     const wm = !!job.watermark;
     for (const r of ladder) {
@@ -187,11 +204,11 @@ export function estimateEncoderLoad(job: Record<string, any>, probe?: SourceProb
         cpuUnits: cpu,
         gpuShare: needsGpu ? m / K.gpuMpxsCapacity : 0,
         memoryMib: Math.max(K.memPerTranscodeRungMin, K.memPerTranscodeRung1080 * (m / 62.2)),
-      }));
+      }, needsGpu ? 'encode:nvenc' : 'encode:x264'));
       outKbps += r.bitrate_kbps || 0;
     }
     if (!ladder.length) notes.push('The output ladder is empty, so only the source path is counted.');
-    lines.push(line(`audio: ${audioTracks} AAC track${audioTracks > 1 ? 's' : ''}`, { cpuUnits: K.aacPerTrack * audioTracks }));
+    lines.push(line(`audio: ${audioTracks} AAC track${audioTracks > 1 ? 's' : ''}`, { cpuUnits: K.aacPerTrack * audioTracks }, 'audio'));
   } else {
     const kbpsOf = (i: any) => Number(i.bitrate_kbps) || 3000;
     const inKbps = primaries.reduce((s, i) => s + kbpsOf(i), 0);
@@ -201,12 +218,12 @@ export function estimateEncoderLoad(job: Record<string, any>, probe?: SourceProb
     lines.push(line(`relay ${primaries.length} rendition${primaries.length === 1 ? '' : 's'} in`, {
       netInBps: kbpsToBps(inKbps), cpuUnits: K.relayPerInput * primaries.length + K.ioPerMbps * (inKbps / 1000),
       memoryMib: K.memPerRelay * primaries.length,
-    }));
+    }, 'ingest'));
     if (backups.length) {
       lines.push(line(`relay ${backups.length} backup rendition${backups.length === 1 ? '' : 's'} in (always running)`, {
         netInBps: kbpsToBps(bkKbps), cpuUnits: K.relayPerInput * backups.length + K.ioPerMbps * (bkKbps / 1000),
         memoryMib: K.memPerRelay * backups.length,
-      }));
+      }, 'ingest'));
     }
     outKbps = inKbps;
     if (job.watermark) notes.push('Package-only channels pass the source through untouched, so the watermark is not burned in. Use a transcode profile to burn it in.');
@@ -217,13 +234,13 @@ export function estimateEncoderLoad(job: Record<string, any>, probe?: SourceProb
     cpuUnits: K.packagerBase + K.ioPerMbps * (outTotalKbps / 1000),
     memoryMib: K.memBase,
     netOutBps: kbpsToBps(outTotalKbps),
-  }));
+  }, 'package'));
   if (job.graphics_burn && workflow === 'transcode') {
-    lines.push(line('graphics burned into the picture (renderer + one composite)', { cpuUnits: K.gfxRendererCpu, memoryMib: K.memGfxRenderer }));
+    lines.push(line('graphics burned into the picture (renderer + one composite)', { cpuUnits: K.gfxRendererCpu, memoryMib: K.memGfxRenderer }, 'graphics'));
   }
-  if (job.drm) lines.push(line('DRM encryption', { cpuUnits: K.drmPerMbps * (outTotalKbps / 1000), memoryMib: 16 }));
+  if (job.drm) lines.push(line('DRM encryption', { cpuUnits: K.drmPerMbps * (outTotalKbps / 1000), memoryMib: 16 }, 'drm'));
   if (job.captions?.enabled && job.captions.engine === 'gladia') {
-    lines.push(line('live captions (Gladia, in the cloud)', { cpuUnits: K.gladia, memoryMib: K.memGladia, netOutBps: kbpsToBps(K.gladiaUpKbps) }));
+    lines.push(line('live captions (Gladia, in the cloud)', { cpuUnits: K.gladia, memoryMib: K.memGladia, netOutBps: kbpsToBps(K.gladiaUpKbps) }, 'captions:gladia'));
   }
   if (job.captions?.enabled && job.captions.engine === 'whisper' && job.captions.in_encoder) {
     // faster-whisper int8 on CPU (captionsPlan.ts CPU_WHISPER_SIZES), plus NLLB
@@ -234,13 +251,16 @@ export function estimateEncoderLoad(job: Record<string, any>, probe?: SourceProb
     lines.push(line(`live captions (Whisper ${size} on CPU${mt ? ' + translation' : ''})`, {
       cpuUnits: K.whisperCpu[size] + (mt ? K.nllbCpu : 0),
       memoryMib: K.memWhisperCpu[size] + (mt ? K.memNllbCpu : 0),
-    }));
+    }, 'captions:whisper-cpu'));
   }
 
   const load = total(lines, gpus);
   return {
     taskKind: workflow, load, reservation: reserve(load), needsGpu,
     signature: encoderSignature(job), basis: 'estimate', lines, notes,
+    // The packaged output is what lands on the task disk and in S3; the
+    // Gladia upstream is not stored, so it is left out on purpose.
+    storage: projectStorage(outTotalKbps, job.recording?.retention_sec ?? null),
   };
 }
 
@@ -249,13 +269,14 @@ export function estimateWhisperLoad(plan: { estVramGb: number; needsMt: boolean;
   const lines = [
     line(`Whisper ${plan.modelSize ?? 'small'}${plan.needsMt ? ' + translation' : ''} (GPU)`, {
       cpuUnits: 768, memoryMib: 2048 + plan.estVramGb * 256, gpuShare: 0.5, netInBps: kbpsToBps(160), netOutBps: kbpsToBps(16),
-    }),
+    }, 'captions:whisper-gpu'),
   ];
   const load = total(lines, 1);
   return {
     taskKind: 'captions', load, reservation: reserve(load), needsGpu: true,
     signature: `captions|whisper|${plan.modelSize ?? 'small'}|${plan.needsMt ? 'mt' : 'nomt'}`,
-    basis: 'estimate', lines, notes: [],
+    // Subtitle segments only: a few kbps, written next to the video output.
+    basis: 'estimate', lines, notes: [], storage: projectStorage(16),
   };
 }
 
@@ -265,15 +286,17 @@ export function estimateRadioLoad(job: Record<string, any>): LoadEstimate {
   const outs = job.outputs ?? {};
   const n = ['hls', 'dash', 'mp3'].filter((k) => outs[k]).length || 1;
   const lines = [
-    line('audio source in', { netInBps: kbpsToBps(Math.max(kbps, 256)), cpuUnits: 40 }),
+    line('audio source in', { netInBps: kbpsToBps(Math.max(kbps, 256)), cpuUnits: 40 }, 'radio'),
     line(`${n} audio output${n > 1 ? 's' : ''} at ${kbps} kbps`, {
       cpuUnits: 60 * n, memoryMib: 192 + 32 * n, netOutBps: kbpsToBps(kbps * n * K.muxOverhead),
-    }),
+    }, 'radio'),
   ];
   const load = total(lines, 0);
   return {
     taskKind: 'radio', load, reservation: reserve(load), needsGpu: false,
     signature: `radio|${kbps}|${n}`, basis: 'estimate', lines, notes: [],
+    // Each segmented output (HLS, DASH) is written and uploaded; the MP3 mount is a live relay, not stored.
+    storage: projectStorage(kbps * K.muxOverhead * ['hls', 'dash'].filter((k) => outs[k]).length, job.recording?.retention_sec ?? null),
   };
 }
 

@@ -8,6 +8,12 @@
 //  noticing. That one rule, applied at every start, prevents most of the
 //  fragmentation consolidation would otherwise have to clean up later.
 //
+//  DISK. When the task disk size is known (FLEET_TASK_DISK_GIB), a server is
+//  also refused when what its streams will have written to it by the end of
+//  the planning horizon, plus the new stream's share, would not fit
+//  (storageProjection.ts). A stream too big for a whole empty server's disk is
+//  unplaceable, and launches with default sizing like any other.
+//
 //  Which servers are eligible at all is decided by the stream and the plan,
 //  never by the person starting it:
 //
@@ -25,7 +31,7 @@
 //
 //  Pure: no DB, no clock, no IO.
 // ============================================================================
-import { fits, soloFit, DEFAULT_FIT, instanceProfile, capacityOf, type FitPolicy, type Reservation, type StreamLoad } from './capacity';
+import { fits, soloFit, DEFAULT_FIT, DISK_USABLE, instanceProfile, capacityOf, type FitPolicy, type Reservation, type StreamLoad } from './capacity';
 import { occupancyOf, type HostSnapshot, type Lifecycle } from './fleetModel';
 
 export type StreamClass = 'channel' | 'event' | 'radio' | 'captions' | 'thumbnailer';
@@ -39,6 +45,8 @@ export interface PlacementRequest {
   load: StreamLoad;
   reservation: Reservation;
   needsGpu: boolean;
+  /** Task disk this stream will hold by the end of the planning horizon (MiB). */
+  diskMib?: number;
 }
 
 /**
@@ -60,6 +68,8 @@ export interface PlacementPolicy {
   fit: FitPolicy;
   spotForChannels: boolean;
   pools: PoolSpec[];
+  /** Task disk per server (GiB) when known; the disk check is off without it. */
+  taskDiskGib?: number | null;
 }
 
 const SMALL = ['c7i.xlarge', 'c6i.xlarge', 'c5.xlarge'];
@@ -117,9 +127,9 @@ export function poolFor(req: PlacementRequest): string {
 const EMPTY = { reserved: { cpuUnits: 0, memoryMib: 0, gpus: 0 }, tasks: 0, cpuUnits: 0, netBps: 0, gpuShare: 0 };
 
 /** Does EVERY type this pool can launch hold the stream within the ceiling? */
-function poolHolds(spec: PoolSpec, add: { reservation: Reservation; load: StreamLoad }, fit: FitPolicy): boolean {
+function poolHolds(spec: PoolSpec, add: { reservation: Reservation; load: StreamLoad; diskMib?: number }, fit: FitPolicy, diskGib?: number | null): boolean {
   return spec.types.length > 0 && spec.types.every((t) => {
-    const cap = capacityOf(t, {});
+    const cap = capacityOf(t, {}, { diskGib });
     return !!cap && fits(cap, EMPTY, add, soloFit(fit)).ok;
   });
 }
@@ -128,7 +138,7 @@ export function choosePlacement(req: PlacementRequest, hosts: HostSnapshot[], p:
   const considered: Array<{ hostId: string; reason: string }> = [];
   const pool = poolFor(req);
   const lifecycles = lifecyclesFor(req.streamClass, p);
-  const add = { reservation: req.reservation, load: req.load };
+  const add = { reservation: req.reservation, load: req.load, diskMib: req.diskMib };
 
   const candidates: Array<{ h: HostSnapshot; cpu: number; net: number; rank: number }> = [];
   for (const h of hosts) {
@@ -160,7 +170,7 @@ export function choosePlacement(req: PlacementRequest, hosts: HostSnapshot[], p:
   // matches this stream's pool, hardware and lifecycle and is big enough.
   for (const lc of lifecycles) {
     const specs = p.pools.filter((s) => s.pool === pool && s.gpu === req.needsGpu && s.lifecycle === lc);
-    const spec = specs.find((s) => poolHolds(s, add, p.fit));
+    const spec = specs.find((s) => poolHolds(s, add, p.fit, p.taskDiskGib));
     if (spec) {
       return {
         action: 'new_host', capacityProvider: spec.provider, lifecycle: lc, instanceType: spec.types[0],
@@ -176,7 +186,9 @@ export function choosePlacement(req: PlacementRequest, hosts: HostSnapshot[], p:
       ? (req.isolation === 'dedicated'
         ? 'this account is on a dedicated plan but no dedicated server pool is configured for it'
         : req.needsGpu ? 'this stream needs a GPU and no GPU server pool is configured' : 'no capacity pool is configured')
-      : `this stream is larger than the biggest configured server can run within the ${Math.round(p.fit.soloCeiling * 100)}% sizing ceiling`,
+      : p.taskDiskGib && (req.diskMib ?? 0) > p.taskDiskGib * 1024 * DISK_USABLE
+        ? `this stream would write more than an empty server's ${p.taskDiskGib} GiB task disk holds within the planning horizon`
+        : `this stream is larger than the biggest configured server can run within the ${Math.round(p.fit.soloCeiling * 100)}% sizing ceiling`,
   };
 }
 
