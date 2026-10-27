@@ -115,7 +115,7 @@ resource "aws_autoscaling_group" "ondemand" {
 resource "aws_ecs_capacity_provider" "spot" {
   name = "${var.project}-spot"
   auto_scaling_group_provider {
-    auto_scaling_group_arn         = aws_autoscaling_group.spot.arn
+    auto_scaling_group_arn = aws_autoscaling_group.spot.arn
     # ENABLED: with DISABLED, a scale-in let the Auto Scaling group pick which
     # server to terminate, and that could be one still carrying a live stream.
     managed_termination_protection = "ENABLED"
@@ -131,7 +131,7 @@ resource "aws_ecs_capacity_provider" "spot" {
 resource "aws_ecs_capacity_provider" "ondemand" {
   name = "${var.project}-ondemand"
   auto_scaling_group_provider {
-    auto_scaling_group_arn         = aws_autoscaling_group.ondemand.arn
+    auto_scaling_group_arn = aws_autoscaling_group.ondemand.arn
     # ENABLED: with DISABLED, a scale-in let the Auto Scaling group pick which
     # server to terminate, and that could be one still carrying a live stream.
     managed_termination_protection = "ENABLED"

@@ -52,6 +52,8 @@ resource "aws_secretsmanager_secret_version" "app" {
     VIEWER_JWT_SECRET     = random_password.viewer_jwt.result
     # Seals authenticator-app seeds at rest (ACCESS_CONTROL.md section 12).
     MFA_ENCRYPTION_KEY = random_id.mfa_key.b64_std
+    # Seals social account tokens (app_settings.tf).
+    SOCIAL_TOKEN_KEY = random_id.social_token_key.hex
   })
 }
 

@@ -6,6 +6,9 @@ capacity providers for the encoder/thumbnailer tasks, RDS Postgres, an S3 origin
 fronted by CloudFront, ECR repos, and Secrets Manager. It is the Tier‑2 target
 referenced by the test strategy in the main `RUNBOOK.md` (Tier‑1 = local e2e).
 
+> **First time?** Follow `APPLY.md` in this folder: the order of these steps,
+> the checks to run before you apply, and what does not work on AWS yet.
+
 > **What Terraform does vs what you do.** Terraform builds the infrastructure and
 > wires the control plane's env to it. You still (1) build & push the three
 > container images to ECR, (2) run the DB migration once, and (3) populate the
@@ -86,16 +89,12 @@ aws ecs update-service --cluster $(terraform output -raw ecs_cluster) \
 (Encoder, thumbnailer and FAST playout task defs point at `:latest`; the orchestrator picks
 them up on the next RunTask — no service to roll.)
 
-## 4. Migrate the database (once)
-The app applies `migrations/0001_init.sql`. Easiest is a one‑off task or a bastion;
-for a throwaway env you can run it from anywhere that can reach RDS (it's in
-private subnets, so use SSM port‑forward through a node, or temporarily allow your
-IP on the RDS SG):
-```bash
-DB_URL=$(aws secretsmanager get-secret-value --secret-id $(terraform output -raw app_secret_arn) \
-  --query SecretString --output text | jq -r .DATABASE_URL)
-psql "$DB_URL" -f ../../volt-app/migrations/0001_init.sql
-```
+## 4. The database
+Nothing to run. The roles that own the schema (`all`, `api-admin`, `scheduler`)
+apply every migration in `volt-app/migrations` on boot, under a lock, before they
+serve (`volt-app/src/scale/boot.ts`); the other roles wait for them. Applying
+only `0001_init.sql` by hand, as this step used to say, would leave the schema
+far behind the code.
 
 ## 5. Populate integration secrets
 ```bash

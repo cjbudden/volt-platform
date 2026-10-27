@@ -42,7 +42,7 @@ resource "aws_iam_role" "control_plane" {
 data "aws_iam_policy_document" "control_plane" {
   # S3 origin r/w for recording/VOD bookkeeping + presigns.
   statement {
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:RestoreObject"]
     resources = [aws_s3_bucket.origin.arn, "${aws_s3_bucket.origin.arn}/*"]
   }
   # Secrets the app reads at runtime.

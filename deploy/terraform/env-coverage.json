@@ -1,0 +1,759 @@
+{
+  "about": "Every environment variable the control plane reads that Terraform does not set, and why (build queue 2.1). Checked by scripts/deploy/check-terraform-env.mjs and volt-app/test/terraform-env.check.ts. A name ending in * covers every name with that start.",
+  "classes": {
+    "default": "The built-in default is right on AWS.",
+    "local": "Only for a Mac or a test run; leave it unset on AWS.",
+    "operator": "Set by whoever runs Volt when they use the feature, through app_env (plain) or app_secret_keys (secret, in the integrations secret).",
+    "not-on-aws-yet": "The feature does not work on AWS yet; the named build queue item fixes it."
+  },
+  "settings": {
+    "ACCESS_STRICT_SUBJECT": {
+      "class": "default",
+      "why": "Strict in production already (NODE_ENV)."
+    },
+    "ACCESS_TTL": {
+      "class": "default",
+      "why": "Session and link lifetimes; the built-in values are the product defaults on every deployment."
+    },
+    "AD_BEACONS_ALLOW_PRIVATE": {
+      "class": "local",
+      "why": "Test switches that loosen a safety check; they must stay unset on AWS (SECURITY_CODE_ECHO is ignored in production anyway)."
+    },
+    "ALLOW_DIRECT_REGISTER": {
+      "class": "default",
+      "why": "Off in production, as it should be. Set it with app_env only to open direct sign-up on purpose."
+    },
+    "ANALYTICS_BATCH_ROWS": {
+      "class": "default",
+      "why": "Analytics tuning; the built-in values suit the Tier-2 sizes (SCALING.md)."
+    },
+    "ANALYTICS_CONCURRENCY_SEC": {
+      "class": "default",
+      "why": "Analytics tuning; the built-in values suit the Tier-2 sizes (SCALING.md)."
+    },
+    "ANALYTICS_DATABASE_URL": {
+      "class": "default",
+      "why": "Defaults to the <database>_qoe database on the same RDS instance, created on first start."
+    },
+    "ANALYTICS_FLUSH_SEC": {
+      "class": "default",
+      "why": "Analytics tuning; the built-in values suit the Tier-2 sizes (SCALING.md)."
+    },
+    "ANALYTICS_MAX_BUFFERED": {
+      "class": "default",
+      "why": "Analytics tuning; the built-in values suit the Tier-2 sizes (SCALING.md)."
+    },
+    "ANALYTICS_POOL_MAX": {
+      "class": "default",
+      "why": "Analytics tuning; the built-in values suit the Tier-2 sizes (SCALING.md)."
+    },
+    "ANALYTICS_QUERY_MS": {
+      "class": "default",
+      "why": "Analytics tuning; the built-in values suit the Tier-2 sizes (SCALING.md)."
+    },
+    "AUTO_CONNECT": {
+      "class": "default",
+      "why": "Auto-reconnect policy for streams; the product defaults."
+    },
+    "AWS_ENDPOINT_URL": {
+      "class": "local",
+      "why": "Point the S3 client at a local stand-in (MinIO) for tests; unset on AWS so the real endpoints are used."
+    },
+    "AWS_ENDPOINT_URL_S3": {
+      "class": "local",
+      "why": "Point the S3 client at a local stand-in (MinIO) for tests; unset on AWS so the real endpoints are used."
+    },
+    "CACHE_ASSET_TTL_SEC": {
+      "class": "default",
+      "why": "In-process cache tuning (SCALING.md); the defaults suit Tier-2."
+    },
+    "CACHE_ENTITLEMENT_TTL_SEC": {
+      "class": "default",
+      "why": "In-process cache tuning (SCALING.md); the defaults suit Tier-2."
+    },
+    "CACHE_KEY_TTL_SEC": {
+      "class": "default",
+      "why": "In-process cache tuning (SCALING.md); the defaults suit Tier-2."
+    },
+    "CACHE_MAX_ENTRIES": {
+      "class": "default",
+      "why": "In-process cache tuning (SCALING.md); the defaults suit Tier-2."
+    },
+    "CACHE_PROGRAMME_TTL_SEC": {
+      "class": "default",
+      "why": "In-process cache tuning (SCALING.md); the defaults suit Tier-2."
+    },
+    "CACHE_RULES_TTL_SEC": {
+      "class": "default",
+      "why": "In-process cache tuning (SCALING.md); the defaults suit Tier-2."
+    },
+    "CACHE_VIEWER_TOUCH_SEC": {
+      "class": "default",
+      "why": "In-process cache tuning (SCALING.md); the defaults suit Tier-2."
+    },
+    "CAPTIONS_CPU_IN_ENCODER": {
+      "class": "not-on-aws-yet",
+      "why": "Terraform has no captions task definition or image repository yet (volt-encoder/Dockerfile.captions exists).",
+      "item": "2.1b"
+    },
+    "CAPTIONS_TASK_DEF": {
+      "class": "not-on-aws-yet",
+      "why": "Terraform has no captions task definition or image repository yet (volt-encoder/Dockerfile.captions exists).",
+      "item": "2.1b"
+    },
+    "CLIPS_DIR": {
+      "class": "not-on-aws-yet",
+      "why": "Clip, VOD encode and ad conditioning work is done here and downloads are served from here; the bucket copy exists for clips, but the local copy is still what is served.",
+      "item": "2.1a"
+    },
+    "CLIPS_S3_UPLOAD": {
+      "class": "default",
+      "why": "Clips go to the bucket whenever MEDIA_STORE_DRIVER is s3, which Terraform sets."
+    },
+    "CLOUDWATCH_NAMESPACE": {
+      "class": "default",
+      "why": "Metrics go to the Volt namespace; the dashboards and alarms read that."
+    },
+    "CONSOLE_BASE_URL": {
+      "class": "default",
+      "why": "Fall back to PUBLIC_BASE_URL, which Terraform sets. Set with app_env only when the console has its own domain."
+    },
+    "CORS_ORIGIN": {
+      "class": "default",
+      "why": "The console is served from the same origin as the API, so the open default does not widen anything a browser sends with cookies."
+    },
+    "COVERART_BASE": {
+      "class": "default",
+      "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "DEEZER_API_BASE": {
+      "class": "default",
+      "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "DROPBOX_CLIENT_ID": {
+      "class": "operator",
+      "why": "Ingest from Google Drive, OneDrive and Dropbox; the app registrations are the operator's (build queue: social and ingest registrations need input).",
+      "how": "app_env"
+    },
+    "DROPBOX_CLIENT_SECRET": {
+      "class": "operator",
+      "why": "The secrets of those app registrations.",
+      "how": "app_secret_keys"
+    },
+    "ECS_GPU_PROVIDER": {
+      "class": "not-on-aws-yet",
+      "why": "No GPU capacity provider yet; live captions need one.",
+      "item": "2.1b"
+    },
+    "EDGE_AVAILABILITY_MAX_AGE": {
+      "class": "default",
+      "why": "Edge cache lifetimes and the CloudFront viewer-country header names; the defaults match the distributions Terraform builds."
+    },
+    "EDGE_GEO_HEADERS": {
+      "class": "default",
+      "why": "Edge cache lifetimes and the CloudFront viewer-country header names; the defaults match the distributions Terraform builds."
+    },
+    "EDGE_LIVE_REDIRECT_MAX_AGE": {
+      "class": "default",
+      "why": "Edge cache lifetimes and the CloudFront viewer-country header names; the defaults match the distributions Terraform builds."
+    },
+    "EDGE_RIGHTS_CLAIM_KEY": {
+      "class": "default",
+      "why": "Derived from JWT_ACCESS_SECRET (a Secrets Manager value) when unset, so every task signs and checks the same rights claims."
+    },
+    "ENCODER_BIN": {
+      "class": "local",
+      "why": "Only the local and docker launchers use these; on AWS ORCH_LAUNCHER is ecs."
+    },
+    "ENCODER_IMAGE": {
+      "class": "local",
+      "why": "Only the local and docker launchers use these; on AWS ORCH_LAUNCHER is ecs."
+    },
+    "EXTRACT_JOB_JSON": {
+      "class": "local",
+      "why": "Read by the clip extractor tool (src/tools/extract-clip.ts) when it runs as its own process, not by the control plane."
+    },
+    "FAST_SEGMENT_SEC": {
+      "class": "default",
+      "why": "FAST playout timing; the same on the Mac and on AWS."
+    },
+    "FAST_STALE_SEC": {
+      "class": "default",
+      "why": "FAST playout timing; the same on the Mac and on AWS."
+    },
+    "FCM_BASE_URL": {
+      "class": "local",
+      "why": "Test doubles for Google push, Stripe and the social networks; unset on AWS so the real services are used."
+    },
+    "FCM_SERVICE_ACCOUNT": {
+      "class": "operator",
+      "why": "Google service account for push notifications to the apps; only when push is used.",
+      "how": "app_secret_keys"
+    },
+    "FCM_TOKEN_URL": {
+      "class": "local",
+      "why": "Test doubles for Google push, Stripe and the social networks; unset on AWS so the real services are used."
+    },
+    "FFMPEG_BIN": {
+      "class": "not-on-aws-yet",
+      "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
+      "item": "2.1a"
+    },
+    "FFMPEG_PATH": {
+      "class": "not-on-aws-yet",
+      "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
+      "item": "2.1a"
+    },
+    "FFPROBE_BIN": {
+      "class": "not-on-aws-yet",
+      "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
+      "item": "2.1a"
+    },
+    "FILLER_DIR": {
+      "class": "not-on-aws-yet",
+      "why": "Uploaded slates and loops are kept on the control-plane task's disk and served from it, so they would be lost when the task is replaced and missing on every other task.",
+      "item": "2.1a"
+    },
+    "FLEET_CEILING": {
+      "class": "default",
+      "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
+    },
+    "FLEET_CONSOLIDATE": {
+      "class": "default",
+      "why": "advise: the planner suggests moves and does not act. Acting on them is build queue item 2.4."
+    },
+    "FLEET_DEDICATED_POOLS": {
+      "class": "default",
+      "why": "Built from the capacity provider names Terraform sets (ECS_SPOT_PROVIDER and the rest) when unset."
+    },
+    "FLEET_DEDICATED_TIERS": {
+      "class": "default",
+      "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
+    },
+    "FLEET_GPU_SHARING": {
+      "class": "not-on-aws-yet",
+      "why": "No GPU capacity provider yet; live captions need one.",
+      "item": "2.1b"
+    },
+    "FLEET_GPU_TYPES": {
+      "class": "not-on-aws-yet",
+      "why": "No GPU capacity provider yet; live captions need one.",
+      "item": "2.1b"
+    },
+    "FLEET_MIN_UNDERUSED_HOSTS": {
+      "class": "default",
+      "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
+    },
+    "FLEET_PLACEMENT": {
+      "class": "default",
+      "why": "On whenever ORCH_LAUNCHER is ecs, which Terraform sets."
+    },
+    "FLEET_POOLS": {
+      "class": "default",
+      "why": "Built from the capacity provider names Terraform sets (ECS_SPOT_PROVIDER and the rest) when unset."
+    },
+    "FLEET_SAFETY_FACTOR": {
+      "class": "default",
+      "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
+    },
+    "FLEET_SAMPLE_RETENTION_DAYS": {
+      "class": "default",
+      "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
+    },
+    "FLEET_SOLO_CEILING": {
+      "class": "default",
+      "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
+    },
+    "FLEET_SPOT_FOR_CHANNELS": {
+      "class": "default",
+      "why": "24/7 channels stay on on-demand capacity unless this is turned on; off is the safe default."
+    },
+    "FLEET_TASK_SLOTS": {
+      "class": "default",
+      "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
+    },
+    "FLEET_TICK_SECONDS": {
+      "class": "default",
+      "why": "Loop timings; the same on the Mac and on AWS."
+    },
+    "FLEET_UNDERUSED_CPU": {
+      "class": "default",
+      "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
+    },
+    "FLEET_UNDERUSED_NET": {
+      "class": "default",
+      "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
+    },
+    "FLEET_WINDOW_MINUTES": {
+      "class": "default",
+      "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
+    },
+    "GOOGLE_CLIENT_ID": {
+      "class": "operator",
+      "why": "Ingest from Google Drive, OneDrive and Dropbox; the app registrations are the operator's (build queue: social and ingest registrations need input).",
+      "how": "app_env"
+    },
+    "GOOGLE_CLIENT_SECRET": {
+      "class": "operator",
+      "why": "The secrets of those app registrations.",
+      "how": "app_secret_keys"
+    },
+    "GRAPHICS_ALLOW_PRIVATE_FEEDS": {
+      "class": "local",
+      "why": "Test switches that loosen a safety check; they must stay unset on AWS (SECURITY_CODE_ECHO is ignored in production anyway)."
+    },
+    "HEALTH_SETTLE_SECONDS": {
+      "class": "default",
+      "why": "Loop timings; the same on the Mac and on AWS."
+    },
+    "ICECAST_AUTH_SECRET": {
+      "class": "not-on-aws-yet",
+      "why": "Radio's Icecast server has no home on AWS yet.",
+      "item": "2.1b"
+    },
+    "ICECAST_HOST": {
+      "class": "not-on-aws-yet",
+      "why": "Radio's Icecast server has no home on AWS yet.",
+      "item": "2.1b"
+    },
+    "ICECAST_PORT": {
+      "class": "not-on-aws-yet",
+      "why": "Radio's Icecast server has no home on AWS yet.",
+      "item": "2.1b"
+    },
+    "ICECAST_PUBLIC_BASE": {
+      "class": "not-on-aws-yet",
+      "why": "Radio's Icecast server has no home on AWS yet.",
+      "item": "2.1b"
+    },
+    "ICECAST_SOURCE_PASSWORD": {
+      "class": "not-on-aws-yet",
+      "why": "Radio's Icecast server has no home on AWS yet.",
+      "item": "2.1b"
+    },
+    "ICECAST_SOURCE_USER": {
+      "class": "not-on-aws-yet",
+      "why": "Radio's Icecast server has no home on AWS yet.",
+      "item": "2.1b"
+    },
+    "ICECAST_TLS": {
+      "class": "not-on-aws-yet",
+      "why": "Radio's Icecast server has no home on AWS yet.",
+      "item": "2.1b"
+    },
+    "IMAGE_CACHE_CONTROL": {
+      "class": "default",
+      "why": "Image service limits (IMAGES.md); Terraform sets the store, the cache and the size cap, these are the product defaults."
+    },
+    "IMAGE_CACHE_DIR": {
+      "class": "local",
+      "why": "Only used by the local image store and cache; Terraform sets both drivers to s3."
+    },
+    "IMAGE_MAX_CONCURRENT": {
+      "class": "default",
+      "why": "Image service limits (IMAGES.md); Terraform sets the store, the cache and the size cap, these are the product defaults."
+    },
+    "IMAGE_MAX_INPUT_PIXELS": {
+      "class": "default",
+      "why": "Image service limits (IMAGES.md); Terraform sets the store, the cache and the size cap, these are the product defaults."
+    },
+    "IMAGE_MAX_OUTPUT_PIXELS": {
+      "class": "default",
+      "why": "Image service limits (IMAGES.md); Terraform sets the store, the cache and the size cap, these are the product defaults."
+    },
+    "IMAGE_MAX_QUEUE": {
+      "class": "default",
+      "why": "Image service limits (IMAGES.md); Terraform sets the store, the cache and the size cap, these are the product defaults."
+    },
+    "IMAGE_MAX_SOURCE_BYTES": {
+      "class": "default",
+      "why": "Image service limits (IMAGES.md); Terraform sets the store, the cache and the size cap, these are the product defaults."
+    },
+    "IMAGE_MEMORY_CACHE_MB": {
+      "class": "default",
+      "why": "Image service limits (IMAGES.md); Terraform sets the store, the cache and the size cap, these are the product defaults."
+    },
+    "IMAGE_RENDER_TIMEOUT_S": {
+      "class": "default",
+      "why": "Image service limits (IMAGES.md); Terraform sets the store, the cache and the size cap, these are the product defaults."
+    },
+    "IMAGE_SOURCE_CACHE_MB": {
+      "class": "default",
+      "why": "Image service limits (IMAGES.md); Terraform sets the store, the cache and the size cap, these are the product defaults."
+    },
+    "IMAGE_STORE_DIR": {
+      "class": "local",
+      "why": "Only used by the local image store and cache; Terraform sets both drivers to s3."
+    },
+    "IMAGE_VIPS_THREADS": {
+      "class": "default",
+      "why": "Image service limits (IMAGES.md); Terraform sets the store, the cache and the size cap, these are the product defaults."
+    },
+    "INGEST_S3_BUCKET": {
+      "class": "default",
+      "why": "Falls back to S3_BUCKET, the origin bucket Terraform sets."
+    },
+    "INGEST_S3_ENDPOINT": {
+      "class": "local",
+      "why": "Point the S3 client at a local stand-in (MinIO) for tests; unset on AWS so the real endpoints are used."
+    },
+    "INGEST_S3_PREFIX": {
+      "class": "default",
+      "why": "Uploads land under media/ in the origin bucket."
+    },
+    "INGEST_S3_STAGING_DIR": {
+      "class": "default",
+      "why": "Scratch space for a file in transit; nothing is kept there once it reaches the bucket."
+    },
+    "INVITE_TTL_HOURS": {
+      "class": "default",
+      "why": "Session and link lifetimes; the built-in values are the product defaults on every deployment."
+    },
+    "ITUNES_API_BASE": {
+      "class": "default",
+      "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "KEY_USAGE_FLUSH_SEC": {
+      "class": "default",
+      "why": "Loop timings; the same on the Mac and on AWS."
+    },
+    "LEADER_RETRY_SEC": {
+      "class": "default",
+      "why": "Loop timings; the same on the Mac and on AWS."
+    },
+    "MAX_SSE_CLIENTS": {
+      "class": "default",
+      "why": "Per task; the default fits the task sizes in variables.tf."
+    },
+    "MEDIA_ARCHIVE_TIER": {
+      "class": "default",
+      "why": "The storage ladder's tiers and restore terms; used once media_archive_enabled is on."
+    },
+    "MEDIA_COLD_TIER": {
+      "class": "default",
+      "why": "The storage ladder's tiers and restore terms; used once media_archive_enabled is on."
+    },
+    "MEDIA_RESTORE_DAYS": {
+      "class": "default",
+      "why": "The storage ladder's tiers and restore terms; used once media_archive_enabled is on."
+    },
+    "MEDIA_RESTORE_KEEP_DAYS": {
+      "class": "default",
+      "why": "The storage ladder's tiers and restore terms; used once media_archive_enabled is on."
+    },
+    "MEDIA_RESTORE_SPEED": {
+      "class": "default",
+      "why": "The storage ladder's tiers and restore terms; used once media_archive_enabled is on."
+    },
+    "METRICS_PERIOD_SEC": {
+      "class": "default",
+      "why": "Loop timings; the same on the Mac and on AWS."
+    },
+    "MS_CLIENT_ID": {
+      "class": "operator",
+      "why": "Ingest from Google Drive, OneDrive and Dropbox; the app registrations are the operator's (build queue: social and ingest registrations need input).",
+      "how": "app_env"
+    },
+    "MS_CLIENT_SECRET": {
+      "class": "operator",
+      "why": "The secrets of those app registrations.",
+      "how": "app_secret_keys"
+    },
+    "MUSICBRAINZ_BASE": {
+      "class": "default",
+      "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "MUSIC_PROVIDERS": {
+      "class": "default",
+      "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "NODE_ENV": {
+      "class": "default",
+      "why": "The control-plane image sets NODE_ENV=production (volt-app/Dockerfile), which turns on the production checks."
+    },
+    "NOTIFY_FROM": {
+      "class": "operator",
+      "why": "The sender address for that email.",
+      "how": "app_env"
+    },
+    "ORCH_TICK_SECONDS": {
+      "class": "default",
+      "why": "Loop timings; the same on the Mac and on AWS."
+    },
+    "ORIGIN_DIR": {
+      "class": "not-on-aws-yet",
+      "why": "Prebuilt loop segments and the failover control file are written here, on the task's disk.",
+      "item": "2.1a"
+    },
+    "PACKAGER_BIN": {
+      "class": "not-on-aws-yet",
+      "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
+      "item": "2.1a"
+    },
+    "PLATFORM_REQUIRE_MFA": {
+      "class": "default",
+      "why": "Platform staff need a second factor unless switched off; on is right."
+    },
+    "PLATFORM_SESSION_TTL": {
+      "class": "default",
+      "why": "Session and link lifetimes; the built-in values are the product defaults on every deployment."
+    },
+    "PLAYER_BUNDLE_DIR": {
+      "class": "default",
+      "why": "The image puts the console in /app/web and the player in /app/player, which is where the code looks first."
+    },
+    "PLAYER_EVENT_RETENTION_DAYS": {
+      "class": "default",
+      "why": "How long raw player events stay in the database; the product default."
+    },
+    "PLAYER_SESSION_TTL": {
+      "class": "default",
+      "why": "Session and link lifetimes; the built-in values are the product defaults on every deployment."
+    },
+    "PREWARM_ENABLED": {
+      "class": "default",
+      "why": "Pre-warm timing (SCALING.md). Terraform sets the mode and the sizes; these timings are the product defaults."
+    },
+    "PREWARM_HOLD_MIN": {
+      "class": "default",
+      "why": "Pre-warm timing (SCALING.md). Terraform sets the mode and the sizes; these timings are the product defaults."
+    },
+    "PREWARM_LEAD_MIN": {
+      "class": "default",
+      "why": "Pre-warm timing (SCALING.md). Terraform sets the mode and the sizes; these timings are the product defaults."
+    },
+    "PREWARM_RAMP_SEC": {
+      "class": "default",
+      "why": "Pre-warm timing (SCALING.md). Terraform sets the mode and the sizes; these timings are the product defaults."
+    },
+    "PREWARM_TICK_SEC": {
+      "class": "default",
+      "why": "Pre-warm timing (SCALING.md). Terraform sets the mode and the sizes; these timings are the product defaults."
+    },
+    "PRIVACY_URL": {
+      "class": "operator",
+      "why": "The public sign-up site, only when deployment is saas.",
+      "how": "app_env"
+    },
+    "PUBLIC_PATH_PREFIXES": {
+      "class": "default",
+      "why": "The public route prefixes the api-public role serves; the list is part of the code."
+    },
+    "PYTHON_BIN": {
+      "class": "not-on-aws-yet",
+      "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
+      "item": "2.1a"
+    },
+    "QOE_DERIVE": {
+      "class": "default",
+      "why": "On by default, as on the Mac."
+    },
+    "QOE_GATE_LOG": {
+      "class": "default",
+      "why": "On by default, as on the Mac."
+    },
+    "QOE_RAW_DIR": {
+      "class": "default",
+      "why": "Only used when QOE_RAW_BUCKET is empty; Terraform sets the bucket, so raw files go to S3."
+    },
+    "RADIO_DOCKER_PREFLIGHT": {
+      "class": "local",
+      "why": "Only the local and docker launchers use these; on AWS ORCH_LAUNCHER is ecs."
+    },
+    "RADIO_IMAGE": {
+      "class": "local",
+      "why": "Only the local and docker launchers use these; on AWS ORCH_LAUNCHER is ecs."
+    },
+    "RADIO_MODE": {
+      "class": "not-on-aws-yet",
+      "why": "Terraform has no radio task definition or image repository yet (volt-encoder/Dockerfile.radio exists).",
+      "item": "2.1b"
+    },
+    "RADIO_TASK_DEF": {
+      "class": "not-on-aws-yet",
+      "why": "Terraform has no radio task definition or image repository yet (volt-encoder/Dockerfile.radio exists).",
+      "item": "2.1b"
+    },
+    "REFRESH_TTL": {
+      "class": "default",
+      "why": "Session and link lifetimes; the built-in values are the product defaults on every deployment."
+    },
+    "RESET_TTL_MINUTES": {
+      "class": "default",
+      "why": "Session and link lifetimes; the built-in values are the product defaults on every deployment."
+    },
+    "RESUME_BUDGET_TTL_SECONDS": {
+      "class": "default",
+      "why": "Auto-reconnect policy for streams; the product defaults."
+    },
+    "RESUME_FLAP_SECONDS": {
+      "class": "default",
+      "why": "Auto-reconnect policy for streams; the product defaults."
+    },
+    "RESUME_MAX_ATTEMPTS": {
+      "class": "default",
+      "why": "Auto-reconnect policy for streams; the product defaults."
+    },
+    "RESUME_RETRY_SECONDS": {
+      "class": "default",
+      "why": "Auto-reconnect policy for streams; the product defaults."
+    },
+    "RETENTION_SWEEP_SECONDS": {
+      "class": "default",
+      "why": "Loop timings; the same on the Mac and on AWS."
+    },
+    "RUN_MIGRATIONS": {
+      "class": "default",
+      "why": "The roles that own the schema (all, api-admin, scheduler) migrate on boot under an advisory lock (scale/boot.ts)."
+    },
+    "S3_FORCE_PATH_STYLE": {
+      "class": "local",
+      "why": "Point the S3 client at a local stand-in (MinIO) for tests; unset on AWS so the real endpoints are used."
+    },
+    "SAAS_PLANS_JSON": {
+      "class": "operator",
+      "why": "The public sign-up site, only when deployment is saas.",
+      "how": "app_env"
+    },
+    "SAAS_STRIPE_SECRET_KEY": {
+      "class": "operator",
+      "why": "Self-serve sign-up payments, only when deployment is saas.",
+      "how": "app_secret_keys"
+    },
+    "SAAS_STRIPE_WEBHOOK_SECRET": {
+      "class": "operator",
+      "why": "Self-serve sign-up payments, only when deployment is saas.",
+      "how": "app_secret_keys"
+    },
+    "SALES_EMAIL": {
+      "class": "operator",
+      "why": "The public sign-up site, only when deployment is saas.",
+      "how": "app_env"
+    },
+    "SECURITY_CODE_ECHO": {
+      "class": "local",
+      "why": "Test switches that loosen a safety check; they must stay unset on AWS (SECURITY_CODE_ECHO is ignored in production anyway)."
+    },
+    "SIGNUP_MODE": {
+      "class": "operator",
+      "why": "The public sign-up site, only when deployment is saas.",
+      "how": "app_env"
+    },
+    "SITE_BASE_URL": {
+      "class": "operator",
+      "why": "The public sign-up site, only when deployment is saas.",
+      "how": "app_env"
+    },
+    "SMS_REGION": {
+      "class": "default",
+      "why": "Falls back to AWS_REGION, which Terraform sets."
+    },
+    "SMTP_URL": {
+      "class": "operator",
+      "why": "Email delivery (invites, password resets, sign-in codes, alerts). Without it production cannot send email. Which provider to use is Christian's call (build queue: needs input).",
+      "how": "app_secret_keys"
+    },
+    "SOCIAL_POLL_MS": {
+      "class": "local",
+      "why": "Timings of the social sandbox used in tests and demos."
+    },
+    "SOCIAL_SANDBOX_IG_LIMIT": {
+      "class": "local",
+      "why": "Timings of the social sandbox used in tests and demos."
+    },
+    "SOCIAL_SANDBOX_STEP_MS": {
+      "class": "local",
+      "why": "Timings of the social sandbox used in tests and demos."
+    },
+    "SOCIAL_SANDBOX_TH_LIMIT": {
+      "class": "local",
+      "why": "Timings of the social sandbox used in tests and demos."
+    },
+    "SOCIAL_TEST_BASE": {
+      "class": "local",
+      "why": "Test doubles for Google push, Stripe and the social networks; unset on AWS so the real services are used."
+    },
+    "SSO_BASE_URL": {
+      "class": "default",
+      "why": "Fall back to PUBLIC_BASE_URL, which Terraform sets. Set with app_env only when the console has its own domain."
+    },
+    "STRIPE_API_BASE": {
+      "class": "local",
+      "why": "Test doubles for Google push, Stripe and the social networks; unset on AWS so the real services are used."
+    },
+    "TERMS_URL": {
+      "class": "operator",
+      "why": "The public sign-up site, only when deployment is saas.",
+      "how": "app_env"
+    },
+    "THUMBS_*": {
+      "class": "default",
+      "why": "Thumbnail and storyboard tuning (THUMBNAILS.md); the defaults are the product's."
+    },
+    "TRACK_META": {
+      "class": "default",
+      "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "TRACK_META_ERROR_RETRY_MS": {
+      "class": "default",
+      "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "TRACK_META_MAX_ATTEMPTS": {
+      "class": "default",
+      "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "TRACK_META_MIN_GAP_MS": {
+      "class": "default",
+      "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "TRACK_META_MIN_SCORE": {
+      "class": "default",
+      "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "TRACK_META_TIMEOUT_MS": {
+      "class": "default",
+      "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "TRACK_META_UA": {
+      "class": "default",
+      "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "UPLOAD_STAGING_DIR": {
+      "class": "default",
+      "why": "Scratch space for a file in transit; nothing is kept there once it reaches the bucket."
+    },
+    "VARIANT_SOURCE_CACHE_MS": {
+      "class": "default",
+      "why": "How long the variant manifest service reuses a source playlist; matches the manifest cache policy."
+    },
+    "VIEWER_ACCESS_TTL": {
+      "class": "default",
+      "why": "Session and link lifetimes; the built-in values are the product defaults on every deployment."
+    },
+    "VIEWER_CACHE": {
+      "class": "default",
+      "why": "In-process cache tuning (SCALING.md); the defaults suit Tier-2."
+    },
+    "VIEWER_REFRESH_TTL": {
+      "class": "default",
+      "why": "Session and link lifetimes; the built-in values are the product defaults on every deployment."
+    },
+    "VOLT_TRASH_DAYS": {
+      "class": "default",
+      "why": "How long deleted media can be restored; the product default."
+    },
+    "VOLT_TRASH_DIR": {
+      "class": "not-on-aws-yet",
+      "why": "Deleted media waits here to be restored, on the task's disk.",
+      "item": "2.1a"
+    },
+    "WEB_DIST_DIR": {
+      "class": "default",
+      "why": "The image puts the console in /app/web and the player in /app/player, which is where the code looks first."
+    },
+    "WORKFLOW_*": {
+      "class": "default",
+      "why": "Account-wide defaults for share links and review; each account changes them in the console. Set with app_env only to change the platform default."
+    }
+  }
+}

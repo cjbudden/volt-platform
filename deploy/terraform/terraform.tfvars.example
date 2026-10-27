@@ -54,3 +54,163 @@ prewarm_origin_fraction = 0.1
 # docs_cookie_domain          = ".volt.example"
 # docs_key_pair_id            = "K2XXXXXXXXXXXX"
 # docs_signing_key_secret_arn = "arn:aws:secretsmanager:...:secret:volt-prod-docs/signing-key-xxxx"
+
+# ---- Control-plane settings (app_settings.tf, build queue 2.1) ----------------
+# Settings the app reads that Terraform does not set itself are listed, with the
+# reason, in env-coverage.json. The "operator" ones are yours to set when you use
+# the feature: plain values in app_env, secrets as JSON keys in the integrations
+# secret (terraform output integrations_secret_arn) named in app_secret_keys.
+# app_env = {
+#   NOTIFY_FROM = "Volt <no-reply@volt.example>"
+# }
+# app_secret_keys = ["SMTP_URL"]
+
+# ---- Every other variable, with its default ----------------------------------
+# Generated from the variable blocks (build queue 2.1); uncomment to change.
+# scripts/deploy/check-terraform-env.mjs fails when a variable has no line here.
+
+# app_settings.tf
+# deployment = "single"
+#   VOLT_DEPLOYMENT. single: one customer runs its own Volt and the account
+#   owner sets the plan. saas: many customers on one platform and only platform
+#   staff change plans (PLAN_AND_GROUPS.md).
+# ingest_s3_accelerate = true
+#   Uploads from the console go straight to the origin bucket through S3
+#   Transfer Acceleration (faster from far away, billed per GB accelerated).
+#   false: the regional endpoint.
+# media_archive_enabled = false
+#   MEDIA_ARCHIVE_ENABLED. Lets the storage ladder move media to the cold and
+#   archive tiers (Glacier Instant Retrieval, then Glacier Flexible Retrieval).
+#   Off: media stays in S3 Standard until deleted.
+# upload_cors_origins = []
+#   Browser origins allowed to PUT uploads into the origin bucket. Empty: the
+#   console's own address (public_base_url, else the API edge, else the ALB).
+# app_env = {}
+#   Extra control-plane settings that are not secret, as NAME = value (for
+#   example NOTIFY_FROM, SITE_BASE_URL, SIGNUP_MODE). env-coverage.json lists
+#   which ones are meant to be set this way. Cannot override a setting this
+#   stack already sets.
+# app_secret_keys = []
+#   Extra control-plane secrets (for example SMTP_URL, GOOGLE_CLIENT_SECRET).
+#   Put each as a JSON key in the integrations secret first, then list its name
+#   here; a listed key missing from the secret stops the tasks from starting.
+
+# docs_access.tf
+# docs_session_ttl = 43200
+#   How long one docs pass lasts, in seconds (default 12 hours).
+
+# edge_rights.tf
+# edge_rights_enabled = true
+#   Run the rights function on HLS and DASH manifests (per-stream geo and
+#   programme blackout at the edge).
+
+# images.tf
+# enable_image_edge = true
+#   Put the image CDN (CloudFront, S3-first origin group) in front of /img.
+# image_edge_aliases = []
+#   Custom domain(s) for the image CDN, e.g. ["img.example.com"]. Needs
+#   image_edge_certificate_arn.
+# image_edge_certificate_arn = ""
+#   ACM certificate in us-east-1 for image_edge_aliases. Empty = the
+#   cloudfront.net domain.
+# image_edge_price_class = "PriceClass_All"
+#   CloudFront price class for the image CDN (PriceClass_100 / _200 / _All).
+# image_edge_origin_protocol = "http-only"
+#   CloudFront to ALB for renders. Use https-only once the ALB has an HTTPS
+#   listener.
+# image_cache_expire_days = 180
+#   Rendered derivatives are deleted from S3 this many days after they were
+#   made (re-rendered on demand).
+# images_force_destroy = false
+#   Let terraform destroy delete a non-empty images bucket (customer
+#   originals). true only for throwaway environments.
+# image_max_dimension = 4096
+#   Largest width or height the image service will render
+#   (IMAGE_MAX_DIMENSION).
+# image_formats = "webp,avif,jpeg,png"
+#   Output formats the image service accepts (IMAGE_FORMATS).
+
+# scaling_identity.tf
+# sms_provider = "sns"
+#   sns = send SMS sign-in codes with AWS SNS. Empty = SMS codes unavailable
+#   (email and authenticator app still work).
+# sms_sender_id = ""
+#   Alphanumeric sender ID shown on the text (where the destination country
+#   allows one), e.g. VOLT.
+# sms_origination_number = ""
+#   Origination number (E.164) for countries that require one.
+# manage_sms_preferences = false
+#   Set the ACCOUNT-WIDE SNS SMS preferences (transactional type, spend limit).
+#   Off by default because they affect every SMS sender in the AWS account.
+# sms_monthly_spend_limit_usd = 100
+#   Account-wide SNS SMS monthly spend cap, used when manage_sms_preferences =
+#   true.
+
+# scaling_variables.tf
+# api_public_requests_per_target = 30000
+#   Target-tracking value for ALBRequestCountPerTarget (requests per task per
+#   MINUTE). 30000 = 500/s, well under the ~1500-2000/s one 1-vCPU task
+#   sustains on the cached path.
+# api_public_cpu_target = 50
+# api_admin_max = 6
+# scheduler_count = 2
+#   Scheduler tasks. One leads (advisory lock); the rest are hot standbys that
+#   take over within ~10 s.
+# worker_cpu = 1024
+# worker_memory = 2048
+# worker_min = 1
+# worker_max = 10
+# worker_concurrency = 2
+#   Jobs per worker task at once.
+# worker_scale_out_queue = 10
+#   Ready jobs waiting (Volt/JobsQueued) above which a worker is added.
+# db_pool_max_per_task = 10
+# alb_origin_protocol = "http-only"
+#   CloudFront to ALB. Use https-only once the ALB has an HTTPS listener and
+#   certificate.
+# waf_rate_limit_per_ip = 6000
+#   Requests per IP per 5 minutes across the API (households and mobile
+#   carriers share IPs: keep generous).
+# waf_auth_rate_limit_per_ip = 100
+#   Login attempts per IP per 5 minutes.
+# api_edge_price_class = "PriceClass_All"
+#   Edge locations for the API distribution. PriceClass_All covers APAC viewers
+#   best.
+# public_base_url = ""
+#   Origin viewers use for the API (PUBLIC_BASE_URL). Empty: the first
+#   api_edge_aliases entry, else the API edge, else the ALB.
+
+# variables.tf
+# vpc_cidr = "10.60.0.0/16"
+# az_count = 2
+#   Number of AZs to spread public/private subnets across.
+# encoder_large_instance_types = ["c7i.2xlarge", "c6i.2xlarge", "c5.2xlarge"]
+#   Large CPU nodes for ladders that need more than a 4-vCPU server can give
+#   within the sizing ceiling (e.g. a full 1080p x264 ladder). Placement picks
+#   small or large per stream from its output settings.
+# large_spot_max = 4
+# large_ondemand_max = 4
+# spot_min = 0
+# control_plane_cpu = 512
+# control_plane_memory = 1024
+# db_allocated_storage = 20
+# db_name = "volt"
+# db_username = "volt"
+# jwt_access_secret = ""
+# jwt_refresh_secret = ""
+# ingest_token = ""
+# tags = {}
+# cdn_geo_restriction_type = "none"
+#   CloudFront geo restriction: none | whitelist | blacklist
+# cdn_geo_countries = []
+#   ISO 3166-1 alpha-2 codes for the whitelist/blacklist. Ignored when the type
+#   is none.
+# qoe_raw_retention_days = 760
+#   Days the raw CMCD playback reports are kept before they expire (760 = 25
+#   months: the engagement reports' retention). Raw data is the record every
+#   report is rebuilt from.
+# qoe_raw_lock_days = 90
+#   Object Lock (governance) retention on each raw report object: nobody
+#   without the bypass permission can delete or overwrite it inside this many
+#   days. Not more than qoe_raw_retention_days.
+

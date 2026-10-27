@@ -26,11 +26,11 @@ resource "aws_ecs_task_definition" "control_plane" {
     portMappings = [{ containerPort = 8080, protocol = "tcp" }]
     # The env list lives in local.control_plane_env (bottom of this file) so the
     # role services in scaling_services.tf run with exactly the same settings.
-    environment = concat(local.control_plane_env, local.scale_env, local.image_env, local.docs_env, local.qoe_env, [
+    environment = concat(local.control_plane_env, local.scale_env, local.image_env, local.docs_env, local.qoe_env, local.app_settings_env, local.operator_env, [
       { name = "ROLE", value = var.enable_role_split ? "api-admin" : "all" },
       { name = "PREWARM_ECS_RESOURCE_IDS", value = local.prewarm_target },
     ])
-    secrets = concat(local.control_plane_secrets, local.scale_secrets, local.image_secrets, local.docs_secrets)
+    secrets = concat(local.control_plane_secrets, local.scale_secrets, local.image_secrets, local.docs_secrets, local.app_settings_secrets, local.operator_secrets)
     # Liveness only (no database): a database blip must not restart every task.
     healthCheck = {
       command     = ["CMD-SHELL", "node -e \"fetch('http://localhost:8080/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
@@ -49,6 +49,17 @@ resource "aws_ecs_task_definition" "control_plane" {
       }
     }
   }])
+
+  lifecycle {
+    precondition {
+      condition     = length(setintersection(concat(keys(var.app_env), var.app_secret_keys), local.stack_env_names)) == 0
+      error_message = "app_env and app_secret_keys cannot set a name the stack already sets: ${join(", ", setintersection(concat(keys(var.app_env), var.app_secret_keys), local.stack_env_names))}."
+    }
+    precondition {
+      condition     = length(setintersection(keys(var.app_env), var.app_secret_keys)) == 0
+      error_message = "A name is in both app_env and app_secret_keys: ${join(", ", setintersection(keys(var.app_env), var.app_secret_keys))}."
+    }
+  }
 }
 
 resource "aws_ecs_service" "control_plane" {

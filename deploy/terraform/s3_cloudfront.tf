@@ -1,7 +1,7 @@
 # ---- S3 origin --------------------------------------------------------------
 resource "aws_s3_bucket" "origin" {
   bucket        = "${local.name}-origin"
-  force_destroy = true
+  force_destroy = var.env != "prod"
   tags          = { Name = "${local.name}-origin" }
 }
 
@@ -19,6 +19,15 @@ resource "aws_s3_bucket_cors_configuration" "origin" {
     allowed_methods = ["GET", "HEAD"]
     allowed_origins = ["*"]
     allowed_headers = ["*"]
+    max_age_seconds = 3000
+  }
+  # Uploads from the console go straight to the bucket on a presigned PUT
+  # (services/ingest/providers/s3accel.ts), only from the console's own origin.
+  cors_rule {
+    allowed_methods = ["PUT"]
+    allowed_origins = local.upload_cors_origins
+    allowed_headers = ["*"]
+    expose_headers  = ["ETag"]
     max_age_seconds = 3000
   }
 }
