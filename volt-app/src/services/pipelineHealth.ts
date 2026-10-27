@@ -24,6 +24,9 @@ export type GateName = 'server' | 'input' | 'encoder' | 'output' | 'public';
 import { config } from '../config';
 import { diagnoseFailure, eventLine, type FailureDiagnosis } from './failureDiagnosis';
 
+/** Timing faults a viewer would notice (output_check.py codes); see the output gate. */
+const VIEWER_TIMING = new Set(['timeline_backwards', 'av_skew', 'rendition_skew', 'sequence_regressed']);
+
 export type GateStatus = 'idle' | 'starting' | 'ready' | 'healthy' | 'degraded' | 'failed' | 'stopped';
 
 export interface Gate {
@@ -347,7 +350,21 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   const stall = unresolved(/output\.stalled/, /output\.resumed/);
   // The newest timeline verdict of this run (encoder output_check.py): 'fault' until an 'ok'.
   const tlLast = firstOf(/^output\.timeline$/);
-  const timelineFault = tlLast && d(tlLast.detail).state === 'fault' ? tlLast : null;
+  const tlAny = tlLast && d(tlLast.detail).state === 'fault' ? tlLast : null;
+  // WHAT VIEWERS NOTICE degrades the output: the picture jumping back, sound
+  // seconds out of step, renditions telling different times, segments
+  // renumbered. Audio and video segments merely CUT at different moments
+  // (index_misaligned, alone) does not: every player we deliver to (hls.js,
+  // Shaka, Safari, ExoPlayer) syncs the tracks by their timestamps, not by
+  // segment boundaries. It costs at most a segment's alignment on a splice, so
+  // it is a note on a healthy output, not an amber gate that reads as a fault.
+  // The same set decides alerts (streamAlerts.ts SERIOUS_TIMING).
+  const tlFaults: any[] = tlAny ? (d(tlAny.detail).faults ?? []) : [];
+  const viewerVisible = tlFaults.length === 0 || tlFaults.some((f: any) => VIEWER_TIMING.has(String(f?.code)));
+  const timelineFault = tlAny && viewerVisible ? tlAny : null;
+  const timingNote = tlAny && !viewerVisible
+    ? `note: audio and video segments cut ${Math.abs(Number(tlFaults[0]?.value) || 0).toFixed(1)}s apart (no effect on playback; a splice may land a segment late)`
+    : null;
   const srcDown = unresolved(/source\.down/, /source\.up/);
   const inputErr = unresolved(/input\.error/, /source\.up/);
   const lastStop = firstOf(/channel\.stop/);
@@ -472,7 +489,7 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
     outStatus = 'degraded';
     outDetail = `timing fault · ${String(d(timelineFault.detail).message || 'audio/video timeline inconsistent')}`;
   }
-  else if (outFresh) { outStatus = 'healthy'; outDetail = `advancing · ${inp.packagingLabel}`; }
+  else if (outFresh) { outStatus = 'healthy'; outDetail = `advancing · ${inp.packagingLabel}${timingNote ? ` · ${timingNote}` : ''}`; }
   else if (outStalled) { outStatus = 'degraded'; outDetail = firstErrLine || `output stalled — no new segments for ${stalledFor}`; }
   else if (stall) { outStatus = 'degraded'; outDetail = String(d(stall.detail).message || 'output stalled — no new segments'); }
   else if (inputStatus === 'failed' || encStatus === 'failed') { outStatus = 'idle'; outDetail = 'waiting on the upstream gate'; }
