@@ -594,11 +594,16 @@ export function DualPlayers({ d, captionLangs, sourceUp, onAir, onSendSource, on
   const [subLang, setSubLang] = useState(captionLangs[0] || 'en')
 
   const outGate = d.health?.gates.find(g => g.gate === 'output')
-  const outErr = outGate && (outGate.status === 'failed' || outGate.status === 'degraded')
+  // A TIMING FAULT IS STILL OUTPUT: segments are arriving, only their times
+  // disagree. It used to swap the player for "Output degraded", so the pane went
+  // dark over a stream that was playing and the fault read as "the output
+  // stopped". Now the player stays and the gate's badge and the banner say it.
+  const timingOnly = outGate?.status === 'degraded' && /^timing fault/.test(outGate.detail || '')
+  const outErr = outGate && (outGate.status === 'failed' || (outGate.status === 'degraded' && !timingOnly))
   // Output is ready to watch (packaged + advancing) once its gate is healthy. We
   // preview the packaged DASH/HLS output as soon as it's ready — BEFORE going on air —
   // so the operator can confirm packaging works before publishing to the public.
-  const outputReady = outGate?.status === 'healthy'
+  const outputReady = outGate?.status === 'healthy' || timingOnly
   return (
     <div className="player-grid" style={{ marginBottom: 18 }}>
       {/* SOURCE — shows the real incoming feed once a source is sent */}
