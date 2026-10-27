@@ -14,7 +14,7 @@
 //  host CPU, so keep dev ladders light.
 // ============================================================================
 import { spawn, spawnSync, ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, openSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { config } from '../../config';
 import type { TaskLauncher, LaunchResult, Liveness } from './launcher';
@@ -126,8 +126,15 @@ export class DockerTaskLauncher implements TaskLauncher {
   async launchEncoder(streamId: string, job: Record<string, any>): Promise<LaunchResult> {
     const out = this.originFor(streamId);
     await this.requireImage(streamId, this.image(), 'encoder');
-    try { rmSync(out, { recursive: true, force: true }); } catch { /* ignore */ }
-    mkdirSync(out, { recursive: true });
+    // NEVER DELETE THE CHANNEL'S FOLDER HERE. It used to be removed and made
+    // again on every start (from before runs/ existed), which (1) threw away
+    // the previous runs, which ARE the channel's recordings, (2) deleted the
+    // pre-built failover loop the control plane keeps in filler/prebuilt, and
+    // (3) on Docker Desktop for Mac left the container a stale view of the
+    // deleted folder, so the encoder died a second in with "No such file or
+    // directory: .../origin/<id>/runs/<run>". The encoder does the per-run
+    // housekeeping itself, by the recording retention (manage_runs).
+    mkdirSync(resolve(out, 'runs'), { recursive: true });
 
     const localJob: Record<string, any> = { ...job, output: { mode: 'local', dir: out } };
     // The encoder runs INSIDE the container, so localhost is the container, not

@@ -2411,6 +2411,31 @@ def shutdown(sig=None, *_):
     sys.exit(0)
 
 
+def _makedirs_patiently(path, tries=20, wait=0.5):
+    """Create the run directory, waiting out a host folder not visible yet.
+
+    In local mode the encoder runs in Docker Desktop with the origin folder
+    bind-mounted from the Mac. A NEW channel's folder is created on the Mac a
+    moment before the container starts, and Docker Desktop's file sharing can
+    take a moment to show it inside the VM: makedirs then fails with
+    FileNotFoundError and the start dies one second in ("No such file or
+    directory: .../origin/<id>/runs/<run>"), with nothing to retry it.
+    So: up to ~10 s of retries before giving up, logging when it had to wait."""
+    last = None
+    for i in range(tries):
+        try:
+            os.makedirs(path, exist_ok=True)
+            if i:
+                log(f"startup: run directory appeared after {i * wait:.1f}s (host folder sharing lag)")
+            return
+        except FileNotFoundError as e:
+            last = e
+            time.sleep(wait)
+    die(f"cannot create the run directory {path}: {last}. The origin folder is not "
+        f"visible inside the encoder container; check Docker Desktop file sharing "
+        f"includes it, then start again")
+
+
 def main():
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
@@ -2418,7 +2443,7 @@ def main():
     global _events, OUT_DIR
     cfg = load_config()
     OUT_DIR = resolve_out_dir(cfg)
-    os.makedirs(OUT_DIR, exist_ok=True)
+    _makedirs_patiently(OUT_DIR)
     if BASE_OUT_DIR:
         # per-run namespace: housekeep old runs per the recording/retention policy,
         # then point /origin/<id>/live/* at THIS run before anything is served.
