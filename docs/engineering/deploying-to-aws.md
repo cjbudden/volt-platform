@@ -75,11 +75,12 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    sits at zero healthy tasks until its image exists.
 3. **Build and push the images** to the repositories the stack created: the
    control plane (`volt-app`), the encoder (`volt-encoder`, also tagged as the
-   thumbnailer) and FAST playout (`volt-encoder/Dockerfile.fast`). Radio has
-   its own image (`volt-encoder/Dockerfile.radio`) and the app launches it as
-   the `volt-radio` task definition, but `deploy/terraform/ecr.tf` creates no
-   repository for it and the stack no task definition, so radio does not run
-   in AWS yet (queue item 2.1b, with live captions).
+   thumbnailer), FAST playout (`volt-encoder/Dockerfile.fast`), radio
+   (`volt-encoder/Dockerfile.radio`) and, if accounts use Whisper captions,
+   the captions add-on (`volt-encoder/Dockerfile.captions`). Captions run on
+   a GPU pool that starts at zero servers (`deploy/terraform/ecs_capacity_gpu.tf`).
+   Radio's MP3 output needs an Icecast relay, which has no home on AWS yet
+   (queue item 2.1c); stations still deliver HLS and DASH.
 4. **Migrations.** The control plane applies every migration in
    `volt-app/migrations` on boot, under a lock, in the `api-admin` role. A
    one-off run uses the same runner (`npm run migrate` in `volt-app`).

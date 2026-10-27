@@ -39,6 +39,18 @@ variable "encoder_large_instance_types" {
   description = "Large CPU nodes for ladders that need more than a 4-vCPU server can give within the sizing ceiling (e.g. a full 1080p x264 ladder). Placement picks small or large per stream from its output settings."
 }
 
+variable "gpu_instance_types" {
+  type        = list(string)
+  default     = ["g4dn.xlarge"]
+  description = "GPU nodes for the live captions add-on (Whisper and translation). One T4 (g4dn.xlarge) covers up to large-v3 with translation. Smallest first: placement sizes against the first."
+}
+
+variable "gpu_max" {
+  type        = number
+  default     = 2
+  description = "Most GPU servers at once. The pool starts at zero and costs nothing until a captions task needs it. 0 removes the pool, and whisper captions do not run."
+}
+
 variable "large_spot_max" {
   type    = number
   default = 4

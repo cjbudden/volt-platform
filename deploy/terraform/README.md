@@ -58,7 +58,7 @@ terraform output           # control_plane_url, cdn_domain, ecr_repositories,
 The control plane comes up **before** its image exists in ECR, so its ECS
 service will sit at 0 healthy tasks until step 3. That's expected.
 
-## 3. Build & push the three images
+## 3. Build & push the images
 ```bash
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 REGION=$(aws configure get region || echo us-east-1)
@@ -82,11 +82,21 @@ docker build -t volt-fast -f ../../volt-encoder/Dockerfile.fast ../../volt-encod
 docker tag volt-fast $(terraform output -json ecr_repositories | jq -r '."volt-fast"'):latest
 docker push $(terraform output -json ecr_repositories | jq -r '."volt-fast"'):latest
 
+# radio (one small task per station; ffmpeg alone)
+docker build -t volt-radio -f ../../volt-encoder/Dockerfile.radio ../../volt-encoder
+docker tag volt-radio $(terraform output -json ecr_repositories | jq -r '."volt-radio"'):latest
+docker push $(terraform output -json ecr_repositories | jq -r '."volt-radio"'):latest
+
+# live captions add-on (Whisper + NLLB on the GPU pool; large, only if accounts use Whisper)
+docker build -t volt-captions -f ../../volt-encoder/Dockerfile.captions ../../volt-encoder
+docker tag volt-captions $(terraform output -json ecr_repositories | jq -r '."volt-captions"'):latest
+docker push $(terraform output -json ecr_repositories | jq -r '."volt-captions"'):latest
+
 # roll the control-plane service onto the new image
 aws ecs update-service --cluster $(terraform output -raw ecs_cluster) \
   --service $(terraform output -raw ecs_cluster)-* --force-new-deployment 2>/dev/null || true
 ```
-(Encoder, thumbnailer and FAST playout task defs point at `:latest`; the orchestrator picks
+(Encoder, thumbnailer, FAST playout, radio and captions task defs point at `:latest`; the orchestrator picks
 them up on the next RunTask — no service to roll.)
 
 ## 4. The database
@@ -140,6 +150,9 @@ snapshot and the bucket won't force‑empty — intentional guard rails.
 - **HTTPS/domain.** The ALB is HTTP‑only here so it stands up without a domain.
   For prod add an ACM cert + an HTTPS listener and redirect 80→443; put a custom
   domain (Route 53) on both the ALB and the CloudFront distribution.
+- **GPU captions.** Whisper captions run on their own GPU pool
+  (`ecs_capacity_gpu.tf`: `gpu_instance_types`, `gpu_max`), on demand, from
+  zero servers. Check the account's G-instance vCPU quota first.
 - **GPU transcode.** Default nodes are CPU (packaging + x264). For GPU density set
   `encoder_instance_types = ["g4dn.xlarge"]` and switch the ECS AMI SSM parameter
   in `ecs_cluster.tf` to the GPU‑recommended one.

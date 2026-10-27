@@ -146,13 +146,13 @@ resource "aws_ecs_capacity_provider" "ondemand" {
 
 resource "aws_ecs_cluster_capacity_providers" "main" {
   cluster_name = aws_ecs_cluster.main.name
-  capacity_providers = [
+  capacity_providers = concat([
     aws_ecs_capacity_provider.spot.name,
     aws_ecs_capacity_provider.ondemand.name,
     aws_ecs_capacity_provider.spot_large.name,
     aws_ecs_capacity_provider.ondemand_large.name,
     "FARGATE",
-  ]
+  ], aws_ecs_capacity_provider.gpu[*].name)
 
   # Default for the encoder: Spot weight 4 + on-demand base 1 (mirrors the
   # orchestrator's EcsTaskLauncher capacityProviderStrategy).

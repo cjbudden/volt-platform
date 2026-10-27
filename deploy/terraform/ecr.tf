@@ -1,6 +1,9 @@
-# Container registries for the three images the platform ships.
+# Container registries for the images the platform ships. Radio and captions
+# are their own images (volt-encoder/Dockerfile.radio and Dockerfile.captions):
+# a station needs ffmpeg alone, and the captions models and CUDA stay out of the
+# encoder so every channel does not pay to pull them.
 locals {
-  ecr_repos = ["volt-control-plane", "volt-encoder", "volt-thumbnailer", "volt-fast"]
+  ecr_repos = ["volt-control-plane", "volt-encoder", "volt-thumbnailer", "volt-fast", "volt-radio", "volt-captions"]
 }
 
 resource "aws_ecr_repository" "repo" {

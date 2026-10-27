@@ -204,6 +204,78 @@ resource "aws_ecs_task_definition" "fast" {
   }])
 }
 
+# ---- Radio station task definition (one per station; launched by the orchestrator)
+# volt-encoder/Dockerfile.radio: ffmpeg alone, audio in, HLS and DASH into the
+# station's origin prefix and, when an Icecast relay is configured, MP3 pushed
+# to it. With no relay reachable radio.py drops the MP3 output and the HLS and
+# DASH carry on. Container name `radio` is what EcsTaskLauncher.launchRadio
+# overrides. The reservation here is the floor; placement sizes each station
+# with a task-level override (estimateRadioLoad).
+resource "aws_ecs_task_definition" "radio" {
+  family                   = "${local.name}-radio"
+  requires_compatibilities = ["EC2"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.encoder_task.arn
+
+  container_definitions = jsonencode([{
+    name        = "radio"
+    image       = "${aws_ecr_repository.repo["volt-radio"].repository_url}:latest"
+    essential   = true
+    stopTimeout = 30
+    environment = [
+      { name = "AWS_DEFAULT_REGION", value = var.region },
+      { name = "S3_BUCKET", value = aws_s3_bucket.origin.id },
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.encoder.name
+        "awslogs-region"        = var.region
+        "awslogs-stream-prefix" = "radio"
+      }
+    }
+  }])
+}
+
+# ---- Live captions task definition (Whisper add-on; launched with its stream)
+# volt-encoder/Dockerfile.captions: reads the stream's audio playlist from the
+# bucket and writes WebVTT renditions beside it. One GPU, so ECS can only place
+# it on the GPU pool (ecs_capacity_gpu.tf); the orchestrator also launches it
+# into that pool by name. Container name `captions` is what
+# EcsTaskLauncher.launchCaptions overrides.
+resource "aws_ecs_task_definition" "captions" {
+  family                   = "${local.name}-captions"
+  requires_compatibilities = ["EC2"]
+  network_mode             = "awsvpc"
+  cpu                      = "1024"
+  memory                   = "4096"
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.encoder_task.arn
+
+  container_definitions = jsonencode([{
+    name                 = "captions"
+    image                = "${aws_ecr_repository.repo["volt-captions"].repository_url}:latest"
+    essential            = true
+    resourceRequirements = [{ type = "GPU", value = "1" }]
+    stopTimeout          = 30
+    environment = [
+      { name = "AWS_DEFAULT_REGION", value = var.region },
+      { name = "S3_BUCKET", value = aws_s3_bucket.origin.id },
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.encoder.name
+        "awslogs-region"        = var.region
+        "awslogs-stream-prefix" = "captions"
+      }
+    }
+  }])
+}
+
 # ---- Control-plane settings shared by every role ------------------------------
 locals {
   control_plane_env = [
@@ -220,6 +292,9 @@ locals {
     { name = "ORCH_LAUNCHER", value = "ecs" },
     { name = "ENCODER_TASK_DEF", value = "${local.name}-encoder" },
     { name = "THUMBNAILER_TASK_DEF", value = "${local.name}-thumbnailer" },
+    # Radio stations and the live captions add-on, each its own task definition.
+    { name = "RADIO_TASK_DEF", value = "${local.name}-radio" },
+    { name = "CAPTIONS_TASK_DEF", value = "${local.name}-captions" },
     # FAST channels (services/fast): playouts on ECS writing to the bucket, library
     # media packaged to the bucket so any task can read it, and the origin viewers
     # reach the ad stitcher on (per-viewer playlists, never cached).
@@ -234,6 +309,10 @@ locals {
     { name = "ECS_ONDEMAND_LARGE_PROVIDER", value = aws_ecs_capacity_provider.ondemand_large.name },
     { name = "FLEET_SMALL_TYPES", value = join(",", var.encoder_instance_types) },
     { name = "FLEET_LARGE_TYPES", value = join(",", var.encoder_large_instance_types) },
+    # The GPU pool for captions (ecs_capacity_gpu.tf). Empty with gpu_max = 0:
+    # placementConfig.ts then configures no GPU pool and says so per stream.
+    { name = "ECS_GPU_PROVIDER", value = join("", aws_ecs_capacity_provider.gpu[*].name) },
+    { name = "FLEET_GPU_TYPES", value = join(",", var.gpu_instance_types) },
     { name = "ECS_SUBNETS", value = join(",", aws_subnet.private[*].id) },
     { name = "ECS_SECURITY_GROUPS", value = aws_security_group.encoder.id },
     { name = "INTERNAL_API_BASE_URL", value = "http://${aws_lb.cp.dns_name}" },

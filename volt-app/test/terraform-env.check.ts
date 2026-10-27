@@ -90,9 +90,12 @@ function fakeRepo(o: { code?: string; env?: string[]; values?: Record<string, st
   const cov = JSON.parse(readFileSync(join(ROOT, 'deploy/terraform/env-coverage.json'), 'utf8'));
   ok(cov.settings.SMTP_URL?.class === 'operator' && cov.settings.SMTP_URL?.how === 'app_secret_keys', 'SMTP_URL is the operator\'s, as a secret');
   ok(cov.settings.FILLER_DIR?.class === 'not-on-aws-yet' && cov.settings.FILLER_DIR?.item === '2.1a', 'loops on a task\'s disk are named as not on AWS yet (2.1a)');
-  ok(cov.settings.RADIO_TASK_DEF?.item === '2.1b', 'radio is named as not on AWS yet (2.1b)');
+  // 2.1b wired radio, captions and the GPU pool; only the Icecast relay waits (2.1c).
+  for (const n of ['RADIO_TASK_DEF', 'CAPTIONS_TASK_DEF', 'ECS_GPU_PROVIDER', 'FLEET_GPU_TYPES']) ok(real.wired.has(n) && !cov.settings[n], `${n} is set by Terraform (2.1b)`);
+  ok(cov.settings.ICECAST_HOST?.class === 'not-on-aws-yet' && cov.settings.ICECAST_HOST?.item === '2.1c', 'the Icecast relay is named as not on AWS yet (2.1c)');
   const queue = readFileSync(join(ROOT, 'BUILD_QUEUE.md'), 'utf8');
-  for (const item of ['2.1a', '2.1b']) ok(new RegExp(`^\\| ${item.replace('.', '\\.')} \\|`, 'm').test(queue), `queue item ${item} exists for what is not on AWS yet`);
+  const items = [...new Set(Object.values(cov.settings as Record<string, any>).map((v) => v.item).filter(Boolean))] as string[];
+  for (const item of items) ok(new RegExp(`^\\| ${item.replace('.', '\\.')} \\|`, 'm').test(queue), `queue item ${item} exists for what is not on AWS yet`);
 
   console.log('the real Terraform without this item\'s settings');
   {

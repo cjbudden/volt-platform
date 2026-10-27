@@ -78,10 +78,19 @@ that is expected.
 
 ## 5. Build and push the images
 
-Four repositories: `volt-control-plane` (from `volt-app/Dockerfile`, built
-from the repository root), `volt-encoder` (also pushed as `volt-thumbnailer`)
-and `volt-fast` (`volt-encoder/Dockerfile.fast`). The commands are section 3
-of `README.md`. Then force a new deployment of the control-plane service(s).
+Six repositories: `volt-control-plane` (from `volt-app/Dockerfile`, built
+from the repository root), `volt-encoder` (also pushed as `volt-thumbnailer`),
+`volt-fast` (`volt-encoder/Dockerfile.fast`), `volt-radio`
+(`volt-encoder/Dockerfile.radio`) and `volt-captions`
+(`volt-encoder/Dockerfile.captions`, several GB with its models; push it only
+if an account will use Whisper captions). The commands are section 3 of
+`README.md`. Then force a new deployment of the control-plane service(s).
+
+Whisper captions run on a GPU pool (`ecs_capacity_gpu.tf`, g4dn.xlarge by
+default) that starts at zero servers and costs nothing until a captions task
+waits for one. Your AWS account needs a G-instance vCPU quota of at least 4
+per GPU server (`gpu_max`); new accounts often have 0, so request it before
+the first captioned stream. `gpu_max = 0` leaves the pool out.
 
 ## 6. The database
 
@@ -132,8 +141,9 @@ These are queued, not forgotten (`BUILD_QUEUE.md`, and class
   control-plane image has no ffmpeg, packager or Python for the jobs that
   run in it (clip extract, VOD encode, loop preparation, intro detection).
   On AWS today those jobs fail and an uploaded loop is lost with its task.
-- **2.1b.** Radio and live captions: no task definitions, image
-  repositories, GPU pool or Icecast server in the stack yet.
+- **2.1c.** Radio's Icecast relay: stations run (HLS and DASH), but their
+  MP3 output is dropped because no relay is configured. Where it should run
+  is waiting on a decision.
 
 The rest of phase 2 (per-run S3 prefixes, recording retention,
 consolidation, S3 watch folders, WAF blocking, CDN logs) builds on this

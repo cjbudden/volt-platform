@@ -92,14 +92,8 @@
       "why": "In-process cache tuning (SCALING.md); the defaults suit Tier-2."
     },
     "CAPTIONS_CPU_IN_ENCODER": {
-      "class": "not-on-aws-yet",
-      "why": "Terraform has no captions task definition or image repository yet (volt-encoder/Dockerfile.captions exists).",
-      "item": "2.1b"
-    },
-    "CAPTIONS_TASK_DEF": {
-      "class": "not-on-aws-yet",
-      "why": "Terraform has no captions task definition or image repository yet (volt-encoder/Dockerfile.captions exists).",
-      "item": "2.1b"
+      "class": "default",
+      "why": "false is right: the AWS encoder image is built without the CPU caption stack, so Whisper captions run as their own task on the GPU pool (CAPTIONS_TASK_DEF)."
     },
     "CLIPS_DIR": {
       "class": "not-on-aws-yet",
@@ -139,11 +133,6 @@
       "class": "operator",
       "why": "The secrets of those app registrations.",
       "how": "app_secret_keys"
-    },
-    "ECS_GPU_PROVIDER": {
-      "class": "not-on-aws-yet",
-      "why": "No GPU capacity provider yet; live captions need one.",
-      "item": "2.1b"
     },
     "EDGE_AVAILABILITY_MAX_AGE": {
       "class": "default",
@@ -231,14 +220,8 @@
       "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
     },
     "FLEET_GPU_SHARING": {
-      "class": "not-on-aws-yet",
-      "why": "No GPU capacity provider yet; live captions need one.",
-      "item": "2.1b"
-    },
-    "FLEET_GPU_TYPES": {
-      "class": "not-on-aws-yet",
-      "why": "No GPU capacity provider yet; live captions need one.",
-      "item": "2.1b"
+      "class": "default",
+      "why": "false is right: each captions task reserves a whole GPU, which is also what its task definition asks ECS for."
     },
     "FLEET_MIN_UNDERUSED_HOSTS": {
       "class": "default",
@@ -308,38 +291,38 @@
     },
     "ICECAST_AUTH_SECRET": {
       "class": "not-on-aws-yet",
-      "why": "Radio's Icecast server has no home on AWS yet.",
-      "item": "2.1b"
+      "why": "Radio's Icecast relay has no home on AWS yet (needs input: its own ECS service behind an NLB, or a hosted relay). Stations run without it: HLS and DASH carry on and the MP3 output is dropped.",
+      "item": "2.1c"
     },
     "ICECAST_HOST": {
       "class": "not-on-aws-yet",
-      "why": "Radio's Icecast server has no home on AWS yet.",
-      "item": "2.1b"
+      "why": "Radio's Icecast relay has no home on AWS yet (needs input: its own ECS service behind an NLB, or a hosted relay). Stations run without it: HLS and DASH carry on and the MP3 output is dropped.",
+      "item": "2.1c"
     },
     "ICECAST_PORT": {
       "class": "not-on-aws-yet",
-      "why": "Radio's Icecast server has no home on AWS yet.",
-      "item": "2.1b"
+      "why": "Radio's Icecast relay has no home on AWS yet (needs input: its own ECS service behind an NLB, or a hosted relay). Stations run without it: HLS and DASH carry on and the MP3 output is dropped.",
+      "item": "2.1c"
     },
     "ICECAST_PUBLIC_BASE": {
       "class": "not-on-aws-yet",
-      "why": "Radio's Icecast server has no home on AWS yet.",
-      "item": "2.1b"
+      "why": "Radio's Icecast relay has no home on AWS yet (needs input: its own ECS service behind an NLB, or a hosted relay). Stations run without it: HLS and DASH carry on and the MP3 output is dropped.",
+      "item": "2.1c"
     },
     "ICECAST_SOURCE_PASSWORD": {
       "class": "not-on-aws-yet",
-      "why": "Radio's Icecast server has no home on AWS yet.",
-      "item": "2.1b"
+      "why": "Radio's Icecast relay has no home on AWS yet (needs input: its own ECS service behind an NLB, or a hosted relay). Stations run without it: HLS and DASH carry on and the MP3 output is dropped.",
+      "item": "2.1c"
     },
     "ICECAST_SOURCE_USER": {
       "class": "not-on-aws-yet",
-      "why": "Radio's Icecast server has no home on AWS yet.",
-      "item": "2.1b"
+      "why": "Radio's Icecast relay has no home on AWS yet (needs input: its own ECS service behind an NLB, or a hosted relay). Stations run without it: HLS and DASH carry on and the MP3 output is dropped.",
+      "item": "2.1c"
     },
     "ICECAST_TLS": {
       "class": "not-on-aws-yet",
-      "why": "Radio's Icecast server has no home on AWS yet.",
-      "item": "2.1b"
+      "why": "Radio's Icecast relay has no home on AWS yet (needs input: its own ECS service behind an NLB, or a hosted relay). Stations run without it: HLS and DASH carry on and the MP3 output is dropped.",
+      "item": "2.1c"
     },
     "IMAGE_CACHE_CONTROL": {
       "class": "default",
@@ -565,14 +548,8 @@
       "why": "Only the local and docker launchers use these; on AWS ORCH_LAUNCHER is ecs."
     },
     "RADIO_MODE": {
-      "class": "not-on-aws-yet",
-      "why": "Terraform has no radio task definition or image repository yet (volt-encoder/Dockerfile.radio exists).",
-      "item": "2.1b"
-    },
-    "RADIO_TASK_DEF": {
-      "class": "not-on-aws-yet",
-      "why": "Terraform has no radio task definition or image repository yet (volt-encoder/Dockerfile.radio exists).",
-      "item": "2.1b"
+      "class": "default",
+      "why": "container is right: each station runs as its own volt-radio task (RADIO_TASK_DEF); inprocess is the old Mac-only path."
     },
     "REFRESH_TTL": {
       "class": "default",
