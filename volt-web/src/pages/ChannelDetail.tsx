@@ -653,6 +653,28 @@ function OutputError({ d }: { d: CD }) {
 // played (e.g. the contribution CDN blocks cross-origin playback), it switches to
 // the fallback so the pane is never dead.
 type PreviewState = { s: 'loading' | 'playing' | 'fallback' | 'error'; detail?: string; /** which address is playing: 0 = src, 1.. = fallbacks in order */ via?: number }
+
+// THE PLAYER LIBRARY, fetched when this page opens rather than after the
+// channel's details arrive and the panes render: the two used to happen one
+// after the other, and the source pane paid for both before its first request.
+let hlsModule: Promise<any> | null = null
+const loadHls = () => (hlsModule ??= import('hls.js').then((m) => m.default))
+
+// WHICH ADDRESS PLAYS A SOURCE in this browser: a source whose own server
+// refuses cross-origin playback will refuse it next time too, so it goes
+// straight to the relay instead of failing first (remembered for a day).
+const VIA_KEY = 'volt.srcPreview.via'
+function rememberedRelay(url: string): boolean {
+  try { const m = JSON.parse(localStorage.getItem(VIA_KEY) || '{}'); const t = m[url]; return !!t && Date.now() - t < 86_400_000 } catch { return false }
+}
+function rememberRelay(url: string, on: boolean) {
+  try {
+    const m = JSON.parse(localStorage.getItem(VIA_KEY) || '{}')
+    if (on) m[url] = Date.now(); else delete m[url]
+    const keep = Object.entries(m).sort((a: any, b: any) => b[1] - a[1]).slice(0, 50)
+    localStorage.setItem(VIA_KEY, JSON.stringify(Object.fromEntries(keep)))
+  } catch { /* private mode: it simply tries the direct address first */ }
+}
 function HlsVideo({ src, fallbackSrc, hostRef, kind = 'hls', preferHeight, onState }: {
   src: string
   /** Tried in order when the one before cannot play (always HLS). */
@@ -695,18 +717,33 @@ function HlsVideo({ src, fallbackSrc, hostRef, kind = 'hls', preferHeight, onSta
     // 9 Oct demo capture).
     const snapLive = () => { try { const sk = v.seekable; if (sk.length) { const end = sk.end(sk.length - 1); if (end - v.currentTime > 20) { const sync = hls?.liveSyncPosition; v.currentTime = Number.isFinite(sync) && sync > 0 ? sync : Math.max(sk.start(0), end - 8) } } } catch {} }
     ;(async () => {
-      const Hls = (await import('hls.js')).default
+      const Hls = await loadHls()
       if (cancelled) return
       start = (s: string) => {
         const url = resolve(s)
         if (Hls.isSupported()) {
           try { hls?.destroy() } catch {}
-          // liveSyncDurationCount:3 keeps us ~3 segments off the edge (normal live
-          // latency); NOT lowLatency because the origin is a standard LIVE playlist.
-          // Our origin can be warming up, so keep retrying it; a source address
-          // that refuses us will not change its mind, so move on quickly.
+          // OUR ORIGIN (the fallback): ~3 of our short segments off the edge, and
+          // patient, because it can be warming up.
+          //
+          // A SOURCE ADDRESS (its own, or through the relay) is different. Its
+          // segments are often 6 s or more, so three back put the source pane
+          // ~20 s behind the source, while the encoder joins at the NEWEST
+          // segment (live_start_index -1): the output pane was then AHEAD of the
+          // source pane, though it is made from it. So a source sits 1.5
+          // segments back and, if it drifts, catches up by playing up to 10%
+          // faster (no jump) until it is more than 3 segments behind.
+          // progressive: show a large segment as it downloads, not once all of
+          // it has arrived. And a source that refuses us will not change its
+          // mind: one attempt, then the next address.
           const patient = url.includes('/origin/')
-          hls = new Hls({ lowLatencyMode: false, liveSyncDurationCount: 3, backBufferLength: 30, manifestLoadingMaxRetry: patient ? 8 : 1, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: patient ? 8 : 2 })
+          hls = new Hls(patient
+            ? { lowLatencyMode: false, liveSyncDurationCount: 3, backBufferLength: 30, manifestLoadingMaxRetry: 8, manifestLoadingRetryDelay: 1000, levelLoadingMaxRetry: 8 }
+            // lowLatencyMode is what lets hls.js adjust the rate at all; on an
+            // ordinary playlist it changes nothing else (it uses LL-HLS parts
+            // only when the source offers them, which is then better still).
+            : { lowLatencyMode: true, liveSyncDurationCount: 1.5, liveMaxLatencyDurationCount: 3, maxLiveSyncPlaybackRate: 1.1,
+                progressive: true, backBufferLength: 30, manifestLoadingMaxRetry: 0, manifestLoadingRetryDelay: 500, levelLoadingMaxRetry: 2 })
           hlsRef.current = hls
           hls.loadSource(url); hls.attachMedia(v)
           hls.on(Hls.Events.MANIFEST_PARSED, (_e: any, data: any) => {
@@ -1269,18 +1306,31 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   const p = (sel?.protocol || '').toLowerCase()
   const direct = sel && /^https?:\/\//i.test(sel.url) && (p === 'hls' || p === 'dash') ? sel.url : null
   const throughIngest = !direct && receiving && !encFailed
-  const playSrc = direct ?? (throughIngest ? viaOrigin : null)
   // The relay (HLS only): what to fall back to when the browser may not play
   // the source's own address. Asked for per input; the address is a token.
+  // url '' = asking for it failed, so the direct address is all there is.
   const [relay, setRelay] = useState<{ key: string; url: string } | null>(null)
   useEffect(() => {
     if (!direct || p !== 'hls' || !sel) return
     let live = true
-    ;(isEvent ? api.eventInputPreview : api.channelInputPreview)(d.id, sel.key).then(r => { if (live) setRelay({ key: sel.key, url: r.url }) }).catch(() => {})
+    ;(isEvent ? api.eventInputPreview : api.channelInputPreview)(d.id, sel.key)
+      .then(r => { if (live) setRelay({ key: sel.key, url: r.url }) })
+      .catch(() => { if (live) setRelay({ key: sel.key, url: '' }) })
     return () => { live = false }
   }, [direct, p, sel?.key, d.id, isEvent])
-  const relayUrl = relay && sel && relay.key === sel.key ? relay.url : null
-  const fallbacks = direct ? [relayUrl, receiving ? viaOrigin : null].filter((x): x is string => !!x) : []
+  const relayAsked = !!relay && !!sel && relay.key === sel.key
+  const relayUrl = relayAsked && relay!.url ? relay!.url : null
+  // REFUSED BEFORE IN THIS BROWSER: start on the relay, the direct address
+  // second, instead of waiting for the refusal every time the page opens.
+  // Read once per input: remembering it while it plays must not move the
+  // starting address under a player that is already playing.
+  const relayFirst = useMemo(() => !!direct && p === 'hls' && rememberedRelay(direct), [direct, p])
+  const playSrc = relayFirst
+    ? (relayUrl ?? (relayAsked ? direct : null))   // null = the relay address is on its way
+    : direct ?? (throughIngest ? viaOrigin : null)
+  const fallbacks = !direct ? []
+    : relayFirst && relayUrl ? [direct, receiving ? viaOrigin : null].filter((x): x is string => !!x)
+    : [relayUrl, receiving ? viaOrigin : null].filter((x): x is string => !!x)
   const [pv, setPv] = useState<PreviewState>({ s: 'loading' })
   useEffect(() => { setPv({ s: 'loading' }) }, [playSrc])
   const showGateError = inputFailed || (receiving && encFailed)
@@ -1294,13 +1344,19 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
     : sourceUp ? { t: 'CONNECTING', bg: 'rgba(250,204,21,.85)' }
     : playing ? { t: 'SOURCE PREVIEW', bg: 'rgba(99,102,241,.85)' }
     : { t: proto, bg: 'rgba(99,102,241,.85)' }
-  const viaUrl = pv.s === 'fallback' && pv.via ? fallbacks[pv.via - 1] : null
+  const viaUrl = pv.s === 'fallback' && pv.via ? fallbacks[pv.via - 1] : pv.s === 'playing' ? playSrc : null
+  // Remember which address worked, for the next time this page opens.
+  useEffect(() => {
+    if (!direct || p !== 'hls' || !viaUrl) return
+    if (viaUrl === relayUrl) rememberRelay(direct, true)
+    else if (viaUrl === direct) rememberRelay(direct, false)
+  }, [viaUrl, relayUrl, direct, p])
   const how = !playSrc ? null
     : pv.s === 'error' ? 'could not play'
     : pv.s === 'loading' ? 'connecting…'
     : !direct ? 'via Volt ingest'
-    : pv.s !== 'fallback' ? 'direct from the source'
     : viaUrl === relayUrl ? 'relayed by Volt: the source blocks browser playback'
+    : pv.s !== 'fallback' ? 'direct from the source'
     : 'via Volt ingest: direct playback blocked'
 
   return (
