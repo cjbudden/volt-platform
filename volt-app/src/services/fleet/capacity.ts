@@ -27,6 +27,12 @@ export interface StreamLoad {
   gpus: number;
   netInBps: number;
   netOutBps: number;
+  /**
+   * GPU memory the task holds (MiB). Only counted for tasks that share a GPU
+   * (captions on a shared GPU): a task with the whole GPU reserved has all of
+   * it anyway, and nothing else may join it.
+   */
+  vramMib?: number;
 }
 
 /** What ECS is asked to reserve for the task: the estimate plus headroom. */
@@ -43,6 +49,8 @@ export interface Capacity {
   /** Sustained (baseline) network, not the burst figure on the price page. */
   netBps: number;
   gpus: number;
+  /** Memory on its GPU (MiB), when it has one and the type is known. */
+  gpuMemoryMib?: number;
   /** How many awsvpc tasks it can carry at all (ENIs - 1 without trunking). */
   taskSlots: number;
   /**
@@ -59,6 +67,8 @@ export interface InstanceProfile {
   netBaselineGbps: number;
   enis: number;
   gpus: number;
+  /** GPU memory (MiB): T4 16 GB on g4dn, A10G 24 GB on g5. */
+  gpuMemoryMib?: number;
 }
 
 /**
@@ -82,9 +92,9 @@ export const INSTANCE_PROFILES: Record<string, InstanceProfile> = {
   'c7i.xlarge':   { vcpus: 4,  memoryMib: 8192,  netBaselineGbps: 1.5625, enis: 4, gpus: 0 },
   'c7i.2xlarge':  { vcpus: 8,  memoryMib: 16384, netBaselineGbps: 3.125,  enis: 4, gpus: 0 },
   'c7i.4xlarge':  { vcpus: 16, memoryMib: 32768, netBaselineGbps: 6.25,   enis: 8, gpus: 0 },
-  'g4dn.xlarge':  { vcpus: 4,  memoryMib: 16384, netBaselineGbps: 5,      enis: 3, gpus: 1 },
-  'g4dn.2xlarge': { vcpus: 8,  memoryMib: 32768, netBaselineGbps: 10,     enis: 3, gpus: 1 },
-  'g5.xlarge':    { vcpus: 4,  memoryMib: 16384, netBaselineGbps: 2.5,    enis: 4, gpus: 1 },
+  'g4dn.xlarge':  { vcpus: 4,  memoryMib: 16384, netBaselineGbps: 5,      enis: 3, gpus: 1, gpuMemoryMib: 15360 },
+  'g4dn.2xlarge': { vcpus: 8,  memoryMib: 32768, netBaselineGbps: 10,     enis: 3, gpus: 1, gpuMemoryMib: 15360 },
+  'g5.xlarge':    { vcpus: 4,  memoryMib: 16384, netBaselineGbps: 2.5,    enis: 4, gpus: 1, gpuMemoryMib: 23040 },
 };
 
 export function instanceProfile(type: string | null | undefined): InstanceProfile | null {
@@ -115,6 +125,7 @@ export function capacityOf(
     memoryMib: mem,
     netBps: p.netBaselineGbps * 1e9,
     gpus: p.gpus,
+    ...(p.gpuMemoryMib ? { gpuMemoryMib: p.gpuMemoryMib } : {}),
     taskSlots: opts.taskSlotsOverride ?? Math.max(1, p.enis - 1),
     ...(opts.diskGib ? { diskMib: Math.round(opts.diskGib * 1024) } : {}),
   };
@@ -134,9 +145,24 @@ export interface FitPolicy {
    * would be refused by every server size it actually runs well on.
    */
   soloCeiling: number;
+  /**
+   * Captions tasks sharing one GPU (FLEET_CAPTIONS_GPU_SHARING): the share of
+   * the GPU's time they may fill together, after the safety factor. Whisper
+   * works in bursts (a window of audio, then idle), so a GPU can carry a few
+   * streams; the ceiling keeps a burst on one from delaying the words on the
+   * others. GPU memory is checked separately and never overcommitted.
+   */
+  sharedGpuCeiling: number;
 }
 
-export const DEFAULT_FIT: FitPolicy = { ceiling: 0.65, safetyFactor: 1.25, gpuSharing: false, soloCeiling: 0.8 };
+export const DEFAULT_FIT: FitPolicy = { ceiling: 0.65, safetyFactor: 1.25, gpuSharing: false, soloCeiling: 0.8, sharedGpuCeiling: 0.8 };
+
+/**
+ * Share of a GPU's memory shared tasks may fill: the driver, the CUDA context
+ * of each process and fragmentation take the rest. A model that does not fit
+ * fails to load, so this is a hard limit, not a ceiling to tune.
+ */
+export const GPU_MEMORY_USABLE = 0.9;
 
 /** The fit policy for an empty server sized for one stream. */
 export function soloFit(p: FitPolicy): FitPolicy {
@@ -153,6 +179,8 @@ export interface Occupancy {
   gpuShare: number;
   /** Task disk the streams on it will hold over the planning horizon (MiB). */
   diskMib?: number;
+  /** GPU memory held by tasks sharing its GPU (MiB). */
+  vramMib?: number;
 }
 
 /**
@@ -176,7 +204,7 @@ export interface FitResult { ok: boolean; reason: string | null; cpuAfter: numbe
  * all back out to S3, so on package-only work the NIC, not the CPU, is what
  * runs out first.
  */
-export function fits(cap: Capacity, occ: Occupancy, add: { reservation: Reservation; load: StreamLoad; diskMib?: number }, p: FitPolicy = DEFAULT_FIT): FitResult {
+export function fits(cap: Capacity, occ: Occupancy, add: { reservation: Reservation; load: StreamLoad; diskMib?: number; sharesGpu?: boolean }, p: FitPolicy = DEFAULT_FIT): FitResult {
   const cpuAfter = (occ.cpuUnits + add.load.cpuUnits * p.safetyFactor) / cap.cpuUnits;
   const netAdd = (add.load.netInBps + add.load.netOutBps) * p.safetyFactor;
   const netAfter = (occ.netBps + netAdd) / cap.netBps;
@@ -185,9 +213,25 @@ export function fits(cap: Capacity, occ: Occupancy, add: { reservation: Reservat
   if (occ.tasks + 1 > cap.taskSlots) return no('no task slot (network interfaces) left');
   if (occ.reserved.cpuUnits + add.reservation.cpuUnits > cap.cpuUnits) return no('CPU reservation would not fit');
   if (occ.reserved.memoryMib + add.reservation.memoryMib > cap.memoryMib) return no('memory reservation would not fit');
-  if (add.load.gpuShare > 0 || add.reservation.gpus > 0) {
+  if (add.sharesGpu) {
+    // A captions task that shares the GPU (no whole-GPU reservation). It may
+    // only join other sharers: ECS would happily put it beside a task that
+    // reserved the GPU, because it asks for none, and that task was promised
+    // the GPU to itself.
+    if (cap.gpus < 1) return no('needs a GPU');
+    if (occ.reserved.gpus > 0) return no('GPU reserved whole by another task');
+    const vram = (occ.vramMib ?? 0) + (add.load.vramMib ?? 0);
+    if (cap.gpuMemoryMib && vram > cap.gpuMemoryMib * cap.gpus * GPU_MEMORY_USABLE) {
+      return no(`GPU memory would run short (${(vram / 1024).toFixed(1)} of ${Math.round(cap.gpuMemoryMib / 1024)} GiB)`);
+    }
+    const busy = occ.gpuShare + add.load.gpuShare * p.safetyFactor;
+    if (busy > p.sharedGpuCeiling * cap.gpus) return no(`GPU would be ${Math.round((busy / cap.gpus) * 100)}% busy`);
+  } else if (add.load.gpuShare > 0 || add.reservation.gpus > 0) {
     if (cap.gpus < 1) return no('needs a GPU');
     if (!p.gpuSharing && occ.reserved.gpus + add.reservation.gpus > cap.gpus) return no('GPU already taken');
+    // Captions sharing the GPU reserve none of it, so the reservation alone
+    // would let a whole-GPU task in on top of them.
+    if (!p.gpuSharing && add.reservation.gpus > 0 && (occ.vramMib ?? 0) > 0) return no('GPU shared by captions tasks');
     if (p.gpuSharing && occ.gpuShare + add.load.gpuShare * p.safetyFactor > p.ceiling * cap.gpus) return no('GPU encoder would be too busy');
   }
   // DISK. The encoder keeps its whole run on the task disk while the sidecar
@@ -203,7 +247,7 @@ export function fits(cap: Capacity, occ: Occupancy, add: { reservation: Reservat
 }
 
 /** Add a placed load to an occupancy (for planning several placements in a row). */
-export function occupy(occ: Occupancy, add: { reservation: Reservation; load: StreamLoad; diskMib?: number }): Occupancy {
+export function occupy(occ: Occupancy, add: { reservation: Reservation; load: StreamLoad; diskMib?: number; sharesGpu?: boolean }): Occupancy {
   return {
     tasks: occ.tasks + 1,
     reserved: {
@@ -215,6 +259,7 @@ export function occupy(occ: Occupancy, add: { reservation: Reservation; load: St
     netBps: occ.netBps + add.load.netInBps + add.load.netOutBps,
     gpuShare: occ.gpuShare + add.load.gpuShare,
     diskMib: (occ.diskMib ?? 0) + (add.diskMib ?? 0),
+    vramMib: (occ.vramMib ?? 0) + (add.load.vramMib ?? 0),
   };
 }
 

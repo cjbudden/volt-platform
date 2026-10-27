@@ -30,6 +30,14 @@ resource "aws_launch_template" "ecs_gpu" {
     echo "ECS_CLUSTER=${var.project}" >> /etc/ecs/ecs.config
     echo "ECS_ENABLE_GPU_SUPPORT=true" >> /etc/ecs/ecs.config
     echo "ECS_CONTAINER_STOP_TIMEOUT=120s" >> /etc/ecs/ecs.config
+    %{if var.captions_gpu_sharing~}
+    # Captions sharing the GPU reserve none of it, so they reach it through
+    # Docker's default runtime. The GPU AMI already makes that NVIDIA's; this
+    # makes sure, and restarts Docker before the ECS agent starts any task.
+    if command -v nvidia-ctk >/dev/null && ! grep -q '"default-runtime": *"nvidia"' /etc/docker/daemon.json 2>/dev/null; then
+      nvidia-ctk runtime configure --runtime=docker --set-as-default && systemctl restart docker
+    fi
+    %{endif~}
   EOT
   )
 

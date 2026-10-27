@@ -45,6 +45,15 @@ export interface LaunchHints {
   ec2InstanceId?: string;
   /** Our compute_hosts id for the pinned server (bookkeeping only). */
   hostId?: string;
+  /**
+   * Captions only: share the GPU instead of reserving it whole (the task
+   * definition that reserves none, CAPTIONS_SHARED_TASK_DEF). launchCaptions
+   * clears it, and sets gpus to 1, when it had to fall back to a whole GPU, so
+   * what is recorded is what ran.
+   */
+  sharedGpu?: boolean;
+  /** Servers the task must not land on (a new server was planned; ECS memberOf with not()). */
+  avoidEc2InstanceIds?: string[];
 }
 
 export interface TaskLauncher {
@@ -270,6 +279,13 @@ export class EcsTaskLauncher implements TaskLauncher {
     };
     if (hints?.ec2InstanceId) {
       input.placementConstraints = [{ type: 'memberOf', expression: `ec2InstanceId == ${hints.ec2InstanceId}` }];
+    } else if (hints?.avoidEc2InstanceIds?.length) {
+      // A planned NEW server. A task that reserves no GPU would otherwise be
+      // binpacked onto a running GPU server whose GPU placement refused (CPU
+      // and memory there still have room). The expression limit is 2000
+      // characters: about 90 ids, far more GPU servers than one pool runs.
+      const ids = hints.avoidEc2InstanceIds.slice(0, 90).map((i) => `'${i}'`).join(', ');
+      input.placementConstraints = [{ type: 'memberOf', expression: `not(ec2InstanceId in [${ids}])` }];
     }
     return input;
   }
@@ -312,12 +328,31 @@ export class EcsTaskLauncher implements TaskLauncher {
       JOB_CONFIG_JSON: JSON.stringify(job),
     }, hints);
   }
-  launchCaptions(streamId: string, job: Record<string, any>, hints?: LaunchHints) {
+  async launchCaptions(streamId: string, job: Record<string, any>, hints?: LaunchHints) {
     // GPU-only capacity: the captions task def targets a GPU capacity provider so
     // this heavy add-on never lands on the lean encoder fleet.
-    return this.run(config.orchestrator.captionsTaskDef, 'captions', {
-      CAPTIONS_CONFIG_JSON: JSON.stringify(job),
-    }, hints);
+    const env = { CAPTIONS_CONFIG_JSON: JSON.stringify(job) };
+    const shared = config.orchestrator.captionsSharedTaskDef;
+    if (hints?.sharedGpu && shared) {
+      // SHARING THE GPU. The shared task definition reserves no GPU (ECS can
+      // only reserve whole ones) and sees it through the GPU AMI's NVIDIA
+      // runtime; placement has already checked GPU memory and GPU time.
+      try {
+        return await this.run(shared, 'captions', env, { ...hints, gpus: 0 });
+      } catch (e) {
+        // Most likely a planned new server that ECS would not start for a
+        // task asking no GPU, behind a constraint that excludes every running
+        // one. A whole GPU is what makes ECS scale the pool out, and captions
+        // that start on their own server beat captions that do not start.
+        console.warn(`[ecs] shared-GPU captions launch for ${streamId} failed (${(e as Error).message}); reserving a whole GPU`);
+      }
+      hints.sharedGpu = false;
+      hints.gpus = 1;
+      delete hints.avoidEc2InstanceIds;
+      delete hints.ec2InstanceId;
+      delete hints.hostId;
+    }
+    return this.run(config.orchestrator.captionsTaskDef, 'captions', env, hints);
   }
   /**
    * A FAST channel's playout (volt-fast image, bin/fast_playout.py). Not on the

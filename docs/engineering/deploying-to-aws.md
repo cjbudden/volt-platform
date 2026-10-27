@@ -79,6 +79,8 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    (`volt-encoder/Dockerfile.radio`) and, if accounts use Whisper captions,
    the captions add-on (`volt-encoder/Dockerfile.captions`). Captions run on
    a GPU pool that starts at zero servers (`deploy/terraform/ecs_capacity_gpu.tf`).
+   With `captions_gpu_sharing = true` several captioned streams share one GPU
+   server; leave it off until the real-T4 check in `PLACEMENT.md` has passed.
    Radio's MP3 output needs an Icecast relay, which has no home on AWS yet
    (queue item 2.1c); stations still deliver HLS and DASH.
 4. **Migrations.** The control plane applies every migration in

@@ -47,6 +47,8 @@ export interface PlacementRequest {
   needsGpu: boolean;
   /** Task disk this stream will hold by the end of the planning horizon (MiB). */
   diskMib?: number;
+  /** Shares a GPU instead of reserving it whole (captions, streamLoad.ts shareGpu). */
+  sharesGpu?: boolean;
 }
 
 /**
@@ -108,6 +110,13 @@ export type PlacementDecision =
       lifecycle: Lifecycle;
       /** The smallest instance type in the pool that holds this stream within the ceiling. */
       instanceType: string | null;
+      /**
+       * Running servers the new task must NOT land on (EC2 instance ids). Set
+       * for a task that shares a GPU: it reserves none, so ECS's own binpack
+       * would put it on a GPU server placement has just refused, because the
+       * CPU and memory there have room.
+       */
+      avoidEc2InstanceIds?: string[];
       reason: string;
       considered: Array<{ hostId: string; reason: string }>;
     }
@@ -127,7 +136,7 @@ export function poolFor(req: PlacementRequest): string {
 const EMPTY = { reserved: { cpuUnits: 0, memoryMib: 0, gpus: 0 }, tasks: 0, cpuUnits: 0, netBps: 0, gpuShare: 0 };
 
 /** Does EVERY type this pool can launch hold the stream within the ceiling? */
-function poolHolds(spec: PoolSpec, add: { reservation: Reservation; load: StreamLoad; diskMib?: number }, fit: FitPolicy, diskGib?: number | null): boolean {
+function poolHolds(spec: PoolSpec, add: { reservation: Reservation; load: StreamLoad; diskMib?: number; sharesGpu?: boolean }, fit: FitPolicy, diskGib?: number | null): boolean {
   return spec.types.length > 0 && spec.types.every((t) => {
     const cap = capacityOf(t, {}, { diskGib });
     return !!cap && fits(cap, EMPTY, add, soloFit(fit)).ok;
@@ -138,7 +147,7 @@ export function choosePlacement(req: PlacementRequest, hosts: HostSnapshot[], p:
   const considered: Array<{ hostId: string; reason: string }> = [];
   const pool = poolFor(req);
   const lifecycles = lifecyclesFor(req.streamClass, p);
-  const add = { reservation: req.reservation, load: req.load, diskMib: req.diskMib };
+  const add = { reservation: req.reservation, load: req.load, diskMib: req.diskMib, sharesGpu: req.sharesGpu };
 
   const candidates: Array<{ h: HostSnapshot; cpu: number; net: number; rank: number }> = [];
   for (const h of hosts) {
@@ -172,8 +181,12 @@ export function choosePlacement(req: PlacementRequest, hosts: HostSnapshot[], p:
     const specs = p.pools.filter((s) => s.pool === pool && s.gpu === req.needsGpu && s.lifecycle === lc);
     const spec = specs.find((s) => poolHolds(s, add, p.fit, p.taskDiskGib));
     if (spec) {
+      const avoid = req.sharesGpu
+        ? hosts.filter((h) => h.pool === pool && h.gpu).map((h) => h.externalId)
+        : [];
       return {
         action: 'new_host', capacityProvider: spec.provider, lifecycle: lc, instanceType: spec.types[0],
+        ...(avoid.length ? { avoidEc2InstanceIds: avoid } : {}),
         reason: hosts.length ? 'no running server has room without affecting its streams' : 'no server running yet',
         considered,
       };

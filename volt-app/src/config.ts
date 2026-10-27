@@ -126,6 +126,9 @@ export const config = {
     encoderTaskDef: process.env.ENCODER_TASK_DEF ?? 'volt-encoder',
     thumbnailerTaskDef: process.env.THUMBNAILER_TASK_DEF ?? 'volt-thumbnailer',
     captionsTaskDef: process.env.CAPTIONS_TASK_DEF ?? 'volt-captions',   // GPU add-on task (whisper+NLLB)
+    // The same captions task without a whole-GPU reservation, so several can
+    // share one GPU (FLEET_CAPTIONS_GPU_SHARING). Empty: sharing stays off.
+    captionsSharedTaskDef: process.env.CAPTIONS_SHARED_TASK_DEF ?? '',
     // The encoder image was built with CAPTIONS_CPU=true, so whisper tiny/base
     // runs inside the encoder on CPU instead of a GPU add-on (captionsPlan.ts).
     captionsCpuInEncoder: (process.env.CAPTIONS_CPU_IN_ENCODER ?? 'false') === 'true',

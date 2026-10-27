@@ -20,7 +20,7 @@
 // ============================================================================
 import { query } from '../../db';
 import type { LaunchHints } from '../orchestrator/launcher';
-import { calibrate, type LoadEstimate } from './streamLoad';
+import { calibrate, shareGpu, unshareGpu, type LoadEstimate } from './streamLoad';
 import { applyFit, fitFor } from './loadFit';
 import { currentLoadFits, familyForPlacement } from './loadLearning';
 import { scratchMibAt } from './storageProjection';
@@ -34,7 +34,18 @@ export interface Assignment {
   hints: LaunchHints | undefined;
 }
 
-export async function assignStream(args: {
+export async function assignStream(args: Parameters<typeof assignInner>[0]): Promise<Assignment> {
+  const a = await assignInner(args);
+  // A captions task only shares a GPU when placement planned it (the hint
+  // carries it to the launcher). Every other way out (placement off, no pool
+  // fits, an error) launches the task definition that reserves the GPU whole,
+  // so the estimate must say so too, or the next placement would treat that
+  // server's GPU as free to share.
+  if (a.estimate.sharesGpu && !a.hints?.sharedGpu) a.estimate = unshareGpu(a.estimate);
+  return a;
+}
+
+async function assignInner(args: {
   streamId: string;
   streamClass: StreamClass;
   accountId: string | null;
@@ -60,6 +71,9 @@ export async function assignStream(args: {
   } catch (e) {
     console.warn('[fleet] history lookup failed; using the estimate', e);
   }
+  // Captions share a GPU server when the deployment allows it: the GPU is
+  // then checked by memory and time, not taken whole (capacity.ts fits).
+  if (args.streamClass === 'captions' && s.captionsGpuSharing) estimate = shareGpu(estimate);
   if (!s.placement) {
     return { estimate, decision: { action: 'not_planned', reason: 'placement is off for this launcher' }, hints: undefined };
   }
@@ -73,17 +87,21 @@ export async function assignStream(args: {
     const hosts = await loadFleetSnapshot(s);
     const decision = choosePlacement({
       streamId: args.streamId, streamClass: args.streamClass, accountId: args.accountId, isolation,
-      load: estimate.load, reservation: estimate.reservation, needsGpu: estimate.needsGpu,
+      load: estimate.load, reservation: estimate.reservation, needsGpu: estimate.needsGpu, sharesGpu: estimate.sharesGpu,
       diskMib: scratchMibAt(estimate.storage?.scratchMibPerHour ?? 0, 0, args.horizonHours ?? s.diskHorizonHours),
     }, hosts, s.placementPolicy);
 
-    const sized = { cpuUnits: estimate.reservation.cpuUnits, memoryMib: estimate.reservation.memoryMib, gpus: estimate.reservation.gpus };
+    const sized = {
+      cpuUnits: estimate.reservation.cpuUnits, memoryMib: estimate.reservation.memoryMib, gpus: estimate.reservation.gpus,
+      ...(estimate.sharesGpu ? { sharedGpu: true } : {}),
+    };
     if (decision.action === 'existing_host') {
       const host = hosts.find((h) => h.id === decision.hostId)!;
       return { estimate, decision, hints: { ...sized, capacityProvider: decision.capacityProvider ?? undefined, ec2InstanceId: host.externalId, hostId: host.id } };
     }
     if (decision.action === 'new_host') {
-      return { estimate, decision, hints: { ...sized, capacityProvider: decision.capacityProvider } };
+      return { estimate, decision, hints: { ...sized, capacityProvider: decision.capacityProvider,
+        ...(decision.avoidEc2InstanceIds?.length ? { avoidEc2InstanceIds: decision.avoidEc2InstanceIds } : {}) } };
     }
     // Unplaceable: launch as before, and say why so the fleet view shows it.
     console.warn(`[fleet] ${args.streamId}: ${decision.reason}; launching with default sizing`);
@@ -106,11 +124,16 @@ export async function recordAssignment(taskArn: string, a: Assignment): Promise<
        placement_decision = $14::jsonb
      WHERE task_arn = $1`,
     [taskArn, l.cpuUnits, l.memoryMib, l.gpuShare, l.netInBps, l.netOutBps, a.estimate.signature, a.estimate.basis,
-     a.hints?.cpuUnits ?? null, a.hints?.memoryMib ?? null, a.estimate.reservation.gpus,
+     // The hints, when set, say what the launcher actually did: a captions
+     // task meant to share a GPU that had to reserve one whole instead
+     // (launcher.ts launchCaptions) is recorded as holding it.
+     a.hints?.cpuUnits ?? null, a.hints?.memoryMib ?? null, a.hints?.gpus ?? a.estimate.reservation.gpus,
      a.hints?.hostId ?? null, a.hints?.capacityProvider ?? null,
      // baseLines (the unfitted model) is what learning compares measurements
      // with; storage drives the disk check for the next placements.
      JSON.stringify({ ...a.decision, lines: a.estimate.lines, baseLines: a.estimate.baseLines ?? a.estimate.lines,
-       notes: a.estimate.notes, reservation: a.estimate.reservation, storage: a.estimate.storage, fit: a.estimate.fit ?? null })]
+       notes: a.estimate.notes, reservation: a.estimate.reservation, storage: a.estimate.storage, fit: a.estimate.fit ?? null,
+       // GPU memory it holds and whether it shares the GPU (snapshot.ts reads vramMib back).
+       vramMib: a.estimate.load.vramMib ?? null, sharesGpu: !!a.hints?.sharedGpu })]
   );
 }

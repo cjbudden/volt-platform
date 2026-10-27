@@ -31,6 +31,7 @@ interface TaskRow {
   drm: boolean | null; protocol: string | null; ingest_url: string | null;
   ends_in_min: string | number | null; since_move_min: string | number | null;
   scratch_mib_per_hour: string | number | null; hours_running: string | number | null;
+  vram_mib: string | number | null;
 }
 
 const n = (v: unknown) => (v == null ? null : Number(v));
@@ -79,6 +80,7 @@ export async function loadFleetSnapshot(s: FleetSettings = fleetSettings()): Pro
             CASE WHEN e.server_stop IS NOT NULL THEN EXTRACT(EPOCH FROM (e.server_stop - now())) / 60 END AS ends_in_min,
             CASE WHEN i.moved_at IS NOT NULL THEN EXTRACT(EPOCH FROM (now() - i.moved_at)) / 60 END AS since_move_min,
             (i.placement_decision->'storage'->>'scratchMibPerHour')::float AS scratch_mib_per_hour,
+            (i.placement_decision->>'vramMib')::float AS vram_mib,
             EXTRACT(EPOCH FROM (now() - i.launched_at)) / 3600 AS hours_running
        FROM instances i
        LEFT JOIN channels c ON c.id = i.channel_id
@@ -138,6 +140,9 @@ function toTask(t: TaskRow, s: FleetSettings): TaskSnapshot {
     gpus: t.reserved_gpus ?? (t.is_gpu ? 1 : 0),
     netInBps: n(t.est_net_in_bps) ?? 0,
     netOutBps: n(t.est_net_out_bps) ?? 0,
+    // GPU memory a captions task holds (recorded at launch); what keeps
+    // tasks sharing a GPU from overfilling it.
+    ...(n(t.vram_mib) ? { vramMib: n(t.vram_mib)! } : {}),
   };
   return {
     instanceId: t.id, streamId: t.stream_id, accountId: t.account_id,

@@ -51,6 +51,12 @@ variable "gpu_max" {
   description = "Most GPU servers at once. The pool starts at zero and costs nothing until a captions task needs it. 0 removes the pool, and whisper captions do not run."
 }
 
+variable "captions_gpu_sharing" {
+  type        = bool
+  default     = false
+  description = "Several live captions streams share one GPU server (placement checks GPU memory and GPU time) instead of each reserving a whole GPU. Two small-model streams then cost one g4dn.xlarge, not two. Off until the real-T4 check in PLACEMENT.md has passed on this account."
+}
+
 variable "large_spot_max" {
   type    = number
   default = 4

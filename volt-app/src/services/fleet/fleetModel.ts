@@ -105,8 +105,8 @@ export function occupancyOf(h: HostSnapshot, mode: 'trusted' | 'conservative', e
   const tasks = h.tasks.filter((t) => !excludeInstanceIds.has(t.instanceId));
   const est = tasks.reduce((a, t) => {
     const l = taskLoad(t);
-    return { cpu: a.cpu + l.cpuUnits, net: a.net + l.netInBps + l.netOutBps, gpu: a.gpu + l.gpuShare, disk: a.disk + (t.diskMibAtHorizon ?? 0) };
-  }, { cpu: 0, net: 0, gpu: 0, disk: 0 });
+    return { cpu: a.cpu + l.cpuUnits, net: a.net + l.netInBps + l.netOutBps, gpu: a.gpu + l.gpuShare, disk: a.disk + (t.diskMibAtHorizon ?? 0), vram: a.vram + (l.vramMib ?? 0) };
+  }, { cpu: 0, net: 0, gpu: 0, disk: 0, vram: 0 });
   const reserved = reservedOf({ ...h, tasks });
   if (mode === 'trusted') {
     if (!telemetryTrusted(h)) return null;
@@ -115,13 +115,13 @@ export function occupancyOf(h: HostSnapshot, mode: 'trusted' | 'conservative', e
     const rmCpu = removed.reduce((s, l) => s + l.cpuUnits, 0);
     const rmNet = removed.reduce((s, l) => s + l.netInBps + l.netOutBps, 0);
     return {
-      reserved, tasks: tasks.length, gpuShare: est.gpu, diskMib: est.disk,
+      reserved, tasks: tasks.length, gpuShare: est.gpu, diskMib: est.disk, vramMib: est.vram,
       cpuUnits: Math.max(0, h.observed!.cpuUnitsP95 - rmCpu),
       netBps: Math.max(0, h.observed!.netBpsP95 - rmNet),
     };
   }
   return {
-    reserved, tasks: tasks.length, gpuShare: est.gpu, diskMib: est.disk,
+    reserved, tasks: tasks.length, gpuShare: est.gpu, diskMib: est.disk, vramMib: est.vram,
     cpuUnits: Math.max(est.cpu, h.observed?.cpuUnitsP95 ?? 0),
     netBps: Math.max(est.net, h.observed?.netBpsP95 ?? 0),
   };

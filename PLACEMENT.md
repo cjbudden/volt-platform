@@ -148,7 +148,54 @@ neighbours to protect.
 - launches into the one capacity provider placement chose
 - pins to the chosen server with `memberOf` on `ec2InstanceId`, and retries once unpinned
   in the same pool if that server filled up in the meantime
-- reserves a GPU through `resourceRequirements` when the stream needs one
+- reserves a GPU through `resourceRequirements` when the stream needs one, except a
+  captions task sharing a GPU (below)
+- for a captions task planned on a NEW server while sharing is on, adds `memberOf` with
+  `not(ec2InstanceId in [...])` so ECS cannot binpack it onto the GPU server placement
+  just refused
+
+## Captions on a shared GPU (build queue 2.4b)
+
+ECS reserves GPUs whole, so with a reservation each Whisper task has a T4 to itself and
+two captioned channels pay for two g4dn servers. With `captions_gpu_sharing = true` in
+Terraform (`FLEET_CAPTIONS_GPU_SHARING=true` plus `CAPTIONS_SHARED_TASK_DEF`), a captions
+task reserves no GPU and launches on the `-captions-shared` task definition, which
+reaches the GPU through the NVIDIA runtime (`NVIDIA_VISIBLE_DEVICES=all`; the GPU hosts
+make NVIDIA Docker's default runtime). Placement then protects the GPU itself:
+
+- **GPU memory** (`vramMib`, from `captionsPlan.sizeWhisper`): the sharers' total stays
+  within 90% of the card (T4 15 GiB usable, A10G 22.5). A model that does not fit
+  fails to load, so this is a hard limit.
+- **GPU time** (`gpuShare`, per model in `streamLoad.ts` `K.whisperGpuShare`, plus
+  translation): the sharers' total, the newcomer times 1.25, stays at or under 80%
+  (`FLEET_SHARED_GPU_CEILING`).
+- **Only with other sharers.** A sharer never joins a task that reserved the GPU whole,
+  and a whole-GPU task never joins sharers.
+- CPU, memory, network and task slots as for every stream. On a g4dn.xlarge the two
+  task network interfaces are what stop a third small-model stream.
+
+What that gives, by model (one T4): two `small` or two `medium` streams share a server;
+two `medium` with translation do not (14 GiB), nor do two `large-v3` (GPU time).
+
+The shared task records `reserved_gpus = 0` and its GPU memory in `placement_decision`,
+and the next placement reads both back. When ECS will not start the shared task (most
+likely a new server behind the `not(...)` constraint), the launcher falls back to the
+whole-GPU task definition, which makes the pool scale out, and records that it holds the
+GPU. Placement off, unplaceable or a placement error: whole GPU, as before.
+
+**Off by default.** The GPU time per model is a starting estimate from published
+faster-whisper throughput, not a measurement. Before turning it on, run on AWS (needs the
+account; Christian):
+
+1. `captions_gpu_sharing = true`, `terraform apply`, push `volt-captions`.
+2. Start two channels with Whisper `small` captions. Expect one g4dn.xlarge with both
+   captions tasks on it (`GET /api/platform/fleet-plan`), and a third channel's captions
+   on a second server.
+3. On the server: `nvidia-smi` shows both processes, memory under 15 GiB; captions on
+   both channels keep their usual delay for an hour (`nvidia-smi dmon` utilisation is
+   the real `gpuShare`: correct `K.whisperGpuShare` if it is far off).
+4. If a container cannot see the GPU (`CUDA driver not found` in its log), check
+   `/etc/docker/daemon.json` on the host for `"default-runtime": "nvidia"`.
 
 ## Infrastructure
 
@@ -191,6 +238,8 @@ advise mode, and nothing can move a running stream.
 | `FLEET_SPOT_FOR_CHANNELS` | false | Allow 24/7 channels on Spot |
 | `FLEET_CEILING`, `FLEET_SAFETY_FACTOR`, `FLEET_SOLO_CEILING` | 0.65, 1.25, 0.8 | Fit test |
 | `FLEET_TASK_SLOTS` | ENIs minus 1 | Tasks per server once ENI trunking is enabled |
+| `FLEET_CAPTIONS_GPU_SHARING`, `CAPTIONS_SHARED_TASK_DEF` | false, set by Terraform | Captions share a GPU server (both needed) |
+| `FLEET_SHARED_GPU_CEILING` | 0.8 | GPU time captions sharing one GPU may fill together |
 | `FLEET_LEARN` | true | Learn the load model's coefficients from every measured run |
 | `FLEET_TASK_DISK_GIB` | not set (disk not checked) | Task disk per encoder server; turns on the disk check |
 | `FLEET_DISK_HORIZON_HOURS` | 24 | How far ahead the disk check looks |
@@ -207,6 +256,7 @@ advise mode, and nothing can move a running stream.
 | `test/placement-e2e.check.ts` | 21 | Postgres with migrations applied |
 | `test/load-fit.check.ts` | 47 | nothing |
 | `test/load-learning.check.ts` | 22 | Postgres with migrations applied |
+| `test/captions-gpu-sharing.check.ts` | 43 | Postgres with migrations applied |
 
 The existing orchestrator, auto-connect, captions-orchestration, crash-loop and
 relay-fleet suites still pass with these changes.
@@ -220,7 +270,7 @@ relay-fleet suites still pass with these changes.
   volume, then set `FLEET_TASK_DISK_GIB`.
 - **Enable ENI trunking.** Without it a server carries at most three tasks however light
   they are, and that, not CPU, caps how many package-only channels share a server.
-- **GPU sharing.** ECS reserves a whole GPU per task, so one NVENC stream occupies a
-  GPU server. Sharing a GPU between tasks would need the NVIDIA runtime configured on
-  the host instead of an ECS GPU reservation.
+- **GPU sharing for NVENC.** Captions share a GPU (above); an NVENC encoder still
+  reserves its GPU whole, so one NVENC stream occupies a GPU server.
+- **The real-T4 check** for captions sharing (above), then `captions_gpu_sharing = true`.
 - **The consolidation handoff** (CONSOLIDATION.md), so that advice can be acted on.

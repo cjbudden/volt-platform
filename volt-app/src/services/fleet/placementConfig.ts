@@ -39,6 +39,13 @@ export interface FleetSettings {
   learn: boolean;
   /** How far ahead the task disk check looks (hours). Events use their own window when shorter. */
   diskHorizonHours: number;
+  /**
+   * Live captions tasks share a GPU server instead of reserving its GPU whole
+   * (FLEET_CAPTIONS_GPU_SHARING, with CAPTIONS_SHARED_TASK_DEF naming the task
+   * definition that reserves no GPU). Off by default until a real T4 has run
+   * two streams side by side (PLACEMENT.md, captions on a shared GPU).
+   */
+  captionsGpuSharing: boolean;
 }
 
 function pools(): PoolSpec[] {
@@ -70,6 +77,7 @@ export function fleetSettings(): FleetSettings {
     safetyFactor: num(process.env.FLEET_SAFETY_FACTOR, DEFAULT_FIT.safetyFactor),
     gpuSharing: bool(process.env.FLEET_GPU_SHARING, false),
     soloCeiling: num(process.env.FLEET_SOLO_CEILING, DEFAULT_FIT.soloCeiling),
+    sharedGpuCeiling: num(process.env.FLEET_SHARED_GPU_CEILING, DEFAULT_FIT.sharedGpuCeiling),
   };
   const mode = (process.env.FLEET_CONSOLIDATE ?? 'advise').toLowerCase();
   if (mode === 'act') console.warn('[fleet] FLEET_CONSOLIDATE=act is not available until the handoff is built; running in advise mode');
@@ -95,5 +103,8 @@ export function fleetSettings(): FleetSettings {
     windowMinutes: num(process.env.FLEET_WINDOW_MINUTES, 60),
     learn: bool(process.env.FLEET_LEARN, true),
     diskHorizonHours: Math.max(1, num(process.env.FLEET_DISK_HORIZON_HOURS, 24)),
+    // Both halves or neither: sharing planned without the task definition
+    // that reserves no GPU would still reserve one per task on ECS.
+    captionsGpuSharing: bool(process.env.FLEET_CAPTIONS_GPU_SHARING, false) && !!config.orchestrator.captionsSharedTaskDef,
   };
 }

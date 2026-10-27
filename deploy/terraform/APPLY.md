@@ -91,6 +91,9 @@ default) that starts at zero servers and costs nothing until a captions task
 waits for one. Your AWS account needs a G-instance vCPU quota of at least 4
 per GPU server (`gpu_max`); new accounts often have 0, so request it before
 the first captioned stream. `gpu_max = 0` leaves the pool out.
+`captions_gpu_sharing = true` lets several captioned streams share one GPU
+server instead of one server each (two `small` models on one g4dn.xlarge);
+leave it off until the real-T4 check in `PLACEMENT.md` has passed.
 
 ## 6. The database
 

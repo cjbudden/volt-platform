@@ -203,6 +203,10 @@ prewarm_origin_fraction = 0.1
 #   Most GPU servers at once. The pool starts at zero and costs nothing until
 #   a captions task needs it. 0 removes the pool, and whisper captions do not
 #   run.
+# captions_gpu_sharing = false
+#   Several live captions streams share one GPU server (placement checks GPU
+#   memory and GPU time) instead of each reserving a whole GPU. Off until the
+#   real-T4 check in PLACEMENT.md has passed on this account.
 # large_spot_max = 4
 # large_ondemand_max = 4
 # spot_min = 0

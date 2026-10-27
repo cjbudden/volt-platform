@@ -276,6 +276,45 @@ resource "aws_ecs_task_definition" "captions" {
   }])
 }
 
+# ---- The same captions task, sharing its GPU (captions_gpu_sharing) ----------
+# ECS can only reserve whole GPUs, so a task that asks for one has the server's
+# T4 to itself, and two captioned channels pay for two servers. This one asks
+# for none: placement (services/fleet/capacity.ts) packs captions tasks onto a
+# GPU server while their GPU memory and GPU time fit, and the GPU AMI's NVIDIA
+# runtime (the Docker default there, ensured in ecs_capacity_gpu.tf) gives the
+# container the GPU when NVIDIA_VISIBLE_DEVICES asks for it. The launcher falls
+# back to the task definition above when ECS will not start this one.
+resource "aws_ecs_task_definition" "captions_shared" {
+  family                   = "${local.name}-captions-shared"
+  requires_compatibilities = ["EC2"]
+  network_mode             = "awsvpc"
+  cpu                      = "1024"
+  memory                   = "4096"
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.encoder_task.arn
+
+  container_definitions = jsonencode([{
+    name        = "captions"
+    image       = "${aws_ecr_repository.repo["volt-captions"].repository_url}:latest"
+    essential   = true
+    stopTimeout = 30
+    environment = [
+      { name = "AWS_DEFAULT_REGION", value = var.region },
+      { name = "S3_BUCKET", value = aws_s3_bucket.origin.id },
+      { name = "NVIDIA_VISIBLE_DEVICES", value = "all" },
+      { name = "NVIDIA_DRIVER_CAPABILITIES", value = "compute,utility" },
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.encoder.name
+        "awslogs-region"        = var.region
+        "awslogs-stream-prefix" = "captions"
+      }
+    }
+  }])
+}
+
 # ---- Control-plane settings shared by every role ------------------------------
 locals {
   control_plane_env = [
@@ -295,6 +334,10 @@ locals {
     # Radio stations and the live captions add-on, each its own task definition.
     { name = "RADIO_TASK_DEF", value = "${local.name}-radio" },
     { name = "CAPTIONS_TASK_DEF", value = "${local.name}-captions" },
+    # Captions sharing a GPU server (variables.tf captions_gpu_sharing): the task
+    # definition that reserves no GPU, and the switch that lets placement use it.
+    { name = "CAPTIONS_SHARED_TASK_DEF", value = "${local.name}-captions-shared" },
+    { name = "FLEET_CAPTIONS_GPU_SHARING", value = var.captions_gpu_sharing ? "true" : "false" },
     # FAST channels (services/fast): playouts on ECS writing to the bucket, library
     # media packaged to the bucket so any task can read it, and the origin viewers
     # reach the ad stitcher on (per-viewer playlists, never cached).

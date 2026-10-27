@@ -225,7 +225,7 @@
     },
     "FLEET_GPU_SHARING": {
       "class": "default",
-      "why": "false is right: each captions task reserves a whole GPU, which is also what its task definition asks ECS for."
+      "why": "false is right: NVENC encoders keep the whole GPU their task asks ECS for. Captions share a GPU through FLEET_CAPTIONS_GPU_SHARING instead (captions_gpu_sharing)."
     },
     "FLEET_LEARN": {
       "class": "default",
@@ -250,6 +250,10 @@
     "FLEET_SAMPLE_RETENTION_DAYS": {
       "class": "default",
       "why": "Placement tuning (PLACEMENT.md); the defaults were measured for the instance types Terraform uses."
+    },
+    "FLEET_SHARED_GPU_CEILING": {
+      "class": "default",
+      "why": "How busy captions tasks sharing one GPU may keep it together (PLACEMENT.md); 80 % until the real-T4 check measures it."
     },
     "FLEET_SOLO_CEILING": {
       "class": "default",

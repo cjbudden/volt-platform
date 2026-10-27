@@ -75,6 +75,12 @@ export interface LoadEstimate {
   storage: StorageProjection;
   /** Things a person should know about how their settings were applied. */
   notes: string[];
+  /**
+   * Runs on a GPU without reserving it whole, beside other tasks that do the
+   * same (captions on a shared GPU, shareGpu()). Placement then checks GPU
+   * memory and GPU time instead of "is the GPU free".
+   */
+  sharesGpu?: boolean;
 }
 
 /** Coefficients, in one place so calibration and review touch one table. */
@@ -92,6 +98,15 @@ export const K = {
   relayPerInput: 20,
   drmPerMbps: 10,
   gladia: 120,
+  // Whisper on a T4 (faster-whisper, CTranslate2 fp16/int8): the share of the
+  // GPU's time one live stream keeps busy, by model. Live captions transcribe
+  // a few seconds of audio at a time and the GPU does that many times faster
+  // than real time, so it idles most of the time. STARTING ESTIMATES (Oct
+  // 2026, from published faster-whisper throughput, not measured here): the
+  // real-T4 check in PLACEMENT.md replaces them. Translation (NLLB) adds its
+  // own pass on each window.
+  whisperGpuShare: { tiny: 0.08, base: 0.1, small: 0.2, medium: 0.35, 'large-v3': 0.55, large: 0.55 } as Record<string, number>,
+  nllbGpuShare: 0.1,
   // Whisper on CPU in the encoder: a window of N seconds must transcribe in
   // well under N seconds. Measured 20 Oct 2026 (faster-whisper 1.0.3 int8,
   // arm64 VM, warm model): tiny 0.19 and base 0.30 CPU-seconds per second of
@@ -266,18 +281,39 @@ export function estimateEncoderLoad(job: Record<string, any>, probe?: SourceProb
 
 /** The Whisper add-on runs as its own GPU task (captionsPlan.ts sizes its VRAM). */
 export function estimateWhisperLoad(plan: { estVramGb: number; needsMt: boolean; modelSize: string | null }): LoadEstimate {
+  const size = plan.modelSize ?? 'small';
+  const gpuShare = (K.whisperGpuShare[size] ?? K.whisperGpuShare.small) + (plan.needsMt ? K.nllbGpuShare : 0);
   const lines = [
-    line(`Whisper ${plan.modelSize ?? 'small'}${plan.needsMt ? ' + translation' : ''} (GPU)`, {
-      cpuUnits: 768, memoryMib: 2048 + plan.estVramGb * 256, gpuShare: 0.5, netInBps: kbpsToBps(160), netOutBps: kbpsToBps(16),
+    line(`Whisper ${size}${plan.needsMt ? ' + translation' : ''} (GPU)`, {
+      cpuUnits: 768, memoryMib: 2048 + plan.estVramGb * 256, gpuShare, netInBps: kbpsToBps(160), netOutBps: kbpsToBps(16),
     }, 'captions:whisper-gpu'),
   ];
-  const load = total(lines, 1);
+  const load: StreamLoad = { ...total(lines, 1), vramMib: Math.round(plan.estVramGb * 1024) };
   return {
     taskKind: 'captions', load, reservation: reserve(load), needsGpu: true,
-    signature: `captions|whisper|${plan.modelSize ?? 'small'}|${plan.needsMt ? 'mt' : 'nomt'}`,
+    signature: `captions|whisper|${size}|${plan.needsMt ? 'mt' : 'nomt'}`,
     // Subtitle segments only: a few kbps, written next to the video output.
     basis: 'estimate', lines, notes: [], storage: projectStorage(16),
   };
+}
+
+/**
+ * The same captions task, sharing its GPU instead of reserving it whole
+ * (FLEET_CAPTIONS_GPU_SHARING). ECS can only reserve whole GPUs, so a shared
+ * task reserves none and placement keeps the GPU from being overcommitted
+ * (capacity.ts fits: GPU memory and GPU time). Cost and signature are
+ * unchanged: it is the same work, on a server it no longer has to itself.
+ */
+export function shareGpu(est: LoadEstimate): LoadEstimate {
+  if (est.taskKind !== 'captions' || !est.needsGpu) return est;
+  const load: StreamLoad = { ...est.load, gpus: 0 };
+  return { ...est, load, reservation: { ...est.reservation, gpus: 0 }, sharesGpu: true };
+}
+
+/** Back to reserving the GPU whole (a launch that could not share). */
+export function unshareGpu(est: LoadEstimate): LoadEstimate {
+  if (!est.sharesGpu) return est;
+  return { ...est, load: { ...est.load, gpus: 1 }, reservation: { ...est.reservation, gpus: 1 }, sharesGpu: false };
 }
 
 /** Radio: one audio source, a few audio-only outputs. Tiny next to video. */
