@@ -19,6 +19,8 @@
 //  count of viewers.
 // ============================================================================
 import { analyticsPool } from './analyticsDb';
+import { chInsert } from './clickhouse';
+import { forEachTarget, qoeChDatabase } from './storeSwitch';
 
 export const MAX_PENDING = 50_000;
 export const FLUSH_MS = 10_000;
@@ -107,14 +109,20 @@ export async function flushGate(): Promise<void> {
   flushing = (async () => {
     const rows = pending; pending = [];
     try {
-      const p = await analyticsPool();
-      for (let i = 0; i < rows.length; i += 2000) {
-        const part = rows.slice(i, i + 2000).map((r) => ({ ...r, at: new Date(r.at).toISOString() }));
-        await p.query(
-          `INSERT INTO qoe_gate (account_id, app_id, sid, at, method, status, mode, reason, layer, rule_id, asset_id, asset_kind, country, ms)
-           SELECT account_id, app_id, sid, at, method, status, mode, reason, layer, rule_id, asset_id, asset_kind, country, ms
-           FROM jsonb_populate_recordset(NULL::qoe_gate, $1::jsonb)`, [JSON.stringify(part)]);
-      }
+      await forEachTarget({
+        // While moving to ClickHouse, decisions before the switch minute are copied there from Postgres (storeSwitch.ts).
+        clickhouse: (since) => chInsert('qoe_gate', rows.filter((r) => since == null || r.at >= since).map((r) => ({ ...r, at: new Date(r.at).toISOString() })), qoeChDatabase()),
+        postgres: async () => {
+          const p = await analyticsPool();
+          for (let i = 0; i < rows.length; i += 2000) {
+            const part = rows.slice(i, i + 2000).map((r) => ({ ...r, at: new Date(r.at).toISOString() }));
+            await p.query(
+              `INSERT INTO qoe_gate (account_id, app_id, sid, at, method, status, mode, reason, layer, rule_id, asset_id, asset_kind, country, ms)
+               SELECT account_id, app_id, sid, at, method, status, mode, reason, layer, rule_id, asset_id, asset_kind, country, ms
+               FROM jsonb_populate_recordset(NULL::qoe_gate, $1::jsonb)`, [JSON.stringify(part)]);
+          }
+        },
+      });
       gateStats.written += rows.length; gateStats.lastError = null;
     } catch (e) {
       gateStats.flushFailures++; gateStats.lastError = (e as Error).message;

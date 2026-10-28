@@ -148,6 +148,51 @@ It should be in the library within seconds, the control plane's log should
 show `[s3 watch] 1 message(s): 1 fetched`, and
 `terraform output -raw watch_drops_dlq_url` should stay empty.
 
+## 8a. The ClickHouse analytics store (when you turn it on)
+
+`clickhouse_enabled = true` (off by default, build queue 2.11) builds two
+ClickHouse replicas in two zones, a third Keeper and a backup bucket
+(`clickhouse.tf`, about $200 a month), and tells the control plane
+`QOE_STORE=auto`. Nothing moves at apply: the playback reports stay on the
+Postgres analytics database until the last 30 days pass
+`qoe_clickhouse_above_vh` viewer hours (1 M by default). Then, by itself, the
+leader writes both stores from the next whole minute, rebuilds up to 400 days
+in ClickHouse from the raw archive (20 minutes of it an hour), copies the
+play gate's log and the collector's counts, replays the switch day once it is
+over, and moves the reports. `GET /api/analytics/qoe/collector` shows the
+phase (`store.phase`: postgres, moving, clickhouse) and how far the rebuild is
+(`store.backfilledTo`).
+
+After the apply:
+
+```bash
+aws ssm start-session --target <replica instance id>
+clickhouse-client -q "SELECT * FROM system.clusters WHERE cluster = 'volt'"
+clickhouse-client -q "SELECT * FROM system.zookeeper WHERE path = '/'"
+systemctl list-timers volt-ch-backup.timer
+```
+
+Two replicas listed, Keeper answering, the backup timer set for 03:17 UTC.
+The control plane makes the tables itself (ON CLUSTER) the first time it
+writes to ClickHouse.
+
+**The replica drill** (the 2.11 acceptance the checks cannot run without a
+real cluster): `volt-app/scripts/clickhouse-drill.ts` loses the second
+replica's data, keeps the reports and the collector running through the
+first, starts it again with `force_restore_data` and checks that it caught up
+and holds exactly the same rows. The header of the script has the SSM
+commands. Run it on staging before the store holds anything that matters.
+
+**Restoring a backup** (both replicas lost): on a fresh replica,
+`clickhouse-client -q "RESTORE DATABASE volt_qoe FROM S3('https://<bucket>.s3.<region>.amazonaws.com/volt_qoe/<latest backup folder>/')"`.
+An incremental backup names its Sunday's full one as its base and ClickHouse
+reads both, so the latest folder is enough. Or rebuild from the raw archive
+instead: `npx tsx src/tools/qoe-replay.ts --day <first> --to <last>` in a
+control-plane task replays into the store the reports read. The raw reports
+are the record; ClickHouse holds nothing that cannot be rebuilt from them
+apart from the play gate's log and the collector's counts, which the backup
+has.
+
 ## 9. What does not work on AWS yet
 
 These are queued, not forgotten (`BUILD_QUEUE.md`, and class

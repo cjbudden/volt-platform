@@ -99,6 +99,10 @@
       "class": "local",
       "why": "A stand-in Kinesis (LocalStack) for trying the CDN log reader off AWS; on AWS the regional endpoint is used."
     },
+    "CLICKHOUSE_QUERY_MS": {
+      "class": "default",
+      "why": "Time limit for one ClickHouse query; unset it follows ANALYTICS_QUERY_MS (10 s)."
+    },
     "CLIPS_DIR": {
       "class": "not-on-aws-yet",
       "why": "Clip, VOD encode and ad conditioning work is done here and downloads are served from here; the bucket copy exists for clips, but the local copy is still what is served.",
@@ -127,6 +131,20 @@
     "DEEZER_API_BASE": {
       "class": "default",
       "why": "Song artwork lookups against the public music services; the same everywhere."
+    },
+    "DELIVERY_CMSD": {
+      "class": "default",
+      "why": "CMSD on Volt's own playlist answers (steered masters, rights variants) is on by default; off only to compare. The media playlists CloudFront serves from S3 carry none (build queue 2.10a)."
+    },
+    "DELIVERY_PATHWAYS": {
+      "class": "operator",
+      "why": "Content steering needs a second delivery path (another CDN); whoever runs Volt sets the paths through app_env when there is one. Unset: one path, plain redirects (build queue 2.10).",
+      "how": "app_env"
+    },
+    "DELIVERY_PATHWAYS_DRAIN": {
+      "class": "operator",
+      "why": "Moves a delivery path last for every viewer (maintenance on a CDN); set through app_env only while draining.",
+      "how": "app_env"
     },
     "DROPBOX_CLIENT_ID": {
       "class": "operator",
@@ -547,6 +565,10 @@
       "class": "default",
       "why": "The key for anonymous CDN session keys (cdnLogs.ts); unset it is the access-token secret, which is already a secret on AWS."
     },
+    "QOE_BACKFILL_DAYS": {
+      "class": "default",
+      "why": "How far back the move to ClickHouse rebuilds (400 days, the longest report window)."
+    },
     "QOE_DERIVE": {
       "class": "default",
       "why": "On by default, as on the Mac."
@@ -673,6 +695,10 @@
     "SSO_BASE_URL": {
       "class": "default",
       "why": "Fall back to PUBLIC_BASE_URL, which Terraform sets. Set with app_env only when the console has its own domain."
+    },
+    "STEERING_MIN_PLAYING_MS": {
+      "class": "default",
+      "why": "How much playing time a path needs in a country before the steering service judges it; the built-in value is the product default."
     },
     "STRIPE_API_BASE": {
       "class": "local",

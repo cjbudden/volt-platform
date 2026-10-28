@@ -111,6 +111,30 @@ same tally. Most need ffmpeg; none need a database.
 | End-to-end media pipeline | Docker | `e2e/run-e2e.sh` |
 | Hands-on workflow tests on the Mac | the running stack | `TESTING_WORKFLOWS.md` |
 
+## The ClickHouse analytics store
+
+`clickhouse-store` needs a ClickHouse. With `CLICKHOUSE_URL` unset it starts
+the stand-in itself: `volt-app/scripts/chdb-http.py`, the ClickHouse engine
+through chDB (`pip install chdb`), serving the part of the HTTP interface the
+store uses. It cannot replicate, so the replica drill
+(`volt-app/scripts/clickhouse-drill.ts`) needs a real cluster.
+
+The QoE suites run on either store. To run them against ClickHouse, start the
+stand-in and point them at it:
+
+```bash
+python3 volt-app/scripts/chdb-http.py --port 18123 &
+cd volt-app
+QOE_STORE=clickhouse CLICKHOUSE_URL=http://127.0.0.1:18123 node scripts/check.js qoe-reports cdn-logs journey cmcd.check
+node scripts/check.js clickhouse-store
+```
+
+Two harnesses measure it (each prints its numbers and a JSON line):
+`volt-app/scripts/qoe-ch-bench.ts` fills 13 months of views at a chosen
+audience inside ClickHouse and times every report through the product's own
+code; `volt-app/scripts/qoe-load.ts` runs the real collector against 100 000
+simulated viewers at the modelled report rate and prints CPU per report.
+
 ## Adding a suite
 
 1. Name it `volt-app/test/<what-it-checks>.check.ts` (or `.check.sh`).

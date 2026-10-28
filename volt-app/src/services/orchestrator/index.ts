@@ -275,6 +275,15 @@ export function startScheduler(): () => void {
       .catch((e) => console.error('[cdn logs] could not start the log reader', e));
   }
 
+  // THE ANALYTICS STORE (build queue 2.11): with QOE_STORE=auto the leader
+  // moves the derived QoE data to ClickHouse once the audience passes the
+  // configured size, one step an hour (services/qoe/storeSwitch.ts).
+  if ((process.env.QOE_STORE ?? '').toLowerCase() === 'auto') {
+    Promise.all([import('../qoe/storeSwitch'), import('../qoe/replay')])
+      .then(([sw, rp]) => sw.startStoreSwitch({ replayInto: rp.replayIntoClickHouse }))
+      .catch((e) => console.error('[qoe] could not start the analytics store switch', e));
+  }
+
   tick.unref?.();
   sweep.unref?.();
   fleet.unref?.();

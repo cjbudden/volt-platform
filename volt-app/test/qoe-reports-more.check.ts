@@ -383,8 +383,20 @@ function enc(d: L): string {
     ok(after === before, 'reports 5, 7, 8, 9 and the timeline identical after a replay', after === before ? undefined : { before: before.slice(0, 300), after: after.slice(0, 300) });
 
     console.log('== the gate log through an analytics outage ==');
-    await query(`ALTER DATABASE "${aname}" ALLOW_CONNECTIONS false`);
-    await query(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1`, [aname]);
+    // The store the derived rows are in goes away: the Postgres analytics database, or ClickHouse (QOE_STORE=clickhouse, build queue 2.11).
+    const chMod = await import('../src/services/qoe/clickhouse');
+    const chUrl = process.env.CLICKHOUSE_URL;
+    const onCh = (process.env.QOE_STORE ?? '') === 'clickhouse';
+    const storeDown = async () => {
+      if (onCh) { process.env.CLICKHOUSE_URL = 'http://127.0.0.1:9'; chMod.resetClickhouse(); return; }
+      await query(`ALTER DATABASE "${aname}" ALLOW_CONNECTIONS false`);
+      await query(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1`, [aname]);
+    };
+    const storeUp = async () => {
+      if (onCh) { process.env.CLICKHOUSE_URL = chUrl; chMod.resetClickhouse(); return; }
+      await query(`ALTER DATABASE "${aname}" ALLOW_CONNECTIONS true`);
+    };
+    await storeDown();
     await sleep(200);
     const ga = Date.now();
     const gd = await gate({ appKey: k.raw, assetId: ch, sid: S('outage') }, AU);
@@ -392,7 +404,7 @@ function enc(d: L): string {
     ok(gd.status === 200 && gms < 1000, `the gate answers while the analytics database is down (${gd.status}, ${gms} ms)`);
     await gl.flushGate();
     ok(gl.gatePending() === 1 && gl.gateStats.flushFailures >= 1, 'its decision is held, not lost', { pending: gl.gatePending(), ...gl.gateStats });
-    await query(`ALTER DATABASE "${aname}" ALLOW_CONNECTIONS true`);
+    await storeUp();
     await gl.flushGate();
     const [row] = await adb.aquery(`SELECT reason, status FROM qoe_gate WHERE sid = $1`, [S('outage')]);
     ok(gl.gatePending() === 0 && row?.reason === 'allowed', 'back up: written', row);

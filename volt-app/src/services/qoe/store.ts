@@ -7,10 +7,12 @@
 //  id; minute rows add (counts, sums and sketch bins), so several collector
 //  processes and repeated flushes merge into the same minute.
 //
-//  The one place that knows the store is Postgres; ClickHouse (2.11) is a
-//  second implementation of these four functions.
+//  Each of the four functions has a Postgres and a ClickHouse form (build
+//  queue 2.11); storeSwitch.ts says which store, or both while moving.
 // ============================================================================
 import { analyticsPool } from './analyticsDb';
+import { chExec, chInsert, lit } from './clickhouse';
+import { forEachTarget, qoeChDatabase, type StoreKind } from './storeSwitch';
 import type { MinuteRow, ViewRow } from './views';
 import { DEFINITIONS_VERSION } from './views';
 
@@ -42,8 +44,22 @@ const MIN_ADD = ['attempts', 'starts', 'failures', 'fatal_after', 'stalls', 'pla
 
 const CHUNK = 2000;
 
-/** Upsert closed (or provisionally closed) views. */
-export async function writeViews(views: ViewRow[], client?: { query: (t: string, p: any[]) => Promise<any> }): Promise<void> {
+type Q = { query: (t: string, p: any[]) => Promise<any> };
+
+/** Upsert closed (or provisionally closed) views. `client`: inside a Postgres transaction (replaceDay). */
+export async function writeViews(views: ViewRow[], client?: Q, target?: StoreKind): Promise<void> {
+  if (client) return pgWriteViews(views, client);
+  await forEachTarget({
+    clickhouse: () => chInsert('qoe_views', views.map(chView), qoeChDatabase(), { versioned: true }),
+    postgres: () => pgWriteViews(views),
+  }, target);
+}
+
+/** A view row for ClickHouse: the same columns (a later write of the same id wins on _v). */
+function chView(v: ViewRow) { const j = viewJson(v); const o: Record<string, unknown> = {}; for (const k of VIEW_COLS) o[k] = (j as any)[k] ?? null; o.unknown_keys = (j as any).unknown_keys ?? {}; return o; }
+function chMinute(m: MinuteRow) { const j = minuteJson(m) as any; const o: Record<string, unknown> = {}; for (const k of [...MIN_KEY, 'def_version', ...MIN_ADD, 'startup_sketch']) o[k] = j[k] ?? (MIN_KEY.includes(k) ? '' : null); o.startup_sketch = j.startup_sketch ?? {}; return o; }
+
+async function pgWriteViews(views: ViewRow[], client?: Q): Promise<void> {
   const c = client ?? await analyticsPool();
   for (let i = 0; i < views.length; i += CHUNK) {
     const part = views.slice(i, i + CHUNK).map(viewJson);
@@ -56,7 +72,15 @@ export async function writeViews(views: ViewRow[], client?: { query: (t: string,
 }
 
 /** Add minute aggregates into what is there. */
-export async function addMinutes(rows: MinuteRow[], client?: { query: (t: string, p: any[]) => Promise<any> }): Promise<void> {
+export async function addMinutes(rows: MinuteRow[], client?: Q, target?: StoreKind): Promise<void> {
+  if (client) return pgAddMinutes(rows, client);
+  await forEachTarget({
+    clickhouse: () => chInsert('qoe_minutes', rows.map(chMinute), qoeChDatabase(), { additive: true }),
+    postgres: () => pgAddMinutes(rows),
+  }, target);
+}
+
+async function pgAddMinutes(rows: MinuteRow[], client?: Q): Promise<void> {
   const c = client ?? await analyticsPool();
   for (let i = 0; i < rows.length; i += CHUNK) {
     const part = rows.slice(i, i + CHUNK).map(minuteJson);
@@ -74,6 +98,14 @@ export async function addMinutes(rows: MinuteRow[], client?: { query: (t: string
 /** The collector's own counts per minute: accepted and refused lines (report 12). */
 export async function addCollectorCounts(rows: Array<{ account_id: string; minute: number; accepted: number; rejected: number; reasons: Record<string, number> }>): Promise<void> {
   if (!rows.length) return;
+  await forEachTarget({
+    // While moving, minutes before the switch are copied from Postgres (storeSwitch.ts), so only later ones are added here.
+    clickhouse: (since) => chInsert('qoe_collector_minutes', rows.filter((r) => since == null || r.minute >= since).map((r) => ({ ...r, minute: iso(r.minute) })), qoeChDatabase(), { additive: true }),
+    postgres: () => pgAddCollectorCounts(rows),
+  });
+}
+
+async function pgAddCollectorCounts(rows: Array<{ account_id: string; minute: number; accepted: number; rejected: number; reasons: Record<string, number> }>): Promise<void> {
   const c = await analyticsPool();
   await c.query(
     `INSERT INTO qoe_collector_minutes (account_id, minute, accepted, rejected, reasons)
@@ -88,15 +120,34 @@ export async function addCollectorCounts(rows: Array<{ account_id: string; minut
  * that started that day and the minutes of that day go, the rebuilt ones
  * come in. Readers see the old day or the new day, never half of each.
  */
-export async function replaceDay(acct: string, day: string, views: ViewRow[], minutes: MinuteRow[]): Promise<void> {
+export async function replaceDay(acct: string, day: string, views: ViewRow[], minutes: MinuteRow[], target?: StoreKind): Promise<void> {
+  await forEachTarget({ clickhouse: () => chReplaceDay(acct, day, views, minutes), postgres: () => pgReplaceDay(acct, day, views, minutes) }, target);
+}
+
+/**
+ * ClickHouse has no transactions: the day's rows of this account are
+ * deleted (lightweight DELETE, synchronous) and the rebuilt ones inserted.
+ * A report that runs in between sees part of the day, never a wrong total
+ * afterwards; the other accounts' rows are never touched.
+ */
+async function chReplaceDay(acct: string, day: string, views: ViewRow[], minutes: MinuteRow[]): Promise<void> {
+  const db = qoeChDatabase();
+  const start = new Date(day + 'T00:00:00Z'), end = new Date(+start + 86_400_000);
+  await chExec(`DELETE FROM qoe_views WHERE account_id = ${lit(acct)} AND day = toDate(${lit(day)})`, db);
+  await chExec(`DELETE FROM qoe_minutes WHERE account_id = ${lit(acct)} AND minute >= ${lit(start)} AND minute < ${lit(end)}`, db);
+  await chInsert('qoe_views', views.map(chView), db, { versioned: true });
+  await chInsert('qoe_minutes', minutes.map(chMinute), db, { additive: true });
+}
+
+async function pgReplaceDay(acct: string, day: string, views: ViewRow[], minutes: MinuteRow[]): Promise<void> {
   const p = await analyticsPool();
   const c = await p.connect();
   try {
     await c.query('BEGIN');
     await c.query(`DELETE FROM qoe_views WHERE account_id = $1 AND day = $2::date`, [acct, day]);
     await c.query(`DELETE FROM qoe_minutes WHERE account_id = $1 AND minute >= ($2::date)::timestamp AT TIME ZONE 'UTC' AND minute < ($2::date + 1)::timestamp AT TIME ZONE 'UTC'`, [acct, day]);
-    await writeViews(views, c);
-    await addMinutes(minutes, c);
+    await pgWriteViews(views, c);
+    await pgAddMinutes(minutes, c);
     await c.query('COMMIT');
   } catch (e) {
     await c.query('ROLLBACK').catch(() => {});

@@ -15,15 +15,20 @@
 //    ANALYTICS_QUERY_MS       statement timeout for every query (default 10000)
 //
 //  On the Mac and for a pilot that second database is enough. Above about a
-//  million viewer hours a month it becomes ClickHouse (build queue 2.11); the
-//  collector and the reports only reach the store through this module and
-//  services/qoe/store.ts, so that is a configuration change.
+//  million viewer hours a month the derived tables move to ClickHouse (build
+//  queue 2.11: clickhouse.ts, and storeSwitch.ts for QOE_STORE and the move
+//  itself); the collector and the reports only reach the store through this
+//  module and the write functions beside it, so that is a configuration
+//  change. This database keeps qoe_meta (the move's own state) and the CDN
+//  reader's cursor either way.
 //
 //  Nothing here is the record: the raw reports (rawStore.ts) are. Every table
 //  below can be deleted and rebuilt with the replay (services/qoe/replay.ts).
 // ============================================================================
 import { Client, Pool } from 'pg';
 import { config } from '../../config';
+import { chExec, chSelect, toClickHouse } from './clickhouse';
+import { qoeChDatabase, readStore } from './storeSwitch';
 
 let pool: Pool | null = null;
 let ready: Promise<void> | null = null;
@@ -368,7 +373,22 @@ export async function analyticsPool(): Promise<Pool> {
   return pool!;
 }
 
-export async function aquery<T = any>(text: string, params: any[] = []): Promise<T[]> {
+/** The derived tables that live in ClickHouse once the reports have moved there (clickhouse.ts); qoe_meta and the CDN cursor stay here. */
+const CH_TABLES = /\bqoe_(views|minutes|collector_minutes|gate|app_sessions|journeys|cdn_minutes|cdn_sessions)\b/;
+
+/**
+ * A query on the analytics store. Written in Postgres SQL; when the reports
+ * read ClickHouse (storeSwitch.ts) a query on the derived tables is
+ * translated there (clickhouse.ts toClickHouse), or `chText` is used: the
+ * same query in ClickHouse SQL, with the same $n parameters, for the few
+ * that have no mechanical translation.
+ */
+export async function aquery<T = any>(text: string, params: any[] = [], chText?: string): Promise<T[]> {
+  if (CH_TABLES.test(text) && (await readStore()) === 'clickhouse') {
+    const sql = toClickHouse(chText ?? text, params);
+    if (/^\s*(DELETE|TRUNCATE|ALTER|INSERT)\b/i.test(sql)) { await chExec(sql, qoeChDatabase()); return []; }
+    return chSelect<T>(sql, qoeChDatabase());
+  }
   const p = await analyticsPool();
   return (await p.query(text, params)).rows as T[];
 }

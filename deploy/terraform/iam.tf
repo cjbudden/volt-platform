@@ -23,7 +23,7 @@ resource "aws_iam_role_policy_attachment" "task_execution" {
 data "aws_iam_policy_document" "exec_secrets" {
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = concat([aws_secretsmanager_secret.app.arn, aws_secretsmanager_secret.integrations.arn], local.docs_secret_arns)
+    resources = concat([aws_secretsmanager_secret.app.arn, aws_secretsmanager_secret.integrations.arn], local.docs_secret_arns, local.clickhouse_secret_arns)
   }
 }
 

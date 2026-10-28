@@ -108,7 +108,7 @@ export async function playbackSuccess(acct: string, q: ReportQuery) {
     `SELECT CASE WHEN outcome = 'failed' THEN 'before_start' ELSE 'after_start' END AS phase, error_step AS step, error_code AS code,
             count(*) AS views, count(DISTINCT sid) AS sessions
      FROM qoe_views WHERE ${w} AND (outcome = 'failed' OR fatal_after_start)
-     GROUP BY 1, 2, 3 ORDER BY views DESC LIMIT 20`, p);
+     GROUP BY 1, 2, 3 ORDER BY views DESC, phase, step, code LIMIT 20`, p);
   const a = Number(t.attempts), s = Number(t.started);
   return {
     attempts: a, sessions: Number(t.sessions), started: s,
@@ -234,12 +234,15 @@ export async function telemetryHealth(acct: string, q: ReportQuery) {
        percentile_disc(0.99) WITHIN GROUP (ORDER BY abs(clock_skew_ms)) AS skew_p99
      FROM qoe_views WHERE ${w}`, p);
   const keys = await aquery<any>(
-    `SELECT k AS key, sum(v::int) AS n FROM qoe_views, jsonb_each_text(unknown_keys) AS u(k, v) WHERE ${w} GROUP BY k ORDER BY n DESC LIMIT 20`, p);
+    `SELECT k AS key, sum(v::int) AS n FROM qoe_views, jsonb_each_text(unknown_keys) AS u(k, v) WHERE ${w} GROUP BY k ORDER BY n DESC, k LIMIT 20`, p,
+    `SELECT k AS key, sum(v) AS n FROM qoe_views ARRAY JOIN mapKeys(unknown_keys) AS k, mapValues(unknown_keys) AS v WHERE ${w} GROUP BY k ORDER BY n DESC, k LIMIT 20`);
   const [c] = await aquery<any>(
     `SELECT COALESCE(sum(accepted), 0) AS accepted, COALESCE(sum(rejected), 0) AS rejected,
        COALESCE((SELECT jsonb_object_agg(k, s) FROM (SELECT k, sum(v::int) AS s FROM qoe_collector_minutes m2, jsonb_each_text(m2.reasons) AS x(k, v)
                   WHERE m2.account_id = $1 AND m2.minute >= $2 AND m2.minute < $3 GROUP BY k) z), '{}'::jsonb) AS reasons
-     FROM qoe_collector_minutes WHERE account_id = $1 AND minute >= $2 AND minute < $3`, [acct, q.from.toISOString(), q.to.toISOString()]);
+     FROM qoe_collector_minutes WHERE account_id = $1 AND minute >= $2 AND minute < $3`, [acct, q.from.toISOString(), q.to.toISOString()],
+    `SELECT COALESCE(sum(accepted), 0) AS accepted, COALESCE(sum(rejected), 0) AS rejected, sumMap(reasons) AS reasons
+     FROM qoe_collector_minutes WHERE account_id = $1 AND minute >= $2 AND minute < $3`);
   const events = Number(r.events), missing = Number(r.missing);
   return {
     views: Number(r.views), reports: events, eventLoss: ratio(missing, events + missing), missingReports: missing,
@@ -305,7 +308,7 @@ export async function delivery(acct: string, q: ReportQuery) {
   const worst = await aquery<any>(
     `SELECT content_id, country, sum(requests) AS requests, sum(errors_4xx + errors_5xx) AS errors, jsonb_agg(ttfb_sketch) AS ttfb
      FROM qoe_cdn_minutes WHERE ${w.join(' AND ')} GROUP BY content_id, country HAVING sum(requests) >= 100
-     ORDER BY sum(errors_4xx + errors_5xx) / NULLIF(sum(requests), 0) DESC NULLS LAST LIMIT 10`, p);
+     ORDER BY sum(errors_4xx + errors_5xx) / NULLIF(sum(requests), 0) DESC NULLS LAST, content_id, country LIMIT 10`, p);
   const audience = await cdnAudience(acct, q.from, q.to);
   return {
     requests: Math.round(all.requests), sampledLines: all.lines,
@@ -400,7 +403,14 @@ export async function access(acct: string, q: ReportQuery) {
      FROM (SELECT account_id, sid, outcome, fatal_after_start, error_step, error_code FROM qoe_views
            WHERE ${w} AND (outcome = 'failed' OR fatal_after_start) AND error_step IN ('entitlement', 'drm')) v
      LEFT JOIN LATERAL (SELECT reason FROM qoe_gate g WHERE g.account_id = v.account_id AND g.sid = v.sid ORDER BY g.at DESC LIMIT 1) g ON true
-     GROUP BY 1, 2, 3, 4 ORDER BY views DESC, step, code, gate_reason, phase LIMIT 30`, p);
+     GROUP BY 1, 2, 3, 4 ORDER BY views DESC, step, code, gate_reason, phase LIMIT 30`, p,
+    // ClickHouse: the latest decision per sid as a join (argMax) instead of LATERAL
+    `SELECT v.error_step AS step, v.error_code AS code, COALESCE(g.last_reason, CASE WHEN v.error_step = 'entitlement' THEN 'not in the gate log' END) AS gate_reason,
+       CASE WHEN v.outcome = 'failed' THEN 'before_start' ELSE 'after_start' END AS phase, count(*) AS views, count(DISTINCT v.sid) AS sessions
+     FROM (SELECT account_id, sid, outcome, fatal_after_start, error_step, error_code FROM qoe_views
+           WHERE ${w} AND (outcome = 'failed' OR fatal_after_start) AND error_step IN ('entitlement', 'drm')) v
+     LEFT JOIN (SELECT sid, argMax(reason, at) AS last_reason FROM qoe_gate WHERE account_id = $1 AND sid IS NOT NULL GROUP BY sid) g ON g.sid = v.sid
+     GROUP BY step, code, gate_reason, phase ORDER BY views DESC, step, code, gate_reason, phase LIMIT 30`);
   const [l] = await aquery<any>(
     `SELECT count(*) FILTER (WHERE licence_requests > 0 OR t_drm IS NOT NULL OR error_step = 'drm') AS drm_views,
        COALESCE(sum(licence_requests), 0) AS licence_requests, COALESCE(sum(licence_failures), 0) AS licence_failures,
@@ -581,7 +591,7 @@ export async function breakdown(acct: string, q: ReportQuery, by: FilterName, me
     `SELECT ${by} AS value, count(*) AS views, count(DISTINCT sid) AS sessions,
        count(DISTINCT sid) FILTER (WHERE outcome <> 'started' OR stalls > 0 OR fatal_after_start) AS affected, ${m.sql} AS measure
      FROM qoe_views WHERE ${w} GROUP BY ${by} HAVING count(*) >= $${p.length}
-     ORDER BY measure DESC NULLS LAST, views DESC LIMIT 50`, p);
+     ORDER BY measure DESC NULLS LAST, views DESC, value LIMIT 50`, p);
   return { by, measure, label: m.label, minViews, rows: rows.map((r) => ({ value: r.value, views: Number(r.views), sessions: Number(r.sessions), affected: Number(r.affected), measure: n(r.measure) })) };
 }
 
@@ -591,7 +601,7 @@ export async function dimensionValues(acct: string, q: ReportQuery, limit = 30) 
   for (const f of FILTERS) {
     const p: unknown[] = [];
     const w = where(acct, { ...q, filters: {} }, 'ended_at', p);
-    out[f] = (await aquery<any>(`SELECT ${f} AS value, count(*) AS views FROM qoe_views WHERE ${w} GROUP BY 1 ORDER BY 2 DESC LIMIT ${Math.min(100, limit)}`, p))
+    out[f] = (await aquery<any>(`SELECT ${f} AS value, count(*) AS views FROM qoe_views WHERE ${w} GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT ${Math.min(100, limit)}`, p))
       .map((r) => ({ value: r.value, views: Number(r.views) }));
   }
   return out;
@@ -617,7 +627,11 @@ export async function series(acct: string, q: ReportQuery) {
     `SELECT floor(extract(epoch FROM minute) * 1000 / ${bucketMs})::bigint * ${bucketMs} AS b, sum(attempts) AS attempts, sum(starts) AS starts, sum(failures) AS failures,
        sum(fatal_after) AS fatal_after, sum(stalls) AS stalls, sum(playing_ms) AS playing_ms, sum(rebuffer_ms) AS rebuffer_ms, sum(switches) AS switches,
        jsonb_agg(startup_sketch) AS sketches
-     FROM qoe_minutes WHERE ${w.join(' AND ')} GROUP BY 1 ORDER BY 1`, p);
+     FROM qoe_minutes WHERE ${w.join(' AND ')} GROUP BY 1 ORDER BY 1`, p,
+    `SELECT intDiv(toUnixTimestamp64Milli(minute), ${bucketMs}) * ${bucketMs} AS b, sum(attempts) AS attempts, sum(starts) AS starts, sum(failures) AS failures,
+       sum(fatal_after) AS fatal_after, sum(stalls) AS stalls, sum(playing_ms) AS playing_ms, sum(rebuffer_ms) AS rebuffer_ms, sum(switches) AS switches,
+       [sumMap(startup_sketch)] AS sketches
+     FROM qoe_minutes WHERE ${w.join(' AND ')} GROUP BY b ORDER BY b`);
   return {
     bucketMs, ignoredFilters: ignored,
     points: rows.map((r) => {

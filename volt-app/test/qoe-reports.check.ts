@@ -318,8 +318,20 @@ interface Viewer { sid: string; ua: string; geo: Record<string, string>; lines: 
     ok(defv === `${DV}-${DV}`, `every row stamped with the definitions version (${DV})`, defv);
 
     console.log('== the analytics database goes away mid-run ==');
-    await query(`ALTER DATABASE "${aname}" ALLOW_CONNECTIONS false`);
-    await query(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1`, [aname]);
+    // The store the derived rows are in goes away: the Postgres analytics database, or ClickHouse (QOE_STORE=clickhouse, build queue 2.11).
+    const chMod = await import('../src/services/qoe/clickhouse');
+    const chUrl = process.env.CLICKHOUSE_URL;
+    const onCh = (process.env.QOE_STORE ?? '') === 'clickhouse';
+    const storeDown = async () => {
+      if (onCh) { process.env.CLICKHOUSE_URL = 'http://127.0.0.1:9'; chMod.resetClickhouse(); return; }
+      await query(`ALTER DATABASE "${aname}" ALLOW_CONNECTIONS false`);
+      await query(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1`, [aname]);
+    };
+    const storeUp = async () => {
+      if (onCh) { process.env.CLICKHOUSE_URL = chUrl; chMod.resetClickhouse(); return; }
+      await query(`ALTER DATABASE "${aname}" ALLOW_CONNECTIONS true`);
+    };
+    await storeDown();
     await sleep(200);
     const more: Viewer[] = [];
     for (let i = 0; i < 10; i++) {
@@ -339,7 +351,7 @@ interface Viewer { sid: string; ua: string; geo: Record<string, string>; lines: 
     ok(down.flushFailures >= 1 && down.pendingViews >= 10, 'the flush failed and the views are held, not dropped', down);
     const downReport = await get(`/overview?${W}`);
     ok(downReport.status >= 500, `the reports say they cannot answer (${downReport.status}) rather than answer wrong`);
-    await query(`ALTER DATABASE "${aname}" ALLOW_CONNECTIONS true`);
+    await storeUp();
     await coll.flushQoe(Date.now() + 62_000);
     const up = coll.collectorState();
     ok(up.pendingViews === 0 && up.lastError == null, 'back up: the held writes went in', up);

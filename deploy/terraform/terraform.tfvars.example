@@ -260,3 +260,19 @@ prewarm_origin_fraction = 0.1
 #   starts (cut one zone off, interrupt a Spot server). deploy/loadtest/CHAOS.md.
 # chaos_fault_seconds = 600
 #   How long a zone stays cut off before it is restored by itself.
+
+# clickhouse_enabled = false
+#   The ClickHouse analytics store (clickhouse.tf, build queue 2.11): two
+#   replicas, three keepers, nightly backups to S3, about $200 a month. On, the
+#   control plane moves the playback reports to it by itself once the audience
+#   passes qoe_clickhouse_above_vh viewer hours in 30 days.
+# clickhouse_instance_type = "r7g.large"
+#   Each replica (Graviton). r7g.2xlarge above about 100 M viewer hours a month.
+# clickhouse_keeper_instance_type = "t4g.small"
+#   The third Keeper (replication log only).
+# clickhouse_volume_gb = 200
+#   gp3 disk on each replica.
+# clickhouse_backup_retention_days = 35
+#   Days the nightly backups are kept.
+# qoe_clickhouse_above_vh = 1000000
+#   Viewer hours in 30 days at which the reports move to ClickHouse.

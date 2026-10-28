@@ -119,5 +119,5 @@ locals {
     { name = "QOE_RAW_BUCKET", value = aws_s3_bucket.qoe_raw.id },
     { name = "QOE_RAW_PREFIX", value = "qoe-raw" },
     { name = "QOE_RAW_REGION", value = var.region },
-  ], local.cdn_logs_env) # the CDN's real-time logs (cdn_logs.tf)
+  ], local.cdn_logs_env, local.clickhouse_env) # the CDN's real-time logs (cdn_logs.tf); which analytics store (clickhouse.tf)
 }

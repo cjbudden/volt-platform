@@ -42,6 +42,8 @@
 // ============================================================================
 import { createHmac } from 'node:crypto';
 import { aquery, analyticsPool } from './analyticsDb';
+import { chExec, chInsert, lit } from './clickhouse';
+import { forEachTarget, qoeChDatabase, type StoreKind } from './storeSwitch';
 import { parseCmcdLine, type CmcdValue } from './cmcdParse';
 import { appendRaw, readDay, type RawRow } from './rawStore';
 import { deviceClass } from './ua';
@@ -271,8 +273,18 @@ const M_ADD = ['lines', 'requests', 'errors_4xx', 'errors_5xx', 'bytes', 'shield
 const M_SK = ['ttfb_sketch', 'time_sketch', 'origin_sketch', 'kbps_sketch', 'last_mile_sketch'];
 
 /** Add minute rows into what is there (several flushes and consumers merge). */
-export async function addCdnMinutes(rows: CdnMinute[], client?: Q): Promise<void> {
+export async function addCdnMinutes(rows: CdnMinute[], client?: Q, target?: StoreKind): Promise<void> {
   if (!rows.length) return;
+  if (client) return pgAddCdnMinutes(rows, client);
+  await forEachTarget({ clickhouse: () => chAddCdnMinutes(rows), postgres: () => pgAddCdnMinutes(rows) }, target);
+}
+
+/** ClickHouse: the rows add into the minute (AggregatingMergeTree, clickhouse.ts). */
+function chAddCdnMinutes(rows: CdnMinute[]): Promise<void> {
+  return chInsert('qoe_cdn_minutes', rows.map((m) => { const o: any = { ...m, minute: iso(m.minute) }; for (const k of M_SK) o[k] = o[k] ?? {}; return o; }), qoeChDatabase(), { additive: true });
+}
+
+async function pgAddCdnMinutes(rows: CdnMinute[], client?: Q): Promise<void> {
   const c = client ?? await analyticsPool();
   const cols = [...M_KEY, ...M_ADD, ...M_SK];
   for (let i = 0; i < rows.length; i += CHUNK) {
@@ -288,8 +300,18 @@ export async function addCdnMinutes(rows: CdnMinute[], client?: Q): Promise<void
 }
 
 /** Merge sessions: first and last seen widen, counts add. */
-export async function addCdnSessions(rows: CdnSession[], client?: Q): Promise<void> {
+export async function addCdnSessions(rows: CdnSession[], client?: Q, target?: StoreKind): Promise<void> {
   if (!rows.length) return;
+  if (client) return pgAddCdnSessions(rows, client);
+  await forEachTarget({ clickhouse: () => chAddCdnSessions(rows), postgres: () => pgAddCdnSessions(rows) }, target);
+}
+
+/** ClickHouse: first and last seen widen (min, max), counts add, the first known content, country and device stay (any). */
+function chAddCdnSessions(rows: CdnSession[]): Promise<void> {
+  return chInsert('qoe_cdn_sessions', rows.map((x) => ({ ...x, content_id: x.content_id || null, first_at: iso(x.first_at), last_at: iso(x.last_at) })), qoeChDatabase(), { additive: true });
+}
+
+async function pgAddCdnSessions(rows: CdnSession[], client?: Q): Promise<void> {
   const c = client ?? await analyticsPool();
   const cols = ['account_id', 'day', 'skey', 'sid', 'content_id', 'first_at', 'last_at', 'lines', 'requests', 'country', 'device_class'];
   for (let i = 0; i < rows.length; i += CHUNK) {
@@ -402,7 +424,7 @@ const shift = (day: string, n: number) => new Date(Date.parse(day + 'T00:00:00Z'
  * player waited beyond the edge's own first byte). Replaces the day in one
  * transaction; idempotent.
  */
-export async function replayCdnDay(acct: string, day: string): Promise<{ lines: number; minuteRows: number; sessions: number; joined: number }> {
+export async function replayCdnDay(acct: string, day: string, target?: StoreKind): Promise<{ lines: number; minuteRows: number; sessions: number; joined: number }> {
   // Raw partitions are by the day a line ARRIVED; a request just before
   // midnight can arrive after it, so the next day's partition is read too
   // and only the day's own requests are kept below.
@@ -438,17 +460,30 @@ export async function replayCdnDay(acct: string, day: string): Promise<{ lines: 
     if (t != null) { s.join(acct, l, t); joined++; }
   }
   const { minutes, sessions } = s.take();
-  const p = await analyticsPool();
-  const c = await p.connect();
-  try {
-    await c.query('BEGIN');
-    await c.query(`DELETE FROM qoe_cdn_minutes WHERE account_id = $1 AND minute >= ($2::date)::timestamp AT TIME ZONE 'UTC' AND minute < ($2::date + 1)::timestamp AT TIME ZONE 'UTC'`, [acct, day]);
-    await c.query(`DELETE FROM qoe_cdn_sessions WHERE account_id = $1 AND day = $2::date`, [acct, day]);
-    await addCdnMinutes(minutes.filter((m) => m.minute >= dayStart && m.minute < dayStart + 86_400_000), c);
-    await addCdnSessions(sessions.filter((x) => x.day === day), c);
-    await c.query('COMMIT');
-  } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; }
-  finally { c.release(); }
+  const dayMinutes = minutes.filter((m) => m.minute >= dayStart && m.minute < dayStart + 86_400_000), daySessions = sessions.filter((x) => x.day === day);
+  await forEachTarget({
+    clickhouse: async () => {
+      // No transactions in ClickHouse: this account's day out, the rebuilt one in (store.ts replaceDay says why that is enough).
+      const db = qoeChDatabase();
+      await chExec(`DELETE FROM qoe_cdn_minutes WHERE account_id = ${lit(acct)} AND minute >= ${lit(new Date(dayStart))} AND minute < ${lit(new Date(dayStart + 86_400_000))}`, db);
+      await chExec(`DELETE FROM qoe_cdn_sessions WHERE account_id = ${lit(acct)} AND day = toDate(${lit(day)})`, db);
+      await chAddCdnMinutes(dayMinutes);
+      await chAddCdnSessions(daySessions);
+    },
+    postgres: async () => {
+      const p = await analyticsPool();
+      const c = await p.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query(`DELETE FROM qoe_cdn_minutes WHERE account_id = $1 AND minute >= ($2::date)::timestamp AT TIME ZONE 'UTC' AND minute < ($2::date + 1)::timestamp AT TIME ZONE 'UTC'`, [acct, day]);
+        await c.query(`DELETE FROM qoe_cdn_sessions WHERE account_id = $1 AND day = $2::date`, [acct, day]);
+        await pgAddCdnMinutes(dayMinutes, c);
+        await pgAddCdnSessions(daySessions, c);
+        await c.query('COMMIT');
+      } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; }
+      finally { c.release(); }
+    },
+  }, target);
   return { lines: parsed.length, minuteRows: minutes.length, sessions: sessions.length, joined };
 }
 
@@ -461,7 +496,15 @@ export async function cdnAudience(acct: string, from: Date, to: Date) {
      SELECT count(*) AS sessions,
             count(*) FILTER (WHERE sid IS NOT NULL) AS with_sid,
             count(*) FILTER (WHERE sid IS NOT NULL AND EXISTS (SELECT 1 FROM qoe_views v WHERE v.account_id = $1 AND v.sid = s.sid)) AS reported
-       FROM s`, [acct, from.toISOString(), to.toISOString()]);
+       FROM s`, [acct, from.toISOString(), to.toISOString()],
+    // ClickHouse: the correlated EXISTS as IN, looking up only the sids the edge saw (the sid index skips the rest)
+    `WITH s AS (
+       SELECT skey, sid FROM qoe_cdn_sessions
+        WHERE account_id = $1 AND last_at >= $2 AND first_at < $3)
+     SELECT count(*) AS sessions,
+            count(*) FILTER (WHERE sid IS NOT NULL) AS with_sid,
+            count(*) FILTER (WHERE sid IS NOT NULL AND sid IN (SELECT sid FROM qoe_views WHERE account_id = $1 AND sid IN (SELECT sid FROM s WHERE sid IS NOT NULL))) AS reported
+       FROM s`);
   const sessions = Number(r?.sessions ?? 0), reported = Number(r?.reported ?? 0), withSid = Number(r?.with_sid ?? 0);
   return { sessions, withSessionId: withSid, withTelemetry: reported, withoutTelemetry: sessions - reported, withoutSessionId: sessions - withSid };
 }

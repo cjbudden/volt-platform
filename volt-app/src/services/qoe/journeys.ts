@@ -35,6 +35,8 @@
 //  advertising ids, no user ids.
 // ============================================================================
 import { analyticsPool, aquery } from './analyticsDb';
+import { chExec, chInsert, lit } from './clickhouse';
+import { forEachTarget, qoeChDatabase, type StoreKind } from './storeSwitch';
 import { parseUa } from './ua';
 import type { RawCtx } from './views';
 import type { ReportQuery } from './reports';
@@ -335,7 +337,20 @@ async function upsert(c: Q, table: string, cols: string[], key: string[], rows: 
   }
 }
 
-export async function writeJourneyRows(sessions: AppSessionRow[], journeys: JourneyRow[], client?: Q): Promise<void> {
+export async function writeJourneyRows(sessions: AppSessionRow[], journeys: JourneyRow[], client?: Q, target?: StoreKind): Promise<void> {
+  if (client) return pgWriteJourneyRows(sessions, journeys, client);
+  await forEachTarget({ clickhouse: () => chWriteJourneyRows(sessions, journeys), postgres: () => pgWriteJourneyRows(sessions, journeys) }, target);
+}
+
+/** ClickHouse: versioned rows (a later write of the same app session or journey wins, clickhouse.ts). */
+async function chWriteJourneyRows(sessions: AppSessionRow[], journeys: JourneyRow[]): Promise<void> {
+  const db = qoeChDatabase();
+  const pick = (o: any, cols: string[]) => Object.fromEntries(cols.map((k) => [k, o[k] ?? null]));
+  await chInsert('qoe_app_sessions', sessions.map((x) => pick({ ...x, app_id: okApp(x.app_id), started_at: iso(x.started_at), ended_at: iso(x.ended_at) }, SESSION_COLS)), db, { versioned: true });
+  await chInsert('qoe_journeys', journeys.map((j) => pick({ ...j, app_id: okApp(j.app_id), started_at: iso(j.started_at) }, JOURNEY_COLS)), db, { versioned: true });
+}
+
+async function pgWriteJourneyRows(sessions: AppSessionRow[], journeys: JourneyRow[], client?: Q): Promise<void> {
   const c = client ?? await analyticsPool();
   if (sessions.length) await upsert(c, 'qoe_app_sessions', SESSION_COLS, ['account_id', 'asid'],
     sessions.map((s) => ({ ...s, app_id: okApp(s.app_id), started_at: iso(s.started_at), ended_at: iso(s.ended_at) })));
@@ -344,14 +359,26 @@ export async function writeJourneyRows(sessions: AppSessionRow[], journeys: Jour
 }
 
 /** Replace one account's day of app sessions and journeys (by the day they started), in one transaction. */
-export async function replaceJourneyDay(acct: string, day: string, sessions: AppSessionRow[], journeys: JourneyRow[]): Promise<void> {
+export async function replaceJourneyDay(acct: string, day: string, sessions: AppSessionRow[], journeys: JourneyRow[], target?: StoreKind): Promise<void> {
+  await forEachTarget({
+    clickhouse: async () => {
+      const db = qoeChDatabase();
+      await chExec(`DELETE FROM qoe_app_sessions WHERE account_id = ${lit(acct)} AND day = toDate(${lit(day)})`, db);
+      await chExec(`DELETE FROM qoe_journeys WHERE account_id = ${lit(acct)} AND day = toDate(${lit(day)})`, db);
+      await chWriteJourneyRows(sessions, journeys);
+    },
+    postgres: () => pgReplaceJourneyDay(acct, day, sessions, journeys),
+  }, target);
+}
+
+async function pgReplaceJourneyDay(acct: string, day: string, sessions: AppSessionRow[], journeys: JourneyRow[]): Promise<void> {
   const p = await analyticsPool();
   const c = await p.connect();
   try {
     await c.query('BEGIN');
     await c.query(`DELETE FROM qoe_app_sessions WHERE account_id = $1 AND day = $2::date`, [acct, day]);
     await c.query(`DELETE FROM qoe_journeys WHERE account_id = $1 AND day = $2::date`, [acct, day]);
-    await writeJourneyRows(sessions, journeys, c);
+    await pgWriteJourneyRows(sessions, journeys, c);
     await c.query('COMMIT');
   } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; }
   finally { c.release(); }
@@ -474,9 +501,16 @@ export async function journeyToPlay(acct: string, q: ReportQuery) {
   const p: unknown[] = [acct, q.from.toISOString(), q.to.toISOString()];
   const w = [`s.account_id = $1`, `s.started_at >= $2`, `s.started_at < $3`, ...jWhere(q, p, 's')];
   const entries = q.filters.entry_point?.filter((e) => e !== '__none') ?? [];
-  if (entries.length) { p.push(entries); w.push(`EXISTS (SELECT 1 FROM qoe_journeys j WHERE j.account_id = s.account_id AND j.asid = s.asid AND j.entry = ANY($${p.length}::text[]))`); }
-  const sess = await aquery<any>(`SELECT asid, browse_ms, detail_ms, play_ms, paywall_ms, purchase_ms, purchase_ok, plays, journeys FROM qoe_app_sessions s WHERE ${w.join(' AND ')}
-    ORDER BY started_at LIMIT ${MAX_SESSIONS}`, p);
+  const chW = [...w];
+  if (entries.length) {
+    p.push(entries);
+    w.push(`EXISTS (SELECT 1 FROM qoe_journeys j WHERE j.account_id = s.account_id AND j.asid = s.asid AND j.entry = ANY($${p.length}::text[]))`);
+    // ClickHouse: the correlated EXISTS as IN over the account's journeys
+    chW.push(`s.asid IN (SELECT asid FROM qoe_journeys WHERE account_id = $1 AND entry = ANY($${p.length}::text[]))`);
+  }
+  const sel = (ws: string[]) => `SELECT asid, browse_ms, detail_ms, play_ms, paywall_ms, purchase_ms, purchase_ok, plays, journeys FROM qoe_app_sessions s WHERE ${ws.join(' AND ')}
+    ORDER BY started_at LIMIT ${MAX_SESSIONS}`;
+  const sess = await aquery<any>(sel(w), p, sel(chW));
   // With an entry point filter, only the plays of journeys from those entries count.
   let allowJ: Set<string> | null = null;
   if (entries.length && sess.length) {

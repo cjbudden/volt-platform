@@ -30,7 +30,7 @@ resource "aws_ecs_task_definition" "control_plane" {
       { name = "ROLE", value = var.enable_role_split ? "api-admin" : "all" },
       { name = "PREWARM_ECS_RESOURCE_IDS", value = local.prewarm_target },
     ])
-    secrets = concat(local.control_plane_secrets, local.scale_secrets, local.image_secrets, local.docs_secrets, local.app_settings_secrets, local.operator_secrets)
+    secrets = concat(local.control_plane_secrets, local.scale_secrets, local.image_secrets, local.docs_secrets, local.app_settings_secrets, local.operator_secrets, local.clickhouse_secrets)
     # Liveness only (no database): a database blip must not restart every task.
     healthCheck = {
       command     = ["CMD-SHELL", "node -e \"fetch('http://localhost:8080/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]

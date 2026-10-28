@@ -23,6 +23,7 @@ apply`, pushes images or touches credentials.
 | `deploy/terraform/edge_rights.tf` | the CloudFront Function and KeyValueStore for edge rights variants |
 | `deploy/terraform/images.tf` | the image library bucket, image CDN and signing secret |
 | `deploy/terraform/qoe_raw.tf` | the raw player-report store for QoE |
+| `deploy/terraform/clickhouse.tf` | the ClickHouse analytics store, off by default: two replicas, three keepers, nightly backups (build queue 2.11) |
 | `deploy/terraform/ecr.tf` | the image repositories |
 | `deploy/terraform/secrets.tf` | Secrets Manager entries the app reads by reference |
 | `deploy/terraform/app_settings.tf` | control-plane settings that are not infrastructure (deployment shape, media in the bucket, the operator's own settings) |
@@ -115,6 +116,19 @@ What makes Volt cheap to run is mostly in phase 2 of the queue:
 | Scaling and chaos runs against the deployment | `deploy/loadtest/chaos.mjs`, run sheet `deploy/loadtest/CHAOS.md`, `deploy/terraform/chaos.tf` (`enable_chaos_experiments`, staging only) | built (2.8); the real run waits on the AWS account |
 | CDN logs with CMCD counted at the edge | | 2.9 |
 | Server-guided quality (CMSD) and content steering between delivery paths | `volt-app/src/services/delivery/cmsd.ts`, `volt-app/src/services/delivery/steering.ts` | built on the Mac origin and the manifest service (2.10); CMSD on CDN-served media playlists and a second CDN not yet |
+
+### The analytics store (build queue 2.11)
+
+The playback reports start on a second database in the RDS Postgres. With
+`clickhouse_enabled = true` the control plane is told `QOE_STORE=auto` and
+moves them to ClickHouse by itself once the last 30 days pass
+`qoe_clickhouse_above_vh` viewer hours (1 M): both stores are written from the
+switch minute, the history is rebuilt from the raw archive, then the reports
+read ClickHouse. About $200 a month at the default sizes, nothing while off.
+The code is `volt-app/src/services/qoe/clickhouse.ts` and
+`volt-app/src/services/qoe/storeSwitch.ts`; `deploy/terraform/APPLY.md`
+section 8a has the checks after apply, the replica drill and restoring a
+backup.
 
 ## Before you apply, check
 

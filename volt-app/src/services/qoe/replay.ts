@@ -19,6 +19,7 @@ import { replaceDay } from './store';
 import { deriveAll, DEFINITIONS_VERSION } from './views';
 import { deriveJourneys, replaceJourneyDay } from './journeys';
 import { replayCdnDay } from './cdnLogs';
+import type { StoreKind } from './storeSwitch';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const shift = (day: string, n: number) => new Date(Date.parse(day + 'T00:00:00Z') + n * 86_400_000).toISOString().slice(0, 10);
@@ -29,7 +30,8 @@ export interface ReplayResult { account: string; day: string; definitions: numbe
   /** CDN edge log lines (cdnLogs.ts): lines read, minute rows and sessions rebuilt, lines joined to a player's response report. */
   cdnLines: number; cdnMinuteRows: number; cdnSessions: number; cdnJoined: number }
 
-export async function replayDay(acct: string, day: string): Promise<ReplayResult> {
+/** `target`: rebuild into one store only (the move to ClickHouse, storeSwitch.ts); default: where writes go now. */
+export async function replayDay(acct: string, day: string, target?: StoreKind): Promise<ReplayResult> {
   if (!DAY.test(day)) throw new Error('day must be YYYY-MM-DD');
   const rows: Array<{ acct: string; sid: string; rt: number; app: string | null; line: string; ctx?: any }> = [];
   for (const d of [shift(day, -1), day, shift(day, 1)]) for (const r of await readDay(acct, d)) rows.push({ acct, ...r });
@@ -37,27 +39,32 @@ export async function replayDay(acct: string, day: string): Promise<ReplayResult
   const start = Date.parse(day + 'T00:00:00Z'), end = start + 86_400_000;
   const keepViews = views.filter((v) => v.day === day);
   const keepMinutes = minutes.filter((m) => m.minute >= start && m.minute < end);
-  await replaceDay(acct, day, keepViews, keepMinutes);
+  await replaceDay(acct, day, keepViews, keepMinutes, target);
   // The app's journey events, from their own raw stream, the same way.
   const jrows: Array<{ acct: string; rt: number; app: string | null; line: string; ctx?: any }> = [];
   for (const d of [shift(day, -1), day, shift(day, 1)]) for (const r of await readDay(acct, d, undefined, 'journey')) jrows.push({ acct, ...r });
   const j = deriveJourneys(jrows);
   const keepS = j.sessions.filter((s) => s.day === day), keepJ = j.journeys.filter((x) => x.day === day);
-  if (jrows.length || keepS.length) await replaceJourneyDay(acct, day, keepS, keepJ);
+  if (jrows.length || keepS.length) await replaceJourneyDay(acct, day, keepS, keepJ, target);
   // The CDN's edge log lines (build queue 2.9), joined to the players' response reports.
-  const cdn = await replayCdnDay(acct, day);
+  const cdn = await replayCdnDay(acct, day, target);
   return { account: acct, day, definitions: DEFINITIONS_VERSION, rawReports: rows.length, views: keepViews.length, minuteRows: keepMinutes.length,
     journeyEvents: jrows.length, appSessions: keepS.length, journeys: keepJ.length,
     cdnLines: cdn.lines, cdnMinuteRows: cdn.minuteRows, cdnSessions: cdn.sessions, cdnJoined: cdn.joined };
 }
 
 /** Every account with raw reports on each day of the range (inclusive). */
-export async function replayRange(from: string, to = from, account?: string): Promise<ReplayResult[]> {
+export async function replayRange(from: string, to = from, account?: string, target?: StoreKind): Promise<ReplayResult[]> {
   if (!DAY.test(from) || !DAY.test(to) || to < from) throw new Error('from and to must be YYYY-MM-DD, to not before from');
   const out: ReplayResult[] = [];
   for (let d = from; d <= to; d = shift(d, 1)) {
     const accts = account ? [account] : [...new Set([...await accountsOnDay(d), ...await accountsOnDay(d, 'journey'), ...await accountsOnDay(d, 'cdn')])];
-    for (const a of accts) out.push(await replayDay(a, d));
+    for (const a of accts) out.push(await replayDay(a, d, target));
   }
   return out;
+}
+
+/** The move to ClickHouse (storeSwitch.ts): one day of every account rebuilt there from the raw archive; the views written. */
+export async function replayIntoClickHouse(day: string): Promise<number> {
+  return (await replayRange(day, day, undefined, 'clickhouse')).reduce((n, r) => n + r.views, 0);
 }

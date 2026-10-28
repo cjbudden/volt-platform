@@ -182,14 +182,15 @@ export async function pathwayQuality(cfg: SteeringConfig, cc: string): Promise<M
   try {
     const { aquery } = await import('../qoe/analyticsDb');
     const hosts = cfg.pathways.map(hostOf);
+    // Plain SQL both analytics stores read (Postgres, or ClickHouse once the reports move there, build queue 2.11).
     const rows = await aquery<any>(
-      `SELECT cdn, SUM(playing_ms)::float8 AS p, SUM(rebuffer_ms)::float8 AS r, SUM(attempts)::float8 AS a, SUM(failures)::float8 AS f
-         FROM qoe_minutes WHERE minute >= now() - ($1 || ' minutes')::interval AND country = $2 AND cdn = ANY($3) GROUP BY cdn`,
-      [String(QUALITY_WINDOW_MIN), cc, hosts]);
+      `SELECT cdn, SUM(playing_ms) AS p, SUM(rebuffer_ms) AS r, SUM(attempts) AS a, SUM(failures) AS f
+         FROM qoe_minutes WHERE minute >= $1 AND country = $2 AND cdn = ANY($3::text[]) GROUP BY cdn`,
+      [new Date(Date.now() - QUALITY_WINDOW_MIN * 60_000).toISOString(), cc, hosts]);
     for (const r of rows) {
       // two pathways on one host cannot be told apart by the reports: neither is judged
       const ids = cfg.pathways.filter((p) => hostOf(p) === r.cdn);
-      if (ids.length === 1) q.set(ids[0].id, { playingMs: r.p ?? 0, rebufferMs: r.r ?? 0, attempts: r.a ?? 0, failures: r.f ?? 0 });
+      if (ids.length === 1) q.set(ids[0].id, { playingMs: Number(r.p ?? 0), rebufferMs: Number(r.r ?? 0), attempts: Number(r.a ?? 0), failures: Number(r.f ?? 0) });
     }
   } catch { /* no analytics: the configured order */ }
   qCache.set(key, { at: Date.now(), q });

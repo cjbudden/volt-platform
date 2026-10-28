@@ -37,6 +37,7 @@ import { breakdown, dimensionValues, FILTERS, listViews, MEASURES, overview, par
 import { sessionTimeline, type BeaconRow } from '../services/qoe/timeline';
 import { replayRange } from '../services/qoe/replay';
 import { collectorState } from '../services/qoe/collector';
+import { moveStats, storeState, switchAboveVh } from '../services/qoe/storeSwitch';
 import { DEFINITIONS_VERSION } from '../services/qoe/views';
 import { discovery, journeyState, journeyToPlay } from '../services/qoe/journeys';
 
@@ -195,7 +196,13 @@ qoeRouter.get('/definitions', (_req, res) => {
   });
 });
 
-qoeRouter.get('/collector', (_req, res) => { res.json({ ...collectorState(), journeys: journeyState(), cdn: cdnReaderState() }); });
+qoeRouter.get('/collector', asyncHandler(async (_req, res) => {
+  // Which analytics store the reports read, and the move to ClickHouse (build queue 2.11).
+  const st = await storeState();
+  res.json({ ...collectorState(), journeys: journeyState(), cdn: cdnReaderState(),
+    store: { reads: st.phase === 'clickhouse' ? 'clickhouse' : 'postgres', phase: st.phase, switchAt: st.switchAt ? new Date(st.switchAt).toISOString() : null,
+      backfilledTo: st.backfilledTo ?? null, switchAboveViewerHours: switchAboveVh(), ...moveStats } });
+}));
 
 qoeRouter.post('/replay', asyncHandler(async (req, res) => {
   const b = z.object({ day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).parse(req.body ?? {});
