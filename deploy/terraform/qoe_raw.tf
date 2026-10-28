@@ -119,5 +119,8 @@ locals {
     { name = "QOE_RAW_BUCKET", value = aws_s3_bucket.qoe_raw.id },
     { name = "QOE_RAW_PREFIX", value = "qoe-raw" },
     { name = "QOE_RAW_REGION", value = var.region },
+    # Each session derived by the one task that owns it (sidRoute.ts); the
+    # task finds its own address from the ECS task metadata.
+    { name = "QOE_ROUTE", value = "auto" },
   ], local.cdn_logs_env, local.clickhouse_env) # the CDN's real-time logs (cdn_logs.tf); which analytics store (clickhouse.tf)
 }

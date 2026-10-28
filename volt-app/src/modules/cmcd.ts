@@ -22,7 +22,10 @@
  *
  * Once kept raw, the batch goes to the live path (services/qoe/collector.ts),
  * which builds view rows and minute aggregates in the separate analytics
- * database; the reports are modules/qoe.ts.
+ * database; the reports are modules/qoe.ts. With several collector tasks,
+ * each session's rows go to the one task that owns it (services/qoe/
+ * sidRoute.ts); the owners take them on POST /api/cmcd/_peer, a signed
+ * request from another task, never from a player.
  */
 import express, { Router } from 'express';
 import { asyncHandler } from '../util/http';
@@ -30,6 +33,7 @@ import { verifyKey } from '../services/apiKeys';
 import { checkEventReport } from '../services/qoe/cmcdParse';
 import { appendRaw, type RawRow } from '../services/qoe/rawStore';
 import { countReports, ingestReports } from '../services/qoe/collector';
+import { receiveForward, route, routeStats, startRouting, verifyPeer } from '../services/qoe/sidRoute';
 import type { RawCtx } from '../services/qoe/views';
 import { scaleConfig } from '../scale/config';
 
@@ -74,6 +78,20 @@ export function resetCmcdLimits(): void { perSession.clear(); }
 export const cmcdRouter = Router();
 cmcdRouter.use(express.text({ type: ['application/cmcd', 'text/cmcd'], limit: '256kb' }));
 
+// FROM ANOTHER COLLECTOR TASK: the sessions this task owns, received by a
+// peer and already kept raw there. Signed with the key every task derives
+// (sidRoute.ts); anything else is 401. Read as text so the signature is
+// checked over the exact bytes sent.
+cmcdRouter.post('/_peer', express.text({ type: 'application/json', limit: '8mb' }), asyncHandler(async (req, res) => {
+  const body = typeof req.body === 'string' ? req.body : '';
+  if (!verifyPeer(req.get('x-volt-peer'), body)) { routeStats.refused++; res.status(401).json({ error: 'not a collector task' }); return; }
+  let msg: any;
+  try { msg = JSON.parse(body); } catch { res.status(400).json({ error: 'bad body' }); return; }
+  const batches = Array.isArray(msg?.batches) ? msg.batches.filter((b: any) => typeof b?.acct === 'string' && Array.isArray(b.rows)) : [];
+  receiveForward(batches, ingestReports);
+  res.status(204).end();
+}));
+
 cmcdRouter.post('/', asyncHandler(async (req, res) => {
   res.setHeader('cache-control', 'no-store');
   if (!req.is('application/cmcd') && !req.is('text/cmcd')) { res.status(415).json({ error: 'use Content-Type: application/cmcd' }); return; }
@@ -107,7 +125,9 @@ cmcdRouter.post('/', asyncHandler(async (req, res) => {
   // anything is derived from it, and before the player hears 204.
   await appendRaw(key.account_id, rows);
   countReports(key.account_id, now, rows.length, rejected);
-  ingestReports(key.account_id, rows);
+  // Derive the sessions this task owns; the others go to their owners.
+  await startRouting();
+  route(key.account_id, rows, ingestReports);
   if (rejected.length) res.setHeader('x-cmcd-rejected', String(rejected.length));
   res.status(204).end();
 }));

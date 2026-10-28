@@ -320,6 +320,14 @@ CREATE TABLE IF NOT EXISTS qoe_cdn_sessions (
   PRIMARY KEY (account_id, day, skey)
 );
 CREATE INDEX IF NOT EXISTS qoe_cdn_sessions_seen ON qoe_cdn_sessions (account_id, last_at);
+-- The collector tasks taking reports now, for routing sessions by sid
+-- (sidRoute.ts, build queue 2.11b): an entry older than three heartbeats is
+-- not a member.
+CREATE TABLE IF NOT EXISTS qoe_collectors (
+  id      TEXT PRIMARY KEY,
+  url     TEXT NOT NULL,
+  seen_at TIMESTAMPTZ NOT NULL
+);
 -- How far the Kinesis consumer has read each shard (cdnStream.ts).
 CREATE TABLE IF NOT EXISTS qoe_cdn_cursor (
   stream     TEXT NOT NULL,

@@ -39,6 +39,19 @@ resource "aws_security_group" "control_plane" {
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
+  # Collector tasks forward each viewer session's reports to the one task
+  # that owns it (POST /api/cmcd/_peer, signed; volt-app
+  # services/qoe/sidRoute.ts, build queue 2.11b), so the control-plane tasks
+  # reach each other on 8080. Only from this same group. Inline like the
+  # rule above: a separate aws_security_group_rule beside inline rules would
+  # be removed again on the next apply.
+  ingress {
+    description = "Collector forwards between control-plane tasks"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    self        = true
+  }
   egress {
     from_port   = 0
     to_port     = 0

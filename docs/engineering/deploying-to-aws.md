@@ -130,6 +130,24 @@ The code is `volt-app/src/services/qoe/clickhouse.ts` and
 section 8a has the checks after apply, the replica drill and restoring a
 backup.
 
+### Several collector tasks (build queue 2.11b)
+
+Players' reports (`POST /api/cmcd`) reach whichever control-plane task the
+load balancer picks. Each task keeps the batch raw first, then derives only
+the viewer sessions it owns and forwards the rest to their owner, so every
+session has one state and one live view row and a task holds about 1/n of
+the audience. The tasks that take reports list themselves in the analytics
+database (`qoe_collectors`, a heartbeat every 5 s) and pick each owner by
+rendezvous hashing of the sid, so a task starting or stopping moves only its
+own sessions. Forwards go task to task on 8080 (the control-plane security
+group's own rule), signed with a key derived from `JWT_ACCESS_SECRET`;
+`QOE_ROUTE=auto` is set by `deploy/terraform/qoe_raw.tf` and each task reads its address from
+the ECS task metadata. A forward that fails is derived where it arrived, and
+yesterday is replayed from the raw archive once a night (02:30 UTC,
+`QOE_NIGHTLY_REPLAY_AT`), so what a task change left provisional is exact by
+the next morning. The code is `volt-app/src/services/qoe/sidRoute.ts` and
+`volt-app/src/services/qoe/nightly.ts`; the suite is `qoe-sid-route`.
+
 ## Before you apply, check
 
 - `terraform plan` shows what you expect and nothing in another environment.

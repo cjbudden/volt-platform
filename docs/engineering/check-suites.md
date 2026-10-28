@@ -135,6 +135,14 @@ audience inside ClickHouse and times every report through the product's own
 code; `volt-app/scripts/qoe-load.ts` runs the real collector against 100 000
 simulated viewers at the modelled report rate and prints CPU per report.
 
+`qoe-sid-route` starts two real collector processes
+(`volt-app/test/fixtures/qoe-collector-node.ts`, the product's CMCD router on
+its own port) against one analytics database, as two tasks behind the load
+balancer, and sends every session's batches to both in turn. Start the
+fixture with `node --import tsx`, not the `tsx` command: the command runs a
+second process that a kill does not reach, and a task the suite thinks is
+dead keeps answering.
+
 ## Adding a suite
 
 1. Name it `volt-app/test/<what-it-checks>.check.ts` (or `.check.sh`).

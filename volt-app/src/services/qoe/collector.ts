@@ -18,16 +18,21 @@
 //  counted, and the replay of that day restores them from the raw reports.
 //  Nothing here touches the control plane's pool.
 //
-//  ONE PROCESS PER SESSION. On the Mac the API is one process. With several
-//  collector tasks behind the load balancer a session's batches can land on
-//  different tasks; each then holds part of it, so live view rows of such
-//  sessions are provisional until the day is replayed (build queue 2.11 routes
-//  by sid). QOE_DERIVE=off turns the live path off (raw is still kept).
+//  ONE TASK PER SESSION. On the Mac the API is one process. With several
+//  collector tasks behind the load balancer a session's batches land on
+//  different tasks; each task now derives only the sessions it owns and
+//  forwards the rest to their owners (sidRoute.ts, build queue 2.11b), so a
+//  session has one state and one view row, and a task holds about 1/n of
+//  the audience. What is still provisional (an owner that changed, a forward
+//  that failed) is made exact by the nightly replay of yesterday (nightly.ts).
+//  QOE_DERIVE=off turns the live path off (raw is still kept).
 // ============================================================================
 import { MinuteSink, SessionState, SILENCE_MS, RESUME_MS, toEvent, byReportOrder, type MinuteRow, type ViewRow, type Ev } from './views';
 import type { RawRow } from './rawStore';
 import { addCollectorCounts, addMinutes, writeViews } from './store';
 import { flushGate, gatePending, gateStats } from './gateLog';
+import { routeState, setFallback } from './sidRoute';
+import { nightlyStats, startNightlyReplay } from './nightly';
 
 export const FLUSH_MS = 10_000;
 export const MAX_PENDING_VIEWS = 200_000;
@@ -51,6 +56,7 @@ function ensureTimer() {
   if (timer) return;
   timer = setInterval(() => { void flushQoe(); }, FLUSH_MS);
   timer.unref?.();
+  startNightlyReplay();
 }
 
 /** The lines the collector accepted and refused, for report 12. */
@@ -91,6 +97,8 @@ export function ingestReports(acct: string, rows: RawRow[]): void {
   }
   ensureTimer();
 }
+// A forward its owner could not take is derived where it was received.
+setFallback(ingestReports);
 
 /** Close the views that went quiet and forget sessions silent past resuming. */
 function sweep(now: number) {
@@ -156,7 +164,7 @@ function requeue(views: Array<[string, ViewRow]>, minutes: MinuteRow[], c: Array
 /** What is held in memory now (the console's telemetry panel, tests). */
 export function collectorState() {
   return { sessions: sessions.size, pendingViews: pendingViews.size, pendingMinuteRows: sink.rows.size, ...stats,
-    gate: { pending: gatePending(), ...gateStats } };
+    gate: { pending: gatePending(), ...gateStats }, route: routeState(), nightly: { ...nightlyStats } };
 }
 
 /** For tests: forget everything held in memory. */
