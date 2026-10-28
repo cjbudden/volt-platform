@@ -61,6 +61,19 @@ native tools are missing but Docker is up, the script picks Docker by itself.
 Docker on a Mac still uses the Mac's CPU, so keep test ladders light (720p and
 480p).
 
+**Server-guided quality (CMSD) and delivery paths** (`volt-app/src/services/delivery`,
+build queue 2.10). The Mac serves viewers from its own uplink, so tell it how
+much it may use: `DELIVERY_ALLOWANCE_MBPS=40` (off when unset). Above 90 % of
+it the origin is under duress and every live playlist suggests a fair share
+per viewer (`CMSD-Dynamic: "volt-origin";mb=1200;du`); the guidance lifts once
+what the viewers would take unguided fits under 70 % for 20 s
+(`DELIVERY_DURESS_HI`, `DELIVERY_DURESS_LO`, `DELIVERY_DURESS_HOLD_SEC`,
+`DELIVERY_DURESS_TARGET`). `DELIVERY_CMSD=off` sends no CMSD at all. Two or
+more delivery paths turn content steering on:
+`DELIVERY_PATHWAYS='{"pathways":[{"id":"a","base":"http://127.0.0.1:8080"},{"id":"b","base":"http://localhost:8080"}],"ttlSec":60}'`
+(add `"regions":{"AU":["b","a"]}` for a country's own order), and
+`DELIVERY_PATHWAYS_DRAIN=a` moves everyone off a path.
+
 ## Where things go
 
 | What | Where |

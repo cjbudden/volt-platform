@@ -221,6 +221,10 @@ export function createServer() {
       req.url = run ? `/${live[1]}/runs/${run}${rest}` : `/${live[1]}${rest}`;
     }
     res.setHeader('Access-Control-Allow-Origin', '*');
+    // SERVER-GUIDED QUALITY (services/delivery/cmsd.ts): CMSD on playlists,
+    // and every response's bytes counted against its stream, the load the
+    // guidance is decided from.
+    (await import('./services/delivery/cmsd')).applyOriginDelivery(req, res);
     if (/\.(m3u8|mpd)$/.test(req.path)) res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     else if (/\.(m4s|mp4|ts|vtt)$/.test(req.path)) res.setHeader('Cache-Control', 'no-cache');
     next();

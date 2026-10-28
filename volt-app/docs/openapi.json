@@ -36591,6 +36591,31 @@
     }
    }
   },
+  "/live/{id}/steering": {
+   "get": {
+    "operationId": "getLiveByIDSteering",
+    "summary": "Which delivery path a viewer's player should use",
+    "tags": [
+     "Live"
+    ],
+    "description": "Content steering. When Volt delivers a stream over more than one path (for example two CDNs), `GET /live/{id}/master.m3u8` and `manifest.mpd` list every path and name this address as the steering server (HLS `EXT-X-CONTENT-STEERING`, DASH `ContentSteering`). The player asks it which path to use, and asks again every `TTL` seconds: the answer is the paths in order (`PATHWAY-PRIORITY`), per viewer country, with a path that is clearly worse for viewers in that country over the last ten minutes moved last. Players that support content steering (Shaka, which the Volt player uses, hls.js and dash.js) move at the next segment, without a stall.\n\nYou do not call this yourself: the player does. `f` is `hls` or `dash`; the player adds its current path and measured throughput (`_HLS_pathway` and `_HLS_throughput`, or the `_DASH_` pair). The answer is never cached. Expect 404 when the stream is delivered over one path only.\n\n**Credential:** none, share token or playback token",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
   "/live/{id}/stream.mp3": {
    "get": {
     "operationId": "getLiveByIDStreamMP3",

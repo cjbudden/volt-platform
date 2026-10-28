@@ -114,6 +114,7 @@ What makes Volt cheap to run is mostly in phase 2 of the queue:
 | Edge rights decided in CloudFront, not at the origin | `deploy/edge/rights-viewer-request.js` | built (1.14a, 1.14b) |
 | Scaling and chaos runs against the deployment | `deploy/loadtest/chaos.mjs`, run sheet `deploy/loadtest/CHAOS.md`, `deploy/terraform/chaos.tf` (`enable_chaos_experiments`, staging only) | built (2.8); the real run waits on the AWS account |
 | CDN logs with CMCD counted at the edge | | 2.9 |
+| Server-guided quality (CMSD) and content steering between delivery paths | `volt-app/src/services/delivery/cmsd.ts`, `volt-app/src/services/delivery/steering.ts` | built on the Mac origin and the manifest service (2.10); CMSD on CDN-served media playlists and a second CDN not yet |
 
 ## Before you apply, check
 

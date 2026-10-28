@@ -171,6 +171,31 @@ The guide covers six hours back to 24 hours ahead and refreshes every few minute
 
 Both are off on private share links, so a private preview stays on the device it was opened on.
 
+## Server-guided quality and delivery paths
+
+Two things the Volt player already does, which your own player should do too
+if you use one.
+
+**Server guidance (CMSD).** Live playlists carry a `CMSD-Dynamic` header.
+When the delivery path is close to full, it says so (`du`) and suggests a
+highest bitrate (`mb`, in kb/s), a fair share for every viewer, on one of the
+stream's own rungs. A player that follows it steps down before the link
+stalls everyone; when the pressure has gone the header is sent without `mb`
+and the player is free again. The Volt player (Shaka) follows it by default;
+dash.js does too. A player that ignores it keeps playing as it always has.
+The headers are exposed to pages on other sites, and the Volt player reports
+what it received in its playback reports.
+
+**Delivery paths (content steering).** Where a stream is delivered over more
+than one path, `master.m3u8` lists every variant once per path
+(`EXT-X-CONTENT-STEERING` and `PATHWAY-ID`) and `manifest.mpd` has a
+`BaseURL` per path and a `ContentSteering` element. The player asks the
+steering address in the playlist which path to use and asks again every few
+minutes; Volt orders the paths per viewer country, moving a path that is
+clearly worse for viewers there (from the players' own playback reports) to
+the end. Shaka, hls.js and dash.js move at the next segment without a stall.
+A player without steering plays the first path listed, which works as before.
+
 ## Troubleshooting
 
 | You see | Usually | Do |

@@ -6292,6 +6292,15 @@
  },
  {
   "method": "GET",
+  "path": "/live/:id/steering",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/live"
+ },
+ {
+  "method": "GET",
   "path": "/live/:id/stream.mp3",
   "api": "delivery",
   "credential": "none, share token or playback token",

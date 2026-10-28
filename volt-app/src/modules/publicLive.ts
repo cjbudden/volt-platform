@@ -27,6 +27,9 @@ import { channelDelivery, reportedOutputLive } from '../services/viewerPath';
 import { edgeCache } from '../scale/edge';
 import { scaleConfig } from '../scale/config';
 import { existsSync, statSync, readdirSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { steeringConfig, steerHlsMaster, steerMpd, steeringManifest, type SteeringConfig } from '../services/delivery/steering';
+import { playlistHeaders, EXPOSE as CMSD_EXPOSE } from '../services/delivery/cmsd';
 import { join } from 'node:path';
 
 /** GROUND TRUTH: is the channel's origin manifest advancing right now? Shaka rewrites
@@ -359,9 +362,69 @@ publicLiveRouter.get(
       res.status(r.status).json({ available: false, reason: r.reason });
       return;
     }
+    // CONTENT STEERING (services/delivery/steering.ts): with two or more
+    // delivery paths configured, the master itself is answered here, listing
+    // every path, instead of a redirect to one of them. Not for a per-viewer
+    // address (FAST stitched ads), which is one path by construction.
+    const steer = steeringConfig();
+    if (steer && !(r as any).perViewer && await serveSteered(req, res, id, file as 'master.m3u8' | 'manifest.mpd', r.url, steer)) return;
     res.redirect(302, r.url);
   })
 );
+
+/** The delivered master's text: from this origin's disk, or fetched from the default path (cached 2 s). */
+const fetched = new Map<string, { at: number; text: string }>();
+async function deliveredText(id: string, url: string): Promise<string | null> {
+  const local = liveUrlBase(id) + '/';
+  if (url.startsWith(local)) {
+    try { return await readFile(join(liveDirFor(id), url.slice(local.length).split('?')[0]), 'utf8'); } catch { return null; }
+  }
+  if (!/^https?:\/\//.test(url)) return null;
+  const c = fetched.get(url);
+  if (c && Date.now() - c.at < 2000) return c.text;
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(3000) });
+    if (!r.ok) return null;
+    const text = await r.text();
+    fetched.set(url, { at: Date.now(), text });
+    if (fetched.size > 500) fetched.delete(fetched.keys().next().value!);
+    return text;
+  } catch { return null; }
+}
+
+/** Serves the steered master; false (the caller redirects as before) when it cannot be built. */
+async function serveSteered(req: any, res: any, id: string, file: 'master.m3u8' | 'manifest.mpd', url: string, cfg: SteeringConfig): Promise<boolean> {
+  const text = await deliveredText(id, url);
+  if (!text) return false;
+  // a tester's pretend country travels to the steering service with them
+  const as = config.env !== 'production' && typeof req.query?.as === 'string' && /^[A-Za-z]{2}$/.test(req.query.as) ? `&as=${req.query.as}` : '';
+  const server = `/live/${id}/steering?f=${file === 'manifest.mpd' ? 'dash' : 'hls'}${as}`;
+  const body = file === 'manifest.mpd' ? steerMpd(text, url, cfg.pathways, server) : steerHlsMaster(text, url, cfg.pathways, server);
+  if (!body) return false;
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Expose-Headers', CMSD_EXPOSE);
+  for (const [k, v] of Object.entries(playlistHeaders(id, file))) res.setHeader(k, v);
+  res.type(file === 'manifest.mpd' ? 'application/dash+xml' : 'application/vnd.apple.mpegurl').send(body);
+  return true;
+}
+
+/**
+ * THE STEERING SERVICE: which delivery path a viewer's player should use, in
+ * order, answered again every TTL seconds (services/delivery/steering.ts).
+ * Never cached: the answer is per country and moves with the players' own
+ * quality reports. 404 when steering is not configured.
+ */
+publicLiveRouter.get('/live/:id/steering', asyncHandler(async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  noStore(res);
+  const cfg = steeringConfig();
+  if (!cfg || !/^[0-9a-f-]{36}$/i.test(req.params.id)) { res.status(404).json({ available: false, reason: 'not_found' }); return; }
+  const as = config.env !== 'production' && typeof req.query.as === 'string' && /^[A-Za-z]{2}$/.test(req.query.as) ? req.query.as.toUpperCase() : null;
+  const cc = as ?? viewerGeo(req) ?? '';
+  const f = req.query.f === 'dash' ? 'dash' : 'hls';
+  const reload = `/live/${req.params.id}/steering?f=${f}${as ? `&as=${as}` : ''}`;
+  res.type('application/json').send(JSON.stringify(await steeringManifest(cfg, cc === 'XX' ? '' : cc, reload)));
+}));
 
 /**
  * THE VARIANT MANIFEST SERVICE (EDGE_RIGHTS_VARIANTS.md, queue item 1.14b).
@@ -450,6 +513,9 @@ async function serveVariant(req: any, res: any, kindHint: 'channel' | 'event' | 
     // a tester's stand-ins are one viewer's answer
     if (preview || (v.perViewer && config.env !== 'production')) noStore(res);
     else edgeCache(res, scaleConfig.edge.liveRedirectMaxAgeSec);
+    // server-guided quality on the variant's playlists too (services/delivery/cmsd.ts)
+    res.setHeader('Access-Control-Expose-Headers', CMSD_EXPOSE);
+    for (const [k, v] of Object.entries(playlistHeaders(id, file))) res.setHeader(k, v);
     res.type(out.type).send(out.body);
   } catch (e: any) {
     noStore(res);
