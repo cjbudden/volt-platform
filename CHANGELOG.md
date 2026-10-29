@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.19.0 (2026-10-29)
+
+### Product (in customer release notes)
+
+- fixed · Encoding Queue: An encode's page no longer shows customer accounts the name of the machine running it, and its packages read Stored rather than naming a storage bucket.
+- added · Documentation: New guides for Collections, the Encoding Queue, Genres and Single sign-on: how to group and order library media, follow and retry encodes, keep the genre list tidy, and let your team sign in with your own identity provider.
+
+### Internal
+
+- added · Documentation: The docs seed adds collections, two finished encodes and a single sign-on provider, and the coverage check requires the four new guides (batch G8).
+
 ## 0.18.0 (2026-10-29)
 
 ### Product (in customer release notes)
