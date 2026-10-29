@@ -434,6 +434,14 @@
     "Collections": {
       "displayName": "Collections",
       "description": "Your own nested groupings of library media: a collection per channel or show, with sub-collections for each week's playlist. Media can be in any number of collections, each collection keeps its own order, and removing a collection never removes media.\n\n**Use it to:**\n- List the tree with `GET /api/collections` (flat, with counts and durations; build the tree from `parentId`)\n- Make, rename, recolour or move one with `POST /api/collections` and `PATCH /api/collections/{id}`\n- Add or take out media with `POST /api/collections/{id}/items` and `POST /api/collections/{id}/items/remove`, and order it with `PUT /api/collections/{id}/items/order`\n- Read a collection in its order with `GET /api/collections/{id}/items` (`deep=true` adds its sub-collections)\n- Filter the library to a collection with `GET /api/vod?collection={id}&collection_deep=true`\n\n**Credential:** admin session or account secret key (Media library: view to read, manage to change).\n\n**Good to know:** collections nest at most 6 levels deep, and a name is unique within its level."
+    },
+    "Metadata Lists": {
+      "hidden": true,
+      "description": "Left out of the customer reference until it has a usage statement (added hidden by the 29 Oct build queue run so the release could regenerate openapi.json; write the statement and remove hidden to publish it)."
+    },
+    "SSO Connections": {
+      "hidden": true,
+      "description": "Left out of the customer reference until it has a usage statement (added hidden by the 29 Oct build queue run so the release could regenerate openapi.json; write the statement and remove hidden to publish it)."
     }
   },
   "GET /api/vod/:id/delete-impact": {
