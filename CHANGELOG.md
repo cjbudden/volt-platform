@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.20.0 (2026-10-29)
+
+### Product (in customer release notes)
+
+- fixed · Channels: A channel or event page whose guide has programmes, just none in the next few hours, now says Nothing in the guide around now and names the next (or last) programme, instead of No programme guide yet.
+- fixed · Captions: A channel's Subtitles settings change every stream on its output profile, so they can no longer be saved while another stream on that profile is running; the message names the streams to stop, as Admin > Captions does.
+
+### Internal
+
+- added: New check suite g5b-fixes (24 assertions): watch folder asset delete, the guide strip's outside block, the shared subtitles lock.
+
 ## 0.19.0 (2026-10-29)
 
 ### Product (in customer release notes)
