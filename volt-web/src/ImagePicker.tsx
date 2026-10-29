@@ -3,9 +3,9 @@
 // image kinds, UPLOAD a new one right here (it's added to the library and auto-picked).
 // Returns the picked item's /library URL.
 import { useEffect, useRef, useState } from 'react'
-import { api, apiRequest, thumbUrl, isMotionFile, type MediaFile } from './api'
+import { api, apiRequest, isMotionFile, type MediaFile } from './api'
 import { MotionThumb } from './MotionThumb'
-import { pressable } from './a11y'
+import { pressable, useEscape } from './a11y'
 import { Notice } from './notices'
 
 function fileToDataURL(file: File): Promise<string> {
@@ -41,6 +41,7 @@ export function ImagePicker({ open, onClose, onPick, kinds, title, allowUpload =
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const fileInput = useRef<HTMLInputElement | null>(null)
+  useEscape(open, onClose)
 
   function reload() {
     setFiles(null)

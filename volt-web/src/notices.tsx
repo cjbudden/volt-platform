@@ -286,17 +286,32 @@ export function useSaveResult(holdMs = 1100) {
   const [message, setMessage] = useState<string | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
   const t = useRef<number | null>(null)
+  // What runs when the hold ends (close and reload). Kept so a form closed by
+  // hand during the hold (Cancel, the close button) can still run it: without
+  // that the save had happened but the list behind never reloaded, and the
+  // new row looked missing until the page was reloaded.
+  const pending = useRef<(() => void) | null>(null)
   useEffect(() => () => { if (t.current) window.clearTimeout(t.current) }, [])
   const later = (then: (() => void) | undefined, ms: number) => {
     if (t.current) window.clearTimeout(t.current)
-    if (then) t.current = window.setTimeout(() => { t.current = null; then() }, ms)
+    t.current = null; pending.current = then ?? null
+    if (then) t.current = window.setTimeout(() => { t.current = null; pending.current = null; then() }, ms)
   }
   /** Saved: "Saved" up top for a moment, then `then`. */
   const show = useCallback((msg: string, then?: () => void) => { setWarning(null); setMessage(msg); later(then, holdMs) }, [holdMs])
   /** Saved, but say something: held three times as long, so it can be read. */
   const warn = useCallback((msg: string, then?: () => void) => { setMessage(null); setWarning(msg); later(then, holdMs * 3) }, [holdMs])
-  const clear = useCallback(() => { setMessage(null); setWarning(null); if (t.current) { window.clearTimeout(t.current); t.current = null } }, [])
-  return { message, warning, show, warn, clear, saving: message != null || warning != null }
+  const clear = useCallback(() => { setMessage(null); setWarning(null); pending.current = null; if (t.current) { window.clearTimeout(t.current); t.current = null } }, [])
+  /** Run the pending step now, if a save is holding; true when one ran. */
+  const flush = useCallback(() => {
+    const then = pending.current
+    if (!then) return false
+    if (t.current) { window.clearTimeout(t.current); t.current = null }
+    pending.current = null
+    then()
+    return true
+  }, [])
+  return { message, warning, show, warn, clear, flush, saving: message != null || warning != null }
 }
 
 /** A field's own problem, directly under it. */

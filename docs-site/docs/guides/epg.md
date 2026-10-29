@@ -25,7 +25,7 @@ Schedulers and presentation staff use it day to day.
 
 - The channel, station or event the guide is for ([Channels](channels.md), [Radio](radio.md), [Events](events.md)).
 - For **Auto VOD**, recording turned on for that stream: a programme can only become an asset if it was recorded.
-- For a replacement, the image or video in the Image Library (or its address), or the asset in the Media Library.
+- For a replacement, the slate or loop in [Loops & Fillers](loops-and-fillers.md) (you can also upload one while choosing it), or a ready asset in the Media Library.
 - **EPG & schedules: Manage** to change a guide (see [Who can do it](#who-can-do-it)).
 
 ## Step by step
@@ -73,7 +73,7 @@ In a programme's **Slot controls**:
 | Control | Choices |
 |---|---|
 | **Geo access for this period** | **Worldwide** (no extra limit), **Allow only listed countries** or **Block listed countries**, with two-letter country codes separated by commas (for example `AU, NZ`) |
-| **Replacement for this period** | **None** (air the live feed), **Slate image**, **Loop video** or **VOD asset**, then **Browse…** to pick it from the library, or paste its address. Viewers the slot's countries leave out are given a replacement instead of the live feed for the slot: today that is the stream's own filler (the slate or loop under **Filler on total loss**, played as a loop) |
+| **Replacement for this period** | **None** (air the live feed), **Slate image**, **Loop video** or **VOD asset**. Choose a slate or loop with **Choose from Loops & Fillers…** (a loop replacement also takes a slate, played as a gently moving loop), or upload one in the picker; choose a VOD asset from the assets that are ready to play. A slot saved before with an Image Library image shows it as **Not in Loops & Fillers**; it still works, and **Copy into Loops & Fillers** moves it over. Viewers the slot's countries leave out are given a replacement instead of the live feed for the slot: today that is the stream's own filler (the slate or loop under **Filler on total loss**, played as a loop) |
 
 A programme's geo rule only narrows access further. It never opens up what the account or the stream already restricts ([Account settings](account-settings.md)).
 
@@ -121,7 +121,7 @@ For a station, the guide also holds the log of what was played: each now-playing
 | Section | How it relates |
 |---|---|
 | [Channels](channels.md), [Radio](radio.md), [Events](events.md) | Each has its own guide; the stream's page shows now and next and opens its guide |
-| [Loops & Fillers](loops-and-fillers.md) | What a stream falls back on when its source is lost; a programme's replacement is chosen here in the guide instead |
+| [Loops & Fillers](loops-and-fillers.md) | What a stream falls back on when its source is lost, and where a programme's slate or loop replacement is chosen from |
 | Recordings and Media Library | **Auto VOD** cuts an asset from the recording when a programme ends |
 | [Graphics](graphics.md) | Graphics can run by rule or trigger from the guide (genre, title, programme start and end), and fields can show the current or next programme |
 | [FAST](fast.md) | A FAST channel's guide is written for you from its run order |

@@ -1285,7 +1285,6 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   const [showAll, setShowAll] = useState(false)
 
   const proto = (sel?.protocol || d.sources[0]?.protocol || 'SRT').toUpperCase()
-  const srcHost = hostOf(ts.sourceUrl || sel?.url)
   const sendLabel = sel ? `Start ${noun}` : isEvent ? null : 'Start with test source'
   // Reflect the pipeline: when the channel runs, the input gate is the
   // observation of whether bytes arrive, so it decides RECEIVING (see the

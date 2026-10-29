@@ -25,7 +25,7 @@
 //  Prefer <button type="button" class="..."> for anything new. Reach for this
 //  when the element cannot be a button without disturbing the layout.
 // ============================================================================
-import type { KeyboardEvent } from 'react'
+import { useEffect, useRef, type KeyboardEvent } from 'react'
 
 export interface PressableOptions {
   /** Announced label, when the element's own text is not enough on its own. */
@@ -97,4 +97,33 @@ export function openable(onOpen: (e?: any) => void, label?: string) {
       onOpen(e)
     },
   }
+}
+
+// ============================================================================
+//  ESCAPE CLOSES THE DIALOG ON TOP (29 Oct 2026, from the EPG guide).
+//
+//  Dialogs open over drawers (a picker over a form), so a plain document
+//  listener in each would close every layer at once on one key press. Each
+//  open dialog registers here and only the most recent one answers Escape.
+// ============================================================================
+const escStack: (() => void)[] = []
+let escBound = false
+
+export function useEscape(active: boolean, onEscape: () => void) {
+  const cb = useRef(onEscape)
+  cb.current = onEscape
+  useEffect(() => {
+    if (!active) return
+    const h = () => cb.current()
+    escStack.push(h)
+    if (!escBound) {
+      escBound = true
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' || !escStack.length) return
+        e.preventDefault()
+        escStack[escStack.length - 1]()
+      })
+    }
+    return () => { const i = escStack.lastIndexOf(h); if (i >= 0) escStack.splice(i, 1) }
+  }, [active])
 }

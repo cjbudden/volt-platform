@@ -64,7 +64,7 @@ Streams set up before Loops & Fillers existed may fall back on an image kept in 
 | Section | How it relates |
 |---|---|
 | [Channels](channels.md), [Events](events.md) | Each channel and event chooses its fallback in its settings, under **Filler on total loss** |
-| [EPG](epg.md) | A programme's own replacement (a slate, loop or asset for its slot) is chosen in the guide, from the Image Library or an address, not from here |
+| [EPG](epg.md) | A programme's own slate or loop replacement for its slot is chosen from here, in the programme's **Replacement for this period**. **Used by** lists channels and events only, not the programmes that name a file |
 | [Failover](failover.md) | The filler is what plays when neither the primary nor the backup source is available |
 | Image Library | Older fallbacks are copied in from there |
 

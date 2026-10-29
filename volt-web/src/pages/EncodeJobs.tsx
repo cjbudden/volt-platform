@@ -208,7 +208,7 @@ function EncodeJobDetail({ id }: { id: string }) {
     // eslint-disable-next-line
   }, [live, id])
   // One more look when it finishes: the asset row is written at the end.
-  const prevState = useRef<string | undefined>()
+  const prevState = useRef<string | undefined>(undefined)
   useEffect(() => { if (prevState.current && prevState.current !== job?.state) loadOuts(); prevState.current = job?.state /* eslint-disable-next-line */ }, [job?.state])
 
   async function act(kind: 'retry' | 'cancel') {

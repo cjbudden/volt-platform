@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError, type EpgOwner, type EpgOwnerRow, type ProgrammeRow, type ProgrammeConflict, type ProgrammeBody, type ProgrammeVod, type VodState, type EpgScope, type EpgSeriesInfo, type RepeatPolicy } from '../api'
-import { ImagePicker } from '../ImagePicker'
+import { FillerField } from '../FillerField'
 import { pressable } from '../a11y'
 import { navigate } from '../router'
 import { FormStatus, useNotify, usePageNotice, useSaveResult } from '../notices'
@@ -478,7 +478,13 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initia
   const [geoCountries, setGeoCountries] = useState((p?.geo_countries ?? []).join(', '))
   const [replKind, setReplKind] = useState<'none' | 'slate' | 'loop' | 'vod'>(p?.replacement_kind ?? 'none')
   const [replRef, setReplRef] = useState(p?.replacement_ref ?? '')
-  const [pickerOpen, setPickerOpen] = useState(false)
+  // A slate or loop replacement comes from Loops & Fillers, the same picker as
+  // a stream's Filler on total loss, so a loop uploaded there can be chosen
+  // here. It is stored as that asset's id; a programme saved before keeps its
+  // Image Library address, shown as such with a copy into Loops & Fillers.
+  const fillerId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(replRef) ? replRef : null
+  // Closing by hand while "Saved" is held still reloads the guide behind.
+  const close = () => { if (!saved.flush()) onClose() }
   // A VOD REPLACEMENT IS PICKED FROM READY ASSETS ONLY: what a blocked viewer
   // gets must play (volt-app services/assetReadiness.ts; the API refuses others).
   const [readyVods, setReadyVods] = useState<{ id: string; title: string | null; duration_ms: any }[] | null>(null)
@@ -598,9 +604,9 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initia
   }
 
   return (
-    <div className="drawer-scrim" {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="">
+    <div className="drawer-scrim" {...pressable(() => close())} data-a11y-click="">
       <div className="drawer" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="">
-        <div className="drawer-h"><div className="t">{isEdit ? 'Edit programme' : 'Add programme'}</div><button className="xbtn" onClick={onClose}>✕</button></div>
+        <div className="drawer-h"><div className="t">{isEdit ? 'Edit programme' : 'Add programme'}</div><button className="xbtn" onClick={close}>✕</button></div>
         <div className="drawer-b">
           <div className="field"><label>Title <span style={{ color: 'var(--faint)' }}>— also names the auto-clip asset</span></label>
             <input className="inp" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Berita Utama" />
@@ -675,33 +681,37 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initia
             </div>
           )}
           <div className="field"><label>Replacement for this period <span style={{ color: 'var(--faint)' }}>— play this instead of the live feed</span></label>
-            <select className="inp" value={replKind} onChange={e => setReplKind(e.target.value as any)}>
+            <select className="inp" value={replKind} onChange={e => {
+              const v = e.target.value as typeof replKind
+              // a VOD id is not a filler and the other way round
+              if ((v === 'vod') !== (replKind === 'vod') && replKind !== 'none') setReplRef('')
+              setReplKind(v)
+            }}>
               <option value="none">None — air the live feed</option>
               <option value="slate">Slate image</option>
               <option value="loop">Loop video</option>
               <option value="vod">VOD asset</option>
             </select>
           </div>
-          {replKind !== 'none' && (
-            <div className="field"><label>{replKind === 'vod' ? 'VOD reference' : replKind === 'loop' ? 'Loop video' : 'Slate image'}</label>
+          {replKind === 'vod' && (
+            <div className="field"><label>VOD reference</label>
               <div style={{ display: 'flex', gap: 8 }}>
-                {replKind === 'vod' ? (
                   <select className="inp" value={replRef} onChange={e => setReplRef(e.target.value)} aria-label="Replacement asset">
                     <option value="">{readyVods == null ? 'Loading ready assets…' : readyVods.length ? 'Choose a ready asset' : 'No assets are ready to use'}</option>
                     {replRef && readyVods && !readyVods.some(v => v.id === replRef) && <option value={replRef}>Current: {replRef} (not ready)</option>}
                     {(readyVods ?? []).map(v => <option key={v.id} value={v.id}>{v.title || 'Untitled'}{v.duration_ms ? ` · ${Math.round(Number(v.duration_ms) / 60000)} min` : ''}</option>)}
                   </select>
-                ) : (
-                  <input className="inp" value={replRef} onChange={e => setReplRef(e.target.value)} placeholder="Pick from library or paste a URL" />
-                )}
-                {replKind !== 'vod' && <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse…</button>}
               </div>
             </div>
           )}
-          <ImagePicker open={pickerOpen} kinds={replKind === 'loop' ? ['loop', 'clip', 'vod', 'other'] : ['slate', 'brand', 'other']}
-            title={replKind === 'loop' ? 'Choose a loop video' : 'Choose or upload a slate image'}
-            uploadKind="slate" uploadFolder="slates" allowUpload={replKind !== 'loop'}
-            onClose={() => setPickerOpen(false)} onPick={(url) => { setReplRef(url); setPickerOpen(false) }} />
+          {(replKind === 'slate' || replKind === 'loop') && (
+            <FillerField behavior={replKind === 'slate' ? 'slate' : 'vod_loop'}
+              assetId={fillerId} onAssetId={(id) => setReplRef(id ?? '')}
+              legacyRef={fillerId ? '' : replRef}
+              // FillerField clears the old address right after choosing an
+              // asset; with one field here that would undo the choice.
+              onLegacyRef={(r) => { if (r) setReplRef(r) }} />
+          )}
 
           <div className="sec-label">Post-broadcast VOD</div>
           <div className="toggle-row">
@@ -776,7 +786,7 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initia
         <div className="drawer-f">
           <FormStatus error={err} success={saved.message} warning={saved.warning} onDismiss={err ? () => setErr('') : undefined} />
           {isEdit && <button className="btn ghost" style={{ color: 'var(--down,#f87171)' }} disabled={busy || saved.saving} onClick={del}>{isSeries && scope !== 'this' ? `Delete ${scopeWord}` : 'Delete'}</button>}
-          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn ghost" onClick={close}>Cancel</button>
           <button className="btn primary" disabled={busy || saved.saving} onClick={submit}>
             {busy ? 'Saving…' : saved.saving ? 'Saved' : isEdit ? (isSeries ? `Save ${scopeWord}` : repeatRule && !('error' in repeatRule) ? 'Save and repeat' : 'Save changes') : repeatRule && !('error' in repeatRule) ? 'Add and repeat' : 'Add programme'}
           </button>

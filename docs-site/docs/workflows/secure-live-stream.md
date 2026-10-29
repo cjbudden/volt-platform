@@ -77,7 +77,7 @@ How the rules combine with the account default: [Publishing Rules](../guides/pub
 1. Open **EPG** and choose **Open** on the channel's guide, or **Build** if it has no programmes yet.
 2. Choose **Add programme** (or **Edit** on one), and fill in its **Title**, **Start** and **End**.
 3. Under **Slot controls**, set **Geo access for this period** to **Allow only listed countries** or **Block listed countries** and type the codes (for example `AU, NZ`).
-4. To show something instead of the programme where it is not allowed, rather than block it, set **Replacement for this period** to **Slate image**, **Loop video** or **VOD asset** and pick it with **Browse…**.
+4. To show something instead of the programme where it is not allowed, rather than block it, set **Replacement for this period** to **Slate image** or **Loop video** and pick it with **Choose from Loops & Fillers…**, or to **VOD asset** and pick a ready asset.
 5. Save the programme.
 
 A slot changes what viewers get only when it has a country list: viewers the list leaves out are blocked for the length of the programme or, with a replacement, shown the replacement. Where a programme is replaced, viewers are shown the channel's own filler (the slate or loop under **Filler on total loss**, played as a loop), whatever replacement the slot names. Details: [EPG](../guides/epg.md#control-a-slot).

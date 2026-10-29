@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type EpgOwner, type PlaceResult, type RepeatPolicy, type RepeatRule, type RepeatWeekday } from '../api'
 import { Segmented } from '../listFilters'
-import { pressable } from '../a11y'
+import { pressable, useEscape } from '../a11y'
 import { FormStatus } from '../notices'
 
 /* ============================================================================
@@ -203,6 +203,7 @@ export function CopyDayModal({ owner, day, count, onClose, onDone }: {
   const [policy, setPolicy] = useState<RepeatPolicy>('replace')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  useEscape(true, onClose)
 
   const targetDates = target === 'tomorrow' ? [toDateInput(addDays(day, 1))]
     : target === 'week' ? [1, 2, 3, 4, 5, 6, 7].map(n => toDateInput(addDays(day, n)))
