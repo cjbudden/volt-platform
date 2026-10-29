@@ -11,6 +11,9 @@ import { RadioDrawer, ClassChip } from './Radio'
 import { ShareDrawer } from '../ShareDrawer'
 import { pressable } from '../a11y'
 import { PanelLayout } from '../panelLayout'
+import { ProgrammeFlagIcon, mediaHref } from '../programmeMedia'
+import { useProgrammeGestures, broadcastOf, BROADCAST } from '../programmeGestures'
+import { EpgStrip } from './ChannelDetail'
 import { LogWhen, logClock, logClockTitle, useNow } from '../logWhen'
 
 /* ============================================================================
@@ -112,6 +115,21 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
   const [muted, setMuted] = useState(true)
   /** Monitoring is on precisely when it is not muted. */
   const playing = !muted
+  // UNMUTE MUST BE INSTANT (24 Oct 2026). Letting go of the stream on every
+  // mute meant every unmute paid a new connection, the MP3 gateway's wait for
+  // its next segment and the browser's own pre-roll: several seconds of
+  // silence after the click. So a mute keeps the stream ATTACHED, silenced on
+  // the element, for HOLD_MS, and an unmute inside that window only lifts
+  // element.muted. After it, the stream is released as before, so a console
+  // left muted on a wall display still stops pulling audio. The one-control
+  // rule above stands: the button is the only state the operator sees.
+  const HOLD_MS = 90_000
+  const [attached, setAttached] = useState(false)
+  useEffect(() => {
+    if (!muted) { setAttached(true); return }
+    const t = setTimeout(() => setAttached(false), HOLD_MS)
+    return () => clearTimeout(t)
+  }, [muted])
   const [vol, setVol] = useState(0.9)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [mediaEl, setMediaEl] = useState<HTMLMediaElement | null>(null)
@@ -188,6 +206,11 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
 
   const live = st?.status === 'live'
   const onAir = st?.onAir === true || st?.on_air === true
+  // What is going out, by the five gates (programmeGestures.tsx): colours the
+  // current song's badge and the guide strip's current slot.
+  const broadcast = broadcastOf(st?.health?.overall, onAir)
+  const bcast = BROADCAST[broadcast]
+  const songGestures = useProgrammeGestures(`/epg/radio/${encodeURIComponent(id)}`, () => { loadLog(); load() })
   const readyToAir = st?.health?.gates?.find(g => g.gate === 'public')?.status === 'ready'
   const verdict = levels?.verdict ?? st?.qc?.verdict ?? 'unknown'
   const title = np?.title ?? st?.nowPlaying ?? null
@@ -236,7 +259,7 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
       }
     }
     async function attach() {
-      if (!st || !live || !playing || !a) return
+      if (!st || !live || !attached || !a) return
       setPlayError(null)
       if (st.outputs.mp3 && await tryUrl(st.outputs.mp3)) return
       if (cancelled) return
@@ -271,15 +294,23 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
         ? `No output this player can use: ${why}`
         : 'The station is on air but is not producing an output this player can attach to.')
     }
-    if (playing && live) attach()
+    if (attached && live) attach()
     else { setPlayError(null); a.pause(); a.removeAttribute('src'); a.load() }
     return () => { cancelled = true; if (hls) hls.destroy() }
     /* eslint-disable-next-line */
-  }, [playing, live, st?.outputs.mp3, st?.outputs.hls])
-  // Volume only. `muted` is not pushed onto the element any more: silence is
-  // achieved by not being attached, so the element is never both loaded and
-  // silent -- the state that made a broken output indistinguishable from a
-  // muted one.
+  }, [attached, live, st?.outputs.mp3, st?.outputs.hls])
+  // Mute and unmute while attached: the element keeps playing (so it stays at
+  // the live edge) and only its sound is switched. play() covers a browser
+  // that paused it in the background.
+  useEffect(() => {
+    const a = audioRef.current
+    if (!a) return
+    a.muted = muted
+    if (!muted && a.getAttribute('src') && a.paused) a.play().catch(() => {})
+  }, [muted, attached])
+  // Volume. Muted IS pushed onto the element again, but only for the hold
+  // window after a mute (see HOLD_MS): a broken output still shows itself the
+  // moment you unmute, because playError is reported while unmuted.
   useEffect(() => { const a = audioRef.current; if (a) a.volume = vol }, [vol])
   useEffect(() => { if (!live) { setMuted(true); setPreview(null) } }, [live])
   useEffect(() => { if (playing) setPreview(null) }, [playing])
@@ -733,6 +764,12 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           )}
         </div>
         </>) },
+        // The station's programme guide: the same strip, flags and gestures as
+        // a channel (ChannelDetail EpgStrip, programmeGestures.tsx).
+        { id: 'epg', zone: 'full', label: 'Programme guide', node: (
+          <EpgStrip d={{ id: st.id, epg: st.epg ?? { now: null, next: null, lane: [] }, epgEnabled: st.epgEnabled !== false }}
+            broadcast={broadcast} ownerPath={`/epg/radio/${encodeURIComponent(st.id)}`} onChanged={load}
+            onAddEpg={() => navigate(`/epg/radio/${encodeURIComponent(st.id)}`)} />) },
         { id: 'metalog', zone: 'full', label: 'Received metadata log', node: (<>
       {/* ---- timed metadata log ---- */}
       <div className="card" style={{ padding: 16 }}>
@@ -786,13 +823,17 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           </div>
         ) : (
           <table>
-            <thead><tr><th style={{ width: 170 }}>When</th><th style={{ width: 90 }}>Length</th><th>Title</th><th style={{ width: 90 }}>Class</th></tr></thead>
+            <thead><tr><th style={{ width: 170 }}>When</th><th style={{ width: 90 }}>Length</th><th>Title</th>
+              <th style={{ width: 70 }} title="TV: recording (grey) or VOD (blue not published, green published, grey restricted). Clock: Auto VOD, converting, failed. Dot: not recorded or gone. Click a row to open it, double click for the EPG, Ctrl+click for Auto VOD.">Media</th>
+              <th style={{ width: 90 }}>Class</th></tr></thead>
             <tbody>
               {log.entries.map((e) => {
                 const liveRow = e.status === 'live'
                 const dur = new Date(e.ends_at).getTime() - new Date(e.starts_at).getTime()
                 return (
-                  <tr key={e.id} style={liveRow ? { background: 'rgba(63,123,255,.07)' } : undefined}>
+                  <tr key={e.id} className={`log-row${mediaHref(e.media) ? ' has-media' : ''}${songGestures.busyId === e.id ? ' busy' : ''}`}
+                    style={liveRow ? { background: 'rgba(63,123,255,.07)' } : undefined}
+                    {...songGestures.bind({ id: e.id, name: e.title || 'Untitled break', startMs: Date.parse(e.starts_at), endMs: liveRow ? Date.now() + 60_000 : Date.parse(e.ends_at), flag: e.media?.flag })}>
                     <td style={{ color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
                       {fmtClock(e.starts_at)} → {liveRow ? 'now' : fmtClock(e.ends_at)}
                     </td>
@@ -800,10 +841,14 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         {isImg(e.stream_url) && <img src={e.stream_url!} alt="" style={{ width: 22, height: 22, borderRadius: 4, objectFit: 'cover' }} />}
+                        {/* The title opens the VOD made from it, else the recording at
+                            exactly this range (programmeMedia.tsx). */}
                         <span>{e.title || <span style={{ color: 'var(--faint)' }}>Untitled break</span>}</span>
-                        {liveRow && <span className="tag live" style={{ fontSize: 9 }}>on air</span>}
+                        {/* The current song by BROADCAST state: on air, ready (private), off air. */}
+                        {liveRow && <span className={`tag ${bcast.pill}`} style={{ fontSize: 9 }} title={bcast.hint}>{bcast.card}</span>}
                       </div>
                     </td>
+                    <td>{liveRow && e.media?.flag?.kind !== 'autovod' ? null : <ProgrammeFlagIcon flag={e.media?.flag} />}</td>
                     <td><ClassChip cls={e.class} /></td>
                   </tr>
                 )

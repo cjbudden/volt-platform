@@ -219,8 +219,12 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
    The one markup every detail page uses for "what am I looking at":
    thumb + title + type tag + status pill. Pills are optically dropped so
    they align to the TITLE'S BASELINE rather than its box centre. */
-.page-id{display:flex;align-items:center;gap:12px;margin:0}
-.page-id .tag{position:relative;top:var(--tag-drop)}
+.page-id{display:flex;align-items:center;flex-wrap:wrap;column-gap:12px;row-gap:6px;margin:0;min-width:0}
+/* Every pill in the row, billable included, is a .tag of one height on one
+   line. They used to be dropped 3px each (top:--tag-drop) while the billable
+   label was a different, taller box, so a full row looked ragged and, once it
+   wrapped, the dropped pills overlapped the line under them. */
+.page-id .tag{position:static;align-self:center;line-height:1.3}
 /* section label used above grouped fields/cards, identical everywhere */
 .sec-label{font-size:var(--fs-label);letter-spacing:var(--ls-label);text-transform:uppercase;color:var(--faint);font-weight:700;margin:20px 0 10px}
 .sec-label:first-child{margin-top:0}
@@ -280,6 +284,30 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
    borrow when every station was labelled CHANNEL. */
 .tag.type.radio{color:#6ee7b7}
 .tag.type.loop{color:#c4b5fd}
+.tag.bill{background:rgba(251,191,36,.14);color:#fbbf24;font-variant-numeric:tabular-nums}
+.tag.bill .dot-s{background:#fbbf24}
+/* THE PROGRAMME FLAG (programmeMedia.tsx): one per guide entry or logged
+   song. The same box as a .tag, so it sits on a line with status pills at the
+   same height. Filled = a thing exists (VOD, REC); outlined blue = an intention
+   (Auto VOD); grey = nothing left (Expired, Unavailable), grey outline =
+   there never was anything (Not recorded). */
+.pflag{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:7px;font-size:var(--fs-xs);font-weight:700;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;line-height:1.3;text-decoration:none;flex:none;border:1px solid transparent;font-variant-numeric:tabular-nums}
+a.pflag{cursor:pointer;transition:filter .15s}
+a.pflag:hover{filter:brightness(1.25)}
+.pflag svg{width:11px;height:11px;flex:none}
+.pflag .rec-dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.pflag.autovod{color:#93c5fd;border-color:rgba(147,197,253,.45);background:transparent}
+/* VOD by publish state: solid blue = created, not published; solid green =
+   published; mid grey = expired or withdrawn. */
+.pflag.vod{background:#2563eb;color:#fff}
+.pflag.vod.pub-published{background:#16a34a;color:#fff}
+.pflag.vod.pub-expired,.pflag.vod.pub-withdrawn{background:#4b5263;color:#d1d5db}
+.pflag.converting{background:rgba(251,191,36,.14);color:#fbbf24}
+.pflag.failed{background:rgba(248,113,113,.15);color:#fca5a5}
+.pflag.rec{background:rgba(248,113,113,.13);color:#fca5a5}
+.pflag.rec.warn,.pflag.failed.warn{background:rgba(251,191,36,.16);color:#fbbf24}
+.pflag.expired,.pflag.notrecorded,.pflag.unavailable{background:rgba(102,112,138,.16);color:#8b93a7}
+.pflag.notrecorded{background:transparent;border-color:rgba(139,147,167,.4)}
 .tag.proto{background:rgba(255,255,255,.05);color:var(--muted);font-weight:600;font-size:var(--fs-label)}
 .tag.hls{color:#fdba74;background:rgba(253,186,116,.12)}
 .tag.dash{color:#7dd3fc;background:rgba(125,211,252,.12)}
@@ -434,9 +462,41 @@ tbody tr:last-child td{border-bottom:none}
 .epg-lane{overflow-x:auto;overflow-y:hidden;padding:22px 16px 13px;scrollbar-width:thin;overscroll-behavior-x:contain}
 .epg-track{display:flex;gap:6px;transition:transform .35s ease;width:max-content}
 .epg-prog{flex:0 0 178px;width:178px;height:52px;border-radius:9px;background:var(--panel-2);border:1px solid var(--border);padding:0 12px;position:relative;overflow:visible;display:flex;flex-direction:column;justify-content:center}
+.log-row.has-media{cursor:pointer}
+.log-row:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.log-row.busy{opacity:.6}
+.row-marked td{background:color-mix(in srgb,var(--brand) 14%,transparent);transition:background 1s}
+.pflag-ic{display:inline-flex;width:16px;height:16px;flex:none}
+.pflag-ic svg{width:100%;height:100%}
+.pflag-ic.blue{color:#60a5fa}.pflag-ic.green{color:#4ade80}.pflag-ic.red{color:#f87171}.pflag-ic.amber{color:#fbbf24}
+.pflag-ic.grey{color:#8b93a7}.pflag-ic.midgrey{color:#6b7280}
+.pflag-ic.dot-only svg{width:10px}
+.epg-prog .pmedia{position:absolute;top:7px;right:8px;z-index:2;line-height:0}
+.epg-prog.has-media{cursor:pointer}
+.epg-prog.has-flag .pnm{padding-right:24px}
+.epg-prog.now.has-flag .pnm{padding-right:78px}
+.epg-prog.now .pmedia{top:auto;bottom:7px}
+.epg-prog.busy{opacity:.6;pointer-events:none}
+.epg-prog:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+/* The current slot by BROADCAST state (EpgStrip): green on air, blue ready, grey off air. */
+.epg-prog.now.bc-ready{border-color:color-mix(in srgb,var(--sched) 60%,transparent);background:color-mix(in srgb,var(--sched) 9%,var(--panel-2))}
+.epg-prog.now.bc-ready .fill{background:color-mix(in srgb,var(--sched) 16%,transparent)}
+.epg-prog.now.bc-ready .epg-onair{color:var(--sched)}
+.epg-prog.now.bc-off{border-color:var(--border-2,#3a4256);background:var(--panel-2)}
+.epg-prog.now.bc-off .fill{background:rgba(139,147,167,.12)}
+.epg-prog.now.bc-off .epg-onair{color:#8b93a7}
+.epg-prog.has-media:hover{border-color:var(--border-2,#3a4256)}
 .epg-prog .pnm{font-size:var(--fs-sm);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;z-index:2;padding-right:20px}
 .epg-prog .ptm{font-size:var(--fs-label);color:var(--faint);margin-top:2px;position:relative;z-index:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .epg-prog.past{opacity:.45}
+/* DVR (EpgStrip player): the programme at the playhead, its own line apart from Live, and Watch on programmes still in the window */
+.epg-prog.playing{opacity:1;border-color:color-mix(in srgb,var(--brand) 70%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--brand) 45%,transparent)}
+.epg-prog .playline{position:absolute;top:-4px;bottom:-8px;width:2px;margin-left:-1px;background:var(--brand);z-index:3;transition:left 1s linear;pointer-events:none}
+.epg-prog .playlbl{position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:1px;white-space:nowrap;font-size:var(--fs-micro,10px);font-weight:700;color:#fff;background:var(--brand);padding:0 5px;border-radius:4px;font-variant-numeric:tabular-nums}
+.epg-watch{position:absolute;right:6px;bottom:6px;z-index:4;width:22px;height:22px;border-radius:6px;border:1px solid var(--border-2);background:var(--panel-3);color:var(--text);font-size:10px;display:none;place-items:center;cursor:pointer;padding:0}
+.epg-prog:hover .epg-watch,.epg-watch:focus-visible{display:grid}
+.epg-lane:has(.epg-prog.playing){padding-bottom:24px}
+.epg-watching{display:inline-flex;align-items:center;gap:8px;margin-left:12px;padding-left:12px;border-left:1px solid var(--border)}
 .epg-prog.now{flex-basis:220px;width:220px;border-color:color-mix(in srgb,var(--live) 60%,transparent);background:color-mix(in srgb,var(--live) 9%,var(--panel-2))}
 .epg-prog.now .fill{position:absolute;left:0;top:0;bottom:0;border-radius:8px 0 0 8px;background:color-mix(in srgb,var(--live) 16%,transparent);z-index:1;transition:width 1s linear}
 .epg-prog.now .nowline{position:absolute;top:-8px;bottom:-4px;width:2px;margin-left:-1px;background:#fff;z-index:3;transition:left 1s linear;pointer-events:none}
@@ -790,6 +850,13 @@ tr.selected td{background:rgba(63,123,255,.07)}
 .form-status svg{flex:none;width:16px;height:16px;margin-top:1px}
 .form-status-error{color:var(--down)}
 .form-status-warn{color:var(--warn)}
+.form-status-ok{color:var(--live)}
+/* The save result at the top of a panel body (FormStatus): sticks to the top
+   while the body scrolls, so it stays in view on a long form. */
+.panel-status-slot:empty{display:none}
+.panel-status-slot{position:sticky;top:-20px;z-index:5;margin:-20px -20px 16px;padding:12px 20px;background:var(--panel)}
+.panel-status .notice{animation:panelStatusIn .18s ease}
+@keyframes panelStatusIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 .field-err{margin-top:6px;color:var(--down);font-size:var(--fs-sm)}
 .field.has-err .inp{border-color:var(--down);box-shadow:0 0 0 3px color-mix(in srgb,var(--down) 18%,transparent)}
 .modal-f{display:flex;align-items:center;gap:10px;margin-top:16px}
@@ -1026,6 +1093,8 @@ select.sel-sm:not([multiple]):not([size]){padding:4px 30px 4px 10px;font-size:va
 /* Detail page header: secondary actions as icons, named on hover (ChannelDetail) */
 .icon-actions{display:flex;align-items:center;gap:8px}
 .btn.icon-btn{position:relative;width:40px;height:40px;padding:0;justify-content:center}
+/* One height for every button in the bar: text buttons (Rewrite guide, Go live) match the 40px icon buttons */
+.icon-actions>.btn{height:40px;box-sizing:border-box;padding-top:0;padding-bottom:0}
 .btn.icon-btn svg{width:18px;height:18px}
 .btn.icon-btn.alert{color:#fca5a5;border-color:rgba(248,113,113,.5)}
 .icon-btn[data-tip]::after{content:attr(data-tip);position:absolute;top:calc(100% + 8px);left:50%;transform:translate(-50%,-3px);
@@ -1270,6 +1339,8 @@ svg.spin{animation:vspin 1s linear infinite}
 .tlg-block.past{background:var(--panel-3);border-color:var(--border);color:var(--muted)}
 .tlg-block.now{background:var(--brand-dim);border-color:var(--brand)}
 .tlg-block.next{background:transparent;border-style:dashed;border-color:var(--border-2);color:var(--muted)}
+.tlg-mark{margin-left:auto;padding:1px 6px;font-size:var(--fs-micro,10px);cursor:inherit}
+.pflag.sm{padding:1px 6px;font-size:var(--fs-micro,10px)}
 .tlg-bt{font-size:var(--fs-sm);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .tlg-bs{font-size:var(--fs-micro);color:var(--faint);font-family:ui-monospace,monospace;white-space:nowrap;margin-left:auto}
 .tlg-clip{position:absolute;top:2px;width:2px;height:6px;border-radius:1px;background:var(--brand);transform:translateX(-1px);pointer-events:auto}

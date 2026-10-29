@@ -1,0 +1,12 @@
+/* The shared ladder editor (LadderEditor.tsx): Encoding profiles and FAST Settings. */
+.led { display: flex; flex-direction: column; gap: 14px; }
+.led-use { font-size: var(--fs-sm); color: var(--muted); padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); }
+.led-h { font-size: var(--fs-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); margin-bottom: 6px; }
+.led-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.led-rungs { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.led-rungs th { text-align: left; font-weight: 500; color: var(--faint); font-size: var(--fs-xs); padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.led-rungs td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.led-rungs td:last-child { text-align: right; width: 1%; white-space: nowrap; }
+.led-add { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(130px, 1fr) auto; gap: 8px; margin-top: 8px; }
+.led-add select { grid-column: 1 / -1; }
+@media (max-width: 560px) { .led-add { grid-template-columns: 1fr; } }

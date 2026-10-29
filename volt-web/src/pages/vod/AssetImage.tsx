@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { apiRequest } from '../../api'
 import { ImagePicker } from '../../ImagePicker'
 import { SongFinder, SOURCE_NAME } from './SongFinder'
+import { AssetImageSet } from './AssetImageSet'
 
 interface Cand { key: string; atMs: number | null; origin: string; score: number | null; notes: string[]; rejected: string | null; url: string | null }
 interface ImageView {
@@ -29,7 +30,9 @@ export function AssetImage({ id, onChanged }: { id: string; onChanged?: () => vo
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState('')
   const [picker, setPicker] = useState(false)
-  const load = () => apiRequest(`/vod/${id}/image`).then(setV, (e: any) => setErr(e.message))
+  const load = () => apiRequest(`/vod/${id}/image`).then((nv: ImageView) => {
+    setV((prev) => { if (prev?.pending && !nv.pending) window.setTimeout(() => onChanged?.(), 0); return nv })
+  }, (e: any) => setErr(e.message))
   useEffect(() => { setV(null); load() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
   // A pick still running in the background (a slow song lookup): look again shortly.
   useEffect(() => { if (!v?.pending) return; const t = setTimeout(load, 4000); return () => clearTimeout(t) }, [v]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -50,7 +53,7 @@ export function AssetImage({ id, onChanged }: { id: string; onChanged?: () => vo
   return (
     <div className="asset-img">
       <div className="asset-img-h">
-        <div className="sec-label" style={{ margin: 0 }}>Image</div>
+        <div className="sec-label" style={{ margin: 0 }}>{v.audio ? 'Cover' : 'Thumbnail'}</div>
         {v.source && <span className={`asset-img-src ${v.locked ? 'manual' : ''}`}>{SOURCE[v.source] ?? v.source}{v.locked ? '' : v.music?.reason?.startsWith('Chosen') ? ' · chosen' : ' · automatic'}</span>}
         <div style={{ flex: 1 }} />
         <button className="btn ghost sm" disabled={!!busy} onClick={() => setPicker(true)}>Choose from library</button>
@@ -108,7 +111,9 @@ export function AssetImage({ id, onChanged }: { id: string; onChanged?: () => vo
           </div>
         </>
       )}
-      <ImagePicker open={picker} title="Image for this asset" kinds={['poster', 'brand', 'other', 'keyframe']} uploadKind="poster" uploadFolder="posters"
+      <AssetImageSet id={id} folder={v.folder} candidates={v.candidates} primaryKey={v.key} />
+      <ImagePicker open={picker} title={v.audio ? 'Cover for this asset' : 'Thumbnail for this asset'} assetId={id}
+        kinds={v.audio ? ['cover', 'poster', 'brand', 'other', 'imported'] : ['poster', 'brand', 'other', 'keyframe']} uploadKind={v.audio ? 'cover' : 'poster'} uploadFolder={v.folder ?? 'posters'}
         onClose={() => setPicker(false)} onPick={(url) => { setPicker(false); choose(url) }} />
     </div>
   )

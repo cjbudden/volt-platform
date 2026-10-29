@@ -35,9 +35,15 @@ import { signedImageUrl } from './images';
 import { pickAssetImage, setAssetImage, isAudioAsset, isSongAsset, prepareFileFrames } from '../services/media/assetImage';
 import { songIdentity } from '../services/media/musicLookup';
 import { parseIcyTitle } from '../services/radio/trackMeta';
+import { assetImagesRouter } from './assetImages';
+import { assetFilesRouter } from './assetFiles';
 
 export const vodImageRouter = Router();
 vodImageRouter.use(requireAuth);
+// An asset's images by type: thumbnail, cover, poster, hero... (modules/assetImages.ts, ASSET_IMAGES.md section 13).
+vodImageRouter.use(assetImagesRouter);
+// Companion files: captions (subtitle tracks) and metadata sidecars (modules/assetFiles.ts, COMPANION_FILES.md).
+vodImageRouter.use(assetFilesRouter);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -64,7 +70,8 @@ async function view(id: string, acct: string) {
   const shape = a.poster_shape ?? 'wide';
   return {
     key: a.poster_key ?? null,
-    url: sign(a.poster_key, shape === 'square' ? '600x600,contain' : '960x540,cover'),
+    // v= the moment it was picked: a new choice is a new URL even when the library file kept its path.
+    url: sign(a.poster_key, `${shape === 'square' ? '600x600,contain' : '960x540,cover'}${a.poster_picked_at ? `,v=${new Date(a.poster_picked_at).getTime()}` : ''}`),
     source: a.poster_source ?? null,
     shape: a.poster_source ? shape : null,
     reason: a.poster_reason ?? (a.poster_source ? null : 'Not picked yet: it will be shortly.'),
@@ -280,6 +287,14 @@ const useSchema = z.object({
  * ticked it, and the details are kept for the song so every later play uses
  * them without a lookup.
  */
+/** The content type's image field: an `image` field, else one named like one. */
+export function imageFieldOf(fields: { key: string; type?: string }[]): string | null {
+  const byType = fields.find((f) => f.type === 'image');
+  if (byType) return byType.key;
+  const byName = fields.find((f) => ['artwork', 'image', 'cover', 'poster', 'thumbnail'].includes(f.key));
+  return byName?.key ?? null;
+}
+
 vodImageRouter.post('/:id/song/use', asyncHandler(async (req, res) => {
   const acct = accountId(req);
   const a = await owned(String(req.params.id), acct);
@@ -298,7 +313,7 @@ vodImageRouter.post('/:id/song/use', asyncHandler(async (req, res) => {
     if (!m || m[1].toLowerCase() !== acct.toLowerCase()) throw badRequest('That image is not in this account\'s library.');
     imageKey = b.imageRef.replace(/^\//, '');
   } else if (b.imageUrl) {
-    try { imageKey = await importImageUrl(acct, b.imageUrl, songFolder(b.artist, b.album ?? null, b.title), 'cover'); }
+    try { imageKey = await importImageUrl(acct, b.imageUrl, songFolder(b.artist, b.album ?? null, b.title), 'cover', 'cover'); }
     catch (e: any) { throw badRequest(`The cover could not be copied: ${String(e?.message ?? e).slice(0, 160)}`); }
     if (!imageKey) throw badRequest('That address did not return an image (JPEG, PNG, WebP or GIF, up to 8 MB).');
   }
@@ -321,12 +336,26 @@ vodImageRouter.post('/:id/song/use', asyncHandler(async (req, res) => {
       schemaId = song.id;
     }
   }
-  // The song's fields: exactly the ones approved.
-  if (schemaId && b.fields.length) {
+  // The song's fields: exactly the ones approved, PLUS the image field.
+  //
+  // THE IMAGE FIELD FOLLOWS THE IMAGE. The cover is copied into the Image
+  // Library first (importImageUrl above), and only then is the field set, to
+  // the LIBRARY reference (/<key>), never the outside address, which can move
+  // or vanish. It used to be set only when the browser had listed 'artwork' in
+  // `fields`, and the browser decided that from the content type the asset had
+  // BEFORE this call: a clip being made a Song here had no artwork field yet,
+  // so the cover was saved and the Artwork field stayed empty. Now the server
+  // decides from the type the asset has NOW. A chosen cover always fills it; a
+  // cover kept from before fills it only when it is empty.
+  if (schemaId && (b.fields.length || imageKey)) {
     const fields = (await one<any>(`SELECT fields FROM metadata_schemas WHERE id = $1`, [schemaId]))?.fields ?? [];
     const approved = new Set(b.fields);
     const all = fillsFor({ state: 'hit', ...details, provider: b.provider }, {}, fields.map((f: any) => ({ key: f.key, type: f.type, options: f.options, multiple: f.multiple })));
-    if (imageKey && b.useImage && fields.some((f: any) => f.key === 'artwork')) all.artwork = `/${imageKey}`;
+    const imgField = imageFieldOf(fields);
+    if (imageKey && imgField && (b.useImage || !a.metadata?.[imgField])) {
+      all[imgField] = `/${imageKey}`;
+      approved.add(imgField);
+    }
     const fill = Object.fromEntries(Object.entries(all).filter(([k]) => approved.has(k)));
     if (Object.keys(fill).length) {
       const pv = Object.fromEntries(Object.keys(fill).map((k) => [k, { source: b.provider, chosen: true, approvedBy: by, link: details.link, at: new Date().toISOString(), was: a.metadata?.[k] ?? null }]));

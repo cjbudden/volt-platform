@@ -106,7 +106,7 @@ Every release, every change: product, SaaS platform and internal. The customer-f
 
 ### Product (in customer release notes)
 
-- added · API: New event routes matching the channel ones: GET /api/events/{id}/access-check, GET /api/events/{id}/inputs/{inputId}/preview and POST /api/events/{id}/health/reset.
+- added · API: New event routes matching the channel ones: `GET /api/events/{id}/access-check`, `GET /api/events/{id}/inputs/{inputId}/preview` and `POST /api/events/{id}/health/reset`.
 - fixed · Events: On the event page, 'View as a viewer in' now answers for the event instead of showing Could not check, and an HLS source that blocks playback from other sites now previews through Volt.
 - fixed · Events: The event page no longer goes blank once a live event's output starts playing.
 - added · Events: The event page now has Clear QC, like the channel page: it resets the event's health after an earlier fault, and the fault stays in the event log.
@@ -150,7 +150,7 @@ Every release, every change: product, SaaS platform and internal. The customer-f
 - added · EPG: Plan against as-run: the guide now records what actually aired (actual start and end, live while airing, aired when done) from the channel's own runs, and GET /api/epg/as-run compares plan and as-run per programme with on-air, source and filler time and whether it aired, partly aired or was missed.
 - fixed · Encoder: Programme start and end markers in the stream now reach viewers on every channel. Before, they were only present on channels with subtitles or a backup source.
 - added · Monitoring: QC shows a Captions lane for channels with live captions: starting, healthy, degraded (windows skipped) or failed with the reason and how to fix it. A captions problem never turns the channel red.
-- added · API: Stream aggregate API: GET /api/live-streams/{channel|event}/{id} shows a stream as its production plane (origin, processing profile, placement) and distribution plane (schema.org VideoObject published by a BroadcastEvent, metadata, availability), its preset (live channel, live event, FAST channel) and its source-provider contract per tier (delivery, descriptive, guide, timed, rights, control). /schema.org serves the JSON-LD, with the sports fixture as broadcastOfEvent for sports events.
+- added · API: Stream aggregate API: `GET /api/live-streams/{channel|event}/{id}` shows a stream as its production plane (origin, processing profile, placement) and distribution plane (schema.org VideoObject published by a BroadcastEvent, metadata, availability), its preset (live channel, live event, FAST channel) and its source-provider contract per tier (delivery, descriptive, guide, timed, rights, control). /schema.org serves the JSON-LD, with the sports fixture as broadcastOfEvent for sports events.
 - fixed · Channels: Switch source and force slate or loop from the Failover panel now reach the encoder on cloud deployments (it runs on another server). Each choice is recorded in the channel's log with who made it, and a restart always returns to automatic.
 - added · Player: Channels with a programme guide now carry an Up next notice in the stream itself, towards the end of each programme. The Volt player shows it with the next title, image and a countdown, and you can set when it appears per channel or turn it off in Player setup.
 - fixed · Channels: A loop video chosen as a channel's fallback is now played as a loop. It was being treated as a still image.

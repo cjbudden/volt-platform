@@ -52,7 +52,7 @@ export default function NewStreamChooser({ onClose }: { onClose: () => void }) {
       disabledReason: role('radio', 'stations') ?? planFullReason(plan, 'station') ?? (groups ? noRoomReason(groups, 'station') : null) },
     { key: 'fast', title: 'FAST channel', icon: I.fast, to: '/fast?new',
       desc: 'A linear channel built from your library: a run order of films and series that loops, with the guide written for you and ad breaks.',
-      disabledReason: role('channels', 'channels') ?? planFullReason(plan, 'channel') ?? (groups ? noRoomReason(groups, 'channel') : null) },
+      disabledReason: role('fast', 'FAST channels') ?? planFullReason(plan, 'channel') ?? (groups ? noRoomReason(groups, 'channel') : null) },
   ]
 
   function go(k: Kind) { if (!k.to || k.disabledReason) return; onClose(); navigate(k.to) }

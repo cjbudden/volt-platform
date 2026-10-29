@@ -44,6 +44,7 @@ export async function deriveEventVod(rec: any) {
   );
   // The replay is the finished recording itself: there is no build to wait
   // for, so the publishing rules are asked now (build queue 1.14-G5a).
+  if (row) await (await import('./assetReadiness')).setMediaState(row.id, 'ready');
   if (row) await (await import('./availability')).autoPublishWhenReady(row.id, 'full_event');
   return row;
 }
@@ -116,6 +117,18 @@ export async function createClipVod(opts: {
  * of the same helper the row creation lives beside, so a fourth caller cannot
  * repeat the omission.
  */
+/**
+ * HOW MUCH MISSING RECORDING AN UNATTENDED BUILD ACCEPTS.
+ *
+ * The EPG auto-VOD and scheduled clips enqueued with a tolerance of zero, so a
+ * single encoder restart inside a programme (26.3 s in Sorotan's case) refused
+ * the whole build and left nothing. Nobody is there to say "accept the gap", so
+ * the automation accepts a short one and lets QC say so: coverage below 100%
+ * is a QC error, which keeps the asset out of FAST and loops until a person
+ * approves it or re-cuts it. A long hole still refuses the build.
+ */
+export const AUTO_BUILD_ACCEPT_GAPS_MS = 60_000;
+
 export async function enqueueClipBuild(opts: {
   vodAssetId: string;
   /** The channel or event whose segments are being cut. */
@@ -158,5 +171,8 @@ export async function enqueueClipBuild(opts: {
     dedupeKey: `clip.extract:${opts.vodAssetId}:${opts.fromMs}-${opts.toMs}`,
     priority: 50,
   });
+  // The asset is being built from now on; a previous failure no longer applies.
+  const { setMediaState } = await import('./assetReadiness');
+  await setMediaState(opts.vodAssetId, 'processing');
   return { id: job.id, state: job.state };
 }

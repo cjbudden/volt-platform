@@ -97,6 +97,66 @@ jobsRouter.get('/', asyncHandler(async (req, res) => {
   res.json({ jobs: finishPage(req, res, pl, rows, total) });
 }));
 
+// ---------------------------------------------------------------- THE ENCODING QUEUE
+// The console's Encoding queue (docs/ENCODING_QUEUE.md): the vod.encode jobs running now,
+// the ones waiting in the order a worker will take them (priority, run_after, created_at,
+// as queue.ts claims), and the ones that finished recently. Each names its asset and file.
+//   GET /api/jobs/encode-queue?recent=50
+//   GET /api/jobs/:id/log?after=<seq>&limit=   the job's log (jobLog.ts), for tailing
+//   GET /api/jobs/:id/outputs                   renditions, manifests, thumbnails, sprites
+const ASSET_OF = `LEFT JOIN vod_assets a ON a.id = CASE WHEN j.payload->>'vodAssetId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                                                    THEN (j.payload->>'vodAssetId')::uuid END`;
+const ENCODE_COLS = `j.id, j.state, j.priority, j.progress_pct, j.progress_note, j.attempts, j.max_attempts,
+            j.last_error, j.error_code, j.created_at, j.started_at, j.finished_at, j.run_after, j.claimed_by,
+            j.payload->>'vodAssetId' AS asset_id, a.title AS asset_title, a.source_kind,
+            regexp_replace(COALESCE(j.payload->>'sourcePath', ''), '^.*/', '') AS source_file,
+            j.result->>'summary' AS summary`;
+
+jobsRouter.get('/encode-queue', asyncHandler(async (req, res) => {
+  const acc = accountId(req);
+  const recent = Math.min(Math.max(Number(req.query.recent) || 50, 1), 200);
+  const running = await query(
+    `SELECT ${ENCODE_COLS} ${OWNED} ${ASSET_OF}
+      WHERE j.type = 'vod.encode' AND j.state = 'running' AND ${ACCOUNT} = $1 ORDER BY j.started_at`, [acc]);
+  // The position counts every queued encode on the platform ahead of it, other accounts'
+  // too, because they share the workers; only this account's jobs are listed.
+  const queued = await query(
+    `WITH q AS (
+       SELECT id, row_number() OVER (ORDER BY priority, run_after, created_at)::int AS position
+         FROM jobs WHERE type = 'vod.encode' AND state = 'queued')
+     SELECT ${ENCODE_COLS}, q.position ${OWNED} ${ASSET_OF} JOIN q ON q.id = j.id
+      WHERE ${ACCOUNT} = $1 ORDER BY q.position`, [acc]);
+  const done = await query(
+    `SELECT ${ENCODE_COLS} ${OWNED} ${ASSET_OF}
+      WHERE j.type = 'vod.encode' AND j.state IN ('succeeded','failed','cancelled') AND ${ACCOUNT} = $1
+      ORDER BY j.finished_at DESC NULLS LAST LIMIT $2`, [acc, recent]);
+  const ahead = await one<{ n: number }>(`SELECT count(*)::int AS n FROM jobs WHERE type = 'vod.encode' AND state IN ('queued','running')`, []);
+  res.json({ running, queued, recent: done, platformBacklog: ahead?.n ?? 0, at: new Date().toISOString() });
+}));
+
+/** The job's own account check, shared by the log and outputs routes. */
+async function ownedJob(id: string, acc: string) {
+  return one<any>(`SELECT j.id, j.type, j.state, j.payload, j.result, j.created_at ${OWNED} WHERE j.id = $1 AND ${ACCOUNT} = $2`, [id, acc]);
+}
+
+jobsRouter.get('/:id/log', asyncHandler(async (req, res) => {
+  const job = await ownedJob(req.params.id, accountId(req));
+  if (!job) throw notFound('Job not found');
+  const { readJobLog } = await import('../services/jobs/jobLog');
+  const lines = await readJobLog(job.id, Number(req.query.after) || 0, Number(req.query.limit) || 1000);
+  res.json({ jobId: job.id, state: job.state, lines, last: lines.length ? lines[lines.length - 1].seq : Number(req.query.after) || 0 });
+}));
+
+jobsRouter.get('/:id/outputs', asyncHandler(async (req, res) => {
+  const job = await ownedJob(req.params.id, accountId(req));
+  if (!job) throw notFound('Job not found');
+  if (job.type !== 'vod.encode') throw badRequest('Outputs are listed for VOD encode jobs only');
+  const { encodeOutputs } = await import('../services/encode/encodeOutputs');
+  const out = await encodeOutputs(job);
+  if (!out) throw notFound('This job names no asset');
+  res.json(out);
+}));
+
 /** One job with its full attempt history — what you need when it failed twice. */
 jobsRouter.get('/:id', asyncHandler(async (req, res) => {
   const job = await one<any>(

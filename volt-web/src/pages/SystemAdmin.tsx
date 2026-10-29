@@ -3,6 +3,7 @@ import { api, setPlatformSession, type PlatformAccountRow, type PlatformGroupRow
 import { PageHead, NewButton, FChip, EntityCell, StatusTag } from '../scaffold'
 import { pressable } from '../a11y'
 import { FormStatus, Notice, usePageNotice } from '../notices'
+import { GraphicsLibraryAdmin, AccountGraphicsSets } from './SystemGraphics'
 
 /* ============================================================================
    System Admin — SaaS-provider controls, visible ONLY to platform staff
@@ -28,6 +29,9 @@ export default function SystemAdmin() {
   const [createOpen, setCreateOpen] = useState(false)
   const [editing, setEditing] = useState<PlatformAccountRow | null>(null)
   const [creds, setCreds] = useState<{ account: string; email: string; password: string } | null>(null)
+  // Client accounts, or Volt's graphics library (sets of default templates, on or off per account).
+  const [tab, setTab] = useState<'accounts' | 'graphics'>(() => new URLSearchParams(window.location.search).get('tab') === 'graphics' ? 'graphics' : 'accounts')
+  const go = (t: 'accounts' | 'graphics') => { setTab(t); window.history.replaceState(null, '', t === 'graphics' ? '?tab=graphics' : window.location.pathname) }
 
   // PLATFORM STEP-UP. /api/platform only accepts a session verified with the
   // authenticator code (ACCESS_CONTROL.md), so a signed-in admin session gets
@@ -105,9 +109,15 @@ export default function SystemAdmin() {
 
   return (
     <>
-      <PageHead title="System Admin" sub="Client accounts across the whole platform: create accounts with their primary admin user, set plans and quotas, suspend access."
-        action={<NewButton label="New client account" onClick={() => setCreateOpen(true)} />} />
-      {rows === null ? (
+      <PageHead title="System Admin" sub={tab === 'graphics'
+          ? "Volt's own graphics templates, the sets they belong to, and which client accounts each set is on for."
+          : 'Client accounts across the whole platform: create accounts with their primary admin user, set plans and quotas, suspend access.'}
+        action={tab === 'accounts' ? <NewButton label="New client account" onClick={() => setCreateOpen(true)} /> : undefined} />
+      <div className="chipset" role="tablist" style={{ marginBottom: 16 }}>
+        <button role="tab" aria-selected={tab === 'accounts'} className={`selchip ${tab === 'accounts' ? 'sel' : ''}`} onClick={() => go('accounts')}>Client accounts</button>
+        <button role="tab" aria-selected={tab === 'graphics'} className={`selchip ${tab === 'graphics' ? 'sel' : ''}`} onClick={() => go('graphics')}>Graphics library</button>
+      </div>
+      {tab === 'graphics' ? <GraphicsLibraryAdmin /> : rows === null ? (
         <div className="loading">Loading accounts…</div>
       ) : (
         <>
@@ -271,6 +281,8 @@ function AccountDrawer({ account, onClose, onDone }: {
           )}
 
           {isEdit && <AccountGroups accountId={account!.id} />}
+
+          {isEdit && <AccountGraphicsSets accountId={account!.id} />}
 
           {isEdit && (
             <>

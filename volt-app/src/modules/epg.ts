@@ -20,6 +20,24 @@ import { defineList, parseList, whereSql, pageSql, finishPage, onlyIdParam } fro
 import { expandRrule, validateRrule } from '../services/epg';
 import { programmeVodStates, convertProgramme } from '../services/epgVod';
 import { programmeFieldsFrom } from '../services/contentTypes';
+import { usageStatusSql, usageStatusLabel, type UsageStatus } from '../services/assetReadiness';
+
+/**
+ * A BLACKOUT REPLACEMENT MUST PLAY. A VOD replacement is what a blocked viewer
+ * gets instead of the programme, so an asset whose build failed, or that QC
+ * could not decode, would turn a blackout into a broken player. Only ready
+ * assets are accepted (services/assetReadiness.ts).
+ */
+async function assertReplacementUsable(kind: string | null | undefined, ref: string | null | undefined): Promise<void> {
+  if (kind !== 'vod' || !ref) return;
+  const id = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(ref)?.[0];
+  if (!id) return;
+  const r = await one<{ title: string; usage_status: UsageStatus }>(
+    `SELECT v.title, ${usageStatusSql('v')} AS usage_status FROM vod_assets v WHERE v.id = $1`, [id]);
+  if (r && r.usage_status !== 'ready') {
+    throw badRequest(`"${r.title}" cannot be used as a replacement: ${usageStatusLabel(r.usage_status).toLowerCase()}. Pick an asset that is ready.`);
+  }
+}
 import { resolveEffectiveFields } from './metadataSchemas';
 import {
   place, decide, summarise, fieldsOf, draftSeries, insertSeries, materialize, seriesCandidates, seriesOccursOn,
@@ -378,6 +396,7 @@ epgRouter.post(
     }
     if (Date.parse(endsAt) <= Date.parse(b.startsAt)) throw badRequest('endsAt must be after startsAt');
     if ((b.replacementKind ?? 'none') !== 'none' && !b.replacementRef) throw badRequest('replacementRef required for a slot replacement');
+    await assertReplacementUsable(b.replacementKind, b.replacementRef);
     // the idempotent-import upsert must name the partial index predicate EXACTLY
     // (channel and event use different partial unique indexes)
     const conflict = owner.kind === 'channel'
@@ -439,6 +458,7 @@ epgRouter.patch(
     const startsAt = b.startsAt ?? new Date(cur.starts_at).toISOString();
     const endsAt = b.endsAt ?? new Date(cur.ends_at).toISOString();
     if (Date.parse(endsAt) <= Date.parse(startsAt)) throw badRequest('endsAt must be after startsAt');
+    await assertReplacementUsable(b.replacementKind ?? cur.replacement_kind, b.replacementRef);
     const has = (k: string) => Object.prototype.hasOwnProperty.call(req.body ?? {}, k);
     const row = await one(
       `UPDATE programmes SET

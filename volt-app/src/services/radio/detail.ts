@@ -132,11 +132,11 @@ export async function radioEventLog(channelId: string) {
     'channel.air': 'On air', 'channel.off_air': 'Off air',
     'output.stalled': 'Output stalled', 'output.resumed': 'Output resumed',
     'input.error': 'Input error', 'source.up': 'Source up', 'source.down': 'Source down',
-    'qc.silence': 'QC: dead air', 'qc.static': 'QC: static-like signal', 'qc.recovered': 'QC: recovered',
+    'source.notice': 'Runs on this machine', 'qc.silence': 'QC: dead air', 'qc.static': 'QC: static-like signal', 'qc.recovered': 'QC: recovered',
   };
   const LEVEL: Record<string, string> = {
     'input.error': 'down', 'source.down': 'down', 'qc.silence': 'down',
-    'output.stalled': 'warn', 'qc.static': 'warn', 'channel.stop': 'info',
+    'output.stalled': 'warn', 'qc.static': 'warn', 'source.notice': 'warn', 'channel.stop': 'info',
   };
   const rows = evs.map((e) => {
     const d = typeof e.detail === 'string' ? (() => { try { return JSON.parse(e.detail); } catch { return { text: e.detail }; } })() : (e.detail || {});

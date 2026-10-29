@@ -68,9 +68,37 @@ async function libraryCandidates(accountId: string, name: string, sanitised: str
          OR lower(original_filename) IN (lower($3), lower($4))
          OR lower(title) IN (lower($3), lower($4))
          OR ($5::bigint IS NOT NULL AND source_bytes = $5))
+        -- An asset whose encode FAILED and that has nothing playable is not a copy
+        -- already in the library: uploading the file again is how people retry, so it
+        -- must not be held as a duplicate of the failure (sintel_4k.mov, 25 Oct 2026).
+        AND NOT (master_key IS NULL AND EXISTS (SELECT 1 FROM jobs j WHERE j.id = vod_assets.encode_job_id AND j.state = 'failed'))
       LIMIT 50`,
     [accountId, sha256, name, sanitised, bytes]);
   return rows.map((r: any) => ({ id: r.id, name: r.source_key ? r.source_key.split('/').pop() : r.title, originalName: r.original_filename ?? r.title, bytes: r.source_bytes != null ? Number(r.source_bytes) : null, sha256: r.sha256 }));
+}
+
+/** A library record whose encode FAILED and that has nothing playable, matching a file by
+ *  name or size (or content, when the hash is known). The upload panel asks what to do
+ *  with one before the file moves: make the new file its source, replace it, or keep both. */
+export interface FailedMatch { assetId: string; title: string; originalName: string | null; bytes: number | null; createdAt: string;
+  error: string | null; metadataFields: number; sameSize: boolean; sameName: boolean }
+export async function failedMatches(accountId: string, name: string, bytes: number | null, sha256: string | null = null): Promise<FailedMatch[]> {
+  const rows = await query<any>(
+    `SELECT v.id, v.title, v.original_filename, v.source_bytes, v.created_at, v.metadata, j.last_error
+       FROM vod_assets v JOIN jobs j ON j.id = v.encode_job_id
+      WHERE v.account_id = $1 AND v.master_key IS NULL AND j.state = 'failed'
+        AND (($2::text IS NOT NULL AND v.sha256 = $2)
+          OR lower(v.original_filename) = lower($3) OR lower(v.title) = lower($3)
+          OR ($4::bigint IS NOT NULL AND v.source_bytes = $4))
+      ORDER BY v.created_at DESC LIMIT 5`,
+    [accountId, sha256, name, bytes]);
+  return rows.map((r: any) => ({
+    assetId: r.id, title: r.title, originalName: r.original_filename ?? null, bytes: r.source_bytes != null ? Number(r.source_bytes) : null,
+    createdAt: r.created_at, error: r.last_error ?? null,
+    metadataFields: Object.values(r.metadata ?? {}).filter((v) => v != null && v !== '').length,
+    sameSize: bytes != null && r.source_bytes != null && Number(r.source_bytes) === bytes,
+    sameName: [r.original_filename, r.title].some((n) => n && String(n).toLowerCase() === name.toLowerCase()),
+  }));
 }
 
 export interface LandedFile {
@@ -222,13 +250,34 @@ export async function deliverWebhooks(accountId: string, payload: IngestPayload,
 
 /** Queue the encode for an asset whose ingest is now complete. Idempotent by dedupe key. */
 export async function queueEncodeFor(assetId: string): Promise<string | null> {
-  const a = await one<any>(`SELECT id, account_id, source_key, ladder_group_id FROM vod_assets WHERE id = $1`, [assetId]);
+  const a = await one<any>(`SELECT v.id, v.account_id, v.source_key, v.ladder_group_id, v.encode_job_id, j.state AS job_state
+                              FROM vod_assets v LEFT JOIN jobs j ON j.id = v.encode_job_id WHERE v.id = $1`, [assetId]);
   if (!a?.source_key) return null;
+  // Encoded (or encoding) already, because the metadata gate no longer holds the
+  // media: filling the field later must not encode the same file twice.
+  if (a.encode_job_id && ['queued', 'running', 'succeeded'].includes(String(a.job_state))) return a.encode_job_id;
   const { enqueue } = await import('../jobs/queue');
   const { VOD_ENCODE } = await import('../jobs/handlers/vodEncode');
   const job = await enqueue({ type: VOD_ENCODE, payload: { vodAssetId: a.id, accountId: a.account_id, sourcePath: a.source_key, ladderGroupId: a.ladder_group_id ?? null }, dedupeKey: `vod.encode:${a.id}`, maxAttempts: 2 });
   await query(`UPDATE vod_assets SET encode_job_id = $2 WHERE id = $1`, [a.id, job.id]);
   return job.id;
+}
+
+/**
+ * Uploads that the metadata gate held BEFORE it stopped holding the media:
+ * waiting for metadata, with a source, never encoded. Queued once at boot by
+ * the scheduler leader (index.ts), so assets uploaded under the old rule play.
+ */
+export async function encodeHeldUploads(): Promise<number> {
+  const rows = await query<{ id: string }>(
+    `SELECT id FROM vod_assets
+      WHERE ingest->>'status' = 'awaiting_metadata' AND source_key IS NOT NULL AND encode_job_id IS NULL
+        AND source_kind IN ('upload', 'watchfolder')
+      ORDER BY created_at LIMIT 500`);
+  let n = 0;
+  for (const r of rows) { if (await queueEncodeFor(r.id).catch((e) => { console.warn('[ingest] held upload not queued', r.id, e?.message ?? e); return null; })) n++; }
+  if (n) console.log(`[ingest] queued ${n} upload(s) that were waiting for metadata`);
+  return n;
 }
 
 async function markIngested(assetId: string, extra: Record<string, any> = {}): Promise<void> {

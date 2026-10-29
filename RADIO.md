@@ -280,6 +280,43 @@ blank rather than drawn as a quiet bar. Bar height is the square root of linear
 peak amplitude, so speech at -13 dBFS reads as speech, not as a soft hum. When the operator does press Listen, the Web Audio analyser adds a
 live spectrum overlay on top: detail, never the proof of signal.
 
+## Validate source (24 Oct 2026)
+
+The station form's **Validate source** button (it was "View metadata") answers
+"does this source work as it is?" before the station is saved, for Icecast, HLS
+and DASH, with no ffprobe: `POST /api/sources/validate { url, protocol }`
+(`volt-app/src/services/sourceValidate.ts`).
+
+- **Icecast**: resolves a `.pls` / `.m3u`, connects, reads the ICY headers and
+  one metadata block, then reads ~24 KB of audio and requires at least three
+  consecutive MP3 or ADTS AAC frames (or an Ogg page). A mount that answers 200
+  with an HTML page fails. The station's name, genre, bitrate and artwork keep
+  their Use buttons.
+- **HLS**: reads the playlist, for a master the lowest variant with its own
+  audio, then the start of the newest segment (MPEG-TS, fMP4 or packed audio).
+  A playlist with `#EXT-X-ENDLIST` warns.
+- **DASH**: reads the MPD (live or static, sets, codecs, DRM warns) and the
+  start of an initialisation segment.
+- Each check is pass / warn / fail / skip with the reason. Where it passes, the
+  panel plays a sample straight from the source in the browser (MP3/AAC
+  natively, HLS via hls.js, DASH via dash.js; the latter two need the source to
+  send CORS, and the panel says so when it does not).
+- SRT listeners and RTMP are push sources: nothing to dial, so the button is off.
+
+Check suite: `test/source-validate.check.ts` (34 checks, real media from ffmpeg
+served as Icecast, HLS and DASH).
+
+**Docker reachability.** In Docker mode a station pulls its source from inside
+its container. Before starting one, the Docker launcher dials the source host
+from this machine and from a throwaway `volt-radio` container. When the machine
+reaches it and the container cannot (DEF CON Radio on 24 Oct:
+`Connection to tcp://ice5.somafm.com:443 failed: Connection refused`, usually a
+Docker Desktop proxy, VPN or firewall), the station runs on this machine with
+the same `radio.py` and the event log says why ("Runs on this machine").
+`RADIO_DOCKER_PREFLIGHT=0` turns the check off. The radio job also now gets
+every loopback URL rewritten to `host.docker.internal` (as the encoder does), so
+the timed-events feed reaches the control plane from the container.
+
 ## Test setup
 
 Local dev has an Icecast simulator (`volt-app/test/icecast-sim.js`) that loops

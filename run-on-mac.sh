@@ -218,9 +218,17 @@ if [ -x "$ROOT/volt-encoder/.venv/bin/python3" ]; then PYTHON_BIN="$ROOT/volt-en
 if "$PYTHON_BIN" -c "import faster_whisper" >/dev/null 2>&1; then
   echo "    live captions engine: READY (faster-whisper via $PYTHON_BIN)"
 else
-  echo "    live captions engine: NOT AVAILABLE, $PYTHON_BIN cannot import faster_whisper."
-  echo "      Channels will stream, but without subtitles. Fix with:"
-  echo "        python3 -m venv volt-encoder/.venv && volt-encoder/.venv/bin/pip install faster-whisper"
+  echo "    live captions engine (native encoder only): NOT AVAILABLE, ${PYTHON_BIN} cannot import faster_whisper."
+  if [ -d "$ROOT/volt-encoder/.venv" ] && [ ! -x "$ROOT/volt-encoder/.venv/bin/python3" ]; then
+    # A venv copied without its bin/ (it arrived with an old bundle sync):
+    # its packages are there but nothing can run them.
+    echo "      volt-encoder/.venv is incomplete (no bin/python3). Recreate it with:"
+    echo "        rm -rf volt-encoder/.venv && python3 -m venv volt-encoder/.venv && volt-encoder/.venv/bin/pip install faster-whisper"
+  else
+    echo "      Channels will stream, but without subtitles. Fix with:"
+    echo "        python3 -m venv volt-encoder/.venv && volt-encoder/.venv/bin/pip install faster-whisper"
+  fi
+  echo "      (With ENCODER_MODE=docker this does not matter: captions run inside the encoder image.)"
 fi
 # SOCIAL FORMATS (volt/REFRAME.md): the face tracker in reframe_analyse.py
 # needs numpy and OpenCV in the same Python. Without them the Formats tab still
@@ -228,7 +236,7 @@ fi
 if "$PYTHON_BIN" -c "import numpy, cv2; cv2.FaceDetectorYN" >/dev/null 2>&1; then
   echo "    social formats face tracking: READY (OpenCV via $PYTHON_BIN)"
 else
-  echo "    social formats face tracking: installing numpy and OpenCV for $PYTHON_BIN…"
+  echo "    social formats face tracking: installing numpy and OpenCV for ${PYTHON_BIN}..."
   if "$PYTHON_BIN" -m pip install --quiet numpy opencv-python-headless >/dev/null 2>&1 \
      || "$PYTHON_BIN" -m pip install --quiet --user --break-system-packages numpy opencv-python-headless >/dev/null 2>&1; then
     echo "      installed."
@@ -281,27 +289,63 @@ if [ "$WANT_DOCKER" = "1" ]; then
   # volt-radio") and sat at "Input: connecting" with nothing in its log.
   # Each image is labelled with its Dockerfile's hash and rebuilt when that
   # changes (bin/ is mounted live, so code edits never need a rebuild).
-  ensure_image() {  # <tag> <dockerfile> <label>
+  ensure_image() {  # <tag> <dockerfile> <label> [build args...]
     local tag="$1" df="$2" what="$3" want have
-    want=$(shasum -a 256 "$df" 2>/dev/null | cut -c1-16)
+    shift 3
+    # The label covers the Dockerfile AND the build args, so turning captions
+    # on (or off) rebuilds the image instead of reusing one without them.
+    want=$( { shasum -a 256 "$df" 2>/dev/null | cut -c1-16; echo "$*"; } | shasum -a 256 | cut -c1-16)
     have=$(docker image inspect -f '{{ index .Config.Labels "volt.dockerfile" }}' "$tag" 2>/dev/null || true)
     if [ -n "$have" ] && [ "$have" = "$want" ]; then
       echo "    $what image '$tag' present."
       return 0
     fi
-    if [ -z "$have" ] && docker image inspect "$tag" >/dev/null 2>&1 && [ "${REBUILD_IMAGES:-0}" != "1" ]; then
+    # An unlabelled image (built before labels) is kept, unless build args are
+    # asked for: it cannot say whether it has them, and the captions image is
+    # exactly the case where keeping it silently left whisper out.
+    if [ -z "$have" ] && [ $# -eq 0 ] && docker image inspect "$tag" >/dev/null 2>&1 && [ "${REBUILD_IMAGES:-0}" != "1" ]; then
       echo "    $what image '$tag' present (unlabelled; REBUILD_IMAGES=1 to refresh it)."
       return 0
     fi
     echo "    building $what image '$tag' (a few minutes the first time)..."
-    if ! docker build -f "$df" --label "volt.dockerfile=$want" -t "$tag" "$ROOT/volt-encoder"; then
+    if ! docker build -f "$df" "$@" --label "volt.dockerfile=$want" -t "$tag" "$ROOT/volt-encoder"; then
       echo "    !! could not build $what image '$tag'. Streams that need it will report why in their event log."
       return 1
     fi
   }
   IMG="${ENCODER_IMAGE:-volt-encoder:local}"
   RIMG="${RADIO_IMAGE:-volt-radio:local}"
-  ensure_image "$IMG"  "$ROOT/volt-encoder/Dockerfile"       encoder || true
+  # LIVE CAPTIONS IN DOCKER MODE. The encoder runs in the container, so the
+  # Mac's own Python (the check above) does not matter here: whisper has to be
+  # IN THE IMAGE. CAPTIONS=1 (the default) builds it with faster-whisper tiny
+  # and base on CPU and tells the control plane to transcribe inside the
+  # encoder task. CAPTIONS_MT=1 adds NLLB translation to non-English targets
+  # (a much larger image). CAPTIONS=0 keeps the lean image.
+  ENC_ARGS=()
+  if [ "${CAPTIONS:-1}" = "1" ]; then
+    ENC_ARGS+=(--build-arg CAPTIONS_CPU=true)
+    [ "${CAPTIONS_MT:-0}" = "1" ] && ENC_ARGS+=(--build-arg CAPTIONS_MT=true)
+  fi
+  # GRAPHICS BURNED INTO THE PICTURE IN DOCKER MODE. The renderer (Node,
+  # playwright-core and a headless Chromium) has to be IN THE IMAGE: the Mac's
+  # Chrome is not visible from the container. Built without it, every channel
+  # with burned graphics logged "graphics burn-in: not available on this host
+  # (Node.js is not installed)" and ran without them. GRAPHICS=1 (the default)
+  # builds it in (about 400 MB more); GRAPHICS=0 keeps the image lean.
+  [ "${GRAPHICS:-1}" = "1" ] && ENC_ARGS+=(--build-arg GRAPHICS_BURN=true)
+  ensure_image "$IMG"  "$ROOT/volt-encoder/Dockerfile"       encoder ${ENC_ARGS[@]+"${ENC_ARGS[@]}"} || true
+  if [ "${GRAPHICS:-1}" = "1" ] && docker run --rm --entrypoint sh "$IMG" -c "command -v node >/dev/null && test -x /usr/local/bin/gfx-chromium" >/dev/null 2>&1; then
+    echo "    burned-in graphics: READY in the encoder image (headless Chromium)."
+  else
+    echo "    burned-in graphics: OFF in Docker mode (image built without the renderer; GRAPHICS=1 REBUILD_IMAGES=1 to add it)."
+  fi
+  if [ "${CAPTIONS:-1}" = "1" ] && docker run --rm --entrypoint python3 "$IMG" -c "import faster_whisper" >/dev/null 2>&1; then
+    export CAPTIONS_CPU_IN_ENCODER=true
+    echo "    live captions: READY in the encoder image (whisper tiny/base on CPU$([ "${CAPTIONS_MT:-0}" = "1" ] && echo ", NLLB translation"))."
+  else
+    export CAPTIONS_CPU_IN_ENCODER=false
+    echo "    live captions: OFF in Docker mode (image built without whisper; CAPTIONS=1 REBUILD_IMAGES=1 to add it)."
+  fi
   ensure_image "$RIMG" "$ROOT/volt-encoder/Dockerfile.radio" station || true
   ENCODER_MODE="docker"
   export ENCODER_IMAGE="$IMG" RADIO_IMAGE="$RIMG"

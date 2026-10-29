@@ -47,6 +47,11 @@ const HEARTBEAT_MS = 2000;
 const BURST_MAX_MS = 4000;     // the longest a change is followed frame by frame
 const SETTLE_FRAMES = 3;       // identical frames in a row that end a burst
 const MIN_BURST_MS = 600;      // a play() starts its animation on the next frames
+// GRAPHICS THAT NEVER SETTLE (a crawl, a looping alpha-video bug, a rotating handle). A
+// burst ends after BURST_MAX_MS, and nothing else used to look again until the state
+// changed, so they froze in the burned picture. Between bursts one frame is taken every
+// IDLE_PROBE_MS; if it moved, frame-by-frame capture starts again.
+const IDLE_PROBE_MS = 400;
 
 const log = (ev, o = {}) => process.stdout.write(JSON.stringify({ t: new Date().toISOString(), src: 'gfx-renderer', stream: STREAM, ev, ...o }) + '\n');
 
@@ -183,7 +188,7 @@ async function main() {
   await frame();                                   // a valid (empty) frame of the right size at once
   log('ready', { chrome: exe || 'playwright default', region: REGION, fps: FPS, pollMs: POLL_MS });
 
-  let burstUntil = 0, burstStart = 0, same = 0, lastBeat = Date.now(), lastPoll = 0, polling = false;
+  let burstUntil = 0, burstStart = 0, same = 0, lastBeat = Date.now(), lastPoll = 0, polling = false, lastProbe = 0;
   const startBurst = () => { const n = Date.now(); if (n >= burstUntil) burstStart = n; burstUntil = n + BURST_MAX_MS; same = 0; };
 
   for (;;) {
@@ -210,6 +215,7 @@ async function main() {
           log('settled', { frames: framesWritten, layers: st.layers, ready: st.ready, on: st.on });
         }
       }
+      else if (Date.now() - lastProbe >= IDLE_PROBE_MS) { lastProbe = Date.now(); if (await frame()) startBurst(); }
       if (Date.now() - lastBeat >= HEARTBEAT_MS) { lastBeat = Date.now(); if (current) writeAtomic(current); }
     } catch (e) {
       log('render_error', { error: String(e && e.message || e) });

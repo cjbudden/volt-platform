@@ -16,7 +16,8 @@
 import { useEffect, useState } from 'react'
 import { Notice, useNotify } from '../../notices'
 import { LibIcon } from './icons'
-import { libraryApi, type EncodeDetails, type EpgPreview, type Prov, type TargetMetadata } from './libraryApi'
+import { libraryApi, type DownloadFile, type EncodeDetails, type EpgPreview, type Prov, type TargetMetadata } from './libraryApi'
+import { useAccess } from '../../access'
 
 const show = (v: any): string => {
   if (v == null || v === '') return ''
@@ -222,6 +223,72 @@ const Mark = ({ s }: { s: Prov }) => s === 'derived'
 const NR = () => <span className="lib-faint">Not recorded</span>
 const kbps = (k: number | null) => (k == null ? '' : k >= 1000 ? `${(k / 1000).toFixed(k % 1000 ? 1 : 0)} Mb/s` : `${k} kb/s`)
 
+/**
+ * DOWNLOADS: the asset's files, for people whose role has Downloads.
+ * Not shown at all without Downloads: view; buttons only with operate. Each
+ * click asks the server for a five-minute link (and is audited), so the file
+ * never needs a public address of its own (modules/downloads.ts).
+ */
+export function DownloadFiles({ id, compact = false }: { id: string; compact?: boolean }) {
+  const { can } = useAccess()
+  const notify = useNotify()
+  const [files, setFiles] = useState<DownloadFile[] | null>(null)
+  const [busy, setBusy] = useState('')
+  const canSee = can('downloads', 'view')
+  const canGet = can('downloads', 'operate')
+  useEffect(() => {
+    if (!canSee) return
+    let gone = false
+    libraryApi.downloads(id).then((r) => { if (!gone) setFiles(r.files) }).catch(() => { if (!gone) setFiles([]) })
+    return () => { gone = true }
+  }, [id, canSee])
+  if (!canSee || !files) return null
+  const get = async (f: DownloadFile) => {
+    setBusy(f.format)
+    try {
+      const r = await libraryApi.downloadLink(id, f.format)
+      const a = document.createElement('a')
+      a.href = r.url; a.download = r.filename; a.rel = 'noopener'
+      document.body.appendChild(a); a.click(); a.remove()
+      notify({ id: 'download', kind: 'ok', message: `Downloading ${r.filename}.` })
+    } catch (e: any) {
+      notify({ id: 'download', kind: 'error', title: 'The download did not start.', message: e.message })
+    } finally { setBusy('') }
+  }
+  const mb = (b: number | null) => b == null ? '' : b > 1e9 ? ` · ${(b / 1e9).toFixed(1)} GB` : ` · ${(b / 1e6).toFixed(1)} MB`
+  if (compact) {
+    return <>{files.map((f) => (
+      <button key={f.format} type="button" className="btn ghost" style={{ marginLeft: 6 }} disabled={!canGet || !!busy}
+        title={canGet ? f.filename : 'Your role does not include downloading'} onClick={() => get(f)}>
+        {busy === f.format ? 'Preparing…' : `Download ${f.format.toUpperCase()}`}
+      </button>))}</>
+  }
+  return (
+    <>
+      <div className="sec-label">Download</div>
+      {files.length === 0
+        ? <div className="lib-faint lib-small">No downloadable file yet. Ask for MP4, MP3 or AAC under Deliveries, then download it here.</div>
+        : (
+          <table className="lib-rend lib-deliv">
+            <thead><tr><th scope="col">File</th><th scope="col">Name</th><th /></tr></thead>
+            <tbody>{files.map((f) => (
+              <tr key={f.format}>
+                <td>{f.label}</td>
+                <td className="lib-faint"><span className="mono">{f.filename}</span>{mb(f.bytes)}</td>
+                <td style={{ textAlign: 'right' }}>
+                  <button type="button" className="btn ghost sm" disabled={!canGet || !!busy} onClick={() => get(f)}
+                    title={canGet ? 'Download this file' : 'Your role lets you see the files, not download them'}>
+                    {busy === f.format ? 'Preparing…' : 'Download'}
+                  </button>
+                </td>
+              </tr>))}</tbody>
+          </table>
+        )}
+      {!canGet && files.length > 0 && <div className="lib-faint lib-small">Downloading needs the Downloads permission in your role.</div>}
+    </>
+  )
+}
+
 export function EncodePanel({ id }: { id: string }) {
   const [e, setE] = useState<EncodeDetails | null>(null)
   const [err, setErr] = useState('')
@@ -287,6 +354,7 @@ export function EncodePanel({ id }: { id: string }) {
           </div>
         </div>
         <Deliveries />
+        <DownloadFiles id={id} />
         {e.captions.value.length > 0 && (<>
           <div className="sec-label">Transcripts and subtitles</div>
           <ul className="lib-tracks">{e.captions.value.map((c, i) => <li key={i}>{c.kind === 'captions' ? 'Transcript' : 'Subtitles'} · <span className="mono">{c.language}</span> · {c.source}</li>)}</ul>
@@ -351,6 +419,7 @@ export function EncodePanel({ id }: { id: string }) {
       ) : <NR />}
       {e.dropped.length > 0 && <div className="lib-faint lib-small">Not encoded: {e.dropped.map((d) => `${d.height}p (${d.why})`).join(', ')}.</div>}
       <Deliveries />
+      <DownloadFiles id={id} />
       <div className="lib-encode-grid">
         <div>
           <div className="sec-label">Audio tracks <Mark s={e.audio.source} /></div>

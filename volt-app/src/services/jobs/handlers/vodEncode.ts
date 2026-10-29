@@ -30,6 +30,7 @@ import { fitToSource, describeFit, type SourceProbe } from '../../encode/ladder'
 import { loadLadder, resolveLadderFor, NoLadderError } from '../../encode/store';
 import { PermanentError, registerHandler, type JobContext } from '../worker';
 import { fireHook } from '../../workflows/hooks';
+import { JobLog } from '../jobLog';
 
 export const VOD_ENCODE = 'vod.encode';
 
@@ -49,10 +50,10 @@ export interface VodEncodePayload {
 /** Where a file-sourced asset's media lives. Under clips/, not origin/, for the
  *  same reason a clip is: origin is pruned by the channel's retention rules and
  *  an uploaded asset has no channel whose retention should be able to delete it. */
-function outDirFor(assetId: string): string {
+export function outDirFor(assetId: string): string {
   return join(config.clips.dir, 'vod', assetId);
 }
-function publicBase(assetId: string): string {
+export function publicBase(assetId: string): string {
   return `/clips/vod/${assetId}`;
 }
 
@@ -61,7 +62,7 @@ function encoderScript(): string {
 }
 
 /** Run the encoder script, capturing its JSON result line. */
-function runEncoder(
+export function runEncoder(
   jobPath: string,
   onLine: (s: string) => void
 ): Promise<{ code: number; out: string; err: string }> {
@@ -79,7 +80,7 @@ function runEncoder(
 
 /** The last line of stdout that parses as JSON. The script logs progress on
  *  stdout too, so taking the whole buffer would never parse. */
-function lastJson(s: string): any | null {
+export function lastJson(s: string): any | null {
   const lines = s.trim().split('\n').reverse();
   for (const l of lines) {
     const t = l.trim();
@@ -89,7 +90,7 @@ function lastJson(s: string): any | null {
   return null;
 }
 
-async function probeSource(sourcePath: string, onLine: (s: string) => void): Promise<SourceProbe & { ok: boolean; error?: string }> {
+export async function probeSource(sourcePath: string, onLine: (s: string) => void): Promise<SourceProbe & { ok: boolean; error?: string }> {
   const dir = join(config.clips.dir, 'vod', '_probe');
   await mkdir(dir, { recursive: true });
   const jobPath = join(dir, `${process.pid}-${Date.now()}.json`);
@@ -106,7 +107,24 @@ async function probeSource(sourcePath: string, onLine: (s: string) => void): Pro
   }
 }
 
+/** What happened to each output beyond the renditions, for the Encoding queue's job view. */
+type StepOutcome = { state: 'ok' | 'failed' | 'skipped'; count?: number; detail?: string; error?: string };
+
+// THE JOB'S LOG (services/jobs/jobLog.ts): every stage, the encoder's own output and
+// any step that failed without failing the job, kept with the job for the console.
 export async function handleVodEncode(ctx: JobContext): Promise<Record<string, unknown>> {
+  const log = await JobLog.open(ctx.job.id, ctx.job.attempts || 1);
+  try {
+    return await encode(ctx, log);
+  } catch (e: any) {
+    log.err(`FAILED: ${String(e?.message ?? e)}\n`);
+    throw e;
+  } finally {
+    await log.close();
+  }
+}
+
+async function encode(ctx: JobContext, log: JobLog): Promise<Record<string, unknown>> {
   const p = ctx.job.payload as VodEncodePayload;
   if (!p?.vodAssetId || !p?.sourcePath || !p?.accountId) {
     throw new PermanentError('vod.encode payload needs vodAssetId, accountId and sourcePath', 'bad_payload');
@@ -116,8 +134,15 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
     throw new PermanentError(`the source file is not there: ${p.sourcePath}`, 'source_missing');
   }
 
+  let srcBytes: number | null = null;
+  try { srcBytes = (await stat(p.sourcePath)).size; } catch { /* reported below */ }
+  log.step(`source ${p.sourcePath}${srcBytes != null ? ` (${(srcBytes / 1048576).toFixed(1)} MB)` : ''}`);
   await ctx.progress(2, 'reading the source');
-  const probe = await probeSource(p.sourcePath, () => { /* logged by the script */ });
+  const probe = await probeSource(p.sourcePath, (s) => log.out(s));
+  if (probe.ok !== false) {
+    log.step(`probe: ${probe.width ?? '?'}x${probe.height ?? '?'}${probe.fps ? ` ${probe.fps} fps` : ''}, ${probe.videoCodec ?? 'video ?'}`
+      + `${probe.durationMs ? `, ${(probe.durationMs / 1000).toFixed(1)} s` : ''}, audio ${probe.hasAudio === false ? 'none' : `${(probe.audioTracks ?? []).length || 1} track(s)`}`);
+  }
   if (probe.ok === false) {
     throw new PermanentError(
       `the source could not be read (${probe.error ?? 'no reason given'})`, 'unreadable_source');
@@ -147,6 +172,9 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
     // far better than an encode that produces nothing and reports success.
     throw new PermanentError('the ladder fitted no rungs to this source', 'empty_ladder');
   }
+  log.step(`ladder "${ladder.groupName}": ${describeFit(fit)}`);
+  for (const n of fit.notes ?? []) log.step(`  ${n}`);
+  if (fit.dropped.length) log.step(`  dropped: ${fit.dropped.map((r) => `${r.height}p (${r.why})`).join(', ')}`);
   await ctx.progress(10, `encoding ${describeFit(fit)}`);
 
   const outDir = outDirFor(p.vodAssetId);
@@ -162,20 +190,42 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
     gpu: ladder.codecBackend === 'nvenc',
     packaging: ladder.packaging,
     has_audio: probe.hasAudio !== false,
+    // a fixed-size ladder (frame_mode 'box'): every rung in its 16:9 box (vod_encoder.py box_filter)
+    ...(fit.boxed ? { fit: 'box' } : {}),
     ladder: fit.kept,
+    // For the script's "progress encode N%" lines.
+    duration_sec: probe.durationMs ? probe.durationMs / 1000 : null,
   }, null, 1));
 
-  // ffmpeg reports progress on stderr; the lease is 120s and a feature-length
-  // encode is far longer than that, so the heartbeat has to be driven by output
-  // rather than by a timer that assumes the job is short.
-  let lastBeat = 0;
-  const r = await runEncoder(jobPath, () => {
-    const now = Date.now();
-    if (now - lastBeat > 15_000) {
-      lastBeat = now;
-      void ctx.progress(50, `encoding ${describeFit(fit)}`).catch(() => { /* the lease will be reaped */ });
-    }
-  });
+  // THE LEASE IS 120 s AND AN ENCODE IS NOT. Two things keep it: a timer that beats
+  // every 20 s for as long as the encoder process is alive (a live process is working,
+  // however quiet), and the script's "progress encode N%" lines, which set the
+  // percentage (10 to 90 over the encode). Output alone was not enough: ffmpeg ran
+  // silent, a 4K source outlived the lease, the reaper re-queued the job mid-encode and
+  // a second worker started the same encode beside the first (both CPU-bound, the
+  // console starved, then "worker stopped reporting; lease expired").
+  let pct = 10;
+  let note = `encoding ${describeFit(fit)}`;
+  const beat = () => { void ctx.progress(Math.round(pct), note).catch(() => { /* the lease will be reaped */ }); };
+  const timer = setInterval(beat, 20_000);
+  let lastBeat = Date.now();
+  let r;
+  try {
+    log.step('encoder started');
+    r = await runEncoder(jobPath, (chunk) => {
+      log.out(chunk);
+      const m = [...chunk.matchAll(/progress encode (\d+(?:\.\d+)?)%(?: at (\S+))?/g)].pop();
+      if (m) {
+        pct = 10 + 80 * Math.min(1, Number(m[1]) / 100);
+        note = `encoding ${describeFit(fit)}: ${Math.round(Number(m[1]))}%${m[2] && m[2] !== '?' ? ` at ${m[2]}` : ''}`;
+      } else if (/\[vod-encoder\] package:/.test(chunk)) {
+        pct = 90; note = 'packaging HLS and DASH';
+      }
+      if (Date.now() - lastBeat > 5_000) { lastBeat = Date.now(); beat(); }
+    });
+  } finally {
+    clearInterval(timer);
+  }
 
   if (r.code !== 0) {
     const why = (r.err || r.out || '').trim().split('\n').slice(-6).join('\n').slice(0, 800);
@@ -195,6 +245,7 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
   if (!master && !mpd) {
     throw new Error('the encode reported success but wrote no manifest');
   }
+  log.step(`packaged: ${[master ? 'HLS master.m3u8' : null, mpd ? 'DASH manifest.mpd' : null].filter(Boolean).join(', ')}`);
 
   await ctx.progress(95, 'recording what was produced');
   // WHAT THE FILES CARRY, read back from the packaged init segments while they
@@ -223,6 +274,8 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
     zeroStart: result?.zero_start === true,
     loudnorm: result?.loudnorm === true,
     fps: fit.fps,
+    // 'box': every rung at its fixed 16:9 size, so a FAST channel on the same ladder airs it as it is
+    frame: fit.boxed ? 'box' : 'scale',
     kept: fit.kept,
     dropped: fit.dropped,
     adapted: fit.adapted,
@@ -249,8 +302,42 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
     summary: describeFit(fit),
   };
 
-  let bytes: number | null = null;
-  try { bytes = (await stat(p.sourcePath)).size; } catch { /* not fatal */ }
+  const bytes = srcBytes;
+
+  // AN MP4 BESIDE HLS AND DASH (27 Oct 2026). An uploaded file that browsers
+  // already play (H.264 video, AAC or no audio, in MP4 / MOV) is repackaged as
+  // the asset's MP4: a stream copy with the index at the front, so it costs
+  // seconds and loses nothing. Anything else keeps HLS / DASH only, and an MP4
+  // can still be made on demand (Downloads).
+  let mp4File: string | null = null;
+  {
+    const vc = String(probe.videoCodec ?? '').toLowerCase();
+    const ac = String(probe.audioTracks?.[0]?.codec ?? '').toLowerCase();
+    const okVideo = vc === 'h264' || vc === 'avc1';
+    const okAudio = probe.hasAudio === false || !probe.audioTracks?.length || ac === 'aac' || ac === 'mp4a';
+    if (/\.(mp4|m4v|mov)$/i.test(p.sourcePath) && okVideo && okAudio) {
+      await ctx.progress(96, 'making the MP4');
+      const target = join(outDir, 'file.mp4');
+      const r = await new Promise<{ code: number | null; err: string }>((resolve) => {
+        const ch = spawn(config.clips.ffmpegBin, ['-y', '-v', 'error', '-i', p.sourcePath, '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-dn', '-sn', '-movflags', '+faststart', target]);
+        let err = ''; ch.stderr.on('data', (d) => { err += String(d); });
+        ch.on('error', (e) => resolve({ code: -1, err: String(e?.message ?? e) }));
+        ch.on('close', (code) => resolve({ code, err }));
+      });
+      if (r.code === 0 && existsSync(target)) { mp4File = 'file.mp4'; log.step('MP4: the source repackaged (stream copy, faststart)'); }
+      else log.warn(`MP4 not made: ${r.err.slice(0, 300) || `ffmpeg exited ${r.code}`}`);
+    } else {
+      log.step(`MP4: not made from the source (${okVideo ? '' : `video ${vc || 'unknown'}`}${!okVideo && !okAudio ? ', ' : ''}${okAudio ? '' : `audio ${ac || 'unknown'}`}); HLS and DASH only, an MP4 can be made on demand`);
+    }
+  }
+  // THE SOURCE'S FACTS, read fresh for the asset page (resolution, bitrates,
+  // codecs, profile, colour), so files uploaded before the probe recorded them
+  // show them too.
+  try {
+    const { probeFileFacts } = await import('../../ingest/metadata');
+    const facts = await probeFileFacts(p.sourcePath);
+    if (facts) await query(`UPDATE vod_assets SET ingest = jsonb_set(COALESCE(ingest, '{}'::jsonb), '{probe}', $2::jsonb) WHERE id = $1`, [p.vodAssetId, JSON.stringify(facts)]);
+  } catch (e: any) { log.warn(`source facts not refreshed: ${String(e?.message ?? e).slice(0, 200)}`); }
 
   // PRODUCTION: the packaged media goes to the origin bucket, so it is served
   // by the CDN and readable by a FAST playout on another server, instead of
@@ -259,6 +346,7 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
   const { vodStore, uploadVodDir } = await import('../../fast/vodStore');
   if (vodStore() === 's3') {
     await ctx.progress(97, 'uploading to the origin');
+    log.step('uploading the packaged media to the origin bucket');
     const up = await uploadVodDir(outDir, p.vodAssetId);
     storedMaster = master ? up.master : null;
     storedMpd = mpd ? up.mpd : null;
@@ -267,7 +355,7 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
   await query(
     `UPDATE vod_assets
         SET master_key = COALESCE($2, master_key),
-            progressive_key = NULL,
+            progressive_key = $8,
             duration_ms = COALESCE($3, duration_ms),
             end_epoch_ms = COALESCE($3, end_epoch_ms),
             source_bytes = COALESCE($4, source_bytes),
@@ -275,30 +363,79 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
             formats = $6::jsonb,
             media_facts = $7::jsonb,
             thumb_status = 'ready',
+            media_state = 'ready', media_error = NULL, media_error_code = NULL, media_state_at = now(),
             updated_at = now()
       WHERE id = $1`,
     [p.vodAssetId, storedMaster, probe.durationMs ?? null, bytes,
      JSON.stringify(encodeResult),
-     JSON.stringify({ hls: !!storedMaster, dash: !!storedMpd, progressive: false }),
-     mediaFacts ? JSON.stringify(mediaFacts) : null]
+     JSON.stringify({ hls: !!storedMaster, dash: !!storedMpd, progressive: !!mp4File }),
+     mediaFacts ? JSON.stringify(mediaFacts) : null,
+     // the MP4 sits beside the master, locally and on the origin bucket alike
+     mp4File ? (storedMaster ? storedMaster.replace(/[^/]*$/, mp4File) : `${publicBase(p.vodAssetId)}/${mp4File}`) : null]
   );
 
+  // A NEW ENCODE MAKES ITS FAST PACKAGINGS STALE (services/fast/ladder.ts): they were
+  // made from the previous encode or source. Forgotten, so each channel's prepare
+  // packages it again (its own encode plays meanwhile).
+  await query(`DELETE FROM vod_asset_ladders WHERE vod_asset_id = $1`, [p.vodAssetId]).catch(() => null);
   fireHook('vod.encoded', 'vod_asset', p.vodAssetId, { renditions: fit.kept.length });
   // While the source is on disk: candidate stills to pick the asset's image
   // from (services/media/assetImage.ts) and the sprite sheets for hover
   // previews (services/thumbnails/fileSprites.ts). Never fails the encode.
+  // Each step on its own, so a failed one is reported and the next still runs.
+  const outputs: { thumbnails: StepOutcome; sprites: StepOutcome; image: StepOutcome } = {
+    thumbnails: { state: 'skipped' }, sprites: { state: 'skipped' }, image: { state: 'skipped' },
+  };
   try {
     await ctx.progress(98, 'choosing a thumbnail');
     const { extractFrames } = await import('../../media/assetImage');
-    await extractFrames(p.vodAssetId, p.accountId, p.sourcePath, probe.durationMs ?? null);
+    const c = await extractFrames(p.vodAssetId, p.accountId, p.sourcePath, probe.durationMs ?? null);
+    outputs.thumbnails = { state: c.length ? 'ok' : 'failed', count: c.length, ...(c.length ? {} : { error: 'no frames could be read' }) };
+    log[c.length ? 'step' : 'warn'](`thumbnails: ${c.length} candidate stills`);
+  } catch (e: any) {
+    outputs.thumbnails = { state: 'failed', error: String(e?.message ?? e).slice(0, 400) };
+    log.warn(`thumbnails failed: ${outputs.thumbnails.error}`);
+  }
+  try {
     await ctx.progress(99, 'building the sprite sheets');
-    await (await import('../../thumbnails/fileSprites')).buildFileSprites(p.vodAssetId, p.accountId, p.sourcePath, probe.durationMs ?? null);
+    const sp = await (await import('../../thumbnails/fileSprites')).buildFileSprites(p.vodAssetId, p.accountId, p.sourcePath, probe.durationMs ?? null);
+    if (sp) {
+      const tiles = sp.sheets.reduce((a, s) => a + s.tiles, 0);
+      outputs.sprites = { state: 'ok', count: sp.sheets.length, detail: `${tiles} previews, one every ${sp.intervalMs / 1000} s` };
+      log.step(`sprite sheets: ${sp.sheets.length} (${outputs.sprites.detail})`);
+    } else {
+      outputs.sprites = { state: 'skipped', detail: 'no duration or no video to sample' };
+      log.warn('sprite sheets: none made (no duration or no video to sample)');
+    }
+  } catch (e: any) {
+    outputs.sprites = { state: 'failed', error: String(e?.message ?? e).slice(0, 400) };
+    log.warn(`sprite sheets failed: ${outputs.sprites.error}`);
+  }
+  try {
     await (await import('./vodImage')).queueAssetImage(p.vodAssetId);
-  } catch (e) { console.error(`[vod.encode] ${p.vodAssetId}: no thumbnail candidates:`, e); }
+    outputs.image = { state: 'ok', detail: 'asset image chosen by a vod.image job' };
+    log.step('queued: choose the asset image (vod.image)');
+  } catch (e: any) {
+    outputs.image = { state: 'failed', error: String(e?.message ?? e).slice(0, 400) };
+    log.warn(`asset image not queued: ${outputs.image.error}`);
+  }
   // Skip markers: the intro and credits, against the other episodes of its series.
   await (await import('./vodMarkers')).queueMarkerDetection(p.vodAssetId);
   // Social formats: follow what is in the picture (tracking only; cheap). Volt/REFRAME.md.
   await (await import('./reframe')).queueReframeAnalysis(p.vodAssetId);
+  log.step('queued: skip marker detection (vod.markers) and social formats tracking');
+  // QC: an uploaded file is confirmed playable the same way a clip is, by
+  // decoding what was packaged. Until it has run the asset reads "not checked"
+  // and no picker offers it (services/assetReadiness.ts).
+  try {
+    const { enqueue } = await import('../queue');
+    const { QC_RUN } = await import('./qcRun');
+    await enqueue({ type: QC_RUN, payload: { vodAssetId: p.vodAssetId }, dedupeKey: `qc.run:${p.vodAssetId}`, priority: 40 });
+    log.step('queued: QC (qc.run)');
+  } catch (e: any) {
+    log.warn(`QC not queued: ${String(e?.message ?? e).slice(0, 200)}`);
+  }
+  log.step('done');
 
   return {
     vodAssetId: p.vodAssetId,
@@ -306,9 +443,13 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
     renditions: fit.kept.length,
     dropped: fit.dropped.length,
     summary: describeFit(fit),
+    outputs,
   };
 }
 
 export function registerVodEncodeHandlers(): void {
   registerHandler(VOD_ENCODE, handleVodEncode);
+  // A FAST channel's ladder, encoded beside the asset's own (vodLadder.ts). Registered
+  // here so it starts wherever vod.encode does.
+  registerHandler('vod.ladder', async (ctx) => (await import('./vodLadder')).handleVodLadder(ctx));
 }

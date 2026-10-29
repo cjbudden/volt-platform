@@ -120,7 +120,7 @@ async function sse(url: string) {
   try {
     await ensureDefaultTemplates();
     const tpls = (await api('GET', '/api/graphics/templates')).j.items;
-    const lower = tpls.find((t: any) => t.owner === 'volt' && t.kind === 'lower_third');
+    const lower = tpls.find((t: any) => t.owner === 'volt' && t.kind === 'lower_third' && /^Name super \(who/.test(t.name));
     let r = await api('POST', '/api/graphics/sources', { name: 'Presenter feed', kind: 'push' });
     const push = r.j;
     r = await api('POST', '/api/graphics/setups', { name: 'Presenter super', versionId: lower.latest.id, fields: { name: { source: 'operator' }, title: { source: 'operator' } } });

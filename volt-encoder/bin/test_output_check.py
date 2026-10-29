@@ -60,10 +60,15 @@ starts = aligned(3) + [2.0, 5.6, 9.2]
 c, _ = codes({"v": track("video", "1080p", starts, 3.6)})
 ok("timeline_backwards" in c, "a jump back in one track is reported")
 
-# ---- timeline_gap ----------------------------------------------------------
+# ---- a forward hole (filler covered it) is NOT a fault ---------------------
 starts = aligned(3) + [30.0, 33.6, 37.2]
 c, _ = codes({"v": track("video", "1080p", starts, 3.6)})
-ok("timeline_gap" in c, "a hole in one track is reported")
+ok(c == set(), "a forward hole is not reported (the loop covers it)")
+
+# ---- numbers differ but boundaries line up: NOT a fault ----------------------
+c, _ = codes({"a": track("audio", "audio", aligned(6, 3.6, 97.2), 3.598, first_no=23),
+              "v": track("video", "1080p", aligned(6, 3.6, 97.24), 3.6, first_no=21)})
+ok("index_misaligned" not in c, "audio two segments ahead in numbering but cut together is fine")
 
 # ---- sequence_regressed (a player reloading is sent back) ----------------
 _, st = codes(clean)
@@ -75,11 +80,11 @@ ok("sequence_regressed" not in c, "steady media sequence is not reported")
 
 # ---- OutputWatch: one event per change, ok on clear ------------------------
 seen = []
-feed = [berita, berita, clean, clean]
+feed = [berita, berita, clean, clean, berita, clean]
 w = oc.OutputWatch("x", 4, emit=lambda t, **d: seen.append((t, d.get("state"))), read=lambda _d: feed.pop(0))
-for _ in range(4):
+for _ in range(6):
     w.tick()
-ok(seen == [("output.timeline", "fault"), ("output.timeline", "ok")], f"watch emits on change only: {seen}")
+ok(seen == [("output.timeline", "fault"), ("output.timeline", "ok")], f"watch emits on change only, and a one-check blip is not reported: {seen}")
 
 # ---- read_tracks against real fMP4 boxes ----------------------------------
 def box(t, payload):

@@ -4,6 +4,7 @@ import { requireAuth } from '../auth/middleware';
 import { asyncHandler } from '../util/http';
 import { probeSource, probeUrlProblem } from '../services/sourceProbe';
 import { inspectHls } from '../services/hlsMaster';
+import { validateSource } from '../services/sourceValidate';
 
 export const sourcesRouter = Router();
 sourcesRouter.use(requireAuth);
@@ -14,6 +15,16 @@ const ProbeBody = z.object({ url: z.string().min(1), protocol: z.string().option
 sourcesRouter.post('/probe', asyncHandler(async (req, res) => {
   const b = ProbeBody.parse(req.body);
   res.json(await probeSource(b.url, b.protocol));
+}));
+
+// POST /api/sources/validate  { url, protocol } -> is it playable as it is?
+// Icecast, HLS and DASH are answered from the protocol itself over plain HTTP
+// (no ffprobe): connect, read the playlist or manifest, fetch the start of a
+// segment or a few KB of audio and recognise it. Icecast also returns the
+// station's own ICY metadata. See services/sourceValidate.ts.
+sourcesRouter.post('/validate', asyncHandler(async (req, res) => {
+  const b = z.object({ url: z.string().min(1).max(4000), protocol: z.string().max(32).optional() }).parse(req.body);
+  res.json(await validateSource(b.url, b.protocol));
 }));
 
 // POST /api/sources/hls  { url } -> the HLS playlist at that address: master

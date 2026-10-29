@@ -22,6 +22,8 @@ import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/li
 import { orchestrator } from '../services/orchestrator';
 import { radioRunState, radioRunStates } from '../services/radio/state';
 import { icyState, probeIcySource } from '../services/radio/icyMeta';
+import { programmeMedia } from '../services/programmeMedia';
+import { epgLane } from '../services/epgLane';
 import { radioLevels } from '../services/radio/monitor';
 import { loadRadioHealth, radioEventLog, radioQc, radioStatusBoard, radioHasValidContent } from '../services/radio/detail';
 import { writeAudit, actor } from '../services/audit';
@@ -224,6 +226,10 @@ radioRouter.get('/:id', asyncHandler(async (req, res) => {
     publicUrls: publicUrls(c.id, c.radio_config),
     openRecording: openRec ?? null,
     recentLog: recent,
+    // The station's own programme guide (not the now-playing log), as the
+    // channel page's guide strip shows it.
+    epg: await epgLane('channel_id', c.id).catch(() => ({ now: null, next: null, lane: [] })),
+    epgEnabled: c.epg_enabled !== false,
     // parity with the channel control page: gates, QC, event log, status board
     health,
     pipelineState: health.overall,
@@ -494,12 +500,15 @@ radioRouter.get('/:id/log', asyncHandler(async (req, res) => {
   const args = [c.id, from.toISOString(), to.toISOString(), p.q?.trim() || null, p.class ?? null, p.minSec ?? null];
   const order = p.sort === 'oldest' ? 'starts_at ASC' : p.sort === 'longest' ? '(ends_at - starts_at) DESC, starts_at DESC' : p.sort === 'title' ? 'title ASC, starts_at DESC' : 'starts_at DESC';
   const rows = await query<any>(
-    `SELECT id, title, starts_at, ends_at, status,
+    `SELECT id, channel_id, title, starts_at, ends_at, actual_start, actual_end, status, clip_asset_id, auto_vod, clip_status, clip_error,
             metadata->>'class' AS class, metadata->>'stream_url' AS stream_url
        FROM programmes WHERE ${where}
       ORDER BY ${order} LIMIT $7 OFFSET $8`,
     [...args, p.limit, p.offset]
   );
+  // Where each entry can be heard again: the VOD made from it, or the
+  // recording that still holds it (services/programmeMedia.ts).
+  const media = await programmeMedia(rows);
   const total = await one<any>(`SELECT count(*)::int AS n FROM programmes WHERE ${where}`, args);
   const counts = await query<any>(
     `SELECT COALESCE(metadata->>'class','content') AS class, count(*)::int AS n
@@ -516,6 +525,6 @@ radioRouter.get('/:id/log', asyncHandler(async (req, res) => {
     from: from.toISOString(), to: to.toISOString(),
     counts: Object.fromEntries(counts.map((r: any) => [r.class, r.n])),
     total: total?.n ?? rows.length, offset: p.offset, limit: p.limit,
-    entries: rows,
+    entries: rows.map(({ channel_id, actual_start, actual_end, clip_asset_id, auto_vod, clip_status, clip_error, ...e }: any) => ({ ...e, media: media.get(e.id) ?? null })),
   });
 }));

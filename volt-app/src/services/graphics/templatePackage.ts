@@ -35,13 +35,17 @@ import { isOgrafManifest, ografChecks, readOgraf, stripJsComments, type OgrafInf
 export const LIMITS = { maxFiles: 200, maxBytes: 25 * 1024 * 1024 };
 
 export type FieldType = 'text' | 'number' | 'image' | 'list' | 'color' | 'boolean';
-export interface TemplateField { id: string; type: FieldType; label: string; hidden?: boolean; options?: { value: string | number; label: string }[] }
+export interface TemplateField { id: string; type: FieldType; label: string; hidden?: boolean; options?: { value: string | number; label: string }[]
+  /** Older field ids this one took over: a setup moving to this version carries their binding across. */
+  replaces?: string[] }
 export interface Manifest {
   name?: string;
   canvas: [number, number];
   canvasDeclared: boolean;
   fps?: number;
   bbox?: [number, number, number, number];
+  /** The setup's anchor PLACES the graphic (its box goes to that spot of the frame, keeping its margin), not only scales about it. Needs a bbox. */
+  snap?: boolean;
   fields: TemplateField[];
   sample: Record<string, unknown>;
   contract: string;
@@ -142,7 +146,12 @@ function normField(f: any, i: number): TemplateField | null {
   if (type === 'number' || type === 'int' || type === 'float') type = 'number';
   if (type === 'colour') type = 'color';
   if (!FIELD_TYPES.has(type as FieldType)) type = 'text';
-  return { id, type: type as FieldType, label: String(f?.label ?? f?.title ?? id).slice(0, 80) || `Field ${i + 1}`, ...(f?.hidden ? { hidden: true } : {}) };
+  return { id, type: type as FieldType, label: String(f?.label ?? f?.title ?? id).slice(0, 80) || `Field ${i + 1}`, ...(f?.hidden ? { hidden: true } : {}),
+    // A fixed choice list (a dropdown in the setup and live control): [{value,label}] or plain values.
+    ...(Array.isArray(f?.options) && f.options.length ? { options: f.options.slice(0, 100).map((o: any) => (o && typeof o === 'object')
+      ? { value: typeof o.value === 'number' ? o.value : String(o.value ?? ''), label: String(o.label ?? o.value ?? '').slice(0, 80) }
+      : { value: typeof o === 'number' ? o : String(o), label: String(o).slice(0, 80) }) } : {}),
+    ...(Array.isArray(f?.replaces) && f.replaces.length ? { replaces: f.replaces.map(String).filter((x: string) => /^[A-Za-z_][\w.-]{0,63}$/.test(x)).slice(0, 8) } : {}) };
 }
 
 function between(html: string, re: RegExp): string | null {
@@ -194,6 +203,7 @@ export function readManifest(files: PackageFile[]): Manifest {
     canvasDeclared: canvasOk,
     ...(Number.isFinite(src.fps) && src.fps > 0 && src.fps <= 120 ? { fps: Number(src.fps) } : {}),
     ...(bbox ? { bbox } : {}),
+    ...(bbox && src.snap === true ? { snap: true } : {}),
     fields,
     sample: src.sample && typeof src.sample === 'object' && !Array.isArray(src.sample) ? src.sample : {},
     contract: typeof src.contract === 'string' ? src.contract.slice(0, 80) : 'casparcg-html',

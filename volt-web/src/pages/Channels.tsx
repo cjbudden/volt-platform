@@ -8,7 +8,7 @@ import DeleteChannelDialog, { BulkRemoveDialog } from '../DeleteChannelDialog'
 import { RowMenu, Icons, useSelection, SelectCell, SelectAllHead, BulkBar, ConfirmDialog, runBulk, bulkSummary, type MenuItem } from '../listActions'
 import { navigate } from '../router'
 import { usePref, byName, ChipGroup, GroupFilter, SortSelect, ListToolbar, ClearFilters, NoMatches } from '../listFilters'
-import { usePageNotice, useNotify, FormStatus } from '../notices'
+import { usePageNotice, useNotify, FormStatus, useSaveResult } from '../notices'
 import { isFull, fullReason, groupLabel, noRoomReason, pickGroup, planFullReason } from '../lib/capacity'
 import { PackageRenditions, pkgToSources, DEFAULT_PKG_ROWS, type PkgRow, type PkgFallback } from '../PackageRenditions'
 import { PageHead, NewButton, EntityCell, StatusTag, Preset, RecordingSection, RET_UNIT_SEC, type RetUnit } from '../scaffold'
@@ -309,7 +309,7 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
             <th>Type</th>
             <th>Renditions</th>
             <th>Status</th>
-            <th>Retention</th>
+            <th title="How long recordings are kept, and so how long they can still become VOD">Kept for</th>
             <th></th>
           </tr>
         </thead>
@@ -349,7 +349,7 @@ function ChannelTable({ channels, onChanged, onOpen }: { channels: any[]; onChan
                     return (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <StatusTag label={m.label} cls={m.cls} />
-                        {c.billable && <span title="encoder up (billable)" style={{ fontSize: 'var(--fs-micro)', color: '#fbbf24' }}>● billable</span>}
+                        {c.billable && <span className="tag bill" title="Encoder up: server time is being billed"><span className="dot-s" />Billable</span>}
                       </div>
                     )
                   })()}
@@ -451,6 +451,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
 
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const saved = useSaveResult()
   const candidates = ofType[type]
   const group = pickGroup(candidates, groupId)
   const groupFull = !!group && isFull(group)
@@ -509,7 +510,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
       fallbackTranscode = out.fallbackTranscode // one source, transcoded up to all matching bitrates
     }
 
-    setBusy(true)
+    setBusy(true); saved.clear()
     try {
       const created = await api.createChannel({
         groupId: group.id, name: name.trim(), purchasingMode: purchasing,
@@ -530,11 +531,14 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
       })
       // captions ride on the group's shared output profile, so they are applied via the
       // same channel-update path the settings drawer uses (after the channel exists)
+      let capErr: string | null = null
       if (capOn && created?.id) {
         try { await api.updateChannel(created.id, { captions: { enabled: true, targets: capLangs } }) }
-        catch { /* channel created fine; captions can still be set in Settings */ }
+        catch (e: any) { capErr = e?.message || 'unknown error' }
       }
-      onCreated()
+      // Created; and if the captions step failed, SAY so rather than swallow it.
+      if (capErr) saved.warn(`Channel created, but captions could not be turned on (${capErr}). Set them in the channel's Settings.`, onCreated)
+      else saved.show('Channel created', onCreated)
     } finally { setBusy(false) }
   }
 
@@ -656,7 +660,7 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
             </select>
           </div>
           <div className="field">
-            <label>DVR catch-up window — {dvrMin} min{dvrMin >= 60 ? ` (${(dvrMin / 60).toFixed(dvrMin % 60 ? 1 : 0)}h)` : ''}</label>
+            <label>DVR window (how far viewers can rewind) · {dvrMin} min{dvrMin >= 60 ? ` (${(dvrMin / 60).toFixed(dvrMin % 60 ? 1 : 0)}h)` : ''}</label>
             <input type="range" min={1} max={DVR_MAX_MIN} step={1} value={dvrMin} onChange={e => setDvrMin(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
             <div className="hintxt">Max 4h for 24×7 channels; event streams scrub back to the event start.</div>
           </div>
@@ -664,14 +668,15 @@ function CreateChannel({ groups, onClose, onCreated }: { groups: Group[]; onClos
           <RecordingSection ctx="channel" recOn={recOn} setRecOn={setRecOn}
             retNum={retNum} setRetNum={setRetNum} retUnit={retUnit} setRetUnit={setRetUnit}
             retWarn={retNum && Number(retNum) * RET_UNIT_SEC[retUnit] < dvrMin * 60
-              ? `Will be raised to the DVR window (${dvrMin}m): retention can’t be shorter than DVR.` : null} />
+              ? `Will be raised to the DVR window (${dvrMin}m): recordings can’t be kept for less than the DVR window.` : null} />
           </TabPane>
         </div>
         <div className="drawer-f">
-          {/* In the footer, so a problem is seen wherever the form is scrolled to. */}
-          <FormStatus error={err} blocked={blocked} />
+          {/* The save result shows at the top of the panel (FormStatus); why
+              the button is unavailable stays here, next to it. */}
+          <FormStatus error={err} blocked={blocked} success={saved.message} warning={saved.warning} onDismiss={err ? () => setErr('') : undefined} />
           <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy || !!blocked} onClick={submit} title={blocked ?? ''}>{busy ? 'Creating…' : 'Create channel'}</button>
+          <button className="btn primary" disabled={busy || !!blocked || saved.saving} onClick={submit} title={blocked ?? ''}>{busy ? 'Creating…' : saved.saving ? 'Created' : 'Create channel'}</button>
         </div>
       </div>
     </div>

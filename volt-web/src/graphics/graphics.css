@@ -72,9 +72,14 @@ a.btn{text-decoration:none}
 .gfx-chip small{color:var(--muted);font-size:var(--fs-xs)}
 
 /* field binding rows */
-.gfx-frow{display:grid;grid-template-columns:150px 170px minmax(0,1fr) 110px;gap:12px;align-items:center;padding:11px 16px;border-bottom:1px solid var(--border)}
+.gfx-frow{display:grid;grid-template-columns:150px 170px minmax(170px,1fr) 110px;gap:12px;align-items:center;padding:11px 16px;border-bottom:1px solid var(--border)}
 .gfx-frow:last-child{border-bottom:0}
 .gfx-frow .now{font-size:var(--fs-sm);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gfx-imgpick{display:flex;flex-direction:column;gap:6px;min-width:0}
+.gfx-imgpick .sel{display:flex;align-items:center;gap:8px;min-width:0}
+.gfx-imgpick .sel img{width:40px;height:40px;object-fit:contain;flex:none;border-radius:6px;background:repeating-conic-gradient(#d9dde5 0% 25%,#fff 0% 50%) 50%/8px 8px}
+.gfx-imgpick .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.gfx-imgpick .acts{display:flex;gap:6px;flex-wrap:wrap}
 .gfx-anchor{display:grid;grid-template-columns:repeat(3,34px);gap:4px}
 .gfx-anchor button{width:34px;height:26px;border-radius:6px;border:1px solid var(--border-2);background:var(--panel-2);cursor:pointer;padding:0}
 .gfx-anchor button.on{background:var(--brand);border-color:var(--brand)}

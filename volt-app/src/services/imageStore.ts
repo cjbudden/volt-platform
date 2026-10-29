@@ -6,7 +6,8 @@
 //
 //  Layout (keys are relative to the store root):
 //    library/<account>/<path>   curated, browsable images (watermarks/slates/…)
-//    derived/<account>/<path>   machine-generated keyframes / storyboard sheets
+//    derived/<account>/<path>   machine-generated files people do not browse: sprites/ holds
+//                               every sprite sheet and thumbnail VTT (thumbnails/spriteStore.ts)
 //  The resize service is pointed at the store root; the browser defaults to library/.
 // ============================================================================
 import { promises as fs } from 'node:fs';
@@ -56,6 +57,34 @@ class LocalImageStore implements ImageStore {
     try { await fs.access(this.abs(key)); return createReadStream(this.abs(key)); } catch { return null; }
   }
   async delete(key: string) { try { await fs.unlink(this.abs(key)); } catch { /* already gone */ } }
+  /** Remove the directory for `key` if it holds no files (empty subdirectories go too), then each
+   *  parent that is left empty, up to but not including `stop`. Answers how many went. */
+  async pruneDirs(key: string, stop: string): Promise<number> {
+    const d = this.abs(key), s = this.abs(stop);
+    let n = await this.emptyTree(d);
+    for (let p = dirname(d); p.startsWith(s + sep); p = dirname(p)) {
+      try { await fs.rmdir(p); n++; } catch { break; }
+    }
+    return n;
+  }
+  /** Every empty directory under `prefix` (the prefix itself is kept). */
+  async pruneTree(prefix: string): Promise<number> {
+    const root = this.abs(prefix);
+    let n = 0;
+    try { for (const e of await fs.readdir(root, { withFileTypes: true })) if (e.isDirectory()) n += await this.emptyTree(join(root, e.name)); } catch { /* no library yet */ }
+    return n;
+  }
+  private async emptyTree(dir: string): Promise<number> {
+    let n = 0, left = 0;
+    let entries;
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return 0; }
+    for (const e of entries) {
+      if (e.isDirectory()) { n += await this.emptyTree(join(dir, e.name)); try { await fs.access(join(dir, e.name)); left++; } catch { /* removed */ } }
+      else left++;
+    }
+    if (!left) { try { await fs.rmdir(dir); n++; } catch { /* in use */ } }
+    return n;
+  }
   async exists(key: string) { try { await fs.access(this.abs(key)); return true; } catch { return false; } }
   async stat(key: string) {
     try { const st = await fs.stat(this.abs(key)); return st.isFile() ? { size: st.size } : null; } catch { return null; }
@@ -156,8 +185,31 @@ export function imageStore(): ImageStore {
   if (!store) {
     if (config.imageStore.driver === 's3') store = new S3ImageStore(config.imageStore.s3Bucket, config.imageStore.s3Prefix);
     else store = new LocalImageStore(config.imageStore.localDir);
+    store = withForwarding(store);
   }
   return store;
+}
+
+/**
+ * MOVED IMAGES FORWARD. A library image moved to another folder has a new key
+ * (services/media/libraryMoves.ts). Reads of the old key that find nothing
+ * follow media_file_moves to the new one, so links held outside the database
+ * (web pages, feeds, signed image URLs) keep working. Writes, deletes and
+ * existence checks are never forwarded.
+ */
+function withForwarding(s: ImageStore): ImageStore {
+  const moved = async (key: string) => key.startsWith('library/') ? (await import('./media/libraryMoves')).resolveMoved(key) : null;
+  return {
+    ...((s as any).pruneDirs ? { pruneDirs: (k: string, stop: string) => (s as any).pruneDirs(k, stop), pruneTree: (p: string) => (s as any).pruneTree(p) } : {}),
+    put: (k, b, ct) => s.put(k, b, ct),
+    delete: (k) => s.delete(k),
+    exists: (k) => s.exists(k),
+    list: (p) => s.list(p),
+    move: (a, b) => s.move(a, b),
+    async get(k) { const b = await s.get(k); if (b) return b; const to = await moved(k); return to ? s.get(to) : null; },
+    async getStream(k) { const b = await s.getStream(k); if (b) return b; const to = await moved(k); return to ? s.getStream(to) : null; },
+    async stat(k) { const b = await s.stat(k); if (b) return b; const to = await moved(k); return to ? s.stat(to) : null; },
+  };
 }
 
 export function storeDriver(): string { return config.imageStore.driver; }

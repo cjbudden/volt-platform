@@ -11,7 +11,7 @@ import { asyncHandler, notFound } from '../util/http';
 import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { actor, writeAudit } from '../services/audit';
 import { BASELINE, INGEST_KEYS } from '../services/ingest/rules';
-import { preview, completeMetadata, resolveDuplicate } from '../services/ingest/pipeline';
+import { preview, completeMetadata, resolveDuplicate, failedMatches } from '../services/ingest/pipeline';
 import { sanitise, applyNaming } from '../services/ingest/naming';
 import { INGEST_EVENTS } from '../services/ingest/events';
 import { openSession } from '../services/uploads';
@@ -148,6 +148,8 @@ ingestRouter.post('/preview', asyncHandler(async (req, res) => {
       settings: p.resolved.settings, sources: p.resolved.sources, matched: p.resolved.matched, deferred: p.resolved.deferred,
       duplicate: p.duplicate.outcome, duplicateOf: p.duplicate.match ? { assetId: p.duplicate.match.asset.id, strength: p.duplicate.match.strength } : null,
       reject: p.resolved.settings.reject,
+      // A failed record this file looks like: the panel asks before it moves.
+      failedMatch: (await failedMatches(accountId(req), f.name, f.bytes ?? null))[0] ?? null,
     });
   }
   res.json(out);
@@ -229,14 +231,28 @@ ingestRouter.get('/held', asyncHandler(async (req, res) => {
   const from = `FROM vod_assets v WHERE v.account_id = $1 AND v.ingest->>'status' IN ('awaiting_metadata', 'duplicate', 'rejected')${whereSql(pl)}`;
   const fetched = await query<any>(
     `SELECT v.id, v.title, v.original_filename, v.source_bytes, v.mime, v.schema_id, v.awaiting_metadata, v.ingest, v.created_at,
-            v.ingest->>'status' AS held_status
+            v.metadata, v.master_key, v.media_state, v.ingest->>'status' AS held_status
        ${from} ${pageSql(pl)}`, params);
+  // SELF-HEALING: metadata filled in somewhere else (the asset's page, the API)
+  // releases the hold here too. Each waiting asset is checked against its type
+  // again; one with nothing required missing is completed and leaves the list.
+  const { completeMetadata } = await import('../services/ingest/pipeline');
+  const released = new Set<string>();
+  for (const r of fetched) {
+    if (r.held_status !== 'awaiting_metadata') continue;
+    const c = await completeMetadata(accountId(req), r.id, {}).catch(() => null);
+    if (c?.ingested) released.add(String(r.id));
+    else if (c) r.awaiting_metadata = c.missing;
+  }
+  for (let i = fetched.length - 1; i >= 0; i--) if (released.has(String(fetched[i].id))) fetched.splice(i, 1);
   const cParams = [...base];
   const cWhere = pl.count ? whereSql(parseList(heldList, { ...req.query, cursor: undefined, offset: undefined }, cParams)) : '';
   const total = pl.count ? (await one<any>(`SELECT count(*)::int AS n FROM vod_assets v WHERE v.account_id = $1 AND v.ingest->>'status' IN ('awaiting_metadata', 'duplicate', 'rejected')${cWhere}`, cParams))?.n : undefined;
   const rows = finishPage(req, res, pl, fetched, total);
   res.json(rows.map((r: any) => ({ id: r.id, title: r.title, originalFilename: r.original_filename, bytes: r.source_bytes != null ? Number(r.source_bytes) : null, mime: r.mime,
-    schemaId: r.schema_id, status: r.ingest?.status, awaitingMetadata: r.awaiting_metadata, duplicate: r.ingest?.duplicate ?? null, rules: r.ingest?.rules?.matched ?? [], createdAt: r.created_at })));
+    schemaId: r.schema_id, status: r.ingest?.status, awaitingMetadata: r.awaiting_metadata, duplicate: r.ingest?.duplicate ?? null, rules: r.ingest?.rules?.matched ?? [], createdAt: r.created_at,
+    // what is already filled in (the Fill in form starts from it), and whether the media is built
+    metadata: r.metadata ?? {}, encoded: !!r.master_key, mediaState: r.media_state ?? null })));
 }));
 
 ingestRouter.post('/assets/:id/metadata', asyncHandler(async (req, res) => {

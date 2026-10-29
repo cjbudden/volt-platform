@@ -10,6 +10,7 @@
  *   analytics@<domain>   Report and Analytics Manager
  *   events@<domain>      Event Manager
  *   radio@<domain>       Radio Manager
+ *   fast@<domain>        FAST Manager
  *   viewer@<domain>      System Viewer                read-only admin
  *   fan@<domain>         PUBLIC user (viewer account, not an admin user)
  * plus a web app "Access demo player" and its publishable key, printed once,
@@ -32,6 +33,7 @@ const STAFF: { local: string; name: string; roleKey: string; tier: string }[] = 
   { local: 'analytics', name: 'Ari Analytics', roleKey: 'analytics_manager', tier: 'operator' },
   { local: 'events', name: 'Eve Events', roleKey: 'event_manager', tier: 'operator' },
   { local: 'radio', name: 'Rae Radio', roleKey: 'radio_manager', tier: 'operator' },
+  { local: 'fast', name: 'Fay FAST', roleKey: 'fast_manager', tier: 'operator' },
   { local: 'viewer', name: 'Vic Viewer', roleKey: 'system_viewer', tier: 'viewer' },
 ];
 

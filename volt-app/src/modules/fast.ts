@@ -32,7 +32,7 @@ import {
 } from '../services/fast/lineup';
 import { achievedLoad, resolveAdPolicy } from '../services/fast/adPlan';
 import {
-  libraryFor, libraryForMedia, type FastMedia, lineupFromRow, adsFor, applyLineup, activateLineup, timelineFor, decideBreak, adReport, wireProgramme, DEFAULT_HORIZON_DAYS,
+  libraryFor, libraryForMedia, airable, type FastMedia, lineupFromRow, adsFor, applyLineup, activateLineup, timelineFor, decideBreak, adReport, wireProgramme, DEFAULT_HORIZON_DAYS,
 } from '../services/fast/store';
 import { resolve as resolveVast, expandTag } from '../services/fast/vast';
 import { stitchHls, type SessionState, type PodRendition } from '../services/fast/stitch';
@@ -61,11 +61,28 @@ async function ownLineup(req: Request, id: string) {
 }
 const uuid = z.string().uuid();
 
+/**
+ * BEHIND THE SCENES: whatever the channel now uses that is not packaged to its
+ * ladder is queued (services/fast/prepare.ts), without holding up the save that
+ * added it. A packaging that failed is not retried from here; Prepare does.
+ */
+function prepareSoon(channelId: string): void {
+  void import('../services/fast/prepare').then((m) => m.prepare(channelId, { auto: true }))
+    .catch((e) => console.error(`[fast] preparing ${channelId}:`, e?.message ?? e));
+}
+
+/** A ladder group this account owns that resolves to rungs, or a 400 saying why not. */
+async function checkLadder(req: Request, groupId: string) {
+  const { loadLadder } = await import('../services/encode/store');
+  try { return await loadLadder(groupId, accountId(req)); }
+  catch (e: any) { throw /not found/.test(String(e?.message)) ? notFound('Ladder not found') : badRequest(String(e?.message ?? e)); }
+}
+
 // ------------------------------------------------------------------ channels
 
 fastRouter.get('/channels', asyncHandler(async (req, res) => {
   const rows = await query<any>(
-    `SELECT c.id, c.name, c.status, c.group_id, c.origin, c.fast_media AS media,
+    `SELECT c.id, c.name, c.status, c.group_id, c.origin, c.fast_media AS media, c.brand_ref,
             l.id AS lineup_id, l.name AS lineup_name, l.version, l.applied_until, l.zone,
             jsonb_array_length(l.slots) AS slot_count,
             (SELECT title FROM programmes p WHERE p.channel_id = c.id AND p.starts_at <= now() AND p.ends_at > now() ORDER BY starts_at DESC LIMIT 1) AS on_air,
@@ -84,10 +101,13 @@ const createChannel = z.object({
   zone: z.string().default('UTC'),
   /** Video or audio: fixed for the channel, it decides what the library offers. */
   media: z.enum(['video', 'audio']).default('video'),
+  /** The ladder every title on the channel is packaged to (an encode ladder group); omitted or null: the account default. */
+  ladderGroupId: uuid.nullable().optional(),
 });
 fastRouter.post('/channels', asyncHandler(async (req, res) => {
   const b = createChannel.parse(req.body);
   if (!isTimeZone(b.zone)) throw badRequest(`Unknown time zone: ${b.zone}`);
+  if (b.ladderGroupId && b.media === 'video') await checkLadder(req, b.ladderGroupId);
   const group = await one<any>(`SELECT id, max_channels FROM groups WHERE id = $1 AND account_id = $2`, [b.groupId, accountId(req)]);
   if (!group) throw notFound('Group not found');
   await assertPlanRoom(accountId(req));
@@ -97,8 +117,8 @@ fastRouter.post('/channels', asyncHandler(async (req, res) => {
     // A playlist channel has no source, no recording (the media is already in
     // the library) and no encoder; the FAST playout writes its playlists.
     const ch = (await c.query(
-      `INSERT INTO channels (group_id, name, origin, fast_media, recording_enabled, created_by, updated_by)
-       VALUES ($1, $2, 'playlist', $4, false, $3, $3) RETURNING *`, [b.groupId, b.name, actorId(req), b.media])).rows[0];
+      `INSERT INTO channels (group_id, name, origin, fast_media, recording_enabled, created_by, updated_by, fast_ladder_group_id)
+       VALUES ($1, $2, 'playlist', $4, false, $3, $3, $5) RETURNING *`, [b.groupId, b.name, actorId(req), b.media, b.media === 'video' ? b.ladderGroupId ?? null : null])).rows[0];
     const l = (await c.query(
       `INSERT INTO fast_lineups (channel_id, name, epoch, zone, created_by) VALUES ($1, 'Main lineup', now(), $2, $3) RETURNING *`,
       [ch.id, b.zone, actorId(req)])).rows[0];
@@ -116,15 +136,55 @@ fastRouter.get('/channels/:id', asyncHandler(async (req, res) => {
     `SELECT launcher, status, started_at, last_seen_at, last_pdt, media_sequence, restarts, error, unreadable,
             (last_seen_at > now() - make_interval(secs => $2)) AS fresh
        FROM fast_playouts WHERE channel_id = $1`, [ch.id, fastConfig.staleSec]);
-  res.json({ channel: { id: ch.id, name: ch.name, status: ch.status, origin: ch.origin, groupId: ch.group_id, onAir: !!ch.on_air, media: (ch.fast_media ?? 'video') as FastMedia }, lineups, ads, playout,
+  // The channel's own settings, for the FAST page's Settings and Overview: its
+  // content type and metadata (title, description...), logo, guide icon, the
+  // watermark the player draws over it (apps.ts fastBrandMark) and in-stream
+  // graphics. Saved through PATCH /api/channels/:id like any channel.
+  const settings = {
+    version: ch.version ?? null, schemaId: ch.schema_id ?? null, metadata: ch.metadata ?? {}, brandRef: ch.brand_ref ?? null, guideIconRef: ch.guide_icon_ref ?? null,
+    graphics: ch.graphics ?? {}, epgEnabled: ch.epg_enabled !== false,
+    watermark: { enabled: !!ch.watermark_enabled, ref: ch.watermark_ref ?? null, position: ch.watermark_position ?? 'br', offsetX: Number(ch.watermark_offset_x ?? 24),
+      offsetY: Number(ch.watermark_offset_y ?? 24), opacity: Number(ch.watermark_opacity ?? 100), scale: Number(ch.watermark_scale ?? 12) },
+  };
+  const { channelLadder } = await import('../services/fast/ladder');
+  const ladder = await channelLadder(ch.id).catch(() => null);
+  res.json({ channel: { id: ch.id, name: ch.name, status: ch.status, origin: ch.origin, groupId: ch.group_id, onAir: !!ch.on_air, media: (ch.fast_media ?? 'video') as FastMedia,
+    ladderGroupId: ch.fast_ladder_group_id ?? null, ladder }, settings, lineups, ads, playout,
     urls: { hls: channelPlaylistUrl(ch.id, 'master.m3u8'), dash: channelPlaylistUrl(ch.id, 'manifest.mpd'), session: `/fast/${ch.id}/s/{session}/master.m3u8` } });
 }));
 
 /** Is every asset the channel uses ready to air (packaged, splice-aligned, loudness, 1 s slate)? */
 fastRouter.get('/channels/:id/readiness', asyncHandler(async (req, res) => {
   const ch = await ownChannel(req, String(req.params.id));
-  const { readiness } = await import('../services/fast/prepare');
-  res.json({ items: await readiness(ch.id) });
+  const { readinessWithLadder } = await import('../services/fast/prepare');
+  const r = await readinessWithLadder(ch.id);
+  res.json({ items: r.items, ladder: r.ladder });
+}));
+
+/** The ladders a FAST channel can use (the account's encode ladder groups, with their rungs). */
+fastRouter.get('/ladders', asyncHandler(async (req, res) => {
+  const { fastLadders } = await import('../services/fast/ladder');
+  res.json({ items: await fastLadders(accountId(req)) });
+}));
+
+/**
+ * CHANGE THE CHANNEL'S LADDER (null: the account default). Everything on the
+ * channel is packaged to the new one behind the scenes; what is already
+ * packaged to it (for this or another channel) is reused. The playout keeps
+ * its tracks until it restarts, so a running one is reported.
+ */
+fastRouter.put('/channels/:id/ladder', asyncHandler(async (req, res) => {
+  const ch = await ownChannel(req, String(req.params.id));
+  if ((ch.fast_media ?? 'video') === 'audio') throw badRequest('An audio channel has no video ladder.');
+  const b = z.object({ ladderGroupId: uuid.nullable() }).parse(req.body ?? {});
+  if (b.ladderGroupId) await checkLadder(req, b.ladderGroupId);
+  await query(`UPDATE channels SET fast_ladder_group_id = $2, updated_at = now() WHERE id = $1`, [ch.id, b.ladderGroupId]);
+  const { channelLadder } = await import('../services/fast/ladder');
+  const ladder = await channelLadder(ch.id);
+  const { prepare } = await import('../services/fast/prepare');
+  const prepared = await prepare(ch.id, { auto: true });
+  const running = await one<any>(`SELECT 1 FROM fast_playouts WHERE channel_id = $1 AND status IN ('starting', 'running') LIMIT 1`, [ch.id]).catch(() => null);
+  res.json({ ladder, prepared, restartNeeded: !!running });
 }));
 /** Queue the encodes that make them ready. */
 fastRouter.post('/channels/:id/prepare', asyncHandler(async (req, res) => {
@@ -169,9 +229,30 @@ fastRouter.get('/library', asyncHandler(async (req, res) => {
   const all = await libraryFor(accountId(req));
   const chId = req.query.channel ? String(req.query.channel) : null;
   const media: FastMedia | null = chId ? ((await ownChannel(req, chId)).fast_media ?? 'video') : null;
-  const lib = media ? libraryForMedia(all, media) : all;
-  let otherMedia = 0, noSource = 0;
-  if (media) for (const a of all.values()) { if (a.media !== media) otherMedia++; else if (!a.sourceOk) noSource++; }
+  let lib = media ? libraryForMedia(all, media) : airable(all);
+  let otherMedia = 0, noSource = 0, notReady = 0, belowLadder = 0;
+  for (const a of all.values()) {
+    if (media && a.media !== media) otherMedia++;
+    else if (media && !a.sourceOk) noSource++;
+    else if (a.usageStatus !== 'ready') notReady++;
+  }
+  // THE CHANNEL'S LADDER (services/fast/ladder.ts): only sources that can fill
+  // its top rung, by picture and bitrate, unless ?all=1. Each title says how it
+  // fits, so the list can mark the ones whose bitrate was never measured.
+  const { channelLadder, fitToTop } = await import('../services/fast/ladder');
+  const ladder = chId && media === 'video' ? await channelLadder(chId) : null;
+  const fits = new Map<string, { fit: string; why: string | null }>();
+  if (ladder) {
+    const showAll = req.query.all === '1';
+    const kept: typeof lib = new Map();
+    for (const [id, a] of lib) {
+      const f = fitToTop(a.quality ?? { width: null, height: null, kbps: null }, ladder.rungs[0]);
+      fits.set(id, f);
+      if (f.fit === 'below') { belowLadder++; if (!showAll) continue; }
+      kept.set(id, a);
+    }
+    lib = kept;
+  }
   const q = String(req.query.q ?? '').trim().toLowerCase();
   const assets = [...lib.values()].filter((a) => !q || a.title.toLowerCase().includes(q) || (a.series ?? '').toLowerCase().includes(q));
   const series = new Map<string, { name: string; episodes: number; seasons: Set<number>; durationSec: number }>();
@@ -193,11 +274,15 @@ fastRouter.get('/library', asyncHandler(async (req, res) => {
     }
     inUse = [...used].filter((u) => !lib.has(u) && all.has(u)).map((u) => all.get(u)!);
   }
+  const withFit = <T extends { id: string }>(a: T) => (ladder ? { ...a, fit: fits.get(a.id)?.fit ?? 'ok', fitWhy: fits.get(a.id)?.why ?? null } : a);
   res.json({
     media,
-    hidden: { otherMedia, noSource },
-    inUse,
-    assets: assets.slice(0, 2000),
+    hidden: { otherMedia, noSource, notReady, belowLadder },
+    // why each title below the ladder is not offered, so Find media can say so instead of guessing
+    belowLadder: ladder ? [...fits].filter(([, f]) => f.fit === 'below').slice(0, 2000).map(([id, f]) => ({ id, why: f.why })) : [],
+    ladder: ladder ? { groupId: ladder.groupId, name: ladder.groupName, inherited: ladder.inherited, top: ladder.rungs[0] ?? null, rungs: ladder.rungs } : null,
+    inUse: inUse.map(withFit),
+    assets: assets.slice(0, 2000).map(withFit),
     series: [...series.values()].map((s) => ({ name: s.name, episodes: s.episodes, seasons: [...s.seasons].sort((x, y) => x - y), durationSec: Math.round(s.durationSec) }))
       .sort((a, b) => a.name.localeCompare(b.name)),
   });
@@ -269,6 +354,7 @@ fastRouter.post('/channels/:id/lineups', asyncHandler(async (req, res) => {
      VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7) RETURNING *`,
     [ch.id, b.name ?? (src ? `${src.name} (draft)` : 'Lineup'), b.epoch ?? new Date().toISOString(), zone,
      JSON.stringify(slots), JSON.stringify(b.settings ?? src?.settings ?? {}), actorId(req)]);
+  if (slots.length) prepareSoon(ch.id);
   res.status(201).json(row);
 }));
 
@@ -289,6 +375,7 @@ fastRouter.put('/lineups/:lid', asyncHandler(async (req, res) => {
             slots = COALESCE($5::jsonb, slots), settings = COALESCE($6::jsonb, settings), updated_at = now()
       WHERE id = $1 RETURNING *`,
     [l.id, b.name ?? null, b.zone ?? null, b.epoch ?? null, b.slots ? JSON.stringify(b.slots) : null, b.settings ? JSON.stringify(b.settings) : null]);
+  if (b.slots || b.settings?.backfill) prepareSoon(l.channel_id);
   res.json(row);
 }));
 
@@ -321,7 +408,7 @@ fastRouter.post('/lineups/:lid/preview', asyncHandler(async (req, res) => {
   const lineup = lineupFromRow(row, ads.policy);
   // a draft previews from when it would start: now (or its own epoch if later)
   if (l.status !== 'active' && lineup.epoch.getTime() < Date.now()) lineup.epoch = new Date(Math.floor(Date.now() / 60_000) * 60_000);
-  const lib = await libraryFor(accountId(req));
+  const lib = airable(await libraryFor(accountId(req)));
   const from = b.from ? new Date(b.from) : lineup.epoch;
   const to = new Date(from.getTime() + b.days * 86400_000);
   const plan = planLineup(lineup, lib, from, to);
@@ -341,13 +428,79 @@ fastRouter.post('/lineups/:lid/preview', asyncHandler(async (req, res) => {
   });
 }));
 
+/**
+ * START, RESTART OR STOP THE PLAYOUT by hand: the channel page's Start. The
+ * scheduler keeps a playout running for every channel with an active run
+ * order (reconcilePlayouts, every 30 s); this is for not waiting, for kicking
+ * a stuck one, and for stopping it. Start needs an active run order; Stop
+ * holds until the next scheduler tick restarts it unless the run order is
+ * deactivated.
+ */
+fastRouter.post('/channels/:id/playout', asyncHandler(async (req, res) => {
+  const ch = await ownChannel(req, String(req.params.id));
+  const action = String(req.body?.action ?? 'start');
+  const runner = await import('../services/fast/playoutRunner');
+  if (action === 'stop') { await runner.stopPlayout(ch.id, 'stopped from the console'); return res.json({ playout: 'stopped' }); }
+  const active = await one<any>(`SELECT id FROM fast_lineups WHERE channel_id = $1 AND status = 'active' LIMIT 1`, [ch.id]);
+  if (!active) throw conflict('Activate a run order first: the playout plays the active run order.');
+  if (action === 'restart') await runner.stopPlayout(ch.id, 'restarted from the console');
+  const playout = await runner.startPlayout(ch.id, action === 'restart');
+  if (playout === 'run separately') throw conflict('This server runs no FAST playouts (FAST_LAUNCHER=off or an unsupported launcher). Set FAST_LAUNCHER=local, or run fast_playout.py --channel <id>.');
+  res.json({ playout });
+}));
+
+/**
+ * SLATES & LOOPS AS FILLER. Pick the channel's slate and gap loop from Loops
+ * & Fillers. Each is rendered once into a library asset (fillerBridge.ts),
+ * set as the channel's slate (ad breaks nobody sold, gaps) or loop (gaps, in
+ * the slate's place; with breaksUseLoop, breaks too) and prepared for air.
+ * null takes it off; leaving a key out keeps it.
+ */
+const fillerBody = z.object({
+  slateFillerId: z.string().uuid().nullable().optional(),
+  loopFillerId: z.string().uuid().nullable().optional(),
+  breaksUseLoop: z.boolean().optional(),
+});
+fastRouter.put('/channels/:id/filler', asyncHandler(async (req, res) => {
+  const ch = await ownChannel(req, String(req.params.id));
+  const b = fillerBody.parse(req.body ?? {});
+  const { vodForFiller, FillerError } = await import('../services/fast/fillerBridge');
+  const cur = await one<any>(`SELECT policy FROM channel_ads WHERE channel_id = $1`, [ch.id]);
+  const policy: any = { ...(cur?.policy ?? {}) };
+  const sources: Record<string, string> = { ...(policy.fillerSources ?? {}) };
+  const brand: any = { mode: 'off', identIds: [], ...(policy.brand ?? {}) };
+  try {
+    if (b.slateFillerId !== undefined) {
+      if (policy.slateAssetId && sources[policy.slateAssetId]) delete sources[policy.slateAssetId];
+      if (b.slateFillerId) { const v = await vodForFiller(String(ch.account_id), b.slateFillerId); policy.slateAssetId = v.assetId; sources[v.assetId] = b.slateFillerId; }
+      else policy.slateAssetId = null;
+    }
+    if (b.loopFillerId !== undefined) {
+      if (brand.loopAssetId && sources[brand.loopAssetId]) delete sources[brand.loopAssetId];
+      if (b.loopFillerId) { const v = await vodForFiller(String(ch.account_id), b.loopFillerId); brand.loopAssetId = v.assetId; sources[v.assetId] = b.loopFillerId; }
+      else brand.loopAssetId = null;
+    }
+  } catch (e: any) {
+    if (e instanceof FillerError) throw e.status === 404 ? notFound(e.message) : conflict(e.message);
+    throw e;
+  }
+  if (b.breaksUseLoop !== undefined) policy.breaksUseLoop = b.breaksUseLoop;
+  policy.fillerSources = sources;
+  policy.brand = brand;
+  await query(
+    `INSERT INTO channel_ads (channel_id, mode, policy) VALUES ($1, 'off', $2::jsonb)
+     ON CONFLICT (channel_id) DO UPDATE SET policy = $2::jsonb, updated_at = now()`, [ch.id, JSON.stringify(policy)]);
+  const prepared = await import('../services/fast/prepare').then((m) => m.prepare(ch.id, { auto: true })).catch(() => null);
+  res.json({ ...(await adsFor(ch.id)), prepared });
+}));
+
 fastRouter.post('/lineups/:lid/activate', asyncHandler(async (req, res) => {
   const l = await ownLineup(req, String(req.params.lid));
   if (!(l.slots ?? []).length) throw badRequest('The lineup has no slots yet.');
   const r = await activateLineup(l.id);
   const applied = await applyLineup(l.id, { days: l.settings?.horizonDays ?? DEFAULT_HORIZON_DAYS });
   // anything not ready to air is prepared now (splice-aligned re-encodes, loudness, the 1 s slate)
-  const prepared = await import('../services/fast/prepare').then((m) => m.prepare(l.channel_id)).catch(() => null);
+  const prepared = await import('../services/fast/prepare').then((m) => m.prepare(l.channel_id, { auto: true })).catch(() => null);
   const { startPlayout } = await import('../services/fast/playoutRunner');
   const playout = await startPlayout(l.channel_id).catch((e: any) => `could not start: ${e?.message ?? e}`);
   res.json({ ...r, applied, playout, prepared, urls: { hls: channelPlaylistUrl(l.channel_id, 'master.m3u8'), dash: channelPlaylistUrl(l.channel_id, 'manifest.mpd') } });
@@ -369,6 +522,12 @@ const adsBody = z.object({
   adServerId: uuid.nullable().optional(),
   houseAds: z.array(z.object({ assetId: uuid, weight: z.number().int().min(1).max(10).optional() })).max(100).optional(),
   scope: z.enum(['channel', 'session']).optional(),
+  /** The channel's brand loop: idents between programmes (store.ts ChannelBrand). */
+  brand: z.object({
+    mode: z.enum(['off', 'pad', 'between']),
+    identIds: z.array(uuid).max(20).default([]),
+    loopAssetId: uuid.nullable().optional(),
+  }).optional(),
 });
 fastRouter.get('/channels/:id/ads', asyncHandler(async (req, res) => {
   const ch = await ownChannel(req, String(req.params.id));
@@ -388,6 +547,25 @@ fastRouter.put('/channels/:id/ads', asyncHandler(async (req, res) => {
   }
   // `enabled` follows the mode (off = no breaks) unless it is set on purpose
   const policy = b.policy ? (() => { const r: any = { ...resolveAdPolicy(b.policy), slateAssetId: b.policy.slateAssetId ?? null }; if (typeof b.policy.enabled !== 'boolean') delete r.enabled; return r; })() : null;
+  // The brand lives in the same stored policy: saving the ad policy keeps it,
+  // and a brand change is written on its own below.
+  if (policy) {
+    // kept from the stored policy: the brand, and where the slate and loop came from (Loops & Fillers)
+    const cur = await one<any>(`SELECT policy->'brand' AS brand, policy->'fillerSources' AS sources, policy->'breaksUseLoop' AS bul FROM channel_ads WHERE channel_id = $1`, [ch.id]);
+    if (cur?.brand) policy.brand = cur.brand;
+    if (cur?.sources) policy.fillerSources = cur.sources;
+    if (cur?.bul != null) policy.breaksUseLoop = cur.bul;
+  }
+  if (b.brand) {
+    const ids = [...new Set([...b.brand.identIds, ...(b.brand.loopAssetId ? [b.brand.loopAssetId] : [])])];
+    if (ids.length) {
+      const own = await query<any>(
+        `SELECT v.id FROM vod_assets v LEFT JOIN channels c ON c.id = v.channel_id LEFT JOIN events e ON e.id = v.event_id
+           LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
+          WHERE v.id = ANY($1::uuid[]) AND COALESCE(g.account_id, v.account_id) = $2`, [ids, accountId(req)]);
+      if (own.length !== ids.length) throw notFound('An ident or brand loop was not found in this account');
+    }
+  }
   await query(
     `INSERT INTO channel_ads (channel_id, mode, policy, ad_server_id, house_ads, decision_scope)
      VALUES ($1, COALESCE($2, 'off'), COALESCE($3::jsonb, '{}'::jsonb), $4, COALESCE($5::jsonb, '[]'::jsonb), COALESCE($6, 'session'))
@@ -396,8 +574,64 @@ fastRouter.put('/channels/:id/ads', asyncHandler(async (req, res) => {
        ad_server_id = CASE WHEN $7 THEN $4 ELSE channel_ads.ad_server_id END,
        house_ads = COALESCE($5::jsonb, channel_ads.house_ads), decision_scope = COALESCE($6, channel_ads.decision_scope), updated_at = now()`,
     [ch.id, b.mode ?? null, policy ? JSON.stringify(policy) : null, b.adServerId ?? null, b.houseAds ? JSON.stringify(b.houseAds) : null, b.scope ?? null, b.adServerId !== undefined]);
+  if (b.brand) {
+    await query(`UPDATE channel_ads SET policy = jsonb_set(COALESCE(policy, '{}'::jsonb), '{brand}', $2::jsonb), updated_at = now() WHERE channel_id = $1`,
+      [ch.id, JSON.stringify({ mode: b.brand.mode, identIds: b.brand.identIds, loopAssetId: b.brand.loopAssetId ?? null })]);
+  }
+  // a house spot, slate, ident or loop just added is packaged for the channel
+  if (b.houseAds || b.brand || b.policy?.slateAssetId !== undefined) prepareSoon(ch.id);
   res.json(await adsFor(ch.id));
 }));
+
+/**
+ * GOING TO AIR: what the playout plays over the next few hours, exactly as
+ * it will play it (the same timeline the playout reads, services/fast/store.ts
+ * timelineFor): programmes cut around their breaks, each break, and each gap
+ * with its ident, house spots and brand loop. For the On air tab's rundown
+ * beside the preview. `hours` ahead (default 3, at most 12), `back` hours
+ * behind (default 0.5, at most 3).
+ */
+fastRouter.get('/channels/:id/rundown', asyncHandler(async (req, res) => {
+  const ch = await ownChannel(req, String(req.params.id));
+  const num = (v: unknown, d: number, lo: number, hi: number) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+  const hours = num(req.query.hours, 3, 0.25, 12), back = num(req.query.back, 0.5, 0, 3);
+  const now = Date.now();
+  const tl = await timelineFor(ch.id, new Date(now - back * 3600_000), new Date(now + hours * 3600_000));
+  const ms = (iso: string) => Date.parse(iso);
+  const iso = (n: number) => new Date(n).toISOString();
+  const rows: RundownRow[] = [];
+  for (const it of tl.items) {
+    const start = ms(it.start), end = start + it.durationSec * 1000;
+    if (it.kind === 'content') {
+      const [programmeId, inSec] = it.id.split(':');
+      rows.push({ kind: 'programme', id: it.id, programmeId, start: iso(start), end: iso(end), durationSec: it.durationSec, title: it.title, part: Number(inSec) > 0 ? 'resumes' : 'starts', assetId: it.assetId, inSec: it.inSec });
+    } else if (it.kind === 'break') {
+      rows.push({ kind: 'break', id: it.id, start: iso(start), end: iso(end), durationSec: it.durationSec, title: it.position === 'mid' ? 'Ad break' : 'Ad break (end)',
+        fill: it.fill.map((f) => ({ kind: f.kind, title: f.title ?? null, durationSec: f.durationSec })) });
+    } else {
+      // a gap: one row per thing that plays in it
+      let t = start;
+      it.fill.forEach((f, k) => {
+        const kind: RundownRow['kind'] = f.kind === 'ident' ? 'ident' : f.kind === 'house' ? 'house' : f.title === 'Brand loop' ? 'loop' : 'slate';
+        const d = Math.min(f.durationSec, (end - t) / 1000);
+        if (d <= 0.05) return;
+        rows.push({ kind, id: `${it.id}:${k}`, start: iso(t), end: iso(t + d * 1000), durationSec: Math.round(d * 1000) / 1000, title: f.title ?? (kind === 'slate' ? 'Slate' : 'Filler'), assetId: f.assetId ?? null });
+        t += d * 1000;
+      });
+    }
+  }
+  const brand = (await adsFor(ch.id)).brand;
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ now: iso(now), from: tl.from, to: tl.to, adsMode: tl.adsMode, brandMode: brand.mode, items: rows.filter((r) => ms(r.end) > now - back * 3600_000) });
+}));
+interface RundownRow {
+  kind: 'programme' | 'break' | 'ident' | 'loop' | 'house' | 'slate';
+  id: string; start: string; end: string; durationSec: number; title: string;
+  programmeId?: string; part?: 'starts' | 'resumes';
+  /** The library asset that plays (programme, ident, house spot, loop); `inSec` is where in it this row starts. */
+  assetId?: string | null; inSec?: number;
+  fill?: { kind: string; title: string | null; durationSec: number }[];
+}
 
 const serverBody = z.object({
   name: z.string().trim().min(1).max(120),
@@ -593,7 +827,12 @@ async function tracksOf(master: string) {
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.startsWith('#EXT-X-MEDIA:') && l.includes('TYPE=AUDIO')) { const u = l.match(/URI="([^"]+)"/)?.[1]; if (u && !out.audio) out.audio = await media(u); }
-    if (l.startsWith('#EXT-X-STREAM-INF:') && lines[i + 1]) { const h = Number(l.match(/RESOLUTION=\d+x(\d+)/)?.[1] ?? 0); out[`v${h}`] = await media(lines[i + 1]); }
+    if (l.startsWith('#EXT-X-STREAM-INF:') && lines[i + 1]) {
+      const h = l.match(/RESOLUTION=\d+x(\d+)/)?.[1];
+      // an audio-only asset (a song, an audio ad) lists its audio as the variant itself: that is the 'audio' track
+      if (h) out[`v${h}`] = await media(lines[i + 1]);
+      else if (!out.audio) out.audio = await media(lines[i + 1]);
+    }
   }
   assetTracks.set(master, { at: Date.now(), tracks: out });
   return out;

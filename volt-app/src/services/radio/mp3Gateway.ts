@@ -55,6 +55,7 @@ import { config } from '../../config';
 import { query } from '../../db';
 import { liveDirFor } from '../liveOrigin';
 import { icyState } from './icyMeta';
+import { mp3FrameOffset } from '../sourceValidate';
 
 /** How often ICY metadata is interleaved, in bytes. 16 KB is the convention. */
 const ICY_METAINT = 16_000;
@@ -91,6 +92,20 @@ const FIRST_BYTE_TIMEOUT_MS = 15_000;
  */
 const MAX_LISTENER_BACKLOG_BYTES = 2_000_000;
 
+/**
+ * BURST ON CONNECT: how much recent audio a new listener gets at once.
+ *
+ * What Icecast does (burst-size, 64 KB by default) and what this gateway did
+ * not. ffmpeg writes MP3 as each HLS segment lands, so a listener joining a
+ * running feed got NOTHING until the next segment (up to 4 s), then the
+ * browser still wanted its own pre-roll before making a sound. That was the
+ * long silence after unmute on the station page. The feed keeps its last few
+ * seconds and a new listener starts with them, cut at an MP3 frame boundary,
+ * so the player has enough to start immediately. It puts the listener this
+ * much further behind live, which is the usual radio trade.
+ */
+const BURST_SECONDS = 3;
+
 interface Listener {
   res: any;
   /** Wants ICY metadata interleaved (sent `Icy-MetaData: 1`). */
@@ -115,6 +130,9 @@ interface Feed {
   waiters: Array<(ok: boolean) => void>;
   lingerTimer: NodeJS.Timeout | null;
   stopping: boolean;
+  /** The last BURST_SECONDS of MP3, for the next listener to start with. */
+  recent: Buffer[];
+  recentBytes: number;
 }
 
 const feeds = new Map<string, Feed>();
@@ -158,6 +176,7 @@ function startFeed(channelId: string, bitrateKbps: number): Feed {
   const feed: Feed = {
     channelId, proc: null, listeners: new Set(), bitrateKbps,
     startedAt: Date.now(), ready: false, waiters: [], lingerTimer: null, stopping: false,
+    recent: [], recentBytes: 0,
   };
   feeds.set(channelId, feed);
 
@@ -181,6 +200,7 @@ function startFeed(channelId: string, bitrateKbps: number): Feed {
       feed.waiters.splice(0).forEach((w) => w(true));
     }
     broadcast(feed, chunk);
+    keepRecent(feed, chunk);
   });
   let errTail = '';
   proc.stderr!.on('data', (d: Buffer) => { errTail = (errTail + d.toString()).slice(-2000); });
@@ -219,32 +239,55 @@ function broadcast(feed: Feed, chunk: Buffer) {
         feed.listeners.delete(l);
         continue;
       }
-      if (!l.wantsMeta) {
-        l.res.write(chunk);
-        l.bytes += chunk.length;
-        continue;
-      }
-      let off = 0;
-      while (off < chunk.length) {
-        const take = Math.min(l.countdown, chunk.length - off);
-        if (take > 0) {
-          l.res.write(chunk.subarray(off, off + take));
-          l.bytes += take;
-          l.countdown -= take;
-          off += take;
-        }
-        if (l.countdown === 0) {
-          const block = icyBlock(title);
-          l.res.write(block);
-          l.bytes += block.length;
-          l.countdown = ICY_METAINT;
-        }
-      }
+      writeTo(l, chunk, title);
     } catch {
       endListener(feed, l, 'write_failed');
       feed.listeners.delete(l);
     }
   }
+}
+
+/** One chunk to one listener, with ICY metadata interleaved when asked for. */
+function writeTo(l: Listener, chunk: Buffer, title: string) {
+  if (!l.wantsMeta) {
+    l.res.write(chunk);
+    l.bytes += chunk.length;
+    return;
+  }
+  let off = 0;
+  while (off < chunk.length) {
+    const take = Math.min(l.countdown, chunk.length - off);
+    if (take > 0) {
+      l.res.write(chunk.subarray(off, off + take));
+      l.bytes += take;
+      l.countdown -= take;
+      off += take;
+    }
+    if (l.countdown === 0) {
+      const block = icyBlock(title);
+      l.res.write(block);
+      l.bytes += block.length;
+      l.countdown = ICY_METAINT;
+    }
+  }
+}
+
+/** Keep the last BURST_SECONDS of output (whole chunks, trimmed from the front). */
+function keepRecent(feed: Feed, chunk: Buffer) {
+  const cap = Math.round((feed.bitrateKbps * 1000 / 8) * BURST_SECONDS);
+  feed.recent.push(chunk);
+  feed.recentBytes += chunk.length;
+  while (feed.recent.length > 1 && feed.recentBytes - feed.recent[0].length >= cap) {
+    feed.recentBytes -= feed.recent.shift()!.length;
+  }
+}
+
+/** The burst a new listener starts with: recent audio from its first whole MP3 frame. */
+export function burstFrom(recent: Buffer[], capBytes: number): Buffer {
+  let buf = Buffer.concat(recent);
+  if (buf.length > capBytes) buf = buf.subarray(buf.length - capBytes);
+  const at = mp3FrameOffset(buf);
+  return at < 0 ? Buffer.alloc(0) : buf.subarray(at);
 }
 
 function scheduleStopIfIdle(feed: Feed) {
@@ -361,6 +404,12 @@ export async function attachListener(
     ipHash: hashIp(req.ip || req.socket?.remoteAddress),
     userAgent: String(req.headers?.['user-agent'] ?? '').slice(0, 300) || null,
   };
+  // Start them with the last few seconds (BURST_SECONDS) so the player can
+  // make a sound now instead of waiting for the next segment.
+  const burst = burstFrom(feed.recent, Math.round((feed.bitrateKbps * 1000 / 8) * BURST_SECONDS));
+  if (burst.length) {
+    try { writeTo(listener, burst, icy?.title ?? ''); } catch { /* the close handler below tidies up */ }
+  }
   feed.listeners.add(listener);
 
   const detach = () => {

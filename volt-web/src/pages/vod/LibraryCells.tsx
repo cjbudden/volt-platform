@@ -2,6 +2,8 @@
 // availability pill, the metadata completeness meter and the encode summary.
 import { useState, type ReactElement } from 'react'
 import { thumbUrl } from '../../api'
+import { signImage } from '../../imageSigning'
+import { posterVersion } from './useLibraryChanges'
 import { LibIcon } from './icons'
 import { codecLabel, resLabel } from './libraryQuery'
 import type { LibraryRow } from './libraryApi'
@@ -15,7 +17,13 @@ export function fmtDur(ms: number | string | null | undefined) {
 
 /** The keyscreen through the image service, sized for where it is shown. Lazy. */
 export function posterSrc(r: LibraryRow, w: number, h: number): string | null {
-  if (r.poster_key) return thumbUrl(`/${String(r.poster_key).replace(/^\/+/, '')}`, w, h, r.poster_shape === 'square' ? 'inside' : 'cover')
+  if (r.poster_key) {
+    // Versioned by when it was picked: choosing another image (even one saved at the same
+    // path) is a new URL, so the card shows it at once instead of a cached copy.
+    const key = String(r.poster_key).replace(/^\/+/, ''), v = posterVersion((r as any).poster_picked_at)
+    return signImage(`${w}x${h},${r.poster_shape === 'square' ? 'inside' : 'cover'}${v ? `,v=${v}` : ''}`, key)
+      ?? thumbUrl(`/${key}`, w, h, r.poster_shape === 'square' ? 'inside' : 'cover')
+  }
   const m = r.metadata ?? {}
   const img = m.image ?? m.thumbnail ?? m.artwork ?? null
   return typeof img === 'string' && /^(https?:)?\//.test(img) ? (img.startsWith('/library/') ? thumbUrl(img, w, h) : img) : null
@@ -99,6 +107,13 @@ export function Completeness({ row, compact }: { row: LibraryRow; compact?: bool
 }
 
 export function EncodeSummary({ row }: { row: LibraryRow }) {
+  // NO MEDIA, NO RENDITIONS. A failed clip read "1080p · 2 renditions" from
+  // its channel's ladder while nothing had been built.
+  const u = row.usage_status
+  if (u === 'failed' || u === 'no_media' || u === 'unplayable') {
+    return <span className="lib-enc bad" title={row.media_error ?? undefined}>{LibIcon.alert}{u === 'failed' ? 'Build failed' : u === 'unplayable' ? 'Will not play' : 'No media'}</span>
+  }
+  if (u === 'processing' && !row.encode_state) return <span className="lib-enc busy">{LibIcon.clock}Building</span>
   if (row.encode_state === 'queued' || row.encode_state === 'running') {
     return <span className="lib-enc busy">{LibIcon.clock}{row.encode_state === 'queued' ? 'Queued to encode' : `Encoding ${row.encode_pct ?? 0}%`}</span>
   }

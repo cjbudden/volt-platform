@@ -74,7 +74,7 @@ export function Can({ feature, level, fallback = null, children }: {
 }
 
 /** The feature a channel row belongs to: radio stations are channels too. */
-export const featureForChannel = (kind?: string | null) => (kind === 'radio' ? 'radio' : 'channels')
+export const featureForChannel = (kind?: string | null, origin?: string | null) => (kind === 'radio' ? 'radio' : origin === 'playlist' ? 'fast' : 'channels')
 
 /** A small, consistent "read only" marker for pages a user can see but not change. */
 export function ReadOnlyBadge({ feature }: { feature: string }) {

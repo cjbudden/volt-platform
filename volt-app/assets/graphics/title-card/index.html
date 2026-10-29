@@ -1,0 +1,146 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Title card</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     In and out sequences: see volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md section 4.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Title card (section open)",
+  "bbox": [
+    0,
+    380,
+    1920,
+    320
+  ],
+  "fields": [
+    {
+      "id": "kicker",
+      "type": "text",
+      "label": "Kicker (PART TWO, SPECIAL REPORT)"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title"
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "label": "Subtitle (optional)"
+    },
+    {
+      "id": "accent",
+      "type": "color",
+      "label": "Accent colour"
+    },
+    {
+      "id": "bandColor",
+      "type": "color",
+      "label": "Band colour"
+    },
+    {
+      "id": "bandOpacity",
+      "type": "number",
+      "label": "Band opacity (0 to 1)"
+    },
+    {
+      "id": "textColor",
+      "type": "color",
+      "label": "Title colour"
+    }
+  ],
+  "sample": {
+    "kicker": "SPECIAL REPORT",
+    "title": "Water Wars",
+    "subtitle": "Who owns the Murray-Darling?",
+    "accent": "#f2a900",
+    "bandColor": "#0a2350",
+    "bandOpacity": 0.92,
+    "textColor": "#ffffff"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+:root{--ein:cubic-bezier(.16,1,.3,1);--eout:cubic-bezier(.7,0,.84,0);--pop:cubic-bezier(.34,1.56,.64,1)}
+/* Three states: initial (hidden), .on (in sequence to on air), .out (out sequence to a different
+   hidden pose). After the out sequence .reset snaps back to initial with no transition. */
+.reset *,.reset *::before,.reset *::after{transition:none!important;animation:none!important}
+:root{--accent:#f2a900;--band:#0a2350;--bo:.92;--ink:#fff}
+#band{position:absolute;left:0;right:0;top:380px;height:320px;clip-path:inset(50% 0 50% 0)}
+#band::before{content:"";position:absolute;inset:0;background:var(--band);opacity:var(--bo)}
+#in{position:relative;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 120px}
+#kick{font:700 30px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;letter-spacing:.32em;text-transform:uppercase;color:var(--accent);opacity:0;transform:translateY(12px)}
+#kick:empty{display:none}
+#tl{overflow:hidden;max-width:1680px;white-space:nowrap;margin:18px 0 18px;padding:0 4px}
+#tw{display:inline-block;font:700 128px/1.08 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;text-transform:uppercase;letter-spacing:.02em;color:var(--ink)}
+#tw .c{display:inline-block;transform:translateY(105%)}
+#ul{width:180px;height:6px;background:var(--accent);transform:scaleX(0)}
+#sub{margin-top:22px;font:500 38px/1.1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;color:var(--ink);opacity:0;transform:translateY(12px)}
+#sub:empty{display:none}
+/* in: the band opens from its centre line, the kicker settles, the title's letters rise out of a mask
+   one after another, the rule draws from the middle and the subtitle fades up */
+.on #band{clip-path:inset(0 0 0 0);transition:clip-path .55s var(--ein)}
+.on #kick{opacity:1;transform:none;transition:opacity .4s .3s,transform .5s var(--ein) .3s}
+.on #tw .c{transform:none;transition:transform .6s var(--ein) var(--d)}
+.on #ul{transform:none;transition:transform .55s var(--ein) var(--after)}
+.on #sub{opacity:1;transform:none;transition:opacity .4s calc(var(--after) + .1s),transform .5s var(--ein) calc(var(--after) + .1s)}
+/* out: letters leave upward in the same order, kicker and subtitle fade, the band closes to its centre */
+.out #tw .c{transform:translateY(-105%);transition:transform .35s var(--eout) var(--o)}
+.out #kick,.out #sub{opacity:0;transition:opacity .2s}
+.out #ul{transform:scaleX(0);transition:transform .3s var(--eout) .1s}
+.out #band{clip-path:inset(50% 0 50% 0);transition:clip-path .4s var(--eout) .35s}
+</style>
+</head>
+<body>
+<div id="band"><div id="in"><div id="kick"></div><div id="tl"><span id="tw"></span></div><div id="ul"></div><div id="sub"></div></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+function truthy(v){return !(v===false||v==='false'||v===0||v==='0'||v==='no'||v==='off')}
+function css(k,v){if(v!=null&&v!=='')document.documentElement.style.setProperty(k,String(v))}
+// Shrink one line until it fits its box, down to `floor` of its size.
+function fit(el,floor){if(!el)return;el.style.fontSize='';var s=parseFloat(getComputedStyle(el).fontSize),min=s*(floor||.72);
+  while(el.scrollWidth>el.clientWidth+1&&s>min){s-=1;el.style.fontSize=s+'px'}}
+var B=document.body,data={},playing=false,resetTimer=null;
+function play(){clearTimeout(resetTimer);B.classList.remove('out','reset');void B.offsetWidth;B.classList.add('on');playing=true;
+  if(typeof onPlay==='function')onPlay()}
+function stop(){if(!playing)return;playing=false;B.classList.add('out');B.classList.remove('on');
+  if(typeof onStop==='function')onStop();clearTimeout(resetTimer);
+  resetTimer=setTimeout(function(){B.classList.add('reset');B.classList.remove('out');void B.offsetWidth;B.classList.remove('reset');
+    if(typeof onReset==='function')onReset()},OUT_MS)}
+function next(){if(typeof onNext==='function')onNext()}
+var OUT_MS=800;
+function setTitle(s){var tw=$('tw');tw.textContent='';var cs=Array.from(String(s||'')),n=cs.length;
+  cs.forEach(function(ch,i){var c=document.createElement('span');c.className='c';c.textContent=ch===' '?' ':ch;
+    c.style.setProperty('--d',(.35+Math.min(i*.035,1.1)).toFixed(3)+'s');c.style.setProperty('--o',Math.min(i*.015,.3).toFixed(3)+'s');tw.appendChild(c)});
+  css('--after',(.5+Math.min(n*.035,1.1)).toFixed(2)+'s');shrink()}
+// Very long titles scale down to fit one line (to 60%).
+function shrink(){var tw=$('tw'),tl=$('tl');tw.style.fontSize='';var s=128;
+  while(tw.offsetWidth>tl.clientWidth-8&&s>77){s-=2;tw.style.fontSize=s+'px'}}
+function update(raw){var d=parse(raw);for(var k in d)data[k]=d[k];
+  css('--accent',d.accent);css('--band',d.bandColor);css('--ink',d.textColor);
+  if(d.bandOpacity!=null&&d.bandOpacity!=='')css('--bo',Math.max(0,Math.min(1,Number(d.bandOpacity))));
+  if('kicker' in d)setText($('kick'),d.kicker||'');if('subtitle' in d)setText($('sub'),d.subtitle||'');
+  if('title' in d)setTitle(d.title)}
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(shrink);
+</script>
+</body>
+</html>

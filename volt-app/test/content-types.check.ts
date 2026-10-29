@@ -83,9 +83,14 @@ check('language carried', s.language, 'en');
   check('owner policy keeps provenance keys', kept.seeded, 'scripts/seed-radio.ts');
   check('owner policy keeps every unknown key', kept.seed_note, 'x');
   check('owner policy still validates known fields', kept.name, 'ABC Classic');
+  // Required fields are a publish rule (review.ts publishGate), not a save rule: saving
+  // with them empty works, and a caller that must have them can still ask.
+  let saved: any = null;
+  try { saved = validateMetadata(station.fields, { seeded: 'y' }, 'keep'); } catch { /* */ }
+  truthy('saving with a required field empty is allowed', saved && saved.seeded === 'y');
   let req = '';
-  try { validateMetadata(station.fields, { seeded: 'y' }, 'keep'); } catch (e: any) { req = e.message; }
-  truthy('owner policy still enforces required fields', /missing required field/.test(req));
+  try { validateMetadata(station.fields, { seeded: 'y' }, 'keep', 'enforce'); } catch (e: any) { req = e.message; }
+  truthy('a caller can still enforce required fields', /missing required field/.test(req));
 }
 
 console.log(`content-types: ${pass} passed, ${fail} failed`);

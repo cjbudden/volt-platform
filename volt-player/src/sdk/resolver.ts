@@ -58,6 +58,8 @@ export interface ResolvedItem {
   kind?: string;
   /** On-demand ads for this play (volt-app services/vodAds), when the gate gave any. */
   ads?: ItemAds | null;
+  /** The channel's brand mark (a FAST channel's watermark), when it has one. */
+  brandMark?: import('./types').BrandMark | null;
 }
 
 /**
@@ -87,6 +89,7 @@ export async function resolveAsset(apiBase: string, appKey: string, assetId: str
     token: j.playbackToken ?? null,
     title: m.title ?? null, description: m.description ?? null, artworkUrl: m.artworkUrl ?? null,
     durationMs: m.durationMs ?? null, live: m.live ?? undefined, kind: m.kind,
+    brandMark: m.brandMark && typeof m.brandMark.url === 'string' ? m.brandMark : null,
     ads: j.ads && (j.ads.delivery === 'stitched' || j.ads.delivery === 'guided') ? { delivery: j.ads.delivery, sessionId: j.ads.sessionId ?? null, timelineUrl: j.ads.timelineUrl ?? null } : null,
   };
 }
@@ -135,6 +138,7 @@ export function mergeResolved(item: PlaylistItem, r: ResolvedItem): PlaylistItem
     durationMs: item.durationMs ?? r.durationMs ?? null,
     live: item.live ?? r.live,
     ads: r.ads ?? item.ads ?? null,
+    brandMark: item.brandMark ?? r.brandMark ?? null,
   };
 }
 

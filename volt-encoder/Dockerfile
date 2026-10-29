@@ -61,12 +61,14 @@ RUN if [ "$CAPTIONS_CPU" = "true" ]; then \
 # "Burned into the video" draws them into the encode. Without it the encoder
 # logs that burn-in is not available here and runs the channel without them
 # (bin/gfx_burn.py renderer_problem). Adds about 400 MB to the image.
+# fonts-noto-cjk lets graphics draw Chinese, Japanese and Korean text (a 新闻号 label,
+# a Mandarin ticker); the templates' own fonts cover Latin text only. About 60 MB more.
 #   docker build --build-arg GRAPHICS_BURN=true .
 ARG GRAPHICS_BURN=false
 COPY gfx/package.json gfx/package-lock.json /app/gfx/
 RUN if [ "$GRAPHICS_BURN" = "true" ]; then \
       curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-      && apt-get install -y --no-install-recommends nodejs fonts-dejavu-core fonts-liberation \
+      && apt-get install -y --no-install-recommends nodejs fonts-dejavu-core fonts-liberation fonts-noto-cjk \
       && cd /app/gfx && npm ci --omit=dev --no-audit --no-fund \
       && PLAYWRIGHT_BROWSERS_PATH=/opt/gfx-browsers node node_modules/playwright-core/cli.js install --with-deps chromium \
       && ln -s "$(ls -d /opt/gfx-browsers/chromium-*/chrome-linux*/chrome | head -1)" /usr/local/bin/gfx-chromium \

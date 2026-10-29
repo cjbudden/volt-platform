@@ -183,6 +183,8 @@ boot().then(async () => {
       const stopGraphics = startGraphicsRuntime();
       // Asset images: queue a pick for every asset that has none yet (services/media/assetImage.ts).
       startAssetImageSweep();
+      // Uploads held for metadata before the gate stopped holding the media: encode them once.
+      void import('./services/ingest/pipeline').then((m) => m.encodeHeldUploads()).catch((e) => console.warn('[ingest] held uploads not checked', e));
       return () => { stopSched(); stopPrewarm(); stopMetrics(); stopGraphics(); };
     });
     setLeaderCheck(() => !!leadership?.isLeader());

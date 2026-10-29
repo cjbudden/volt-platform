@@ -3,6 +3,7 @@ import { api, type RecordingSource, type RecordingSourcesFeed, type RecordingSou
 import { PageHead, FChip, EntityCell, StatusPill } from '../scaffold'
 import { navigate } from '../router'
 import { usePageNotice } from '../notices'
+import { removalText } from '../programmeMedia'
 
 /* ============================================================================
    RECORDINGS — TIER 1: the sources that have recorded content.
@@ -171,7 +172,10 @@ export default function Recordings() {
                   <td><span className={`tag type ${TYPE_CLS[s.type]}`}>{TYPE_LABEL[s.type]}</span></td>
                   <td style={{ color: 'var(--muted)' }}>
                     {s.recordings}
-                    {s.retentionDays != null && <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)' }}>keeps {s.retentionDays}d</div>}
+                    {s.retentionDays != null && <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)' }}>kept for {s.retentionDays}d</div>}
+                    {(s as any).nextExpiry && (() => { const r = removalText((s as any).nextExpiry); return (
+                      <div style={{ fontSize: 'var(--fs-micro)', color: r.warn ? '#fbbf24' : 'var(--faint)' }} title={`Oldest recording: ${r.text}`}>next removal {r.short}</div>
+                    ) })()}
                   </td>
                   <td style={{ color: 'var(--muted)' }}>{rangeLabel(s)}</td>
                   <td style={{ color: 'var(--muted)' }}>{fmtSpan(s.totalDurationMs)}</td>

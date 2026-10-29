@@ -1,0 +1,173 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Crawl ticker</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     In and out sequences: see volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md section 4.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Crawl ticker (scrolling headlines)",
+  "bbox": [
+    0,
+    958,
+    1920,
+    56
+  ],
+  "fields": [
+    {
+      "id": "tickerLabel",
+      "type": "text",
+      "label": "Label at the left (optional)"
+    },
+    {
+      "id": "tickerItems",
+      "type": "list",
+      "label": "Headlines (or an RSS feed's items)"
+    },
+    {
+      "id": "speed",
+      "type": "number",
+      "label": "Speed, pixels per second (default 140)"
+    },
+    {
+      "id": "separator",
+      "type": "text",
+      "label": "Between headlines (default •)"
+    },
+    {
+      "id": "uppercase",
+      "type": "boolean",
+      "label": "Capitals"
+    },
+    {
+      "id": "barColor",
+      "type": "color",
+      "label": "Bar colour"
+    },
+    {
+      "id": "textColor",
+      "type": "color",
+      "label": "Text colour"
+    },
+    {
+      "id": "accent",
+      "type": "color",
+      "label": "Label colour"
+    },
+    {
+      "id": "barOpacity",
+      "type": "number",
+      "label": "Bar opacity (0 to 1)"
+    }
+  ],
+  "sample": {
+    "tickerLabel": "",
+    "tickerItems": [
+      "Ferry services suspended on two routes while ramps are upgraded",
+      "Interest rates held steady at this month's board meeting",
+      "Severe thunderstorm warning for the south-east until 9pm",
+      "Ceasefire talks resume overnight, officials say"
+    ],
+    "speed": 140,
+    "separator": "•",
+    "uppercase": true,
+    "barColor": "#ffffff",
+    "textColor": "#0b1220",
+    "accent": "#c1121f",
+    "barOpacity": 0.94
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+:root{--ein:cubic-bezier(.16,1,.3,1);--eout:cubic-bezier(.7,0,.84,0);--pop:cubic-bezier(.34,1.56,.64,1)}
+/* Three states: initial (hidden), .on (in sequence to on air), .out (out sequence to a different
+   hidden pose). After the out sequence .reset snaps back to initial with no transition. */
+.reset *,.reset *::before,.reset *::after{transition:none!important;animation:none!important}
+:root{--bar:#ffffff;--ink:#0b1220;--accent:#c1121f;--bo:.94}
+#crawl{position:absolute;left:0;top:958px;width:1920px;height:56px;display:flex}
+#bar{position:absolute;inset:0;background:var(--bar);opacity:var(--bo);clip-path:inset(0 100% 0 0)}
+#lbl{position:relative;z-index:2;flex:none;background:var(--accent);color:#fff;font:700 30px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;letter-spacing:.06em;
+  text-transform:uppercase;display:flex;align-items:center;padding:0 26px 0 96px;transform:translateX(-100%)}
+#lbl:empty{display:none}
+#win{position:relative;flex:1;overflow:hidden;opacity:0}
+#run{position:absolute;left:0;top:0;height:100%;display:flex;align-items:center;white-space:nowrap;will-change:transform;
+  color:var(--ink);font:700 34px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif}
+.uc #run{text-transform:uppercase}
+#run .sep{display:inline-block;margin:0 .85em}
+/* in: the bar wipes on from the left, the label slides out of the edge, then the crawl shows */
+.on #bar{clip-path:inset(0 0 0 0);transition:clip-path .55s var(--ein)}
+.on #lbl{transform:none;transition:transform .5s var(--ein) .2s}
+.on #win{opacity:1;transition:opacity .25s .3s}
+/* out: the crawl fades, the label slides back, the bar wipes off to the right */
+.out #win{opacity:0;transition:opacity .25s}
+.out #lbl{transform:translateX(-100%);transition:transform .35s var(--eout) .05s}
+.out #bar{clip-path:inset(0 0 0 100%);transition:clip-path .45s var(--eout) .15s}
+</style>
+</head>
+<body>
+<div id="crawl"><div id="bar"></div><div id="lbl"></div><div id="win"><div id="run"></div></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+function truthy(v){return !(v===false||v==='false'||v===0||v==='0'||v==='no'||v==='off')}
+function css(k,v){if(v!=null&&v!=='')document.documentElement.style.setProperty(k,String(v))}
+// Shrink one line until it fits its box, down to `floor` of its size.
+function fit(el,floor){if(!el)return;el.style.fontSize='';var s=parseFloat(getComputedStyle(el).fontSize),min=s*(floor||.72);
+  while(el.scrollWidth>el.clientWidth+1&&s>min){s-=1;el.style.fontSize=s+'px'}}
+var B=document.body,data={},playing=false,resetTimer=null;
+function play(){clearTimeout(resetTimer);B.classList.remove('out','reset');void B.offsetWidth;B.classList.add('on');playing=true;
+  if(typeof onPlay==='function')onPlay()}
+function stop(){if(!playing)return;playing=false;B.classList.add('out');B.classList.remove('on');
+  if(typeof onStop==='function')onStop();clearTimeout(resetTimer);
+  resetTimer=setTimeout(function(){B.classList.add('reset');B.classList.remove('out');void B.offsetWidth;B.classList.remove('reset');
+    if(typeof onReset==='function')onReset()},OUT_MS)}
+function next(){if(typeof onNext==='function')onNext()}
+var OUT_MS=650;
+var items=[],x=null,last=null,raf=0,speed=140,sep='•';
+B.classList.add('uc');
+// The crawl is a queue of copies of the headline list. A copy that has left the screen is
+// dropped and new copies join at the right, so new headlines join smoothly after the ones on screen.
+function unit(){var u=document.createElement('span');u.className='u';
+  items.forEach(function(it){var s=document.createElement('span');s.textContent=txt(it);u.appendChild(s);
+    var p=document.createElement('span');p.className='sep';p.textContent=sep;u.appendChild(p)});return u}
+function W(){return $('win').clientWidth||1920}
+function fill(){var run=$('run'),tot=0,g=0;for(var c=run.firstChild;c;c=c.nextSibling)tot+=c.offsetWidth;
+  while(items.length&&tot<W()-x+200&&g++<200){var u=unit();run.appendChild(u);tot+=u.offsetWidth||1}}
+function frame(t){raf=requestAnimationFrame(frame);if(last==null){last=t;return}
+  var dt=Math.min(.1,Math.max(0,(t-last)/1000));last=t;x-=speed*dt;
+  var run=$('run'),f=run.firstChild;if(f&&x<=-f.offsetWidth){x+=f.offsetWidth;run.removeChild(f)}
+  fill();run.style.transform='translate3d('+x.toFixed(2)+'px,0,0)'}
+// It cuts in with the first headline already at the left (as a crawl joined mid-flow), not an empty bar.
+function restart(){$('run').textContent='';x=24;last=null}
+function onPlay(){if(x==null||!$('run').firstChild)restart();cancelAnimationFrame(raf);last=null;raf=requestAnimationFrame(frame)}
+function onReset(){cancelAnimationFrame(raf);restart()}
+function update(raw){var d=parse(raw);for(var k in d)data[k]=d[k];
+  css('--bar',d.barColor);css('--ink',d.textColor);css('--accent',d.accent);
+  if(d.barOpacity!=null&&d.barOpacity!=='')css('--bo',Math.max(0,Math.min(1,Number(d.barOpacity))));
+  if('tickerLabel' in d)setText($('lbl'),d.tickerLabel||'');
+  if('uppercase' in d)B.classList.toggle('uc',truthy(d.uppercase));
+  if(d.speed!=null&&d.speed!=='')speed=Math.max(20,Math.min(600,Number(d.speed)||140));
+  if('separator' in d)sep=d.separator==null||d.separator===''?'•':String(d.separator);
+  if('tickerItems' in d||'items' in d){items=asList('tickerItems' in d?d.tickerItems:d.items);if(!playing)restart()}}
+function onNext(){}
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){if(!playing)restart()});
+</script>
+</body>
+</html>

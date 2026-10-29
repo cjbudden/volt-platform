@@ -2,6 +2,10 @@
 //  THUMBNAIL BUILDER: library stills, sprite sheets and an hourly WebVTT for
 //  every stream that has video, built from the encoder's own segments.
 //
+//  The stills go to the Image Library (people pick them as posters). The sheets
+//  and the VTT do not: they are system files, kept in the sprite store with a
+//  sprite_sheets row each (spriteStore.ts).
+//
 //  WHY FROM SEGMENTS. Our encoder cuts a closed GOP exactly one segment long,
 //  so every segment opens on a keyframe that decodes alone: a frame is one
 //  small read and one picture decode, not a seek through a stream. The
@@ -29,6 +33,7 @@ import { originBaseFor } from '../liveOrigin';
 import { listRuns, scanRun, type LocalSegment } from '../localRecordingIndex';
 import { upsertMediaRow } from '../mediaLibrary';
 import { signedImageUrl } from '../../modules/images';
+import { isSpriteKey, recordSprite, streamSpriteKey, legacySpritesRemain, relocateLegacySprites } from './spriteStore';
 import {
   buildVtt, frameName, hourUnit, safeTz, sheetName, slotsPerSheet, slugify, unitFolder, unitsBetween, vttName,
   type HourUnit, type Layout, type SheetRecord, type UnitRecord,
@@ -207,6 +212,7 @@ export async function buildUnit(s: StreamInfo, u: HourUnit, upTo: number, deadli
   const progs = await programmesBetween(s, u.start, u.end);
   const frameEvery = c.frameIntervalSec * 1000;
   const extracted = new Map<string, Promise<Buffer | null>>();   // one decode per segment
+  const touched = new Map<string, { start: number; bytes: number }>();   // sheets written this call (sprite_sheets rows)
   const grab = (seg: PlacedSegment) => {
     const k = `${seg.dir}/${seg.file}`;
     let p = extracted.get(k);
@@ -221,7 +227,7 @@ export async function buildUnit(s: StreamInfo, u: HourUnit, upTo: number, deadli
     const sheetStart = u.start + si * per * l.intervalMs;
     let rec = sheets.find((x) => x.start_ms === sheetStart);
     if (!rec) {
-      rec = { key: libraryKey(s, `${folder}/storyboard/${sheetName(s.slug, u, sheetStart, s.tz)}`), start_ms: sheetStart, slots: per, filled: [], skipped: [] };
+      rec = { key: streamSpriteKey(s.accountId, folder, sheetName(s.slug, u, sheetStart, s.tz)), start_ms: sheetStart, slots: per, filled: [], skipped: [] };
       sheets.push(rec);
     }
     const filled = new Set(rec.filled), skipped = new Set(rec.skipped ?? []);
@@ -278,18 +284,18 @@ export async function buildUnit(s: StreamInfo, u: HourUnit, upTo: number, deadli
 
     if (tiles.length) {
       const W = l.cols * l.tileW, H = l.rows * l.tileH;
-      const prev = rec.filled.length ? await imageStore().get(rec.key) : null;
+      // A sheet from before the sprite store (library/...) moves there as it gains tiles.
+      const legacy = isSpriteKey(rec.key) ? null : rec.key;
+      if (legacy) rec.key = streamSpriteKey(s.accountId, folder, legacy.split('/').pop()!);
+      const prev = rec.filled.length ? (await imageStore().get(rec.key)) ?? (legacy ? await imageStore().get(legacy) : null) : null;
       const base = prev ?? await sharp({ create: { width: W, height: H, channels: 3, background: '#000000' } }).jpeg().toBuffer();
       const sheet = await sharp(base).composite(tiles).jpeg({ quality: c.sheetQuality, mozjpeg: true }).toBuffer();
       await imageStore().put(rec.key, sheet, 'image/jpeg');
-      const rel = rec.key.slice(`library/${s.accountId}/`.length);
-      await upsertMediaRow({
-        accountId: s.accountId, kind: 'storyboard', path: rel, folder: `${folder}/storyboard`, name: rel.split('/').pop()!,
-        storeKey: rec.key, sizeBytes: sheet.length, contentType: 'image/jpeg', tags: ['encoder', 'storyboard'],
-        source: 'encoder', channelId: s.id, capturedAt: new Date(sheetStart),
-        facts: { width: W, height: H, contentType: 'image/jpeg' },
-        extra: { channel: s.name, stream_kind: s.kind, sheet_start_ms: sheetStart, tiles: filled.size, interval_ms: l.intervalMs },
-      });
+      if (legacy) {
+        await imageStore().delete(legacy).catch(() => { /* already gone */ });
+        await query(`DELETE FROM media_files WHERE account_id = $1 AND store_key = $2`, [s.accountId, legacy]);
+      }
+      touched.set(rec.key, { start: sheetStart, bytes: sheet.length });
     }
     rec.filled = [...filled].sort((a, b) => a - b);
     rec.skipped = [...skipped].sort((a, b) => a - b);
@@ -297,30 +303,62 @@ export async function buildUnit(s: StreamInfo, u: HourUnit, upTo: number, deadli
 
   sheets.sort((a, b) => a.start_ms - b.start_ms);
   const unit: UnitRecord = { ...l, unitStart: u.start, unitEnd: u.end, sheets };
-  const vttKey = libraryKey(s, `${folder}/storyboard/${vttName(s.slug, u)}`);
+  const vttKey = streamSpriteKey(s.accountId, folder, vttName(s.slug, u));
   const vtt = buildVtt([unit], [{ from: u.start, to: u.end, offset: 0 }], (k, v) => sheetUrl(k, v, l));
   await imageStore().put(vttKey, Buffer.from(vtt), 'text/vtt');
+  if (row?.vtt_key && row.vtt_key !== vttKey) await imageStore().delete(row.vtt_key).catch(() => { /* already gone */ });
 
   const totalSlots = Math.ceil((u.end - u.start) / l.intervalMs);
   const settled = sheets.reduce((n, x) => n + x.filled.length + (x.skipped?.length ?? 0), 0);
   const tiles = sheets.reduce((n, x) => n + x.filled.length, 0);
   res.status = until >= u.end && settled >= totalSlots ? (tiles ? 'complete' : 'empty') : 'building';
-  await query(
+  const saved = await one<{ id: string }>(
     `INSERT INTO storyboards (account_id, stream_kind, stream_id, unit_start, unit_end, folder, interval_ms,
        tile_w, tile_h, cols, rows, sheets, vtt_key, tiles, frames, status, built_through)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17)
      ON CONFLICT (stream_id, unit_start) DO UPDATE SET
        sheets = EXCLUDED.sheets, vtt_key = EXCLUDED.vtt_key, tiles = EXCLUDED.tiles,
        frames = storyboards.frames + $15, status = EXCLUDED.status,
-       built_through = GREATEST(storyboards.built_through, EXCLUDED.built_through), updated_at = now()`,
+       built_through = GREATEST(storyboards.built_through, EXCLUDED.built_through), updated_at = now()
+     RETURNING id`,
     [s.accountId, s.kind, s.id, new Date(u.start), new Date(u.end), folder, l.intervalMs, l.tileW, l.tileH,
      l.cols, l.rows, JSON.stringify(sheets), vttKey, tiles, res.framesAdded, res.status, new Date(until)]);
+  // The sprite inventory: each sheet written this call, and the hour's VTT.
+  const base = { accountId: s.accountId, ownerKind: 'stream' as const, streamKind: s.kind, streamId: s.id, storyboardId: saved?.id ?? null };
+  for (const sh of sheets) {
+    const t = touched.get(sh.key);
+    if (!t) continue;
+    await recordSprite({ ...base, storeKey: sh.key, startMs: t.start, intervalMs: l.intervalMs, tileW: l.tileW, tileH: l.tileH,
+      cols: l.cols, rows: l.rows, tiles: sh.filled.length, width: l.cols * l.tileW, height: l.rows * l.tileH, sizeBytes: t.bytes });
+  }
+  await recordSprite({ ...base, kind: 'vtt', storeKey: vttKey, startMs: u.start, sizeBytes: Buffer.byteLength(vtt) });
   return res;
 }
 
 // ---------------------------------------------------------------- passes
 let passing = false;
 const building = new Set<string>();
+
+// Sheets made before the sprite store still in the Image Library: moved a batch per pass
+// until none are left (spriteStore.ts relocateLegacySprites). null = not checked yet.
+let legacyPending: boolean | null = null;
+/** One relocation batch, when sheets with old keys remain. Streams being built are left for the next pass.
+ *  Answers whether more remain. */
+export async function relocateWhilePending(): Promise<boolean> {
+  if (legacyPending === false) return false;
+  try {
+    if (legacyPending === null) legacyPending = await legacySpritesRemain();
+    if (!legacyPending) return false;
+    const r = await relocateLegacySprites({ skipStreams: building });
+    if (r.hours || r.assets || r.clipVtts || r.libraryRows)
+      console.log(`[sprites] moved out of the Image Library: ${r.hours} hour(s), ${r.assets} upload(s), ${r.clipVtts} clip VTT(s), ${r.objects} file(s), ${r.libraryRows} library row(s) dropped${r.missing ? `, ${r.missing} missing` : ''}${r.done ? ' (done)' : ''}`);
+    legacyPending = !r.done;
+  } catch (e) {
+    console.warn('[sprites] relocation batch failed (retried next pass)', e);
+    return false;
+  }
+  return !!legacyPending;
+}
 
 export interface PassReport { streams: number; units: number; tiles: number; frames: number; deadline: boolean; ms: number }
 
@@ -363,6 +401,7 @@ export async function thumbnailPass(now = Date.now()): Promise<PassReport | null
   const deadline = t0 + c.passBudgetSeconds * 1000;
   const r: PassReport = { streams: 0, units: 0, tiles: 0, frames: 0, deadline: false, ms: 0 };
   try {
+    await relocateWhilePending();
     for (const id of await streamsWithMaterial()) {
       if (building.has(id)) continue;
       const x = await buildRange(id, now - c.lookbackMinutes * 60_000, now, deadline);
@@ -382,20 +421,33 @@ export async function sweepThumbnails(now = Date.now()): Promise<{ hours: number
   const days = cfg().retentionDays;
   if (!days) return { hours: 0, files: 0 };
   const old = await query<any>(
-    `SELECT id, account_id, folder FROM storyboards WHERE unit_end < $1 ORDER BY unit_end LIMIT 200`,
+    // An hour a clip was cut from keeps its stills and sheets: they are the clip's picture
+    // of its source, and recording retention keeps that source too (services/media/prune.ts).
+    `SELECT sb.id, sb.account_id, sb.folder FROM storyboards sb WHERE sb.unit_end < $1
+        AND NOT EXISTS (SELECT 1 FROM clip_segments cs JOIN vod_assets v ON v.id = cs.vod_asset_id
+                         WHERE COALESCE(v.channel_id, v.event_id) = sb.stream_id
+                           AND cs.source_from_ms < (extract(epoch FROM sb.unit_end) * 1000)
+                           AND cs.source_to_ms > (extract(epoch FROM sb.unit_start) * 1000))
+      ORDER BY sb.unit_end LIMIT 200`,
     [new Date(now - days * 86400_000)]);
   let files = 0;
   for (const sb of old) {
-    const prefix = `library/${sb.account_id}/${sb.folder}`;
-    for (const o of await imageStore().list(prefix + '/').catch(() => [])) {
-      await imageStore().delete(o.key).catch(() => { /* already gone */ });
-      files++;
+    // The hour's stills (Image Library) and its sheets and VTT (sprite store; their sprite_sheets rows go with the storyboard row).
+    for (const prefix of [`library/${sb.account_id}/${sb.folder}`, streamSpriteKey(sb.account_id, sb.folder, '').replace(/\/$/, '')]) {
+      for (const o of await imageStore().list(prefix + '/').catch(() => [])) {
+        await imageStore().delete(o.key).catch(() => { /* already gone */ });
+        files++;
+      }
     }
     await query(
       `DELETE FROM media_files WHERE account_id = $1 AND source = 'encoder' AND (folder = $2 OR folder LIKE $3)`,
       [sb.account_id, sb.folder, sb.folder.replace(/[\\%_]/g, (ch: string) => '\\' + ch) + '/%']);
     await query(`DELETE FROM storyboards WHERE id = $1`, [sb.id]);
+    // The hour's folder is empty now; so may be the day's and the channel's (libraryMoves.ts).
+    await (await import('../media/libraryMoves')).pruneEmptyFolders(sb.account_id, [sb.folder]).catch((e) => console.warn('[thumbs] empty folders not removed', e));
   }
+  // Empty directories anywhere in a local store's library, at most hourly.
+  await (await import('../media/libraryMoves')).tidyEmptyDirs().catch(() => 0);
   return { hours: old.length, files };
 }
 

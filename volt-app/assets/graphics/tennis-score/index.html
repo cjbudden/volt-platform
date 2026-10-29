@@ -1,0 +1,486 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tennis score</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     In and out sequences: see volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md section 4.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Tennis score (sets, games, points, automatic callouts)",
+  "bbox": [
+    96,
+    58,
+    760,
+    190
+  ],
+  "fields": [
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title (event, round, court)"
+    },
+    {
+      "id": "p1Name",
+      "type": "text",
+      "label": "Player or team 1"
+    },
+    {
+      "id": "p2Name",
+      "type": "text",
+      "label": "Player or team 2"
+    },
+    {
+      "id": "sets",
+      "type": "list",
+      "label": "Sets, games each, current set last: 6-4, 3-6, 2-1 (or a feed's period_scores)"
+    },
+    {
+      "id": "points",
+      "type": "text",
+      "label": "Points in this game: 40-15, AD-40, tie-break 5-3 (or a feed's game_state)"
+    },
+    {
+      "id": "server",
+      "type": "number",
+      "label": "Serving: 1 or 2, or home / away (0 for none)"
+    },
+    {
+      "id": "bestOf",
+      "type": "number",
+      "label": "Match format",
+      "options": [
+        {
+          "value": 3,
+          "label": "Best of 3 sets"
+        },
+        {
+          "value": 5,
+          "label": "Best of 5 sets"
+        }
+      ]
+    },
+    {
+      "id": "finalSet",
+      "type": "text",
+      "label": "Final set",
+      "options": [
+        {
+          "value": "tb7",
+          "label": "Tie-break to 7 at 6-6"
+        },
+        {
+          "value": "tb10",
+          "label": "10-point tie-break at 6-6 (Grand Slams)"
+        },
+        {
+          "value": "adv",
+          "label": "Advantage set, no tie-break"
+        },
+        {
+          "value": "mtb",
+          "label": "Match tie-break to 10 instead of the final set"
+        }
+      ]
+    },
+    {
+      "id": "noAd",
+      "type": "boolean",
+      "label": "No-ad scoring (deciding point at deuce)"
+    },
+    {
+      "id": "autoCallouts",
+      "type": "boolean",
+      "label": "Automatic callouts: break, set and match point, tie-break, deuce"
+    },
+    {
+      "id": "championship",
+      "type": "boolean",
+      "label": "A final: say CHAMPIONSHIP POINT for match point"
+    },
+    {
+      "id": "matchStatus",
+      "type": "text",
+      "label": "Feed match status: interrupted, delayed, retired, walkover… shown as a callout"
+    },
+    {
+      "id": "status",
+      "type": "text",
+      "label": "Manual callout (shown instead of the automatic one)",
+      "options": [
+        {
+          "value": "",
+          "label": "None (automatic)"
+        },
+        {
+          "value": "TIME OUT",
+          "label": "TIME OUT"
+        },
+        {
+          "value": "MEDICAL TIME-OUT",
+          "label": "MEDICAL TIME-OUT"
+        },
+        {
+          "value": "INJURY TIME-OUT",
+          "label": "INJURY TIME-OUT"
+        },
+        {
+          "value": "TOILET BREAK",
+          "label": "TOILET BREAK"
+        },
+        {
+          "value": "CHALLENGE",
+          "label": "CHALLENGE"
+        },
+        {
+          "value": "HAWK-EYE REVIEW",
+          "label": "HAWK-EYE REVIEW"
+        },
+        {
+          "value": "CODE VIOLATION",
+          "label": "CODE VIOLATION"
+        },
+        {
+          "value": "TIME VIOLATION",
+          "label": "TIME VIOLATION"
+        },
+        {
+          "value": "RAIN DELAY",
+          "label": "RAIN DELAY"
+        },
+        {
+          "value": "HEAT BREAK",
+          "label": "HEAT BREAK"
+        },
+        {
+          "value": "MATCH SUSPENDED",
+          "label": "MATCH SUSPENDED"
+        },
+        {
+          "value": "WARM-UP",
+          "label": "WARM-UP"
+        },
+        {
+          "value": "SET BREAK",
+          "label": "SET BREAK"
+        },
+        {
+          "value": "RETIRED",
+          "label": "RETIRED"
+        },
+        {
+          "value": "WALKOVER",
+          "label": "WALKOVER"
+        }
+      ]
+    },
+    {
+      "id": "statusCustom",
+      "type": "text",
+      "label": "Custom callout (shown first when filled)"
+    },
+    {
+      "id": "calloutPlayer",
+      "type": "number",
+      "label": "Manual or custom callout is about",
+      "options": [
+        {
+          "value": 0,
+          "label": "Nobody in particular"
+        },
+        {
+          "value": 1,
+          "label": "Player or team 1"
+        },
+        {
+          "value": 2,
+          "label": "Player or team 2"
+        }
+      ]
+    },
+    {
+      "id": "winner",
+      "type": "number",
+      "label": "Winner: 1 or 2, or home / away (empty works it out from the sets)"
+    },
+    {
+      "id": "p1Image",
+      "type": "image",
+      "label": "Flag or logo 1 (optional)"
+    },
+    {
+      "id": "p2Image",
+      "type": "image",
+      "label": "Flag or logo 2 (optional)"
+    },
+    {
+      "id": "p1Color",
+      "type": "color",
+      "label": "Colour 1 (when there is no flag)"
+    },
+    {
+      "id": "p2Color",
+      "type": "color",
+      "label": "Colour 2 (when there is no flag)"
+    },
+    {
+      "id": "accent",
+      "type": "color",
+      "label": "Points and title colour"
+    },
+    {
+      "id": "panelColor",
+      "type": "color",
+      "label": "Panel colour"
+    },
+    {
+      "id": "ballColor",
+      "type": "color",
+      "label": "Serve marker colour"
+    }
+  ],
+  "sample": {
+    "title": "QUARTER-FINAL · CENTRE COURT",
+    "p1Name": "N. Djokovic",
+    "p2Name": "C. Alcaraz",
+    "sets": [
+      "6-4",
+      "5-4"
+    ],
+    "points": "40-30",
+    "server": 1,
+    "status": "",
+    "p1Color": "#c8102e",
+    "p2Color": "#f1bf00",
+    "winner": 0,
+    "p1Image": "",
+    "p2Image": "",
+    "accent": "#f2c200",
+    "panelColor": "#0b1220",
+    "ballColor": "#d4f53c",
+    "statusCustom": "",
+    "calloutPlayer": 0,
+    "bestOf": 3,
+    "finalSet": "tb10",
+    "noAd": false,
+    "autoCallouts": true,
+    "championship": false,
+    "matchStatus": ""
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+:root{--ein:cubic-bezier(.16,1,.3,1);--eout:cubic-bezier(.7,0,.84,0);--pop:cubic-bezier(.34,1.56,.64,1)}
+/* Three states: initial (hidden), .on (in sequence to on air), .out (out sequence to a different
+   hidden pose). After the out sequence .reset snaps back to initial with no transition. */
+.reset *,.reset *::before,.reset *::after{transition:none!important;animation:none!important}
+:root{--panel:rgba(9,15,30,.94);--row2:rgba(255,255,255,.06);--accent:#f2c200;--accentInk:#0b1220;--ball:#d4f53c;--p1:#c8102e;--p2:#00247d}
+#sb{position:absolute;left:96px;top:58px;display:flex;flex-direction:column;align-items:flex-start;filter:drop-shadow(0 8px 20px rgba(0,0,0,.4))}
+#ttl{background:var(--accent);color:var(--accentInk);font:700 20px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px 6px;
+  white-space:nowrap;transform:translateY(100%);opacity:0}
+#ttl:empty{display:none}
+#card{background:var(--panel);clip-path:inset(0 0 100% 0)}
+.row{display:flex;align-items:center;height:56px;transform:translateX(-30px);opacity:0}
+.row+.row{border-top:1px solid rgba(255,255,255,.12)}
+.who{display:flex;align-items:center;gap:14px;padding:0 14px 0 16px;width:var(--nameW,330px);box-sizing:border-box;position:relative}
+.chip{width:14px;height:14px;flex:none;background:var(--c)}
+.flag{width:40px;height:28px;object-fit:cover;flex:none;display:none;box-shadow:0 0 0 1px rgba(255,255,255,.25)}
+.hasimg .flag{display:block}.hasimg .chip{display:none}
+.nm{flex:1;min-width:0;font:700 31px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;white-space:nowrap;overflow:hidden;letter-spacing:.01em}
+.lost .nm{opacity:.55}
+.won .nm::after{content:" \2713";color:var(--accent)}
+.srv{width:26px;flex:none;display:flex;align-items:center;justify-content:center;gap:3px}
+.cells{display:flex;height:100%}
+.c{width:50px;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;
+  font:600 30px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;font-variant-numeric:tabular-nums;color:rgba(255,255,255,.55);transition:width .45s var(--ein)}
+.c.w{color:#fff}
+.c.cur{background:var(--row2);color:#fff}
+.c.pts{width:76px;background:var(--accent);color:var(--accentInk);font-weight:700;font-size:32px}
+.c.new{width:0}
+.c span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transition:transform .4s var(--ein),opacity .4s}
+.c span.in{transform:translateY(100%);opacity:0}.c span.gone{transform:translateY(-100%);opacity:0}
+.c.flash{animation:flash .9s ease-out}
+@keyframes flash{0%{filter:brightness(1.7)}100%{filter:none}}
+#ballrail{position:absolute;left:0;top:0;width:26px;height:112px;pointer-events:none}
+#ball{position:absolute;left:5px;width:16px;height:16px;border-radius:50%;background:var(--ball);box-shadow:0 0 0 2px rgba(0,0,0,.25);
+  top:20px;transform:scale(0);transition:top .45s var(--ein),transform .35s var(--pop)}
+#sn{position:absolute;left:24px;font:700 18px/1 "Volt Sans";color:var(--ball);top:19px;transition:top .45s var(--ein);opacity:0}
+.s2 #ball{top:76px}.s2 #sn{top:75px}
+.on.s1 #ball,.on.s2 #ball{transform:scale(1);transition:top .45s var(--ein),transform .35s var(--pop) .55s}
+.on.s1.withnum #sn,.on.s2.withnum #sn{opacity:1;transition:top .45s var(--ein),opacity .3s .6s}
+#st{background:var(--accent);color:var(--accentInk);font:700 22px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;padding:9px 14px 8px;
+  white-space:nowrap;clip-path:inset(0 100% 0 0);transition:clip-path .4s var(--ein)}
+.on #st.show{clip-path:inset(0 0 0 0);transition:clip-path .45s var(--ein) .7s}
+.on #st.show.live{transition:clip-path .4s var(--ein)}
+#st.pulse{animation:pulse 1.6s ease-in-out 1.2s infinite}
+@keyframes pulse{0%,100%{filter:none}50%{filter:brightness(1.25)}}
+/* in: the title tab rises, the card unrolls downward, the two rows slide in one after the other,
+   the serve marker pops beside the server and the status tab wipes out under the card */
+.on #ttl{transform:none;opacity:1;transition:transform .4s var(--ein),opacity .25s}
+.on #card{clip-path:inset(0 0 0 0);transition:clip-path .5s var(--ein) .1s}
+.on .row{transform:none;opacity:1;transition:transform .5s var(--ein) calc(.25s + var(--r) * .1s),opacity .3s calc(.25s + var(--r) * .1s)}
+/* out: status and marker go first, the rows slide out left, the card rolls up, the title drops */
+.out #st{clip-path:inset(0 100% 0 0);transition:clip-path .25s var(--eout)}
+.out #ball{transform:scale(0);transition:transform .2s var(--eout)}
+.out .row{transform:translateX(-30px);opacity:0;transition:transform .3s var(--eout) calc((1 - var(--r)) * .06s),opacity .25s calc((1 - var(--r)) * .06s)}
+.out #card{clip-path:inset(0 0 100% 0);transition:clip-path .35s var(--eout) .2s}
+.out #ttl{transform:translateY(100%);opacity:0;transition:transform .3s var(--eout) .35s,opacity .2s .4s}
+</style>
+</head>
+<body>
+<div id="sb"><div id="ttl"></div><div id="card"><div style="position:relative">
+<div id="ballrail"><div id="ball"></div><div id="sn"></div></div>
+<div class="row" id="r1" style="--r:0"><div class="srv"></div><div class="who"><span class="chip" style="--c:var(--p1)"></span><img class="flag" alt=""><div class="nm"></div></div><div class="cells"></div></div>
+<div class="row" id="r2" style="--r:1"><div class="srv"></div><div class="who"><span class="chip" style="--c:var(--p2)"></span><img class="flag" alt=""><div class="nm"></div></div><div class="cells"></div></div>
+</div></div><div id="st"></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+function truthy(v){return !(v===false||v==='false'||v===0||v==='0'||v==='no'||v==='off')}
+function css(k,v){if(v!=null&&v!=='')document.documentElement.style.setProperty(k,String(v))}
+// Shrink one line until it fits its box, down to `floor` of its size.
+function fit(el,floor){if(!el)return;el.style.fontSize='';var s=parseFloat(getComputedStyle(el).fontSize),min=s*(floor||.72);
+  while(el.scrollWidth>el.clientWidth+1&&s>min){s-=1;el.style.fontSize=s+'px'}}
+var B=document.body,data={},playing=false,resetTimer=null;
+function play(){clearTimeout(resetTimer);B.classList.remove('out','reset');void B.offsetWidth;B.classList.add('on');playing=true;
+  if(typeof onPlay==='function')onPlay()}
+function stop(){if(!playing)return;playing=false;B.classList.add('out');B.classList.remove('on');
+  if(typeof onStop==='function')onStop();clearTimeout(resetTimer);
+  resetTimer=setTimeout(function(){B.classList.add('reset');B.classList.remove('out');void B.offsetWidth;B.classList.remove('reset');
+    if(typeof onReset==='function')onReset()},OUT_MS)}
+function next(){if(typeof onNext==='function')onNext()}
+// Tennis score: sets listed, then the live score of the current game.
+var OUT_MS=750;
+// One engine for racket and net sports. Scores arrive as "a-b" text (or {a,b} objects, or two
+// numbers), finished sets or games as a list, and the live score of the current game separately.
+// Objects from a data feed are read as they come: {a,b}, {p1,p2}, {home,away}, Sportradar's
+// {home_score,away_score} (period_scores, game_state) and Sportradar Live Data's {t1,t2}.
+function side(v,k){var n=k===0?['a','p1','home','home_score','t1']:['b','p2','away','away_score','t2'];for(var i=0;i<n.length;i++)if(v[n[i]]!=null)return v[n[i]];return null}
+function pair(v){if(v==null||v==='')return null;if(typeof v==='object'&&!Array.isArray(v)){var a=side(v,0),b=side(v,1);if(a==null&&b==null)return null;return [txtv(a),txtv(b)]}
+  if(Array.isArray(v))return [txtv(v[0]),txtv(v[1])];var m=String(v).trim().match(/^(.+?)\s*[-:–\/]\s*(.+)$/);return m?[m[1].trim(),m[2].trim()]:null}
+function txtv(x){return x==null?'':String(x)}
+function num(x){var n=parseInt(x,10);return isNaN(n)?null:n}
+function roll(cell,v){var cur=cell.querySelector('span:not(.gone)');if(cur&&cur.textContent===v)return;
+  var n=document.createElement('span');n.className='in';n.textContent=v;cell.appendChild(n);void n.offsetWidth;n.className='';
+  if(cur){cur.className='gone';setTimeout(function(){cur.remove()},450);if(playing){cell.classList.remove('flash');void cell.offsetWidth;cell.classList.add('flash')}}}
+// Cells: one per set or game (the current one marked in tennis), then the points cell.
+function cells(rowIdx,list,pts){var box=document.querySelectorAll('.cells')[rowIdx],want=list.length+(pts?1:0);
+  while(box.children.length<want){var c=document.createElement('div');c.className='c'+(playing?' new':'');box.insertBefore(c,box.querySelector('.pts'));
+    if(playing)(function(c){requestAnimationFrame(function(){requestAnimationFrame(function(){c.classList.remove('new')})})})(c)}
+  while(box.children.length>want)box.removeChild(box.lastChild);
+  var kids=box.children;
+  function cls(c,x){c.className='c'+(c.classList.contains('new')?' new':'')+(x?' '+x:'')}
+  list.forEach(function(s,i){var c=kids[i];cls(c,s.cls);roll(c,s.v)});
+  if(pts){var p=kids[want-1];cls(p,'pts');roll(p,pts)}}
+// THE RULES. Sets arrive as games each ("6-4", "7-6(5)"), the current set last, and the live
+// points separately. From them and the match format the template works out who has won what,
+// whether this is a tie-break, and who is one point from the game, the set or the match.
+var PT={'0':0,'00':0,'LOVE':0,'15':1,'30':2,'40':3,'A':4,'AD':4,'ADV':4};
+function on(v){return v===true||v===1||v==='1'||v==='true'||v==='yes'||v==='on'}
+function fmt(){var bv=data.bestOf;if(bv&&typeof bv==='object')bv=bv.best_of!=null?bv.best_of:bv.bestOf;var bo=Number(bv)===5?5:3,f=String(data.finalSet||'tb7');if(!/^(tb7|tb10|adv|mtb)$/.test(f))f='tb7';return {bo:bo,need:(bo+1)/2,fin:f,noAd:on(data.noAd)}}
+// Who has won a set on these games (0: nobody yet). The deciding set follows the final-set rule.
+function setWon(g,decider,R){var a=g[0],b=g[1],hi=Math.max(a,b),lo=Math.min(a,b),x=a>b?1:2;if(a===b)return 0;
+  if(decider&&R.fin==='mtb')return (hi>=10&&hi-lo>=2)||(hi===1&&lo===0)?x:0;
+  if(decider&&R.fin==='adv')return hi>=6&&hi-lo>=2?x:0;
+  return (hi===6&&lo<=4)||(hi===7&&(lo===5||lo===6))?x:0}
+// "home" / "away" (a feed's serving or winner) as player 1 / 2.
+function who(v){if(v==null||v==='')return 0;if(typeof v==='object')v=v.serving!=null?v.serving:v.side;var s=String(v).toLowerCase();
+  if(s==='home'||s==='p1'||s==='1'||s==='a')return 1;if(s==='away'||s==='p2'||s==='2'||s==='b')return 2;return 0}
+// The current game's points. A feed's game_state counts 0/15/30/40/50 (50: advantage) or names
+// who has the advantage; shown as AD.
+function points(){var v=data.points,p=pair(v);if(!p)return null;
+  if(v&&typeof v==='object'&&!Array.isArray(v)){var adv=who(v.advantage);if(adv)p=adv===1?['AD','40']:['40','AD'];
+    p=p.map(function(x){return x==='50'?'AD':x})}
+  return p}
+function games(v){var p=pair(v);if(!p)return null;return [num(p[0])||0,num(p[1])||0]}
+function state(){var R=fmt(),sets=asList(data.sets).map(games).filter(Boolean),won=[0,0],winner=0,cur=null,ci=-1;
+  for(var i=0;i<sets.length&&!winner;i++){var w=setWon(sets[i],i===R.bo-1,R);
+    if(w){won[w-1]++;if(won[w-1]>=R.need)winner=w}else if(i===sets.length-1){cur=sets[i];ci=i}}
+  var justSet=0;if(!winner&&!cur&&sets.length){var lw=setWon(sets[sets.length-1],sets.length-1===R.bo-1,R);justSet=lw;ci=sets.length;cur=[0,0]}
+  if(!cur&&!winner){cur=[0,0];ci=0}
+  var decider=ci===R.bo-1,tb=null;
+  if(cur&&decider&&R.fin==='mtb')tb={to:10,match:true};
+  else if(cur&&cur[0]===6&&cur[1]===6&&!(decider&&R.fin==='adv'))tb={to:decider&&R.fin==='tb10'?10:7};
+  var p=points(),pts=null;
+  if(p&&!winner){if(tb)pts=[num(p[0])||0,num(p[1])||0];else{var a=PT[String(p[0]).toUpperCase()],b=PT[String(p[1]).toUpperCase()];pts=[a==null?0:a,b==null?0:b]}}
+  return {R:R,won:won,winner:winner,cur:cur,ci:ci,decider:decider,tb:tb,pts:pts,justSet:justSet&&!(pts&&(pts[0]||pts[1]))?justSet:0}}
+// What the next point is worth to player x (0 or 1): how many chances in a row, and the stake.
+function stake(S,x){if(!S.pts||!S.cur||S.winner)return null;var o=1-x,px=S.pts[x],po=S.pts[o],n=0,dp=false;
+  if(S.tb){if(px>=S.tb.to-1&&px>po)n=px-po}
+  else if(S.R.noAd&&px===3&&po===3){n=1;dp=true}
+  else if(px===4)n=1;else if(px===3&&po<3)n=3-po;
+  if(!n)return null;
+  var setW=!!S.tb;if(!setW){var g=S.cur.slice();g[x]++;setW=setWon(g,S.decider,S.R)===x+1}
+  var match=setW&&S.won[x]+1>=S.R.need,srv=who(data.server);
+  return {n:n,dp:dp,what:match?'MATCH':setW?'SET':srv&&srv!==x+1?'BREAK':'GAME'}}
+function plural(n,what){var w=what==='MATCH'&&on(data.championship)?'CHAMPIONSHIP':what;return n>1?n+' '+w+' POINTS':w+' POINT'}
+function lastName(i){return String(data['p'+i+'Name']||'')}
+function autoCallout(S){
+  if(S.winner)return 'GAME, SET AND MATCH';
+  if(S.justSet)return 'SET · '+lastName(S.justSet);
+  var a=stake(S,0),b=stake(S,1),rank={MATCH:3,SET:2,BREAK:1,GAME:0};
+  if(a&&b){var top=rank[a.what]>=rank[b.what]?a:b;return top.what==='MATCH'||top.what==='SET'?plural(1,top.what):'DECIDING POINT'}
+  var k=a||b;if(k&&k.what!=='GAME')return plural(k.n,k.what);
+  if(k&&k.dp)return 'DECIDING POINT';
+  if(S.tb)return S.tb.match?'MATCH TIE-BREAK':'TIE-BREAK';
+  if(S.pts&&!S.R.noAd&&S.pts[0]===3&&S.pts[1]===3)return 'DEUCE';
+  return ''}
+// A feed's match status, when it says play has stopped or how the match ended.
+var FEED_STATUS={interrupted:'MATCH SUSPENDED',suspended:'MATCH SUSPENDED',delayed:'DELAYED',start_delayed:'DELAYED',postponed:'POSTPONED',
+  abandoned:'ABANDONED',walkover:'WALKOVER',walkover1:'WALKOVER',walkover2:'WALKOVER',retired:'RETIRED',retired1:'RETIRED',retired2:'RETIRED',defaulted:'DEFAULTED',defaulted1:'DEFAULTED',defaulted2:'DEFAULTED'};
+function feedStatus(v){if(v==null||v==='')return '';if(typeof v==='object')v=v.match_status!=null?v.match_status:v.status;return FEED_STATUS[String(v).toLowerCase().replace(/[\s-]+/g,'_')]||''}
+function callout(S){var who=Number(data.calloutPlayer)||0,name=who?lastName(who):'',tag=function(t){return t&&name?t+' · '+name:t};
+  var c=String(data.statusCustom||'').trim();if(c)return tag(c);
+  var m=String(data.status||'').trim();if(m)return tag(m);
+  var fs=feedStatus(data.matchStatus);if(fs)return fs;
+  return data.autoCallouts==null||data.autoCallouts===''||on(data.autoCallouts)?autoCallout(S):''}
+function apply(){
+  var S=state(),wf=who(data.winner),w=wf>0?wf:S.winner,over=w>0,sets=asList(data.sets).map(pair).filter(Boolean),pts=over?null:points(),cur=sets.length&&!over&&S.ci===sets.length-1?sets.length-1:-1;
+  var a=[],b=[];sets.forEach(function(s,i){var x=num(s[0]),y=num(s[1]),done=i!==cur;
+    a.push({v:s[0],cls:i===cur?'cur':done&&x!=null&&y!=null&&x>y?'w':''});b.push({v:s[1],cls:i===cur?'cur':done&&x!=null&&y!=null&&y>x?'w':''})});
+  cells(0,a,pts&&pts[0]);cells(1,b,pts&&pts[1]);
+  // Once there is a winner the match is over: no live points, no serve marker, every set counted.
+  var s=over?0:who(data.server);B.classList.toggle('s1',s===1);B.classList.toggle('s2',s===2);
+  var sn=false&&data.serverNumber!=null&&data.serverNumber!==''?String(data.serverNumber):'';setText($('sn'),sn);B.classList.toggle('withnum',!!sn);
+  $('r1').classList.toggle('won',w===1);$('r2').classList.toggle('won',w===2);$('r1').classList.toggle('lost',w===2);$('r2').classList.toggle('lost',w===1);
+  setStatus(callout(S))}
+function setStatus(v){var st=$('st');v=v==null?'':String(v);if(st.textContent===v&&st.classList.contains('show')===!!v)return;
+  st.classList.add('live');if(!v){st.classList.remove('show','pulse');return}
+  if(st.classList.contains('show')&&playing){st.classList.remove('show');setTimeout(function(){st.textContent=v;st.classList.add('show')},380)}
+  else{st.textContent=v;st.classList.add('show')}
+  st.classList.toggle('pulse',/MATCH POINT|CHAMPIONSHIP|SET POINT|BREAK/i.test(v))}
+function sizeNames(){var w=280;[].forEach.call(document.querySelectorAll('.nm'),function(n){n.style.fontSize='';
+  var probe=document.createElement('span');probe.style.cssText='position:absolute;visibility:hidden;white-space:nowrap;font:inherit';probe.textContent=n.textContent;n.appendChild(probe);
+  w=Math.max(w,probe.offsetWidth+110);probe.remove()});w=Math.min(w,520);css('--nameW',w+'px');
+  [].forEach.call(document.querySelectorAll('.nm'),function(n){fit(n,.75)})}
+function player(i,d){var r=$('r'+i);
+  if(('p'+i+'Name') in d)setText(r.querySelector('.nm'),d['p'+i+'Name']);
+  if(('p'+i+'Image') in d){var img=r.querySelector('.flag');img.setAttribute('src',d['p'+i+'Image']||'');r.classList.toggle('hasimg',!!d['p'+i+'Image'])}
+  if(d['p'+i+'Color'])css('--p'+i,d['p'+i+'Color'])}
+function update(raw){var d=parse(raw);for(var k in d)data[k]=d[k];
+  css('--accent',d.accent);css('--accentInk',d.accentText);if(d.panelColor)css('--panel',d.panelColor);css('--ball',d.ballColor);
+  if('title' in d)setText($('ttl'),d.title||'');player(1,d);player(2,d);
+  if('p1Name' in d||'p2Name' in d)sizeNames();
+  apply()}
+function onPlay(){$('st').classList.remove('live')}
+function onReset(){$('st').classList.remove('live')}
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(sizeNames);
+</script>
+</body>
+</html>

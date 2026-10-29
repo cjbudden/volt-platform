@@ -399,7 +399,7 @@ export async function sweep(opts: {
   const driver = storageDriver();
 
   const objects = await query<any>(
-    `SELECT o.*, o.updated_at, r.end_epoch_ms, r.channel_id AS rec_channel, r.event_id AS rec_event,
+    `SELECT o.*, o.updated_at, r.end_epoch_ms, r.channel_id AS rec_channel, r.event_id AS rec_event, r.delete_after,
             v.channel_id AS asset_channel, v.event_id AS asset_event,
             COALESCE(gc.account_id, ge.account_id) AS account_id,
             to_timestamp(COALESCE(r.end_epoch_ms, 0)/1000.0) AS closed_at
@@ -446,6 +446,13 @@ export async function sweep(opts: {
   for (const obj of objects) {
     res.considered++;
     if (obj.hold) { res.skippedOnHold++; continue; }
+    // Another object of the same run may have taken this one with it (pruneRun handles a
+    // whole run at once), so look again rather than trust the snapshot above.
+    if (!opts.dryRun && obj.recording_id) {
+      const now = await one<any>(`SELECT state, hold FROM media_objects WHERE id = $1`, [obj.id]);
+      if (!now || now.state === 'deleted') continue;
+      if (now.hold) { res.skippedOnHold++; continue; }
+    }
 
     // ---- an object a previous sweep left mid-transition --------------------
     // `deleting` or `archiving` means something crashed or errored between the
@@ -506,11 +513,21 @@ export async function sweep(opts: {
       accountId: obj.account_id,
       appliesTo: obj.vod_asset_id ? 'asset' : 'recording',
     });
+    // AN EXPIRY SET BY HAND (recordings.delete_after) wins over the rule's delete rung,
+    // earlier or later, and applies to a recording no rule governs too.
+    const manual = obj.recording_id && obj.delete_after ? new Date(obj.delete_after).getTime() : null;
+    if (manual != null && manual <= Date.now() && obj.state !== 'deleting') {
+      if (opts.dryRun) { res.deleted++; continue; }
+      try {
+        if (await removeRecordingMedia(obj, `expiry set by hand for ${new Date(manual).toISOString().slice(0, 10)}`, actor)) { res.deleted++; continue; }
+      } catch (e) { res.failed++; console.error('[retention] manual expiry failed for', obj.id, e); continue; }
+    }
     if (!rule) continue;
 
     const locs = await locationsOf(obj.id);
     const due = dueStage(obj, rule, locs.map((l) => l.tier), closedAtMsOf(obj));
     if (!due) continue;
+    if (due.stage.action === 'delete' && manual != null && manual > Date.now()) continue;   // kept longer by hand
 
     if (due.stage.action !== 'delete' && !caps.archiveEnabled) {
       // The rule asked for something this deployment cannot do. Rules are
@@ -537,6 +554,9 @@ export async function sweep(opts: {
 
     try {
       if (due.stage.action === 'delete') {
+        // A recording's run on local disk goes through the clip-aware prune: what clips
+        // were cut from stays (held), the rest goes to the restore bin.
+        if (await removeRecordingMedia(obj, `retention rule "${rule.name}", ${due.stage.afterDays} days`, actor)) { res.deleted++; continue; }
         await transition(obj.id, 'deleting', { action: 'delete', actor, detail: `rule "${rule.name}"` });
         for (const l of locs) {
           await driver.remove(l.uri);
@@ -631,6 +651,24 @@ export async function sweep(opts: {
   return res;
 }
 
+/**
+ * Remove a recording object's run through pruneRun (clips kept, the rest to the bin).
+ * False when it is not a local run of a recording, so the caller removes it as before.
+ */
+async function removeRecordingMedia(obj: any, reason: string, actor: string): Promise<boolean> {
+  const m = /^run\/([^/]+)\//.exec(obj.logical_key ?? '');
+  const stream = obj.channel_id ?? obj.event_id ?? obj.rec_channel ?? obj.rec_event;
+  if (!m || !stream || !obj.recording_id) return false;
+  const locs = await locationsOf(obj.id);
+  if (!locs.some((l) => l.tier === 'local')) return false;
+  const { pruneRun } = await import('./prune');
+  await pruneRun({ streamId: stream, runId: m[1], accountId: obj.account_id ?? null, recordingId: obj.recording_id, reason, actor });
+  const left = await one<any>(`SELECT count(*)::int AS n FROM media_objects WHERE recording_id = $1 AND state <> 'deleted'`, [obj.recording_id]);
+  if (!left?.n) await query(`UPDATE recordings SET storage_state = 'deleted' WHERE id = $1`, [obj.recording_id]);
+  await refreshNextAction(obj.recording_id).catch(() => {});
+  return true;
+}
+
 /** A default ladder for a new account, in the deployment's own terms. */
 export function defaultLadder(): RetentionStage[] {
   const caps = capabilities();
@@ -649,12 +687,17 @@ export function defaultLadder(): RetentionStage[] {
 export async function refreshNextAction(recordingId: string): Promise<void> {
   const obj = await one<any>(
     `SELECT o.*, to_timestamp(COALESCE(r.end_epoch_ms,0)/1000.0) AS closed_at,
-            r.channel_id, r.event_id
+            r.channel_id, r.event_id, r.delete_after
        FROM media_objects o JOIN recordings r ON r.id = o.recording_id
       WHERE o.recording_id = $1 ORDER BY o.created_at LIMIT 1`,
     [recordingId]
   );
   if (!obj) return;
+  if (obj.delete_after) {   // an expiry set by hand is the next action, whatever the rule says
+    await query(`UPDATE recordings SET next_action = 'delete', next_action_at = $2, storage_state = $3::media_state WHERE id = $1`,
+      [recordingId, obj.delete_after, obj.state]);
+    return;
+  }
   const rule = await ruleFor({ channelId: obj.channel_id, eventId: obj.event_id, appliesTo: 'recording' });
   if (!rule) {
     await query(`UPDATE recordings SET next_action = NULL, next_action_at = NULL, storage_state = $2::media_state WHERE id = $1`,

@@ -121,6 +121,30 @@ live preview has an **In-stream graphics** panel: the programme marker on now, a
 announced with its wall-clock window and state (In 4 min, On screen, Shown). Read from
 `player.getStreamGraphics()`.
 
+## Key metadata for now and next (built 28 Oct 2026)
+
+Every programme marker (`CLASS="com.boomlabs.volt.programme"`, DASH `urn:com:boomlabs:volt:programme:2026`) carries the programme's key metadata, so a player can show what is on and what is next from the stream alone, with no guide request. Live channels, events and FAST channels (video and audio) all get it, because the encoder and the FAST playout write the same triggers.
+
+| Attribute | From |
+|---|---|
+| `X-TITLE`, `X-SUBTITLE`, `X-IMAGE`, `X-KIND` | the programme (image: the programme's, else the asset's poster on the CDN) |
+| `X-DESCRIPTION` | programme, else asset; one line, cut at 280 characters on a word |
+| `X-GENRE`, `X-SERIES`, `X-SEASON`, `X-EPISODE`, `X-RATING`, `X-YEAR`, `X-LANGUAGE` | programme, else asset (schema.org names such as `contentRating`, `inLanguage`, `releaseYear` are read too) |
+| `X-ARTIST`, `X-ALBUM` | songs and audio programmes |
+| `X-ASSET`, `X-DURATION` | the library asset behind the programme, and its length in whole seconds |
+| `X-MEDIA="audio"` | on an audio FAST channel |
+| `X-NEXT-TITLE`, `X-NEXT-START`, `X-NEXT-ID`, `X-NEXT-SUBTITLE`, `X-NEXT-IMAGE` | the next content programme |
+
+Only what is set is written. Up next cards repeat the next programme's genre, series, season, episode, rating, artist and description. In DASH the same keys are in the event's JSON `messageData`, lower case (`next-title`).
+
+```
+#EXT-X-DATERANGE:ID="<programme>",CLASS="com.boomlabs.volt.programme",START-DATE="2026-10-28T10:00:00.000Z",DURATION=1800.000,
+  X-TITLE="Episode 3",X-DESCRIPTION="A quiet town, and a storm.",X-GENRE="Drama, Mystery",X-SERIES="Drama Hour",X-SEASON="1",X-EPISODE="3",
+  X-RATING="M",X-ASSET="…",X-DURATION="1800",X-NEXT-TITLE="Episode 4",X-NEXT-START="2026-10-28T10:30:00.000Z",X-ID="<programme>"
+```
+
+The Volt player turns these into `state.programme` and `state.nextProgramme` (`description`, `imageUrl`, and `meta` with the rest, keys lower case with underscores), whether or not stream graphics are drawn. With no next marker in the look-ahead yet, `nextProgramme` comes from the current marker's `X-NEXT-*`. Built in `services/graphicTriggers.ts` (`keyMetadata`), checked by `test/stream-metadata.check.ts`.
+
 ## Next graphics
 
 New graphic types are a new `graphic` value and rule in `buildTriggers`, plus a renderer in the player. Candidates:

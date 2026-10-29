@@ -269,6 +269,15 @@ export interface RightsPreviewResult {
   strip: { from: string; to: string; truncated: boolean; rows: { audience: string; country: string; rightsClass: string; label: string; asked: boolean; segments: { from: string; to: string; decision: 'allow' | 'block' | 'replace'; variant: string | null }[] }[] }
 }
 
+export interface AssetDeleteImpact {
+  id: string; name: string; availability: string | null
+  /** how many days the restore bin keeps it */
+  binDays: number
+  /** why the delete would be refused right now (in an active FAST lineup), else null */
+  blocker: string | null
+  fastChannels: string[]
+  counts: { markers: number; formats: number; reviews: number; publishing_points: number; social_posts: number }
+}
 export interface DeleteImpact {
   id: string; name: string; kind: 'tv' | 'radio'; group: string; status: string
   /** why the delete would be refused right now (live, encoder running), else null */
@@ -585,6 +594,20 @@ export interface RecordingSourceQuery {
 
 
 /** What a source URL says about itself, read before anything is saved. */
+/** POST /api/sources/validate: is the source playable as it is (no ffprobe). */
+export interface SourceValidation {
+  ok: boolean
+  kind: 'icecast' | 'hls' | 'dash' | 'push' | 'unknown'
+  url: string
+  verdict: string
+  checks: { id: string; label: string; state: 'pass' | 'warn' | 'fail' | 'skip'; detail: string }[]
+  facts: { k: string; v: string }[]
+  preview: { kind: 'audio' | 'hls' | 'dash'; url: string } | null
+  icy?: IcyProbe
+  hls?: { kind?: 'master' | 'media'; variants?: { audioOnly: boolean }[] }
+  elapsedMs: number
+}
+
 export interface IcyProbe {
   ok: boolean
   url: string
@@ -651,6 +674,30 @@ export interface JobRow {
   result?: any
   created_at: string; started_at: string | null; finished_at: string | null
   source_name?: string | null
+}
+
+export interface EncodeJobRow {
+  id: string; state: JobRow['state']; priority: number
+  progress_pct: number; progress_note: string | null
+  attempts: number; max_attempts: number
+  last_error: string | null; error_code: string | null
+  created_at: string; started_at: string | null; finished_at: string | null; run_after: string | null
+  claimed_by: string | null
+  asset_id: string | null; asset_title: string | null; source_kind: string | null; source_file: string | null
+  summary: string | null
+  /** queued only: place in the platform's encode queue, 1 = next */
+  position?: number
+}
+export interface EncodeQueue { running: EncodeJobRow[]; queued: EncodeJobRow[]; recent: EncodeJobRow[]; platformBacklog: number; at: string }
+export interface JobLogLine { seq: number; attempt: number; at: string; stream: 'out' | 'err' | 'step' | 'warn'; line: string }
+export type OutputState = 'ok' | 'running' | 'pending' | 'failed' | 'skipped' | 'missing'
+export interface EncodeOutputs {
+  asset: { id: string; title: string | null; exists: boolean; dir: string; store: 'local' | 's3' }
+  renditions: { name: string; planned: boolean; state: OutputState; width: number | null; height: number | null; bitrateKbps: number | null; codec: string | null; init: boolean; segments: number; bytes: number }[]
+  manifests: { name: string; state: OutputState; path: string | null }[]
+  thumbnails: { state: OutputState; count: number; chosen: string | null; source: string | null; error?: string; detail?: string }
+  sprites: { state: OutputState; sheets: number; previews: number; intervalMs: number | null; error?: string; detail?: string }
+  followOn: { id: string; type: string; label: string; state: string; progressPct: number; note: string | null; error: string | null; finishedAt: string | null }[]
 }
 
 
@@ -917,6 +964,10 @@ export interface LadderGroup {
   /** Set when the ladder cannot resolve at all, e.g. its live profile was
    *  deleted. Shown rather than hidden: this is the screen to fix it on. */
   problem: string | null
+  /** 'box': every rendition at its fixed 16:9 size, none dropped (what FAST channels need); 'scale': follow the source. */
+  frame_mode?: 'scale' | 'box'
+  /** What uses it: watch folders naming it, FAST channels on it (named or by default), uploads (the account default). */
+  usage?: { watchfolders: number; fastChannels: { id: string; name: string; inherited: boolean }[]; uploads: boolean } | null
 }
 
 export interface LiveOutputProfile {
@@ -992,11 +1043,21 @@ export interface IngestPreviewRow {
   name: string; key: string; sanitised: string; changed: boolean; settings: Required<IngestThen>
   sources: Record<string, string>; matched: { rung: string; ruleId: string; ruleName: string }[]; deferred: boolean
   duplicate: 'proceed' | 'skip' | 'replace' | 'version' | 'rename' | 'ask'; duplicateOf: { assetId: string; strength: string } | null; reject: string | null
+  /** A library record whose encode failed that this file looks like (the panel asks what to do). */
+  failedMatch?: IngestFailedMatch | null
+}
+export interface IngestFailedMatch {
+  assetId: string; title: string; originalName: string | null; bytes: number | null; createdAt: string
+  error: string | null; metadataFields: number; sameSize: boolean; sameName: boolean
 }
 export interface IngestHeld {
   id: string; title: string | null; originalFilename: string | null; bytes: number | null; mime: string | null; schemaId: string | null
   status: 'awaiting_metadata' | 'duplicate' | 'rejected'; awaitingMetadata: string[] | null
   duplicate: { outcome: string; ofAssetId: string | null; strength: string | null } | null; rules: { rung: string; ruleName: string }[]; createdAt: string
+  /** What is filled in already, so Fill in starts from it. */
+  metadata?: Record<string, any>
+  /** The media is built (it encodes while metadata is pending; only publishing waits). */
+  encoded?: boolean; mediaState?: string | null
 }
 export interface IngestTransfer {
   id: string; provider: string; state: 'created' | 'running' | 'landed' | 'failed' | 'cancelled'; externalId: string | null
@@ -1576,6 +1637,8 @@ export const api = {
   inspectHls: (url: string): Promise<HlsInspection> => req('/sources/hls', { method: 'POST', body: JSON.stringify({ url }) }),
   probeSource: (url: string, protocol?: string): Promise<SourceProbe> =>
     req('/sources/probe', { method: 'POST', body: JSON.stringify({ url, protocol }) }),
+  validateSource: (url: string, protocol?: string): Promise<SourceValidation> =>
+    req('/sources/validate', { method: 'POST', body: JSON.stringify({ url, protocol }) }),
   probeRadioSource: (url: string): Promise<IcyProbe> =>
     req('/radio/probe', { method: 'POST', body: JSON.stringify({ url }) }),
   /** The three lanes in one call, so they cannot disagree about a boundary. */
@@ -1598,6 +1661,13 @@ export const api = {
     return req('/jobs' + (qs.toString() ? '?' + qs : ''))
   },
   retryJob: (id: string) => req(`/jobs/${id}/retry`, { method: 'POST' }),
+  /** The Encoding queue: vod.encode jobs running, waiting (in claim order) and recently finished. */
+  encodeQueue: (recent = 50): Promise<EncodeQueue> => req(`/jobs/encode-queue?recent=${recent}`),
+  /** A job's log after `after` (a seq), for tailing while it runs. */
+  jobLog: (id: string, after = 0): Promise<{ jobId: string; state: string; lines: JobLogLine[]; last: number }> =>
+    req(`/jobs/${id}/log?after=${after}`),
+  /** What a VOD encode produced: renditions, manifests, thumbnails, sprites, follow-on jobs. */
+  jobOutputs: (id: string): Promise<EncodeOutputs> => req(`/jobs/${id}/outputs`),
   cancelJob: (id: string) => req(`/jobs/${id}/cancel`, { method: 'POST' }),
   recordingSources: (p: RecordingSourceQuery = {}): Promise<RecordingSourcesFeed> => {
     const qs = new URLSearchParams()
@@ -1634,8 +1704,11 @@ export const api = {
     req(`/recordings/${id}/waveform?from=${Math.round(from)}&to=${Math.round(to)}&buckets=${Math.round(buckets)}`),
   recording: (id: string): Promise<RecordingRow & { vod_assets: VodAssetRow[] }> => req(`/recordings/${id}`),
   recordingTimeline: (id: string): Promise<RecordingTimeline> => req(`/recordings/${id}/timeline`),
-  clipRecording: (id: string, b: { title: string; startMs: number; endMs: number; outputKind?: 'manifest' | 'progressive' | 'both'; acceptGapsMs?: number }): Promise<VodAssetRow> =>
+  clipRecording: (id: string, b: { title: string; startMs: number; endMs: number; outputKind?: 'manifest' | 'progressive' | 'both'; acceptGapsMs?: number; schemaId?: string | null; metadata?: Record<string, any> }): Promise<VodAssetRow> =>
     req(`/recordings/${id}/clip`, { method: 'POST', body: JSON.stringify(b) }),
+  /** The guide's name and field values for a clip of this range, for the chosen content type. */
+  clipDefaults: (id: string, startMs: number, endMs: number, schemaId?: string | null): Promise<ClipDefaults> =>
+    req(`/recordings/${id}/clip-defaults?startMs=${Math.round(startMs)}&endMs=${Math.round(endMs)}${schemaId ? `&schemaId=${schemaId}` : ''}`),
   publishRecording: (id: string, title?: string): Promise<VodAssetRow> =>
     req(`/recordings/${id}/publish`, { method: 'POST', body: JSON.stringify({ title }) }),
   // ---- media lifecycle ----
@@ -1678,6 +1751,12 @@ export const api = {
   createContentType: (b: ContentTypeBody): Promise<ContentType> => req('/metadata-schemas', { method: 'POST', body: JSON.stringify(b) }),
   patchContentType: (id: string, b: Partial<ContentTypeBody>): Promise<ContentType> => req(`/metadata-schemas/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
   deleteContentType: (id: string) => req(`/metadata-schemas/${id}`, { method: 'DELETE' }),
+  // ---- account pick lists (Admin > Genres) ----
+  metadataList: (key: MetadataListKey): Promise<MetadataList> => req(`/metadata-lists/${key}`),
+  saveMetadataList: (key: MetadataListKey, b: { items: { value: string; retired?: boolean }[]; renames?: { from: string; to: string }[]; version?: number }): Promise<MetadataList & { saved: { renamed: number; typesUpdated: number; removed: string[] } }> =>
+    req(`/metadata-lists/${key}`, { method: 'PUT', body: JSON.stringify(b) }),
+  resetMetadataList: (key: MetadataListKey): Promise<MetadataList & { saved: { renamed: number; typesUpdated: number; removed: string[] } }> =>
+    req(`/metadata-lists/${key}/reset`, { method: 'POST' }),
   ownerDefaults: (owner: { kind: 'channel' | 'event'; id: string }): Promise<OwnerBaseEntry> =>
     req(`/epg/owner-defaults?${owner.kind === 'event' ? 'eventId' : 'channelId'}=${owner.id}`),
 
@@ -1750,6 +1829,14 @@ export const api = {
   vodAssets: (published?: boolean): Promise<VodAssetRow[]> =>
     req(`/vod${published === undefined ? '' : `?published=${published}`}`),
   vodAsset: (id: string): Promise<any> => req(`/vod/${id}`),
+  /** What deleting an asset would take with it, and why it would be refused now (DeleteAssetDialog). */
+  vodDeleteImpact: (id: string): Promise<AssetDeleteImpact> => req(`/vod/${id}/delete-impact`),
+  /** Delete into the restore bin: the record, its metadata and its media files. Undo with restoreVod for `binDays`. */
+  deleteVod: (id: string): Promise<{ id: string; bin: string | null; binDays: number; purgeAfter: string | null }> =>
+    req(`/vod/${id}`, { method: 'DELETE' }),
+  /** Undelete: put an asset deleted with deleteVod back from the restore bin. */
+  restoreVod: (id: string): Promise<{ id: string; title: string; bin: string; files: number; rows: number }> =>
+    req(`/vod/${id}/restore`, { method: 'POST' }),
   // Skip markers (intro, recap, credits): editable any time, written into the
   // on-demand playlists when they are served.
   vodMarkers: (id: string): Promise<VodMarkersView> => req(`/vod/${id}/markers`),
@@ -1785,6 +1872,9 @@ export const api = {
   // ---- monitoring ----
   /** The whole live board in one request: the fan-out lives on the server. */
   liveBoard: (): Promise<LiveBoard> => req('/monitoring/live'),
+  /** What the edge gives a viewer in `cc` (XX = unknown) and why; no cc = the countries the rules name. */
+  edgeViewAs: (id: string, cc?: string): Promise<{ countries?: string[]; restricted?: boolean; cc?: string; decision?: 'allow' | 'block' | 'replace'; reason?: string; until?: number | null }> =>
+    req(`/monitoring/edge/${id}${cc ? `?cc=${encodeURIComponent(cc)}` : ''}`),
   /** ONE paged list over channels, stations, events and FAST channels
    *  (GET /api/live-streams, the list standard). Paging is in the headers. */
   liveStreams: async (params: Record<string, string>): Promise<{ rows: LiveStreamListRow[]; next: string | null; total: number | null }> => {
@@ -1851,6 +1941,12 @@ export const api = {
     req(`/vod/${id}/review`, { method: 'POST', body: JSON.stringify({ to, note }) }),
   rerunQc: (id: string): Promise<{ jobId: string; state: string }> =>
     req(`/vod/${id}/qc`, { method: 'POST' }),
+  /** Build a clip again over the same range. A 409 carries coveragePct, gapMs
+   *  and gaps in ApiError.body so the page can offer to accept the gaps. */
+  vodRebuild: (id: string, acceptGapsMs = 0): Promise<{ jobId: string; state: string; coveragePct: number }> =>
+    req(`/vod/${id}/rebuild`, { method: 'POST', body: JSON.stringify({ acceptGapsMs }) }),
+  /** Queue QC for every asset not yet confirmed playable. */
+  qcUnchecked: (): Promise<{ queued: number }> => req('/vod/qc-unchecked', { method: 'POST' }),
 
   /** Keyframe thumbnails across a window: the video half of the media lane. */
   channelThumbs: (id: string, from: number, to: number, count: number, prime = true): Promise<ThumbStrip> =>
@@ -1862,8 +1958,14 @@ export const api = {
 
   fileFolders: (): Promise<{ folders: { path: string; name: string; count: number }[] }> => req('/files/folders'),
   createFolder: (path: string): Promise<{ path: string }> => req('/files/folders', { method: 'POST', body: JSON.stringify({ path }) }),
-  uploadFile: (b: { folder?: string; name: string; kind?: string; contentType?: string; tags?: string[]; dataBase64: string }): Promise<MediaFile> =>
+  uploadFile: (b: { folder?: string; name: string; kind?: string; contentType?: string; tags?: string[]; dataBase64: string; ad?: BugAd }): Promise<MediaFile> =>
     req('/files', { method: 'POST', body: JSON.stringify(b) }),
+  /** A video for graphics (an animated bug), raw: stored as VP9-with-alpha WebM, a first-frame PNG and the original. */
+  uploadMotion: (file: Blob, o: { folder?: string; name: string; kind?: string; ad?: BugAd }): Promise<MediaFile & { warning?: string | null; videoUrl?: string }> =>
+    req('/files/motion?' + new URLSearchParams(Object.entries({ folder: o.folder ?? '', name: o.name, kind: o.kind ?? 'bug', ...(o.ad ?? {}) })
+      .filter(([, v]) => v != null && v !== '') as [string, string][]).toString(), { method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream' } }),
+  /** A bug's advertising metadata. */
+  setFileAd: (id: string, ad: BugAd): Promise<MediaFile> => req(`/files/${id}/ad`, { method: 'PUT', body: JSON.stringify(ad) }),
   patchFile: (id: string, b: { name?: string; folder?: string; kind?: string; tags?: string[]; version?: number }): Promise<MediaFile> =>
     req(`/files/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
   // ---- radio: audio-only stations (channels with kind='radio') ----
@@ -2069,9 +2171,29 @@ export interface RadioStationRow {
   onAir?: boolean
   signal?: SignalVerdict
 }
+/** Where an aired programme (or logged song) can be played again: its VOD, or the recording that holds it. */
+export interface ProgrammeMedia {
+  asset: { id: string; title: string | null } | null
+  recording: { id: string; from: number; to: number; partial: boolean; expiresAt: string | null } | null
+  flag: ProgrammeFlag | null
+}
+/** The one flag a guide entry or logged song shows (programmeMedia.tsx). */
+export interface ProgrammeFlag {
+  kind: 'autovod' | 'vod' | 'converting' | 'failed' | 'rec' | 'expired' | 'notrecorded' | 'unavailable'
+  warn: boolean
+  daysLeft: number | null
+  partial: boolean
+  /** VOD only: where the asset stands with viewers. */
+  publish: 'draft' | 'scheduled' | 'published' | 'expired' | 'withdrawn' | null
+  assetId: string | null
+  recording: { id: string; from: number; to: number } | null
+  note: string
+}
 export interface RadioLogEntry {
   id: string; title: string; starts_at: string; ends_at: string; status: string
   class: RadioClass | null; stream_url: string | null
+  /** Null before it aired, or when nothing holds it any more. */
+  media?: ProgrammeMedia | null
 }
 export interface RadioStationDetail extends RadioStationRow {
   sources: { id: string; role: string; protocol: string; ingest_url: string | null; stream_key: string | null; status?: string }[]
@@ -2083,6 +2205,9 @@ export interface RadioStationDetail extends RadioStationRow {
   statusBoard: Record<string, string>
   log: { ts: string; level: string; title: string; detail: string }[]
   publicAvailable: boolean
+  /** The station's programme guide around now (not the now-playing log). */
+  epg?: { now: any; next: any; lane: any[] }
+  epgEnabled?: boolean
 }
 /** The resolved now-playing line. The server makes the four-way decision (see
  *  services/radio/nowPlaying.ts); the console only paints it, so the list, the
@@ -2386,6 +2511,9 @@ export interface ProgrammeVod {
    *  means the owner keeps recordings indefinitely. */
   expiresAt: string | null
   future: boolean
+  /** The recording holding the slot, with the slot's own range. */
+  recording?: { id: string; from: number; to: number; partial: boolean; expiresAt: string | null } | null
+  flag?: ProgrammeFlag | null
 }
 
 export interface RecordingRow {
@@ -2634,7 +2762,16 @@ export interface LiveStream {
   /** The ORIGIN manifest, not the public URL: multiview monitors what the
    *  encoder is producing, whether or not the stream has been published. */
   previewUrl: string
+  /** The manifest viewers are given (the *_cc copies), from the origin. */
+  deliveredUrl: string
   audioOnly: boolean
+  /** {source: up|down|waiting|ready|unknown} as the encoder last reported. */
+  sources: Record<string, string>
+  outputAvailable: boolean | null
+  /** Running, but no source has been pushed (input gate NO SOURCE). */
+  noSource: boolean
+  /** Output advancing with a timing fault (audio/video disagree), or null. */
+  timingFault: string | null
 }
 
 /** One row of GET /api/live-streams. `live` is there with health=true: the
@@ -2807,7 +2944,26 @@ export interface VodAssetRow {
   review_state?: ReviewStateId
   qc_state?: string | null
   source_name?: string | null
+  /** Can it be used (volt-app services/assetReadiness.ts). Only 'ready' is
+   *  offered to FAST, loops and blocking. */
+  usage_status?: UsageStatus
+  media_state?: 'processing' | 'ready' | 'failed' | 'missing' | 'unplayable' | null
+  media_error?: string | null
 }
+
+export interface ClipDefaults {
+  programme: { id: string; title: string; startsAt: string; endsAt: string } | null
+  confident: boolean
+  reason: string | null
+  title: string | null
+  schemaId: string | null
+  ownerSchemaId: string | null
+  suggestedType: { id: string; name: string; key: string } | null
+  metadata: Record<string, any>
+  fields: { field: string; label: string; value: any; required: boolean }[]
+}
+
+export type UsageStatus = 'ready' | 'unchecked' | 'qc_failed' | 'processing' | 'failed' | 'unplayable' | 'no_media'
 
 /** One contiguous stretch of source media inside a finished clip. */
 export interface ProvenanceBlock {
@@ -2867,6 +3023,10 @@ export interface ShareLinkRow {
   last_viewed_at: string | null; revoked: boolean; created_at: string; token_prefix: string
 }
 
+/** A bug's advertising metadata (Image Library kind 'bug'). */
+export interface BugAd { advertiser?: string; agency?: string; campaign?: string; adCode?: string }
+/** Graphics videos: anything the Image Library converts to alpha WebM. */
+export const isMotionFile = (f: File) => /^video\//i.test(f.type) || /\.(mov|webm|mp4|m4v|mkv|mxf)$/i.test(f.name)
 export interface MediaFile {
   id: string; account_id: string; kind: string; path: string; folder: string; name: string
   content_type: string | null; size_bytes: number | null; width: number | null; height: number | null
@@ -2880,6 +3040,8 @@ export interface MediaFile {
   keywords?: string[]; creator?: string | null; copyright?: string | null; checksum?: string | null
   metadata?: Record<string, any>
   duplicateOf?: { id: string; path: string }[]
+  /** schema.org JSON-LD for a bug with advertising metadata. */
+  jsonLd?: Record<string, any> | null
 }
 
 export interface LibraryFolder { path: string; name: string; count: number; total?: number; hasChildren?: boolean }
@@ -3077,9 +3239,22 @@ export interface SchemaField {
   key: string; label?: string
   type: 'string' | 'text' | 'number' | 'boolean' | 'date' | 'enum' | 'url' | 'tags' | 'reference' | 'image'
   required?: boolean; options?: string[]; multiple?: boolean; refDomain?: string
+  /** enum: the account list its options come from ('genres'); options are filled by the server. */
+  optionsList?: MetadataListKey
+  /** enum linked to a list: retired values, still valid where already set, not offered. */
+  retiredOptions?: string[]
   /** EPG slot: title | sub-title | description | category | episode | language | icon | credits.<role> | custom:<name> */
   epg?: string
   schemaOrg?: string
+}
+export type MetadataListKey = 'genres'
+export interface MetadataList {
+  key: MetadataListKey; name: string; description: string
+  items: { value: string; retired: boolean; usage: number }[]
+  unlisted: { value: string; usage: number }[]
+  isDefault: boolean; version: number; updatedAt: string | null
+  defaults: string[]
+  usedBy: { schemaId: string; schemaName: string; fieldKey: string; label: string }[]
 }
 export interface ContentType {
   id: string; account_id: string; name: string; description: string | null
@@ -3212,6 +3387,9 @@ export interface TimelineGridBlock {
   start: string; end: string
   scheduledStart: string; scheduledEnd: string
   asRun: boolean; status: string | null; vodState: VodState | null
+  /** The VOD made from this programme, when there is one. */
+  assetId?: string | null
+  flag?: ProgrammeFlag | null
   /** 'event' is the event's own window drawn as one block. */
   source: 'epg' | 'event'
 }

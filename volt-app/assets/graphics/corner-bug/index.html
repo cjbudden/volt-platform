@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Corner bug</title>
 <!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     In and out sequences: see volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md section 4.
      Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
 <script type="application/json" id="volt-manifest">
 {
@@ -13,23 +14,35 @@
     1080
   ],
   "fps": 25,
-  "name": "Corner bug (logo or sponsor)",
+  "snap": true,
+  "name": "Corner bug (logo or alpha video, caption)",
   "bbox": [
     1500,
-    50,
-    340,
-    100
+    58,
+    324,
+    120
   ],
   "fields": [
     {
       "id": "logo",
       "type": "image",
-      "label": "Logo"
+      "label": "Bug: a logo, GIF or alpha video from the Image Library",
+      "replaces": ["motion"]
+    },
+    {
+      "id": "loop",
+      "type": "boolean",
+      "label": "Loop an animated bug (off: play once and hold the last frame)"
     },
     {
       "id": "caption",
       "type": "text",
       "label": "Caption (optional)"
+    },
+    {
+      "id": "panel",
+      "type": "boolean",
+      "label": "Light panel behind it"
     },
     {
       "id": "opacity",
@@ -39,7 +52,9 @@
   ],
   "sample": {
     "logo": "",
+    "loop": true,
     "caption": "Presented by Sponsor",
+    "panel": true,
     "opacity": 0.94
   }
 }
@@ -50,30 +65,82 @@
 @font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
 @font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
 html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
-body{font-family:"Volt Sans",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
-
-#cb{position:absolute;right:96px;top:58px;display:flex;align-items:center;gap:14px;background:rgba(244,245,247,.94);border-radius:3px;padding:12px 18px;opacity:0;transition:opacity .45s}
-#cb.on{opacity:var(--o,.94)}
-#logo{height:64px;max-width:240px;object-fit:contain}
-#logo[src=""]{display:none}
-#caption{font:700 22px/1.15 "Volt Sans";letter-spacing:.06em;text-transform:uppercase;color:#0b1220;max-width:280px}
+body{font-family:"Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+:root{--ein:cubic-bezier(.16,1,.3,1);--eout:cubic-bezier(.7,0,.84,0);--pop:cubic-bezier(.34,1.56,.64,1)}
+/* Three states: initial (hidden), .on (in sequence to on air), .out (out sequence to a different
+   hidden pose). After the out sequence .reset snaps back to initial with no transition. */
+.reset *,.reset *::before,.reset *::after{transition:none!important;animation:none!important}
+:root{--h:64px;--o:.94}
+#cb{position:absolute;right:96px;top:58px;display:flex;align-items:center;gap:14px;padding:12px 18px;border-radius:3px;
+  opacity:0;transform:scale(.92);transform-origin:top right}
+.pos-tl #cb{left:96px;right:auto;transform-origin:top left}
+.pos-br #cb{top:auto;bottom:54px;transform-origin:bottom right}
+.pos-bl #cb{left:96px;right:auto;top:auto;bottom:54px;transform-origin:bottom left}
+.panel #cb{background:rgba(244,245,247,.94)}
+.nopanel #cb{padding:0}
+#logo,#vid,#still{height:var(--h);max-width:calc(var(--h) * 4);object-fit:contain;display:none}
+.has-logo #logo{display:block}
+.has-video #logo{display:none}
+.has-video.plays #vid{display:block}
+.has-video.noplay #still{display:block}
+#caption{font:700 22px/1.15 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#0b1220;max-width:280px}
+.nopanel #caption{color:#fff;text-shadow:0 1px 6px rgba(0,0,0,.6)}
 #caption:empty{display:none}
+/* in: it settles into the corner, growing from it; out: it fades back toward the corner */
+.on #cb{opacity:var(--o);transform:none;transition:opacity .45s,transform .5s var(--ein)}
+.out #cb{opacity:0;transform:scale(.96);transition:opacity .3s,transform .3s var(--eout)}
 </style>
 </head>
 <body>
-<div id="cb"><img id="logo" src="" alt=""><div id="caption"></div></div>
+<div id="cb"><img id="logo" src="" alt=""><video id="vid" muted playsinline preload="auto"></video><img id="still" src="" alt=""><div id="caption"></div></div>
 <script>
 function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
 function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
 function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
 function $(id){return document.getElementById(id)}
 function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
-
-function update(raw){var d=parse(raw);if('logo' in d)$('logo').setAttribute('src',d.logo||'');if('caption' in d)setText($('caption'),d.caption);
-  if(d.opacity!=null)$('cb').style.setProperty('--o',String(d.opacity))}
-function play(){$('cb').classList.add('on')}
-function stop(){$('cb').classList.remove('on')}
-function next(){}
+function truthy(v){return !(v===false||v==='false'||v===0||v==='0'||v==='no'||v==='off')}
+function css(k,v){if(v!=null&&v!=='')document.documentElement.style.setProperty(k,String(v))}
+// Shrink one line until it fits its box, down to `floor` of its size.
+function fit(el,floor){if(!el)return;el.style.fontSize='';var s=parseFloat(getComputedStyle(el).fontSize),min=s*(floor||.72);
+  while(el.scrollWidth>el.clientWidth+1&&s>min){s-=1;el.style.fontSize=s+'px'}}
+var B=document.body,data={},playing=false,resetTimer=null;
+function play(){clearTimeout(resetTimer);B.classList.remove('out','reset');void B.offsetWidth;B.classList.add('on');playing=true;
+  if(typeof onPlay==='function')onPlay()}
+function stop(){if(!playing)return;playing=false;B.classList.add('out');B.classList.remove('on');
+  if(typeof onStop==='function')onStop();clearTimeout(resetTimer);
+  resetTimer=setTimeout(function(){B.classList.add('reset');B.classList.remove('out');void B.offsetWidth;B.classList.remove('reset');
+    if(typeof onReset==='function')onReset()},OUT_MS)}
+function next(){if(typeof onNext==='function')onNext()}
+var OUT_MS=350;
+// AN ALPHA VIDEO plays as VP9-with-alpha WebM (the Image Library converts uploads to it,
+// services/motionGraphics.ts). Where WebM alpha does not play (Safari) the transparent
+// first frame beside it (<name>.png) is shown instead, so the bug is never a black box.
+var vid=$('vid'), canWebm=!!vid.canPlayType && vid.canPlayType('video/webm; codecs="vp9"')!=='';
+function setVideo(url){B.classList.toggle('has-video',!!url);
+  if(!url){vid.removeAttribute('src');vid.load();return}
+  $('still').setAttribute('src',url.replace(/\.webm(\?.*)?$/i,'.png'));
+  B.classList.toggle('plays',canWebm);B.classList.toggle('noplay',!canWebm);
+  if(canWebm&&vid.getAttribute('src')!==url){vid.setAttribute('src',url);vid.load();if(playing)start()}}
+function start(){if(!B.classList.contains('has-video')||!canWebm)return;try{vid.currentTime=0}catch(e){}
+  var p=vid.play();if(p&&p.catch)p.catch(function(){B.classList.remove('plays');B.classList.add('noplay')})}
+vid.addEventListener('error',function(){B.classList.remove('plays');B.classList.add('noplay')});
+function update(raw){var d=parse(raw);for(var k in d)data[k]=d[k];
+  // ONE FIELD for the bug: a still or GIF shows as an image, an Image Library video (its
+  // WebM, which a binding resolves to) plays. 'motion' is the older separate video field,
+  // still honoured for setups saved with it, and it wins when both are set.
+  if('logo' in d||'motion' in d){var mv=data.motion||'',lg=data.logo||'',isv=/\.(webm|mp4|mov)(\?.*)?$/i.test(lg);
+    setVideo(mv||(isv?lg:''));$('logo').setAttribute('src',isv?'':lg);B.classList.toggle('has-logo',!!lg&&!isv)}
+  if('loop' in d)vid.loop=truthy(d.loop);
+  if('caption' in d)setText($('caption'),d.caption);
+  if('panel' in d){B.classList.toggle('panel',truthy(d.panel));B.classList.toggle('nopanel',!truthy(d.panel))}
+  if('position' in d){B.classList.remove('pos-tl','pos-br','pos-bl');var p=String(d.position||'').toLowerCase();
+    if(p==='top-left')B.classList.add('pos-tl');if(p==='bottom-right')B.classList.add('pos-br');if(p==='bottom-left')B.classList.add('pos-bl')}
+  if(d.height!=null&&d.height!=='')css('--h',Math.max(16,Math.min(400,Number(d.height)||64))+'px');
+  if(d.opacity!=null&&d.opacity!=='')css('--o',String(Math.max(0,Math.min(1,Number(d.opacity)))))}
+function onPlay(){start()}
+function onReset(){try{vid.pause()}catch(e){}}
+B.classList.add('panel');vid.loop=true;
 </script>
 </body>
 </html>

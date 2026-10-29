@@ -537,3 +537,124 @@ Search uses one GIN index over a search vector kept by a database trigger
 (migration 0049), plus indexes for time, location, source, channel and folder
 prefixes, so it stays one index lookup as the library grows.
 
+
+## 18. Moving images and removing folders
+
+**Selecting.** In the Image Library, tick an image (the box appears on hover), Ctrl/Cmd-click or Shift-click for a
+range. While anything is selected, a click selects instead of opening, and a bar offers **Move to folder…**, **Select
+all shown** and **Clear**. An open image has **Move…** too. Encoder thumbnails stay in their channel's dated folders and
+cannot be selected.
+
+**Moving.** Choose a folder from the list (searchable), the top level, or type a new one (`posters/2026`). Or drag the
+images onto a folder in the tree. Images keep their names; one whose name is already taken in the target folder is
+skipped and the message says so.
+
+**Nothing that uses a moved image breaks.** An image's store key is its path, so a move:
+
+1. moves the bytes and the library row;
+2. rewrites every reference in the database: every text, varchar, JSON and text-array column of every table, read
+   from the schema, whatever the column is called (a `*_key` column, a JSON list of an asset's candidate frames, a song
+   lookup's chosen cover, a field in a template), so a column added later is covered too; as a key, a `/library/` path
+   or a URL, plain or percent-encoded (`a b.png` and `a%20b.png`), and never a longer name that starts the same
+   (`a.png.bak`). Channel and event refs that hold a bare path are updated within the account only. History is left as
+   it was recorded: audit, job and event logs, play and ad sessions, the restore bin's snapshots
+   (`HISTORY_TABLES` in `libraryMoves.ts`); what they hold still opens through 3. Graphics templates hold images by
+   id, not path, so they never need rewriting;
+3. records the move (`media_file_moves`), and the image store forwards reads of the old key to the new one, so links
+   outside the database (web pages, feeds, signed image URLs already handed out) keep working. Chains collapse to the
+   newest place; moving an image back removes its forwarding.
+
+Renaming an image, or changing its folder in its details, does the same.
+
+**A video item moves as one.** A video in the library (an alpha video for graphics, `motionGraphics.ts`) is one row and
+three files side by side: `<name>.webm` (what templates play), `<name>.png` (its first frame, the row's `store_key`) and
+`<name>.source.<ext>` (the file as uploaded). Moving or renaming it moves all three into the new folder under the new
+name, updates `metadata.motion`, forwards every old address and rewrites references to any of them (a channel's
+graphics holding the WebM follows). Delete removes all three; Replace sends all three to the bin and forwards each to
+the same part of the video that stays (a video is only replaced by another video, an image by an image); "where it is
+used" looks for all three. Duplicates leave videos out: their checksum is their first frame's, and many videos open on
+the same empty frame. Moves made before 28 Oct 2026 took only the first frame (named like the WebM) and left the rest
+behind; a minute after start-up the server puts such items back together (`repairVideoItems`). Checked by
+`test/library-video-items.check.ts`.
+
+Until 28 Oct 2026 the rewrite read only columns with image-like names (`_ref`, `_key`, `_url`, `logo`, `icon`, `image`,
+`artwork`, `poster`, `avatar`, `thumbnail`) and a few JSON columns by name, so a reference elsewhere (an asset's
+candidate frames, a song lookup) kept the old key: it still opened through forwarding, but "is this image used?" checks
+compare keys. A minute after start-up the server replays every recorded move through the full rewrite
+(`repairMovedReferences`); running it again changes nothing. `test/library-move-references.check.ts` puts a reference to
+one image in each kind of place and checks every one follows a move.
+
+**Where an image is used.** `GET /api/files/uses?ids=` answers, per image, every place that uses it, in words
+(Channel: Jazz FM, Asset: Late Show, Song, Social post...), found the same way a move finds references. The Duplicates
+dialog, the Replace dialog and Delete show it, so the right copy is kept and nothing is deleted from under a channel.
+
+**Replacing an image with another** (a duplicate, the same picture in another file or size, a better version, a broken
+upload). Open the image, or select several, and choose **Replace with…**; pick the image that stays from the library or
+upload it there. Everything that used the replaced images (assets, typed images, channels, metadata, song details,
+social posts, links) is pointed at the one that stays, their old addresses forward to it, and they go to the **restore
+bin** (Storage > Bin) with their library rows. Restoring puts the files and rows back at their own addresses (their
+forwarding ends); uses stay on the image that was kept. Encoder stills cannot be replaced. Delete offers **Replace with
+another image…** when the image is in use.
+
+**Duplicates.** **Duplicates…** groups images stored more than once (the same bytes). Each copy shows where it is used;
+click the copy to keep, then merge that group alone or all groups at once. Merging is a replace: the other copies go to
+the bin and their uses move to the copy that stays.
+
+**Removing a folder.** Open the folder and choose **Delete folder…**. A folder can be deleted only when it holds no
+images, in it or in any folder inside it; the dialog says how many there are and where, with **Show them**. An empty
+folder goes together with its empty subfolders.
+
+| | |
+|---|---|
+| `GET /api/files/uses?ids=a,b` | per image id, every use: `{ table, column, id, label, what }` (up to 50 ids) |
+| `POST /api/files/replace` `{ keep, drop[] }` | replace `drop` with `keep`: uses rewritten, old addresses forward, the dropped images to the bin. Answers `kept`, `removed`, `bytes`, `references`, `binId` |
+| `POST /api/files/duplicates/merge` `{ keepers?, checksums? }` | merge duplicate groups (all, or the `checksums` given) keeping `keepers[checksum]`, through the bin. Answers `groups`, `removed`, `bytes`, `references`, `binIds` |
+| `POST /api/files/move` `{ ids[], folder }` | move up to 500 images (`''` = top level). Answers `moved`, `skipped` (with the reason) and `references` (places updated, by table.column) |
+| `GET /api/files/folders/contents?path=` | `{ images, here, inSubfolders, subfolders }` |
+| `DELETE /api/files/folders?path=` | remove an empty folder and its empty subfolders; 409 with `contents` when it holds images, 404 when there is no such folder |
+
+Code: `services/media/libraryMoves.ts`, forwarding in `services/imageStore.ts`, routes in `modules/mediaFiles.ts`,
+console `pages/library/LibraryMove.tsx`. Migration `0092_media_file_moves.sql`. Test: `test/library-moves.e2e.ts`.
+
+## 19. Tidy: empty folders, counts, song covers, an asset's own images, duplicates
+
+**Empty folders go with their last image.** When retention removes images (encoder stills and sprite sheets of an
+expired hour, the stills of a pruned recording) or an asset is removed, each folder they were in that now holds no
+image, in it or below it, is removed, then each folder above it that is left empty (`libraryMoves.ts`
+`pruneEmptyFolders`). A local store also loses the empty directories, and at most hourly any stray empty directory
+in the library is tidied. A folder retention did not touch is left alone, so an empty folder a person just created
+stays.
+
+**An asset's own frames go with it.** Removing an asset (Delete in its Metadata form) puts the frames Volt saved for
+it (`metadata.assetId`) into the same restore-bin item, unless another asset uses them, along with its companion
+files and typed images; a restore brings them all back. Uploaded images and song covers are not the asset's to take.
+
+**Counts follow the grid.** Folder counts used to count every image whatever the grid showed, so with Uploaded
+selected a folder of encoder stills read 1,440 and opened empty, and All images left out images at the top level.
+The tree now counts only what the source filter shows (Uploaded, Encoder thumbnails, Everything), lists only
+folders that hold such images (plus folders a person created), and All images counts the top level.
+`GET /api/files/folders?parent=&source=library|encoder` answers `total` and `top` too.
+
+**Song covers are kind `cover`**, with a **cover** filter in the Image Library and in the usage-type list. Album
+covers, covers a station's feed sent and covers chosen in Find song details are saved as covers; migration 0093
+marks existing ones (a `coverOf` mark, or `cover.<ext>` in a song folder).
+
+**One copy of each picture.** Volt never stores the same bytes twice: saving an image that is already in the library
+answers the existing one (the same album cover for every song on it, the same frame chosen twice). For copies made
+before, **Duplicates…** in the Image Library lists each set: the copy a person uploaded stays (else the oldest), or
+click another to keep it. Removing the duplicates points every use of a copy (asset images, typed images, channels,
+metadata, song details, links) at the copy that stays, forwards the copies' old addresses (section 18) and removes
+empty folders they leave. Encoder stills are not compared.
+
+| | |
+|---|---|
+| `GET /api/files/duplicates` | `{ groups: [{ checksum, keep, drop[] }], copies, bytes }` |
+| `POST /api/files/duplicates/merge` `{ keepers?: { checksum: fileId }, checksums? }` | `{ groups, removed, bytes, references }` |
+
+**Pickers open on the asset's own images.** Choosing an asset's image (or one of its typed images) opens on, in
+order: what it uses now, what was made or uploaded for it, its song's cover (audio), and up to 48 encoder stills from
+while it was on air, then the whole library. A video's picker no longer offers song covers. Uploads from the picker
+go to the asset's own folder. `GET /api/vod/:id/images/related`.
+
+Migration `0093_covers_and_asset_image_ids.sql` (covers; an `id` on `vod_asset_images` so the restore bin keeps them).
+Test: `test/library-tidy.e2e.ts`.

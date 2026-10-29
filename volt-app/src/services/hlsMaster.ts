@@ -53,6 +53,16 @@ export interface HlsInspection {
   targetDuration?: number | null;
   /** Media playlist: the last few segments (address, seconds, byte range), for measuring the bitrate. */
   recentSegments?: HlsSegment[];
+  /**
+   * Media playlist: what the newest segment's #EXTINF names after its duration.
+   * Radio services put now playing there (title="...",artist="..." or a plain
+   * "Artist - Title"); `fields` holds the KEY="value" pairs when present.
+   */
+  segmentTitle?: { raw: string; title: string | null; artist: string | null; fields: Record<string, string> } | null;
+  /** Media playlist: timed markers it carries (#EXT-X-DATERANGE, SCTE-35 cues, PROGRAM-DATE-TIME). */
+  markers?: { dateRanges: number; cues: number; programDateTime: boolean };
+  /** Master: closed captions announced on the variants (CLOSED-CAPTIONS=...). */
+  closedCaptions?: boolean;
 }
 export interface HlsSegment { uri: string; duration: number; length: number | null }
 
@@ -89,12 +99,14 @@ export function parsePlaylist(text: string, baseUrl: string): HlsInspection {
       default: a.DEFAULT === 'YES', channels: a.CHANNELS ?? null, uri: a.URI ? abs(a.URI, baseUrl) : null });
   }
   const variants: HlsVariant[] = [];
+  let cc = renditions.some((r) => r.type === 'CLOSED-CAPTIONS');
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].startsWith('#EXT-X-STREAM-INF:')) continue;
     const a = parseAttrs(lines[i].slice(18));
     const uri = lines.slice(i + 1).find((l) => !l.startsWith('#'));
     if (!uri) continue;
     const codecs = (a.CODECS ?? '').split(',').map((c) => c.trim()).filter(Boolean);
+    if (a['CLOSED-CAPTIONS'] && a['CLOSED-CAPTIONS'] !== 'NONE') cc = true;
     const group = a.AUDIO ?? null;
     const externalAudio = !!group && renditions.some((r) => r.type === 'AUDIO' && r.groupId === group && r.uri);
     variants.push({
@@ -103,7 +115,7 @@ export function parsePlaylist(text: string, baseUrl: string): HlsInspection {
       audioGroup: group, externalAudio, audioOnly: !a.RESOLUTION && !codecs.some((c) => VIDEO.test(c)),
     });
   }
-  if (variants.length || renditions.length) return { ok: true, kind: 'master', variants, renditions };
+  if (variants.length || renditions.length) return { ok: true, kind: 'master', variants, renditions, closedCaptions: cc };
   const td = lines.find((l) => l.startsWith('#EXT-X-TARGETDURATION:'));
   const isMedia = !!td || lines.some((l) => l.startsWith('#EXTINF'));
   if (!isMedia) return { ok: false, error: 'The playlist lists neither variants nor segments.' };
@@ -116,8 +128,30 @@ export function parsePlaylist(text: string, baseUrl: string): HlsInspection {
     if (dur && dur > 0) segs.push({ uri: abs(l, baseUrl), duration: dur, length: len });
     dur = null; len = null;
   }
+  const lastInf = [...lines].reverse().find((l) => l.startsWith('#EXTINF:'));
   return { ok: true, kind: 'media', live: !lines.includes('#EXT-X-ENDLIST'), targetDuration: td ? num(td.split(':')[1]) : null,
-    recentSegments: segs.slice(-3) };
+    recentSegments: segs.slice(-3), segmentTitle: lastInf ? extinfTitle(lastInf) : null,
+    markers: {
+      dateRanges: lines.filter((l) => l.startsWith('#EXT-X-DATERANGE:')).length,
+      cues: lines.filter((l) => /^#EXT-X-(CUE-OUT|CUE-IN|SCTE35|OATCLS-SCTE35|SPLICEPOINT-SCTE35)/.test(l)).length,
+      programDateTime: lines.some((l) => l.startsWith('#EXT-X-PROGRAM-DATE-TIME:')),
+    } };
+}
+
+/**
+ * Pure: the text after an #EXTINF duration. "10,title="X",artist="Y"" (RadioJar,
+ * Revma and others), "10,Artist - Title", or nothing ("10,").
+ */
+export function extinfTitle(line: string): { raw: string; title: string | null; artist: string | null; fields: Record<string, string> } | null {
+  const comma = line.indexOf(',');
+  const raw = comma >= 0 ? line.slice(comma + 1).trim() : '';
+  if (!raw) return null;
+  const fields: Record<string, string> = {};
+  for (const m of raw.matchAll(/([A-Za-z][\w-]*)="([^"]*)"/g)) fields[m[1].toLowerCase()] = m[2];
+  if (Object.keys(fields).length) return { raw, title: fields.title || fields.song || null, artist: fields.artist || null, fields };
+  const dash = raw.split(' - ');
+  return dash.length >= 2 ? { raw, artist: dash[0].trim() || null, title: dash.slice(1).join(' - ').trim() || null, fields }
+    : { raw, title: raw, artist: null, fields };
 }
 
 /** Does this source look like HLS worth reading as a playlist? */

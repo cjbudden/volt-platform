@@ -49,6 +49,7 @@ export interface UploadSession {
   schema_id?: string | null;
   metadata?: Record<string, any> | null;
   source?: string | null;
+  retry_of?: RetryOf | null;
 }
 
 /**
@@ -132,11 +133,20 @@ export interface OpenRequest {
   schemaId?: string | null;
   metadata?: Record<string, any> | null;
   source?: string;
+  /** 'vod' only: this file is a retry of a record whose encode failed (migration 0082). */
+  retryOf?: RetryOf | null;
 }
+
+export interface RetryOf { assetId: string; action: 'reattach' | 'replace' | 'new' }
 
 export async function openSession(req: OpenRequest): Promise<{ session: UploadSession; assetId: string | null }> {
   if (!Number.isFinite(req.totalBytes) || req.totalBytes <= 0) {
     throw Object.assign(new Error('An upload needs a positive size.'), { status: 400 });
+  }
+  if (req.retryOf && req.retryOf.action !== 'new') {
+    const failed = await one<any>(`SELECT v.id FROM vod_assets v JOIN jobs j ON j.id = v.encode_job_id
+       WHERE v.id = $1 AND v.account_id = $2 AND v.master_key IS NULL AND j.state = 'failed'`, [req.retryOf.assetId, req.accountId]);
+    if (!failed) throw Object.assign(new Error('That record is not a failed encode in this account, so the new file cannot replace or become its source.'), { status: 409 });
   }
   if (req.totalBytes > MAX_UPLOAD_BYTES) {
     throw Object.assign(
@@ -184,14 +194,15 @@ export async function openSession(req: OpenRequest): Promise<{ session: UploadSe
     `INSERT INTO upload_sessions
        (account_id, opened_by, token, purpose, filler_kind, filler_asset_id, vod_asset_id,
         ladder_group_id, filename, content_type, total_bytes, chunk_size, chunk_count,
-        relative_path, schema_id, metadata, source)
-     VALUES ($1,$2,$3,$4,$5::filler_kind,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        relative_path, schema_id, metadata, source, retry_of)
+     VALUES ($1,$2,$3,$4,$5::filler_kind,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      RETURNING *`,
     [req.accountId, req.openedBy ?? null, openSessionToken(),
      purpose, req.fillerKind ?? null, assetId, vodAssetId, req.ladderGroupId ?? null,
      req.filename, req.contentType ?? 'application/octet-stream',
      req.totalBytes, CHUNK_SIZE, chunkCount,
-     req.relativePath ?? null, req.schemaId ?? null, JSON.stringify(req.metadata ?? {}), req.source ?? 'panel']
+     req.relativePath ?? null, req.schemaId ?? null, JSON.stringify(req.metadata ?? {}), req.source ?? 'panel',
+     purpose === 'vod' && req.retryOf ? JSON.stringify(req.retryOf) : null]
   );
   if (!session) throw new Error('failed to open an upload session');
 
@@ -435,6 +446,30 @@ export async function completeLanded(session: UploadSession, dest: string, writt
   }
   let ingestStatus: string = 'ingested';
   let encodeSource = dest;
+  // A RETRY OF A FAILED RECORD (the panel asked; migration 0082). 'reattach': the bytes
+  // become the existing record's source, so its id, metadata and links stay and it is
+  // encoded again; the placeholder made when the upload opened is dropped. 'replace': the
+  // failed record goes once these bytes are safe. 'new': both stay.
+  const retry = session.vod_asset_id ? session.retry_of ?? null : null;
+  let operatorMetadata = session.metadata ?? null;
+  let kept: { metadata: any; title: string | null } | null = null;
+  if (retry?.action === 'reattach') {
+    const old = await one<any>(`SELECT id, source_key, metadata, title FROM vod_assets WHERE id = $1 AND account_id = $2 AND master_key IS NULL`, [retry.assetId, session.account_id]);
+    if (old) {
+      const placeholder = session.vod_asset_id!;
+      await query(`UPDATE upload_sessions SET vod_asset_id = $2 WHERE id = $1`, [session.id, old.id]);
+      await query(`DELETE FROM vod_assets WHERE id = $1 AND source_kind = 'upload' AND master_key IS NULL`, [placeholder]);
+      if (old.source_key && old.source_key !== dest && !/^[a-z0-9]+:\/\//i.test(old.source_key)
+          && old.source_key.startsWith(join(config.clips.dir, 'vod-src'))) {
+        try { rmSync(old.source_key, { force: true }); } catch { /* */ }
+      }
+      await query(`UPDATE vod_assets SET encode_job_id = NULL, thumb_status = 'processing', updated_at = now() WHERE id = $1`, [old.id]);
+      session = { ...session, vod_asset_id: old.id };
+      // What was typed for the record before stays; anything typed with this upload wins.
+      operatorMetadata = { ...(old.metadata ?? {}), ...(session.metadata ?? {}) };
+      kept = { metadata: old.metadata ?? {}, title: old.title ?? null };
+    }
+  }
   if (session.vod_asset_id) {
     await query(
       `UPDATE vod_assets SET source_key = $2, source_bytes = $3, updated_at = now()
@@ -452,9 +487,19 @@ export async function completeLanded(session: UploadSession, dest: string, writt
         originalName: session.filename, relativePath: session.relative_path ?? null,
         bytes: written, sha256: sha, declaredMime: session.content_type,
         source: session.source ?? 'panel', sessionId: session.id, uploadedBy: session.opened_by,
-        contentTypeId: session.schema_id ?? null, operatorMetadata: session.metadata ?? null,
+        contentTypeId: session.schema_id ?? null, operatorMetadata,
       });
       ingestStatus = out.status; encodeSource = out.path;
+      // The ingest merge keeps only the fields of the record's content type; a reattached
+      // record keeps everything it had (and its title), with this upload's values on top.
+      if (kept) {
+        await query(`UPDATE vod_assets SET metadata = $2::jsonb || COALESCE(metadata, '{}'::jsonb), title = COALESCE($3, title) WHERE id = $1`,
+          [session.vod_asset_id, JSON.stringify(kept.metadata), kept.title]);
+      }
+      if (retry?.action === 'replace' && retry.assetId !== session.vod_asset_id) {
+        const { removeVodAsset } = await import('./vodRemove');
+        await removeVodAsset(retry.assetId).catch((e) => console.warn('[uploads] the failed record was not removed', e));
+      }
     } catch (e: any) {
       // A probe that cannot read the file is worth recording, not worth losing
       // the bytes over. The asset keeps its original name and encodes as before.
@@ -462,7 +507,12 @@ export async function completeLanded(session: UploadSession, dest: string, writt
         [session.id, `ingest rules could not run: ${String(e?.message ?? e)}`.slice(0, 500)]);
     }
   }
-  if (session.vod_asset_id && ingestStatus === 'ingested') {
+  // A METADATA GATE HOLDS THE INGEST, NOT THE MEDIA (27 Oct 2026). An upload
+  // waiting for a required field (a bug's Advertiser, say) is still a good file:
+  // it is encoded now, so it has renditions, an MP4, thumbnails and sprites
+  // when the field is filled. The ingest stays "awaiting metadata" (held list,
+  // no 'ingested' webhook) until then. Only a duplicate or a rejection waits.
+  if (session.vod_asset_id && (ingestStatus === 'ingested' || ingestStatus === 'awaiting_metadata')) {
     // THE ENCODE IS QUEUED HERE, not by the route, because finishing is
     // idempotent by design (a service worker's backgroundfetchsuccess can fire
     // more than once) and the dedupe key makes a second call join the job in

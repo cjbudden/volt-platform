@@ -51,6 +51,9 @@ export async function sweepUnpicked(limit = 100): Promise<number> {
              AND poster_picked_at < now() - interval '6 hours')
       ORDER BY created_at DESC LIMIT $1`, [limit]);
   for (const r of rows) await queueAssetImage(r.id);
+  // Images saved under older names (poster.jpg, poster-<hash>.jpg, 1970-01-01 folders, a file
+  // extension in the folder) move to <asset>-<hash>.jpg in the asset's folder, a batch a pass.
+  await (await import('../../media/libraryMoves')).tidyAssetImageNames(50).catch((e) => console.warn('[vod.image] image names not tidied', e));
   return rows.length;
 }
 

@@ -103,3 +103,17 @@ def probeable(inp):
     proto = str(inp.get("protocol", "")).lower()
     url = str(inp.get("url") or "")
     return proto == "hls" and url.startswith(("http://", "https://"))
+
+
+
+def timeline_args(inp):
+    """Output args that place a copy relay's timeline. A relay starts its output
+    at zero (-muxdelay 0, first keyframe on the segment grid); a RESPAWNED relay
+    is given `_ts_offset`, the point the previous one reached plus the time it
+    was gone, rounded up to whole segments (source_selector.continue_offset), so
+    the bus never goes back in time.
+
+    Not -copyts: on ffmpeg 4.4 (the encoder image) -re paces from timestamp zero,
+    so a relay on the source's own clock (hours in) waits hours before it sends."""
+    off = float(inp.get("_ts_offset") or 0.0)
+    return ["-output_ts_offset", f"{off:.6f}"] if off > 0 else []

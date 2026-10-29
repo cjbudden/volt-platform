@@ -7,10 +7,17 @@ import { ApiError } from '../util/http';
  *   { key, label?, type, required?, options?, multiple? }
  * Supported types: string | text | number | boolean | date | enum | url | tags | image.
  *
- * Validation is strict: required fields must be present, values must match their
- * declared type, enums must be within options, and unknown keys are rejected —
- * so "custom schema" stays structured rather than drifting into free-form soup.
+ * Validation is strict about what IS there: values must match their declared type,
+ * enums must be within options, and unknown keys are rejected — so "custom schema"
+ * stays structured rather than drifting into free-form soup.
  * Returns a cleaned values object (only known keys, coerced where safe).
+ *
+ * REQUIRED FIELDS ARE A PUBLISH RULE, NOT A SAVE RULE. Content is created empty
+ * (an API create, an upload, a watch folder) and filled in over time, so saving
+ * with required fields still empty is allowed. They are enforced where it matters:
+ * publishing (services/review.ts publishGate, which every publish goes through)
+ * refuses while any is missing, naming them. Pass required = 'enforce' only for a
+ * caller that genuinely cannot hold incomplete values.
  */
 export interface SchemaField {
   key: string;
@@ -19,6 +26,12 @@ export interface SchemaField {
   type: 'string' | 'text' | 'number' | 'boolean' | 'date' | 'enum' | 'url' | 'tags' | 'reference' | 'image';
   required?: boolean;
   options?: string[];
+  /** enum: the account list the options come from ('genres'). The options are
+   *  copied in from the list on every list or type save (services/metadataLists.ts). */
+  optionsList?: string;
+  /** enum linked to a list: values retired from it. Still valid on what already
+   *  carries them, no longer offered. Written by the list sync, never by hand. */
+  retiredOptions?: string[];
   multiple?: boolean;
   refDomain?: string; // for type 'reference': the entity domain (e.g. 'sports-team')
   /** The EPG slot this value lands in when a programme is made from the owner:
@@ -55,6 +68,8 @@ export function validateSchemaFields(fields: unknown): SchemaField[] {
     if (!okTypes.includes(f.type)) throw new ApiError(422, `bad field type: ${f.type} (${f.key})`);
     if (f.type === 'enum' && (!Array.isArray(f.options) || f.options.length === 0))
       throw new ApiError(422, `enum field ${f.key} needs options[]`);
+    if (f.optionsList != null && (f.type !== 'enum' || !/^[a-z][a-z0-9-]{0,39}$/.test(String(f.optionsList))))
+      throw new ApiError(422, `${f.key}: a list can only feed an enum field`);
     if (f.epg != null && !/^(title|sub-title|description|category|episode|language|icon|credits\.[a-z-]+|custom:[a-zA-Z0-9_-]+)$/.test(String(f.epg)))
       throw new ApiError(422, `bad epg slot on ${f.key}: ${f.epg}`);
   }
@@ -95,8 +110,9 @@ function checkOne(field: SchemaField, value: any): any {
       const vals = field.multiple ? value : [value];
       if (field.multiple && !Array.isArray(value))
         throw new ApiError(422, `${field.key} must be an array`);
+      const retired = field.retiredOptions ?? [];
       for (const v of vals) {
-        if (!opts.includes(v)) throw new ApiError(422, `${field.key}: ${v} not in options`);
+        if (!opts.includes(v) && !retired.includes(v)) throw new ApiError(422, `${field.key}: ${v} not in options`);
       }
       return value;
     }
@@ -134,7 +150,8 @@ export type UnknownKeyPolicy = 'reject' | 'keep';
 export function validateMetadata(
   fields: SchemaField[],
   values: Record<string, any>,
-  unknown: UnknownKeyPolicy = 'reject'
+  unknown: UnknownKeyPolicy = 'reject',
+  required: 'defer' | 'enforce' = 'defer'
 ): Record<string, any> {
   const known = new Map(fields.map((f) => [f.key, f]));
   const clean: Record<string, any> = {};
@@ -146,7 +163,7 @@ export function validateMetadata(
   for (const field of fields) {
     const present = values && Object.prototype.hasOwnProperty.call(values, field.key);
     if (!present || values[field.key] === null || values[field.key] === '') {
-      if (field.required) throw new ApiError(422, `missing required field: ${field.key}`);
+      if (field.required && required === 'enforce') throw new ApiError(422, `missing required field: ${field.key}`);
       continue;
     }
     clean[field.key] = checkOne(field, values[field.key]);

@@ -30,8 +30,10 @@ import { pressable } from '../a11y'
 import { OutputUrls } from '../OutputUrls'
 import { PanelLayout } from '../panelLayout'
 import { RightsPreview } from '../RightsPreview'
-import { DualPlayers, StatusBoard, EventLog, ViewersCard, QcPanel, withMeters } from './ChannelDetail'
+import { DualPlayers, StatusBoard, EventLog, ViewersCard, QcPanel, withMeters, EpgStrip } from './ChannelDetail'
 import { EventDrawer } from './Events'
+import { broadcastOf } from '../programmeGestures'
+import { removalText } from '../programmeMedia'
 import { LiveGraphicsButton } from '../graphics/LiveGraphicsButton'
 
 const ms = (v: string | number | null | undefined) => (v == null ? null : typeof v === 'number' ? v : Date.parse(v))
@@ -220,6 +222,10 @@ export default function EventDetail({ id, onBack }: { id: string; onBack: () => 
 
       <PanelLayout pageKey="event" panels={[
         { id: 'schedule', label: 'Schedule', node: <ScheduleCard d={d} now={now} /> },
+        // The event's programme guide, the same strip and flags as a channel.
+        { id: 'epg', label: 'Programme guide', node: (
+          <EpgStrip d={cd} broadcast={broadcastOf(ov, !!d.onAir)} ownerPath={`/epg/event/${encodeURIComponent(d.id)}`}
+            onChanged={load} onAddEpg={() => navigate(`/epg/event/${encodeURIComponent(d.id)}`)} />) },
         { id: 'players', label: 'Source and output players', node: (
           <DualPlayers d={cd} captionLangs={captionLangs} sourceUp={sourceUp} onAir={!!d.onAir}
             onSendSource={() => startStop('start')} onGoLive={() => startStop('start')} busy={busy} />) },
@@ -314,7 +320,7 @@ function RecordingsCard({ d, now }: { d: EventDetailData; now: number }) {
         <div className="ev-empty">{d.recording_enabled === false ? 'Recording is off for this event. Turn it on in Settings to keep what goes out.' : 'Nothing recorded yet. Recording starts when the event goes live.'}</div>
       ) : (
         <table>
-          <thead><tr><th>Recording</th><th>Started</th><th>Length</th><th>Status</th><th /></tr></thead>
+          <thead><tr><th>Recording</th><th>Started</th><th>Length</th><th>Status</th><th title="When the recording is deleted by the keep period">Removed</th><th /></tr></thead>
           <tbody>
             {recs.map(r => {
               const s = Number(r.start_epoch_ms), e = r.end_epoch_ms != null ? Number(r.end_epoch_ms) : null
@@ -325,6 +331,8 @@ function RecordingsCard({ d, now }: { d: EventDetailData; now: number }) {
                   <td style={{ color: 'var(--muted)' }}>{fmtWhen(s, now)}</td>
                   <td style={{ color: 'var(--muted)' }}>{fmtDur(len)}{e == null ? ' so far' : ''}</td>
                   <td><span className={`tag ${r.status === 'recording' ? 'live' : 'idle'}`}>{r.status}</span></td>
+                  <td style={{ color: removalText((r as any).expires_at).warn ? '#fbbf24' : 'var(--muted)', whiteSpace: 'nowrap' }} title={removalText((r as any).expires_at).text}>
+                    {removalText((r as any).expires_at).short === 'kept' ? 'kept' : removalText((r as any).expires_at).text.replace(/^Removed /, '')}</td>
                   <td style={{ textAlign: 'right' }}><button className="btn ghost" onClick={(ev) => { ev.stopPropagation(); navigate(`/recordings/${r.id}`) }}>Open in workbench</button></td>
                 </tr>
               )

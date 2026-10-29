@@ -89,6 +89,11 @@
    "description": "Opens this documentation site for a signed-in admin user by issuing a short-lived pass.\n\n**Use it to:**\n- Get a documentation link for the current user with `GET /api/docs/session`\n- Back a Documentation button in your own admin tools, sending the user to the returned URL before it expires\n\n**Credential:** admin session (Bearer), any signed-in admin user. Account secret keys are refused because documentation access is for people."
   },
   {
+   "name": "Downloads",
+   "x-displayName": "Downloads",
+   "description": "Download an item's media files (MP4, MP3, AAC) for people whose role allows it. Downloading is its own permission, separate from the Media Library.\n\n**Use it to:**\n- List the files an item has with `GET /api/downloads/vod/{id}`\n- Get a five-minute link to one file with `POST /api/downloads/vod/{id}/link`, then open the returned `url` to download it\n\n**Credential:** admin session (Bearer) or account secret key, with `downloads: view` to list and `downloads: operate` to download. Owners and admins have both.\n\n**Good to know:** every link issued is recorded in the audit log. The link itself (`GET /api/downloads/file`) needs no session: its token is the access, for one file, for five minutes."
+  },
+  {
    "name": "EPG",
    "x-displayName": "EPG (programme guide)",
    "description": "The EPG holds the programme schedule for each channel and event, including geo rules, slot replacement and automatic VOD after airing.\n\n**Use it to:**\n- Read a guide window with `GET /api/epg` (pass `channelId` or `eventId`, plus `from` and `to`) and now and next with `GET /api/epg/now-next`\n- Add, edit and repeat programmes with `POST /api/epg`, `PATCH /api/epg/{id}`, `POST /api/epg/series` and `POST /api/epg/copy-day`\n- Import XMLTV guides with `POST /api/epg/import/sources` and export them with `GET /api/epg/xmltv` or partner feeds\n- Check overlaps with `GET /api/epg/conflicts` and convert an aired programme with `POST /api/epg/{id}/convert`\n\n**Credential:** admin session (Bearer) or account secret key, with `epg: view` to read, `epg: operate` to run imports and `epg: manage` to change.\n\n**Good to know:** overlaps are reported, not blocked, so check conflicts after bulk changes."
@@ -352,8 +357,8 @@
   },
   {
    "name": "VOD Ads",
-   "x-displayName": "On-demand ads",
-   "description": "On-demand ads put ad breaks in your on-demand titles, filled by your ad server and your house spots, with ad-free viewing for viewers who paid.\n\n**Use it to:**\n- Set where breaks go and who fills them with `PUT /api/vod/ads/rules/default`, or for one content type with `PUT /api/vod/ads/rules/content-type/{id}`\n- See where a title's breaks would go with `GET /api/vod/ads/assets/{id}/plan`\n- Follow fill, completion and clicks with `GET /api/vod/ads/report`\n\n**Credential:** admin session (Bearer) or account secret key, with `vod: view` to read and `vod: manage` to change.\n\n**Good to know:** players get the ads through the play gate (`ads` in its answer); a viewer's ad timeline, clicks and player events are under `/vod-ads/s/{session}/`."
+   "x-displayName": "On-demand ads (playback)",
+   "description": "The viewer-facing side of server-side ads in on-demand video: a viewer's ad-inserted playlists, ad segments, ad timeline, clicks and playback events.\n\n**Use it to:**\n- Play a stitched session's playlists and segments with `GET /vod-ads/s/{sid}/{file}` and `GET /vod-ads/s/{sid}/seg/{b}/{p}/{track}/{n}`\n- Read where the breaks sit, in content time and stitched time, with `GET /vod-ads/s/{sid}/timeline.json`, so a player can draw ad markers, snap back and resume in content time\n- Report what the viewer actually watched with `POST /vod-ads/s/{sid}/events`, and send ad clicks through `GET /vod-ads/s/{sid}/click/{b}/{p}`\n- For guided delivery (HLS Interstitials), fetch a break's asset list with `GET /vod-ads/g/{assetId}/{ver}/list/{b}`\n\n**Credential:** the session id is the viewer's capability for its own playlists, beacons and clicks. Rules, plans and reports are under `/api/vod/ads`, with `vod: view` to read and `vod: manage` to change.\n\n**Good to know:** ad decisions are made when the session starts, never while a player is loading a playlist, and a break the ad server cannot fill plays house spots."
   },
   {
    "name": "Viewers",
@@ -410,6 +415,7 @@
     "Channels",
     "Daypart Presets",
     "Docs",
+    "Downloads",
     "Encode Profiles",
     "Engines",
     "EPG",
@@ -7960,6 +7966,93 @@
     }
    }
   },
+  "/api/downloads/file": {
+   "get": {
+    "operationId": "getDownloadsFile",
+    "summary": "Get downloads file",
+    "tags": [
+     "Downloads"
+    ],
+    "description": "**Credential:** none or per-route",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/api/downloads/vod/{id}": {
+   "get": {
+    "operationId": "getDownloadsVODByID",
+    "summary": "Get a VOD asset",
+    "tags": [
+     "Downloads"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** downloads: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/downloads/vod/{id}/link": {
+   "post": {
+    "operationId": "postDownloadsVODByIDLink",
+    "summary": "Link (VOD asset)",
+    "tags": [
+     "Downloads"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** downloads: operate",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/encode-profiles": {
    "get": {
     "operationId": "getEncodeProfiles",
@@ -12689,6 +12782,42 @@
     }
    }
   },
+  "/api/files/{id}/ad": {
+   "put": {
+    "operationId": "putFilesByIDAd",
+    "summary": "Set a file's ad",
+    "tags": [
+     "Files"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/files/{id}/metadata/refresh": {
    "post": {
     "operationId": "postFilesByIDMetadataRefresh",
@@ -13018,6 +13147,32 @@
    "post": {
     "operationId": "postFilesMetadataBackfill",
     "summary": "Metadata: backfill",
+    "tags": [
+     "Files"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/files/motion": {
+   "post": {
+    "operationId": "postFilesMotion",
+    "summary": "Files: motion",
     "tags": [
      "Files"
     ],
@@ -13752,6 +13907,78 @@
    "patch": {
     "operationId": "patchFillerAssetsByID",
     "summary": "Update a slate or loop",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/filler-assets/{id}/details": {
+   "get": {
+    "operationId": "getFillerAssetsByIDDetails",
+    "summary": "Get a slate or loop's details",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/filler-assets/{id}/rebuild": {
+   "post": {
+    "operationId": "postFillerAssetsByIDRebuild",
+    "summary": "Rebuild (slate or loop)",
     "tags": [
      "Filler Assets"
     ],
@@ -17372,6 +17599,78 @@
     }
    }
   },
+  "/api/jobs/{id}/log": {
+   "get": {
+    "operationId": "getJobsByIDLog",
+    "summary": "A job's log",
+    "tags": [
+     "Jobs"
+    ],
+    "description": "What the job printed, oldest first: `lines` of `{ seq, attempt, at, stream, line }`, where `stream` is `out` or `err` (the process), `step` (a stage the job announced) or `warn` (a step that failed without failing the job). Pass `after` (the last `seq` you have) to tail a running job; `last` is the seq to pass next. `limit` up to 5000 (default 1000). Progress lines are kept once per 5%, and a job keeps at most 4000 lines plus its last 200.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/jobs/{id}/outputs": {
+   "get": {
+    "operationId": "getJobsByIDOutputs",
+    "summary": "What a VOD encode produced",
+    "tags": [
+     "Jobs"
+    ],
+    "description": "For a `vod.encode` job: each rendition and the audio (resolution, bitrate, codec, segments, bytes and a `state`: `ok`, `running`, `pending`, `failed`, `skipped` or `missing`), the HLS and DASH manifests, the thumbnails (candidate stills and the chosen image), the sprite sheets (sheets, previews, interval) and the jobs the encode queued after it (`followOn`). Read while the job runs too, from the files as they are written. 400 for other job types.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/jobs/{id}/retry": {
    "post": {
     "operationId": "postJobsByIDRetry",
@@ -17393,6 +17692,32 @@
       "schema": {
        "type": "string"
       }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/jobs/encode-queue": {
+   "get": {
+    "operationId": "getJobsEncodeQueue",
+    "summary": "The encoding queue",
+    "tags": [
+     "Jobs"
+    ],
+    "description": "Your VOD encode jobs (`vod.encode`): `running` (with progress and the stage), `queued` in the order a worker will take them, each with its `position` in the platform's encode queue (1 is next; other accounts' encodes count, since the workers are shared), and `recent`, the last `recent` (default 50, at most 200) finished, failed or cancelled. Each names its asset (`asset_id`, `asset_title`) and source file. `platformBacklog` is every encode queued or running on the platform.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
      }
     ],
     "responses": {
@@ -18443,6 +18768,42 @@
      "Metadata Schemas"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: any signed-in admin user (lookup for forms)",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/monitoring/edge/{id}": {
+   "get": {
+    "operationId": "getMonitoringEdgeByID",
+    "summary": "Get an edge",
+    "tags": [
+     "Monitoring"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** monitoring: view",
     "security": [
      {
       "adminBearer": []
@@ -27566,6 +27927,32 @@
     }
    }
   },
+  "/api/sources/validate": {
+   "post": {
+    "operationId": "postSourcesValidate",
+    "summary": "Sources: validate",
+    "tags": [
+     "Sources"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels or radio or events: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/status": {
    "get": {
     "operationId": "getStatus",
@@ -28020,10 +28407,134 @@
     }
    }
   },
+  "/api/storage/bin": {
+   "get": {
+    "operationId": "getStorageBin",
+    "summary": "Get storage bin",
+    "tags": [
+     "Storage"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/storage/bin/{id}": {
+   "delete": {
+    "operationId": "deleteStorageBinByID",
+    "summary": "Delete a bin",
+    "tags": [
+     "Storage"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/storage/bin/{id}/restore": {
+   "post": {
+    "operationId": "postStorageBinByIDRestore",
+    "summary": "Restore (bin)",
+    "tags": [
+     "Storage"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/storage/capabilities": {
    "get": {
     "operationId": "getStorageCapabilities",
     "summary": "Get storage capabilities",
+    "tags": [
+     "Storage"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/storage/expiring": {
+   "get": {
+    "operationId": "getStorageExpiring",
+    "summary": "Get storage expiring",
     "tags": [
      "Storage"
     ],
@@ -28423,6 +28934,78 @@
     "security": [
      {
       "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/storage/recordings/{id}/expiry": {
+   "patch": {
+    "operationId": "patchStorageRecordingsByIDExpiry",
+    "summary": "Update a recording's expiry",
+    "tags": [
+     "Storage"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/storage/recordings/{id}/hold": {
+   "post": {
+    "operationId": "postStorageRecordingsByIDHold",
+    "summary": "Hold (recording)",
+    "tags": [
+     "Storage"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
      }
     ],
     "responses": {
@@ -31739,7 +32322,7 @@
     "tags": [
      "VOD"
     ],
-    "description": "The account's on-demand library: recordings published as VOD, clips, uploads and watch-folder files. Search titles and file names with `q`, filter on any field below (for example `review_state=in_review` or `published=true`), and sort with `sort=-created_at`.\n\nDerived assets. ?published=true|false.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `title`, `kind`, `source_kind`, `source_name`, `channel_id`, `event_id`, `recording_id`, `schema_id`, `schema_name`, `published`, `portal_visible`, `output_kind`, `review_state`, `qc_state`, `availability_state`, `available_from`, `available_until`, `withdrawn_at`, `thumb_status`, `original_filename`, `mime`, `start_epoch_ms`, `end_epoch_ms`, `duration_ms`, `source_bytes`, `source_coverage_pct`, `schema_key`, `schema_org_type`, `origin`, `metadata_completeness`, `metadata_missing_required`, `top_height`, `video_codec`, `rendition_count`, `has_stale_publication`, `publication_count`, `encode_state`, `encode_pct`, `created_at`, `updated_at`, `built_at`, `reviewed_at`.",
+    "description": "The account's on-demand library: recordings published as VOD, clips, uploads and watch-folder files. Search titles and file names with `q`, filter on any field below (for example `review_state=in_review` or `published=true`), and sort with `sort=-created_at`.\n\nDerived assets. ?published=true|false.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `title`, `kind`, `source_kind`, `source_name`, `channel_id`, `event_id`, `recording_id`, `schema_id`, `schema_name`, `published`, `portal_visible`, `output_kind`, `review_state`, `qc_state`, `availability_state`, `available_from`, `available_until`, `withdrawn_at`, `thumb_status`, `original_filename`, `mime`, `start_epoch_ms`, `end_epoch_ms`, `duration_ms`, `source_bytes`, `source_coverage_pct`, `schema_key`, `schema_org_type`, `origin`, `source`, `media_type`, `metadata_completeness`, `metadata_missing_required`, `top_height`, `video_codec`, `rendition_count`, `has_stale_publication`, `publication_count`, `encode_state`, `encode_pct`, `created_at`, `updated_at`, `built_at`, `reviewed_at`.",
     "security": [
      {
       "adminBearer": []
@@ -32333,7 +32916,37 @@
         "watchfolder"
        ]
       },
-      "description": "recording, clip, upload or watchfolder. Filter: `origin=value` (comma list = any of), or `origin[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+      "description": "How it was made: recording, clip, upload or watchfolder. Filter: `origin=value` (comma list = any of), or `origin[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "source",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "channel",
+        "event",
+        "radio",
+        "upload",
+        "none"
+       ]
+      },
+      "description": "What it belongs to: channel, event, radio, upload, or none (its channel or event is gone). Filter: `source=value` (comma list = any of), or `source[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "media_type",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "video",
+        "audio",
+        "song"
+       ]
+      },
+      "description": "video, audio or song. Filter: `media_type=value` (comma list = any of), or `media_type[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
      },
      {
       "name": "metadata_completeness",
@@ -32471,7 +33084,7 @@
        "type": "string",
        "default": "-created_at"
       },
-      "description": "Comma list of: id, title, kind, source_kind, source_name, channel_id, event_id, recording_id, schema_id, schema_name, published, portal_visible, output_kind, review_state, qc_state, availability_state, available_from, available_until, withdrawn_at, thumb_status, original_filename, mime, start_epoch_ms, end_epoch_ms, duration_ms, source_bytes, source_coverage_pct, schema_key, schema_org_type, origin, metadata_completeness, metadata_missing_required, top_height, video_codec, has_stale_publication, publication_count, encode_state, encode_pct, created_at, updated_at, built_at, reviewed_at. Prefix `-` for descending. Default `-created_at`; ties by id."
+      "description": "Comma list of: id, title, kind, source_kind, source_name, channel_id, event_id, recording_id, schema_id, schema_name, published, portal_visible, output_kind, review_state, qc_state, availability_state, available_from, available_until, withdrawn_at, thumb_status, original_filename, mime, start_epoch_ms, end_epoch_ms, duration_ms, source_bytes, source_coverage_pct, schema_key, schema_org_type, origin, source, media_type, metadata_completeness, metadata_missing_required, top_height, video_codec, has_stale_publication, publication_count, encode_state, encode_pct, created_at, updated_at, built_at, reviewed_at. Prefix `-` for descending. Default `-created_at`; ties by id."
      },
      {
       "name": "limit",
@@ -32510,11 +33123,11 @@
   "/api/vod/{id}": {
    "delete": {
     "operationId": "deleteVODByID",
-    "summary": "Delete a VOD asset",
+    "summary": "Delete an asset (into the restore bin)",
     "tags": [
      "VOD"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "description": "Removes the asset's record, metadata and media files from the library. Nothing is destroyed yet: it goes to the restore bin (Storage > Recently removed) for `binDays` days, until `purgeAfter`, and `POST /api/vod/{id}/restore` puts it back. Posts already on social platforms are not taken down. Refused (400) while the asset is in an active FAST lineup; `GET /api/vod/{id}/delete-impact` says so first. Needs `vod: manage`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
     "security": [
      {
       "adminBearer": []
@@ -33200,6 +33813,42 @@
      "VOD"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/delete-impact": {
+   "get": {
+    "operationId": "getVODByIDDeleteImpact",
+    "summary": "What deleting an asset would take",
+    "tags": [
+     "VOD"
+    ],
+    "description": "Before deleting: the asset's title (`name`, typed to confirm in the console), its availability, what goes with it (`counts`: skip markers, social formats, reviews, portal and app publishing points), the social posts that stay on their platforms (`counts.social_posts`), how many days the restore bin keeps it (`binDays`) and `blocker`, why the delete would be refused now (it is in the active lineup of a FAST channel, named in `fastChannels`). Needs `vod: view`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
     "security": [
      {
       "adminBearer": []
@@ -34034,6 +34683,42 @@
      "VOD"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/restore": {
+   "post": {
+    "operationId": "postVODByIDRestore",
+    "summary": "Undelete an asset",
+    "tags": [
+     "VOD"
+    ],
+    "description": "Puts an asset deleted with `DELETE /api/vod/{id}` back from the restore bin, with its metadata, markers and media files, under the same id. Needs `vod: manage`, the same as the delete. 404 when the asset is not in the bin (never deleted, already restored, or purged).\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
     "security": [
      {
       "adminBearer": []

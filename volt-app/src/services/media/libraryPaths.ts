@@ -23,10 +23,26 @@ export function slug(s: unknown, fallback = 'untitled'): string {
   return v || fallback;
 }
 
-/** YYYY-MM-DD of a time (epoch ms, Date or ISO string); today when unknown. */
+/** YYYY-MM-DD of a time (epoch ms, Date or ISO string); today when unknown. An epoch of 0
+ *  (an upload has no broadcast start, stored as 0) is unknown, never 1970-01-01. */
 export function day(t: unknown): string {
   const d = t instanceof Date ? t : typeof t === 'number' || (typeof t === 'string' && /^\d+$/.test(t)) ? new Date(Number(t)) : t ? new Date(String(t)) : new Date();
-  return Number.isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10);
+  return Number.isNaN(d.getTime()) || d.getTime() < 86_400_000 * 366 ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10);
+}
+
+/** A media file's extension, which is not part of what it is called ("sintel_1080p.mkv" > "sintel_1080p"). */
+const MEDIA_EXT = /\.(mkv|mp4|m4v|mov|mxf|webm|ts|m2ts|mts|avi|wmv|flv|mpg|mpeg|3gp|mp3|m4a|aac|wav|flac|ogg|opus|wma|aif|aiff)$/i;
+export const withoutExt = (title: unknown) => String(title ?? '').trim().replace(MEDIA_EXT, '');
+
+/**
+ * The file name of an image Volt saves for an asset: the asset's name (no file
+ * extension, no spaces), the image type when it is not the main image, and a
+ * short hash of the picture, so a different frame is a different file:
+ *   sintel-1080p-21fe57ffc0.jpg          the main image (thumbnail / cover)
+ *   sintel-1080p-hero-9a0c33b2e1.jpg     a typed image
+ */
+export function assetImageName(title: unknown, sha256: string, type?: string | null): string {
+  return `${slug(withoutExt(title), 'asset')}${type ? `-${slug(type)}` : ''}-${sha256.slice(0, 10)}.jpg`;
 }
 
 export const songFolder = (artist: unknown, album: unknown, song: unknown) => `media/${slug(artist, 'unknown-artist')}/${slug(album, 'singles')}/${slug(song)}`;
@@ -65,8 +81,8 @@ export function assetFolder(a: AssetPlace): string {
   }
   const series = str(m.series) || str(m.seriesTitle) || str(m.show);
   const episode = str(m.episode) || str(m.episodeTitle) || (m.episodeNumber != null ? `episode ${m.episodeNumber}` : '');
-  if (series && (episode || a.schemaKey === 'episode')) return episodeFolder(series, episode || a.title);
+  if (series && (episode || a.schemaKey === 'episode')) return episodeFolder(series, episode || withoutExt(a.title));
   if (a.eventName) return eventFolder(a.eventName, a.when);
-  if (a.channelName) return programmeFolder(a.channelName, a.programmeTitle || a.title, a.when);
-  return `media/${slug(a.title)}/${day(a.when)}`;
+  if (a.channelName) return programmeFolder(a.channelName, withoutExt(a.programmeTitle || a.title), a.when);
+  return `media/${slug(withoutExt(a.title))}/${day(a.when)}`;
 }

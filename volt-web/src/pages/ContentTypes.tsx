@@ -12,6 +12,7 @@ import { api, type ContentType, type SchemaField } from '../api'
 import { PageHead } from '../scaffold'
 import { RuleEditor } from '../RuleEditor'
 import { useNotify, usePageNotice } from '../notices'
+import { navigate } from '../router'
 
 const APPLIES: { key: 'radio' | 'tv' | 'event' | 'vod'; label: string }[] = [
   { key: 'radio', label: 'Radio stations' }, { key: 'tv', label: 'TV channels' }, { key: 'event', label: 'Events' }, { key: 'vod', label: 'On-demand assets' },
@@ -130,7 +131,26 @@ function TypeEditor({ type, all, onChanged, onDeleted }: { type: ContentType; al
                 <td><input {...inp} value={f.label ?? ''} onChange={e => setField(i, { label: e.target.value })} style={{ ...inp.style, width: 150 }} /></td>
                 <td><select className="inp sel-sm" value={f.type} onChange={e => setField(i, { type: e.target.value as any })}>{FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></td>
                 <td>
-                  {f.type === 'enum' && <input {...inp} placeholder="a, b, c" value={(f.options ?? []).join(', ')} onChange={e => setField(i, { options: e.target.value.split(',').map(x => x.trim()).filter(Boolean) })} style={{ ...inp.style, width: 160 }} />}
+                  {/* An enum takes its options from its own list, or from the
+                      account's Genres list (Admin > Genres), filled in on save. */}
+                  {f.type === 'enum' && (
+                    <select className="inp sel-sm" aria-label={`Options for ${f.label || f.key}`} value={f.optionsList ?? ''}
+                      onChange={e => {
+                        const v = e.target.value
+                        if (v) setField(i, { optionsList: v as any })
+                        else setField(i, { optionsList: undefined, retiredOptions: undefined, options: f.options ?? [] })
+                      }} style={{ marginRight: 6 }}>
+                      <option value="">Own list</option>
+                      <option value="genres">Genres list</option>
+                    </select>
+                  )}
+                  {f.type === 'enum' && f.optionsList && (
+                    <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>
+                      {f.options?.length ? `${f.options.length} values · ` : 'filled on save · '}
+                      <a href="/genres" onClick={e => { e.preventDefault(); navigate('/genres') }}>manage</a>
+                    </span>
+                  )}
+                  {f.type === 'enum' && !f.optionsList && <input {...inp} placeholder="a, b, c" value={(f.options ?? []).join(', ')} onChange={e => setField(i, { options: e.target.value.split(',').map(x => x.trim()).filter(Boolean) })} style={{ ...inp.style, width: 160 }} />}
                   {f.type === 'enum' && <label style={{ fontSize: 'var(--fs-micro)', marginLeft: 6 }}><input type="checkbox" checked={!!f.multiple} onChange={e => setField(i, { multiple: e.target.checked })} /> multi</label>}
                   {f.type === 'reference' && <input {...inp} placeholder="sports-team" value={f.refDomain ?? ''} onChange={e => setField(i, { refDomain: e.target.value })} style={{ ...inp.style, width: 120 }} />}
                 </td>

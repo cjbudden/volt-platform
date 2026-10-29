@@ -12,6 +12,7 @@ import { currentRunId } from './services/liveOrigin';
 import { errorHandler } from './util/http';
 import { authRouter } from './auth/routes';
 import { sessionCookies } from './auth/sessionCookie';
+import { ssoRouter, ssoAdminRouter } from './auth/sso/routes';
 import { channelsRouter } from './modules/channels';
 import { searchRouter } from './modules/search';
 import { sourcesRouter } from './modules/sources';
@@ -31,6 +32,7 @@ import { storageRouter } from './modules/storage';
 import { vodRouter } from './modules/vod';
 import { vodImageRouter } from './modules/vodImage';
 import { metadataSchemasRouter } from './modules/metadataSchemas';
+import { metadataListsRouter } from './modules/metadataLists';
 import { fillerAssetsRouter } from './modules/fillerAssets';
 import { uploadsRouter, uploadChunksRouter } from './modules/uploads';
 import { scheduledClipsRouter } from './modules/scheduledClips';
@@ -53,6 +55,7 @@ import { attachMp3Listener } from './services/radio/pipeline';
 import { icecastAuthRouter } from './modules/icecastAuth';
 import { analyticsRouter, analyticsBeaconRouter } from './modules/analytics';
 import { platformRouter } from './modules/platform';
+import { platformGraphicsRouter } from './modules/platformGraphics';
 import { onboardingRouter } from './modules/onboarding';
 import { signupRouter, signupWebhookRouter, platformSignupsRouter } from './modules/signup';
 import { fleetPlanRouter } from './modules/fleetPlan';
@@ -64,6 +67,7 @@ import { shareLinksRouter, publicShareRouter } from './modules/shareLinks';
 import { publicLiveRouter } from './modules/publicLive';
 import { cmcdRouter } from './modules/cmcd';
 import { journeyRouter } from './modules/journey';
+import { downloadsRouter, downloadFileRouter } from './modules/downloads';
 import { hypermediaRouter } from './modules/hypermedia';
 import { liveStreamsRouter } from './modules/liveStreams';
 import { hypermediaNegotiation } from './middleware/hypermedia';
@@ -85,6 +89,8 @@ import { planRouter } from './modules/plan';
 import { isBootReconciled } from './services/orchestrator';
 import { mountHealth, publicOnlyGuard } from './scale/health';
 import { publicAuthRouter, publicMeRouter } from './modules/publicApi';
+import { epgPublicRouter } from './modules/epgPublic';
+import { collectionsRouter } from './modules/collections';
 import { viewersAdminRouter } from './modules/viewersAdmin';
 import { scaleConfig } from './scale/config';
 
@@ -104,6 +110,7 @@ export function createServer() {
   app.use('/api/files', express.json({ limit: '30mb' }));
   // Graphics: pasted template HTML and fonts added in the style editor arrive in JSON.
   app.use('/api/graphics/templates', express.json({ limit: '12mb' }));
+  app.use('/api/platform/graphics/templates', express.json({ limit: '12mb' }));
   // Provider webhooks verify a signature over the exact bytes: mounted before the JSON parser.
   app.use('/api/payments/webhooks', paymentsWebhookRouter);
   // tus resumable uploads: PATCH bodies are raw octets, so this too sits before
@@ -137,6 +144,11 @@ export function createServer() {
   // already loaded the asset once. Segments keep the long cache below.
   //
   // FAILS OPEN: anything unexpected falls through to the plain file.
+  // Caption tracks of an asset (services/companions/serve.ts, COMPANION_FILES.md):
+  // subs/<id>.m3u8 | .vtt | .dash.vtt beside its playlists. Before the route below.
+  app.get(/^\/clips\/.+\/subs\/[0-9a-f-]{36}(\.dash)?\.(m3u8|vtt)$/i, (req, res, next) => {
+    import('./services/companions/serve').then((m) => m.serveSubs(req, res, next), () => next());
+  });
   app.get(/^\/clips\/.+\.(m3u8|mpd)$/, async (req, res, next) => {
     try {
       const { assetIdFromClipsPath, playlistContext, annotateHls, annotateMpd } = await import('./services/vodMarkers');
@@ -153,7 +165,8 @@ export function createServer() {
       res.setHeader('Content-Type', isMpd ? 'application/dash+xml' : 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'public, max-age=10');
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.end(out);
+      // The asset's caption files as subtitle tracks (masters and MPDs only; fails open).
+      res.end(id ? await (await import('./services/companions/serve')).withTracks(out, id, isMpd) : out);
     } catch { next(); }
   });
   // Generated clips and their renditions, served like origin. Segments are
@@ -335,8 +348,12 @@ export function createServer() {
   app.use(hypermediaNegotiation);
   app.use('/api', hypermediaRouter); // GET /api (entrypoint), /api/context.jsonld, /api/doc
 
+  // SINGLE SIGN-ON (auth/sso/, ACCESS_CONTROL.md section 14): the public sign-in routes before
+  // /api/auth, and the account's connections (admin users, admin tier).
   // The console's refresh token as an HttpOnly cookie on every sign-in answer (auth/sessionCookie.ts).
   app.use(['/api/auth', '/api/onboarding'], sessionCookies);
+  app.use('/api/auth/sso', ssoRouter);
+  app.use('/api/sso-connections', ssoAdminRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/onboarding', onboardingRouter);           // welcome + reset links -> code -> password (docs/ONBOARDING.md)
   app.use('/api/signup', signupRouter);                   // promo site registration: waitlist, trial or paid (docs/ONBOARDING.md)
@@ -381,10 +398,30 @@ export function createServer() {
   app.get('/library/*', async (req, res) => {
     try {
       const key = decodeURIComponent(req.path.replace(/^\//, '')); // 'library/<account>/<path>'
+      const ext = (key.split('.').pop() || '').toLowerCase();
+      const ct: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', avif: 'image/avif',
+        webm: 'video/webm', mp4: 'video/mp4' };
+      // ALPHA VIDEOS (services/motionGraphics.ts) are played by <video>, which asks for
+      // byte ranges to start, loop and seek; answer them.
+      if (ext === 'webm' || ext === 'mp4') {
+        const buf = await imageStore().get(key);
+        if (!buf) return res.status(404).end();
+        res.setHeader('Content-Type', ct[ext]); res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('Cache-Control', 'public, max-age=300');
+        res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+        if (m && (m[1] || m[2])) {
+          let start = m[1] ? Number(m[1]) : buf.length - Number(m[2]); let end = m[1] && m[2] ? Number(m[2]) : buf.length - 1;
+          start = Math.max(0, start); end = Math.min(buf.length - 1, end);
+          if (start > end) { res.setHeader('Content-Range', `bytes */${buf.length}`); return res.status(416).end(); }
+          res.status(206).setHeader('Content-Range', `bytes ${start}-${end}/${buf.length}`);
+          res.setHeader('Content-Length', String(end - start + 1));
+          return res.end(buf.subarray(start, end + 1));
+        }
+        res.setHeader('Content-Length', String(buf.length));
+        return res.end(buf);
+      }
       const stream = await imageStore().getStream(key);
       if (!stream) return res.status(404).end();
-      const ext = (key.split('.').pop() || '').toLowerCase();
-      const ct: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', avif: 'image/avif' };
       if (ct[ext]) res.setHeader('Content-Type', ct[ext]);
       res.setHeader('Cache-Control', 'public, max-age=300');
       // Originals may be SVG: never let one run script on this origin.
@@ -417,11 +454,18 @@ export function createServer() {
   // and what retention will do to it next. NOT /api/media — that prefix is the
   // thumbnailer's ingest callback and belongs to a different concern entirely.
   app.use('/api/storage', storageRouter);
+  // Downloads (modules/downloads.ts). The file route first and on its own: a
+  // browser navigation cannot send the bearer, so its short-lived token is the
+  // access. Everything else under /api/downloads is gated as usual.
+  app.use('/api/downloads', downloadFileRouter);
+  app.use('/api/downloads', downloadsRouter);
   app.use('/api/vod/ads', vodAdsRouter);                // on-demand ad rules, plans, report (before vodRouter's /:id)
   app.use('/api/vod', reframeRouter);                    // social formats per asset: /:id/reframe... (modules/reframe.ts)
   app.use('/api/vod', vodImageRouter);                   // the image that represents an asset (before vodRouter's /:id)
   app.use('/api/vod', vodRouter);                        // derived VOD assets + metadata
+  app.use('/api/collections', collectionsRouter);       // nested collections of library assets (modules/collections.ts)
   app.use('/api/metadata-schemas', metadataSchemasRouter); // named metadata schemas
+  app.use('/api/metadata-lists', metadataListsRouter);     // the account's pick lists: genres (services/metadataLists.ts)
   app.use('/api/filler-assets', fillerAssetsRouter);     // slates & loops
   // Resumable uploads. Chunk bodies are raw octets carrying their own capability
   // token, so they mount BEFORE the JSON parser's reach and without requireAuth;
@@ -473,6 +517,7 @@ export function createServer() {
   app.use('/api/public/cmcd', cmcdRouter);                 // CMCD v2 event mode (modules/cmcd.ts)
   app.use('/api/public/journey', journeyRouter);           // journey to play: the app's events (modules/journey.ts)
   app.use('/api/public/payments', paymentsAppRouter);
+  app.use('/api/public/epg', epgPublicRouter);           // read-only guide for viewer apps: now / next / schedule / grid (EPG_PUBLIC_API.md)
   // Admin view of public users (feature `viewers`).
   app.use('/api/viewers', viewersAdminRouter);
   app.use('/api/availability', availabilityRouter);      // public play-gate → mints playback token (publishable key)
@@ -490,6 +535,7 @@ export function createServer() {
   app.use('/api/platform/auth', platformAuthRouter);     // SaaS-admin 2-step login (password → TOTP)
   app.use('/api/platform/fleet-plan', fleetPlanRouter);   // placement + consolidation advice (read-only)
   app.use('/api/platform/signups', platformSignupsRouter); // SaaS-admin: promo site registrations
+  app.use('/api/platform/graphics', platformGraphicsRouter); // SaaS-admin: Volt graphics library, sets per account
   app.use('/api/platform', platformRouter);              // SaaS-admin cross-tenant dashboard
   app.use('/api/platform/tickets', platformTicketsRouter); // SaaS-admin ticket triage
   app.use('/api/publish-targets', publishTargetsRouter); // social account config

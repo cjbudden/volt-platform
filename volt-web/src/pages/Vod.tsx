@@ -1,12 +1,19 @@
 import { SocialComposer, SocialPanel } from './SocialPublish'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { IngestPanel } from '../IngestPanel'
-import { api, apiRequest } from '../api'
+import { api, apiRequest, thumbUrl } from '../api'
+import DeleteAssetDialog, { type DeletedAsset } from '../DeleteAssetDialog'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import { navigate } from '../router'
 import { Notice, PageError, useNotify, usePageNotice } from '../notices'
 import MediaPreview from '../MediaPreview'
 import { AssetImage } from './vod/AssetImage'
+import { confirmLeave, setUnsaved, stable } from './vod/unsaved'
+import { AssetFiles } from './vod/AssetFiles'
+import { useLibraryChanges, posterVersion } from './vod/useLibraryChanges'
+import { useAssetsChanged } from '../assetEvents'
+import { useDrawerWidth, DrawerResizeHandle, WidthButton } from './vod/drawerWidth'
+import { signImage } from '../imageSigning'
 import { AssetHistory } from './vod/AssetHistory'
 import SkipMarkers from '../SkipMarkers'
 import { RuleEditor } from '../RuleEditor'
@@ -18,12 +25,15 @@ import { NoMatches, usePref } from '../listFilters'
 import { LibraryFilterPanel, LibraryToolbar } from './vod/LibraryFilters'
 import { LibraryGrid } from './vod/LibraryGrid'
 import { AvailabilityPill, Completeness, Keyscreen, KindLegend, TypeLabel } from './vod/LibraryCells'
-import { EncodePanel, TargetMetadataPanel } from './vod/AssetPanels'
+import { DownloadFiles, EncodePanel, TargetMetadataPanel } from './vod/AssetPanels'
 import FormatsPanel from './vod/FormatsPanel'
 import { libraryApi, type LibraryFacets, type LibraryRow } from './vod/libraryApi'
 import { VIEWS, codecLabel, filtersToApi, filtersToSearch, isFiltered, parseColumns, parseFilters, resLabel, type LibraryFilters, type LibraryView } from './vod/libraryQuery'
 import { LibIcon } from './vod/icons'
+import { AssetStatusPanel, QcChecks, UsageBadge, USAGE_LABEL, hasNoMedia } from './vod/AssetStatus'
 import './vod/library.css'
+import { SourceFacts } from './vod/SourceFacts'
+import { AddToCollectionDialog, CollectionTree, ColIcon, NewCollection, collectionsApi, flatten, pathName, useCollections } from './vod/collections'
 
 /* ============================================================================
    MEDIA LIBRARY — everything that was cut or uploaded, and what state it is in.
@@ -121,11 +131,11 @@ function fmtDur(ms: number | string | null | undefined) {
 // ---------------------------------------------------------------------------
 //  One asset, expanded
 // ---------------------------------------------------------------------------
-function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
+function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () => void; onDeleted?: (a: DeletedAsset) => void }) {
   const [d, setD] = useState<any>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
-  const [tab, setTab] = useState<'play' | 'markers' | 'history' | 'availability' | 'metadata' | 'encode' | 'formats'>('play')
+  const [tab, setTab] = useState<'play' | 'markers' | 'history' | 'availability' | 'metadata' | 'files' | 'encode' | 'formats'>('play')
   const [composeOpen, setComposeOpen] = useState(false)
   const [socialKey, setSocialKey] = useState(0)
   async function load() {
@@ -156,24 +166,32 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   const audioOnly: boolean = d.audioOnly === true
   const file = audioOnly ? (d.export_mp3_key || d.export_m4a_key || d.progressive_key || null) : (d.progressive_key || null)
   const hls = d.master_key || null
-  const playable = !!(file || hls)
+  // NOTHING TO PLAY IS SAID, NOT TRIED. A clip whose build failed still has a
+  // master_key (the placeholder it was created with), so the player used to
+  // load it and report "Playback failed" with no reason. The usage status
+  // (volt-app services/assetReadiness.ts) knows there is no media and why.
+  const noMedia = hasNoMedia(d.usage_status) || d.usage_status === 'processing'
+  const playable = !!(file || hls) && !noMedia
   // Social posts have their own panel below (progress, retry, take down);
   // this table keeps the portal and app publishing points.
   const pubs = (d.publications ?? []).filter((p: any) => p.platform === 'portal' || p.platform === 'app')
 
   async function act(fn: () => Promise<any>, label: string) {
     setBusy(label)
-    try { await fn(); await load(); onChanged() } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy('') }
+    try {
+      await fn(); await load(); onChanged()
+      if (label === 'qc') notify({ kind: 'ok', message: 'QC is running again. The result shows here when it finishes.' })
+    } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy('') }
   }
 
   return (
     <div style={{ padding: '8px 2px 14px' }}>
       <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 12 }}>
-        {(['play', 'markers', 'metadata', 'encode', 'formats', 'availability', 'history'] as const).map(t => (
+        {(['play', 'markers', 'metadata', 'files', 'encode', 'formats', 'availability', 'history'] as const).map(t => (
           <button key={t} className={`btn ${tab === t ? 'primary' : 'ghost'}`}
             style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }}
-            onClick={() => setTab(t)}>
-            {t === 'play' ? 'Preview' : t === 'markers' ? 'Skip markers' : t === 'metadata' ? 'Metadata' : t === 'encode' ? 'Encode' : t === 'formats' ? 'Formats' : t === 'availability' ? 'Availability' : 'History'}
+            onClick={() => { if (t !== tab && !confirmLeave()) return; setTab(t) }}>
+            {t === 'play' ? 'Preview' : t === 'markers' ? 'Skip markers' : t === 'metadata' ? 'Metadata' : t === 'files' ? 'Companion files' : t === 'encode' ? 'Encode' : t === 'formats' ? 'Formats' : t === 'availability' ? 'Availability' : 'History'}
           </button>
         ))}
         <AvailabilityBadge state={d.availability_state} until={d.available_until} />
@@ -189,11 +207,13 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
         </button>
       </div>
 
+      {tab === 'play' && <AssetStatusPanel asset={d} onChanged={() => { load(); onChanged() }} />}
       {tab === 'play' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, alignItems: 'start' }}>
           <div>
             {playable ? (
-              <MediaPreview sources={{ file, hls }} audioOnly={audioOnly} title={d.title} thumbnailsVtt={thumbsVtt} />
+              <MediaPreview sources={{ file, hls }} audioOnly={audioOnly} title={d.title} thumbnailsVtt={thumbsVtt}
+                poster={d.poster_key ? signImage(`1280x720,${d.poster_shape === 'square' ? 'contain,bg=000000' : 'cover'}${posterVersion(d.poster_picked_at) ? `,v=${posterVersion(d.poster_picked_at)}` : ''}`, String(d.poster_key)) ?? thumbUrl(`/${String(d.poster_key).replace(/^\/+/, '')}`, 1280, 720, 'cover') : null} />
             ) : (
               <div style={{
                 height: 200, background: 'var(--panel-2)', borderRadius: 8,
@@ -202,13 +222,20 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
                 {/* An asset with no file is not an error state on its own: the
                     extraction job may still be running. Saying which it is beats
                     an empty player. */}
-                {d.thumb_status === 'processing' ? 'Still being extracted…' : 'No rendered file for this asset.'}
+                {d.usage_status === 'processing' ? (d.ingest?.status === 'awaiting_metadata' ? 'Encoding… The content type also needs required metadata (see Metadata) before the ingest completes.' : 'Still being built…')
+                  : d.usage_status === 'failed' ? 'The build failed: there is no media to play.'
+                  : d.usage_status === 'unplayable' ? 'The media will not decode, so it is not played here.'
+                  : 'No media for this asset.'}
               </div>
             )}
             {audioOnly && (
               <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', marginTop: 8 }}>
                 Audio only{d.recording_id ? ': cut from an audio source' : ''}.
               </div>
+            )}
+            {/* THE SOURCE FILE AS DELIVERED: container, bitrates, codecs, resolution, colour (vod/SourceFacts.tsx). */}
+            {(d.source_kind === 'upload' || d.source_kind === 'watchfolder') && d.ingest?.probe && (
+              <SourceFacts probe={d.ingest.probe} bytes={d.source_bytes} filename={d.original_filename} mime={d.mime} />
             )}
             {/* reload THIS drawer too: a song applied from the finder changes the content type and metadata shown below */}
             <AssetImage id={d.id} onChanged={() => { load(); onChanged() }} />
@@ -217,6 +244,7 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
             <div className="sec-label">Facts</div>
             <table>
               <tbody>
+                <tr><td style={{ color: 'var(--faint)' }}>Status</td><td>{d.usage_status ? <UsageBadge row={d} /> : '—'}</td></tr>
                 <tr><td style={{ color: 'var(--faint)' }}>Kind</td><td>{d.kind}</td></tr>
                 {(d.source_kind === 'upload' || d.source_kind === 'watchfolder') && <>
                   {/* THE SOURCE (mezzanine) FILE: kept as uploaded; every rendition is made from it. */}
@@ -243,21 +271,15 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
                     {REVIEW_LABEL[d.review_state ?? 'draft']}
                   </td></tr>
                 <tr><td style={{ color: 'var(--faint)' }}>QC</td>
-                  <td style={{ color: QC_TONE[d.qc_state] ?? 'var(--muted)' }}>{d.qc_state ?? 'not run'}</td></tr>
+                  <td style={{ color: QC_TONE[d.qc_state] ?? 'var(--muted)' }}>{d.qc_state ?? 'not run'}{d.qc_at ? <span style={{ color: 'var(--faint)' }}> · {new Date(d.qc_at).toLocaleString()}</span> : null}</td></tr>
               </tbody>
             </table>
-            {d.master_key && (
+            <QcChecks id={d.id} state={d.qc_state ?? null} at={d.qc_at ?? null} />
+            {d.master_key && !noMedia && (
               <div style={{ marginTop: 10 }}>
                 <a className="btn ghost" href={d.master_key} target="_blank" rel="noreferrer">HLS manifest</a>
-                {d.progressive_key && (
-                  <a className="btn ghost" style={{ marginLeft: 6 }} href={d.progressive_key} download>Download MP4</a>
-                )}
-                {d.export_mp3_key && (
-                  <a className="btn ghost" style={{ marginLeft: 6 }} href={d.export_mp3_key} download>Download MP3</a>
-                )}
-                {d.export_m4a_key && (
-                  <a className="btn ghost" style={{ marginLeft: 6 }} href={d.export_m4a_key} download title="The AAC exactly as broadcast, no re-encode">AAC (.m4a)</a>
-                )}
+                {/* Downloads follow the Downloads permission (modules/downloads.ts), not the page. */}
+                <DownloadFiles id={d.id} compact />
               </div>
             )}
           </div>
@@ -335,10 +357,24 @@ function AssetDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
           <TargetMetadataPanel asset={d} reloadKey={Date.parse(d.updated_at ?? '') || 0} onChanged={() => { load(); onChanged() }} />
           {/* keyed on updated_at so an EPG fill shows in the form at once */}
           <AssetMetadata key={d.updated_at ?? ''} d={d} onSaved={() => { load(); onChanged() }} />
+          <DeleteAsset d={d} onDeleted={(a) => { onChanged(); onDeleted?.(a) }} />
         </>
       )}
 
-      {tab === 'encode' && <EncodePanel id={d.id} />}
+      {/* COMPANION FILES: captions as subtitle tracks, metadata sidecars to apply (docs/COMPANION_FILES.md). */}
+      {tab === 'files' && <AssetFiles id={d.id} onMetadataApplied={() => { load(); onChanged() }} />}
+
+      {tab === 'encode' && (
+        <>
+          {/* The encode job behind this asset: its outputs, thumbnails, sprites and log. */}
+          {d.encode_job_id && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+              <button className="btn ghost sm" onClick={() => navigate(`/encode-jobs/${d.encode_job_id}`)}>Encode job and log</button>
+            </div>
+          )}
+          <EncodePanel id={d.id} />
+        </>
+      )}
 
       {/* SOCIAL FORMATS: 9:16, 1:1 and 4:5 framed by following the picture (volt/REFRAME.md). */}
       {tab === 'formats' && <FormatsPanel asset={d} />}
@@ -372,19 +408,53 @@ function AssetMetadata({ d, onSaved }: { d: any; onSaved: () => void }) {
   const [meta, setMeta] = useState<Record<string, any>>(d.metadata ?? {})
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const notify = useNotify()
   // Images added in this form go in the asset's own library folder (docs/ASSET_IMAGES.md section 7).
   const [imgFolder, setImgFolder] = useState<string | null>(null)
   useEffect(() => { apiRequest(`/vod/${d.id}/image`).then((r: any) => setImgFolder(r?.folder ?? null)).catch(() => { /* default folder */ }) }, [d.id])
+  // UNSAVED CHANGES ARE VISIBLE. The form differs from what is saved: the save
+  // bar says so, Save stands out, and leaving (tab, another asset, closing the
+  // drawer or the page) asks first. An image chosen here only takes effect on Save.
+  const saved = useMemo(() => stable({ t: d.schema_id ?? null, m: d.metadata ?? {} }), [d])
+  const dirty = !busy && stable({ t: typeId, m: meta }) !== saved
+  const what = `"${meta.title || d.title || 'this asset'}"`
+  useEffect(() => {
+    setUnsaved(dirty ? what : null)
+    if (!dirty) return
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty, what])
+  useEffect(() => () => setUnsaved(null), [])
+  const discard = () => { setTypeId(d.schema_id ?? null); setMeta(d.metadata ?? {}); setErr('') }
+  const save = async () => {
+    setBusy(true); setErr('')
+    // SAY HOW IT WENT, in the page's notice area: a save that only turned a
+    // button back from "Saving…" left people unsure whether it had worked.
+    try {
+      const r: any = await api.patchVodAsset(d.id, { schemaId: typeId, metadata: meta } as any)
+      const imageNote = r?.poster_key && r.poster_key !== d.poster_key ? ' The asset\'s image was updated.' : ''
+      setUnsaved(null)
+      notify({ id: 'asset-save', kind: 'ok', message: `Saved the metadata for ${what}.${imageNote}` })
+      onSaved()
+    } catch (e: any) {
+      setErr(e.message)
+      notify({ id: 'asset-save', kind: 'error', title: 'The metadata was not saved.', message: e.message })
+    } finally { setBusy(false) }
+  }
   return (
     <div style={{ maxWidth: 820 }}>
       <TypePicker appliesTo="vod" value={typeId} onChange={(id) => setTypeId(id)}
         hint="Inherited from the channel, station or event it was cut from. Change it to describe this item differently." />
       <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact imageFolder={imgFolder ?? undefined} />
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <button className="btn primary" disabled={busy} onClick={async () => {
-          setBusy(true); setErr('')
-          try { await api.patchVodAsset(d.id, { schemaId: typeId, metadata: meta } as any); onSaved() } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
-        }}>{busy ? 'Saving…' : 'Save metadata'}</button>
+      <div role="status" aria-live="polite" style={{ position: 'sticky', bottom: 0, zIndex: 2, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+        padding: '10px 12px', margin: '8px -12px 0', background: dirty ? 'color-mix(in srgb, var(--warn, #d97706) 14%, var(--panel))' : 'var(--panel)',
+        borderTop: `1px solid ${dirty ? 'var(--warn, #d97706)' : 'var(--border)'}` }}>
+        <button className="btn primary" disabled={busy || !dirty} onClick={save}>{busy ? 'Saving…' : dirty ? 'Save changes' : 'Save metadata'}</button>
+        {dirty && <button className="btn ghost" disabled={busy} onClick={discard}>Discard</button>}
+        <span style={{ fontSize: 'var(--fs-sm)', fontWeight: dirty ? 600 : 400, color: dirty ? 'var(--warn, #d97706)' : 'var(--faint)' }}>
+          {busy ? 'Saving…' : dirty ? '● Unsaved changes: nothing here is saved until you press Save changes.' : 'All changes saved.'}
+        </span>
         {err && <span style={{ color: '#fca5a5', fontSize: 'var(--fs-sm)' }}>{err}</span>}
       </div>
     </div>
@@ -393,6 +463,26 @@ function AssetMetadata({ d, onSaved }: { d: any; onSaved: () => void }) {
 
 /* WHERE IT GOES AND HOW LONG IT STAYS. The resolved plan (with the rung each
    field came from), the item's own overrides, and the three actions. */
+// DELETE, INTO THE RESTORE BIN, with the same dialog workflow as removing a channel or
+// station (DeleteAssetDialog): what goes, why it cannot go now, type the title to
+// confirm. The record and its media go to Storage > Recently removed for the bin's days,
+// so the page offers Undo straight after (POST /api/vod/:id/restore).
+function DeleteAsset({ d, onDeleted }: { d: any; onDeleted: (a: DeletedAsset) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="danger-zone">
+      <div>
+        <div className="dz-t">Delete this asset</div>
+        <div className="dz-d">Removes the asset with its metadata and media files. You will see exactly what goes and type the title to confirm. It can be restored from Storage &gt; Recently removed for a few days.</div>
+      </div>
+      <button className="btn ghost danger" onClick={() => setOpen(true)}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>Delete asset
+      </button>
+      {open && <DeleteAssetDialog id={d.id} onClose={() => setOpen(false)} onDeleted={(a) => { setOpen(false); onDeleted(a) }} />}
+    </div>
+  )
+}
+
 function AvailabilityPanel({ d, onChanged }: { d: any; onChanged: () => void }) {
   const [a, setA] = useState<AssetAvailability | null>(null)
   const [busy, setBusy] = useState('')
@@ -475,6 +565,11 @@ export default function VodPage() {
 
   const [view, setView] = usePref<LibraryView>('vod.view', 'list', VIEWS)
   const [colPref, setColPref] = usePref<string>('vod.columns', 'type,complete')
+  // COLLECTIONS (vod/collections.tsx): the rail on the left, the bulk Add / Remove.
+  const cols = useCollections()
+  const [rail, setRail] = usePref<string>('vod.rail', 'on', ['on', 'off'])
+  const [adding, setAdding] = useState<string[] | null>(null)
+  const [newCol, setNewCol] = useState(false)
   const columns = parseColumns(colPref)
 
   const [cursor, setCursor] = useState<string | null>(null)
@@ -483,6 +578,16 @@ export default function VodPage() {
   const [facets, setFacets] = useState<LibraryFacets | null>(null)
   const [err, setErr] = useState('')
   const [open, setOpen] = useState<string | null>(null)
+  // Unsaved edits in the open asset's form: ask before switching or closing (vod/unsaved.ts).
+  const guardOpen = (v: string | null) => { if (v !== open && !confirmLeave()) return; setOpen(v) }
+  // DEEP LINK (?asset=<id>), from the metadata log, the guide strip, the Live
+  // Streams timeline and the EPG drawer (programmeMedia.tsx). The asset opens
+  // in a drawer over the library whatever page or filter it is on.
+  const linked = new URLSearchParams(window.location.search).get('asset')
+  const closeLinked = () => {
+    const q = new URLSearchParams(window.location.search); q.delete('asset')
+    navigate(`/vod${q.toString() ? `?${q}` : ''}`, { replace: true })
+  }
   const [bulkBusy, setBulkBusy] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const notify = useNotify()
@@ -502,6 +607,63 @@ export default function VodPage() {
     return () => { gone = true }
   }, [facetQs, tick])
   const load = () => setTick((t) => t + 1)
+  // Cards update in place when an asset changes (an image chosen or picked in the
+  // background, a title, availability): light polling, see vod/useLibraryChanges.ts.
+  // WHICH CARD IS WHICH: the open asset's card is ringed (and stays marked "last opened"
+  // after the panel closes), and a card that just changed pulses with "Updated" for a few
+  // seconds, whether the change came from the open panel or from the poll below.
+  const [lastOpen, setLastOpen] = useState<string | null>(null)
+  // The asset panel's width: drag its left edge or use the width button (vod/drawerWidth.tsx).
+  const panel = useDrawerWidth()
+  useEffect(() => { if (open) setLastOpen(open) }, [open])
+  const [fresh, setFresh] = useState<Set<string>>(new Set())
+  const markFresh = (ids: (string | null | undefined)[]) => {
+    const list = ids.filter(Boolean) as string[]
+    if (!list.length) return
+    setFresh((f) => new Set([...f, ...list]))
+    window.setTimeout(() => setFresh((f) => { const n = new Set(f); list.forEach((i) => n.delete(i)); return n }), 4000)
+  }
+  const changedHere = (id: string | null | undefined) => () => { load(); markFresh([id]) }
+  // Saved elsewhere in this console (the ingest queue's Fill in): reload the page now,
+  // so the metadata bar, status and counts are current without waiting or polling.
+  useAssetsChanged((ids) => { load(); markFresh(ids) })
+  useLibraryChanges(
+    (changed) => setPage((p) => {
+      if (!p) return p
+      const by = new Map(changed.map((c) => [c.id, c]))
+      if (!p.rows.some((r) => by.has(r.id))) return p
+      window.setTimeout(() => markFresh(p.rows.filter((r) => by.has(r.id)).map((r) => r.id)), 0)
+      return { ...p, rows: p.rows.map((r) => (by.has(r.id) ? { ...r, ...by.get(r.id)! } as LibraryRow : r)) }
+    }),
+    load,
+  )
+
+  // DELETED FROM THE FORM: close it, drop it from the list and offer Undo while the
+  // notice is up (the bin keeps it for binDays either way).
+  function assetDeleted(a: DeletedAsset) {
+    if (linked === a.id) closeLinked()
+    setOpen((o) => (o === a.id ? null : o))
+    load()
+    const until = a.purgeAfter ? new Date(a.purgeAfter).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : null
+    notify({
+      id: 'asset-delete', kind: 'ok', autoHideMs: 30000,
+      title: `Deleted "${a.title}".`,
+      message: `It is in Storage > Recently removed for ${a.binDays} day${a.binDays === 1 ? '' : 's'}${until ? ` (until ${until})` : ''}, and can be restored from there until then.`,
+      actions: [{
+        label: 'Undo',
+        onClick: async () => {
+          try {
+            await api.restoreVod(a.id)
+            load()
+            setOpen(a.id)
+            notify({ id: 'asset-delete', kind: 'ok', message: `"${a.title}" is back, with its metadata and media.` })
+          } catch (e: any) {
+            notify({ id: 'asset-delete', kind: 'error', title: `"${a.title}" could not be restored.`, message: e.message })
+          }
+        },
+      }],
+    })
+  }
   usePageNotice('load', err && page ? { kind: 'error', title: "Couldn't load the library.", message: err, actions: [{ label: 'Retry', onClick: load }] } : null)
 
   const rows = page?.rows ?? []
@@ -521,6 +683,16 @@ export default function VodPage() {
       sel.clear(); load()
     } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBulkBusy(null) }
   }
+  async function bulkRemoveFromCollection() {
+    if (!filters.col) return
+    setBulkBusy(`Taking ${chosen.length} out…`)
+    try {
+      const r = await collectionsApi.take(filters.col, chosen.map((x) => x.id))
+      const left = chosen.length - r.removed
+      notify({ kind: 'ok', message: `Took ${r.removed} out of ${pathName(cols.rows ?? [], filters.col)}. The assets stay in the library.${left ? ` ${left} ${left === 1 ? 'is' : 'are'} in a sub-collection: open that one to take ${left === 1 ? 'it' : 'them'} out.` : ''}` })
+      sel.clear(); load(); cols.reload()
+    } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBulkBusy(null) }
+  }
   async function bulkPublish() {
     setBulkBusy(`Publishing ${unpublished.length}…`)
     const res = await runBulk(unpublished.map((r) => ({ id: r.id, name: r.title || 'Untitled' })), (r) => api.publishVod(r.id), (n) => setBulkBusy(`Publishing ${n} of ${unpublished.length}…`))
@@ -538,17 +710,88 @@ export default function VodPage() {
 
   return (
     <>
+      {linked && (
+        <div className="drawer-scrim" onClick={(e) => { if (e.target === e.currentTarget) closeLinked() }}>
+          <div className="drawer lib-drawer-asset" role="dialog" aria-modal="true" aria-label="Asset" style={panel.style} onKeyDown={(e) => { if (e.key === 'Escape') closeLinked() }}>
+            <DrawerResizeHandle width={panel.width} setWidth={panel.setWidth} />
+            <div className="drawer-h">
+              <span className="t">{rows.find((r) => r.id === linked)?.title || 'Asset'}</span>
+              <WidthButton current={panel.current} next={panel.next} onClick={panel.cycle} />
+              <button type="button" className="icon-btn" onClick={closeLinked} aria-label="Close" autoFocus>{LibIcon.close}</button>
+            </div>
+            <div className="drawer-b"><AssetDetail id={linked} onChanged={changedHere(linked)} onDeleted={assetDeleted} /></div>
+          </div>
+        </div>
+      )}
       <div className="page-head">
         <div>
           <h1>Media Library</h1>
           <p>Everything that has been cut or uploaded, what it is, how it was encoded, and where it went.</p>
         </div>
         <div className="spacer" />
+        {(() => {
+          const unchecked = facets?.facets.usage?.find((f) => f.value === 'unchecked')?.n ?? 0
+          return unchecked > 0 ? (
+            <button className="btn ghost" title={`${USAGE_LABEL.unchecked}: not offered to FAST, loops or blocking until QC confirms they play`}
+              onClick={async () => {
+                try { const r = await api.qcUnchecked(); notify({ kind: 'ok', message: `QC queued for ${r.queued} asset${r.queued === 1 ? '' : 's'}. Statuses update as each finishes.` }); load() }
+                catch (e: any) { notify({ kind: 'error', message: e.message }) }
+              }}>Check {unchecked} not checked</button>
+          ) : null
+        })()}
         <button className="btn ghost" onClick={load}>Refresh</button>
       </div>
 
       <IngestPanel onDone={load} />
 
+      {adding && <AddToCollectionDialog assetIds={adding} onClose={() => setAdding(null)} onDone={() => { sel.clear(); cols.reload() }} />}
+      <div className={`lib-layout${rail === 'off' ? ' rail-off' : ''}`}>
+      {rail !== 'off' && (
+        <aside className="card lib-rail" aria-label="Collections">
+          <div className="lib-rail-h">Collections<span className="spacer" />
+            <button className="fast-ico" title="New collection" aria-label="New collection" onClick={() => setNewCol((v) => !v)}>{ColIcon.plus}</button>
+            <button className="fast-ico" title="Hide collections" aria-label="Hide collections" onClick={() => setRail('off')}>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="m15 6-6 6 6 6" /></svg></button>
+          </div>
+          <div className={`col-row lib-rail-all${!filters.col ? ' on' : ''}`} onClick={() => setFilters({ ...filters, col: '' })} tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter') setFilters({ ...filters, col: '' }) }}>
+            <span className="col-tw" />{ColIcon.all}<span className="col-nm">All media</span>
+          </div>
+          {newCol && cols.rows && <div style={{ padding: '4px 4px 8px' }}><NewCollection rows={cols.rows} parentId={filters.col || null} maxDepth={cols.maxDepth}
+            onCancel={() => setNewCol(false)} onCreated={(c) => { setNewCol(false); cols.reload(); setFilters({ ...filters, col: c.id }) }} /></div>}
+          {cols.rows && !cols.rows.length && !newCol && <div className="hintxt" style={{ padding: '6px 10px' }}>Group assets your way: a collection per channel or show, with sub-collections for each week's playlist. Select assets and use <b>Add to collection</b>.</div>}
+          <CollectionTree tree={cols.tree} selected={filters.col || null} onSelect={(c) => setFilters({ ...filters, col: c.id })} />
+          <div className="lib-rail-f">
+            {filters.col && <label><input type="checkbox" checked={filters.colDeep} onChange={(e) => setFilters({ ...filters, colDeep: e.target.checked })} /> Include sub-collections</label>}
+            <button className="btn ghost sm" onClick={() => navigate(filters.col ? `/collections/${filters.col}` : '/collections')}>Manage collections</button>
+          </div>
+        </aside>
+      )}
+      <div className="lib-main">
+      <div className="lib-rail-mobile">
+        <select className="inp" value={filters.col} onChange={(e) => setFilters({ ...filters, col: e.target.value })} aria-label="Collection">
+          <option value="">All media</option>
+          {flatten(cols.tree).map((n) => <option key={n.id} value={n.id}>{'  '.repeat(n.depth)}{n.depth ? '└ ' : ''}{n.name} ({n.totalCount})</option>)}
+        </select>
+        <button className="btn ghost sm" onClick={() => navigate('/collections')}>Manage</button>
+      </div>
+      {(filters.col || rail === 'off') && (
+        <div className="lib-colbar">
+          {rail === 'off' && <button className="btn ghost sm" onClick={() => setRail('on')}>{ColIcon.folder} Collections</button>}
+          {filters.col && cols.rows && (
+            <span className="crumb">{ColIcon.folder}
+              <a href="/vod" onClick={(e) => { e.preventDefault(); setFilters({ ...filters, col: '' }) }}>All media</a> /{' '}
+              {pathName(cols.rows, filters.col).split(' / ').map((nm, i, a) => {
+                const id = (() => { let c = cols.rows!.find((x) => x.id === filters.col); for (let k = a.length - 1; k > i && c; k--) c = cols.rows!.find((x) => x.id === c!.parentId); return c?.id })()
+                return i < a.length - 1
+                  ? <Fragment key={i}><a href={`/vod?col=${id}`} onClick={(e) => { e.preventDefault(); if (id) setFilters({ ...filters, col: id }) }}>{nm}</a> /{' '}</Fragment>
+                  : <Fragment key={i}>{nm}</Fragment>
+              })}
+            </span>
+          )}
+          {filters.col && <span>{filters.colDeep ? 'with its sub-collections' : 'this collection only'}</span>}
+        </div>
+      )}
       <LibraryToolbar filters={filters} onChange={setFilters} view={view} onView={setView}
         columns={columns} onColumns={(c) => setColPref(c.join(','))} />
       <LibraryFilterPanel filters={filters} onChange={setFilters} facets={facets} />
@@ -559,10 +802,15 @@ export default function VodPage() {
             hint: fromGuide.length < sel.sel.size ? 'Uploaded files have no guide slot. Only empty fields are filled, and only from a clear programme match.' : 'Only empty fields are filled, and only from a clear programme match.' },
           { key: 'publish', label: 'Publish', icon: LibIcon.publish, count: unpublished.length, onRun: bulkPublish,
             hint: unpublished.length < sel.sel.size ? 'Assets that are already available or scheduled are left out' : undefined },
+          { key: 'collect', label: 'Add to collection', icon: ColIcon.addTo, count: chosen.length, onRun: () => setAdding(chosen.map((x) => x.id)),
+            hint: 'Add the selected assets to a collection, or make a new one' },
+          ...(filters.col ? [{ key: 'uncollect', label: 'Remove from collection', icon: ColIcon.out, count: chosen.length, onRun: bulkRemoveFromCollection,
+            hint: `Take the selected assets out of ${pathName(cols.rows ?? [], filters.col)}. They stay in the library.` }] : []),
         ]} />
 
       {!page ? <div className="loading">Loading the library…</div> : rows.length === 0 ? (
-        filtered ? <NoMatches what="assets" onClear={() => setFilters({ ...parseFilters(''), sort: filters.sort })} />
+        filters.col && !isFiltered({ ...filters, col: '' }) ? <div className="empty"><h3>This collection is empty</h3><p>Go to <b>All media</b>, select assets in the list or grid, and use <b>Add to collection</b>.</p></div>
+        : filtered ? <NoMatches what="assets" onClear={() => setFilters({ ...parseFilters(''), sort: filters.sort, col: filters.col, colDeep: filters.colDeep })} />
           : <div className="empty"><h3>Nothing here yet</h3><p>Clips appear once they are cut from a recording, and files once they are uploaded.</p></div>
       ) : view === 'grid' ? (
         <>
@@ -573,15 +821,17 @@ export default function VodPage() {
             </label>
             <div style={{ marginLeft: 'auto' }}><KindLegend /></div>
           </div>
-          <LibraryGrid rows={rows} selected={sel.sel} onToggle={sel.toggle} onOpen={(id) => setOpen(id)} openId={open} />
-          {open && (
-            <div className="drawer-scrim" onClick={(e) => { if (e.target === e.currentTarget) setOpen(null) }}>
-              <div className="drawer lib-drawer-asset" role="dialog" aria-modal="true" aria-label="Asset" onKeyDown={(e) => { if (e.key === 'Escape') setOpen(null) }}>
+          <LibraryGrid rows={rows} selected={sel.sel} onToggle={sel.toggle} onOpen={(id) => guardOpen(id)} openId={open} lastOpenId={lastOpen} fresh={fresh} />
+          {open && !linked && (
+            <div className="drawer-scrim" onClick={(e) => { if (e.target === e.currentTarget) guardOpen(null) }}>
+              <div className="drawer lib-drawer-asset" role="dialog" aria-modal="true" aria-label="Asset" style={panel.style} onKeyDown={(e) => { if (e.key === 'Escape') guardOpen(null) }}>
+                <DrawerResizeHandle width={panel.width} setWidth={panel.setWidth} />
                 <div className="drawer-h">
                   <span className="t">{rows.find((r) => r.id === open)?.title || 'Untitled'}</span>
-                  <button type="button" className="icon-btn" onClick={() => setOpen(null)} aria-label="Close" autoFocus>{LibIcon.close}</button>
+                  <WidthButton current={panel.current} next={panel.next} onClick={panel.cycle} />
+                  <button type="button" className="icon-btn" onClick={() => guardOpen(null)} aria-label="Close" autoFocus>{LibIcon.close}</button>
                 </div>
-                <div className="drawer-b"><AssetDetail id={open} onChanged={load} /></div>
+                <div className="drawer-b"><AssetDetail id={open} onChanged={changedHere(open)} onDeleted={assetDeleted} /></div>
               </div>
             </div>
           )}
@@ -609,19 +859,22 @@ export default function VodPage() {
                 const x = a as any
                 return (
                   <Fragment key={a.id}>
-                    <tr onClick={() => setOpen(open === a.id ? null : a.id)} style={{ cursor: 'pointer' }} className={sel.sel.has(a.id) ? 'sel' : undefined}>
+                    <tr onClick={() => guardOpen(open === a.id ? null : a.id)} style={{ cursor: 'pointer' }} aria-current={open === a.id ? 'true' : undefined}
+                      className={[sel.sel.has(a.id) ? 'sel' : '', open === a.id ? 'lib-row-open' : '', fresh.has(a.id) ? 'lib-fresh' : ''].filter(Boolean).join(' ') || undefined}>
                       <SelectCell on={sel.sel.has(a.id)} onToggle={() => sel.toggle(a.id)} label={`Select ${a.title || 'Untitled'}`} />
                       <td>
                         <div className="lib-title-cell">
                           <Keyscreen row={a} w={96} h={54} className="sm" />
                           <div className="min-w-0">
                             <b>{a.title || 'Untitled'}</b>
-                            <div><EncodeState a={x} /></div>
+                            <div><EncodeState a={x} />{a.usage_status && a.usage_status !== 'ready' && <> <UsageBadge row={a} /></>}</div>
                           </div>
                         </div>
                       </td>
                       <td style={{ color: 'var(--muted)' }}>
-                        {x.source_name ?? (x.source_kind === 'upload' ? 'Uploaded' : x.source_kind === 'watchfolder' ? 'Watchfolder' : '')}
+                        {x.source === 'none' ? <span className="lib-faint">No source</span>
+                          : x.source === 'upload' ? (x.source_kind === 'watchfolder' ? 'Upload · watch folder' : 'Upload')
+                          : <>{x.source_name ?? ''}<span className="lib-faint">{x.source ? ` · ${({ channel: 'Channel', event: 'Event', radio: 'Radio' } as Record<string, string>)[x.source] ?? ''}` : ''}</span></>}
                       </td>
                       <td className="mono" style={{ color: 'var(--muted)' }}>{fmtDur(a.duration_ms)}</td>
                       {show('type') && <td><TypeLabel row={a} /></td>}
@@ -641,14 +894,14 @@ export default function VodPage() {
                       <td><AvailabilityPill row={a} />{x.has_stale_publication && <div className="lib-faint lib-small">copy is old</div>}</td>
                       <td style={{ color: 'var(--muted)' }}>{new Date(a.created_at).toLocaleDateString()}</td>
                       <td style={{ textAlign: 'right' }}>
-                        <button className="btn ghost" onClick={e => { e.stopPropagation(); setOpen(open === a.id ? null : a.id) }} aria-expanded={open === a.id}>
+                        <button className="btn ghost" onClick={e => { e.stopPropagation(); guardOpen(open === a.id ? null : a.id) }} aria-expanded={open === a.id}>
                           {open === a.id ? 'Close' : 'Open'}
                         </button>
                       </td>
                     </tr>
                     {open === a.id && (
                       <tr><td colSpan={10 + extraCols} style={{ background: 'var(--panel-2)' }}>
-                        <AssetDetail id={a.id} onChanged={load} />
+                        <AssetDetail id={a.id} onChanged={changedHere(a.id)} onDeleted={assetDeleted} />
                       </td></tr>
                     )}
                   </Fragment>
@@ -672,6 +925,8 @@ export default function VodPage() {
           </button>
         </nav>
       )}
+      </div>
+      </div>
     </>
   )
 }

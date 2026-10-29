@@ -94,9 +94,16 @@
 .ig-tog.on i{background:var(--brand)}.ig-tog.on i::after{left:16px}
 
 /* queue drawer (the Glue pattern, ours) */
-.iq-fab{position:fixed;right:18px;bottom:18px;z-index:70;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--radius-ctl,10px);border:1px solid var(--border-2);background:var(--panel);color:var(--text);box-shadow:0 12px 34px -12px rgba(0,0,0,.8);cursor:pointer;font:inherit;font-size:var(--fs-sm)}
-.iq-fab .ring{width:22px;height:22px;border-radius:50%;background:conic-gradient(var(--brand) var(--p,0%),var(--panel-3) 0);display:grid;place-items:center}
-.iq-fab .ring::after{content:"";width:14px;height:14px;border-radius:50%;background:var(--panel)}
+/* The queue's button sits in the top bar with the other global actions (App.tsx), the
+   height of the icon buttons beside it; it never floats over the page. */
+.iq-fab{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 11px 0 8px;border-radius:var(--radius-ctl,10px);border:1px solid var(--border-2);background:var(--panel-2);color:var(--text);cursor:pointer;font:inherit;font-size:var(--fs-sm);white-space:nowrap;flex:none}
+.iq-fab:hover{border-color:var(--brand)}
+.iq-fab.warn{border-color:color-mix(in srgb,var(--warn) 55%,var(--border-2));color:var(--warn)}
+.iq-fab.bad{border-color:color-mix(in srgb,var(--down) 55%,var(--border-2));color:var(--down)}
+.iq-fab .ring{width:18px;height:18px;border-radius:50%;background:conic-gradient(var(--brand) var(--p,0%),var(--panel-3) 0);display:grid;place-items:center;flex:none}
+.iq-fab.warn .ring{background:var(--warn)}.iq-fab.bad .ring{background:var(--down)}
+.iq-fab .ring::after{content:"";width:12px;height:12px;border-radius:50%;background:var(--panel-2)}
+@media (max-width:700px){.iq-fab .lbl{display:none}.iq-fab{padding:0 8px}}
 .iq{position:fixed;top:0;right:0;bottom:0;width:min(420px,100vw);z-index:80;background:#161b26;border-left:1px solid rgba(255,255,255,.14);box-shadow:-20px 0 60px -20px rgba(0,0,0,.8);display:flex;flex-direction:column}
 .iq-h{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.12);font-size:var(--fs-h2);font-weight:600}
 .iq-h .sp{flex:1}
@@ -119,3 +126,12 @@
 .iq-f .b{flex:1;min-width:0}.iq-f .mt{font-size:var(--fs-xs);color:var(--faint)}
 .iq-f .pb{height:4px;border-radius:2px;background:var(--panel-3);margin-top:6px;overflow:hidden}.iq-f .pb i{display:block;height:100%;background:var(--brand)}
 .iq-sec{padding:10px 18px 4px;font-size:var(--fs-label);letter-spacing:var(--ls-label);text-transform:uppercase;color:var(--faint);font-weight:700}
+
+/* What are these files: asked before anything uploads (IngestPanel ig-type). */
+.ig-type{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 20px;border-bottom:1px solid var(--ig-line)}
+.ig-type-l{font-size:var(--fs-sm);color:var(--muted);min-width:180px}
+.ig-type.need{background:color-mix(in srgb,var(--warn) 8%,transparent)}
+.ig-type.need .ig-type-l{color:var(--warn);font-weight:600}
+.ig-type-chips{display:flex;flex-wrap:wrap;gap:6px}
+.ig-type-chip{font:inherit;font-size:var(--fs-sm);padding:4px 10px;border:1px solid var(--border);color:var(--muted);background:none;cursor:pointer}
+.ig-type-chip.active{color:var(--text,#e9ecf4);border-color:var(--brand);background:var(--brand-dim)}

@@ -75,8 +75,9 @@ const ok = (c: boolean, m: string, d = '') => { if (c) { pass++; console.log('PA
     if (!r.j.items) console.log("DEBUG", r.s, JSON.stringify(r.j).slice(0, 400));
     const volt = r.j.items.filter((t: any) => t.owner === 'volt');
     ok(r.s === 200 && volt.length >= 5 && volt.every((t: any) => t.latest?.version >= 1 && t.latest.publishable), `5 Volt templates, published (${volt.length})`);
-    const scorebug = volt.find((t: any) => t.kind === 'scorebug');
-    const lower = volt.find((t: any) => t.kind === 'lower_third');
+    const scorebug = volt.find((t: any) => t.kind === 'scorebug' && t.name === 'Scorebug');
+    // The name super by name: there are several Volt lower thirds, and only this one has name and title fields.
+    const lower = volt.find((t: any) => t.kind === 'lower_third' && /^Name super \(who/.test(t.name));
     r = await api('PATCH', `/api/graphics/templates/${scorebug.id}`, { name: 'Mine' });
     ok(r.s === 400 && /read-only/.test(r.j.error ?? r.j.message ?? JSON.stringify(r.j)), 'Volt templates are read-only');
     r = await api('GET', '/api/graphics/templates', undefined, { token: tokOther });

@@ -39,7 +39,7 @@ import { frameStats, scoreFrame, pickFrame, clock, type Candidate } from './fram
 import { songIdentity, songMatch, fetchCoverFor, fillsFor, type MusicMatch } from './musicLookup';
 import { getSongDetails, detailsToMatch } from './songDetails';
 import { saveToLibrary, importImageUrl, LIBRARY_REF } from './libraryImages';
-import { assetFolder, songFolder, stationFolder, programmeFolder, type AssetPlace } from './libraryPaths';
+import { assetFolder, assetImageName, songFolder, stationFolder, programmeFolder, type AssetPlace } from './libraryPaths';
 
 export { importImageUrl };
 
@@ -68,6 +68,17 @@ async function load(assetId: string) {
       LEFT JOIN metadata_schemas s ON s.id = v.schema_id
      WHERE v.id = $1`, [assetId]);
 }
+
+/**
+ * A frame's file name in the asset's library folder: poster-<content hash>.jpg.
+ * It used to be poster.jpg every time, so choosing another frame overwrote the
+ * file at the same key: the signed URL did not change and every cache (the
+ * browser, the image service's source and derivative caches, the CDN) kept
+ * showing the old picture. Named by content, a new frame is a new key and the
+ * same frame chosen twice is still one file.
+ */
+export const framePosterName = (buf: Buffer, title?: string | null, type?: string | null) =>
+  assetImageName(title, createHash('sha256').update(buf).digest('hex'), type);
 
 /** Audio only: a radio station's asset, or an asset with audio exports and no video facts. */
 export function isAudioAsset(a: any): boolean {
@@ -106,7 +117,10 @@ export async function assetPlaceFolder(assetId: string): Promise<string | null> 
 /** Where this asset's images go (libraryPaths.ts). */
 export function placeOf(a: any): AssetPlace {
   return { title: a.title, metadata: a.metadata, schemaKey: a.schema_key, channelName: a.channel_name, channelKind: a.channel_kind,
-    eventName: a.event_name, programmeTitle: a.programme?.title ?? null, when: a.programme?.starts_at ?? (a.start_epoch_ms ? Number(a.start_epoch_ms) : a.created_at) };
+    // The date: the programme's start, else the recording's start, else when the asset was added
+    // (an upload's start is stored as 0, which used to make the folder 1970-01-01).
+    eventName: a.event_name, programmeTitle: a.programme?.title ?? null,
+    when: a.programme?.starts_at ?? (Number(a.start_epoch_ms) > 86_400_000 * 366 ? Number(a.start_epoch_ms) : a.created_at) };
 }
 
 const PROVIDER_LABEL: Record<string, { name: string; image: string }> = {
@@ -128,14 +142,16 @@ export async function coverKey(acct: string, m: MusicMatch): Promise<string | nu
   const folder = songFolder(m.artist, m.album, m.title);
   const have = await one<any>(`SELECT store_key, path FROM media_files WHERE account_id = $1 AND metadata->>'coverOf' = $2 ORDER BY (path = $3) DESC, created_at LIMIT 1`,
     [acct, coverOf, `${folder}/cover.jpg`]);
-  if (have?.path === `${folder}/cover.jpg`) return have.store_key;
-  let jpg: Buffer | null = have ? await imageStore().get(have.store_key) : null;
+  // One cover per album per account, used by every song on it (no copy per song folder).
+  if (have && await imageStore().exists(have.store_key)) return have.store_key;
+  let jpg: Buffer | null = null;
   if (!jpg) {
     const c = await fetchCoverFor(m);
     if (!c) return null;
     jpg = c.contentType === 'image/jpeg' ? c.data : await sharp(c.data).jpeg({ quality: 88 }).toBuffer();
   }
-  return saveToLibrary(acct, folder, 'cover.jpg', jpg, 'image/jpeg', 'poster',
+  // Kind 'cover': song artwork is its own type in the Image Library (filter: Cover).
+  return saveToLibrary(acct, folder, 'cover.jpg', jpg, 'image/jpeg', 'cover',
     { coverOf, provider: m.provider ?? 'musicbrainz', releaseGroupMbid: m.releaseGroupMbid ?? null, album: m.album, artist: m.artist, song: m.title, link: m.link ?? null },
     `${m.artist ?? ''} - ${m.album ?? m.title ?? ''}`.replace(/^ - | - $/g, ''));
 }
@@ -149,7 +165,7 @@ async function shapeOf(acct: string, key: string, fallback: 'wide' | 'square'): 
 /** Sources that are Volt's own fills, not a person's choice. */
 // Song details from a source (even one a person chose with "Find song details") can be replaced by a
 // later choice; only values a person typed or picked in the form are theirs.
-export const AUTO_SOURCES = new Set(['musicbrainz', 'deezer', 'apple', 'page', 'typed', 'station', 'auto']);
+export const AUTO_SOURCES = new Set(['musicbrainz', 'deezer', 'apple', 'page', 'typed', 'station', 'auto', 'poster']);
 
 /**
  * Fields of a radio asset's type that its station already answers: name,
@@ -277,7 +293,7 @@ export function mayLookUp(a: any, opts: { lookup?: boolean; userCheck?: boolean 
   return ml.state === 'error' && (Number(ml.attempts) || 1) < 3;
 }
 
-export async function decide(a: any, opts: { lookup?: boolean; retryErrors?: boolean; userCheck?: boolean; trace?: { lookedUp: boolean } } = {}): Promise<PickResult> {
+export async function decide(a: any, opts: { lookup?: boolean; retryErrors?: boolean; userCheck?: boolean; trace?: { lookedUp: boolean }; prefer?: string } = {}): Promise<PickResult> {
   const acct: string = a.acct;
   const audio = isAudioAsset(a);
   let music: MusicMatch | null = null;
@@ -288,7 +304,12 @@ export async function decide(a: any, opts: { lookup?: boolean; retryErrors?: boo
 
   // 2. An image a PERSON put in the asset's metadata (not one Volt filled).
   let personPick: PickResult | null = null;
-  for (const k of ['image', 'thumbnail', 'artwork', 'poster', 'cover']) {
+  // `prefer`: the image field a person just changed goes first, so changing the
+  // Thumbnail while an older Image is set still changes the asset's image.
+  const order = ['image', 'thumbnail', 'artwork', 'poster', 'cover'];
+  if (opts.prefer && !order.includes(opts.prefer)) order.unshift(opts.prefer);
+  else if (opts.prefer) order.sort((x, y) => (x === opts.prefer ? -1 : y === opts.prefer ? 1 : 0));
+  for (const k of order) {
     const v = m0[k];
     if (typeof v !== 'string' || !v.trim() || AUTO_SOURCES.has(prov[k]?.source)) continue;
     const key = await fromRef(acct, v, assetFolder(placeOf(a)), k);
@@ -368,7 +389,7 @@ export async function decide(a: any, opts: { lookup?: boolean; retryErrors?: boo
   if (p.best) {
     const buf = await imageStore().get(p.best.key);
     if (buf) {
-      const key = await saveToLibrary(acct, assetFolder(placeOf(a)), 'poster.jpg', buf, 'image/jpeg', 'poster',
+      const key = await saveToLibrary(acct, assetFolder(placeOf(a)), framePosterName(buf, a.title), buf, 'image/jpeg', 'poster',
         { assetId: a.id, frameAtMs: p.best.atMs ?? null, score: p.best.score, from: p.best.origin }, a.title ?? undefined);
       return { source: p.best.origin === 'live' ? 'live_frame' : 'frame', key, shape: 'wide', reason: p.reason, ...({ candidates: p.ranked } as any) };
     }
@@ -381,7 +402,7 @@ export async function decide(a: any, opts: { lookup?: boolean; retryErrors?: boo
  * Pick and store the asset's image. A locked (manual) image is kept unless
  * `force`. Song fields found on the way are filled even when the image is locked.
  */
-export async function pickAssetImage(assetId: string, opts: { force?: boolean; lookup?: boolean; userCheck?: boolean; by?: string } = {}): Promise<PickResult & { locked?: boolean }> {
+export async function pickAssetImage(assetId: string, opts: { force?: boolean; lookup?: boolean; userCheck?: boolean; by?: string; prefer?: string } = {}): Promise<PickResult & { locked?: boolean }> {
   const a = await load(assetId);
   if (!a) throw new Error('no such asset');
   if (a.poster_locked && !opts.force) {
@@ -419,7 +440,40 @@ export async function pickAssetImage(assetId: string, opts: { force?: boolean; l
        at: trace.lookedUp || !prevMl.at ? new Date().toISOString() : prevMl.at,
        attempts: (Number(prevMl.attempts) || 0) + (trace.lookedUp ? 1 : 0) }) : null,
      JSON.stringify(r.filled ?? {}), JSON.stringify(provenance), r.schemaId ?? null]);
+  await syncImageField(assetId).catch((e) => console.warn(`[asset-image] ${assetId}: image field not filled:`, e?.message ?? e));
   return r;
+}
+
+/**
+ * THE METADATA SHOWS THE ASSET'S IMAGE. The content type's main image field
+ * (Image, Thumbnail on video, Cover on audio, Artwork) is filled with the
+ * asset's current image when it is empty, and kept in step while it still
+ * holds a value put there this way (provenance source 'poster'). A value a
+ * person or an import set is left alone: that one decides the image instead
+ * (decide(), step 2). Called whenever the image is picked or chosen.
+ * Returns the field written, or null.
+ */
+const MAIN_IMAGE_FIELDS = ['image', 'artwork', 'picture', 'photo'];
+export async function syncImageField(assetId: string): Promise<string | null> {
+  const a = await load(assetId);
+  if (!a || !Array.isArray(a.schema_fields)) return null;
+  const primary = isAudioAsset(a) ? 'cover' : 'thumbnail';
+  const field = (a.schema_fields as any[]).find((f) => f?.type === 'image' && (MAIN_IMAGE_FIELDS.includes(String(f.key)) || f.key === primary));
+  if (!field) return null;
+  const k = String(field.key);
+  const cur = typeof a.metadata?.[k] === 'string' ? a.metadata[k].trim() : '';
+  const ours = a.metadata_provenance?.[k]?.source === 'poster';
+  if (cur && !ours) return null;
+  const want = a.poster_key ? `/${a.poster_key}` : '';
+  if (cur === want) return null;
+  if (!want) {
+    await query(`UPDATE vod_assets SET metadata = COALESCE(metadata, '{}'::jsonb) - $2::text, metadata_provenance = COALESCE(metadata_provenance, '{}'::jsonb) - $2::text WHERE id = $1`, [assetId, k]);
+    return k;
+  }
+  await query(`UPDATE vod_assets SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object($2::text, $3::text),
+                 metadata_provenance = COALESCE(metadata_provenance, '{}'::jsonb) || jsonb_build_object($2::text, jsonb_build_object('source', 'poster', 'at', now())) WHERE id = $1`,
+    [assetId, k, want]);
+  return k;
 }
 
 /** A person's choice: a candidate frame, or any image from the library. Locks it. */
@@ -431,7 +485,7 @@ export async function setAssetImage(assetId: string, acct: string, ref: string, 
   if (!key && cand) {
     const buf = await imageStore().get(cand.key);
     if (!buf) throw new Error('that frame is no longer stored');
-    key = await saveToLibrary(acct, assetFolder(placeOf(a)), 'poster.jpg', buf, 'image/jpeg', 'poster', { assetId: a.id, frameAtMs: cand.atMs ?? null, chosenBy: by }, a.title ?? undefined);
+    key = await saveToLibrary(acct, assetFolder(placeOf(a)), framePosterName(buf, a.title), buf, 'image/jpeg', 'poster', { assetId: a.id, frameAtMs: cand.atMs ?? null, chosenBy: by }, a.title ?? undefined);
   }
   if (!key) throw new Error('choose an image from this account\'s Image Library or one of the frames');
   const at = cand?.atMs != null ? ` at ${clock(cand.atMs)}` : '';
@@ -440,5 +494,6 @@ export async function setAssetImage(assetId: string, acct: string, ref: string, 
   const reason = cand ? `Frame${at}, chosen by ${by}.` : `Chosen from the Image Library by ${by}.`;
   await query(`UPDATE vod_assets SET poster_key = $2, poster_source = 'manual', poster_shape = $3, poster_reason = $4, poster_locked = true, poster_picked_at = now(), updated_at = now() WHERE id = $1`,
     [assetId, key, shape, reason]);
+  await syncImageField(assetId).catch((e) => console.warn(`[asset-image] ${assetId}: image field not filled:`, e?.message ?? e));
   return { source: 'manual', key, shape, reason };
 }

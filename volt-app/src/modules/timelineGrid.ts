@@ -37,7 +37,8 @@ import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/li
 import { loadChannelHealthLite } from '../services/channelDetail';
 import { resolveRange, assessRange, type Resolution } from '../services/clips/resolve';
 import { isAudioOnly } from '../services/localRecordingIndex';
-import { programmeVodShape } from '../services/epgVod';
+import { programmeVodShape, withFlag } from '../services/epgVod';
+import { programmeMedia } from '../services/programmeMedia';
 
 export const timelineGridRouter = Router();
 timelineGridRouter.use(requireAuth);
@@ -135,6 +136,8 @@ export function programmeBlock(p: any, vodState: string | null) {
     asRun: p.actual_start != null,
     status: p.status ?? null,
     vodState,
+    /** The VOD made from it, when there is one: a click on an aired block opens it. */
+    assetId: p.clip_asset_id ?? null,
     source: 'epg' as const,
   };
 }
@@ -155,6 +158,7 @@ export function eventBlock(e: any, nowMs: number) {
     asRun: e.actual_start != null,
     status: e.status ?? null,
     vodState: null,
+    assetId: null,
     source: 'event' as const,
   };
 }
@@ -347,6 +351,8 @@ timelineGridRouter.get('/grid', asyncHandler(async (req: Request, res) => {
     [channelIds, iso(from), iso(to)]
   );
   const progsBy = byOwner(progs, (p) => p.channel_id);
+  // Asset, recording and expiry for every programme on the page: two queries.
+  const progMedia = await programmeMedia(progs, nowMs).catch(() => new Map());
 
   // ---- clip ticks: cheap (one indexed query, no media work), so included.
   const clips = allIds.length === 0 ? [] : await query<any>(
@@ -427,7 +433,10 @@ timelineGridRouter.get('/grid', asyncHandler(async (req: Request, res) => {
     const retention = retentionMsOf(o);
     const programmes = o.kind === 'event'
       ? [eventBlock(o, nowMs)]
-      : (progsBy.get(o.id) ?? []).map((p) => programmeBlock(p, programmeVodShape(p, resolution, retention, nowMs).state));
+      : (progsBy.get(o.id) ?? []).map((p) => {
+          const v = withFlag(programmeVodShape(p, resolution, retention, nowMs), p, progMedia.get(p.id) ?? null, nowMs);
+          return { ...programmeBlock(p, v.state), flag: v.flag };
+        });
 
     return {
       kind: o.kind as GridKind,

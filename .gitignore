@@ -64,6 +64,8 @@ volt-encoder/dev/_wftest/
 
 # ---- runtime data written by a running stack or session (not source) ----
 volt-app/clips/
+# the restore bin (services/media/trash.ts)
+volt-app/trash/
 volt-app/filler/
 volt-app/image-store/derived/
 volt-app/image-store/library/
@@ -76,3 +78,55 @@ volt-app/.env.bak.*
 
 # Python virtual environments
 .venv/
+
+# Open-movie demo media (large, re-downloadable, see demo-assets/README.md)
+demo-assets/tears-of-steel/**/*.mkv
+demo-assets/tears-of-steel/**/*.mov
+demo-assets/tears-of-steel/**/*.webm
+demo-assets/tears-of-steel/**/*.flac
+demo-assets/tears-of-steel/**/*.ac3
+demo-assets/tears-of-steel/**/*.zip
+demo-assets/sintel/**/*.mkv
+demo-assets/sintel/**/*.mov
+demo-assets/sintel/**/*.webm
+demo-assets/sintel/**/*.flac
+demo-assets/sintel/**/*.ac3
+demo-assets/sintel/**/*.zip
+demo-assets/elephants-dream/**/*.mkv
+demo-assets/elephants-dream/**/*.mov
+demo-assets/elephants-dream/**/*.webm
+demo-assets/elephants-dream/**/*.flac
+demo-assets/elephants-dream/**/*.ac3
+demo-assets/elephants-dream/**/*.zip
+demo-assets/cosmos-laundromat/**/*.mkv
+demo-assets/cosmos-laundromat/**/*.mov
+demo-assets/cosmos-laundromat/**/*.webm
+demo-assets/cosmos-laundromat/**/*.flac
+demo-assets/cosmos-laundromat/**/*.ac3
+demo-assets/cosmos-laundromat/**/*.zip
+demo-assets/sprite-fright/**/*.mkv
+demo-assets/sprite-fright/**/*.mov
+demo-assets/sprite-fright/**/*.webm
+demo-assets/sprite-fright/**/*.flac
+demo-assets/sprite-fright/**/*.ac3
+demo-assets/sprite-fright/**/*.zip
+demo-assets/charge/**/*.mkv
+demo-assets/charge/**/*.mov
+demo-assets/charge/**/*.webm
+demo-assets/charge/**/*.flac
+demo-assets/charge/**/*.ac3
+demo-assets/charge/**/*.zip
+
+# LOCAL ONLY (29 Oct 2026): kept on disk for testing, never committed or pushed.
+# Demo media and brand kits (re-downloadable, see demo-assets/README.md).
+demo-assets/
+# Everything the running app writes: library images, companion files (captions
+# and sidecars uploaded while testing), derived thumbnails, uploads in flight.
+volt-app/image-store/
+volt-app/uploads-staging/
+# Scratch: transfer archives, patches, staging folders.
+_stage/
+_xfer3/
+docs.patch
+/*.tgz
+/*.bundle

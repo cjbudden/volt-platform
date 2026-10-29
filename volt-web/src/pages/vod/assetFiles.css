@@ -1,0 +1,31 @@
+/* Companion files (AssetFiles.tsx). */
+.afiles { display: flex; flex-direction: column; gap: 14px; font-size: var(--fs-sm) }
+.afiles-drop { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border: 1px dashed var(--border-2, var(--border)); border-radius: 6px; background: var(--panel) }
+.afiles-drop > div { flex: 1 }
+.afiles-drop.over { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 8%, var(--panel)) }
+.afiles-drop-t { font-weight: 600; margin-bottom: 2px }
+.afiles-up { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px }
+.afiles-up li.failed { color: var(--danger, #f87171) }
+.afiles-up li.done span:last-child { color: var(--muted) }
+.afiles-sec { display: flex; flex-direction: column; gap: 6px }
+.afiles-note { margin-top: -4px }
+.afiles-t { width: 100%; border-collapse: collapse }
+.afiles-t th { text-align: left; font-weight: 600; color: var(--faint); padding: 4px 6px; white-space: nowrap }
+.afiles-t td { padding: 6px; border-top: 1px solid var(--border); vertical-align: top }
+.afiles-t tr.off td { opacity: .6 }
+.afiles-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.afiles-check { min-width: 200px; max-width: 320px }
+.afiles-check .ok { color: var(--ok, #16a34a) }
+.afiles-check .bad, .afiles-check .error { color: var(--danger, #f87171) }
+.afiles-check .warning { color: var(--warn, #d97706); font-size: var(--fs-xs); margin-top: 2px }
+.afiles-acts { white-space: nowrap }
+.afiles-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--border) }
+.afiles-pre { max-height: 260px; overflow: auto; padding: 10px; background: var(--panel-2); border-radius: 4px; font-size: var(--fs-xs); white-space: pre-wrap }
+.afiles-sob { display: inline-flex; flex-direction: column; gap: 1px }
+.afiles-sob .inp.unsaved { border-color: var(--warn, #d97706); background: color-mix(in srgb, var(--warn, #d97706) 10%, transparent) }
+.afiles-sob-s { font-size: 10px; min-height: 12px; color: var(--faint) }
+.afiles-sob-s.saving, .afiles-sob-s.idle { color: var(--faint) }
+.afiles-sob-s.saved { color: var(--ok, #16a34a) }
+.afiles-sob-s.error { color: var(--danger, #f87171) }
+.afiles-sob .inp.unsaved + .afiles-sob-s { color: var(--warn, #d97706); font-weight: 600 }
+.afiles-warn-s { font-size: var(--fs-xs); color: var(--warn, #d97706) }

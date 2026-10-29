@@ -6,6 +6,7 @@ import { asyncHandler, notFound, conflict, ApiError } from '../util/http';
 import { validateSchemaFields, validateMetadata, mergeFields, type SchemaField } from '../services/metadataValidator';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
 import { ensureStandardTypes } from '../services/contentTypes';
+import { applyAccountLists } from '../services/metadataLists';
 
 const SCHEMA_EDITABLE = ['name', 'description', 'fields', 'target_kind', 'domain', 'extends_id', 'applies_to', 'schema_org_type'];
 
@@ -96,6 +97,8 @@ const fieldSchema = z.object({
   type: z.enum(['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'tags', 'reference', 'image']),
   required: z.boolean().optional(),
   options: z.array(z.string()).optional(),
+  // An account list ('genres') the options come from; they are filled in here.
+  optionsList: z.string().optional(),
   multiple: z.boolean().optional(),
   refDomain: z.string().optional(),
   epg: z.string().optional(),        // EPG slot, validated in validateSchemaFields
@@ -116,6 +119,8 @@ metadataSchemasRouter.post(
   '/',
   asyncHandler(async (req, res) => {
     const body = upsertSchema.parse(req.body);
+    // Fields linked to an account list (Genres) take their options from it.
+    body.fields = await applyAccountLists(accountId(req), body.fields as SchemaField[]) as any;
     validateSchemaFields(body.fields); // dup keys / enum options etc.
     if (body.extendsId) {
       const parent = await one(`SELECT id FROM metadata_schemas WHERE id=$1 AND account_id=$2`, [body.extendsId, accountId(req)]);
@@ -145,7 +150,10 @@ const editSchema = asyncHandler(async (req, res) => {
   const body = upsertSchema.partial().extend({ version: z.number().int().optional() }).parse(req.body);
   const raw = (req.body ?? {}) as Record<string, unknown>;
   const has = (k: string) => Object.prototype.hasOwnProperty.call(raw, k);
-  if (body.fields) validateSchemaFields(body.fields);
+  if (body.fields) {
+    body.fields = await applyAccountLists(accountId(req), body.fields as SchemaField[]) as any;
+    validateSchemaFields(body.fields);
+  }
   const current = await one<any>(`SELECT * FROM metadata_schemas WHERE id = $1 AND account_id = $2`, [req.params.id, accountId(req)]);
   if (!current) throw notFound('Schema not found');
 

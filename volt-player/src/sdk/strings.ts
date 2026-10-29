@@ -24,7 +24,7 @@ export const STRINGS: Record<string, string> = {
   ended: 'This event has ended', watchReplay: 'Watch the replay', replayHint: 'The full event, from the start.',
   buyTitle: 'Get access', buy: 'Buy', alreadyBought: 'Already bought? Check again', signInTitle: 'Sign in to watch', signIn: 'Sign in',
   regionBlocked: 'This event is not available in your region.', liveNow: 'Live now', backToEvent: 'Back to the event',
-  stats: 'Stats', playbackStats: 'Playback stats', copyDebug: 'Copy debug info', resolution: 'Resolution', bitrate: 'Bitrate', buffer: 'Buffer', latency: 'Behind live',
+  stats: 'Stats', playbackStats: 'Debug mode', copyDebug: 'Copy debug info', resolution: 'Resolution', bitrate: 'Bitrate', buffer: 'Buffer', latency: 'Behind live',
 };
 
 export function format(s: string, v?: Record<string, string | number>): string {

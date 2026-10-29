@@ -188,12 +188,21 @@ async function main() {
     check('stills record where and when', `${stills[1]?.source} ${stills[1]?.channel_id} ${new Date(stills[1]?.captured_at).getTime()}`, `encoder ${CH} ${T + 60_000}`);
     check('and which programme', stills[1]?.metadata?.programme, 'Grand Final');
     truthy('the still bytes are in the library store', existsSync(join(process.env.IMAGE_STORE_DIR!, 'library', ACC, sb.folder, stills[0].name)));
-    const sbRows = await query<any>(`SELECT name, folder FROM media_files WHERE account_id = $1 AND kind = 'storyboard'`, [ACC]);
-    check('the sheet is in the library too, under storyboard/', sbRows[0]?.folder, `${sb.folder}/storyboard`);
+    const sbRows = await query<any>(`SELECT 1 FROM media_files WHERE account_id = $1 AND kind = 'storyboard'`, [ACC]);
+    check('sheets are not in the Image Library', sbRows.length, 0);
+    const spriteDir = `derived/${ACC}/sprites/streams/News-24/${hu.date}/${hu.label}/`;
+    truthy('the sheet is in the sprite store', sheet.key.startsWith(spriteDir));
+    truthy('so is the hour VTT', String(sb.vtt_key).startsWith(spriteDir) && String(sb.vtt_key).endsWith('.vtt'));
+    const inv = await query<any>(`SELECT * FROM sprite_sheets WHERE stream_id = $1 ORDER BY kind, start_ms`, [CH]);
+    const invSheets = inv.filter((x: any) => x.kind === 'sheet');
+    check('the sprite inventory has the sheet that got tiles', invSheets.map((x: any) => x.store_key).join(','), sheet.key);
+    check('with its owner, layout and tiles', `${invSheets[0]?.owner_kind} ${invSheets[0]?.storyboard_id === sb.id} ${invSheets[0]?.tiles} ${invSheets[0]?.width}x${invSheets[0]?.height} ${Number(invSheets[0]?.size_bytes) > 0}`,
+      'stream true 18 1600x540 true');
+    check('and the hour VTT', inv.filter((x: any) => x.kind === 'vtt').map((x: any) => x.store_key).join(','), sb.vtt_key);
     const hourVtt = (await imageStore().get(sb.vtt_key))?.toString() ?? '';
     check('the hour VTT has a cue per tile', (hourVtt.match(/#xywh=/g) ?? []).length, 18);
     truthy('and starts at the half hour', hourVtt.includes('00:30:00.000 --> 00:30:10.000'));
-    truthy('pointing at signed, versioned sheet URLs', /https:\/\/img\.test\/img\/[A-Za-z0-9_-]{22}\/1600x540,fill,fmt=jpeg,q=85,v=18\/library\//.test(hourVtt));
+    truthy('pointing at signed, versioned sheet URLs', /https:\/\/img\.test\/img\/[A-Za-z0-9_-]{22}\/1600x540,fill,fmt=jpeg,q=85,v=18\/derived\/[^/]+\/sprites\//.test(hourVtt));
 
     // search finds stills by programme and channel
     const sq = bfs(ACC, { q: 'grand final' });
@@ -217,7 +226,9 @@ async function main() {
     const clipVtt = (await imageStore().get(w.vttKey!))?.toString() ?? '';
     truthy('re-timed to start at 0 mid-tile', clipVtt.includes('00:00:00.000 --> 00:00:05.000'));
     truthy('and ending at the clip end', clipVtt.includes('--> 00:00:30.000'));
-    truthy('stored beside the channel thumbnails', w.vttKey!.startsWith(`library/${ACC}/thumbnails/News-24/clips/Final-siren-`));
+    check('stored in the asset\'s sprite folder', w.vttKey, `derived/${ACC}/sprites/assets/${VOD}/thumbs.vtt`);
+    const cv = (await query<any>(`SELECT owner_kind, kind, vod_asset_id FROM sprite_sheets WHERE store_key = $1`, [w.vttKey]))[0];
+    check('and in the sprite inventory', `${cv?.owner_kind} ${cv?.kind} ${cv?.vod_asset_id}`, `asset vtt ${VOD}`);
     const va = (await query<any>(`SELECT thumbs_vtt_key, poster_key, thumb_status FROM vod_assets WHERE id = $1`, [VOD]))[0];
     check('the asset points at its VTT', va.thumbs_vtt_key, w.vttKey);
     truthy('and has a poster from the nearest still', String(va.poster_key).includes('/thumbnails/News-24/'));
@@ -231,6 +242,8 @@ async function main() {
     check('retention removes the old hour', sw.hours, 1);
     check('and its library rows', (await query<any>(`SELECT 1 FROM media_files WHERE account_id = $1 AND source = 'encoder'`, [ACC])).length, 0);
     check('and its files', existsSync(join(process.env.IMAGE_STORE_DIR!, 'library', ACC, sb.folder, stills[0].name)), false);
+    check('and its sheets and VTT', (await imageStore().exists(sheet.key)) || (await imageStore().exists(sb.vtt_key)), false);
+    check('and their sprite rows', (await query<any>(`SELECT 1 FROM sprite_sheets WHERE stream_id = $1`, [CH])).length, 0);
     await query(`DELETE FROM vod_assets WHERE id = $1`, [VOD]);
   }
   await pool.end();

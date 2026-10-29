@@ -58,6 +58,16 @@ Manifest:
 Field types: `text`, `number`, `image`, `list`, `color`, `boolean`. `bbox` is the graphic's area, used
 for library thumbnails and for capturing only that area in burn-in.
 
+Two optional keys (25 Oct 2026):
+
+- `"snap": true` (needs a `bbox`): the setup's **Anchor** places the graphic. Its box goes to that spot of the
+  frame, keeping the margin it was drawn with, at any **Size**; Move right and Move down become a nudge from
+  there. Without it the anchor is only the point the graphic scales about. A snap template should not have its
+  own position or size fields: the setup's Position and size panel is the one place for both, and a template
+  that moves itself inside its canvas escapes its `bbox`, so burn-in would crop it.
+- A field's `"replaces": ["oldId"]`: when a setup moves to this version, the binding of the older field carries
+  into this one (and the move says so) instead of being dropped.
+
 ## 3. Safe areas at 1920 × 1080
 
 | Area | Margin | x range | y range |
@@ -99,6 +109,101 @@ Weather icons: `sun`, `partly`, `cloud`, `showers`, `rain`, `storm`, `fog`, `win
 
 **Fonts.** Volt Serif is Source Serif 4 and Volt Sans is Barlow Semi Condensed, both under the SIL Open Font
 License (`fonts/OFL.txt` in each package).
+
+### Second set: basics with in and out sequences (25 Oct 2026)
+
+General-purpose templates beside the news family. Each has a designed **in** sequence on `play()` and a
+different **out** sequence on `stop()` (not the in played backwards), then resets itself so the next `play()`
+starts clean.
+
+| Template | Kind | Box (x, y, w, h) | In | Out | `next()` |
+|---|---|---|---|---|---|
+| Crawl ticker | ticker | 0, 958, 1920, 56 | Bar wipes on from the left, optional label slides out of the edge, crawl starts from the right | Crawl fades, label slides back, bar wipes off to the right | No |
+| Social badge | bug | top right, 394 × 98 | Label wipes on, icon panel follows, icons pop in one after another, handle bar wipes under and the handle rises | Icons shrink last first, handle drops out, bars wipe off right | Next handle |
+| Breaking banner | lower_third | 120, 846, 1680, 138 | Tag snaps open, its words rise, headline bar wipes out of the tag, subline follows; pulsing dot and sheen while on | Headline slides back into the tag, bars retract, tag folds away | No |
+| Name super, accent line | lower_third | 96, 812, 1100, 172 | Plate fades, line draws down, photo pops, name and role slide out from behind the line | Role then name slide back, line draws up, photo and plate go | No |
+| Up next | bug | 1168, 58, 656, 128 | Card wipes on from the right, thumbnail settles with a slow push, label, title and time arrive in turn | Text clears left, card wipes off right | Next item |
+| Quote card | full_frame | centred, 1220 wide | Card rises, quote mark swings in, words land one by one (characters for Chinese, Japanese, Korean), rule draws, attribution follows | Words clear together, card lifts away, picture brightens | No |
+| Title card | full_frame | 0, 380, 1920, 320 | Band opens from its centre line, kicker settles, letters rise out of a mask, rule draws, subtitle fades up | Letters leave upward, band closes to its centre | No |
+| QR callout | bug | top right, 474 × 236 | Panel unrolls, the code opens from its centre with one scan line, call to action slides in | Text clears, code closes, panel rolls up | No |
+
+**Crawl ticker.** A continuous crawl (speed in pixels per second, default 140), the basic ticker; the News
+ticker above flips one headline at a time instead. New headlines join after the ones already on screen, so an
+update or an RSS refresh never jumps the crawl.
+
+**Social badge.** `platforms` is a list (or one comma-separated line) of `facebook`, `instagram`, `tiktok`,
+`youtube`, `x`, `threads`, `whatsapp`, `telegram`, `bluesky`, `line`, `wechat`, `spotify` (also `fb`, `ig`, `yt`,
+`twitter`). One `handle` for all of them, or `handles` as `platform|@name` lines: the badge then rotates, lighting
+the matching icon. `iconStyle` `brand` draws the platform colours, `mono` one ink colour. `position` puts it in
+any corner. Glyphs are Simple Icons (CC0, `ICONS.txt` in the package).
+
+**QR callout.** The code is drawn in the template from `url` (qrcode-generator, MIT, `lib/` in the package),
+error correction M, black on white with a quiet zone, so it scans from a phone at normal viewing distance.
+
+**Motion.** Ease out (`cubic-bezier(.16,1,.3,1)`) for things arriving, ease in (`cubic-bezier(.7,0,.84,0)`) for
+things leaving, a small overshoot for icons and chips; in sequences 0.6 to 1.2 s, out sequences under 0.9 s.
+Everything is CSS transitions or `requestAnimationFrame`, so burn-in's virtual clock draws them frame-exact.
+Three body states drive it: none (hidden), `.on`, `.out`; `.reset` snaps back to hidden with no transition.
+
+**Chinese, Japanese and Korean text.** Volt Sans and Volt Serif are Latin fonts. Every template falls back to
+Noto Sans CJK (then PingFang, Microsoft YaHei), so a label like 新闻号 draws in the player on any desktop or phone.
+For burn-in the encoder image installs `fonts-noto-cjk` with `GRAPHICS_BURN=true`.
+
+### Sport scores: racket and net sports (25 Oct 2026)
+
+One score bug per sport, top left like the Scorebug (96, 58), sharing one engine so they look and move alike.
+
+| Template | Scoring it shows |
+|---|---|
+| Tennis score | Sets as games each with the current set last (lighter cell), then points (15, 30, 40, AD, or tie-break points) |
+| Badminton score | Finished games (to 21), then the points of the current game |
+| Table tennis score | Finished games (to 11), then points |
+| Squash score | Finished games (to 11), then points |
+| Pickleball score | Finished games, points, and the doubles server number (1 or 2) beside the serve marker |
+| Volleyball score | Finished sets (to 25, fifth to 15), then points |
+
+**Fields.** `title` (event, round, court), `p1Name` and `p2Name` (a player, a pair as `Smith / Jones`, or a team), `sets` (a list
+of `a-b`, or `{a,b}` objects from a feed), `points` (`a-b`), `server` (1, 2 or 0), `status` (MATCH POINT, TIE-BREAK, CHALLENGE,
+FINAL: a tab under the bug, pulsing for match, set and break points), `winner` (1 or 2: ticks the winner, dims the other, counts
+every set, hides points and the serve marker), optional flags or logos (`p1Image`, `p2Image`, else a colour chip), colours.
+
+**Motion.** In: title tab rises, the card unrolls, the rows slide in one after the other, the serve marker pops, the status tab
+wipes out. While on: a changed score rolls (old number up and out, new one up and in) and flashes, a new set or game column opens
+out, the serve marker slides between the rows. Out: status and marker first, rows slide out, card rolls up, title drops.
+
+#### Tennis: the rules and the callouts (26 Oct 2026)
+
+The Tennis score works its callout out from the score, so an operator (or a feed) only keeps the sets, points and server up to date.
+
+- **Format.** `bestOf` (3 or 5), `finalSet` (`tb7` tie-break to 7 at 6-6; `tb10` the 10-point tie-break at 6-6 used at the Grand
+  Slams; `adv` an advantage set with no tie-break; `mtb` a match tie-break to 10 instead of the final set, where `points` holds the
+  tie-break points), `noAd` (a deciding point at deuce). Every other set has a tie-break to 7 at 6-6.
+- **Automatic callouts** (`autoCallouts`, on by default): `BREAK POINT`, `SET POINT`, `MATCH POINT` (or `CHAMPIONSHIP POINT` with
+  `championship` on), with the count when there is more than one in a row (`2 BREAK POINTS`, `3 MATCH POINTS`); the highest stake
+  wins (a break that wins the set is a set point); `TIE-BREAK` and `MATCH TIE-BREAK`, `DEUCE`, `DECIDING POINT` (no-ad);
+  `SET · name` between sets; `GAME, SET AND MATCH` at the end. A server's ordinary game point says nothing. The winner is worked out
+  from the sets when `winner` is empty.
+- **Taking over, in order:** `statusCustom` (any text), then `status` (a list: time out, medical and injury time-out, toilet break,
+  challenge, Hawk-Eye review, code and time violation, rain delay, heat break, match suspended, warm-up, set break, retired,
+  walkover), then a feed's `matchStatus` (interrupted, delayed, retired, walkover and the like), then the automatic callout.
+  `calloutPlayer` (1 or 2) adds the player's name to a manual or custom one: `MEDICAL TIME-OUT · M. Kowalski`.
+- **Wiring a feed.** No open standard covers live tennis scoring (IPTC SportsML's tennis part is statistics). The template reads the
+  common feed shapes as they come: `{home_score, away_score}` and `{t1, t2}` as well as `a-b` text, `home` / `away` for the server
+  and winner, a points count of 50 or a named `advantage` as AD. For a Sportradar Tennis API match summary, bind by path:
+
+  | Field | Path |
+  |---|---|
+  | `sets` | `sport_event_status.period_scores` |
+  | `points` | `sport_event_status.game_state` |
+  | `server` | `sport_event_status.game_state.serving` |
+  | `bestOf` | `sport_event.sport_event_context.mode.best_of` |
+  | `matchStatus` | `sport_event_status.match_status` |
+  | `p1Name`, `p2Name` | `sport_event.competitors.0.name`, `sport_event.competitors.1.name` |
+
+  Home is player 1. The final-set rule is not in that feed: set `finalSet` for the event.
+
+Fields with a fixed list of values declare `options` (`[{value, label}]`) in the manifest; the setup and live control show them as
+a dropdown. Tests: `test/tennis-callouts.check.ts` (36 situations in Chromium, and `test/fixtures/sportradar-tennis-live.json`).
 
 ## 5. Three ways a graphic reaches a viewer
 
@@ -201,3 +306,75 @@ preview, adapt to a brand (style editor, code editor), bind data and operate. Re
 graphics team need simple layouts; the first step then would be field-level layout presets on Volt's own
 templates, not a free-form canvas.
 
+## 9. Default sets: which Volt templates each client account gets (25 Oct 2026)
+
+Volt's own templates (`gfx_templates.account_id` NULL) belong to a **set**. Three ship with Volt: **News** (L-bar family, both
+tickers, locator, both name supers, breaking banner), **General** (social badge, up next, quote card, title card, QR callout,
+corner bug, countdown) and **Sport scores** (Scorebug and the racket and net sports). SaaS staff can make more sets.
+
+**On or off per account.** A set's default ("on for all accounts") applies to every account without a choice of its own,
+including accounts created later. Any account can be switched on or off by itself; "Apply default to all" drops those choices.
+
+| Client sees a Volt template when | Can start a setup from it or duplicate it when |
+|---|---|
+| its set is on for the account, or the account already has setups on it | its set is on, the set is not archived and the template is not retired |
+
+So turning a set off, archiving it or retiring a template never breaks anything on air: setups already made stay listed, open,
+edit, and can move between versions of their template. New setups and duplicates are refused with the reason.
+
+**Setups are per account.** `gfx_setups.account_id` is required and every setup query filters by it, so a client only ever sees
+its own setups, including under a Volt template that fifty other accounts also use (the template's "used by" lists only its own).
+
+**System Admin > Graphics library** (`/api/platform/graphics`, platform session with the authenticator code; changes need
+`saas_admin`, reading needs any platform role):
+
+* Sets: create, rename, describe, on for all accounts or not, archive, apply the default to all.
+* Templates: upload a .zip or .html into a set (a draft, checked like any template), publish, upload a new version, discard a
+  draft, move between sets, retire and restore. Each shows how many accounts and setups use it.
+* Client accounts > an account > Graphics sets: Default, On or Off for each set.
+
+Publishing a new version moves nobody: each setup stays on its version and the client sees "update available".
+
+**Shipped templates and boot.** `services/graphics/defaults.ts` creates the shipped sets and templates on first boot and
+publishes a new version only when the files Volt ships change (compared with the last version Volt shipped, so a version an
+admin published is not overwritten by a restart). Boot never changes a set's name or default, a template's set once it has
+one, or whether it is retired.
+
+Tables: `gfx_template_sets`, `gfx_account_sets` (account, set, enabled), `gfx_templates.set_id` and `retired_at`
+(migration 0081). Tests: `test/graphics-sets.check.ts`.
+
+## 10. Bugs and alpha video (25 Oct 2026)
+
+**Bugs** are a usage type in the Image Library (`kind = 'bug'`, the **bugs** filter, a `bugs/` folder by default) and a
+standard content type in the Media Library (**Bug / sponsor graphic**). Both carry the same small set of advertising
+details: **advertiser**, **agency**, **campaign** and an **ad code** (Ad-ID, key number or CAD number). In the Image
+Library they are `metadata.ad`, set on upload or from the item's panel (`PUT /api/files/:id/ad`), and searchable.
+
+**schema.org** has no advertisement type. The closest fit, which `GET /api/files/:id` returns as `jsonLd` for a bug:
+the creative itself (`ImageObject` or `VideoObject`, `genre: Advertising`) with `sponsor` (the advertiser, an
+Organization), `producer` (the agency), `isPartOf` (the campaign, a CreativeWorkSeries) and `identifier`
+(PropertyValue `Ad-ID`).
+
+**Alpha video.** A video uploaded to the Image Library (`POST /api/files/motion?folder=&name=&kind=`, raw body, up to
+500 MB and 300 s; or just drop it in the library or a picker) is converted by `services/motionGraphics.ts` to
+VP9-with-alpha WebM, with a transparent first-frame PNG (the item's thumbnail) and the original kept beside it.
+ProRes 4444, QuickTime Animation, PNG-in-MOV and WebM with alpha keep their transparency; a video without alpha is
+accepted with a warning. A template field of type `image` bound to it receives the WebM.
+
+**Corner bug** has ONE field for the bug, `logo`: a still, a GIF or an alpha video from the Image Library (a video
+plays, anything else shows as an image; the field can be cleared). Then `loop` (off plays once and holds the last
+frame), `caption`, `panel` and `opacity`. Where it sits and how big it is are the setup's **Position and size**
+(it is a `snap` template): no `position` or `height` fields. Version 3 had a separate `motion` field; `logo`
+replaces it, so a setup moved to the new version keeps its video, and the template still honours `motion`
+from older data. Chromium, Chrome, Edge, Firefox and burn-in play WebM alpha; Safari shows the transparent first
+frame.
+
+**Burn-in and graphics that never settle.** The renderer captured frames only for 4 s after a change, so a crawl,
+a looping bug or a rotating handle froze in the burned picture. Between changes it now takes a frame every 400 ms
+and follows any movement frame by frame (`volt-encoder/gfx/burn_renderer.js`).
+
+Tests: `test/motion-graphics.check.ts` (ProRes 4444 upload, alpha kept in the WebM and the PNG, byte ranges, the
+binding, the template playing it in Chromium over magenta with the transparent half showing through, a still and a
+cleared value in the same field, ad details, search, the bugs filter); `test/corner-bug-one-field.check.ts` (the
+shipped manifest, an empty image field, a setup moving version carrying `motion` into `logo`, and the anchor placing
+the box in every corner at 50 to 200 % by the burn-in maths).

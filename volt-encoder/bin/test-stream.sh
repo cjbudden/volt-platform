@@ -106,7 +106,8 @@ if [ -n "$WATERMARK" ]; then
 fi
 
 if [ -n "$WM_FILE" ]; then
-  WMH=$(( 720 * WM_SCALE / 100 )); [ "$WMH" -lt 1 ] && WMH=1
+  # the scale may be a decimal (a wide logo sized by width in the console): awk, not $(( ))
+  WMH=$(awk -v s="$WM_SCALE" 'BEGIN { v = int(720 * s / 100 + 0.5); if (v < 1) v = 1; print v }')
   OP=$(awk "BEGIN{printf \"%.3f\", ${WM_OPACITY}/100}")
   case "$WM_POS" in
     tl) XY="${WM_X}:${WM_Y}";;

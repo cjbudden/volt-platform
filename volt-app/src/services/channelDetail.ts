@@ -15,6 +15,7 @@ import { computePipelineHealth, recoveryOf, type PipelineHealth } from './pipeli
 import { recommendInstance, buildBilling, type Billing } from './billing';
 import { serverStatusFor, type ServerStatus } from './fleet/serverStatus';
 import { splitStamp, foldRepeats, newestFirst, type EncoderLogRow } from './encoderLog';
+import { epgLane } from './epgLane';
 
 const DVR_MAX_SEC = 14400; // 4h cap for 24x7 channels
 
@@ -478,24 +479,9 @@ export async function buildStreamDetail(channel: any, nowMs: number, kind: Owner
   // One log in time order, newest first: encoder lines now have their time too.
   const log = newestFirst<{ at?: string | null }>([...encTail, ...eventsLog]) as typeof eventsLog;
 
-  // EPG — real programmes around now; empty when the channel has no schedule
-  const progs = await query<any>(
-    `SELECT id, title, starts_at, ends_at FROM programmes
-       WHERE ${col} = $1 AND ends_at > now() - interval '2 hours' AND starts_at < now() + interval '8 hours'
-       ORDER BY starts_at`, [channel.id]);
-  let nowObj: any = null; let nextObj: any = null;
-  const lane = progs.map((p: any) => {
-    const s = new Date(p.starts_at).getTime(); const en = new Date(p.ends_at).getTime();
-    const mins = Math.max(1, Math.round((en - s) / 60000));
-    const isNow = nowMs >= s && nowMs < en;
-    const state = en <= nowMs ? 'past' : isNow ? 'now' : '';
-    const entry: any = { name: p.title, start: hhmm(s), end: hhmm(en), mins, state, startMs: s, endMs: en };
-    if (isNow) { entry.progress = Math.round(((nowMs - s) / (en - s)) * 100); nowObj = { ...entry, elapsedMin: Math.floor((nowMs - s) / 60000) }; }
-    return entry;
-  });
-  const nextRow = progs.find((p: any) => new Date(p.starts_at).getTime() > nowMs);
-  if (nextRow) nextObj = { name: nextRow.title, start: hhmm(new Date(nextRow.starts_at).getTime()), startMs: new Date(nextRow.starts_at).getTime() };
-  const epg = { now: nowObj, next: nextObj, lane };
+  // EPG: real programmes around now, with each one's flag (services/epgLane.ts,
+  // shared with the event and radio pages); empty when there is no schedule.
+  const epg = await epgLane(col as 'channel_id' | 'event_id', channel.id, nowMs);
 
   // viewers — real analytics only; empty until wired/there is live data (no fabrication)
   const viewers = await channelViewers(group?.account_id ?? null, channel.id, kind);

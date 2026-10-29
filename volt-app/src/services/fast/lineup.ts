@@ -112,6 +112,12 @@ export interface Lineup {
   /** Used when a slot's title is out of its rights window: best duration fit first. */
   backfill?: string[];
   seed?: string;
+  /**
+   * CHANNEL IDENT BETWEEN PROGRAMMES (brand mode 'between'): seconds reserved
+   * after every programme, after its end break and before any grid pad, for
+   * the channel's ident. 0 = none. The playout fills it (store.ts timelineFor).
+   */
+  identSec?: number;
 }
 
 export interface PlannedProgramme {
@@ -300,10 +306,11 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
           if (c.trimmedSec > 0) notice(new Date(t), `The hourly cap of ${pol.maxPerHourMin} ad minutes shortened or dropped some breaks.`);
         }
         const breakSec = breaks.reduce((s, b) => s + b.durationSec, 0);
+        const identSec = Math.max(0, lineup.identSec ?? 0);
         // ANCHOR: an item that would run past the daily restart is not started.
         // The programme before it is padded up to the anchor and the run order
         // starts again from the top.
-        if (nextAnchor != null && placed > 0 && t + (contentSec + breakSec) * 1000 > nextAnchor) {
+        if (nextAnchor != null && placed > 0 && t + (contentSec + breakSec + identSec) * 1000 > nextAnchor) {
           if (last && last.end.getTime() <= nextAnchor) {
             const extra = (nextAnchor - last.end.getTime()) / 1000;
             last.padSec = Math.round((last.padSec + extra) * 1000) / 1000;
@@ -316,7 +323,9 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
           break;
         }
         const midSec = breaks.filter((b) => b.position === 'mid').reduce((x, b) => x + b.durationSec, 0);
-        const endMs = t + Math.round((contentSec + breakSec) * 1000);
+        // The ident runs after the end break; grid pad (and pad-to-ads) is
+        // worked out from after it, so selling pad never sells the ident.
+        const endMs = t + Math.round((contentSec + breakSec + identSec) * 1000);
         let padSec = gridPad(new Date(endMs), grid, zone);
         const slotEndMs = endMs + Math.round(padSec * 1000);
         // PAD TO ADS: grid pad long enough is sold as break time after the
@@ -348,7 +357,7 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
           end: new Date(slotEndMs),
           contentSec,
           breaks: breaks.map((b) => ({ ...b, start: new Date(t + Math.round((b.atAssetSec + b.offsetBeforeSec) * 1000)) })),
-          padSec, series: p.series, note: p.note, warnings,
+          padSec: Math.round((padSec + identSec) * 1000) / 1000, series: p.series, note: p.note, warnings,
         };
         if (prog.end.getTime() > from.getTime()) out.push(prog);
         last = prog;

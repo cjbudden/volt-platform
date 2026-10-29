@@ -2,10 +2,13 @@
 //  MEDIA LIBRARY TOOLBAR AND FILTER PANEL.
 //
 //    [Search ...........] [Sort v] [Columns v] [List | Grid]
-//    Content type  [Episode 12] [Movie 3] [Clip 40] ...
-//    Availability  [Available 9] [Not published 40] ...   Source [Clip] [Upload] ...
+//    Asset type    [Video 40] [Audio 6] [Song 12]   Source [Channel] [Event] [Radio] [Upload] [No source]
+//    Availability  [Available 9] [Not published 40] ...
+//    (Created as was dropped from the bar on 28 Oct 2026: Source already says
+//    channel, event, radio or upload, and every upload counted as a "Clip". It
+//    shows only when a shared link still filters by it, so it can be cleared.)
 //    Metadata      [Missing required 7]              [More filters v]
-//      Resolution, codec, review, date range, duration, published copy is old
+//      Content type, resolution, codec, review, date range, duration, published copy is old
 //
 //  Every chip is a toggle button (aria-pressed) with the count it would show
 //  with the other filters applied (GET /api/vod/facets). All of it lives in
@@ -18,12 +21,21 @@ import type { LibraryFacets } from './libraryApi'
 import {
   OPT_COLUMNS, SORTS, codecLabel, isFiltered, resLabel,
   type LibraryFilters, type LibraryView, type OptColumn, type SortKey,
+  PROBLEM_STATUSES,
 } from './libraryQuery'
+import { USAGE_LABEL, USAGE_TIP } from './AssetStatus'
+import type { UsageStatus } from '../../api'
 
 const AVAIL_LABEL: Record<string, string> = {
   draft: 'Not published', scheduled: 'Scheduled', available: 'Available', expired: 'Expired', withdrawn: 'Access removed',
 }
 const ORIGIN_LABEL: Record<string, string> = { recording: 'Recording', clip: 'Clip', upload: 'Upload', watchfolder: 'Watch folder' }
+const SOURCE_LABEL: Record<string, string> = { channel: 'Channel', event: 'Event', radio: 'Radio', upload: 'Upload', none: 'No source' }
+const SOURCE_TIP: Record<string, string> = {
+  channel: 'Recorded or cut from a TV channel', event: 'Recorded or cut from an event', radio: 'Recorded or cut from a radio station',
+  upload: 'Uploaded as a file or dropped in a watch folder', none: 'Its channel or event no longer exists, or it never had one',
+}
+const MEDIA_LABEL: Record<string, string> = { video: 'Video', audio: 'Audio', song: 'Song' }
 
 function Toggle({ on, label, n, onClick, title }: { on: boolean; label: string; n?: number; onClick: () => void; title?: string }) {
   return (
@@ -94,11 +106,13 @@ export function LibraryToolbar({ filters, onChange, view, onView, columns, onCol
   )
 }
 
-export function LibraryFilterPanel({ filters, onChange, facets }: {
+export function LibraryFilterPanel({ filters, onChange, facets, mediaOnly }: {
   filters: LibraryFilters; onChange: (f: LibraryFilters) => void; facets: LibraryFacets | null
+  /** Limit the Asset type choice to these (a FAST channel's picker: video only, or audio and songs only). */
+  mediaOnly?: string[]
 }) {
   const fx = facets?.facets
-  const more = filters.res.length > 0 || filters.codec.length > 0 || !!filters.review || filters.stale || !!filters.from || !!filters.to || filters.durMin != null || filters.durMax != null
+  const more = filters.types.length > 0 || filters.res.length > 0 || filters.codec.length > 0 || !!filters.review || filters.stale || !!filters.from || !!filters.to || filters.durMin != null || filters.durMax != null
   const [open, setOpen] = useState(more)
   useEffect(() => { if (more) setOpen(true) }, [more])
   const set = (p: Partial<LibraryFilters>) => onChange({ ...filters, ...p })
@@ -111,28 +125,49 @@ export function LibraryFilterPanel({ filters, onChange, facets }: {
   const codecs = (fx?.codecs ?? []).filter((c) => c.value != null)
   const num = (v: string) => (v === '' ? null : Math.max(0, Number(v)))
 
+  // STATUS: can it be used. "Problems" is the one-click view of everything
+  // that will not play or is held back (build failed, no media, will not play,
+  // QC failed); the per-status chips show only the ones with assets in them.
+  const usageN = (k: string) => n(fx?.usage, k)
+  const problemsN = PROBLEM_STATUSES.reduce((a, k) => a + usageN(k), 0)
+  const problemsOn = PROBLEM_STATUSES.every((k) => filters.status.includes(k)) && filters.status.length === PROBLEM_STATUSES.length
+  const statusKeys = (Object.keys(USAGE_LABEL) as UsageStatus[]).filter((k) => usageN(k) > 0 || filters.status.includes(k))
+
   return (
     <div className="lib-filters" aria-label="Filters">
-      <Group label="Content type">
-        {types.length === 0 && <span className="lib-none">No assets yet</span>}
-        {types.map((t) => (
-          <Toggle key={t.id!} on={filters.types.includes(t.id!)} label={t.name ?? 'Untitled type'} n={t.n}
-            title={t.schema_org_type ? `schema.org ${t.schema_org_type}` : undefined}
-            onClick={() => set({ types: flip(filters.types, t.id!) })} />
-        ))}
-        {(fx?.types ?? []).some((t) => !t.id) && <span className="lib-none">{(fx?.types ?? []).find((t) => !t.id)?.n} with no type</span>}
-      </Group>
+      <div className="lib-filter-row lib-status-row">
+        <Group label="Status">
+          <Toggle on={problemsOn} label="Problems" n={problemsN} title="Build failed, no media, will not play, or QC failed"
+            onClick={() => set({ status: problemsOn ? [] : [...PROBLEM_STATUSES] })} />
+          {statusKeys.map((k) => (
+            <Toggle key={k} on={!problemsOn && filters.status.includes(k)} label={USAGE_LABEL[k]} n={usageN(k)} title={USAGE_TIP[k]}
+              onClick={() => set({ status: problemsOn ? [k] : flip(filters.status, k) })} />
+          ))}
+        </Group>
+      </div>
+      <div className="lib-filter-row">
+        {(!mediaOnly || mediaOnly.length > 1) && <Group label="Asset type">
+          {Object.keys(MEDIA_LABEL).filter((k) => !mediaOnly || mediaOnly.includes(k)).map((k) => (
+            <Toggle key={k} on={filters.media.includes(k)} label={MEDIA_LABEL[k]} n={n(fx?.media_types, k)} onClick={() => set({ media: flip(filters.media, k) })} />
+          ))}
+        </Group>}
+        <Group label="Source">
+          {Object.keys(SOURCE_LABEL).map((k) => (
+            <Toggle key={k} on={filters.source.includes(k)} label={SOURCE_LABEL[k]} n={n(fx?.sources, k)} title={SOURCE_TIP[k]} onClick={() => set({ source: flip(filters.source, k) })} />
+          ))}
+        </Group>
+      </div>
       <div className="lib-filter-row">
         <Group label="Availability">
           {Object.keys(AVAIL_LABEL).filter((k) => n(fx?.availability, k) > 0 || filters.avail.includes(k)).map((k) => (
             <Toggle key={k} on={filters.avail.includes(k)} label={AVAIL_LABEL[k]} n={n(fx?.availability, k)} onClick={() => set({ avail: flip(filters.avail, k) })} />
           ))}
         </Group>
-        <Group label="Source">
+        {filters.origin.length > 0 && <Group label="Created as">
           {Object.keys(ORIGIN_LABEL).filter((k) => n(fx?.origins, k) > 0 || filters.origin.includes(k)).map((k) => (
             <Toggle key={k} on={filters.origin.includes(k)} label={ORIGIN_LABEL[k]} n={n(fx?.origins, k)} onClick={() => set({ origin: flip(filters.origin, k) })} />
           ))}
-        </Group>
+        </Group>}
         <Group label="Metadata">
           <Toggle on={filters.missing} label="Missing required" n={missingN} onClick={() => set({ missing: !filters.missing })}
             title="A required target field for its content type is empty, or it has no content type" />
@@ -141,13 +176,22 @@ export function LibraryFilterPanel({ filters, onChange, facets }: {
           {LibIcon.filter}{open ? 'Fewer filters' : 'More filters'}
         </button>
         {isFiltered(filters) && (
-          <button type="button" className="btn ghost sm" onClick={() => onChange({ ...filters, types: [], avail: [], origin: [], review: '', stale: false, missing: false, res: [], codec: [], from: '', to: '', durMin: null, durMax: null, q: '' })}>
+          <button type="button" className="btn ghost sm" onClick={() => onChange({ ...filters, types: [], avail: [], origin: [], source: [], media: [], status: [], review: '', stale: false, missing: false, res: [], codec: [], from: '', to: '', durMin: null, durMax: null, q: '' })}>
             Clear filters
           </button>
         )}
       </div>
       {open && (
         <div id="lib-more" className="lib-filter-row">
+          <Group label="Content type">
+            {types.length === 0 && <span className="lib-none">None in use</span>}
+            {types.map((t) => (
+              <Toggle key={t.id!} on={filters.types.includes(t.id!)} label={t.name ?? 'Untitled type'} n={t.n}
+                title={t.schema_org_type ? `schema.org ${t.schema_org_type}` : undefined}
+                onClick={() => set({ types: flip(filters.types, t.id!) })} />
+            ))}
+            {(fx?.types ?? []).some((t) => !t.id) && <span className="lib-none">{(fx?.types ?? []).find((t) => !t.id)?.n} with no type</span>}
+          </Group>
           <Group label="Top resolution">
             {resolutions.length === 0 && <span className="lib-none">Not known yet</span>}
             {resolutions.map((r) => (

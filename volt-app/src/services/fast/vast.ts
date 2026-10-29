@@ -296,7 +296,15 @@ export function errorUrl(u: string, code: number): string {
  * The media file we condition from: the Mezzanine when there is one (it is
  * there for exactly this), else the largest progressive MP4.
  */
-export function bestSource(ad: VastAd): string | null {
+export function bestSource(ad: VastAd, media: 'video' | 'audio' = 'video'): string | null {
+  // An AUDIO channel takes an audio creative first (audio/mp4, audio/mpeg,
+  // audio/aac): it is what the ad server meant for audio inventory. Failing
+  // that, a video creative's soundtrack plays (the channel carries audio only).
+  if (media === 'audio') {
+    const aud = ad.mediaFiles.filter((m) => /^audio\//i.test(m.type) && (m.delivery ?? 'progressive') !== 'streaming')
+      .sort((a, b) => (b.bitrateKbps ?? 0) - (a.bitrateKbps ?? 0))[0];
+    if (aud) return aud.url;
+  }
   if (ad.mezzanine) return ad.mezzanine;
   const mp4 = ad.mediaFiles.filter((m) => /mp4|quicktime|mov/i.test(m.type) && (m.delivery ?? 'progressive') !== 'streaming');
   const pick = (mp4.length ? mp4 : ad.mediaFiles).sort((a, b) => (b.height ?? 0) - (a.height ?? 0) || (b.bitrateKbps ?? 0) - (a.bitrateKbps ?? 0))[0];

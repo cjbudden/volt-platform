@@ -1,0 +1,132 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Name super, accent line</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     In and out sequences: see volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md section 4.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Name super with accent line (and photo or logo)",
+  "bbox": [
+    96,
+    812,
+    1100,
+    172
+  ],
+  "fields": [
+    {
+      "id": "name",
+      "type": "text",
+      "label": "Name"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title or role"
+    },
+    {
+      "id": "image",
+      "type": "image",
+      "label": "Photo or logo (optional)"
+    },
+    {
+      "id": "plate",
+      "type": "boolean",
+      "label": "Dark plate behind the text"
+    },
+    {
+      "id": "accent",
+      "type": "color",
+      "label": "Line colour"
+    },
+    {
+      "id": "roleColor",
+      "type": "color",
+      "label": "Role text colour"
+    }
+  ],
+  "sample": {
+    "name": "Dr Amira Haddad",
+    "title": "Climate scientist, University of Queensland",
+    "image": "",
+    "plate": true,
+    "accent": "#f2a900",
+    "roleColor": "#e6e9ef"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+:root{--ein:cubic-bezier(.16,1,.3,1);--eout:cubic-bezier(.7,0,.84,0);--pop:cubic-bezier(.34,1.56,.64,1)}
+/* Three states: initial (hidden), .on (in sequence to on air), .out (out sequence to a different
+   hidden pose). After the out sequence .reset snaps back to initial with no transition. */
+.reset *,.reset *::before,.reset *::after{transition:none!important;animation:none!important}
+:root{--accent:#f2a900;--rolec:#e6e9ef}
+#plate{position:absolute;left:0;top:800px;width:1240px;height:196px;opacity:0;
+  background:linear-gradient(90deg,rgba(6,12,26,.84) 0%,rgba(6,12,26,.62) 55%,rgba(6,12,26,0) 100%)}
+.noplate #plate{display:none}
+#ns{position:absolute;left:120px;top:832px;display:flex;align-items:center}
+#pic{width:132px;height:132px;object-fit:cover;margin-right:22px;transform:scale(.6);opacity:0}
+#pic[src=""]{display:none}
+#line{width:8px;height:132px;background:var(--accent);transform:scaleY(0);transform-origin:top}
+#txt{overflow:hidden;padding-left:26px;height:132px;display:flex;flex-direction:column;justify-content:center;gap:10px}
+#name{font:600 58px/1.05 "Volt Serif","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;white-space:nowrap;text-shadow:0 2px 10px rgba(0,0,0,.35);transform:translateX(calc(-100% - 40px))}
+#role{font:500 30px/1.1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;color:var(--rolec);transform:translateX(calc(-100% - 40px))}
+#role:empty{display:none}
+/* in: plate fades up, the line draws down, the photo pops, name and role slide out from behind the line */
+.on #plate{opacity:1;transition:opacity .5s}
+.on #line{transform:none;transition:transform .45s var(--ein) .05s}
+.on #pic{transform:none;opacity:1;transition:transform .5s var(--pop) .15s,opacity .3s .15s}
+.on #name{transform:none;transition:transform .6s var(--ein) .35s}
+.on #role{transform:none;transition:transform .6s var(--ein) .5s}
+/* out: role then name slide back behind the line, the line draws up, photo and plate go */
+.out #role{transform:translateX(calc(-100% - 40px));transition:transform .3s var(--eout)}
+.out #name{transform:translateX(calc(-100% - 40px));transition:transform .35s var(--eout) .08s}
+.out #line{transform:scaleY(0);transform-origin:bottom;transition:transform .35s var(--eout) .35s}
+.out #pic{transform:scale(.6);opacity:0;transition:transform .3s var(--eout) .3s,opacity .3s .3s}
+.out #plate{opacity:0;transition:opacity .4s .4s}
+</style>
+</head>
+<body>
+<div id="plate"></div><div id="ns"><img id="pic" src="" alt=""><div id="line"></div><div id="txt"><div id="name"></div><div id="role"></div></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+function truthy(v){return !(v===false||v==='false'||v===0||v==='0'||v==='no'||v==='off')}
+function css(k,v){if(v!=null&&v!=='')document.documentElement.style.setProperty(k,String(v))}
+// Shrink one line until it fits its box, down to `floor` of its size.
+function fit(el,floor){if(!el)return;el.style.fontSize='';var s=parseFloat(getComputedStyle(el).fontSize),min=s*(floor||.72);
+  while(el.scrollWidth>el.clientWidth+1&&s>min){s-=1;el.style.fontSize=s+'px'}}
+var B=document.body,data={},playing=false,resetTimer=null;
+function play(){clearTimeout(resetTimer);B.classList.remove('out','reset');void B.offsetWidth;B.classList.add('on');playing=true;
+  if(typeof onPlay==='function')onPlay()}
+function stop(){if(!playing)return;playing=false;B.classList.add('out');B.classList.remove('on');
+  if(typeof onStop==='function')onStop();clearTimeout(resetTimer);
+  resetTimer=setTimeout(function(){B.classList.add('reset');B.classList.remove('out');void B.offsetWidth;B.classList.remove('reset');
+    if(typeof onReset==='function')onReset()},OUT_MS)}
+function next(){if(typeof onNext==='function')onNext()}
+var OUT_MS=850;
+function update(raw){var d=parse(raw);for(var k in d)data[k]=d[k];
+  css('--accent',d.accent);css('--rolec',d.roleColor);
+  if('name' in d)setText($('name'),d.name);if('title' in d)setText($('role'),d.title);
+  if('image' in d)$('pic').setAttribute('src',d.image||'');
+  if('plate' in d)B.classList.toggle('noplate',!truthy(d.plate))}
+</script>
+</body>
+</html>

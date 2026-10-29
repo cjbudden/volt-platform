@@ -15,10 +15,14 @@
 //             useNotify()(notice) for a one-off result. Rendered once by the
 //             app shell, cleared when you leave the page.
 //
-//    FORM     drawers and dialogs: in the footer, left of the buttons, so it
-//             is seen whichever tab or scroll position the form is on.
-//             <FormStatus/>. A field's own problem goes under that field:
-//             <FieldError/>.
+//    FORM     drawers and dialogs. The RESULT of a save (failed, saved,
+//             saved with a warning) is a banner at the TOP of the panel body,
+//             scrolled into view, so it is the first thing seen (24 Oct 2026).
+//             Why the main button is unavailable stays in the footer, next to
+//             the button it explains, and the footer says "Not saved" while
+//             an error is up top. All through <FormStatus/>, so every panel
+//             form gets it. A field's own problem goes under that field:
+//             <FieldError/>. useSaveResult() shows Saved, then closes.
 //
 //    INLINE   a row or item's own state (a failed upload, a publish error)
 //             stays in that row as text: className="err" or a status tag.
@@ -27,7 +31,8 @@
 //  A page that cannot show anything at all renders <PageError/> in place of
 //  its content.
 // ============================================================================
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 export type NoticeKind = 'error' | 'warn' | 'info' | 'ok'
 
@@ -195,13 +200,103 @@ export function PageError({ title = 'This page could not load', message, onRetry
 }
 
 /**
- * The status line in a drawer or dialog footer, left of the buttons: an error
- * from the last attempt, else why the main button is unavailable.
+ * A form's status. Rendered in the footer, left of the buttons.
+ *
+ *   error / warning / success  the RESULT of the last save. Inside a panel
+ *       (a .drawer with a .drawer-b body) it is shown as a banner at the TOP
+ *       of the body, scrolled into view, with a short "Not saved" left in the
+ *       footer for an error. Outside a panel it is the footer line, as before.
+ *   blocked  why the main button is unavailable: always the footer line, next
+ *       to the button it explains.
+ *
+ * The banner is portalled into a slot this component adds as the body's first
+ * child, so the 30-odd panel forms that already pass `error` get it with no
+ * change of their own.
  */
-export function FormStatus({ error, blocked }: { error?: ReactNode; blocked?: ReactNode }) {
-  if (error) return <div className="form-status form-status-error" role="alert">{ICON.error}<span>{error}</span></div>
-  if (blocked) return <div className="form-status form-status-warn" role="status">{ICON.warn}<span>{blocked}</span></div>
-  return <div className="form-status" />
+export function FormStatus({ error, blocked, warning, success, onDismiss }: {
+  error?: ReactNode; blocked?: ReactNode
+  /** Saved, but something needs attention. */
+  warning?: ReactNode
+  /** Saved. */
+  success?: ReactNode
+  /** Clears the result (the banner's ✕). Without it the banner has no ✕. */
+  onDismiss?: () => void
+}) {
+  const anchor = useRef<HTMLDivElement>(null)
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    const body = anchor.current?.closest('.drawer')?.querySelector<HTMLElement>(':scope > .drawer-b, .drawer-b')
+    if (!body) return
+    let el = body.querySelector<HTMLElement>(':scope > .panel-status-slot')
+    let made = false
+    if (!el) { el = document.createElement('div'); el.className = 'panel-status-slot'; body.prepend(el); made = true }
+    setSlot(el)
+    return () => { if (made) el!.remove() }
+  }, [])
+
+  const result: { kind: NoticeKind; title: string; msg: ReactNode } | null =
+    error ? { kind: 'error', title: 'Not saved', msg: error }
+    : warning ? { kind: 'warn', title: 'Saved, with a warning', msg: warning }
+    : success ? { kind: 'ok', title: typeof success === 'string' && success.length <= 40 ? success : 'Saved', msg: typeof success === 'string' && success.length <= 40 ? null : success }
+    : null
+  // Bring the banner into view each time a new result arrives.
+  const key = result ? `${result.kind}:${typeof result.msg === 'string' ? result.msg : ''}:${result.title}` : ''
+  useEffect(() => {
+    if (!slot || !result) return
+    const body = slot.parentElement
+    if (body && body.scrollTop > 0) body.scrollTo({ top: 0, behavior: 'smooth' })
+    /* eslint-disable-next-line */
+  }, [slot, key])
+
+  if (slot) {
+    return (
+      <>
+        {result
+          ? <div ref={anchor} className={`form-status ${result.kind === 'error' ? 'form-status-error' : ''}`} role="status">
+              {result.kind === 'error' && <>{ICON.error}<span>Not saved</span></>}
+            </div>
+          : blocked
+            ? <div ref={anchor} className="form-status form-status-warn" role="status">{ICON.warn}<span>{blocked}</span></div>
+            : <div ref={anchor} className="form-status" />}
+        {result && createPortal(
+          <div className="panel-status">
+            <Notice kind={result.kind} title={result.title} message={result.msg ?? undefined} onDismiss={onDismiss} />
+          </div>, slot)}
+      </>
+    )
+  }
+  if (error) return <div ref={anchor} className="form-status form-status-error" role="alert">{ICON.error}<span>{error}</span></div>
+  if (warning) return <div ref={anchor} className="form-status form-status-warn" role="status">{ICON.warn}<span>{warning}</span></div>
+  if (success) return <div ref={anchor} className="form-status form-status-ok" role="status">{ICON.ok}<span>{success}</span></div>
+  if (blocked) return <div ref={anchor} className="form-status form-status-warn" role="status">{ICON.warn}<span>{blocked}</span></div>
+  return <div ref={anchor} className="form-status" />
+}
+
+/**
+ * SAVED, THEN CLOSE. A panel that closes on success used to vanish with no
+ * word of whether it worked. This shows "Saved" at the top of the panel for a
+ * moment first, then runs `then` (close, reload). While it shows, `saving` is
+ * true so the button cannot be pressed twice.
+ *
+ *   const saved = useSaveResult()
+ *   ... await api.save(); saved.show('Station saved', onDone)
+ *   <FormStatus error={err} success={saved.message} />
+ */
+export function useSaveResult(holdMs = 1100) {
+  const [message, setMessage] = useState<string | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)
+  const t = useRef<number | null>(null)
+  useEffect(() => () => { if (t.current) window.clearTimeout(t.current) }, [])
+  const later = (then: (() => void) | undefined, ms: number) => {
+    if (t.current) window.clearTimeout(t.current)
+    if (then) t.current = window.setTimeout(() => { t.current = null; then() }, ms)
+  }
+  /** Saved: "Saved" up top for a moment, then `then`. */
+  const show = useCallback((msg: string, then?: () => void) => { setWarning(null); setMessage(msg); later(then, holdMs) }, [holdMs])
+  /** Saved, but say something: held three times as long, so it can be read. */
+  const warn = useCallback((msg: string, then?: () => void) => { setMessage(null); setWarning(msg); later(then, holdMs * 3) }, [holdMs])
+  const clear = useCallback(() => { setMessage(null); setWarning(null); if (t.current) { window.clearTimeout(t.current); t.current = null } }, [])
+  return { message, warning, show, warn, clear, saving: message != null || warning != null }
 }
 
 /** A field's own problem, directly under it. */

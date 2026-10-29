@@ -339,6 +339,7 @@ const CSS = `
 .vp:is([data-skin=video],[data-skin=event]):not(.vp-idle) .shaka-text-container{bottom:max(6%,92px)}
 .vp .vp-stage{container-type:inline-size}
 .vp .vp-gfx{position:absolute;overflow:hidden;pointer-events:none;z-index:1}
+.vp .vp-brandmark{position:absolute;width:auto;pointer-events:none;user-select:none;z-index:2;filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))}
 .vp .vp-watermark{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;color:rgba(255,255,255,.16);font-size:clamp(14px,3.2vw,28px);font-weight:800;transform:rotate(-18deg);white-space:nowrap;z-index:2}
 .vp .vp-btn{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:999px;position:relative;flex:none;transition:background .15s}
 .vp .vp-btn:hover,.vp .vp-btn:focus-visible{background:rgba(255,255,255,.14)}

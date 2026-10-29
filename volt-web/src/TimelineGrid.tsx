@@ -10,6 +10,7 @@ import { Segmented } from './listFilters'
 import { subscribeLive } from './liveStatus'
 import { useNotify } from './notices'
 import { ProgrammeDrawer } from './pages/EpgDetail'
+import { flagHref, ProgrammeFlagMark } from './programmeMedia'
 
 /* ============================================================================
    TIMELINE GRID: Past · Now · Next, the Live Streams page's third view.
@@ -408,7 +409,14 @@ export default function TimelineGrid() {
     const rect = e.currentTarget.getBoundingClientRect()
     const at = e.detail > 0 ? s + (e.clientX - rect.left) * msPerPx : Math.max(s, startMs)
     if (s <= now && now < en) navigate(r.links.detail)
-    else if (en <= now) openPast(r, Math.min(at, en - 1))
+    else if (en <= now) {
+      // AN AIRED PROGRAMME OPENS AS A WHOLE: its VOD when one was made, else
+      // the recording with the programme's own range marked. A click on the
+      // bare track (no block) still opens the workbench at that moment.
+      const href = b.source === 'epg' ? flagHref(b.flag) : null
+      if (href) { navigate(href); return }
+      openPast(r, Math.min(at, en - 1))
+    }
     else openFuture(r, b)
   }
   function onTrackClick(e: RMouseEvent<HTMLDivElement>, r: TimelineGridRow) {
@@ -484,13 +492,16 @@ export default function TimelineGrid() {
             const when = e <= now ? 'past' : s <= now ? 'now' : 'next'
             const clash = (r.clashes ?? []).filter(c => c.a.id === b.id || c.b.id === b.id)
             const left = clampX(s), w = Math.max(3, clampX(e) - left - 1)
-            const verb = when === 'past' ? 'Open the recording' : when === 'now' ? 'Open the stream' : 'Open the programme'
+            const flag = b.source === 'epg' ? b.flag ?? null : null
+            const verb = flag?.kind === 'vod' ? 'Open the VOD asset' : when === 'past' ? 'Play the recording from here' : when === 'now' ? 'Open the stream' : 'Open the programme'
             return (
               <button key={b.id} type="button" className={`tlg-block ${when}${clash.length ? ' clash' : ''}`} style={{ left, width: w }}
                 onClick={ev => openBlock(ev, r, b)}
-                title={`${b.title}\n${fmtT(s)} to ${fmtT(e)} · ${fmtDur(e - s)}${b.asRun ? ' · as run' : ''}${clash.map(c => `\nClash: overlaps "${c.a.id === b.id ? c.b.title : c.a.title}" ${fmtT(Date.parse(c.start))} to ${fmtT(Date.parse(c.end))}`).join('')}\n${verb}`}>
+                title={`${b.title}\n${fmtT(s)} to ${fmtT(e)} · ${fmtDur(e - s)}${b.asRun ? ' · as run' : ''}${flag ? `\n${flag.note}` : ''}${clash.map(c => `\nClash: overlaps "${c.a.id === b.id ? c.b.title : c.a.title}" ${fmtT(Date.parse(c.start))} to ${fmtT(Date.parse(c.end))}`).join('')}\n${verb}`}>
                 {w > 34 && <span className="tlg-bt">{b.title}</span>}
                 {w > 110 && <span className="tlg-bs">{fmtT(s)}</span>}
+                {/* VOD made / still recorded: the same marks as the guide and the metadata log. */}
+                {w > 70 && <ProgrammeFlagMark flag={flag} link={false} className="tlg-mark" />}
               </button>
             )
           })}

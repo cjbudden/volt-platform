@@ -82,7 +82,12 @@ authRouter.post(
       throw unauthorized('Invalid credentials');
     }
     if (user.account_status === 'suspended') throw unauthorized('This account is suspended, contact support');
-    if (!(await verifyPassword(user.password_hash, password))) throw unauthorized('Invalid credentials');
+    if (!(await verifyPassword(user.password_hash, password).catch(() => false))) throw unauthorized('Invalid credentials');
+    // COMPULSORY SINGLE SIGN-ON: a connection that enforces it closes password sign-in for its
+    // verified domains (owners keep theirs, so a broken provider cannot lock the account out).
+    // Checked after the password, so the answer says nothing to someone who does not know it.
+    const sso = await (await import('./sso/sso')).ssoRequiredFor({ id: user.id, account_id: user.account_id, role: user.role, email });
+    if (sso) throw Object.assign(new (await import('../util/http')).ApiError(403, `Your organisation signs in with ${sso.name}. Use "Continue with ${sso.name}".`), { code: 'sso_required', details: { connectionId: sso.id, name: sso.name } });
 
     // Two-step sign-in: a person with a second step set up (or an account that
     // requires one) gets a challenge instead of tokens (auth/identity.ts).

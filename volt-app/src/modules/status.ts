@@ -111,6 +111,16 @@ export async function applyReport(raw: unknown): Promise<void> {
     // push every event to live admins too (not just status snapshots), so the UI
     // refreshes on channel.start/stop, source.up/down, input.error, output.stalled…
     publish(acct, 'event', { kind: body.kind, id: body.id, type: e.type });
+    // TELL A PERSON when it needs one (services/streamAlerts.ts): inbox, email
+    // and push to the account's admins, once per stream per topic per half hour.
+    // Not awaited: an alert must never hold up or fail the report.
+    {
+      const tbl0 = body.kind === 'channel' ? 'channels' : 'events';
+      const wasLive = e.type === 'channel.stop'
+        ? (await one<{ status: string }>(`SELECT status FROM ${tbl0} WHERE id = $1`, [body.id]).catch(() => null))?.status === 'live'
+        : false;
+      void import('../services/streamAlerts').then(({ alertOnEvent }) => alertOnEvent(acct, body.kind, body.id, e as any, { wasLive }));
+    }
     // The encoder can DIE on its own (e.g. packager crash) without the control
     // plane knowing. When it reports channel.stop while we still think it's live,
     // run the real teardown so status stops lying (instances terminated, channel

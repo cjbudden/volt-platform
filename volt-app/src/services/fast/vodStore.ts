@@ -53,7 +53,9 @@ async function client() {
  * Upload an asset's packaged folder to vod/<id>/. Segments and init segments
  * first, playlists last, so a playlist never lists a file that is not there.
  */
-export async function uploadVodDir(dir: string, assetId: string, opts: { concurrency?: number } = {}): Promise<{ master: string; mpd: string; files: number; bytes: number }> {
+export async function uploadVodDir(dir: string, assetId: string, opts: { concurrency?: number; subdir?: string } = {}): Promise<{ master: string; mpd: string; files: number; bytes: number }> {
+  // subdir: a FAST ladder variant (ladders/<group>/<seg>s), under the asset's own folder
+  const base = `vod/${assetId}${opts.subdir ? `/${opts.subdir.replace(/^\/+|\/+$/g, '')}` : ''}`;
   const { PutObjectCommand } = await import('@aws-sdk/client-s3');
   const c = await client();
   const files = await walk(dir);
@@ -61,7 +63,7 @@ export async function uploadVodDir(dir: string, assetId: string, opts: { concurr
   const media = files.filter((f) => !isList(f)), lists = files.filter(isList);
   let bytes = 0;
   const put = async (f: string) => {
-    const key = `vod/${assetId}/${relative(dir, f).split('\\').join('/')}`;
+    const key = `${base}/${relative(dir, f).split('\\').join('/')}`;
     const body = await readFile(f);
     bytes += (await stat(f)).size;
     await c.send(new PutObjectCommand({
@@ -74,5 +76,5 @@ export async function uploadVodDir(dir: string, assetId: string, opts: { concurr
   const n = Math.max(1, opts.concurrency ?? 8);
   for (let i = 0; i < media.length; i += n) await Promise.all(media.slice(i, i + n).map(put));
   for (const f of lists) await put(f);
-  return { master: `vod/${assetId}/master.m3u8`, mpd: `vod/${assetId}/manifest.mpd`, files: files.length, bytes };
+  return { master: `${base}/master.m3u8`, mpd: `${base}/manifest.mpd`, files: files.length, bytes };
 }

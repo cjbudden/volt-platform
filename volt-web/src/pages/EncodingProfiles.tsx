@@ -3,6 +3,7 @@ import {
   api, type EncodeProfile, type LadderGroup, type LiveOutputProfile,
   type LadderPreview, type LadderRung,
 } from '../api'
+import { LadderEditor } from '../encode/LadderEditor'
 
 /* ============================================================================
    ENCODING PROFILES — renditions, and the ladders made of them.
@@ -193,21 +194,6 @@ function Ladder({ g, profiles, reload }: {
     catch (e: any) { setErr(String(e?.message ?? e)) } finally { setBusy(false) }
   }
 
-  const toggleMember = async (id: string) => {
-    const cur = new Set(memberIds)
-    cur.has(id) ? cur.delete(id) : cur.add(id)
-    const ordered = profiles.filter(p => cur.has(p.id))
-      .sort((a, b) => b.height - a.height).map(p => p.id)
-    setBusy(true); setErr('')
-    try { await api.setLadderMembers(g.id, ordered); reload() }
-    catch (e: any) { setErr(String(e?.message ?? e)) } finally { setBusy(false) }
-  }
-
-  // Which renditions are in it. A tracking ladder has none by definition.
-  const memberIds = tracking ? [] :
-    profiles.filter(p => g.rungs.some(r => r.height === p.height && r.bitrate_kbps === p.bitrate_kbps))
-      .map(p => p.id)
-
   return (
     <div className="card" style={{ padding: 18, marginTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -241,54 +227,10 @@ function Ladder({ g, profiles, reload }: {
         )}
       </p>
 
-      {g.problem ? (
-        <p style={{ color: 'var(--danger,#f87171)', fontSize: 'var(--fs-sm)' }}>
-          This ladder cannot be used: {g.problem}
-        </p>
-      ) : (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '10px 0' }}>
-          {g.rungs.map((r, i) => (
-            <span key={i} style={{
-              padding: '4px 11px', borderRadius: 999, fontSize: 'var(--fs-sm)', fontWeight: 600,
-              background: 'rgba(63,123,255,.12)', border: '1px solid rgba(63,123,255,.4)',
-            }}>{rungLabel(r)}</span>
-          ))}
-          <span style={{ ...muted, alignSelf: 'center' }}>
-            {g.segment_seconds}s segments · {g.effective_fps}fps · {g.packaging.toUpperCase()}
-          </span>
-        </div>
-      )}
-
-      {/* A tracking ladder gets NO rendition list, because there is nothing here
-          to edit. A disabled one would imply the truth lives here. */}
-      {!tracking && (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ ...muted, marginBottom: 6 }}>Renditions in this ladder</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {profiles.map(p => {
-              const on = memberIds.includes(p.id)
-              return (
-                <button key={p.id} type="button" disabled={busy}
-                  onClick={() => toggleMember(p.id)}
-                  style={{
-                    padding: '4px 11px', borderRadius: 999, fontSize: 'var(--fs-sm)',
-                    cursor: 'pointer', fontFamily: 'inherit',
-                    background: on ? 'rgba(63,123,255,.16)' : 'var(--panel-2,#151922)',
-                    border: `1px solid ${on ? 'rgba(63,123,255,.5)' : 'var(--border,#242a36)'}`,
-                    color: on ? 'var(--text,#e7ebf3)' : 'var(--faint,#8b93a7)',
-                  }}>{p.name}</button>
-              )
-            })}
-            {!profiles.length && <span style={muted}>Add a rendition above first.</span>}
-          </div>
-        </div>
-      )}
-
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 'var(--fs-sm)' }}>
-        <input type="checkbox" checked={g.cap_to_source} disabled={busy}
-          onChange={e => patch({ capToSource: e.target.checked })} />
-        Never upscale — skip rungs above the source's own height
-      </label>
+      {/* THE SHARED EDITOR (encode/LadderEditor.tsx): renditions, encode and
+          packaging, the same one a FAST channel's Settings shows, so a ladder
+          is set up one way wherever it is used. */}
+      <LadderEditor g={g} profiles={profiles} onChanged={reload} />
 
       {err && <p style={{ color: 'var(--danger,#f87171)', fontSize: 'var(--fs-sm)' }}>{err}</p>}
       {!g.problem && <Preview ladder={g} />}

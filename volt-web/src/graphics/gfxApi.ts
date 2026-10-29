@@ -11,7 +11,7 @@ export type FieldType = 'text' | 'number' | 'image' | 'list' | 'color' | 'boolea
 export interface TField { id: string; type: FieldType; label: string; hidden?: boolean; options?: { value: string | number; label: string }[] }
 export interface OgrafInfo { manifestPath: string; id: string; version?: string; author?: string; main: string; stepCount: number; customActions: { id: string; name: string }[] }
 export interface Check { id: string; level: 'ok' | 'warn' | 'error'; title: string; detail: string }
-export interface Manifest { name?: string; canvas: [number, number]; fps?: number; bbox?: [number, number, number, number]; fields: TField[]; sample: Record<string, any>; contract: string; manifestFrom: string; ograf?: OgrafInfo }
+export interface Manifest { name?: string; canvas: [number, number]; fps?: number; bbox?: [number, number, number, number]; snap?: boolean; fields: TField[]; sample: Record<string, any>; contract: string; manifestFrom: string; ograf?: OgrafInfo }
 export interface Version {
   id: string; version: number | null; status: 'draft' | 'published'; manifest: Manifest; checks: Check[]; publishable: boolean
   sizeBytes: number; fileCount: number; note: string | null; createdAt: string; publishedAt: string | null; url: string
@@ -47,6 +47,10 @@ export interface StyleReport { versionId: string; tokens: StyleToken[]; fonts: {
 export interface Template {
   id: string; name: string; kind: Kind; source: 'volt' | 'upload' | 'paste' | 'duplicate'; owner: 'volt' | 'account'
   status?: TemplateStatus
+  /** Volt templates: the set it is in (News, General, Sport scores...). */
+  set?: { id: string; key: string; name: string } | null
+  /** false: a Volt template whose set is off for this account (or retired), listed because setups use it. */
+  available?: boolean; retired?: boolean
   latest: Version | null; draft: Version | null; setups?: number; assignments?: number; createdAt: string; updatedAt: string
 }
 export interface TemplateDetail extends Template {
@@ -60,6 +64,10 @@ export interface Setup {
   id: string; name: string; note: string | null; templateId: string; templateName: string; templateKind: Kind
   versionId: string; version: number | null; versionStatus: string; latestVersion: number | null; latestVersionId: string | null; upgradeAvailable: boolean
   fields: Record<string, Binding>; placement: Placement; templateFields: TField[]; canvas: [number, number]; sources: SourceKind[]
+  /** The template's drawn box, and whether the anchor places it (Manifest.snap). */
+  bbox?: [number, number, number, number] | null; snap?: boolean
+  /** The Image Library items its image fields use (GET/POST/PATCH of one setup). */
+  images?: Record<string, { url: string; still: string; name: string; video: boolean }>
   assignments: { id: string; name: string; channelId: string | null; eventId: string | null; runMode: string; targets: string; onAir: boolean }[]
   templateUrl: string; updatedAt: string
 }
@@ -129,7 +137,7 @@ export const gfx = {
   setups: (templateId?: string): Promise<{ items: Setup[] }> => req('/graphics/setups' + qs({ template_id: templateId })),
   setup: (id: string): Promise<Setup> => req(`/graphics/setups/${id}`),
   createSetup: (b: { name: string; note?: string | null; versionId: string; fields: Record<string, Binding>; placement: Placement }): Promise<Setup> => req('/graphics/setups', { method: 'POST', ...J(b) }),
-  patchSetup: (id: string, b: Partial<{ name: string; note: string | null; versionId: string; fields: Record<string, Binding>; placement: Placement }>): Promise<Setup & { droppedFields?: string[] }> =>
+  patchSetup: (id: string, b: Partial<{ name: string; note: string | null; versionId: string; fields: Record<string, Binding>; placement: Placement }>): Promise<Setup & { droppedFields?: string[]; carriedFields?: string[] }> =>
     req(`/graphics/setups/${id}`, { method: 'PATCH', ...J(b) }),
   deleteSetup: (id: string) => req(`/graphics/setups/${id}`, { method: 'DELETE' }),
 

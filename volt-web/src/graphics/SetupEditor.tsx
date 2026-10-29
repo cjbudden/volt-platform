@@ -14,6 +14,28 @@ import { openLiveControl } from './Graphics'
 
 const ANCHORS = ['top_left', 'top', 'top_right', 'left', 'center', 'right', 'bottom_left', 'bottom', 'bottom_right']
 const ANCHOR_LABEL = ['Top left', 'Top centre', 'Top right', 'Middle left', 'Centre', 'Middle right', 'Bottom left', 'Bottom centre', 'Bottom right']
+const ORIGIN: Record<string, [number, number]> = { top_left: [0, 0], top: [0.5, 0], top_right: [1, 0], left: [0, 0.5], center: [0.5, 0.5], right: [1, 0.5], bottom_left: [0, 1], bottom: [0.5, 1], bottom_right: [1, 1] }
+type Box = [number, number, number, number]
+/**
+ * A SNAP template (a corner bug): the anchor puts its box at that spot of the frame,
+ * keeping the margin it was drawn with, at any size. Placement keeps its one meaning
+ * everywhere else (burnFeed.placedBox, the player): a point p lands at o + t + k(p - o),
+ * o the anchor point; this solves t so the box's matching point lands on the target.
+ * What is left over in x/y is the user's nudge.
+ */
+function snapOffset(anchor: string, k: number, canvas: [number, number], bbox: Box): [number, number] {
+  const [cw, ch] = canvas, [bx, by, bw, bh] = bbox, [fx, fy] = ORIGIN[anchor] ?? [0, 0]
+  const mx = Math.max(0, Math.min(bx, cw - bx - bw)), my = Math.max(0, Math.min(by, ch - by - bh))
+  const o = [fx * cw, fy * ch], c = [bx + fx * bw, by + fy * bh]
+  const T = [fx * cw + (1 - 2 * fx) * mx, fy * ch + (1 - 2 * fy) * my]
+  return [Math.round(T[0] - o[0] - k * (c[0] - o[0])), Math.round(T[1] - o[1] - k * (c[1] - o[1]))]
+}
+/** The anchor whose snap needs no offset: where the template already draws. */
+function homeAnchor(canvas: [number, number], bbox: Box): string {
+  let best = 'top_left', d = Infinity
+  for (const a of ANCHORS) { const [x, y] = snapOffset(a, 1, canvas, bbox); if (Math.abs(x) + Math.abs(y) < d) { d = Math.abs(x) + Math.abs(y); best = a } }
+  return best
+}
 const pick = (o: any, p?: string) => !p ? o : p.split('.').filter(Boolean).reduce((a, k) => a == null ? a : Array.isArray(a) && /^\d+$/.test(k) ? a[+k] : a[k], o)
 
 export function SetupEditor({ id, versionId }: { id?: string; versionId?: string | null }) {
@@ -21,7 +43,7 @@ export function SetupEditor({ id, versionId }: { id?: string; versionId?: string
   const canManage = can('graphics', 'manage')
   const notify = useNotify()
   const [setup, setSetup] = useState<Setup | null>(null)
-  const [tpl, setTpl] = useState<{ templateId: string; templateName: string; versionId: string; version: number | null; latestVersionId: string | null; latestVersion: number | null; url: string; fields: TField[]; sample: Record<string, any>; canvas: [number, number] } | null>(null)
+  const [tpl, setTpl] = useState<{ templateId: string; templateName: string; versionId: string; version: number | null; latestVersionId: string | null; latestVersion: number | null; url: string; fields: TField[]; sample: Record<string, any>; canvas: [number, number]; bbox?: Box | null; snap?: boolean } | null>(null)
   const [name, setName] = useState('')
   const [note, setNote] = useState('')
   const [fields, setFields] = useState<Record<string, Binding>>({})
@@ -29,6 +51,7 @@ export function SetupEditor({ id, versionId }: { id?: string; versionId?: string
   const [sources, setSources] = useState<DataSource[]>([])
   const [imgFor, setImgFor] = useState<string | null>(null)
   const [imgUrls, setImgUrls] = useState<Record<string, string>>({})
+  const [imgNames, setImgNames] = useState<Record<string, string>>({})
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [assign, setAssign] = useState(false)
@@ -37,9 +60,13 @@ export function SetupEditor({ id, versionId }: { id?: string; versionId?: string
 
   useEffect(() => { gfx.sources().then((r) => setSources(r.items)).catch(() => {}) }, [])
   const loadSetup = (sid: string) => gfx.setup(sid).then((s) => {
-    setSetup(s); setName(s.name); setNote(s.note ?? ''); setFields(s.fields); setPlacement({ anchor: 'top_left', x: 0, y: 0, scale: 1, layer: 2, ...s.placement })
+    setSetup(s); setName(s.name); setNote(s.note ?? ''); setFields(s.fields)
+    // What the image fields point at, so a reopened setup previews and names its picks.
+    const im = s.images ?? {}
+    setImgUrls((m) => ({ ...m, ...Object.fromEntries(Object.entries(im).map(([k, v]) => [k, v.url])) }))
+    setImgNames((m) => ({ ...m, ...Object.fromEntries(Object.entries(im).map(([k, v]) => [k, v.name])) })); setPlacement({ anchor: 'top_left', x: 0, y: 0, scale: 1, layer: 2, ...s.placement })
     setTpl({ templateId: s.templateId, templateName: s.templateName, versionId: s.versionId, version: s.version, latestVersionId: s.latestVersionId, latestVersion: s.latestVersion,
-      url: s.templateUrl, fields: s.templateFields, sample: {}, canvas: s.canvas })
+      url: s.templateUrl, fields: s.templateFields, sample: {}, canvas: s.canvas, bbox: s.bbox ?? null, snap: !!s.snap })
   }).catch((e) => setErr(e.message))
   useEffect(() => {
     if (id) {
@@ -57,7 +84,9 @@ export function SetupEditor({ id, versionId }: { id?: string; versionId?: string
       const v = t && (t.latest?.id === versionId ? t.latest : t.draft)
       if (!t || !v) { setErr('That template version was not found.'); return }
       setTpl({ templateId: t.id, templateName: t.name, versionId: v.id, version: v.version, latestVersionId: t.latest?.id ?? null, latestVersion: t.latest?.version ?? null,
-        url: v.url, fields: v.manifest.fields.filter((f) => !f.hidden), sample: v.manifest.sample ?? {}, canvas: v.manifest.canvas })
+        url: v.url, fields: v.manifest.fields.filter((f) => !f.hidden), sample: v.manifest.sample ?? {}, canvas: v.manifest.canvas, bbox: v.manifest.bbox ?? null, snap: !!v.manifest.snap })
+      // A snap template starts anchored where it is drawn, so the anchor grid shows the truth.
+      if (v.manifest.snap && v.manifest.bbox) setPlacement((p) => ({ ...p, anchor: homeAnchor(v.manifest.canvas, v.manifest.bbox!), x: 0, y: 0 }))
       setName(`${t.name} setup`)
       // Start every field as fixed text holding the sample, so the preview shows something real.
       setFields(Object.fromEntries(v.manifest.fields.filter((f) => !f.hidden).map((f) => [f.id, { source: (f.type === 'image' ? 'image' : 'text') as SourceKind, value: v.manifest.sample?.[f.id] ?? '' }])))
@@ -109,12 +138,21 @@ export function SetupEditor({ id, versionId }: { id?: string; versionId?: string
     setBusy(true)
     try {
       const r = await gfx.patchSetup(setup.id, { versionId: tpl.latestVersionId })
-      notify({ kind: 'ok', message: `Moved to v${r.version}.${r.droppedFields?.length ? ` Fields no longer in the template were dropped: ${r.droppedFields.join(', ')}.` : ''} Channels and events using it now draw the new version.` })
+      notify({ kind: 'ok', message: `Moved to v${r.version}.${r.carriedFields?.length ? ` Carried across: ${r.carriedFields.join(', ')}.` : ''}${r.droppedFields?.length ? ` Fields no longer in the template were dropped: ${r.droppedFields.join(', ')}.` : ''} Channels and events using it now draw the new version.` })
       await loadSetup(setup.id)
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
   const upgrade = setup && tpl.latestVersion != null && (tpl.version == null || tpl.latestVersion > tpl.version)
   const ai = Math.max(0, ANCHORS.indexOf(placement.anchor ?? 'top_left'))
+  // Snap templates: x/y hold snap + nudge; the panel shows and edits the nudge only.
+  const snapOn = !!(tpl?.snap && tpl.bbox)
+  const snapAt = (a: string, k: number): [number, number] => snapOn ? snapOffset(a, k, tpl!.canvas, tpl!.bbox!) : [0, 0]
+  const [sx, sy] = snapAt(placement.anchor ?? 'top_left', placement.scale ?? 1)
+  const nudge = { x: (placement.x ?? 0) - sx, y: (placement.y ?? 0) - sy }
+  const place = (anchor: string, scale: number, nx = nudge.x, ny = nudge.y) => {
+    const [ax, ay] = snapAt(anchor, scale)
+    setPlacement({ ...placement, anchor, scale, x: ax + nx, y: ay + ny })
+  }
 
   return (
     <>
@@ -151,14 +189,15 @@ export function SetupEditor({ id, versionId }: { id?: string; versionId?: string
               <div><div className="sec-label" style={{ marginTop: 0 }}>Anchor</div>
                 <div className="gfx-anchor" role="group" aria-label="Anchor">
                   {ANCHORS.map((a, i) => <button key={a} type="button" className={i === ai ? 'on' : ''} aria-label={ANCHOR_LABEL[i]} aria-pressed={i === ai} disabled={!canManage}
-                    onClick={() => setPlacement({ ...placement, anchor: a })} />)}
-                </div></div>
+                    onClick={() => place(a, placement.scale ?? 1)} />)}
+                </div>
+                {snapOn && <div className="gfx-meta" style={{ marginTop: 6, maxWidth: 130 }}>Puts it in that spot of the picture.</div>}</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(90px, 130px))', gap: 10 }}>
-                <div className="field" style={{ margin: 0 }}><label htmlFor="px">Move right (px)</label><input id="px" className="inp" type="number" value={placement.x ?? 0} disabled={!canManage} onChange={(e) => setPlacement({ ...placement, x: Number(e.target.value) })} /></div>
-                <div className="field" style={{ margin: 0 }}><label htmlFor="py">Move down (px)</label><input id="py" className="inp" type="number" value={placement.y ?? 0} disabled={!canManage} onChange={(e) => setPlacement({ ...placement, y: Number(e.target.value) })} /></div>
+                <div className="field" style={{ margin: 0 }}><label htmlFor="px">{snapOn ? 'Nudge right (px)' : 'Move right (px)'}</label><input id="px" className="inp" type="number" value={nudge.x} disabled={!canManage} onChange={(e) => place(placement.anchor ?? 'top_left', placement.scale ?? 1, Number(e.target.value), nudge.y)} /></div>
+                <div className="field" style={{ margin: 0 }}><label htmlFor="py">{snapOn ? 'Nudge down (px)' : 'Move down (px)'}</label><input id="py" className="inp" type="number" value={nudge.y} disabled={!canManage} onChange={(e) => place(placement.anchor ?? 'top_left', placement.scale ?? 1, nudge.x, Number(e.target.value))} /></div>
                 <div className="field" style={{ margin: 0 }}><label htmlFor="ps">Size</label>
-                  <select id="ps" className="inp" value={placement.scale ?? 1} disabled={!canManage} onChange={(e) => setPlacement({ ...placement, scale: Number(e.target.value) })}>
-                    {[0.75, 0.85, 1, 1.15, 1.25, 1.5].map((s) => <option key={s} value={s}>{Math.round(s * 100)}%</option>)}</select></div>
+                  <select id="ps" className="inp" value={placement.scale ?? 1} disabled={!canManage} onChange={(e) => place(placement.anchor ?? 'top_left', Number(e.target.value))}>
+                    {[...new Set([0.5, 0.6, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, placement.scale ?? 1])].sort((a, b) => a - b).map((s) => <option key={s} value={s}>{Math.round(s * 100)}%</option>)}</select></div>
                 <div className="field" style={{ margin: 0 }}><label htmlFor="pl">Layer</label>
                   <select id="pl" className="inp" value={placement.layer ?? 2} disabled={!canManage} onChange={(e) => setPlacement({ ...placement, layer: Number(e.target.value) })}>
                     {[1, 2, 3, 4, 5].map((l) => <option key={l} value={l}>{l}{l === 1 ? ' · bottom' : l === 5 ? ' · top' : ''}</option>)}</select></div>
@@ -188,10 +227,19 @@ export function SetupEditor({ id, versionId }: { id?: string; versionId?: string
                       {(b.source === 'operator' || b.source === 'api') && <div>
                         <FieldInput id={`b-${f.id}`} f={f} value={b.value} onChange={(v) => setB(f.id, { value: v })} />
                         <div className="gfx-meta" style={{ marginTop: 4 }}>{b.source === 'api' ? 'Starting value; your system changes it with PATCH …/state.' : 'Starting value; changed live in live control.'}</div></div>}
-                      {b.source === 'image' && <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        {(b.imageId && imgUrls[b.imageId]) ? <img src={imgUrls[b.imageId]} alt="" style={{ width: 34, height: 34, objectFit: 'contain', background: '#fff', borderRadius: 6 }} /> : null}
-                        <span className="gfx-meta" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.imageId ? 'Image chosen' : 'No image yet'}</span>
-                        {canManage && <button type="button" className="btn ghost sm" onClick={() => setImgFor(f.id)}>Image Library</button>}</div>}
+                      {b.source === 'image' && <div className="gfx-imgpick">
+                        {/* What is chosen (its still and name) on top, the actions under it, so a long
+                            name never pushes the buttons under the Now column. */}
+                        <div className="sel">
+                          {(b.imageId && imgUrls[b.imageId]) ? <img src={imgUrls[b.imageId].replace(/\.webm$/i, '.png')} alt="" /> : null}
+                          <span className="gfx-meta nm" title={b.imageId ? imgNames[b.imageId] : undefined}>
+                            {b.imageId ? (imgNames[b.imageId] ?? 'Chosen, no longer in the library') : 'Nothing chosen'}</span>
+                          {b.imageId && /\.webm$/i.test(imgUrls[b.imageId] ?? '') && <span className="tag" style={{ fontSize: 'var(--fs-micro)', flex: 'none' }}>video</span>}
+                        </div>
+                        {canManage && <div className="acts">
+                          <button type="button" className="btn ghost sm" onClick={() => setImgFor(f.id)}>{b.imageId ? 'Change' : 'Choose from Image Library'}</button>
+                          {b.imageId && <button type="button" className="btn ghost sm" aria-label={`Clear ${f.label}`} title="Clear: the field shows nothing" onClick={() => setB(f.id, { imageId: undefined, value: '' })}>Clear</button>}
+                        </div>}</div>}
                       {b.source === 'feed' && <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <select className="inp" aria-label="Data source" value={b.sourceId ?? ''} disabled={!canManage} onChange={(e) => setB(f.id, { sourceId: e.target.value })} >
                           <option value="">Choose a source…</option>{sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
@@ -201,7 +249,7 @@ export function SetupEditor({ id, versionId }: { id?: string; versionId?: string
                         <option value="now_title">Current programme title</option><option value="now_subtitle">Current programme subtitle</option>
                         <option value="next_title">Next programme title</option><option value="next_subtitle">Next programme subtitle</option><option value="next_start">Next programme start time</option></select>}
                     </div>
-                    <div className="now" title={String(preview[f.id] ?? '')}>{b.source === 'feed' && src && src.status !== 'ok' ? <span style={{ color: 'var(--warn)' }}>{src.status}</span> : Array.isArray(preview[f.id]) ? `${preview[f.id].length} items` : String(preview[f.id] ?? '')}</div>
+                    <div className="now" title={String(preview[f.id] ?? '')}>{b.source === 'feed' && src && src.status !== 'ok' ? <span style={{ color: 'var(--warn)' }}>{src.status}</span> : Array.isArray(preview[f.id]) ? `${preview[f.id].length} items` : b.source === 'image' ? (b.imageId ? imgNames[b.imageId] ?? '' : '') : String(preview[f.id] ?? '')}</div>
                   </div>
                 )
               })}
@@ -227,7 +275,11 @@ export function SetupEditor({ id, versionId }: { id?: string; versionId?: string
         </div>
       </div>
       <ImagePicker open={!!imgFor} onClose={() => setImgFor(null)} title="Choose an image" uploadFolder="graphics"
-        onPick={(url, file) => { if (imgFor) { setB(imgFor, { imageId: file.id }); setImgUrls((m) => ({ ...m, [file.id]: url })) } setImgFor(null) }} />
+        onPick={(url, file) => { if (imgFor) {
+          // An Image Library video previews (and goes on air) as its WebM, as the runtime resolves it.
+          const v = file?.metadata?.motion?.video
+          setB(imgFor, { imageId: file.id }); setImgUrls((m) => ({ ...m, [file.id]: v ? '/' + v : url })); setImgNames((m) => ({ ...m, [file.id]: file.name }))
+        } setImgFor(null) }} />
       {assign && setup && <AssignDialog setup={setup} onClose={() => setAssign(false)} onDone={() => { setAssign(false); notify({ kind: 'ok', message: 'Assigned.' }); loadSetup(setup.id) }} />}
       {confirm === 'delete' && setup && <ConfirmDialog danger title={`Delete ${setup.name}?`} body="Its assignments go with it. A setup on air or in a rundown cannot be deleted." confirmLabel="Delete"
         onCancel={() => setConfirm(null)} onConfirm={async () => { setConfirm(null); try { await gfx.deleteSetup(setup.id); navigate('/graphics?tab=setups') } catch (e: any) { setErr(e.message) } }} />}

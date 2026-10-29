@@ -4,6 +4,7 @@ import { PageIdentity, StatusPill, TypeTag } from '../scaffold'
 import { navigate } from '../router'
 import { SourceTimeline, type TimelineSelection } from '../SourceTimeline'
 import { useNotify } from '../notices'
+import { removalText } from '../programmeMedia'
 
 /* ============================================================================
    RECORDINGS — TIER 2: one source, everything it has recorded.
@@ -172,7 +173,7 @@ export default function RecordingSourceView({ id, onBack }: { id: string; onBack
 
       <div className="card">
         <table>
-          <thead><tr><th>Capture</th><th>Window</th><th>Duration</th><th>Status</th><th>Assets</th><th /></tr></thead>
+          <thead><tr><th>Capture</th><th>Window</th><th>Duration</th><th>Status</th><th title="When each recording is deleted by the keep period">Removed</th><th>Assets</th><th /></tr></thead>
           <tbody>
             {rows.map(r => {
               const start = Number(r.start_epoch_ms)
@@ -186,6 +187,8 @@ export default function RecordingSourceView({ id, onBack }: { id: string; onBack
                   <td style={{ color: 'var(--muted)' }}>{fmtDate(start)} {fmtClock(start)} → {end != null ? fmtClock(end) : '…'}</td>
                   <td style={{ color: 'var(--muted)' }}>{fmtDur((end ?? Date.now()) - start)}</td>
                   <td><StatusPill state={live ? 'onair' : 'idle'} label={live ? 'Recording' : 'Closed'} /></td>
+                  <td style={{ color: removalText(r.expires_at).warn ? '#fbbf24' : 'var(--muted)', whiteSpace: 'nowrap' }} title={removalText(r.expires_at).text}>
+                    {removalText(r.expires_at).short === 'kept' ? 'kept' : removalText(r.expires_at).text.replace(/^Removed /, '')}</td>
                   <td style={{ color: 'var(--muted)' }}>{r.vod_count ? `${r.vod_count} VOD` : '—'}</td>
                   <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                     <button className="btn primary" onClick={() => navigate(`/recordings/${r.id}`)}>Open</button>

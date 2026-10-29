@@ -244,6 +244,109 @@ fillerAssetsRouter.get(
   })
 );
 
+// ---------------------------------------------------------------------------
+//  DETAILS (25 Oct 2026): one slate or loop, what was built from it, and where.
+//
+//  A loop is not played as uploaded. Each stream that falls back to it gets its
+//  OWN copy, encoded to that stream's ladder and packaged to its segment length
+//  (services/fillerPrep.ts), kept under origin/<stream>/filler/prebuilt. So the
+//  renditions "made to date" are per stream, and the page lists them per stream:
+//  the build's state, its renditions, whether it came from THIS file (a stream
+//  that switched assets keeps its old copy until rebuilt), and a playable
+//  preview of exactly what viewers would see on a loss.
+// ---------------------------------------------------------------------------
+async function streamUse(acc: string, assetId: string, sourceKey: string | null): Promise<any[]> {
+  const rows = await query<any>(
+    `SELECT 'channel' AS owner, c.id, c.name, c.kind AS ckind, c.status::text AS status,
+            c.input_failover_enabled AS failover, c.input_loss_behavior::text AS loss, c.filler_build AS build,
+            g.name AS group_name
+       FROM channels c JOIN groups g ON g.id = c.group_id
+      WHERE g.account_id = $1 AND c.filler_asset_id = $2
+     UNION ALL
+     SELECT 'event' AS owner, e.id, e.name, NULL AS ckind, e.status::text AS status,
+            e.input_failover_enabled AS failover, e.input_loss_behavior::text AS loss, e.filler_build AS build,
+            g.name AS group_name
+       FROM events e JOIN groups g ON g.id = e.group_id
+      WHERE g.account_id = $1 AND e.filler_asset_id = $2
+      ORDER BY name`, [acc, assetId]);
+  const { readFile, stat } = await import('node:fs/promises');
+  const { resolve } = await import('node:path');
+  const out: any[] = [];
+  for (const r of rows) {
+    const b = r.build ?? null;
+    const dir = resolve(config.testStream.originDir, r.id, 'filler', 'prebuilt');
+    // What the copy on disk was made FROM: the spec beside it names the source.
+    let builtFrom: string | null = null;
+    try { builtFrom = JSON.parse(await readFile(`${dir}.spec.json`, 'utf8'))?.source?.path ?? null; } catch { /* never built */ }
+    const fromThis = builtFrom && sourceKey ? builtFrom.split('?')[0].endsWith(sourceKey.replace(/^\//, '')) : null;
+    let playable = false;
+    try { playable = (await stat(resolve(dir, 'master.m3u8'))).isFile(); } catch { /* not built */ }
+    // Why a stream that points at this asset might never play it.
+    const active = !!r.failover && (r.loss === 'slate' || r.loss === 'vod_loop');
+    out.push({
+      ...userOf(r),
+      status: r.status, group: r.group_name,
+      fallback: { active, failover: !!r.failover, onLoss: r.loss,
+        note: !r.failover ? 'Input failover is off, so this stream never switches to its fallback'
+          : !active ? `On a loss this stream shows ${r.loss === 'last_frame' ? 'the last frame' : r.loss === 'black' ? 'black' : 'nothing'}, not this ${r.loss}` : null },
+      build: b ? {
+        status: b.status, reason: b.reason ?? null, error: b.error ?? null, at: b.at ?? null,
+        loopSeconds: b.loop_seconds ?? null, buildSeconds: b.build_seconds ?? null, watermark: !!b.watermark,
+        renditions: b.renditions ?? [], audio: b.audio ?? null, sourceKind: b.source_kind ?? null,
+        fromThisAsset: fromThis,
+        preview: playable ? `/origin/${r.id}/filler/prebuilt/master.m3u8` : null,
+      } : null,
+    });
+  }
+  return out;
+}
+
+fillerAssetsRouter.get(
+  '/:id/details',
+  asyncHandler(async (req, res) => {
+    const acc = accountId(req);
+    const row = await one<any>(`SELECT * FROM filler_assets WHERE id=$1 AND account_id=$2`, [req.params.id, acc]);
+    if (!row) throw notFound('Filler asset not found');
+    const streams = await streamUse(acc, row.id, row.source_key);
+    res.json({
+      asset: row,
+      media: row.source_key ? `/${String(row.source_key).replace(/^\//, '')}` : null,
+      streams,
+      summary: {
+        streams: streams.length,
+        ready: streams.filter((s) => s.build?.status === 'ready' && s.build?.fromThisAsset !== false).length,
+        outOfDate: streams.filter((s) => s.build?.fromThisAsset === false).length,
+        failed: streams.filter((s) => s.build?.status === 'failed').length,
+        // only copies made from THIS file count as its renditions
+        renditions: streams.reduce((n, s) => n + (s.build?.status === 'ready' && s.build?.fromThisAsset !== false ? (s.build.renditions?.length ?? 0) : 0), 0),
+      },
+    });
+  })
+);
+
+/** Rebuild one stream's copy of this asset (it changed, or a build failed). */
+fillerAssetsRouter.post(
+  '/:id/rebuild',
+  asyncHandler(async (req, res) => {
+    const acc = accountId(req);
+    const b = z.object({ kind: z.enum(['channel', 'event']), id: z.string().uuid() }).parse(req.body ?? {});
+    const row = await one<any>(`SELECT id, name FROM filler_assets WHERE id=$1 AND account_id=$2`, [req.params.id, acc]);
+    if (!row) throw notFound('Filler asset not found');
+    const tbl = b.kind === 'channel' ? 'channels' : 'events';
+    const owner = await one<any>(
+      `SELECT x.id, x.name FROM ${tbl} x JOIN groups g ON g.id = x.group_id
+        WHERE x.id = $1 AND g.account_id = $2 AND x.filler_asset_id = $3`, [b.id, acc, row.id]);
+    if (!owner) throw notFound('That stream does not use this slate or loop');
+    const { scheduleFillerPrep } = await import('../services/fillerPrep');
+    await scheduleFillerPrep(b.kind, owner.id, `rebuilt from Loops & Fillers (${row.name})`);
+    await query(`UPDATE ${tbl} SET filler_build = jsonb_build_object('status','queued','at',now()) WHERE id = $1`, [owner.id]);
+    const who = actor(req);
+    await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'update', entityType: 'filler_asset',
+      entityId: row.id, changes: { rebuild: { from: null, to: `${b.kind} ${owner.name}` } } }).catch(() => {});
+    res.status(202).json({ queued: true });
+  })
+);
+
 const createSchema = z.object({
   kind: z.enum(['slate', 'loop']),
   name: z.string().min(1),

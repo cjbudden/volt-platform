@@ -26,7 +26,7 @@ function perms(p: Record<string, Level>): Perms {
 }
 
 const CONTENT_VIEW: Record<string, Level> = {
-  monitoring: 'view', channels: 'view', radio: 'view', events: 'view', epg: 'view',
+  monitoring: 'view', channels: 'view', fast: 'view', radio: 'view', events: 'view', epg: 'view',
   recordings: 'view', vod: 'view', media: 'view', sharing: 'view', graphics: 'view',
 };
 
@@ -65,11 +65,23 @@ export const DEFAULT_ROLES: DefaultRole[] = [
     }),
   },
   {
+    // Everything a FAST channel needs and nothing else: the channels themselves,
+    // the titles they air (Media Library), the Image Library, Loops & Fillers,
+    // uploads and the encode queue, the ladders, share links, and reports.
+    // No live TV, radio or events, no users, apps or account settings.
+    key: 'fast_manager', name: 'FAST Manager', tier: 'operator',
+    description: 'Builds and runs FAST channels: run orders, ads, brand and filler, ladders, the titles they air, images, loops and slates, uploads and the encode queue. Sees reports. No live TV, radio or events.',
+    permissions: perms({
+      fast: 'manage', vod: 'manage', media: 'manage', encoding: 'manage', sharing: 'manage',
+      downloads: 'operate', analytics: 'view', epg: 'view', graphics: 'view',
+    }),
+  },
+  {
     key: 'system_viewer', name: 'System Viewer', tier: 'viewer',
     description: 'Read-only access to the whole admin: every list and detail page, no changes and no start/stop.',
     permissions: perms({
       ...CONTENT_VIEW, analytics: 'view', fleet: 'view', users: 'view', access: 'view', viewers: 'view',
-      apps: 'view', payments: 'view', settings: 'view',
+      apps: 'view', payments: 'view', settings: 'view', encoding: 'view',
     }),
   },
 ];

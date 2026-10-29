@@ -71,7 +71,8 @@ import { publishGfx, publishForSetup, publishForSource } from '../services/graph
 import { verifyKey, checkRestrictions, appForKey } from '../services/apiKeys';
 import { assetKindFor } from '../services/viewerPath';
 import { cached } from '../scale/cache';
-import { ApiError } from '../util/http';
+import { ApiError, forbidden } from '../util/http';
+import { usableSql, visibleSql } from '../services/graphics/sets';
 
 export const graphicsRouter = Router();
 graphicsRouter.use(requireAuth);
@@ -83,14 +84,21 @@ const who = (req: Request) => { const a = actor(req); return a.label; };
 
 // ---- templates ----------------------------------------------------------------
 
+// Volt templates are listed when their set is on for the account (services/graphics/sets.ts), or
+// when the account already has setups on one; `usable` says whether new setups may start from it.
+const SET_COLS = `gs.key AS set_key, gs.name AS set_name, gs.id AS set_uuid`;
 async function templateFor(acct: string, id: string, write = false) {
-  const t = await one<any>(`SELECT * FROM gfx_templates WHERE id = $1 AND (account_id = $2 OR account_id IS NULL)`, [id, acct]);
+  const t = await one<any>(`SELECT t.*, ${usableSql('t', '$2')} AS usable, ${SET_COLS} FROM gfx_templates t LEFT JOIN gfx_template_sets gs ON gs.id = t.set_id
+                             WHERE t.id = $1 AND ${visibleSql('t', '$2')}`, [id, acct]);
   if (!t) throw notFound('No template with that id');
   if (write && t.account_id == null) throw badRequest('Volt templates are read-only. Duplicate it to change your copy.');
   return t;
 }
+const notSwitchedOn = (t: any) => forbidden(t.retired_at
+  ? `${t.name} has been retired by Volt. Setups already using it keep working; new ones cannot start from it.`
+  : `${t.name} is in the ${t.set_name ?? 'a'} set, which is not switched on for this account. Ask your Volt account manager to turn it on.`);
 
-async function insertVersion(c: PoolClient, templateId: string, a: Analysed, userId: string | null, note: string | null) {
+export async function insertVersion(c: PoolClient, templateId: string, a: Analysed, userId: string | null, note: string | null) {
   await c.query(`DELETE FROM gfx_template_versions WHERE template_id = $1 AND status = 'draft'`, [templateId]);
   const v = (await c.query(
     `INSERT INTO gfx_template_versions(template_id, status, manifest, checks, size_bytes, file_count, note, created_by)
@@ -104,14 +112,14 @@ async function insertVersion(c: PoolClient, templateId: string, a: Analysed, use
   return v;
 }
 
-const versionJson = (v: any) => v && ({
+export const versionJson = (v: any) => v && ({
   id: v.id, version: v.version, status: v.status, manifest: v.manifest, checks: v.checks,
   publishable: !(v.checks ?? []).some((c: any) => c.level === 'error'),
   sizeBytes: Number(v.size_bytes), fileCount: v.file_count, note: v.note, createdAt: v.created_at, publishedAt: v.published_at,
   url: `/gfx/${v.id}/index.html`,
 });
 
-function pastedFiles(body: any, base: { path: string; data: Buffer }[] = []): { path: string; data: Buffer }[] {
+export function pastedFiles(body: any, base: { path: string; data: Buffer }[] = []): { path: string; data: Buffer }[] {
   const html = typeof body?.html === 'string' ? body.html : null;
   if (!html || !html.trim()) throw badRequest('Paste the template HTML.');
   // `path` names the file the text replaces (an OGraf package's graphic.mjs, say); index.html by default.
@@ -131,7 +139,7 @@ function pastedFiles(body: any, base: { path: string; data: Buffer }[] = []): { 
   return [...files.values()];
 }
 
-function analyseOr400(raw: { path: string; data: Buffer }[]): Analysed {
+export function analyseOr400(raw: { path: string; data: Buffer }[]): Analysed {
   try { return analyse(raw); } catch (e) { if (e instanceof PackageError) throw badRequest(e.message); throw e; }
 }
 
@@ -156,18 +164,22 @@ async function createTemplate(req: Request, raw: { path: string; data: Buffer }[
 const templateJson = (t: any) => ({
   id: t.id, name: t.name, kind: t.kind, source: t.source, owner: t.account_id ? 'account' : 'volt',
   duplicatedFrom: t.duplicated_from, archived: !!t.archived_at, createdAt: t.created_at, updatedAt: t.updated_at,
+  set: t.set_key ? { id: t.set_uuid ?? t.set_id, key: t.set_key, name: t.set_name } : null,
+  // false: a Volt template in a set that is off for this account (or retired), listed only because setups use it.
+  available: t.usable ?? true, retired: !!t.retired_at,
 });
 
 graphicsRouter.get('/templates', asyncHandler(async (req, res) => {
   const acct = accountId(req);
   const params: any[] = [acct];
-  let where = `(t.account_id = $1 OR t.account_id IS NULL) AND t.archived_at IS NULL`;
+  let where = `${visibleSql('t', '$1')} AND t.archived_at IS NULL`;
   if (req.query.kind && KINDS.includes(String(req.query.kind) as any)) { params.push(String(req.query.kind)); where += ` AND t.kind = $${params.length}`; }
   if (req.query.source === 'volt') where += ` AND t.account_id IS NULL`;
   else if (req.query.source === 'imported') where += ` AND t.account_id IS NOT NULL`;
   if (req.query.q) { params.push('%' + String(req.query.q).replace(/[\\%_]/g, (c) => '\\' + c) + '%'); where += ` AND t.name ILIKE $${params.length}`; }
+  if (req.query.set) { params.push(String(req.query.set)); where += ` AND gs.key = $${params.length}`; }
   const rows = await query<any>(`
-    SELECT t.*,
+    SELECT t.*, ${usableSql('t', '$1')} AS usable, ${SET_COLS},
       (SELECT row_to_json(v) FROM (SELECT id, version, manifest, checks, size_bytes, file_count, published_at, status, note, created_at FROM gfx_template_versions
          WHERE template_id = t.id AND status = 'published' ORDER BY version DESC LIMIT 1) v) AS latest,
       (SELECT row_to_json(d) FROM (SELECT id, version, manifest, checks, size_bytes, file_count, status, note, created_at, NULL AS published_at FROM gfx_template_versions
@@ -175,7 +187,8 @@ graphicsRouter.get('/templates', asyncHandler(async (req, res) => {
       (SELECT count(*)::int FROM gfx_setups s WHERE s.template_id = t.id AND s.account_id = $1) AS setups,
       (SELECT count(*)::int FROM gfx_assignments a JOIN gfx_setups s ON s.id = a.setup_id LEFT JOIN gfx_state st ON st.assignment_id = a.id
          WHERE s.template_id = t.id AND a.account_id = $1 AND a.enabled) AS assignments
-    FROM gfx_templates t WHERE ${where} ORDER BY t.account_id NULLS FIRST, t.name LIMIT 500`, params);
+    FROM gfx_templates t LEFT JOIN gfx_template_sets gs ON gs.id = t.set_id
+    WHERE ${where} ORDER BY t.account_id NULLS FIRST, gs.sort NULLS LAST, t.name LIMIT 500`, params);
   res.json({ items: rows.map((r) => ({ ...templateJson(r), status: templateStatus(r.latest, r.draft), latest: versionJson(r.latest), draft: versionJson(r.draft), setups: r.setups, assignments: r.assignments })) });
 }));
 
@@ -224,7 +237,7 @@ graphicsRouter.patch('/templates/:id', asyncHandler(async (req, res) => {
 graphicsRouter.delete('/templates/:id', asyncHandler(async (req, res) => {
   const acct = accountId(req);
   const t = await templateFor(acct, uuidParam(req.params.id, 'template'), true);
-  const n = await one<any>(`SELECT count(*)::int AS n FROM gfx_setups WHERE template_id = $1`, [t.id]);
+  const n = await one<any>(`SELECT count(*)::int AS n FROM gfx_setups WHERE template_id = $1 AND account_id = $2`, [t.id, acct]);
   if (n?.n) throw conflict(`${n.n} setup${n.n === 1 ? ' uses' : 's use'} this template. Delete or move ${n.n === 1 ? 'it' : 'them'} first.`);
   await query(`UPDATE gfx_templates SET archived_at = now() WHERE id = $1`, [t.id]);
   const { userId, label } = actor(req);
@@ -239,6 +252,7 @@ async function filesOf(versionId: string) {
 graphicsRouter.post('/templates/:id/duplicate', asyncHandler(async (req, res) => {
   const acct = accountId(req);
   const t = await templateFor(acct, uuidParam(req.params.id, 'template'));
+  if (!t.usable) throw notSwitchedOn(t);
   const v = await one<any>(`SELECT * FROM gfx_template_versions WHERE template_id = $1 ORDER BY status = 'published' DESC, version DESC NULLS LAST LIMIT 1`, [t.id]);
   if (!v) throw conflict('This template has no files to copy.');
   const files = (await filesOf(v.id)).map((f) => ({ path: f.path, data: f.content as Buffer }));
@@ -315,7 +329,7 @@ graphicsRouter.post('/templates/:id/style', asyncHandler(async (req, res) => {
 graphicsRouter.delete('/templates/:id/draft', asyncHandler(async (req, res) => {
   const acct = accountId(req);
   const t = await templateFor(acct, uuidParam(req.params.id, 'template'), true);
-  const used = await one<any>(`SELECT count(*)::int AS n FROM gfx_setups s JOIN gfx_template_versions v ON v.id = s.version_id WHERE v.template_id = $1 AND v.status = 'draft'`, [t.id]);
+  const used = await one<any>(`SELECT count(*)::int AS n FROM gfx_setups s JOIN gfx_template_versions v ON v.id = s.version_id WHERE v.template_id = $1 AND v.status = 'draft' AND s.account_id = $2`, [t.id, acct]);
   if (used?.n) throw conflict('A setup is trying out this draft. Move it to a published version first.');
   await query(`DELETE FROM gfx_template_versions WHERE template_id = $1 AND status = 'draft'`, [t.id]);
   res.status(204).end();
@@ -393,10 +407,14 @@ const setupSchema = z.object({
   versionId: z.string().uuid(), fields: z.record(binding).default({}), placement: placement.default({}),
 });
 
-async function versionForSetup(acct: string, versionId: string) {
-  const v = await one<any>(`SELECT v.*, t.account_id FROM gfx_template_versions v JOIN gfx_templates t ON t.id = v.template_id
-                             WHERE v.id = $1 AND (t.account_id = $2 OR t.account_id IS NULL)`, [versionId, acct]);
+// sameTemplate: an existing setup moving between versions of its own template, which stays
+// allowed after the template's set is turned off for the account (or the template retired).
+async function versionForSetup(acct: string, versionId: string, sameTemplate?: string) {
+  const v = await one<any>(`SELECT v.*, t.account_id, t.name, t.retired_at, ${usableSql('t', '$2')} AS usable, gs.name AS set_name
+                              FROM gfx_template_versions v JOIN gfx_templates t ON t.id = v.template_id LEFT JOIN gfx_template_sets gs ON gs.id = t.set_id
+                             WHERE v.id = $1 AND ${visibleSql('t', '$2')}`, [versionId, acct]);
   if (!v) throw notFound('No template version with that id');
+  if (!v.usable && v.template_id !== sameTemplate) throw notSwitchedOn(v);
   return v;
 }
 
@@ -406,7 +424,7 @@ async function validateBindings(acct: string, manifest: any, fields: Record<stri
   for (const [k, b] of Object.entries(fields)) {
     if (!known.has(k)) errs.push(`${k}: the template has no such field`);
     if (b.source === 'feed' && !b.sourceId) errs.push(`${k}: choose a data source`);
-    if (b.source === 'image' && !b.imageId) errs.push(`${k}: choose an image`);
+    // An image field with nothing chosen is allowed: it was cleared, and shows nothing.
   }
   const srcIds = [...new Set(Object.values(fields).map((b) => b.sourceId).filter(Boolean))] as string[];
   if (srcIds.length) {
@@ -434,11 +452,27 @@ const setupJson = (s: any) => ({
   id: s.id, name: s.name, note: s.note, templateId: s.template_id, templateName: s.template_name, templateKind: s.template_kind,
   versionId: s.version_id, version: s.version, versionStatus: s.version_status, latestVersion: s.latest_version, latestVersionId: s.latest_version_id,
   upgradeAvailable: s.latest_version != null && (s.version == null || s.latest_version > s.version),
-  fields: s.fields, placement: s.placement, templateFields: s.manifest?.fields ?? [], canvas: s.manifest?.canvas ?? [1920, 1080],
+  fields: s.fields, placement: s.placement, templateFields: s.manifest?.fields ?? [], canvas: s.manifest?.canvas ?? [1920, 1080], bbox: s.manifest?.bbox ?? null, snap: !!s.manifest?.snap,
   sources: [...new Set(Object.values<any>(s.fields ?? {}).map((b) => b.source))],
   assignments: s.assignments ?? [], createdAt: s.created_at, updatedAt: s.updated_at,
   templateUrl: `/gfx/${s.version_id}/index.html`,
 });
+
+/** The Image Library items a setup's image fields point at: what to preview (a video
+ *  binds as its WebM, like on air), its still, and its name, so a reopened setup shows
+ *  what was chosen instead of only an id. A deleted item is simply absent. */
+async function withImages(acct: string, s: any) {
+  const out = setupJson(s);
+  const ids = [...new Set(Object.values<any>(s?.fields ?? {}).map((b) => b?.source === 'image' ? b.imageId : null).filter(Boolean))] as string[];
+  const images: Record<string, { url: string; still: string; name: string; video: boolean }> = {};
+  if (ids.length) {
+    for (const r of await query<any>(`SELECT id, name, store_key, metadata FROM media_files WHERE account_id = $1 AND id = ANY($2::uuid[])`, [acct, ids])) {
+      const v = r.metadata?.motion?.video;
+      images[r.id] = { url: '/' + (v ?? r.store_key), still: '/' + r.store_key, name: r.name, video: !!v };
+    }
+  }
+  return { ...out, images };
+}
 
 graphicsRouter.get('/setups', asyncHandler(async (req, res) => {
   const acct = accountId(req);
@@ -452,7 +486,7 @@ graphicsRouter.get('/setups/:id', asyncHandler(async (req, res) => {
   const acct = accountId(req);
   const s = await one<any>(`${SETUP_SQL} WHERE s.account_id = $1 AND s.id = $2`, [acct, uuidParam(req.params.id, 'setup')]);
   if (!s) throw notFound('No setup with that id');
-  res.json(setupJson(s));
+  res.json(await withImages(accountId(req), s));
 }));
 
 graphicsRouter.post('/setups', asyncHandler(async (req, res) => {
@@ -465,7 +499,7 @@ graphicsRouter.post('/setups', asyncHandler(async (req, res) => {
      VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,(SELECT id FROM users WHERE id = $8)) RETURNING id`,
     [acct, b.name, b.note ?? null, v.template_id, v.id, JSON.stringify(b.fields), JSON.stringify(b.placement), userId]);
   await writeAudit(null, { accountId: acct, userId, label, action: 'create', entityType: 'graphics_setup', entityId: s!.id, snapshot: { name: b.name, versionId: v.id } });
-  res.status(201).json(setupJson(await one<any>(`${SETUP_SQL} WHERE s.id = $1`, [s!.id])));
+  res.status(201).json(await withImages(accountId(req), await one<any>(`${SETUP_SQL} WHERE s.id = $1`, [s!.id])));
 }));
 
 graphicsRouter.patch('/setups/:id', asyncHandler(async (req, res) => {
@@ -475,7 +509,7 @@ graphicsRouter.patch('/setups/:id', asyncHandler(async (req, res) => {
   const b = setupSchema.partial().parse(req.body ?? {});
   let versionId = cur.version_id; let templateId = cur.template_id; let manifest: any;
   if (b.versionId && b.versionId !== cur.version_id) {
-    const v = await versionForSetup(acct, b.versionId);
+    const v = await versionForSetup(acct, b.versionId, cur.template_id);
     if (v.template_id !== cur.template_id) throw badRequest('A setup can move between versions of its template, not to another template.');
     versionId = v.id; templateId = v.template_id; manifest = v.manifest;
   } else manifest = (await one<any>(`SELECT manifest FROM gfx_template_versions WHERE id = $1`, [cur.version_id]))?.manifest;
@@ -483,7 +517,18 @@ graphicsRouter.patch('/setups/:id', asyncHandler(async (req, res) => {
   // Moving version: bindings for fields the new version no longer has are dropped, and said so.
   const known = new Set((manifest?.fields ?? []).map((f: any) => f.id));
   const dropped = Object.keys(fields).filter((k) => !known.has(k));
-  const kept = Object.fromEntries(Object.entries(fields).filter(([k]) => known.has(k)));
+  const kept: Record<string, any> = Object.fromEntries(Object.entries(fields).filter(([k]) => known.has(k)));
+  // A field that took over older ones (manifest "replaces") gets their choice when it has
+  // none of its own, or when the older one won on air (an alpha video over a still logo).
+  const carried: string[] = [];
+  if (b.versionId && b.versionId !== cur.version_id) {
+    for (const f of manifest?.fields ?? []) for (const old of f.replaces ?? []) {
+      const ob = (fields as any)[old];
+      if (!ob || known.has(old) || !(ob.imageId || (ob.value != null && ob.value !== ''))) continue;
+      kept[f.id] = ob; carried.push(`${old} → ${f.id}`);
+      const i = dropped.indexOf(old); if (i >= 0) dropped.splice(i, 1);
+    }
+  }
   if (!b.versionId || b.versionId === cur.version_id) await validateBindings(acct, manifest, fields as any);
   else await validateBindings(acct, manifest, kept as any);
   await query(`UPDATE gfx_setups SET name = $2, note = $3, version_id = $4, template_id = $5, fields = $6::jsonb, placement = $7::jsonb, updated_at = now() WHERE id = $1`,
@@ -492,7 +537,7 @@ graphicsRouter.patch('/setups/:id', asyncHandler(async (req, res) => {
   await writeAudit(null, { accountId: acct, userId, label, action: 'update', entityType: 'graphics_setup', entityId: cur.id,
     changes: Object.fromEntries(Object.keys(b).map((k) => [k, { from: k === 'versionId' ? cur.version_id : cur[k], to: (b as any)[k] }])) });
   await publishForSetup(acct, cur.id);
-  res.json({ ...setupJson(await one<any>(`${SETUP_SQL} WHERE s.id = $1`, [cur.id])), droppedFields: dropped });
+  res.json({ ...(await withImages(acct, await one<any>(`${SETUP_SQL} WHERE s.id = $1`, [cur.id]))), droppedFields: dropped, carriedFields: carried });
 }));
 
 graphicsRouter.delete('/setups/:id', asyncHandler(async (req, res) => {

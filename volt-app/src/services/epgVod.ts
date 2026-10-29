@@ -48,7 +48,8 @@
 import { query, one } from '../db';
 import { resolveRange, type Resolution } from './clips/resolve';
 import { isAudioOnly } from './localRecordingIndex';
-import { createClipVod, enqueueClipBuild } from './clips';
+import { createClipVod, enqueueClipBuild, AUTO_BUILD_ACCEPT_GAPS_MS } from './clips';
+import { programmeMedia, flagFor, type ProgrammeMedia, type ProgrammeFlag } from './programmeMedia';
 
 export type VodState =
   | 'manual' | 'scheduled' | 'converting' | 'converted'
@@ -74,6 +75,14 @@ export interface ProgrammeVod {
   expiresAt: string | null;
   /** True while any part of the slot is still to come. */
   future: boolean;
+  /**
+   * The recording that holds the slot, for an "Open recording" link with the
+   * slot marked (services/programmeMedia.ts). Null before it airs, or when no
+   * capture covers it any more.
+   */
+  recording: { id: string; from: number; to: number; partial: boolean; expiresAt: string | null } | null;
+  /** The one flag every surface shows (programmeMedia.flagFor). */
+  flag: ProgrammeFlag | null;
 }
 
 /** The lifecycle of every programme in a window, for one owner. */
@@ -142,7 +151,24 @@ export async function programmeVodStates(
     }
   }
 
-  return progs.map((p) => shape(p, resolution, retentionMs, nowMs));
+  const media = await programmeMedia(progs.map((p) => ({ ...p, [col]: ownerId })), nowMs).catch(() => new Map());
+  return progs.map((p) => withFlag(shape(p, resolution, retentionMs, nowMs), p, media.get(p.id) ?? null, nowMs));
+}
+
+/**
+ * The shared flag (programmeMedia.flagFor) on top of the measured state. The
+ * disk wins over the recording rows: `unavailable` means nothing covers the
+ * slot any more, whatever a row claims, so the flag is NOT KEPT.
+ */
+export function withFlag(v: ProgrammeVod, p: any, m: ProgrammeMedia | null, nowMs: number): ProgrammeVod {
+  const flag = flagFor({
+    startMs: new Date(p.actual_start ?? p.starts_at).getTime(), endMs: new Date(p.actual_end ?? p.ends_at).getTime(), nowMs,
+    autoVod: !!p.auto_vod, clipStatus: p.clip_status ?? null, clipError: p.clip_error ?? null,
+    asset: m?.asset ?? (p.clip_asset_id && p.clip_status === 'created' ? { id: p.clip_asset_id, title: p.asset_title ?? null } : null),
+    recording: m?.recording ?? null, measuredGone: v.state === 'unavailable',
+    expiredRecording: m?.expired ?? null,
+  });
+  return { ...v, recording: v.state === 'unavailable' ? null : (m?.recording ?? null), flag };
 }
 
 /** Milliseconds of `blocks` that fall inside [from,to]. */
@@ -169,6 +195,8 @@ function shape(p: any, r: Resolution | null, retentionMs: number | null, nowMs: 
     error: p.clip_error ?? null,
     expiresAt: null as string | null,
     future,
+    recording: null,
+    flag: null,
   };
 
   if (p.clip_status === 'created' && p.clip_asset_id) return { ...base, state: 'converted' };
@@ -273,6 +301,7 @@ export async function convertProgramme(
       vodAssetId: (asset as any).id, streamId: ownerId,
       fromMs: startMs, toMs: endMs, outputKind: 'manifest',
       channelId: p.channel_id ?? null, eventId: p.event_id ?? null,
+      acceptGapsMs: AUTO_BUILD_ACCEPT_GAPS_MS,
     });
     await query(`UPDATE programmes SET clip_status='created', clip_asset_id=$2, clip_error=NULL WHERE id=$1`,
                 [p.id, (asset as any).id]);

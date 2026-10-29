@@ -37,6 +37,7 @@ import subprocess
 import threading
 import time
 
+import gop_align
 import ingest_args
 
 BUS_BASE = 20000
@@ -183,7 +184,13 @@ def relay_cmd(inp, group, idx, progress_url):
     # ones it never downloads). Map the first video + first audio deterministically so
     # the relay's choice never depends on probe luck.
     cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
-    cmd += ["-c", "copy", "-f", "mpegts", _priv_url(group, idx)]
+    cmd += ["-c", "copy",
+            # Start the timeline at the first frame, not 1.4 s in (mpegts muxdelay +
+            # preload). With the default, keyframes sat 1.44 s off the packager's
+            # segment grid, so audio (cut on the grid) and video (cut on keyframes)
+            # never shared boundaries, even with segments a whole GOP (gop_align.py).
+            "-muxdelay", "0", "-muxpreload", "0", *gop_align.timeline_args(inp),
+            "-f", "mpegts", _priv_url(group, idx)]
     return cmd
 
 
@@ -299,8 +306,16 @@ def filler_motion_slate_cmd(slate_ref, ladder, seg, fps, progress_url, audio=Non
 
 def forwarder_cmd(group, idx, bus_base=BUS_BASE):
     """Copy the active group's private TS to the bus port the reader consumes (Shaka for
-    package_only, the transcoder for transcode). No re-encode; genpts keeps the bus
-    timeline monotonic across a restart."""
+    package_only, the transcoder for transcode). No re-encode.
+
+    -copyts IS THE POINT (24 Oct 2026). A forwarder is spawned fresh on every switch,
+    and without it ffmpeg starts each one's output at zero. The packager then saw the
+    timeline jump back by the whole uptime on every failback ("audio segment 29 starts
+    99.64s before the previous one ends") and the delivered stream went back in time.
+    genpts, which this used to rely on, only fills in MISSING timestamps; it never kept
+    anything monotonic. With -copyts the bus carries the relay's own clock (the
+    source's, see gop_align.timeline_args), which kept running while we were away, so a
+    failback is a step FORWARD over the gap the filler covered."""
     return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
             "-fflags", "+genpts+nobuffer", "-flags", "low_delay",
             # SHORT PROBE: a forwarder is spawned fresh on every switch, and with
@@ -310,7 +325,7 @@ def forwarder_cmd(group, idx, bus_base=BUS_BASE):
             # so 1s is ample to see both streams.
             "-analyzeduration", "1000000", "-probesize", "1000000",
             "-i", _priv_url(group, idx),
-            "-c", "copy", "-muxdelay", "0", "-muxpreload", "0",
+            "-c", "copy", "-copyts", "-muxdelay", "0", "-muxpreload", "0",
             "-f", "mpegts", _bus_url(idx, bus_base)]
 
 
@@ -350,6 +365,33 @@ class _PlaylistWatcher:
             except Exception:  # noqa: BLE001
                 pass  # unreachable playlist: _last_change ages out below
         return self._last_change is not None and (now - self._last_change) < self.stale_after
+
+
+def read_out_time(path):
+    """Seconds of output an ffmpeg -progress file last reported (excludes any
+    -output_ts_offset), or None."""
+    try:
+        with open(path) as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    out = None
+    for line in data.splitlines():
+        if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
+            v = line.split("=", 1)[1].strip()
+            if v.isdigit():
+                out = int(v)
+    return None if out is None else out / 1_000_000
+
+
+def continue_offset(prev_offset, out_time, gone_s, seg):
+    """Where a respawned relay's timeline starts: past the end of the last one,
+    plus the wall-clock time nothing was arriving, rounded UP to whole segments
+    so its first keyframe is on the packager's grid. Never backwards."""
+    end = float(prev_offset or 0.0) + max(0.0, float(out_time or 0.0)) + max(0.0, float(gone_s or 0.0))
+    seg = float(seg or 0) or 4.0
+    import math
+    return round(math.ceil(end / seg + 1e-9) * seg, 6)
 
 
 class _ProgressWatcher:
@@ -601,7 +643,26 @@ class SourceSelector:
             if now - self._relay_retry.get((group, idx), 0) < 5.0:
                 continue
             self._relay_retry[(group, idx)] = now
-            self.log(f"source-selector: relay {group}:{idx} died; respawning")
+            # CARRY THE TIMELINE ON. A new relay starts its output at zero; the
+            # packager behind the bus must never see time go backwards, so the
+            # new one starts where the old one stopped plus the time it was gone.
+            try:
+                gone = max(0.0, time.time() - os.path.getmtime(pp))
+            except OSError:
+                gone = 0.0
+            # The furthest any relay of this group has got: renditions restarted
+            # one at a time must still land on the same clock as their siblings.
+            ends = []
+            for g2, _i2, inp2, pp2 in self._relay_specs:
+                if g2 != group:
+                    continue
+                try:
+                    gone2 = 0.0 if pp2 != pp else max(0.0, time.time() - os.path.getmtime(pp2))
+                except OSError:
+                    gone2 = 0.0
+                ends.append(continue_offset(inp2.get("_ts_offset"), read_out_time(pp2), gone2, self.cfg.get("segment_seconds", 4)))
+            inp["_ts_offset"] = max(ends + [continue_offset(inp.get("_ts_offset"), read_out_time(pp), gone, self.cfg.get("segment_seconds", 4))])
+            self.log(f"source-selector: relay {group}:{idx} died; respawning (timeline continues at {inp['_ts_offset']:.1f}s)")
             self._relay_procs[(group, idx)] = self.spawn(
                 f"relay:{group}:{idx}", relay_cmd(inp, group, idx, pp))
         # filler (only when this channel runs one)

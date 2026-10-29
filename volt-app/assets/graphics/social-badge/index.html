@@ -1,0 +1,200 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Social badge</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     In and out sequences: see volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md section 4.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Social badge (follow us: icons and handle)",
+  "bbox": [
+    1430,
+    58,
+    394,
+    98
+  ],
+  "fields": [
+    {
+      "id": "label",
+      "type": "text",
+      "label": "Label (FOLLOW US, a programme name, 新闻号)"
+    },
+    {
+      "id": "handle",
+      "type": "text",
+      "label": "Handle (@yourname)"
+    },
+    {
+      "id": "platforms",
+      "type": "list",
+      "label": "Platforms: facebook, instagram, tiktok, youtube, x, threads, whatsapp, telegram, bluesky, line, wechat, spotify"
+    },
+    {
+      "id": "handles",
+      "type": "list",
+      "label": "Different handle per platform (optional, rotates): instagram|@name"
+    },
+    {
+      "id": "interval",
+      "type": "number",
+      "label": "Seconds per handle when rotating (default 5)"
+    },
+    {
+      "id": "iconStyle",
+      "type": "text",
+      "label": "Icons: brand (colour) or mono"
+    },
+    {
+      "id": "position",
+      "type": "text",
+      "label": "Position: top-right, top-left, bottom-right, bottom-left"
+    },
+    {
+      "id": "labelColor",
+      "type": "color",
+      "label": "Label colour"
+    },
+    {
+      "id": "handleColor",
+      "type": "color",
+      "label": "Handle bar colour"
+    },
+    {
+      "id": "iconPanel",
+      "type": "color",
+      "label": "Icon panel colour"
+    }
+  ],
+  "sample": {
+    "label": "FOLLOW US",
+    "handle": "@voltnews",
+    "platforms": [
+      "facebook",
+      "instagram",
+      "tiktok",
+      "youtube"
+    ],
+    "handles": [],
+    "interval": 5,
+    "iconStyle": "brand",
+    "position": "top-right",
+    "labelColor": "#2756a8",
+    "handleColor": "#163f8a",
+    "iconPanel": "#ffffff"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+:root{--ein:cubic-bezier(.16,1,.3,1);--eout:cubic-bezier(.7,0,.84,0);--pop:cubic-bezier(.34,1.56,.64,1)}
+/* Three states: initial (hidden), .on (in sequence to on air), .out (out sequence to a different
+   hidden pose). After the out sequence .reset snaps back to initial with no transition. */
+.reset *,.reset *::before,.reset *::after{transition:none!important;animation:none!important}
+:root{--lb:#2756a8;--hd:#163f8a;--ip:#ffffff;--mono:#0b1220}
+#sb{position:absolute;right:96px;top:58px;display:grid;grid-template-columns:auto auto;filter:drop-shadow(0 6px 14px rgba(0,0,0,.35))}
+.pos-tl #sb{left:96px;right:auto}.pos-br #sb{top:auto;bottom:54px}.pos-bl #sb{left:96px;right:auto;top:auto;bottom:54px}
+#lbl{background:var(--lb);height:52px;display:flex;align-items:center;justify-content:center;padding:0 22px;
+  font:700 34px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;letter-spacing:.02em;white-space:nowrap;clip-path:inset(0 0 0 100%)}
+#lbl:empty{display:none}
+#icons{background:var(--ip);height:52px;display:flex;align-items:center;gap:8px;padding:0 10px;border-top-right-radius:4px;clip-path:inset(0 0 0 100%)}
+#hd{grid-column:1/3;position:relative;background:var(--hd);height:46px;overflow:hidden;border-bottom-right-radius:4px;clip-path:inset(0 100% 0 0)}
+#hdt{position:relative;width:100%;height:100%;transform:translateY(110%)}
+#hdt div{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0 16px;white-space:nowrap;
+  font:500 30px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;letter-spacing:.01em;transition:transform .45s var(--ein),opacity .45s}
+#hdt div.in{transform:translateY(100%);opacity:0}#hdt div.gone{transform:translateY(-100%);opacity:0}
+.ico{width:38px;height:38px;flex:none;transform:scale(0);opacity:0}
+.gl{width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;transition:opacity .4s,transform .4s var(--ein)}
+.gl svg{width:58%;height:58%;fill:#fff;display:block}
+.gl.full{background:none!important}.gl.full svg{width:100%;height:100%}
+.gl.tiktok svg{filter:drop-shadow(-1.4px -1.2px 0 #25F4EE) drop-shadow(1.4px 1.2px 0 #FE2C55)}
+.mono .gl{background:none!important}.mono .gl svg{fill:var(--mono)!important;width:74%;height:74%;filter:none}.mono .gl.full svg{width:100%;height:100%}
+.gl.dim{opacity:.3;transform:scale(.86)}
+/* in: label wipes on from the right, then the icon panel; icons pop in one after another; the handle bar
+   wipes across underneath and the handle rises into it */
+.on #lbl{clip-path:inset(0 0 0 0);transition:clip-path .45s var(--ein)}
+.on #icons{clip-path:inset(0 0 0 0);transition:clip-path .45s var(--ein) .12s}
+.on .ico{transform:none;opacity:1;transition:transform .5s var(--pop) calc(.3s + var(--i) * .07s),opacity .2s calc(.3s + var(--i) * .07s)}
+.on #hd{clip-path:inset(0 0 0 0);transition:clip-path .5s var(--ein) .25s}
+.on #hdt{transform:none;transition:transform .45s var(--ein) .5s}
+/* out: icons shrink away last-first, the handle drops out, the bars wipe off to the right */
+.out .ico{transform:scale(0);opacity:0;transition:transform .25s var(--eout) calc(var(--r) * .04s),opacity .25s calc(var(--r) * .04s)}
+.out #hdt{transform:translateY(-110%);transition:transform .3s var(--eout)}
+.out #hd{clip-path:inset(0 0 0 100%);transition:clip-path .35s var(--eout) .2s}
+.out #icons{clip-path:inset(0 0 0 100%);transition:clip-path .35s var(--eout) .3s}
+.out #lbl{clip-path:inset(0 0 0 100%);transition:clip-path .35s var(--eout) .38s}
+</style>
+</head>
+<body>
+<div id="sb"><div id="lbl"></div><div id="icons"></div><div id="hd"><div id="hdt"></div></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+function truthy(v){return !(v===false||v==='false'||v===0||v==='0'||v==='no'||v==='off')}
+function css(k,v){if(v!=null&&v!=='')document.documentElement.style.setProperty(k,String(v))}
+// Shrink one line until it fits its box, down to `floor` of its size.
+function fit(el,floor){if(!el)return;el.style.fontSize='';var s=parseFloat(getComputedStyle(el).fontSize),min=s*(floor||.72);
+  while(el.scrollWidth>el.clientWidth+1&&s>min){s-=1;el.style.fontSize=s+'px'}}
+var B=document.body,data={},playing=false,resetTimer=null;
+function play(){clearTimeout(resetTimer);B.classList.remove('out','reset');void B.offsetWidth;B.classList.add('on');playing=true;
+  if(typeof onPlay==='function')onPlay()}
+function stop(){if(!playing)return;playing=false;B.classList.add('out');B.classList.remove('on');
+  if(typeof onStop==='function')onStop();clearTimeout(resetTimer);
+  resetTimer=setTimeout(function(){B.classList.add('reset');B.classList.remove('out');void B.offsetWidth;B.classList.remove('reset');
+    if(typeof onReset==='function')onReset()},OUT_MS)}
+function next(){if(typeof onNext==='function')onNext()}
+var OUT_MS=800;
+// Brand glyphs from Simple Icons (CC0 1.0, simpleicons.org).
+var GLYPHS={"facebook":{"d":"M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.401 0 .955.042 1.468.103a8.68 8.68 0 0 1 1.141.195v3.325a8.623 8.623 0 0 0-.653-.036 26.805 26.805 0 0 0-.733-.009c-.707 0-1.259.096-1.675.309a1.686 1.686 0 0 0-.679.622c-.258.42-.374.995-.374 1.752v1.297h3.919l-.386 2.103-.287 1.564h-3.246v8.245C19.396 23.238 24 18.179 24 12.044c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.628 3.874 10.35 9.101 11.647Z","hex":"#0866FF","title":"Facebook","full":true,"bg":"#0866FF"},"instagram":{"d":"M7.0301.084c-1.2768.0602-2.1487.264-2.911.5634-.7888.3075-1.4575.72-2.1228 1.3877-.6652.6677-1.075 1.3368-1.3802 2.127-.2954.7638-.4956 1.6365-.552 2.914-.0564 1.2775-.0689 1.6882-.0626 4.947.0062 3.2586.0206 3.6671.0825 4.9473.061 1.2765.264 2.1482.5635 2.9107.308.7889.72 1.4573 1.388 2.1228.6679.6655 1.3365 1.0743 2.1285 1.38.7632.295 1.6361.4961 2.9134.552 1.2773.056 1.6884.069 4.9462.0627 3.2578-.0062 3.668-.0207 4.9478-.0814 1.28-.0607 2.147-.2652 2.9098-.5633.7889-.3086 1.4578-.72 2.1228-1.3881.665-.6682 1.0745-1.3378 1.3795-2.1284.2957-.7632.4966-1.636.552-2.9124.056-1.2809.0692-1.6898.063-4.948-.0063-3.2583-.021-3.6668-.0817-4.9465-.0607-1.2797-.264-2.1487-.5633-2.9117-.3084-.7889-.72-1.4568-1.3876-2.1228C21.2982 1.33 20.628.9208 19.8378.6165 19.074.321 18.2017.1197 16.9244.0645 15.6471.0093 15.236-.005 11.977.0014 8.718.0076 8.31.0215 7.0301.0839m.1402 21.6932c-1.17-.0509-1.8053-.2453-2.2287-.408-.5606-.216-.96-.4771-1.3819-.895-.422-.4178-.6811-.8186-.9-1.378-.1644-.4234-.3624-1.058-.4171-2.228-.0595-1.2645-.072-1.6442-.079-4.848-.007-3.2037.0053-3.583.0607-4.848.05-1.169.2456-1.805.408-2.2282.216-.5613.4762-.96.895-1.3816.4188-.4217.8184-.6814 1.3783-.9003.423-.1651 1.0575-.3614 2.227-.4171 1.2655-.06 1.6447-.072 4.848-.079 3.2033-.007 3.5835.005 4.8495.0608 1.169.0508 1.8053.2445 2.228.408.5608.216.96.4754 1.3816.895.4217.4194.6816.8176.9005 1.3787.1653.4217.3617 1.056.4169 2.2263.0602 1.2655.0739 1.645.0796 4.848.0058 3.203-.0055 3.5834-.061 4.848-.051 1.17-.245 1.8055-.408 2.2294-.216.5604-.4763.96-.8954 1.3814-.419.4215-.8181.6811-1.3783.9-.4224.1649-1.0577.3617-2.2262.4174-1.2656.0595-1.6448.072-4.8493.079-3.2045.007-3.5825-.006-4.848-.0608M16.953 5.5864A1.44 1.44 0 1 0 18.39 4.144a1.44 1.44 0 0 0-1.437 1.4424M5.8385 12.012c.0067 3.4032 2.7706 6.1557 6.173 6.1493 3.4026-.0065 6.157-2.7701 6.1506-6.1733-.0065-3.4032-2.771-6.1565-6.174-6.1498-3.403.0067-6.156 2.771-6.1496 6.1738M8 12.0077a4 4 0 1 1 4.008 3.9921A3.9996 3.9996 0 0 1 8 12.0077","hex":"#FF0069","title":"Instagram","full":false,"bg":"radial-gradient(circle at 30% 107%,#fdf497 0%,#fdf497 5%,#fd5949 45%,#d6249f 60%,#285aeb 90%)"},"tiktok":{"d":"M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z","hex":"#000000","title":"TikTok","full":false,"bg":"#000"},"youtube":{"d":"M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z","hex":"#FF0000","title":"YouTube","full":false,"bg":"#FF0000"},"x":{"d":"M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z","hex":"#000000","title":"X","full":false,"bg":"#000"},"threads":{"d":"M18.263 11.097c-.03-3.486-1.92-5.586-5.111-5.586-2.13 0-3.922.963-4.863 2.499l2.062 1.438c.535-.843 1.272-1.543 2.628-1.543 1.528 0 2.318.85 2.544 2.431a15 15 0 0 0-2.236-.173c-4.125 0-6.068 1.867-6.068 4.336s1.943 3.99 4.804 3.99c3.139 0 5.013-2.115 5.781-4.735.798.361 1.348 1.204 1.348 2.47 0 3.387-3.907 5.232-7.22 5.232-4.885 0-8.077-3.207-8.077-8.424 0-6.392 4.223-10.487 9.9-10.487 3.808 0 5.69 1.671 6.97 3.914l2.108-1.475C21.44 2.078 18.331 0 13.663 0 6.227 0 1.168 5.277 1.168 12.934c0 7 4.953 11.066 10.856 11.066 4.878 0 9.809-2.846 9.809-7.716 0-2.545-1.46-4.231-3.569-5.187m-6.33 4.855c-1.077 0-2.026-.512-2.026-1.453 0-1.483 1.822-1.934 3.606-1.934.678 0 1.34.045 1.927.173-.422 1.927-1.671 3.215-3.508 3.214Z","hex":"#000000","title":"Threads","full":false,"bg":"#000"},"whatsapp":{"d":"M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z","hex":"#25D366","title":"WhatsApp","full":false,"bg":"#25D366"},"telegram":{"d":"M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z","hex":"#26A5E4","title":"Telegram","full":true,"bg":"#26A5E4"},"bluesky":{"d":"M5.202 2.857C7.954 4.922 10.913 9.11 12 11.358c1.087-2.247 4.046-6.436 6.798-8.501C20.783 1.366 24 .213 24 3.883c0 .732-.42 6.156-.667 7.037-.856 3.061-3.978 3.842-6.755 3.37 4.854.826 6.089 3.562 3.422 6.299-5.065 5.196-7.28-1.304-7.847-2.97-.104-.305-.152-.448-.153-.327 0-.121-.05.022-.153.327-.568 1.666-2.782 8.166-7.847 2.97-2.667-2.737-1.432-5.473 3.422-6.3-2.777.473-5.899-.308-6.755-3.369C.42 10.04 0 4.615 0 3.883c0-3.67 3.217-2.517 5.202-1.026","hex":"#1185FE","title":"Bluesky","full":false,"bg":"#1185FE"},"line":{"d":"M19.365 9.863c.349 0 .63.285.63.631 0 .345-.281.63-.63.63H17.61v1.125h1.755c.349 0 .63.283.63.63 0 .344-.281.629-.63.629h-2.386c-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63h2.386c.346 0 .627.285.627.63 0 .349-.281.63-.63.63H17.61v1.125h1.755zm-3.855 3.016c0 .27-.174.51-.432.596-.064.021-.133.031-.199.031-.211 0-.391-.09-.51-.25l-2.443-3.317v2.94c0 .344-.279.629-.631.629-.346 0-.626-.285-.626-.629V8.108c0-.27.173-.51.43-.595.06-.023.136-.033.194-.033.195 0 .375.104.495.254l2.462 3.33V8.108c0-.345.282-.63.63-.63.345 0 .63.285.63.63v4.771zm-5.741 0c0 .344-.282.629-.631.629-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63.346 0 .628.285.628.63v4.771zm-2.466.629H4.917c-.345 0-.63-.285-.63-.629V8.108c0-.345.285-.63.63-.63.348 0 .63.285.63.63v4.141h1.756c.348 0 .629.283.629.63 0 .344-.282.629-.629.629M24 10.314C24 4.943 18.615.572 12 .572S0 4.943 0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.078 9.436-6.975C23.176 14.393 24 12.458 24 10.314","hex":"#00C300","title":"LINE","full":true,"bg":"#00C300"},"wechat":{"d":"M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 0 0 .167-.054l1.903-1.114a.864.864 0 0 1 .717-.098 10.16 10.16 0 0 0 2.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178A1.17 1.17 0 0 1 4.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178 1.17 1.17 0 0 1-1.162-1.178c0-.651.52-1.18 1.162-1.18zm5.34 2.867c-1.797-.052-3.746.512-5.28 1.786-1.72 1.428-2.687 3.72-1.78 6.22.942 2.453 3.666 4.229 6.884 4.229.826 0 1.622-.12 2.361-.336a.722.722 0 0 1 .598.082l1.584.926a.272.272 0 0 0 .14.047c.134 0 .24-.111.24-.247 0-.06-.023-.12-.038-.177l-.327-1.233a.582.582 0 0 1-.023-.156.49.49 0 0 1 .201-.398C23.024 18.48 24 16.82 24 14.98c0-3.21-2.931-5.837-6.656-6.088V8.89c-.135-.01-.27-.027-.407-.03zm-2.53 3.274c.535 0 .969.44.969.982a.976.976 0 0 1-.969.983.976.976 0 0 1-.969-.983c0-.542.434-.982.97-.982zm4.844 0c.535 0 .969.44.969.982a.976.976 0 0 1-.969.983.976.976 0 0 1-.969-.983c0-.542.434-.982.969-.982z","hex":"#07C160","title":"WeChat","full":false,"bg":"#07C160"},"spotify":{"d":"M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z","hex":"#1ED760","title":"Spotify","full":true,"bg":"#1ED760"}};
+var ALIAS={fb:'facebook',ig:'instagram',insta:'instagram',tt:'tiktok',yt:'youtube',twitter:'x',wa:'whatsapp',tg:'telegram',bsky:'bluesky',weixin:'wechat'};
+function key(p){p=String(p||'').trim().toLowerCase().replace(/^@/,'');return ALIAS[p]||p}
+var plats=[],handles=[],hi=-1,rot=null,cur=null;
+function list(v){var a=asList(v);if(a.length===1&&typeof a[0]==='string'&&a[0].indexOf(',')>=0)a=a[0].split(',');return a}
+function drawIcons(){var box=$('icons');box.textContent='';var n=plats.length;
+  plats.forEach(function(p,i){var g=GLYPHS[p];if(!g)return;var o=document.createElement('div');o.className='ico';o.dataset.p=p;
+    o.style.setProperty('--i',i);o.style.setProperty('--r',n-1-i);
+    var c=document.createElement('div');c.className='gl '+p+(g.full?' full':'');c.style.background=g.bg;
+    c.innerHTML='<svg viewBox="0 0 24 24" role="img" aria-label="'+g.title+'"><path d="'+g.d+'"/></svg>';
+    if(g.full)c.querySelector('svg').style.fill=g.hex;o.appendChild(c);box.appendChild(o)});
+  box.style.display=box.childNodes.length?'':'none'}
+function show(text){text=text==null?'':String(text);if(cur&&cur.textContent===text)return;
+  var n=document.createElement('div');n.className='in';n.textContent=text;$('hdt').appendChild(n);
+  var o=cur;cur=n;void n.offsetWidth;n.className='';if(o){o.className='gone';setTimeout(function(){o.remove()},500)}}
+function highlight(p){[].forEach.call(document.querySelectorAll('.gl'),function(g){g.classList.toggle('dim',!!p&&g.parentNode.dataset.p!==p)})}
+function step(){if(!handles.length){highlight(null);show(data.handle||'');return}
+  hi=(hi+1)%handles.length;var h=handles[hi];highlight(h.p);show(h.h)}
+function startRot(){clearInterval(rot);if(playing&&handles.length>1)rot=setInterval(step,Math.max(2,Number(data.interval)||5)*1000)}
+function update(raw){var d=parse(raw);for(var k in d)data[k]=d[k];
+  css('--lb',d.labelColor);css('--hd',d.handleColor);css('--ip',d.iconPanel);
+  if('label' in d)setText($('lbl'),d.label||'');
+  if('position' in d){B.classList.remove('pos-tl','pos-br','pos-bl');var p=String(d.position||'').toLowerCase();
+    if(p==='top-left')B.classList.add('pos-tl');if(p==='bottom-right')B.classList.add('pos-br');if(p==='bottom-left')B.classList.add('pos-bl')}
+  if('iconStyle' in d)B.classList.toggle('mono',String(d.iconStyle).toLowerCase()==='mono');
+  if('platforms' in d){plats=list(d.platforms).map(key).filter(function(p){return GLYPHS[p]});drawIcons()}
+  if('handles' in d){handles=list(d.handles).map(function(x){if(x&&typeof x==='object')return {p:key(x.platform||x.p),h:x.handle||x.h||''};
+      var s=String(x).split('|');return s.length>1?{p:key(s[0]),h:s.slice(1).join('|').trim()}:{p:null,h:s[0].trim()}}).filter(function(h){return h.h});
+    hi=-1;step();startRot()}
+  else if('handle' in d&&!handles.length)show(d.handle||'');
+  if('interval' in d)startRot()}
+function onPlay(){startRot()}
+function onStop(){clearInterval(rot)}
+function onReset(){if(handles.length){hi=-1;step()}}
+function onNext(){step();startRot()}
+</script>
+</body>
+</html>

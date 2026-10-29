@@ -7,7 +7,7 @@
 //  TV channel get one each (RadioStation / TelevisionChannel, with the
 //  BroadcastService fields), events get a family (BroadcastEvent as the base,
 //  and a town hall, a worship service, a sports match and a multi-sport event
-//  extending it), and on-demand assets get Clip, Episode and Movie.
+//  extending it), and on-demand assets get Clip, Episode, Movie and Bug.
 //
 //  RULES the rest of the platform leans on:
 //   - a radio station, a TV channel and an event ALWAYS have a type. Create
@@ -27,6 +27,7 @@
 // ============================================================================
 import { query, one } from '../db';
 import type { SchemaField } from './metadataValidator';
+import { DEFAULT_GENRES, applyAccountLists } from './metadataLists';
 
 export type OwnerKind = 'radio' | 'tv' | 'event' | 'vod';
 
@@ -45,13 +46,16 @@ export interface StandardType {
 const f = (key: string, label: string, type: SchemaField['type'], extra: Partial<SchemaField> = {}): SchemaField =>
   ({ key, label, type, ...extra });
 
-const GENRES = ['News', 'Talk', 'Sport', 'Music', 'Classical', 'Jazz', 'Rock', 'Pop', 'Dance', 'Community', 'Religious', 'Education', 'Entertainment', 'Drama', 'Documentary', 'Children', 'Other'];
+// The genre fields take their options from the account's genre list (Admin >
+// Genres, services/metadataLists.ts). The platform defaults here are only what
+// the table is written with; the seed fills them from the account's list.
+const GENRES = DEFAULT_GENRES;
 
 /** Broadcast identity shared by a station and a channel (schema.org BroadcastService). */
 const BROADCAST_SERVICE: SchemaField[] = [
   f('name', 'Name', 'string', { required: true, epg: 'title', schemaOrg: 'name' }),
   f('description', 'Description', 'text', { epg: 'description', schemaOrg: 'description' }),
-  f('genre', 'Genre', 'enum', { options: GENRES, multiple: true, epg: 'category', schemaOrg: 'genre' }),
+  f('genre', 'Genre', 'enum', { options: GENRES, optionsList: 'genres', multiple: true, epg: 'category', schemaOrg: 'genre' }),
   f('language', 'Language', 'string', { epg: 'language', schemaOrg: 'inLanguage' }),
   f('broadcaster', 'Broadcaster', 'string', { schemaOrg: 'broadcaster' }),
   f('logo', 'Logo', 'image', { epg: 'icon', schemaOrg: 'logo' }),
@@ -79,7 +83,7 @@ export const STANDARD_TYPES: StandardType[] = [
     fields: [
       f('name', 'Event name', 'string', { required: true, epg: 'title', schemaOrg: 'name' }),
       f('description', 'Description', 'text', { epg: 'description', schemaOrg: 'description' }),
-      f('category', 'Category', 'enum', { options: GENRES, epg: 'category', schemaOrg: 'genre' }),
+      f('category', 'Category', 'enum', { options: GENRES, optionsList: 'genres', epg: 'category', schemaOrg: 'genre' }),
       f('organizer', 'Organiser', 'string', { epg: 'credits.producer', schemaOrg: 'organizer' }),
       f('location', 'Location', 'string', { schemaOrg: 'location' }),
       f('performers', 'Performers / presenters', 'tags', { epg: 'credits.presenter', schemaOrg: 'performer' }),
@@ -152,7 +156,7 @@ export const STANDARD_TYPES: StandardType[] = [
       f('title', 'Title', 'string', { required: true, epg: 'title', schemaOrg: 'name' }),
       f('artist', 'Artist', 'string', { required: true, epg: 'credits.actor', schemaOrg: 'byArtist' }),
       f('album', 'Album', 'string', { epg: 'sub-title', schemaOrg: 'inAlbum' }),
-      f('genre', 'Genre', 'enum', { options: GENRES, multiple: true, epg: 'category', schemaOrg: 'genre' }),
+      f('genre', 'Genre', 'enum', { options: GENRES, optionsList: 'genres', multiple: true, epg: 'category', schemaOrg: 'genre' }),
       f('isrc', 'ISRC', 'string', { schemaOrg: 'isrcCode' }),
       f('label', 'Label', 'string', { schemaOrg: 'recordLabel' }),
       f('released', 'Release date', 'date', { schemaOrg: 'datePublished' }),
@@ -186,7 +190,7 @@ export const STANDARD_TYPES: StandardType[] = [
       f('season', 'Season', 'number', { schemaOrg: 'partOfSeason' }),
       f('episodeNumber', 'Episode number', 'number', { epg: 'episode', schemaOrg: 'episodeNumber' }),
       f('description', 'Description', 'text', { epg: 'description', schemaOrg: 'description' }),
-      f('genre', 'Genre', 'enum', { options: GENRES, multiple: true, epg: 'category', schemaOrg: 'genre' }),
+      f('genre', 'Genre', 'enum', { options: GENRES, optionsList: 'genres', multiple: true, epg: 'category', schemaOrg: 'genre' }),
       f('image', 'Image', 'image', { epg: 'icon', schemaOrg: 'image' }),
       // Added 20 Oct 2026 for the library's target metadata. Accounts seeded
       // before then keep their copy; the library reports the field as "not on
@@ -205,12 +209,66 @@ export const STANDARD_TYPES: StandardType[] = [
       f('title', 'Title', 'string', { required: true, epg: 'title', schemaOrg: 'name' }),
       f('description', 'Synopsis', 'text', { epg: 'description', schemaOrg: 'description' }),
       f('year', 'Year', 'number', { schemaOrg: 'copyrightYear' }),
-      f('genre', 'Genre', 'enum', { options: GENRES, multiple: true, epg: 'category', schemaOrg: 'genre' }),
+      f('genre', 'Genre', 'enum', { options: GENRES, optionsList: 'genres', multiple: true, epg: 'category', schemaOrg: 'genre' }),
       f('cast', 'Cast', 'tags', { epg: 'credits.actor', schemaOrg: 'actor' }),
       f('director', 'Director', 'string', { epg: 'credits.director', schemaOrg: 'director' }),
       f('rating', 'Content rating', 'string', { schemaOrg: 'contentRating' }),
       f('language', 'Language', 'string', { epg: 'language', schemaOrg: 'inLanguage' }),
       f('image', 'Poster', 'image', { epg: 'icon', schemaOrg: 'image' }),
+    ],
+  },
+  {
+    // TRAILERS (28 Oct 2026): a trailer, teaser or promo for a film, a series or
+    // an event. schema.org has no Trailer type; a trailer is the VideoObject a
+    // Movie names as its `trailer`, so `about` names what it promotes.
+    key: 'trailer', name: 'Trailer / promo',
+    description: 'A trailer, teaser or promo for a film, series or event. schema.org VideoObject (the trailer of what it is about).',
+    schemaOrgType: 'VideoObject', targetKind: 'vod', appliesTo: ['vod'], domain: 'ondemand',
+    fields: [
+      f('title', 'Title', 'string', { required: true, epg: 'title', schemaOrg: 'name' }),
+      f('trailerFor', 'Trailer for', 'string', { required: true, epg: 'sub-title', schemaOrg: 'about' }),
+      f('trailerType', 'Kind', 'enum', { options: ['Trailer', 'Teaser', 'Promo', 'Featurette', 'Clip'] }),
+      f('description', 'Description', 'text', { epg: 'description', schemaOrg: 'description' }),
+      f('releaseDate', 'Release date of the title', 'date', { schemaOrg: 'datePublished' }),
+      f('genre', 'Genre', 'enum', { options: GENRES, optionsList: 'genres', multiple: true, epg: 'category', schemaOrg: 'genre' }),
+      f('rating', 'Content rating', 'string', { schemaOrg: 'contentRating' }),
+      f('language', 'Language', 'string', { epg: 'language', schemaOrg: 'inLanguage' }),
+      f('image', 'Image', 'image', { epg: 'icon', schemaOrg: 'image' }),
+    ],
+  },
+  {
+    // MUSIC VIDEOS (28 Oct 2026): a song's video. schema.org MusicVideoObject; the
+    // song details match the Song type so a music channel reads both the same way.
+    key: 'music-video', name: 'Music video',
+    description: 'The video of a song. schema.org MusicVideoObject.',
+    schemaOrgType: 'MusicVideoObject', targetKind: 'vod', appliesTo: ['vod'], domain: 'music',
+    fields: [
+      f('title', 'Title', 'string', { required: true, epg: 'title', schemaOrg: 'name' }),
+      f('artist', 'Artist', 'string', { required: true, epg: 'credits.actor', schemaOrg: 'byArtist' }),
+      f('album', 'Album', 'string', { epg: 'sub-title', schemaOrg: 'inAlbum' }),
+      f('director', 'Director', 'string', { epg: 'credits.director', schemaOrg: 'director' }),
+      f('genre', 'Genre', 'enum', { options: GENRES, optionsList: 'genres', multiple: true, epg: 'category', schemaOrg: 'genre' }),
+      f('label', 'Label', 'string', { schemaOrg: 'recordLabel' }),
+      f('isrc', 'ISRC', 'string', { schemaOrg: 'isrcCode' }),
+      f('released', 'Release date', 'date', { schemaOrg: 'datePublished' }),
+      f('explicit', 'Explicit', 'boolean'),
+      f('image', 'Image', 'image', { epg: 'icon', schemaOrg: 'thumbnailUrl' }),
+    ],
+  },
+  {
+    // BUGS (25 Oct 2026): sponsor and advertiser graphics, still or animated with alpha. The
+    // Image Library has a matching 'bug' kind with the same four fields (metadata.ad), for the
+    // ones graphics templates put on air. schema.org has no advertisement type: the creative
+    // work's sponsor (advertiser), producer (agency), isPartOf (campaign) and identifier
+    // (Ad-ID or key number) are the closest fit.
+    key: 'bug', name: 'Bug / sponsor graphic',
+    description: 'A sponsor or advertiser bug: a logo or short animation shown over a programme. schema.org VideoObject with sponsor, producer, isPartOf.',
+    schemaOrgType: 'VideoObject', targetKind: 'vod', appliesTo: ['vod'], domain: 'advertising',
+    fields: [
+      f('advertiser', 'Advertiser', 'string', { required: true, schemaOrg: 'sponsor' }),
+      f('agency', 'Agency', 'string', { schemaOrg: 'producer' }),
+      f('campaign', 'Campaign', 'string', { schemaOrg: 'isPartOf' }),
+      f('adCode', 'Ad-ID or key number', 'string', { schemaOrg: 'identifier' }),
     ],
   },
 ];
@@ -243,7 +301,7 @@ export async function ensureStandardTypes(accountId: string): Promise<void> {
                                       is_standard, standard_key, schema_org_type, applies_to)
          VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,true,$8,$9,$10)
          ON CONFLICT DO NOTHING RETURNING id`,
-        [accountId, name, t.description, JSON.stringify(t.fields), t.targetKind, t.domain ?? null, parent,
+        [accountId, name, t.description, JSON.stringify(await applyAccountLists(accountId, t.fields)), t.targetKind, t.domain ?? null, parent,
          t.key, t.schemaOrgType, t.appliesTo]);
       if (row) ids.set(t.key, row.id);
     }

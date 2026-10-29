@@ -1,0 +1,16 @@
+/* A FAST channel's ladder (FastLadder.tsx). */
+.flad-sum { margin-top: 8px; }
+.flad-rungs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.flad-rung {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--panel-2); font-size: var(--fs-xs); color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.flad-rung b { color: var(--text); font-weight: 600; }
+.flad-fit { margin-left: 6px; font-size: var(--fs-xs); color: var(--faint); white-space: nowrap; }
+.flad-fit.below { color: var(--warn, #b7791f); }
+.flad-bar { height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 4px; }
+.flad-bar > i { display: block; height: 100%; background: var(--brand); transition: width .4s ease; }
+.flad-tip { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: var(--fs-sm); color: var(--muted); }
+.flad-tip span { flex: 1; }

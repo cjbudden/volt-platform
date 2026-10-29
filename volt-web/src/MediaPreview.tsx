@@ -98,8 +98,10 @@ const fmt = (s: number) => {
   return h ? `${h}:${String(m % 60).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${m}:${String(ss).padStart(2, '0')}`
 }
 
-export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt }: {
+export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt, poster }: {
   sources: PreviewSources
+  /** The asset's image, shown in the player until it plays (a signed image-service URL). */
+  poster?: string | null
   audioOnly: boolean
   title?: string | null
   /** WebVTT thumbnails for this media (a clip's or a recording's): a scrub
@@ -111,12 +113,22 @@ export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt 
   if (!hasAny) return null
   return audioOnly
     ? <AudioPreview sources={sources} title={title} err={err} setErr={setErr} />
-    : <VideoPreview sources={sources} err={err} setErr={setErr} thumbnailsVtt={thumbnailsVtt} />
+    : <VideoPreview sources={sources} err={err} setErr={setErr} thumbnailsVtt={thumbnailsVtt} poster={poster} />
 }
 
 /** Video: the Volt player SDK with the admin skin (the same player customers embed). */
-function VideoPreview({ sources, err, setErr, thumbnailsVtt }: { sources: PreviewSources; err: string; setErr: (m: string) => void; thumbnailsVtt?: string | null }) {
+function VideoPreview({ sources, err, setErr, thumbnailsVtt, poster }: { sources: PreviewSources; err: string; setErr: (m: string) => void; thumbnailsVtt?: string | null; poster?: string | null }) {
   const ref = useRef<HTMLVideoElement | null>(null)
+  // THE ASSET'S IMAGE AS THE POSTER, on the video element itself: shown until it plays, and
+  // put back if loading a new source clears it. A newly chosen image is a new URL (versioned).
+  useEffect(() => {
+    const v = ref.current
+    if (!v) return
+    const apply = () => { if (poster) { if (v.poster !== poster) v.poster = poster } else v.removeAttribute('poster') }
+    apply()
+    v.addEventListener('loadstart', apply); v.addEventListener('emptied', apply)
+    return () => { v.removeEventListener('loadstart', apply); v.removeEventListener('emptied', apply) }
+  }, [poster])
   const [noPicture, setNoPicture] = useState(false)
   const [t, setT] = useState(0)
   const [dur, setDur] = useState(NaN)

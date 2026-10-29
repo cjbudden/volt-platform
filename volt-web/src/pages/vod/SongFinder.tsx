@@ -173,7 +173,8 @@ export function SongFinder({ id, who, onClose, onApplied }: {
                   <td><input type="checkbox" aria-label="Use this cover" checked={useImage} disabled={!draft.coverUrl} onChange={(e) => setUseImage(e.target.checked)} /></td>
                   <td>Image</td>
                   <td>{res?.current?.imageUrl ? <img className="songf-thumb" src={res.current.imageUrl} alt="Current" /> : <span className="lib-faint">none</span>}</td>
-                  <td>{draft.coverUrl ? <img className="songf-thumb" src={draft.coverUrl} alt="Found" /> : <span className="lib-faint">no cover</span>}</td>
+                  <td>{draft.coverUrl ? <img className="songf-thumb" src={draft.coverUrl} alt="Found" /> : <span className="lib-faint">no cover</span>}
+                    {useImage && draft.coverUrl && <div className="songf-note">Copied into the Image Library, then set as the Artwork</div>}</td>
                 </tr>
               )}
               {rows.map((r) => (

@@ -150,7 +150,8 @@ then slate), and grid pads.
 
 ### What the media must be
 
-* **One ladder and one segment length** for everything on the channel (the account ladder; 2 s here).
+* **One ladder and one segment length** for everything on the channel: the channel's ladder, and every asset
+  packaged to it (next section).
 * **Media time from zero.** ffmpeg's MPEG-TS muxer starts at 1.4 s, so the packager cut video at 1.48, 3.48...
   and audio at 2.0, 4.0..., and every audio segment straddled two video ones. Cut at a break, the audio would be
   up to a segment early or late. `vod_encoder.py` now sets `-muxdelay 0 -muxpreload 0` (env `VOD_ZERO_START=0`
@@ -161,6 +162,56 @@ then slate), and grid pads.
   un-normalised house spots, when their source is still there (section 10).
 * The channel brand burned into the FAST copies (decision of 20 Oct 2026, branded copies tracked against the
   original). Ads are separate media, so they are clean of the bug without anything having to switch it off.
+
+### The channel's ladder (28 Oct 2026)
+
+**What went wrong.** The playout took its tracks from the first asset in the timeline and, for every other asset,
+the nearest height it had. Assets did not share a ladder: a smaller source dropped the top rung, and so did a film
+wider than 16:9 (a 1920x800 scope film is 800 lines high, so the height cap dropped 1080). A channel whose first
+film had 1080/720/480 and whose second had 720/480 put 720p segments under a 1080p `RESOLUTION` and `CODECS` in
+`v1080.m3u8`; players stalled or switched badly at the splice, and nothing said why.
+
+**Now** (`services/fast/ladder.ts`):
+
+* **The channel has a ladder**, an encode ladder group: `channels.fast_ladder_group_id`, picked when the channel is
+  made (New FAST channel > Ladder) and changeable on On air > Ladder. `NULL` is the account default. Audio channels
+  have none.
+* **The library offers sources that fill its top rung**: picture at least the rung's (by height, or by width for a
+  film wider than 16:9) and video bitrate at least the rung's (5% slack for a measured VBR rate). Smaller titles are
+  counted ("3 smaller titles are not shown") and can be shown anyway; one that is added is scaled up and says so.
+  A title whose bitrate was never measured is shown, marked "not measured".
+* **Every asset on the channel is packaged to the ladder.** If its own encode already is (same rungs and bitrates,
+  same segment length and frame rate, splice-aligned, loudness where the role needs it, a 16:9 picture) it is used
+  as it is. Otherwise a **variant** is encoded from the source, beside the asset's own encode
+  (`clips/vod/<id>/ladders/<group>/<seg>s[-loud]/`, `vod/<id>/ladders/...` on the origin bucket) by the job
+  `vod.ladder`: every rung (none dropped), each in its 16:9 box (scale to fit, pad, square pixels: a scope film
+  is 1920x1080 with bars), at the ladder's frame rate. The per-role rules hold: the slate and brand loop in 1 s
+  segments, house spots, idents and the loop at broadcast loudness.
+* **`vod_asset_ladders` records it**: one row per asset, ladder, segment length and loudness, `origin` `main`
+  (its own encode matched) or `variant`, with its master, state and notes. A second channel on the same ladder
+  reuses it; a new encode of the asset forgets its rows, and they are packaged again.
+* **The timeline** (`timelineFor`) gives each asset's master for the ladder and the role it plays, and the ladder
+  itself (`ladder: {groupId, rungs: [{height, width, bitrate_kbps}], segmentSeconds, fps}`). An asset not packaged
+  yet keeps its own encode so the channel does not go silent while it is prepared.
+* **The playout's tracks are the ladder's**, and its master playlist takes each variant's attributes from an asset
+  that carries that exact rung, or from the ladder (never the nearest rung's). The tracks are fixed for a run:
+  changing the channel's ladder takes effect at the next playout restart, and On air says so.
+* **Set up in Settings** (Settings > Ladder, beside Slate and loop): choose the ladder, or make one, and edit it in
+  the same editor Encoding profiles uses (`volt-web/src/encode/LadderEditor.tsx`): renditions (height and bitrate,
+  or a standard set), encode (picture sizes, frame rate, encoder) and package (HLS/DASH, segment length). A ladder is
+  shared: the editor says what else uses it (uploads as the account default, watch folders, other FAST channels),
+  and every FAST channel on it re-packages behind the scenes when it changes (`ladderChanged`). A packaging made for
+  an older version of the ladder reads as stale and is made again, into a new folder so a running playout is not
+  cut off.
+* **One ladder for ingest and air** (`encode_ladder_groups.frame_mode`, 0115). A ladder set to **Fixed sizes**
+  (`box`) encodes every rendition at its 16:9 size, letterboxed, none dropped, at ingest too. Make it the account
+  default (or a watch folder's ladder) and uploads arrive in exactly the channel's renditions: `mainMatches` takes
+  them as they are (`encode_result.frame = 'box'`), so nothing is encoded twice. A ladder that follows the source
+  (`scale`) still works; the channel makes its own fixed-size copy of each title.
+* **Behind the scenes.** Saving a run order, adding a house spot, the slate, an ident or the brand loop, activating,
+  and every few minutes for an active channel, queue what is missing (`prepare(channel, {auto: true})`). A packaging
+  that failed is not retried automatically; On air > Media shows why and Prepare retries it. Progress shows there
+  too.
 
 ## 4. Ad breaks and server-side ads
 
@@ -287,11 +338,13 @@ playlists. Worth adding once player support is solid across the target devices.
 
 | | |
 |---|---|
-| `GET/POST /api/fast/channels` | list; create a playlist channel (plan and group checks as any channel) with a draft lineup |
+| `GET/POST /api/fast/channels` | list; create a playlist channel (plan and group checks as any channel) with a draft lineup; `ladderGroupId` picks its ladder |
 | `GET /api/fast/channels/:id` | channel, lineups, ads, playout health, URLs |
-| `GET /api/fast/channels/:id/readiness`, `POST .../prepare` | is every asset the channel uses ready to air; queue the encodes that fix it |
+| `GET /api/fast/channels/:id/readiness`, `POST .../prepare` | is every asset the channel uses ready to air (packaged to the channel's ladder, with `packaging`, `progress`, `note`), and the `ladder`; queue the encodes that fix it |
+| `GET /api/fast/ladders` | the ladders a channel can use, with their rungs (16:9 box and bitrate) |
+| `PUT /api/fast/channels/:id/ladder` | `{ladderGroupId}` (null: the account default): change the channel's ladder; queues the packaging and says whether the playout needs a restart |
 | `POST /api/fast/channels/:id/on-air` | `{on}`: public or private |
-| `GET /api/fast/library?channel=&q=` | assets and series; with `channel`, only that channel's media that can air, plus `hidden` counts and `inUse` (titles its lineups use that the filter leaves out) |
+| `GET /api/fast/library?channel=&q=&all=` | assets and series; with `channel`, only that channel's media that can air and fill its ladder's top rung (`all=1` adds the smaller ones; each title has `fit`), plus `hidden` counts (`belowLadder`), the `ladder` and `inUse` (titles its lineups use that the filter leaves out) |
 | `POST /api/fast/channels/:id/lineups` | new draft (copy of the active one by default) |
 | `GET/PUT/DELETE /api/fast/lineups/:lid` | a lineup; the active one cannot be edited |
 | `POST /api/fast/lineups/:lid/preview` | plan a window from unsaved slots: programmes, notices, repeat report, rotation maths, ad load |

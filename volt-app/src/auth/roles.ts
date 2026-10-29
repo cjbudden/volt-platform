@@ -84,19 +84,27 @@ export interface FeatureDef {
 const ID = '[^/]+';
 export const CATALOGUE: FeatureDef[] = [
   { key: 'monitoring', label: 'Live & monitoring', area: 'content', prefixes: ['/api/status', '/api/monitoring', '/api/timeline', '/api/live-streams'] },
-  // FAST CHANNELS ARE TV CHANNELS (origin = 'playlist'), so /api/fast follows
-  // the same levels: the console already showed FAST to TV channels: View while
-  // the API let any signed-in user read it and any operator-tier role change it.
-  // Running a FAST channel (on/off air, activating a run order, deciding a
-  // break as the stitcher would) is operate; building one (create, run orders,
-  // ads, ad servers) is manage. A preview plans a window and writes nothing,
-  // so seeing the builder needs view only.
-  { key: 'channels', label: 'TV channels', area: 'content', prefixes: ['/api/channels', '/api/daypart-presets', '/api/fast'],
-    operate: [new RegExp(`^/api/channels/${ID}/(start|stop|air|auto-connect|test-stream|failover-test|reset-health)$`),
-      new RegExp(`^/api/fast/channels/${ID}/on-air$`), new RegExp(`^/api/fast/lineups/${ID}/activate$`),
-      new RegExp(`^/api/fast/channels/${ID}/breaks/${ID}/decide$`)],
+  // FAST CHANNELS ARE THEIR OWN FEATURE (28 Oct 2026). A FAST channel is a
+  // channel row (origin = 'playlist'), but building and running one is its own
+  // job: a FAST Manager runs FAST channels without touching live TV, and a TV
+  // operator need not be able to change a FAST run order. /api/fast is here,
+  // and so is /api/channels/<id>/... for a FAST channel (its settings, detail,
+  // graphics), decided by what the channel is (channelKind). A role saved
+  // before this split has no 'fast' key: it keeps its TV channels level for
+  // FAST (cleanPerms), so nobody lost access by the split.
+  // Running a FAST channel (on/off air, activating a run order, starting its
+  // playout, deciding a break as the stitcher would) is operate; building one
+  // (create, run orders, ads, ad servers, ladder, filler) is manage. A preview
+  // plans a window and writes nothing, so seeing the builder needs view only.
+  { key: 'channels', label: 'TV channels', area: 'content', prefixes: ['/api/channels', '/api/daypart-presets'],
+    operate: [new RegExp(`^/api/channels/${ID}/(start|stop|air|auto-connect|test-stream|failover-test|reset-health)$`)],
+    operateMeans: 'Start/stop, on/off air, auto connect, test streams, clear QC' },
+  { key: 'fast', label: 'FAST channels', area: 'content', prefixes: ['/api/fast'],
+    operate: [new RegExp(`^/api/fast/channels/${ID}/on-air$`), new RegExp(`^/api/fast/lineups/${ID}/activate$`),
+      new RegExp(`^/api/fast/channels/${ID}/playout$`), new RegExp(`^/api/fast/channels/${ID}/breaks/${ID}/decide$`),
+      new RegExp(`^/api/channels/${ID}/(air|on-air)$`)],
     readWrites: [new RegExp(`^/api/fast/lineups/${ID}/preview$`)],
-    operateMeans: 'Start/stop, on/off air, auto connect, test streams, clear QC, activate FAST run orders' },
+    operateMeans: 'On/off air, activate run orders, start and stop the playout' },
   { key: 'radio', label: 'Radio stations', area: 'content', prefixes: ['/api/radio'],
     operate: [new RegExp(`^/api/radio/${ID}/(start|stop|air|auto-connect|clear-recovery)$`), /^\/api\/radio\/probe$/],
     operateMeans: 'Start/stop, on/off air, auto connect, clear recovery' },
@@ -114,32 +122,49 @@ export const CATALOGUE: FeatureDef[] = [
     operateMeans: 'Take graphics on and off, change their values, run event rundowns' },
   { key: 'recordings', label: 'Recordings & clips', area: 'content', prefixes: ['/api/recordings', '/api/scheduled-clips'],
     operate: [new RegExp(`^/api/recordings/${ID}/publish$`)], operateMeans: 'Publish recordings' },
-  { key: 'vod', label: 'Media library & publishing', area: 'content', prefixes: ['/api/vod', '/api/publications', '/api/social'],
+  { key: 'vod', label: 'Media library & publishing', area: 'content', prefixes: ['/api/vod', '/api/publications', '/api/social', '/api/collections'],
     operate: [new RegExp(`^/api/vod/${ID}/(publish|withdraw)$`), new RegExp(`^/api/publications/vod/${ID}/publish$`),
       new RegExp(`^/api/social/publish/${ID}$`), new RegExp(`^/api/social/publish-image/${ID}$`), new RegExp(`^/api/social/publications/${ID}/retry$`)],
     operateMeans: 'Publish and withdraw' },
+  // DOWNLOADING IS ITS OWN PERMISSION (modules/downloads.ts): seeing, describing
+  // and publishing an item is not the same as being allowed to take a copy.
+  // view = see which files there are; operate = download them. A role that
+  // predates this feature has none of it until an admin grants it.
+  { key: 'downloads', label: 'Downloads', area: 'content', prefixes: ['/api/downloads'],
+    operate: [new RegExp(`^/api/downloads/vod/${ID}/link$`)],
+    operateMeans: 'Download media files (MP4, MP3, AAC)' },
   { key: 'media', label: 'Files, uploads & storage', area: 'content',
-    prefixes: ['/api/files', '/api/filler-assets', '/api/uploads', '/api/tus', '/api/watchfolders', '/api/storage', '/api/jobs'],
+    prefixes: ['/api/files', '/api/filler-assets', '/api/uploads', '/api/tus', '/api/watchfolders', '/api/storage', '/api/jobs',
+      // THE INGEST QUEUE is handling uploads, not configuring ingest: what is held,
+      // filling in its metadata, settling a duplicate, transfers and remote pulls.
+      // The rules, webhooks and providers under /api/ingest stay account settings.
+      '/api/ingest/held', '/api/ingest/assets', '/api/ingest/transfers', '/api/ingest/remote', '/api/ingest/locate'],
     // Image pickers in other features' forms (guide icons, logos, slates) browse
     // the library; reading it is open, changing it is still `media`.
     readOpen: ['/api/files'],
     operate: [new RegExp(`^/api/jobs/${ID}/(retry|cancel)$`), new RegExp(`^/api/watchfolders/${ID}/dry-run$`)],
     operateMeans: 'Retry/cancel jobs, watchfolder dry runs' },
+  // ENCODING PROFILES AND LADDERS (28 Oct 2026, from Account settings): what titles
+  // are encoded and packaged to, shared by uploads, watch folders and FAST
+  // channels. Its own feature so a FAST Manager can set a channel's ladder
+  // without account settings. Reading stays open: forms pick a ladder. A role
+  // saved before the split keeps its Account settings level here (cleanPerms).
+  { key: 'encoding', label: 'Encoding profiles & ladders', area: 'content', prefixes: ['/api/encode-profiles'], readOpen: ['/api/encode-profiles'] },
   { key: 'sharing', label: 'Share links', area: 'content', prefixes: ['/api/share-links'] },
   { key: 'analytics', label: 'Analytics & reports', area: 'insight', prefixes: ['/api/analytics', '/api/reports'] },
   { key: 'fleet', label: 'Fleet & usage', area: 'insight', prefixes: ['/api/fleet'] },
-  { key: 'users', label: 'Admin users', area: 'admin', prefixes: ['/api/users'] },
+  { key: 'users', label: 'Admin users', area: 'admin', prefixes: ['/api/users', '/api/sso-connections'] },
   { key: 'access', label: 'Roles & access', area: 'admin', prefixes: ['/api/user-groups', '/api/access-roles'] },
   { key: 'viewers', label: 'Public users', area: 'admin', prefixes: ['/api/viewers'],
     operate: [new RegExp(`^/api/viewers/${ID}/sign-out$`)], operateMeans: 'Sign a viewer out everywhere' },
   { key: 'apps', label: 'Apps, API keys & players', area: 'admin', prefixes: ['/api/apps', '/api/player-config'] },
   { key: 'payments', label: 'Payments & products', area: 'admin', prefixes: ['/api/payments'] },
   { key: 'settings', label: 'Account settings', area: 'admin',
-    prefixes: ['/api/groups', '/api/plan', '/api/account-settings', '/api/output-profiles', '/api/metadata-schemas', '/api/notification-templates',
-      '/api/publish-targets', '/api/engines', '/api/addons', '/api/workflows', '/api/encode-profiles',
+    prefixes: ['/api/groups', '/api/plan', '/api/account-settings', '/api/output-profiles', '/api/metadata-schemas', '/api/metadata-lists', '/api/notification-templates',
+      '/api/publish-targets', '/api/engines', '/api/addons', '/api/workflows',
       '/api/ingest', '/api/publishing-rules'],
     // The channel, event and station forms read these to fill their pickers.
-    readOpen: ['/api/groups', '/api/plan', '/api/account-settings', '/api/output-profiles', '/api/metadata-schemas', '/api/engines', '/api/addons', '/api/encode-profiles'],
+    readOpen: ['/api/groups', '/api/plan', '/api/account-settings', '/api/output-profiles', '/api/metadata-schemas', '/api/metadata-lists', '/api/engines', '/api/addons'],
     operate: [/^\/api\/workflows\/runs(\/[^/]+\/(cancel|retry))?$/], operateMeans: 'Start, cancel and retry workflow runs' },
 ];
 
@@ -154,7 +179,10 @@ const SHARED_PREFIXES: { prefix: string; anyOf: string[] }[] = [
 ];
 
 /** The features legacy (pre-0047) tiers got when the user had no role. */
-const LEGACY_CONTENT = ['channels', 'radio', 'events', 'epg', 'recordings', 'vod', 'media', 'sharing', 'analytics', 'monitoring', 'fleet'];
+const LEGACY_CONTENT = ['channels', 'fast', 'radio', 'events', 'epg', 'recordings', 'vod', 'media', 'sharing', 'analytics', 'monitoring', 'fleet'];
+
+/** Features split out of another: a stored role without the new key keeps the level it had through the old one. */
+const SPLIT_FROM: Record<string, string> = { fast: 'channels', encoding: 'settings' };
 
 export function allPerms(level: Level): Perms {
   return Object.fromEntries(FEATURES.map((f) => [f, level])) as Perms;
@@ -167,6 +195,7 @@ export function cleanPerms(p: Record<string, unknown> | null | undefined): Perms
     const v = p?.[f];
     if (typeof v === 'string' && (LEVELS as readonly string[]).includes(v)) out[f] = v as Level;
   }
+  for (const [f, from] of Object.entries(SPLIT_FROM)) if (p && !(f in p)) out[f] = out[from];
   return out;
 }
 
@@ -273,8 +302,9 @@ export function invalidateAccess(_userId?: string) { /* cache invalidation is tr
 function channelKind(id: string): Promise<string | null> {
   return cached<string | null>(`chkind:${id}`, { ttlSec: 300, tags: [`asset:${id}`] }, async () => {
     if (!UUID_RE.test(id)) return null;
-    const r = await one<any>(`SELECT kind FROM channels WHERE id = $1`, [id]);
-    return r?.kind ?? null;
+    const r = await one<any>(`SELECT kind, origin FROM channels WHERE id = $1`, [id]);
+    // a FAST channel is a channel row with origin 'playlist': its own feature
+    return r ? (r.origin === 'playlist' ? 'fast' : r.kind ?? null) : null;
   });
 }
 
@@ -306,7 +336,8 @@ export async function requirementFor(method: string, rawPath: string, body?: any
   // stream, so operate; listing them is view.
   const brk = path.match(/^\/api\/fast\/streams\/([^/]+)\/([^/]+)\/breaks(\/[^/]+)?$/);
   if (brk) {
-    const feature = brk[1] === 'event' ? 'events' : (await kindOf(brk[2])) === 'radio' ? 'radio' : 'channels';
+    const k = brk[1] === 'event' ? null : await kindOf(brk[2]);
+    const feature = brk[1] === 'event' ? 'events' : k === 'radio' ? 'radio' : k === 'fast' ? 'fast' : 'channels';
     return { features: [feature], level: write ? 'operate' : 'view', reason: feature };
   }
 
@@ -326,7 +357,9 @@ export async function requirementFor(method: string, rawPath: string, body?: any
   if (feature === 'channels' && path.startsWith('/api/channels')) {
     const m = path.match(/^\/api\/channels\/([^/]+)/);
     if (m) {
-      if ((await kindOf(m[1])) === 'radio') feature = 'radio';
+      const k = await kindOf(m[1]);
+      if (k === 'radio') feature = 'radio';
+      else if (k === 'fast') feature = 'fast';
     } else if (write && body && body.kind === 'radio') {
       feature = 'radio';
     }

@@ -566,8 +566,13 @@ def hex_to_b64(h):
     return base64.b64encode(bytes.fromhex(h)).decode()
 
 
-def master_playlist(assets_any, tracks):
-    """The multivariant playlist, from the first asset's variant attributes (the ladder is the channel's)."""
+def master_playlist(assets_any, tracks, ladder=None):
+    """The multivariant playlist. Each variant's attributes come from an asset
+    that carries that exact rung (its real CODECS and BANDWIDTH); a rung no
+    asset carries yet takes its RESOLUTION and BANDWIDTH from the channel's
+    ladder rather than borrowing the nearest rung's, which is what put a 720p
+    picture under a 1080p RESOLUTION."""
+    rung = {int(r["height"]): r for r in ((ladder or {}).get("rungs") or [])}
     L = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-INDEPENDENT-SEGMENTS"]
     has_audio = "audio" in tracks
     if has_audio:
@@ -576,7 +581,12 @@ def master_playlist(assets_any, tracks):
         if n == "audio":
             continue
         tr = assets_any.track(n)
-        m = getattr(tr, "meta", {}) or {}
+        m = dict(getattr(tr, "meta", {}) or {})
+        h = int(n[1:])
+        if h in rung and m.get("height") != h:
+            r = rung[h]
+            m.update(height=h, width=int(r.get("width") or round(h * 16 / 9 / 2) * 2),
+                     bandwidth=int(int(r.get("bitrate_kbps", 0)) * 1100 + (128000 if has_audio else 0)) or m.get("bandwidth"))
         attrs = [f"BANDWIDTH={m.get('bandwidth', 1000000)}", f'CODECS="{m.get("codecs", "avc1.64001f,mp4a.40.2")}"']
         if m.get("width"):
             attrs.append(f"RESOLUTION={m['width']}x{m['height']}")
@@ -763,6 +773,7 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: stopping.__setitem__("now", True))
 
     assets, play, tl, tl_at, trig, trig_at, beat_at, unreadable = {}, None, None, 0, [], 0, 0, set()
+    play_ladder = None
     while True:
         now = time.time()
         try:
@@ -782,16 +793,29 @@ def main():
                                 unreadable.add(aid)
                                 print(f"[fast] asset {aid} not readable: {e}", file=sys.stderr)
                 if play is None:
-                    first = next((assets[i["assetId"]] for i in tl["items"] if i["kind"] == "content" and i.get("assetId") in assets), None)
+                    # THE CHANNEL'S LADDER (timeline "ladder", services/fast/ladder.ts) decides
+                    # the tracks; every asset is packaged to it. Without one (an older control
+                    # plane, an audio channel), the first asset's rungs, as before.
+                    ladder = tl.get("ladder") or None
+                    want = [int(r["height"]) for r in ladder["rungs"]] if ladder and ladder.get("rungs") else None
+                    contents = [assets[i["assetId"]] for i in tl["items"] if i["kind"] == "content" and i.get("assetId") in assets]
+                    first = next((x for x in contents if want and all(h in x.video for h in want)), None) or (contents[0] if contents else None)
                     if first is None:
                         print("[fast] nothing playable in the timeline yet", file=sys.stderr)
                         unreadable.clear()
                         time.sleep(5)
                         tl = None
                         continue
-                    tracks = [f"v{h}" for h in sorted(first.video, reverse=True)] + (["audio"] if first.audio else [])
+                    tracks = [f"v{h}" for h in (want or sorted(first.video, reverse=True))] + (["audio"] if first.audio else [])
                     play = Playout(tracks, dvr_sec=a.dvr, seg_sec=float(tl.get("segmentSec", 2)), state=state)
-                    sink.put("master.m3u8", master_playlist(first, tracks))
+                    sink.put("master.m3u8", master_playlist(first, tracks, ladder))
+                    play_ladder = (ladder or {}).get("groupId")
+                elif (tl.get("ladder") or {}).get("groupId") != play_ladder:
+                    # the channel's ladder changed: the tracks are fixed for this run (a player
+                    # holding the old master would lose its variants), so the new one takes
+                    # effect when the playout restarts
+                    print("[fast] the channel's ladder changed; it takes effect when the playout restarts", file=sys.stderr)
+                    play_ladder = (tl.get("ladder") or {}).get("groupId")
                 play.schedule(expand_parts(tl["items"], assets, play.seg), assets, now)
             if api_ok and now - trig_at > 5:
                 try:

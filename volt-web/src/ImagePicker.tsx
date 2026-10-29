@@ -3,7 +3,8 @@
 // image kinds, UPLOAD a new one right here (it's added to the library and auto-picked).
 // Returns the picked item's /library URL.
 import { useEffect, useRef, useState } from 'react'
-import { api, thumbUrl, type MediaFile } from './api'
+import { api, apiRequest, thumbUrl, isMotionFile, type MediaFile } from './api'
+import { MotionThumb } from './MotionThumb'
 import { pressable } from './a11y'
 import { Notice } from './notices'
 
@@ -16,7 +17,7 @@ function fileToDataURL(file: File): Promise<string> {
   })
 }
 
-export function ImagePicker({ open, onClose, onPick, kinds, title, allowUpload = true, uploadKind, uploadFolder, uploadHint }: {
+export function ImagePicker({ open, onClose, onPick, kinds, title, allowUpload = true, uploadKind, uploadFolder, uploadHint, assetId }: {
   open: boolean
   onClose: () => void
   onPick: (url: string, file: MediaFile) => void
@@ -26,7 +27,15 @@ export function ImagePicker({ open, onClose, onPick, kinds, title, allowUpload =
   uploadKind?: string        // kind to tag an uploaded file (default kinds[0] or 'other')
   uploadFolder?: string      // library folder for uploads (default 'slates')
   uploadHint?: string        // note shown instead of the Upload button (e.g. for video)
+  /** Open on this asset's own images first (GET /vod/:id/images/related): what it uses, what was
+   *  made or uploaded for it, its song's cover, stills from while it aired. Then the library. */
+  assetId?: string
 }) {
+  const [related, setRelated] = useState<{ key: string; label: string; files: MediaFile[] }[] | null>(null)
+  useEffect(() => {
+    if (!open || !assetId) { setRelated(null); return }
+    apiRequest(`/vod/${assetId}/images/related`).then((r: any) => setRelated(r.groups ?? []), () => setRelated([]))
+  }, [open, assetId])
   const [files, setFiles] = useState<MediaFile[] | null>(null)
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
@@ -47,6 +56,14 @@ export function ImagePicker({ open, onClose, onPick, kinds, title, allowUpload =
     if (!file) return
     setErr(''); setBusy(true)
     try {
+      // A video (an animated bug) goes up raw and comes back as an alpha WebM item.
+      if (isMotionFile(file)) {
+        const created = await api.uploadMotion(file, { folder: uploadFolder || 'bugs', name: file.name, kind: uploadKind || kinds?.[0] || 'bug' })
+        if (created.warning) setErr(created.warning)
+        setFiles(prev => (prev ? [created, ...prev] : [created]))
+        onPick(created.url, created)
+        return
+      }
       const dataBase64 = await fileToDataURL(file)
       const created = await api.uploadFile({
         folder: uploadFolder || 'slates',
@@ -71,7 +88,7 @@ export function ImagePicker({ open, onClose, onPick, kinds, title, allowUpload =
           <input className="inp" style={{ maxWidth: 200 }} placeholder="Search…" value={q} onChange={e => setQ(e.target.value)} />
           {allowUpload ? (
             <>
-              <input ref={fileInput} type="file" accept="image/*" style={{ display: 'none' }} onChange={onUpload} />
+              <input ref={fileInput} type="file" accept="image/*,video/*,.mov,.webm" style={{ display: 'none' }} onChange={onUpload} />
               <button className="btn primary" style={{ marginLeft: 8 }} disabled={busy} onClick={() => fileInput.current?.click()}>
                 {busy ? 'Uploading…' : '⬆ Upload'}
               </button>
@@ -83,6 +100,22 @@ export function ImagePicker({ open, onClose, onPick, kinds, title, allowUpload =
         </div>
         {err && <div style={{ margin: '0 14px' }}><Notice kind="error" variant="compact" message={err} /></div>}
         <div className="card-b" style={{ overflow: 'auto' }}>
+          {!q && related && related.map(g => (
+            <div key={g.key} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 'var(--fs-label)', fontWeight: 600, color: 'var(--muted)', marginBottom: 6 }}>{g.label}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', gap: 12 }}>
+                {g.files.map(f => (
+                  <div key={f.id} className="card" style={{ overflow: 'hidden', cursor: 'pointer' }} {...pressable((e: any) => { ((() => onPick(f.url, f)) as any)(e) })} data-a11y-click="" title={f.path}>
+                    <MotionThumb f={f} w={480} h={300} style={{ aspectRatio: '16/10', background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 14px 14px' }} />
+                    <div style={{ padding: '7px 9px', fontSize: 'var(--fs-micro)', color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {f.captured_at ? new Date(f.captured_at).toLocaleTimeString() : f.name}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {!q && related && related.length > 0 && <div style={{ fontSize: 'var(--fs-label)', fontWeight: 600, color: 'var(--muted)', margin: '4px 0 6px' }}>All images</div>}
           {files === null ? <div className="loading">Loading…</div>
             : shown.length === 0 ? (
               <div style={{ textAlign: 'center', color: 'var(--muted)', padding: 24, fontSize: 'var(--fs-body)' }}>
@@ -92,9 +125,7 @@ export function ImagePicker({ open, onClose, onPick, kinds, title, allowUpload =
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', gap: 12 }}>
                 {shown.map(f => (
                   <div key={f.id} className="card" style={{ overflow: 'hidden', cursor: 'pointer' }} {...pressable((e: any) => { ((() => onPick(f.url, f)) as any)(e) })} data-a11y-click="">
-                    <div style={{ aspectRatio: '16/10', background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 14px 14px', display: 'grid', placeItems: 'center' }}>
-                      <img src={thumbUrl(f.url, 240, 150)} alt={f.name} loading="lazy" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
-                    </div>
+                    <MotionThumb f={f} w={480} h={300} style={{ aspectRatio: '16/10', background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 14px 14px' }} />
                     <div style={{ padding: '7px 9px' }}>
                       <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={f.path}>{f.name}</div>
                       <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)' }}>{f.kind} · {f.width && f.height ? `${f.width}×${f.height}` : ''}</div>

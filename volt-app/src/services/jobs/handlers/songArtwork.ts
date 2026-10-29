@@ -64,7 +64,7 @@ export async function attachSongArtwork(programmeId: string): Promise<{ result: 
 
   // 2. Artwork the station's feed sent with the song.
   if (looksLikeImage(md.stream_url) && !(await sameEverySong(p, String(md.stream_url)))) {
-    const key = await importImageUrl(p.acct, md.stream_url, songFolder(who.artist, null, who.title), 'cover').catch(() => null);
+    const key = await importImageUrl(p.acct, md.stream_url, songFolder(who.artist, null, who.title), 'cover', 'cover').catch(() => null);
     if (key) {
       await query(`UPDATE programmes SET metadata = metadata || $2::jsonb WHERE id = $1`, [p.id, JSON.stringify({ image: `/${key}`, artist: who.artist, image_source: 'feed' })]);
       return { result: 'artwork from the station feed', image: `/${key}` };

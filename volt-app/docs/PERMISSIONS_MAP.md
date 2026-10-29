@@ -15,6 +15,7 @@ groups) and `requireMinRole` on removals.
 | **Administrator** | Account tier (and the default role "Administrator") | Everything in the account except changing the plan |
 | **Event Manager** | Operator-tier role | Creates, schedules and runs events, their EPG and recordings; publishes results |
 | **Radio Manager** | Operator-tier role | Creates, configures and runs radio stations, their schedules and clips |
+| **FAST Manager** | Operator-tier role | Builds and runs FAST channels: run orders, ads, brand and filler, ladders, the titles they air, images, loops and slates, uploads and the encode queue; sees reports. No live TV, radio or events |
 | **Report and Analytics Manager** | Operator-tier role | Analytics and reports; sees content and usage, cannot change or run it |
 | **System Viewer** | Viewer-tier role | Reads everything in the admin; changes nothing, starts nothing |
 | **Public user** | Viewer account (not an admin user) | Watches through apps and players; never reaches the console |
@@ -28,33 +29,39 @@ at View. Nobody can give access they do not hold.
 View: see lists and pages. Operate: run (start, stop, on air, publish).
 Manage: create, edit, remove.
 
-FAST channels are TV channels (`origin = 'playlist'`), so `/api/fast` is
-under *TV channels*: reads and lineup previews need View; on and off air,
-activating a lineup and a test break decision need Operate; creating
-channels, lineups, ads, ad servers, prepare and apply need Manage. Ad
-breaks on a stream (`/api/fast/streams/<kind>/<id>/breaks`) follow the
-stream: TV channels, Radio stations or Events, View to list and Operate to
-add or cancel (build queue 1.14-G1b, `test/fast-access.check.ts`).
+FAST channels are their own area (28 Oct 2026; they were under *TV
+channels*): `/api/fast`, and `/api/channels/<id>` for a FAST channel.
+Reads and lineup previews need View; on and off air, activating a lineup,
+starting the playout and a test break decision need Operate; creating
+channels, lineups, ads, ad servers, ladder, filler, prepare and apply need
+Manage. Ad breaks on a stream (`/api/fast/streams/<kind>/<id>/breaks`)
+follow the stream: FAST, TV channels, Radio stations or Events, View to
+list and Operate to add or cancel (`test/fast-access.check.ts`). A role
+saved before the split keeps its TV channels level for FAST.
+*Encoding profiles & ladders* came out of Account settings the same way.
 
-| Area | System admin | Owner | Administrator | Event Manager | Radio Manager | Report & Analytics | System Viewer |
-|---|---|---|---|---|---|---|---|
-| Live & monitoring | Manage | Manage | Manage | View | View | View | View |
-| TV channels | Manage | Manage | Manage | View | — | View | View |
-| Radio stations | Manage | Manage | Manage | — | Manage | View | View |
-| Events | Manage | Manage | Manage | Manage | — | View | View |
-| EPG & schedules | Manage | Manage | Manage | Manage | Manage | View | View |
-| Recordings & clips | Manage | Manage | Manage | Manage | Manage | View | View |
-| Media library & publishing | Manage | Manage | Manage | Operate | — | View | View |
-| Files, uploads & storage | Manage | Manage | Manage | Manage | Manage | View | View |
-| Share links | Manage | Manage | Manage | Manage | Manage | View | View |
-| Analytics & reports | Manage | Manage | Manage | View | View | Manage | View |
-| Fleet & usage | Manage | Manage | Manage | — | — | View | View |
-| Admin users | Manage | Manage | Manage | — | — | — | View |
-| Roles & access | Manage | Manage | Manage | — | — | — | View |
-| Public users | Manage | Manage | Manage | — | — | View | View |
-| Apps, API keys & players | Manage | Manage | Manage | — | — | — | View |
-| Payments & products | Manage | Manage | Manage | — | — | — | View |
-| Account settings | Manage | Manage | Manage | — | — | — | View |
+| Area | System admin | Owner | Administrator | Event Manager | Radio Manager | FAST Manager | Report & Analytics | System Viewer |
+|---|---|---|---|---|---|---|---|---|
+| Live & monitoring | Manage | Manage | Manage | View | View | — | View | View |
+| TV channels | Manage | Manage | Manage | View | — | — | View | View |
+| FAST channels | Manage | Manage | Manage | — | — | Manage | View | View |
+| Radio stations | Manage | Manage | Manage | — | Manage | — | View | View |
+| Events | Manage | Manage | Manage | Manage | — | — | View | View |
+| EPG & schedules | Manage | Manage | Manage | Manage | Manage | View | View | View |
+| Recordings & clips | Manage | Manage | Manage | Manage | Manage | — | View | View |
+| Media library & publishing | Manage | Manage | Manage | Operate | — | Manage | View | View |
+| Files, uploads & storage | Manage | Manage | Manage | Manage | Manage | Manage | View | View |
+| Share links | Manage | Manage | Manage | Manage | Manage | Manage | View | View |
+| Analytics & reports | Manage | Manage | Manage | View | View | View | Manage | View |
+| Fleet & usage | Manage | Manage | Manage | — | — | — | View | View |
+| Admin users | Manage | Manage | Manage | — | — | — | — | View |
+| Roles & access | Manage | Manage | Manage | — | — | — | — | View |
+| Public users | Manage | Manage | Manage | — | — | — | View | View |
+| Apps, API keys & players | Manage | Manage | Manage | — | — | — | — | View |
+| Payments & products | Manage | Manage | Manage | — | — | — | — | View |
+| Account settings | Manage | Manage | Manage | — | — | — | — | View |
+| Encoding profiles & ladders | Manage | Manage | Manage | — | — | Manage | — | View |
+| Encoding profiles & ladders | Manage | Manage | Manage | — | — | Manage | — | View |
 
 ## 3. Account controls
 

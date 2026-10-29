@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { api, type IcyProbe } from './api'
+import { useEffect, useRef, useState } from 'react'
+import { api, type IcyProbe, type SourceValidation } from './api'
 import { pressable } from './a11y'
 import { Notice } from './notices'
 
@@ -18,6 +18,15 @@ import { Notice } from './notices'
    ("Secret Agent: The soundtrack for your stylish, mysterious, dangerous life…")
    which is exactly right as metadata and wrong as a station name in a channel
    list. The operator decides.
+
+   VALIDATE SOURCE (24 Oct 2026). The button is now "Validate source" and it
+   answers the question first: does this address work, as it is? For Icecast,
+   HLS and DASH the server checks it from the protocol itself, with no ffprobe
+   (POST /api/sources/validate, services/sourceValidate.ts): connect, playlist
+   or manifest, a segment or a few KB of audio recognised as real media. The
+   panel shows each check, what the source is, a sample to listen to (or
+   watch) where the browser can play it, and for Icecast the station's own
+   metadata with its Use buttons, as before.
    ========================================================================== */
 
 export interface MetadataTargets {
@@ -33,35 +42,50 @@ export interface MetadataTargets {
 
 const IMG = /\.(png|jpe?g|gif|webp|avif)(\?|$)/i
 
-export function SourceMetadataButton({ url, targets }: { url: string; targets: MetadataTargets }) {
+/** Protocols the server can validate without a probe. */
+const VALIDATABLE = ['icecast', 'hls', 'dash', '']
+
+export function SourceValidateButton({ url, protocol = '', targets }: { url: string; protocol?: string; targets: MetadataTargets }) {
   const [open, setOpen] = useState(false)
-  const ready = /^https?:\/\/.+/i.test(url.trim())
+  const proto = protocol.toLowerCase()
+  const supported = VALIDATABLE.includes(proto)
+  const ready = supported && /^https?:\/\/.+/i.test(url.trim())
   return (
     <>
       <button className="btn ghost" type="button" disabled={!ready} onClick={() => setOpen(true)}
-        title={ready ? 'Read what this stream says about itself' : 'Enter a source URL first'}>
+        title={!supported ? `${proto.toUpperCase()} is checked when a feed arrives` : ready ? 'Check this source works as it is, see what it is, and listen to a sample' : 'Enter a source URL first'}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" />
+          <path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" />
         </svg>
-        View metadata
+        Validate source
       </button>
-      {open && <SourceMetadataPanel url={url.trim()} targets={targets} onClose={() => setOpen(false)} />}
+      {open && <SourceMetadataPanel url={url.trim()} protocol={proto} targets={targets} onClose={() => setOpen(false)} />}
     </>
   )
 }
+/** Kept for older imports: the same control. */
+export const SourceMetadataButton = SourceValidateButton
 
-function SourceMetadataPanel({ url, targets, onClose }: {
-  url: string; targets: MetadataTargets; onClose: () => void
+const STATE_ICON: Record<string, { c: string; d: string }> = {
+  pass: { c: '#4ade80', d: 'M5 12l4 4 10-10' },
+  warn: { c: '#fbbf24', d: 'M12 8v5M12 17h.01' },
+  fail: { c: '#f87171', d: 'M6 6l12 12M18 6L6 18' },
+  skip: { c: 'var(--faint)', d: 'M6 12h12' },
+}
+
+function SourceMetadataPanel({ url, protocol, targets, onClose }: {
+  url: string; protocol: string; targets: MetadataTargets; onClose: () => void
 }) {
-  const [probe, setProbe] = useState<IcyProbe | null>(null)
+  const [res, setRes] = useState<SourceValidation | null>(null)
   const [err, setErr] = useState('')
   const [applied, setApplied] = useState<Record<string, boolean>>({})
 
   async function run() {
-    setProbe(null); setErr(''); setApplied({})
-    try { setProbe(await api.probeRadioSource(url)) } catch (e: any) { setErr(e.message) }
+    setRes(null); setErr(''); setApplied({})
+    try { setRes(await api.validateSource(url, protocol || undefined)) } catch (e: any) { setErr(e.message) }
   }
-  useEffect(() => { run() /* eslint-disable-next-line */ }, [url])
+  useEffect(() => { run() /* eslint-disable-next-line */ }, [url, protocol])
+  const probe: IcyProbe | null = res?.icy ?? null
 
   const mark = (k: string, fn: () => void) => { fn(); setApplied(a => ({ ...a, [k]: true })) }
   const st = probe?.station ?? {}
@@ -73,7 +97,7 @@ function SourceMetadataPanel({ url, targets, onClose }: {
     <div {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="" style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 70, display: 'grid', placeItems: 'center', padding: 20 }}>
       <div {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 'min(620px,96vw)', maxHeight: '92vh', overflow: 'auto', background: 'var(--panel,#0e1420)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
         <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
-          <h2 style={{ margin: 0, fontSize: 'var(--fs-h1)', letterSpacing: 'var(--ls-title)' }}>Source metadata</h2>
+          <h2 style={{ margin: 0, fontSize: 'var(--fs-h1)', letterSpacing: 'var(--ls-title)' }}>Validate source</h2>
           <div className="flex-1" />
           <button className="btn ghost" onClick={run}>Re-read</button>
           <button className="btn ghost" onClick={onClose}>Close</button>
@@ -81,16 +105,56 @@ function SourceMetadataPanel({ url, targets, onClose }: {
         <p style={{ color: 'var(--muted)', marginTop: 4, wordBreak: 'break-all', fontSize: 'var(--fs-sm)' }}>{url}</p>
 
         {err && <Notice kind="error" variant="compact" message={err} />}
-        {!probe && !err && <div className="loading">Reading the stream…</div>}
+        {!res && !err && <div className="loading">Checking the source…</div>}
 
-        {probe && !probe.ok && (
-          <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(248,113,113,.10)', border: '1px solid rgba(248,113,113,.4)', marginTop: 12 }}>
-            <div style={{ fontWeight: 700, color: '#fca5a5', marginBottom: 4 }}>Could not read this source</div>
-            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
-              {probe.error || 'no answer'}. The URL may be wrong, the station may be off air, or it may block this server.
-              You can still save it: the station will report the same error in its event log when you start it.
+        {res && (
+          <>
+            <div style={{ padding: '12px 14px', borderRadius: 10, marginTop: 12,
+              background: res.ok ? 'rgba(74,222,128,.08)' : 'rgba(248,113,113,.10)',
+              border: `1px solid ${res.ok ? 'rgba(74,222,128,.35)' : 'rgba(248,113,113,.4)'}` }}>
+              <div style={{ fontWeight: 700, color: res.ok ? '#86efac' : '#fca5a5' }}>{res.verdict}</div>
+              <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)', marginTop: 3 }}>
+                {res.kind === 'icecast' ? 'Icecast' : res.kind === 'hls' ? 'HLS' : res.kind === 'dash' ? 'DASH' : res.kind === 'push' ? 'Push source' : 'Source'}
+                {' · checked from the server in '}{(res.elapsedMs / 1000).toFixed(1)} s, no probe
+                {!res.ok && res.checks.some(c => c.state === 'fail') && ' · you can still save it: the station reports the same error in its event log when started'}
+              </div>
             </div>
-          </div>
+
+            <div className="sec-label">Checks</div>
+            <div className="grid gap-1.5">
+              {res.checks.map(c => {
+                const ic = STATE_ICON[c.state]
+                return (
+                  <div key={c.id} className="flex items-start gap-2" style={{ fontSize: 'var(--fs-body)' }}>
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke={ic.c} strokeWidth="2.5" style={{ flex: 'none', marginTop: 3 }}
+                      aria-label={c.state}><path d={ic.d} /></svg>
+                    <span style={{ width: 116, flex: 'none', color: 'var(--faint)' }}>{c.label}</span>
+                    <span className="flex-1 min-w-0" style={{ wordBreak: 'break-word' }}>{c.detail}</span>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Icecast's name, genre and bitrate are in the station block below, with Use buttons. */}
+            {res.facts.filter(f => res.kind !== 'icecast' || !['Station', 'Genre', 'Bitrate'].includes(f.k)).length > 0 && (
+              <>
+                <div className="sec-label">{res.kind === 'icecast' ? 'Audio, as received' : 'What it is'}</div>
+                <div className="grid gap-1.5">
+                  {res.facts.filter(f => res.kind !== 'icecast' || !['Station', 'Genre', 'Bitrate'].includes(f.k))
+                    .map((f, i) => <Row key={f.k + i} k={f.k} v={f.v} />)}
+                </div>
+              </>
+            )}
+
+            {res.preview && (
+              <>
+                <div className="sec-label">Sample</div>
+                <SamplePlayer preview={res.preview}
+                  video={res.kind !== 'icecast' && !(res.hls?.variants?.length && res.hls.variants.every(v => v.audioOnly))
+                    && res.facts.some(f => f.k === 'Video' || /\d+x\d+/.test(f.v))} />
+              </>
+            )}
+          </>
         )}
 
         {probe?.ok && (
@@ -158,10 +222,12 @@ function SourceMetadataPanel({ url, targets, onClose }: {
               </div>
             )}
 
-            <div className="flex gap-2 justify-end" style={{ marginTop: 18 }}>
-              <button className="btn primary" onClick={onClose}>Done</button>
-            </div>
           </>
+        )}
+        {(res || err) && (
+          <div className="flex gap-2 justify-end" style={{ marginTop: 18 }}>
+            <button className="btn primary" onClick={onClose}>Done</button>
+          </div>
         )}
       </div>
     </div>
@@ -180,6 +246,92 @@ function Row({ k, v, action }: { k: string; v?: string | null; action?: { label:
           {action.label}
         </button>
       )}
+    </div>
+  )
+}
+
+/* A SAMPLE of the source, played in the browser straight from its address.
+   Icecast is plain HTTP audio (no CORS needed for an <audio> that is not read
+   by script); HLS uses native playback on Safari and hls.js elsewhere; DASH
+   uses dash.js. Those two read the playlist with fetch, so they need the
+   source to allow cross-origin requests: when it does not, the sample fails
+   and says so, which is about the browser, not the source the server checked. */
+function SamplePlayer({ preview, video }: { preview: NonNullable<SourceValidation['preview']>; video: boolean }) {
+  const ref = useRef<HTMLVideoElement & HTMLAudioElement>(null)
+  const [playing, setPlaying] = useState(false)
+  const [err, setErr] = useState('')
+  const [secs, setSecs] = useState(0)
+  const mixed = typeof location !== 'undefined' && location.protocol === 'https:' && preview.url.startsWith('http:')
+
+  useEffect(() => {
+    const a = ref.current
+    if (!a) return
+    let killed = false; let hls: any = null; let dash: any = null
+    setErr('')
+    async function attach() {
+      if (!a) return
+      try {
+        if (preview.kind === 'audio' || (preview.kind === 'hls' && a.canPlayType('application/vnd.apple.mpegurl'))) {
+          a.src = preview.url; await a.play(); return
+        }
+        if (preview.kind === 'hls') {
+          const Hls = (await import('hls.js')).default
+          if (killed) return
+          if (!Hls.isSupported()) { setErr('HLS is not supported in this browser'); return }
+          hls = new Hls({ liveDurationInfinity: true })
+          hls.loadSource(preview.url); hls.attachMedia(a)
+          hls.on(Hls.Events.MANIFEST_PARSED, () => a.play().catch(() => {}))
+          hls.on(Hls.Events.ERROR, (_e: any, d: any) => {
+            if (!d?.fatal) return
+            setErr(/manifestLoadError|NetworkError|manifestLoad/i.test(String(d.details)) && d.response?.code === 0
+              ? 'the browser was not allowed to read the playlist (the source sends no CORS header). The server check above is what counts.'
+              : (d.details || 'playback failed'))
+          })
+          return
+        }
+        const dashjs: any = (await import('dashjs')).default
+        if (killed) return
+        dash = dashjs.MediaPlayer().create()
+        dash.initialize(a, preview.url, true)
+        try { dash.on(dashjs.MediaPlayer.events.ERROR, (e: any) => setErr(e?.error?.message || 'playback failed (the source may not allow cross-origin requests)')) } catch { /* ignore */ }
+      } catch (e: any) {
+        if (!killed) setErr(e?.name === 'NotAllowedError' ? 'the browser blocked autoplay: press play again' : (e?.message || 'playback failed'))
+      }
+    }
+    if (playing) attach()
+    else { a.pause(); a.removeAttribute('src'); a.load(); setSecs(0) }
+    return () => {
+      killed = true
+      if (hls) { try { hls.destroy() } catch { /* ignore */ } }
+      if (dash) { try { dash.reset() } catch { /* ignore */ } }
+      try { a.pause() } catch { /* ignore */ }
+    }
+  }, [playing, preview.url, preview.kind])
+
+  useEffect(() => {
+    if (!playing) return
+    const t = setInterval(() => setSecs(Math.floor(ref.current?.currentTime || 0)), 1000)
+    return () => clearInterval(t)
+  }, [playing])
+
+  const label = playing ? 'Stop the sample' : 'Play a sample'
+  return (
+    <div>
+      <div className="flex items-center gap-3">
+        <button className="icon-btn" type="button" onClick={() => setPlaying(p => !p)} aria-label={label} title={label} disabled={mixed}>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            {playing ? <path d="M7 5h4v14H7zM13 5h4v14h-4z" /> : <path d="M8 5v14l11-7z" />}
+          </svg>
+        </button>
+        <div className="flex-1 min-w-0" style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
+          {mixed ? 'This console is on https and the source is http: the browser will not play it here. The server check above still applies.'
+            : playing ? (err ? <span style={{ color: '#fca5a5' }}>Sample: {err}</span> : `Playing from the source · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`)
+            : `Listen${video ? ' and watch' : ''} straight from the source in this browser.`}
+        </div>
+      </div>
+      {video
+        ? <video ref={ref} muted={false} playsInline controls={playing} style={{ display: playing ? 'block' : 'none', width: '100%', maxHeight: 240, marginTop: 10, borderRadius: 8, background: '#000' }} />
+        : <audio ref={ref} style={{ display: 'none' }} />}
     </div>
   )
 }

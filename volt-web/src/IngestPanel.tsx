@@ -19,6 +19,7 @@ import { startUpload, subscribe, type UploadItem } from './uploadManager'
 import { tusUpload } from './tusClient'
 import { TypePicker, MetadataForm } from './ContentTypeFields'
 import { openDropboxChooser, openOneDrivePicker, openGooglePicker, pickerConfigured } from './cloudPickers'
+import { FailedRetryDialog, type RetryAction, type RetryAsk } from './FailedRetryDialog'
 import './ingest.css'
 
 const isPhone = () => /iPhone|iPad|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 900)
@@ -40,7 +41,9 @@ export async function filesFromDrop(dt: DataTransfer): Promise<File[]> {
 
 type Source = 'device' | 'folder' | 'link' | 'dropbox' | 'onedrive' | 'gdrive' | 'camera'
 interface Picked { id: string; file: File; preview?: IngestPreviewRow; skip?: boolean; meta?: Record<string, any>; typeId?: string | null
-  cloud?: { provider: string; ref: string; providerAccountId: string; label: string; strength: string } | null; thumb?: string | null }
+  cloud?: { provider: string; ref: string; providerAccountId: string; label: string; strength: string } | null; thumb?: string | null
+  /** The answer to "this matches a record whose encode failed" (FailedRetryDialog). */
+  retry?: { assetId: string; action: RetryAction } | null }
 
 /** Line icons for our own doors; the cloud drives use their brand marks
  *  (served from Simple Icons, alt text and a letter fallback), because a
@@ -71,6 +74,14 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
   const [src, setSrc] = useState<Source>('device')
   const [picked, setPicked] = useState<Picked[]>([])
   const [typeId, setTypeId] = useState<string | null>(null)
+  // WHAT THESE FILES ARE, ASKED BEFORE A BYTE MOVES. The type decides the
+  // metadata form, the naming and the publishing rules, so a file uploaded
+  // without one lands in the library as "No type" and has to be fixed by hand.
+  // 'unset' holds every file in the manifest until the operator picks a type,
+  // or says the ingest rules should decide.
+  const [typeChoice, setTypeChoice] = useState<'unset' | 'rules' | 'type'>('unset')
+  const [vodTypes, setVodTypes] = useState<{ id: string; name: string; standard_key: string | null }[]>([])
+  useEffect(() => { api.contentTypes('vod').then(t => setVodTypes(t.map(x => ({ id: x.id, name: x.name, standard_key: x.standard_key })))).catch(() => setVodTypes([])) }, [])
   const [meta, setMeta] = useState<Record<string, any>>({})
   const [sheet, setSheet] = useState<null | 'all' | string>(null)      // metadata sheet: all files, or one id
   const [autoUpload, setAutoUpload] = useState(true)
@@ -83,6 +94,8 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
   const [busy, setBusy] = useState(false)
   const [link, setLink] = useState('')
   const [tusProg, setTusProg] = useState<Record<string, number>>({})
+  const [asks, setAsks] = useState<RetryAsk[]>([])
+  const seenDone = useRef<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement | null>(null); const folderRef = useRef<HTMLInputElement | null>(null); const camRef = useRef<HTMLInputElement | null>(null)
   const depth = useRef(0)
   const phone = isPhone()
@@ -90,7 +103,14 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
 
   const loadHeld = () => api.ingestHeld().then(setHeld).catch(() => {})
   useEffect(() => { loadHeld() }, [])
-  useEffect(() => subscribe(all => { setItems(all); if (all.some(i => i.status === 'done')) { onDone(); loadHeld() } }), [onDone])
+  // Reload the library when an upload NEWLY finishes, not on every progress tick: the manager
+  // emits every 150 ms, and while any finished item stayed in the list each tick re-fetched the
+  // Media Library and the queue, so the page jumped about during a long upload.
+  useEffect(() => subscribe(all => {
+    setItems(all)
+    const fresh = all.filter(i => i.status === 'done' && !seenDone.current.has(i.id))
+    if (fresh.length) { fresh.forEach(i => seenDone.current.add(i.id)); onDone(); loadHeld() }
+  }), [onDone])
   useEffect(() => { api.ingestBaseline().then(b => setAutoUpload(b.baseline.autoUpload)).catch(() => {}) }, [])
   useEffect(() => { api.ingestProviders().then(p => setProviders(p.linked.filter(l => ['aspera', 'masv', 'signiant'].includes(l.provider)))).catch(() => {}) }, [])
   useEffect(() => { const load = () => api.ingestTransfers().then(ts => setTransfers(ts.filter(x => x.state !== 'landed' || Date.now() - new Date(x.createdAt).getTime() < 10 * 60_000))).catch(() => {}); load(); const t = setInterval(load, 15000); return () => clearInterval(t) }, [])
@@ -126,26 +146,36 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
         } catch { /* no linked accounts, the local route still works */ }
       }
       setPicked(p => p.map(x => next.find(n => n.id === x.id) ?? x))
-      if (autoUpload) void start(next)
+      // A file that matches a record whose encode failed waits for an answer (FailedRetryDialog).
+      const ask = next.filter(n => !n.skip && n.preview?.failedMatch)
+      if (ask.length) setAsks(a => [...a, ...ask.map(n => ({ id: n.id, fileName: n.file.name, bytes: n.file.size, match: n.preview!.failedMatch! }))])
+      if (autoUpload && typeChoice !== 'unset') void start(next.filter(n => !ask.includes(n)))
     } catch (e: any) { setErr(String(e?.message ?? e)) }
   }
 
-  async function start(list: Picked[]) {
+  /** Pick the type for the files from here on; held files start now (auto upload). */
+  function chooseType(choice: 'rules' | 'type', id: string | null) {
+    setTypeChoice(choice); setTypeId(id); setMeta({})
+    const waiting = picked.filter(p => !p.skip && !p.preview?.reject && !asks.some(a => a.id === p.id))
+    if (autoUpload && waiting.length) void start(waiting, id)
+  }
+
+  async function start(list: Picked[], typeOverride?: string | null) {
     setBusy(true)
     const done: string[] = []
     for (const p of list) {
       if (p.skip || p.preview?.reject) continue
-      const m = { ...meta, ...(p.meta ?? {}) }; const t = p.typeId ?? typeId
+      const m = { ...meta, ...(p.meta ?? {}) }; const t = p.typeId ?? (typeOverride !== undefined ? typeOverride : typeId)
       try {
         if (p.cloud && p.preview?.settings.transfer !== 'local') {
           await api.ingestRemote({ ref: { provider: p.cloud.provider as any, ref: p.cloud.ref }, name: p.file.name, bytes: p.file.size, relativePath: (p.file as any).webkitRelativePath || null, schemaId: t, metadata: Object.keys(m).length ? m : undefined, providerAccountId: p.cloud.providerAccountId })
           onDone(); done.push(p.id); continue
         }
         if (phone) {
-          await tusUpload(p.file, { endpoint: '/api/tus', token: getToken() ?? '', metadata: { source, ...(t ? { schemaId: t } : {}), ...(Object.keys(m).length ? { metadata: JSON.stringify(m) } : {}) }, onProgress: (s, tot) => setTusProg(x => ({ ...x, [p.id]: s / tot })) })
+          await tusUpload(p.file, { endpoint: '/api/tus', token: getToken() ?? '', metadata: { source, ...(t ? { schemaId: t } : {}), ...(Object.keys(m).length ? { metadata: JSON.stringify(m) } : {}), ...(p.retry ? { retryOf: JSON.stringify(p.retry) } : {}) }, onProgress: (s, tot) => setTusProg(x => ({ ...x, [p.id]: s / tot })) })
           setTusProg(x => { const c = { ...x }; delete c[p.id]; return c }); onDone(); loadHeld()
         } else {
-          await startUpload(p.file, { kind: 'loop', purpose: 'vod', source, schemaId: t, metadata: Object.keys(m).length ? m : null })
+          await startUpload(p.file, { kind: 'loop', purpose: 'vod', source, schemaId: t, metadata: Object.keys(m).length ? m : null, retryOf: p.retry ?? null })
         }
         done.push(p.id)
       } catch (e: any) { setErr(String(e?.message ?? e)) }
@@ -204,8 +234,18 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
     : { key: 'local', text: phone ? 'from this phone, resumable' : 'from this device, resumable' }
   const routeCounts = { local: pending.filter(p => routeOf(p).key === 'local').length, cloud: pending.filter(p => routeOf(p).key === 'cloud').length, refused: picked.filter(p => p.preview?.reject).length }
 
+  function answerRetry(answers: Record<string, RetryAction>) {
+    const done = asks.filter(a => answers[a.id])
+    const chosen = picked.filter(p => answers[p.id]).map(p => ({ ...p, retry: { assetId: asks.find(a => a.id === p.id)!.match.assetId, action: answers[p.id] } }))
+    setPicked(cur => cur.map(p => chosen.find(c => c.id === p.id) ?? p))
+    setAsks(a => a.filter(x => !done.includes(x)))
+    if (autoUpload && chosen.length && typeChoice !== 'unset') void start(chosen)
+  }
+
   return (
     <div style={{ marginBottom: 16 }}>
+      {asks.length > 0 && <FailedRetryDialog key={asks.map(a => a.id).join()} asks={asks} onAnswer={answerRetry}
+        onCancel={ids => { setAsks(a => a.filter(x => !ids.includes(x.id))); setPicked(cur => cur.filter(p => !ids.includes(p.id))) }} />}
       <div className="ig"
         onDragEnter={e => { e.preventDefault(); depth.current++; setOver(true) }}
         onDragLeave={e => { e.preventDefault(); if (--depth.current <= 0) setOver(false) }}
@@ -236,6 +276,19 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
           <input ref={camRef} type="file" accept="video/*" capture="environment" hidden onChange={e => { add([...(e.target.files ?? [])]); e.target.value = '' }} />
         </div>
 
+        {/* STEP: WHAT ARE THESE FILES. Before anything uploads. */}
+        <div className={`ig-type${typeChoice === 'unset' && picked.length ? ' need' : ''}`} role="group" aria-label="Content type for the files you add">
+          <span className="ig-type-l">{typeChoice === 'unset' ? (picked.length ? `Choose what ${picked.length === 1 ? 'this file is' : `these ${picked.length} files are`} to start the upload` : 'What are you adding?') : 'Files are added as'}</span>
+          <div className="ig-type-chips">
+            {vodTypes.map(t => (
+              <button key={t.id} type="button" className={`chip ig-type-chip${typeChoice === 'type' && typeId === t.id ? ' active' : ''}`} aria-pressed={typeChoice === 'type' && typeId === t.id}
+                onClick={() => chooseType('type', t.id)}>{t.name}</button>
+            ))}
+            <button type="button" className={`chip ig-type-chip${typeChoice === 'rules' ? ' active' : ''}`} aria-pressed={typeChoice === 'rules'}
+              title="The ingest rules (Admin > Ingest rules) set the type from the file's folder, name or kind" onClick={() => chooseType('rules', null)}>Let the rules decide</button>
+          </div>
+        </div>
+
         {src === 'link' && (
           <form className="ig-link" onSubmit={e => { e.preventDefault(); fetchLink() }}>
             <input className="ig-in" value={link} onChange={e => setLink(e.target.value)} placeholder="https://example.com/master.mxf  (fetched by Volt's servers, nothing goes through this device)" autoFocus />
@@ -262,7 +315,7 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
               <div className="ig-sheet">
                 <div className="ig-sheet-h"><b>Every file added from now</b><span>Leave the type empty and the rules decide it. Required fields can be filled while the upload runs.</span></div>
                 <div style={{ display: 'grid', gridTemplateColumns: phone ? '1fr' : '240px 1fr', gap: 12 }}>
-                  <TypePicker appliesTo="vod" value={typeId} onChange={id => { setTypeId(id); setMeta({}) }} />
+                  <TypePicker appliesTo="vod" value={typeId} onChange={id => { setTypeId(id); setMeta({}); if (typeChoice === 'unset') chooseType('type', id) }} />
                   {typeId ? <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact /> : <div />}
                 </div>
                 <div><button type="button" className="ig-lnk" onClick={() => setSheet(null)}>Done</button></div>
@@ -274,6 +327,8 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
                 const pv = p.preview; const r = routeOf(p); const prog = tusProg[p.id]
                 const decision = !pv ? <span className="ig-dec">checking the rules</span>
                   : pv.reject ? <span className="ig-dec bad">refused: {pv.reject}</span>
+                  : p.retry ? <span className="ig-dec warn">{p.retry.action === 'reattach' ? 'becomes the source of the failed record, encoded again' : p.retry.action === 'replace' ? 'replaces the failed record' : 'a new record; the failed one stays'}</span>
+                  : pv.failedMatch ? <span className="ig-dec warn">matches a record whose encode failed: choose what to do</span>
                   : pv.duplicate !== 'proceed' ? <span className="ig-dec warn">looks like a duplicate ({pv.duplicateOf?.strength.replace('_', ' ')}), rule says {pv.duplicate}</span>
                   : <span className="ig-dec ok" title={pv.matched.map(m => m.ruleName).join(' < ')}>{pv.settings.naming === 'honour' ? (pv.changed ? `named ${pv.sanitised}` : 'name kept') : `filed by ${pv.settings.naming.replace('_', ' ')}`}{pv.deferred ? ' · checked again after upload' : ''}</span>
                 return (
@@ -325,7 +380,7 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
           {transfers.filter(t => t.state !== 'landed').length > 0 && <span className="rt fast">{transfers.filter(t => t.state !== 'landed').length} accelerated transfer{transfers.filter(t => t.state !== 'landed').length === 1 ? '' : 's'} running</span>}
           <span className="sp" />
           {providers.map(pa => <button key={pa.id} type="button" className="btn ghost" disabled={!pending.length} title={pending.length ? `${pa.label} moves the files; Volt ingests them when they land` : 'Add files first'} onClick={() => sendWith(pa)}>{I.fast}Send with {pa.label}</button>)}
-          {pending.length > 0 && !autoUpload && <button type="button" className="btn primary" disabled={busy} onClick={() => start(pending)}>Ingest {pending.length} file{pending.length === 1 ? '' : 's'}</button>}
+          {pending.length > 0 && !autoUpload && <button type="button" className="btn primary" disabled={busy || typeChoice === 'unset'} title={typeChoice === 'unset' ? 'Choose what these files are first' : undefined} onClick={() => start(pending)}>Ingest {pending.length} file{pending.length === 1 ? '' : 's'}</button>}
           {pending.length > 0 && autoUpload && busy && <span className="ig-dec">starting…</span>}
         </div>
       </div>

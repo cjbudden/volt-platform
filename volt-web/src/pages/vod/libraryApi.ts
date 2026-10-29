@@ -43,7 +43,7 @@ export interface FacetType { id: string | null; name: string | null; key: string
 export interface FacetValue { value: any; n: number }
 export interface LibraryFacets {
   total: number
-  facets: { types: FacetType[]; availability: FacetValue[]; origins: FacetValue[]; resolutions: FacetValue[]; codecs: FacetValue[]; metadata: FacetValue[] }
+  facets: { types: FacetType[]; availability: FacetValue[]; origins: FacetValue[]; sources?: FacetValue[]; media_types?: FacetValue[]; resolutions: FacetValue[]; codecs: FacetValue[]; metadata: FacetValue[]; usage?: FacetValue[] }
 }
 
 export interface TargetMetadata {
@@ -103,4 +103,10 @@ export const libraryApi = {
     apiRequest(`/vod/${id}/epg-fill`, { method: 'POST', body: JSON.stringify(b) }),
   epgBulk: (ids: string[], o: { title?: boolean } = {}): Promise<{ results: EpgApplyResult[]; filled: number; unchanged: number }> =>
     apiRequest('/vod/epg-fill', { method: 'POST', body: JSON.stringify({ ids, title: !!o.title }) }),
+  /** The asset's downloadable files (Downloads: view). */
+  downloads: (id: string): Promise<{ files: DownloadFile[] }> => apiRequest(`/downloads/vod/${id}`),
+  /** A five-minute link for one file (Downloads: operate). */
+  downloadLink: (id: string, format: DownloadFile['format']): Promise<{ url: string; filename: string; expiresAt: string }> =>
+    apiRequest(`/downloads/vod/${id}/link`, { method: 'POST', body: JSON.stringify({ format }) }),
 }
+export interface DownloadFile { format: 'mp4' | 'mp3' | 'm4a'; label: string; filename: string; bytes: number | null }

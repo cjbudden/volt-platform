@@ -62,7 +62,7 @@ export function diff(current: Record<string, any>, patch: Record<string, any>, a
 
 export async function writeAudit(c: PoolClient | null, o: {
   accountId: string | null; userId: string | null; label: string;
-  action: 'create' | 'update' | 'delete'; entityType: string; entityId: string;
+  action: 'create' | 'update' | 'delete' | 'download'; entityType: string; entityId: string;
   changes?: Record<string, { from: any; to: any }>; snapshot?: any;
 }): Promise<void> {
   const detail: any = { actor: o.label };

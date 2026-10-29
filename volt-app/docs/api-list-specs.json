@@ -5063,7 +5063,45 @@
      "nin",
      "exists"
     ],
-    "doc": "recording, clip, upload or watchfolder"
+    "doc": "How it was made: recording, clip, upload or watchfolder"
+   },
+   "source": {
+    "type": "enum",
+    "values": [
+     "channel",
+     "event",
+     "radio",
+     "upload",
+     "none"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "What it belongs to: channel, event, radio, upload, or none (its channel or event is gone)"
+   },
+   "media_type": {
+    "type": "enum",
+    "values": [
+     "video",
+     "audio",
+     "song"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "video, audio or song"
    },
    "metadata_completeness": {
     "type": "number",
@@ -5176,6 +5214,47 @@
      "succeeded",
      "failed",
      "cancelled"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "usage_status": {
+    "type": "enum",
+    "values": [
+     "ready",
+     "unchecked",
+     "qc_failed",
+     "processing",
+     "failed",
+     "unplayable",
+     "no_media"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "Can it be used: ready, unchecked, qc_failed, processing, failed, unplayable or no_media. Only ready is offered to FAST, loops and blocking"
+   },
+   "media_state": {
+    "type": "enum",
+    "values": [
+     "processing",
+     "ready",
+     "failed",
+     "missing",
+     "unplayable"
     ],
     "sort": true,
     "filter": true,

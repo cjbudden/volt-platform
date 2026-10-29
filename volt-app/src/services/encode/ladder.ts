@@ -48,6 +48,8 @@
 
 export interface Rung {
   height: number;
+  /** Set on a fixed-size (box) rung: the 16:9 width it is encoded at. */
+  width?: number;
   bitrate_kbps: number;
   /** null means "the ladder's frame rate". */
   fps?: number | null;
@@ -66,6 +68,16 @@ export interface LadderGroupRow {
   packaging: 'hls' | 'dash' | 'both';
   codec_backend: 'x264' | 'nvenc';
   cap_to_source: boolean;
+  /** 'box': every rung at its fixed 16:9 size, letterboxed, none dropped (0115). Absent on an old row: 'scale'. */
+  frame_mode?: 'scale' | 'box' | null;
+}
+
+export type FrameMode = 'scale' | 'box';
+
+/** The 16:9 box for a rung height, even (H.264 4:2:0 needs even sides). */
+export function boxWidth(height: number): number {
+  const w = Math.round((height * 16) / 9);
+  return w % 2 ? w + 1 : w;
 }
 
 export interface ResolvedLadder {
@@ -77,6 +89,8 @@ export interface ResolvedLadder {
   packaging: 'hls' | 'dash' | 'both';
   codecBackend: 'x264' | 'nvenc';
   capToSource: boolean;
+  /** 'box': fixed sizes (each rung's 16:9 box), every rung; 'scale': follow the source. */
+  frameMode: FrameMode;
   origin: LadderOrigin;
 }
 
@@ -115,6 +129,8 @@ export interface FittedLadder {
   /** True when nothing could be measured, so nothing was capped. Distinct from
    *  "measured and everything fitted", which is why it is a separate field. */
   sourceUnmeasured: boolean;
+  /** Fixed sizes: every rung encoded at its 16:9 box ({width} on each kept rung). */
+  boxed?: boolean;
   notes: string[];
 }
 
@@ -173,6 +189,7 @@ export function resolveLadder(
     packaging: group.packaging,
     codecBackend: group.codec_backend,
     capToSource: group.cap_to_source,
+    frameMode: group.frame_mode === 'box' ? 'box' : 'scale',
     origin: tracking
       ? { kind: 'tracked', outputProfileId: group.tracks_output_profile_id!, profileName: opts.trackedProfileName ?? null }
       : { kind: 'members' },
@@ -194,6 +211,24 @@ export function fitToSource(ladder: ResolvedLadder, probe: SourceProbe): FittedL
     kept: [], dropped: [], fps: ladder.fps, adapted: null,
     sourceUnmeasured: false, notes,
   };
+
+  // FIXED SIZES. Every rung, each at its own 16:9 size with the picture fitted
+  // inside it: the output is the ladder whatever the source, which is what a
+  // FAST channel needs (services/fast/ladder.ts). A smaller source is scaled up,
+  // and said so; nothing is dropped and the frame rate is the ladder's.
+  if (ladder.frameMode === 'box') {
+    out.kept = ladder.rungs.map((r) => ({ ...r, width: boxWidth(r.height) }));
+    out.boxed = true;
+    notes.push('fixed sizes: every rendition at its 16:9 size, the picture fitted inside it');
+    const w = probe.width == null ? null : Number(probe.width);
+    if (srcH != null && srcH > 0 && w != null && w > 0) {
+      const top = ladder.rungs[0];
+      if (top && srcH < top.height && w < boxWidth(top.height) * 0.98) notes.push(`the source is ${w}x${srcH}, below the ${top.height}p top rendition, so it is scaled up`);
+      if (Math.abs(w / srcH - 16 / 9) >= 0.01) notes.push(`${w}x${srcH} is not 16:9: ${w / srcH > 16 / 9 ? 'bars above and below' : 'bars at the sides'}`);
+    }
+    if (srcFps != null && srcFps > 0 && Math.abs(srcFps - ladder.fps) > 0.5) notes.push(`the source is ${srcFps}fps; encoded at the ladder's ${ladder.fps}fps so every title shares one frame rate`);
+    return out;
+  }
 
   // CASE 1. Not measured is not zero. See the header.
   if (!ladder.capToSource || srcH == null || !Number.isFinite(srcH) || srcH <= 0) {
@@ -268,6 +303,7 @@ function capFps(ladderFps: number, sourceFps: number | null, notes: string[]): n
 /** A one-line summary for a queue row or a job note. */
 export function describeFit(f: FittedLadder): string {
   const kept = f.kept.map((r) => `${r.height}p`).join(', ') || 'nothing';
+  if (f.boxed) return `${kept} (fixed sizes)`;
   if (f.adapted) return `${kept} (adapted from ${f.adapted.from}p, source was smaller)`;
   if (f.sourceUnmeasured) return `${kept} (source not measured)`;
   if (f.dropped.length) return `${kept} (${f.dropped.length} above the source dropped)`;

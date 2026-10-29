@@ -28,7 +28,7 @@ const ID1 = '11111111-1111-4111-8111-111111111111', ID2 = '22222222-2222-4222-82
 
 ;(async () => {
   console.log('== filters <-> URL ==')
-  const f: LibraryFilters = { ...EMPTY_FILTERS, types: [ID1, ID2], avail: ['available'], origin: ['clip', 'upload'], missing: true, res: [1080, 720], codec: ['h264'], from: '2026-10-01', to: '2026-10-18', durMin: 5, durMax: 60, q: 'harbour final', sort: 'least_complete', review: 'needs', stale: true }
+  const f: LibraryFilters = { ...EMPTY_FILTERS, source: ['channel', 'none'], media: ['song'], types: [ID1, ID2], avail: ['available'], origin: ['clip', 'upload'], missing: true, res: [1080, 720], codec: ['h264'], from: '2026-10-01', to: '2026-10-18', durMin: 5, durMax: 60, q: 'harbour final', sort: 'least_complete', review: 'needs', stale: true }
   const url = filtersToSearch(f)
   eq(parseFilters(url), f, 'every filter survives the round trip through the page URL')
   ok(url.includes(`type=${encodeURIComponent(`${ID1},${ID2}`)}`) && url.includes('missing=1') && url.includes('res=1080%2C720'), `short, shareable parameters (${url})`)
@@ -38,6 +38,7 @@ const ID1 = '11111111-1111-4111-8111-111111111111', ID2 = '22222222-2222-4222-82
   eq([bad.types, bad.avail, bad.res, bad.from, bad.durMin, bad.sort, bad.codec], [[ID1], ['available'], [1080], '', null, 'newest', []], 'malformed URL values are dropped, never thrown')
   const api = new URLSearchParams(filtersToApi(f, { limit: 48, cursor: 'abc' }))
   eq(api.get('schema_id'), `${ID1},${ID2}`, 'API: content types as schema_id (any of)')
+  eq([api.get('source'), api.get('media_type')], ['channel,none', 'song'], 'API: source and asset type')
   eq([api.get('availability_state'), api.get('origin'), api.get('metadata_missing_required'), api.get('top_height'), api.get('video_codec')], ['available', 'clip,upload', 'true', '1080,720', 'h264'], 'API: availability, source, missing metadata, resolution, codec')
   eq([api.get('created_at[gte]'), api.get('created_at[lt]')], ['2026-10-01', '2026-10-19'], 'API: date range, the end day included')
   eq([api.get('duration_ms[gte]'), api.get('duration_ms[lte]')], ['300000', '3600000'], 'API: duration range in ms')
@@ -76,12 +77,17 @@ const ID1 = '11111111-1111-4111-8111-111111111111', ID2 = '22222222-2222-4222-82
   const facets: any = { total: 9, facets: {
     types: [{ id: ID1, name: 'Programme / episode', key: 'episode', schema_org_type: 'Episode', n: 4 }, { id: ID2, name: 'Movie', key: 'movie', schema_org_type: 'Movie', n: 2 }, { id: null, name: null, key: null, schema_org_type: null, n: 3 }],
     availability: [{ value: 'available', n: 5 }, { value: 'draft', n: 4 }], origins: [{ value: 'clip', n: 7 }, { value: 'upload', n: 2 }],
+    sources: [{ value: 'channel', n: 5 }, { value: 'upload', n: 3 }, { value: 'none', n: 1 }], media_types: [{ value: 'video', n: 6 }, { value: 'song', n: 3 }],
     resolutions: [{ value: 720, n: 2 }, { value: 1080, n: 7 }], codecs: [{ value: 'h264', n: 9 }], metadata: [{ value: true, n: 6 }, { value: false, n: 3 }] } }
   const panel = renderToStaticMarkup(<LibraryFilterPanel filters={{ ...EMPTY_FILTERS, types: [ID2] }} onChange={() => {}} facets={facets} />)
   ok(/aria-pressed="false"[^>]*>Programme \/ episode<span class="ct">4/.test(panel) && /aria-pressed="true"[^>]*>Movie<span class="ct">2/.test(panel), 'content type chips: multi-select toggles with counts')
   ok(panel.includes('3 with no type'), 'assets with no type are counted')
   ok(/Missing required<span class="ct">6/.test(panel), 'missing required metadata with its count')
-  ok(!panel.includes('Top resolution') && panel.includes('More filters'), 'secondary filters folded away until asked for')
+  const plain = renderToStaticMarkup(<LibraryFilterPanel filters={EMPTY_FILTERS} onChange={() => {}} facets={facets} />)
+  ok(!plain.includes('Top resolution') && !plain.includes('Content type') && plain.includes('More filters'), 'secondary filters (content type among them) folded away until asked for')
+  ok(/Asset type/.test(plain) && />Video<span class="ct">6/.test(plain) && />Audio<span class="ct">0/.test(plain) && />Song<span class="ct">3/.test(plain), 'asset type chips: video, audio, song with counts')
+  ok(/>Channel<span class="ct">5/.test(plain) && />Event<span class="ct">0/.test(plain) && />Radio</.test(plain) && />Upload<span class="ct">3/.test(plain) && />No source<span class="ct">1/.test(plain), 'source chips: channel, event, radio, upload and no source')
+  ok(plain.includes('Created as'), 'how it was made is labelled Created as, not Source')
   const panel2 = renderToStaticMarkup(<LibraryFilterPanel filters={{ ...EMPTY_FILTERS, res: [1080] }} onChange={() => {}} facets={facets} />)
   ok(panel2.indexOf('1080p') < panel2.indexOf('720p') && panel2.includes('Top resolution') && panel2.includes('Clear filters'), 'a secondary filter in use opens the panel; resolutions highest first; Clear shown')
 

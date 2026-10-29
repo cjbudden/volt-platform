@@ -266,3 +266,106 @@ storageRouter.post('/reconcile', asyncHandler(async (req, res) => {
   if (!owned) throw notFound('Stream not found');
   res.json(await reconcileStream(body.streamId, { actor: `user:${await actorLabel(req)}` }));
 }));
+
+// ------------------------------------------------- what expires next, and the restore bin
+//
+//   GET    /api/storage/expiring?within=&q=          recordings by when they will be deleted
+//   PATCH  /api/storage/recordings/:id/expiry        { deleteAfter: ISO | null, note? }  set by hand, or back to the rule
+//   POST   /api/storage/recordings/:id/hold          { hold, reason? }  keep it until released
+//   GET    /api/storage/bin                          what retention and deletes removed, restorable
+//   POST   /api/storage/bin/:id/restore              put it back
+//   DELETE /api/storage/bin/:id                      purge now (the real deletion)
+//
+// docs/RETENTION.md.
+
+async function ownedRecording(req: any) {
+  const r = await one<any>(
+    `SELECT r.* FROM recordings r LEFT JOIN channels c ON c.id = r.channel_id LEFT JOIN groups gc ON gc.id = c.group_id
+       LEFT JOIN events e ON e.id = r.event_id LEFT JOIN groups ge ON ge.id = e.group_id
+      WHERE r.id = $1 AND COALESCE(gc.account_id, ge.account_id) = $2`, [req.params.id, accountId(req)]);
+  if (!r) throw notFound('Recording not found');
+  return r;
+}
+
+storageRouter.get('/expiring', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const within = req.query.within ? Math.max(1, Math.min(3650, Number(req.query.within) || 0)) : null;
+  const rows = await query<any>(
+    `SELECT r.id, r.title, r.kind, r.channel_id, r.event_id, r.start_epoch_ms, r.end_epoch_ms, r.expires_at, r.delete_after,
+            r.delete_after_by, r.delete_after_note, r.storage_state, COALESCE(c.name, e.name) AS owner,
+            (SELECT COALESCE(sum(m.bytes), 0)::bigint FROM media_objects m WHERE m.recording_id = r.id AND m.state <> 'deleted') AS bytes,
+            (SELECT bool_or(m.hold AND m.hold_reason NOT LIKE 'kept %') FROM media_objects m WHERE m.recording_id = r.id AND m.state <> 'deleted') AS held,
+            (SELECT max(m.hold_reason) FROM media_objects m WHERE m.recording_id = r.id AND m.state <> 'deleted' AND m.hold AND m.hold_reason LIKE 'kept %') AS kept_for_clips,
+            (SELECT count(DISTINCT cs.vod_asset_id)::int FROM clip_segments cs WHERE cs.recording_id = r.id) AS clips
+       FROM recordings r LEFT JOIN channels c ON c.id = r.channel_id LEFT JOIN groups gc ON gc.id = c.group_id
+       LEFT JOIN events e ON e.id = r.event_id LEFT JOIN groups ge ON ge.id = e.group_id
+      WHERE COALESCE(gc.account_id, ge.account_id) = $1 AND r.storage_state IS DISTINCT FROM 'deleted'
+        AND ($2::text IS NULL OR COALESCE(c.name, e.name, r.title, '') ILIKE '%' || $2 || '%')
+      ORDER BY r.start_epoch_ms LIMIT 2000`, [acct, req.query.q ? String(req.query.q) : null]);
+  const rules = new Map<string, any>();
+  const out = [];
+  for (const r of rows) {
+    const stream = r.channel_id ?? r.event_id;
+    if (!rules.has(stream)) rules.set(stream, await ruleFor({ channelId: r.channel_id, eventId: r.event_id, accountId: acct, appliesTo: 'recording' }));
+    const rule = rules.get(stream);
+    const del = rule?.enabled === false ? null : rule?.stages?.filter((s: any) => s.action === 'delete').sort((a: any, b: any) => a.afterDays - b.afterDays)[0];
+    const end = r.end_epoch_ms != null ? Number(r.end_epoch_ms) : null;
+    const byRule = del && end ? new Date(end + del.afterDays * 86_400_000) : null;
+    // A recording retention already pruned down to what clips use stays until those clips
+    // go: it has no expiry of its own any more.
+    const expiry = r.kept_for_clips ? null : r.delete_after ? new Date(r.delete_after) : byRule ?? (r.expires_at ? new Date(r.expires_at) : null);
+    const source = r.kept_for_clips ? 'kept_for_clips' : r.delete_after ? 'manual' : byRule ? 'rule' : r.expires_at ? 'legacy' : 'none';
+    out.push({
+      id: r.id, title: r.title, kind: r.kind, owner: r.owner, channelId: r.channel_id, eventId: r.event_id,
+      startMs: Number(r.start_epoch_ms), endMs: end, recording: end == null, bytes: Number(r.bytes), clips: r.clips,
+      held: !!r.held, keptForClips: r.kept_for_clips ?? null, storageState: r.storage_state,
+      expiresAt: expiry, expirySource: source, rule: rule ? { name: rule.name, deleteAfterDays: del?.afterDays ?? null } : null,
+      manual: r.delete_after ? { at: r.delete_after, by: r.delete_after_by, note: r.delete_after_note } : null,
+    });
+  }
+  const now = Date.now();
+  const list = out.filter((x) => !within || (x.expiresAt && x.expiresAt.getTime() < now + within * 86_400_000))
+    .sort((a, b) => (a.expiresAt?.getTime() ?? Infinity) - (b.expiresAt?.getTime() ?? Infinity) || a.startMs - b.startMs);
+  res.json({ items: list, binDays: (await import('../services/media/trash')).TRASH_DAYS });
+}));
+
+storageRouter.patch('/recordings/:id/expiry', asyncHandler(async (req, res) => {
+  const rec = await ownedRecording(req);
+  const b = z.object({ deleteAfter: z.string().datetime({ offset: true }).nullable(), note: z.string().max(300).optional() }).parse(req.body ?? {});
+  const who = await actorLabel(req);
+  await query(`UPDATE recordings SET delete_after = $2, delete_after_by = $3, delete_after_note = $4 WHERE id = $1`,
+    [rec.id, b.deleteAfter ? new Date(b.deleteAfter) : null, b.deleteAfter ? who : null, b.deleteAfter ? b.note ?? null : null]);
+  // A legacy expires_at would still fire on its own; a date set by hand replaces it.
+  if (b.deleteAfter) await query(`UPDATE recordings SET expires_at = NULL WHERE id = $1`, [rec.id]);
+  const { refreshNextAction } = await import('../services/media/retention');
+  await refreshNextAction(rec.id).catch(() => {});
+  res.json({ id: rec.id, deleteAfter: b.deleteAfter, by: b.deleteAfter ? who : null });
+}));
+
+storageRouter.post('/recordings/:id/hold', asyncHandler(async (req, res) => {
+  const rec = await ownedRecording(req);
+  const b = z.object({ hold: z.boolean(), reason: z.string().max(500).optional() }).parse(req.body ?? {});
+  const objs = await query<any>(`SELECT id FROM media_objects WHERE recording_id = $1 AND state <> 'deleted'`, [rec.id]);
+  const who = `user:${await actorLabel(req)}`;
+  for (const o of objs) await setHold(o.id, b.hold, b.hold ? (b.reason ?? 'kept from the retention list') : null, who);
+  res.json({ id: rec.id, hold: b.hold, objects: objs.length });
+}));
+
+storageRouter.get('/bin', asyncHandler(async (req, res) => {
+  const { listBin, TRASH_DAYS } = await import('../services/media/trash');
+  res.json({ items: await listBin(accountId(req), { all: req.query.all === '1' }), days: TRASH_DAYS });
+}));
+
+storageRouter.post('/bin/:id/restore', asyncHandler(async (req, res) => {
+  const { restoreItem } = await import('../services/media/trash');
+  try { res.json(await restoreItem(req.params.id, { accountId: accountId(req), by: await actorLabel(req) })); }
+  catch (e: any) { if (e?.status === 404) throw notFound(e.message); if (e?.status === 409) throw badRequest(e.message); throw e; }
+}));
+
+storageRouter.delete('/bin/:id', asyncHandler(async (req, res) => {
+  const it = await one<any>(`SELECT id FROM trash_items WHERE id = $1 AND account_id = $2 AND state = 'held'`, [req.params.id, accountId(req)]);
+  if (!it) throw notFound('Nothing in the bin with that id');
+  const { purgeItem } = await import('../services/media/trash');
+  await purgeItem(it.id);
+  res.status(204).end();
+}));

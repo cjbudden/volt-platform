@@ -1,0 +1,12 @@
+-- ============================================================================
+--  0080 WATERMARK SIZE TO A DECIMAL.
+--
+--  watermark_scale is the logo's height as a percent of the frame height, which
+--  every renderer reads (encoder, loop builder, burned graphics, test stream).
+--  Logos are rarely square, so the console now lets a wide logo be sized by
+--  WIDTH and converts that to a height through the logo's own aspect ratio. A
+--  whole-number height made that conversion coarse (1% of the height is 50 px
+--  of width on a 5:1 logo), so the column holds a decimal. REAL rather than
+--  NUMERIC: the driver returns REAL as a number, NUMERIC as a string.
+-- ============================================================================
+ALTER TABLE channels ALTER COLUMN watermark_scale TYPE REAL;

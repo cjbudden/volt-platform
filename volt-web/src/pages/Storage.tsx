@@ -4,6 +4,7 @@ import {
   type RetentionStageInput, type SweepPreview, type AnalyticsRetention,
 } from '../api'
 import { Notice, PageError, useNotify, usePageNotice } from '../notices'
+import { RetentionList, RestoreBin } from './StorageRetention'
 
 /* ============================================================================
    STORAGE — what media exists, where it lives, and what will happen to it.
@@ -502,6 +503,10 @@ export default function StoragePage() {
           )}
         </div>
       </div>
+
+      {/* WHAT GOES NEXT, AND WHAT CAN STILL COME BACK (docs/RETENTION.md). */}
+      <RetentionList />
+      <RestoreBin />
 
       <div className="card">
         <div className="flex items-center gap-2" style={{ padding: '12px 14px 0' }}>

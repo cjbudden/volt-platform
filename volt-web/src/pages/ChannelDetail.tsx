@@ -15,7 +15,7 @@ import { ImageRefField, GuideIconField } from '../ImageRefField'
 import { LangPicker, useCaptionLanguages } from '../LangPicker'
 import { RecordingSection, RET_UNIT_SEC, splitDuration, PipelineStrip, type StripGate, GATE_COLOR, RecoveryNote, DiagnosisBlock, DrawerTabs, TabPane, type DrawerTab, type RetUnit } from '../scaffold'
 import DeleteChannelDialog from '../DeleteChannelDialog'
-import { usePageNotice, useNotify, PageError, FormStatus, Notice } from '../notices'
+import { usePageNotice, useNotify, PageError, FormStatus, Notice, useSaveResult } from '../notices'
 import { useAccess, ReadOnlyBadge } from '../access'
 // The meter reads the SAME quantity as the radio waveform and the clipping
 // workbench: linear peak amplitude. See audioLevel.ts.
@@ -28,6 +28,8 @@ import { OutputUrls } from '../OutputUrls'
 import { PanelLayout } from '../panelLayout'
 import { RightsPreview } from '../RightsPreview'
 import { useStatsPanel } from '../useStatsPanel'
+import { ProgrammeFlagIcon, mediaHref } from '../programmeMedia'
+import { useProgrammeGestures, BROADCAST, broadcastOf, type Broadcast } from '../programmeGestures'
 import { LiveGraphicsButton } from '../graphics/LiveGraphicsButton'
 import { LogWhen, logClock, logClockTitle, useNow } from '../logWhen'
 function fmtOffset(sec: number) {
@@ -206,9 +208,8 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
             <span className={`tag type ${wt === 'transcode' ? 'chan' : 'event'}`}>{wt === 'transcode' ? 'Transcode' : 'Packaging'}</span>
             <span className={`tag ${stateCls}`}><span className={`dot-s ${stateCls}`} />{stateLabel}</span>
             {d.billing?.billable && (
-              <span title="Server up, live time metering"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-sm)', padding: '3px 9px', borderRadius: 999, background: 'rgba(251,191,36,.14)', border: '1px solid rgba(251,191,36,.4)', color: '#fbbf24' }}>
-                ● billable · {fmtDur(billingElapsed)}
+              <span className="tag bill" title="Server up, live time metering">
+                <span className="dot-s" />Billable · {fmtDur(billingElapsed)}
               </span>
             )}
           </h1>
@@ -334,7 +335,8 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
             onSendSource={() => setConfirmStart(true)} onGoLive={() => setAir(true)} busy={busy} />) },
         { id: 'failover', label: 'Failover control', node: <FailoverTestPanel d={d} sourceUp={sourceUp} /> },
         { id: 'epg', label: 'Programme guide', node: (
-          <EpgStrip d={d}
+          <EpgStrip d={d} broadcast={broadcastOf(ov, !!d.onAir)}
+            onChanged={load}
             // ABSOLUTE path. navigate('events') was relative, so the browser resolved it
             // against /channels/<id> and landed on /channels/events, a channel called
             // "events" that does not exist. The guide for THIS channel lives here.
@@ -633,16 +635,12 @@ function OutputError({ d }: { d: CD }) {
     <div className="player">
       <div className="video">
         <div className="grad" style={{ background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' }} />
-        <div className="plabel"><span className="pt" style={{ color: col }}>OUTPUT</span></div>
-        {/* not LIVE: a neutral status badge that matches the real state */}
-        <div className="badge-live" style={{ background: 'rgba(148,163,184,.25)', color: '#e5e7eb' }}><span className="d" style={{ background: col }} />{degraded ? 'DEGRADED' : 'NOT LIVE'}</div>
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
           <div style={{ maxWidth: 360 }}>
             <div style={{ fontWeight: 700, color: col, marginBottom: 6 }}>{degraded ? 'Output degraded' : 'Output is not being produced'}</div>
             <div style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)', wordBreak: 'break-word' }}>{g?.detail || 'the encoder is not delivering output'}</div>
           </div>
         </div>
-        <div className="ptime">{degraded ? 'degraded' : 'no output'}</div>
       </div>
       <div className="pfoot">
         <span className="dot-s down" /> {d.health?.primaryError ? `${d.health.primaryError.label}: ${d.health.primaryError.message}` : 'output error'}
@@ -1295,7 +1293,11 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
   const h = d.health
   const inGate = h?.gates.find(g => g.gate === 'input')
   const inputFailed = sourceUp && inGate?.status === 'failed'
+  // FAILED, not degraded: an output timing fault (the output gate is degraded,
+  // the encoder is running) is not "the encoder has failed", and must not hide
+  // the source preview behind that message.
   const encFailed = !!h?.primaryError && (h.primaryError.gate === 'encoder' || h.primaryError.gate === 'output')
+    && (h.gates ?? []).some((g: any) => g.gate === h.primaryError!.gate && g.status === 'failed')
   const inputArriving = inGate?.status === 'healthy' || inGate?.status === 'degraded'
   const receiving = sourceUp && inputArriving
   const viaOrigin = `/origin/${d.id}/live/master.m3u8`
@@ -1372,10 +1374,9 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
               fallbackSrc={fallbacks}
               preferHeight={heightOf(sel?.label) || undefined} onState={setPv} />
           : <div className="grad" style={showGateError ? { background: 'radial-gradient(120% 120% at 70% 20%,#2a1620 0%,#0b0f16 70%)' } : undefined} />}
-        <div className="plabel"><span className="pt" style={{ color: showGateError ? '#fca5a5' : '#a5b4fc' }}>
-          SOURCE · {proto}{sel?.label ? ` · ${sel.label}` : ''}{sel?.role === 'backup' ? ' · backup' : ''}
-        </span></div>
-        <div className="badge-live" style={{ background: badge.bg }}><span className="d" />{badge.t}</div>
+        {/* NOTHING SITS ON THE PICTURE (24 Oct 2026): the source label, its state badge
+            and how it is played used to cover the corners, exactly where a station puts
+            its logo, watermark and lower thirds. They are in the bar below instead. */}
         {showGateError && (
           <div className="src-overlay">
             <div className="t" style={{ color: '#fca5a5' }}>{inputFailed ? 'Source error' : 'Source is valid, but the encoder has failed'}</div>
@@ -1407,7 +1408,6 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
         {!showGateError && !playSrc && sourceUp && !receiving && (
           <div className="src-overlay"><div className="d">{inGate?.detail || `Waiting for ${proto}: nothing arriving yet`}</div></div>
         )}
-        <div className="ptime">{showGateError ? '— error —' : how ?? (sourceUp ? `${srcHost || 'source'} · live` : '— no signal —')}</div>
       </div>
 
       {inputs.length > 1 && (
@@ -1423,11 +1423,14 @@ function SourcePlayer({ d, sourceUp, onSendSource, busy }: { d: CD; sourceUp: bo
       )}
 
       <div className="pfoot">
-        <LevelDot level={inputs.length ? summary.level : 'pending'} />
+        <span className="tag" style={{ background: badge.bg, color: '#0b0f16' }} title={how ?? undefined}>
+          {badge.t === proto ? proto : `${proto} · ${badge.t}`}{sel?.label ? ` · ${sel.label}` : ''}{sel?.role === 'backup' ? ' · BACKUP' : ''}
+        </span>
         <span style={{ flex: 1, minWidth: 0 }}>
           {!inputs.length ? 'No source: send one to enable output'
             : inputs.length === 1 ? (selVerdict?.text ?? '')
             : summary.text}
+          {how && !showGateError && <span style={{ color: 'var(--faint)' }}> · {how}</span>}
         </span>
         {inputs.length > 0 && <button type="button" className="btn ghost sm" onClick={() => setShowAll(v => !v)}>{showAll ? 'Hide inputs' : (isPkg || inputs.length > 1 ? 'All inputs' : 'Details')}</button>}
         {inputs.length > 0 && <button type="button" className="btn ghost sm" onClick={() => void checkAll()} disabled={Object.values(checks).some(c => c.busy)}>Check all</button>}
@@ -1493,8 +1496,6 @@ function IdleOutput({ sourceUp, onGoLive, warming, sinceMs, captionsOn, isEvent 
     <div className="player">
       <div className="video">
         <div className="grad" style={{ background: 'radial-gradient(120% 120% at 70% 20%,#20304a 0%,#0b0f16 70%)' }} />
-        <div className="plabel"><span className="pt" style={{ color: sourceUp ? '#38bdf8' : '#98a1b6' }}>OUTPUT · {warming ? 'warming up' : sourceUp ? 'ready' : 'idle'}</span></div>
-        <div className="badge-live" style={{ background: sourceUp ? 'rgba(56,189,248,.8)' : 'rgba(102,112,138,.7)' }}><span className="d" />{warming ? 'STARTING' : sourceUp ? 'READY' : 'IDLE'}</div>
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 20 }}>
           {warming ? (
             <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-body)', maxWidth: 340 }}>
@@ -1520,7 +1521,6 @@ function IdleOutput({ sourceUp, onGoLive, warming, sinceMs, captionsOn, isEvent 
             </div>
           )}
         </div>
-        <div className="ptime">{warming ? `warming up · ${warmSec}s` : sourceUp ? 'ready to go live' : 'no source'}</div>
       </div>
       <div className="pfoot">
         <span className={`dot-s ${warming || sourceUp ? 'sched' : 'idle'}`} /> {warming ? (captionsOn ? 'Encoder starting · captions add 10 to 20 seconds before first output' : 'Encoder starting · first output in a few seconds') : sourceUp ? 'Encoder warm · output held private until you go live' : 'Output disabled until a source is connected'}
@@ -1930,19 +1930,10 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
               : <>The programme on air is blacked out there; they get “{geoRes.replacement!.title}” instead.</>}</div>
           </div>
         )}
-        <div className="plabel"><span className="pt" style={{ color: liveNow ? '#4ade80' : '#fbbf24' }}>OUTPUT · {fmt.toUpperCase()}{liveNow ? '' : ' · DVR'}</span></div>
-        {/* On-air state: green ON AIR when published to the public, blue PREVIEW when the
-            packaged output is playing but held private (verify DASH/HLS before going on air).
-            Centered at the top so it never sits behind the OUTPUT label or the LIVE badge. */}
-        <div style={{
-          position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
-          display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
-          fontSize: 'var(--fs-label)', fontWeight: 700, letterSpacing: .4, padding: '4px 10px', borderRadius: 999,
-          background: onAir ? 'rgba(74,222,128,.18)' : 'rgba(56,189,248,.18)',
-          border: `1px solid ${onAir ? 'rgba(74,222,128,.55)' : 'rgba(56,189,248,.55)'}`,
-          color: onAir ? '#4ade80' : '#38bdf8', backdropFilter: 'blur(2px)',
-        }}><span className="dot-s" style={{ background: onAir ? '#4ade80' : '#38bdf8' }} />{onAir ? 'ON AIR' : 'PREVIEW · not on air'}</div>
-        <div className="badge-live" style={liveNow ? undefined : { background: 'rgba(251,191,36,.9)' }}><span className="d" />{liveNow ? 'LIVE' : 'DVR'}</div>
+        {/* NOTHING SITS ON THE PICTURE (24 Oct 2026): OUTPUT · HLS, ON AIR / PREVIEW and
+            LIVE / DVR covered the top corners, where the burned-in watermark and the
+            graphics being tested are. The format and on-air state are in the bar below,
+            live or how far behind in the DVR bar. */}
         {/* The watermark is burned into the encoded output (transcode), so it is
             already in these pixels. We intentionally do NOT paint a DOM overlay. */}
         <AudioDock eng={eng} tracks={audioTracks} currentTrack={audioTrack} onSelectTrack={setAudioTrack} controlsShown={controlsShown} />
@@ -1967,7 +1958,6 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
             </div>
           </div>
         )}
-        <div className="ptime">{stalled ? 'stalled — recovering' : liveNow ? 'live edge' : `${fmtOffset(behind)} behind live`}</div>
       </div>
 
       {/* DVR scrubber — LIVE is the right end. The handle sits at the right (live) and you
@@ -1991,12 +1981,14 @@ function HlsOutput({ d, onAir, captionLangs, subOn, setSubOn, subLang, setSubLan
             <button className="chip" style={{ padding: '3px 8px', fontSize: 'var(--fs-label)' }} onClick={() => seekBehind(behind + 15)}>« 15s</button>
             <button className="chip" style={{ padding: '3px 8px', fontSize: 'var(--fs-label)' }} onClick={() => seekBehind(behind + 60)}>« 1m</button>
           </span>
-          <span style={{ color: liveNow ? 'var(--live)' : 'var(--faint)' }}>Live ▸</span>
         </div>
       </div>
 
       <div className="pfoot">
-        <span className={`dot-s ${stalled ? 'down' : 'live'}`} /> {stalled ? 'Stalled — recovering' : `Playing ${fmt.toUpperCase()}`}
+        {stalled && <><span className="dot-s down" /> Stalled, recovering</>}
+        <span className={`tag ${onAir ? 'live' : 'sched'}`} title={onAir ? 'Published: viewers can watch' : 'Held private: check HLS and DASH play before going on air'}>
+          {onAir ? 'On air' : 'Preview · not on air'}
+        </span>
         {latency && (
           <span title={latency.exact
             ? 'Estimated latency from the encoder writing a segment to it playing here, measured from the manifest wall-clock stamps. Add a few seconds of ingest/encode ahead of that for full input to output.'
@@ -2228,7 +2220,43 @@ function Count({ ms, strong }: { ms: number; strong?: boolean }) {
 }
 const clockOf = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 
-function EpgStrip({ d, onAddEpg, onHideEpg }: { d: CD; onAddEpg: () => void; onHideEpg: () => void }) {
+/* ============================================================================
+   THE GUIDE STRIP (24 Oct 2026)
+
+   WHAT IS ON vs WHAT IS GOING OUT. The guide says what is scheduled now; it
+   says nothing about whether the channel is broadcasting it. So the current
+   slot is coloured by the channel's own state, not by the clock:
+     green  ON AIR    running and public
+     blue   READY     running, private (not on air yet)
+     grey   OFF AIR   not running: the slot is scheduled, nothing goes out
+   and the head pill says the same thing.
+
+   EACH CARD'S FLAG is the shared programme flag as an icon, top right
+   (programmeMedia.tsx: clock = Auto VOD / converting / failed, TV = recording
+   or VOD, dot = not recorded or gone), the detail on hover.
+
+   GESTURES
+     click            open what the flag leads to (the VOD, or the recording)
+     double click     the EPG at that programme's day
+     Ctrl+click,      toggle Auto VOD on a programme that has not finished
+     Ctrl+R (hovered  airing. Ctrl+R is taken from the browser ONLY while a
+       or focused)    card is hovered or focused.
+   ========================================================================== */
+/**
+ * THE PLAYER BESIDE THE STRIP, when there is one (a FAST channel's Overview):
+ * where its playhead is in wall-clock time, how far behind live, how far back
+ * the DVR window reaches, and how to move it. With it the strip shows what is
+ * PLAYING (the programme at the playhead, with its own line) apart from what is
+ * LIVE (the white line), and offers "Watch" on programmes still in the window.
+ */
+export interface StripPlayer { wallClock: number | null; behindLive: number; dvrStartMs: number | null; seekTo: (ms: number) => void; goLive: () => void }
+
+export function EpgStrip({ d, broadcast = 'off', ownerPath, onChanged, onAddEpg, onHideEpg, player }: {
+  d: Pick<CD, 'id' | 'epg' | 'epgEnabled'>; broadcast?: Broadcast; ownerPath?: string; onChanged?: () => void; onAddEpg: () => void; onHideEpg?: () => void
+  player?: StripPlayer | null
+}) {
+  const bc = BROADCAST[broadcast]
+  const { bind, busyId } = useProgrammeGestures(ownerPath ?? `/epg/channel/${encodeURIComponent(d.id)}`, onChanged)
   // The page refreshes every 6 s; the strip keeps its own second hand so the
   // marker, the progress and "left" move smoothly and the on-air card changes
   // the moment a programme ends, not at the next refresh.
@@ -2243,12 +2271,17 @@ function EpgStrip({ d, onAddEpg, onHideEpg }: { d: CD; onAddEpg: () => void; onH
   })
   const nowIdx = lane.findIndex((p: any) => p.state === 'now')
   const cur = nowIdx >= 0 ? lane[nowIdx] : null
+  // Behind live (DVR): the programme at the playhead, and where in it.
+  const ph = player && player.wallClock != null && player.behindLive > 8 ? player.wallClock : null
+  const playIdx = ph == null ? -1 : lane.findIndex((p: any) => typeof p.startMs === 'number' && p.startMs <= ph && ph < p.endMs)
+  const playing = playIdx >= 0 ? lane[playIdx] : null
+  const playPct = playing ? ((ph! - playing.startMs) / (playing.endMs - playing.startMs)) * 100 : 0
   const next = lane.find((p: any) => typeof p.startMs === 'number' && p.startMs > t) ?? null
 
   // Keep the on-air card in view: one finished programme to its left for context.
   // Follows the change of programme, but leaves a viewer who scrolled alone until then.
   const laneRef = useRef<HTMLDivElement>(null)
-  const anchor = nowIdx >= 0 ? nowIdx : lane.findIndex((p: any) => p.state !== 'past')
+  const anchor = playIdx >= 0 ? playIdx : nowIdx >= 0 ? nowIdx : lane.findIndex((p: any) => p.state !== 'past')
   useEffect(() => {
     const el = laneRef.current
     if (!el || anchor < 0) return
@@ -2267,11 +2300,11 @@ function EpgStrip({ d, onAddEpg, onHideEpg }: { d: CD; onAddEpg: () => void; onH
       <div className="card" style={{ marginBottom: 18, display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px' }}>
         <span className="tag idle"><span className="dot-s idle" />NO EPG</span>
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 600 }}>No programme guide for this channel</div>
+          <div style={{ fontWeight: 600 }}>No programme guide yet</div>
           <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>Add programmes to show now/next and a schedule, or hide this panel.</div>
         </div>
         <button className="btn primary" onClick={onAddEpg}>Add EPG</button>
-        <button className="btn ghost" onClick={onHideEpg}>Hide</button>
+        {onHideEpg && <button className="btn ghost" onClick={onHideEpg}>Hide</button>}
       </div>
     )
   }
@@ -2296,23 +2329,38 @@ function EpgStrip({ d, onAddEpg, onHideEpg }: { d: CD; onAddEpg: () => void; onH
   return (
     <div className="card" style={{ marginBottom: 18 }}>
       <div className="epg-head">
-        <span className="tag live"><span className="dot-s live" />ON NOW</span>
+        <span className={`tag ${bc.pill}`} title={bc.hint}>
+          <span className={`dot-s ${bc.pill}`} />{bc.label}</span>
         <b>{now?.name || '—'}</b>
         {timing}
+        {ph != null && <span className="epg-watching" title={`The player is at ${clockOf(ph)}`}>
+          <span className="tag type">▶ Watching</span><b>{playing?.name ?? 'outside the guide'}</b>
+          <span className="epg-in"><Count ms={player!.behindLive * 1000} /> behind live</span>
+          <button className="btn ghost sm" onClick={player!.goLive}>Go live</button></span>}
         <div className="spacer" />
         {nx && <span className="epg-next">Up next · <b>{nx.name}</b> · {nx.start}{typeof nx.startMs === 'number' && nx.startMs > t && <> · in <Count ms={nx.startMs - t} /></>}</span>}
       </div>
       <div className="epg-lane" ref={laneRef}>
         <div className="epg-track">
           {lane.map((p: any, i: number) => (
-            <div key={p.startMs ?? i} className={`epg-prog ${p.state || ''}`} aria-current={p.state === 'now' ? 'true' : undefined}>
+            <div key={p.startMs ?? i}
+              className={`epg-prog ${p.state || ''}${i === playIdx ? ' playing' : ''}${p.state === 'now' ? ` bc-${broadcast}` : ''}${mediaHref(p.media) ? ' has-media' : ''}${p.media?.flag ? ' has-flag' : ''}${busyId && busyId === p.id ? ' busy' : ''}`}
+              aria-current={p.state === 'now' ? 'true' : undefined}
+              {...bind({ id: p.id, name: p.name, startMs: p.startMs, endMs: p.endMs, flag: p.media?.flag })}>
               {p.state === 'now' && <>
                 <span className="fill" style={{ width: `${p.progress}%` }} />
-                <span className="nowline" style={{ left: `${p.progress}%` }}><span className="nowlbl">Now {clockOf(t)}</span></span>
-                <span className="epg-onair">ON AIR</span>
+                <span className="nowline" style={{ left: `${p.progress}%` }}><span className="nowlbl">{ph != null ? 'Live' : 'Now'} {clockOf(t)}</span></span>
+                <span className="epg-onair">{bc.card}</span>
               </>}
+              {i === playIdx && <span className="playline" style={{ left: `${playPct}%` }}><span className="playlbl">▶ {clockOf(ph!)}</span></span>}
               <div className="pnm">{p.name}</div>
               <div className="ptm">{p.start} – {p.end} · {p.mins} min</div>
+              {/* Still in the DVR window: watch it from its start in the player beside the strip. */}
+              {player && i !== playIdx && p.state !== '' && typeof p.startMs === 'number' && player.dvrStartMs != null && p.startMs >= player.dvrStartMs - 1000 && (
+                <button type="button" className="epg-watch" title={`Watch ${p.name} from its start`} aria-label={`Watch ${p.name} from its start`}
+                  onClick={(e) => { e.stopPropagation(); player.seekTo(p.startMs) }} onPointerDown={(e) => e.stopPropagation()}>▶</button>)}
+              {/* Aired: where to watch it again (programmeMedia.tsx). */}
+              {p.media?.flag && <div className="pmedia"><ProgrammeFlagIcon flag={p.media.flag} /></div>}
             </div>
           ))}
         </div>
@@ -2405,7 +2453,7 @@ export function EventLog({ d }: { d: CD }) {
   const now = useNow()
   return (
     <div className="card">
-      <div className="card-h"><h3>Connection issues &amp; event log</h3><div className="spacer" /><span className="tag warn">{d.log.filter(l => l.level === 'warn' || l.level === 'down').length} today</span></div>
+      <div className="card-h"><h3>Connection Log</h3><div className="spacer" /><span className="tag warn">{d.log.filter(l => l.level === 'warn' || l.level === 'down').length} today</span></div>
       <div className="card-b" style={{ padding: '8px 18px' }}>
         <div className="log">
           {d.log.map((l, i) => (
@@ -2520,6 +2568,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
   const [guideIcon, setGuideIcon] = useState((d as any).guide_icon_ref || '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const saved = useSaveResult()
 
   const DVR_MAX_MIN = 240 // 4h
   const dvrMinNum = Math.max(0, Math.min(DVR_MAX_MIN, Number(dvrMin) || 0))
@@ -2601,7 +2650,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
 
     if (locked) for (const k of d.lockedWhileRunning ?? []) delete (patch as any)[k]
     setBusy(true)
-    try { await api.updateChannel(d.id, patch); onSaved() }
+    try { await api.updateChannel(d.id, patch); saved.show('Channel settings saved', onSaved) }
     catch (e: any) {
       if (String(e.message).includes('409') || /version|match/i.test(e.message)) setErr('This channel changed since you opened it. Reopen settings and retry.')
       else setErr(e.message)
@@ -2793,7 +2842,7 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
           <RecordingSection ctx="channel" recOn={recOn} setRecOn={setRecOn}
             retNum={retNum} setRetNum={setRetNum} retUnit={retUnit} setRetUnit={setRetUnit}
             retWarn={dvrMode === 'sliding' && retNum && Number(retNum) * RET_UNIT_SEC[retUnit] < dvrMinNum * 60
-              ? `Will be raised to the DVR window (${fmtWindow(dvrMinNum * 60)}) — retention can’t be shorter than DVR.` : null} />
+              ? `Will be raised to the DVR window (${fmtWindow(dvrMinNum * 60)}) : recordings can’t be kept for less than the DVR window.` : null} />
 
           <div className={locked ? 'locked-zone' : undefined} aria-disabled={locked || undefined}>
           {d.profile?.workflow_type === 'transcode' && (<>
@@ -2815,9 +2864,9 @@ function SettingsDrawer({ d, onClose, onSaved }: { d: CD; onClose: () => void; o
 
         </div>
         <div className="drawer-f">
-          <FormStatus error={err} />
+          <FormStatus error={err} success={saved.message} onDismiss={err ? () => setErr('') : undefined} />
           <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save changes'}</button>
+          <button className="btn primary" disabled={busy || saved.saving} onClick={() => { saved.clear(); save() }}>{busy ? 'Saving…' : saved.saving ? 'Saved' : 'Save changes'}</button>
         </div>
       </div>
     </div>

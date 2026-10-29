@@ -18,6 +18,16 @@ import { openSession, sessionDir, destinationFor, completeLanded, MAX_UPLOAD_BYT
 
 interface Who { accountId: string; userId: string | null }
 
+/** tus metadata retryOf: JSON { assetId, action } (a re-upload of a failed record). */
+function retryOf(v: string | undefined) {
+  if (!v) return null;
+  try {
+    const r = JSON.parse(v);
+    if (r && typeof r.assetId === 'string' && /^[0-9a-f-]{36}$/i.test(r.assetId) && ['reattach', 'replace', 'new'].includes(r.action)) return { assetId: r.assetId, action: r.action };
+  } catch { /* */ }
+  return null;
+}
+
 class PgTusStore implements TusStore {
   async create(who: Who, length: number, md: Record<string, string>): Promise<TusInfo> {
     let metadata: Record<string, any> | null = null;
@@ -29,6 +39,7 @@ class PgTusStore implements TusStore {
       contentType: md.filetype || md.type || 'application/octet-stream', totalBytes: Math.max(1, length),
       ladderGroupId: md.ladderGroupId || null, relativePath: md.relativePath || null,
       schemaId: md.schemaId || null, metadata, source: md.source || 'tus',
+      retryOf: retryOf(md.retryOf),
     });
     await query(`UPDATE upload_sessions SET chunk_count = 0, updated_at = now() WHERE id = $1`, [session.id]);
     return toInfo(session, md);

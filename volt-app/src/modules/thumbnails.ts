@@ -7,6 +7,7 @@
 //  GET  /api/thumbnails/vod/:id.vtt                          a clip's WebVTT (re-timed to the clip)
 //  GET  /api/thumbnails/status?stream&from&to                which hours are built
 //  POST /api/thumbnails/build {stream, from, to}             build (or finish) older hours now
+//  GET  /api/thumbnails/sprites[?asset|stream&from&to]        the sprite inventory: files, bytes, and the rows asked for
 //
 //  All answers are scoped to the caller's account. Sheet URLs are signed image
 //  service URLs, cached at the CDN; the VTTs are text and never cached long.
@@ -19,6 +20,9 @@ import { config } from '../config';
 import { buildRangeInBackground, layoutOf, sheetUrl, streamInfo, unitsFor } from '../services/thumbnails/builder';
 import { clipPieces, recordingPieces, vttForRange } from '../services/thumbnails/clips';
 import { fileVttFor } from '../services/thumbnails/fileSprites';
+import { spriteUsage } from '../services/thumbnails/spriteStore';
+import { query } from '../db';
+import { signedImageUrl } from './images';
 import { listRuns } from '../services/localRecordingIndex';
 
 export const thumbnailsRouter = Router();
@@ -124,4 +128,38 @@ thumbnailsRouter.post('/build', asyncHandler(async (req, res) => {
   if (b.to <= b.from || b.to - b.from > 7 * 86400_000) throw badRequest('from..to must be a forward span of at most 7 days');
   const started = buildRangeInBackground(s.id, b.from, b.to);
   res.status(202).json({ started, alreadyRunning: !started, stream: s.id, from: b.from, to: b.to });
+}));
+
+/**
+ * The sprite inventory (sprite_sheets, migration 0112). Sprite sheets are not in the Image
+ * Library; this is where they are counted and listed. No filter: the account's totals by owner.
+ * `asset`: that asset's sheets and VTT. `stream` (with from/to, default the last day): its hours' files.
+ */
+thumbnailsRouter.get('/sprites', asyncHandler(async (req, res) => {
+  const q = req.query as Record<string, string>;
+  const acct = accountId(req);
+  const usage = await spriteUsage(acct);
+  const totals = { files: usage.reduce((n, u) => n + u.files, 0), bytes: usage.reduce((n, u) => n + u.bytes, 0) };
+  let rows: any[] = [];
+  if (q.asset) {
+    if (!/^[0-9a-f-]{36}$/i.test(q.asset)) throw badRequest('asset is a VOD asset id');
+    rows = await query(`SELECT * FROM sprite_sheets WHERE account_id = $1 AND vod_asset_id = $2 ORDER BY kind, start_ms NULLS LAST, store_key`, [acct, q.asset]);
+  } else if (q.stream) {
+    const s = await ownStream(req, q.stream);
+    const to = Number(q.to) || Date.now(), from = Number(q.from) || to - 24 * 3600_000;
+    if (to <= from || to - from > 7 * 86400_000) throw badRequest('from..to must be a forward span of at most 7 days');
+    rows = await query(`SELECT * FROM sprite_sheets WHERE account_id = $1 AND stream_id = $2 AND start_ms >= $3 AND start_ms < $4
+                         ORDER BY start_ms, kind LIMIT 2000`, [acct, s.id, from, to]);
+  }
+  res.setHeader('Cache-Control', 'private, max-age=15');
+  res.json({
+    usage, totals,
+    items: rows.map((r) => ({
+      id: r.id, ownerKind: r.owner_kind, kind: r.kind, key: r.store_key,
+      streamId: r.stream_id, storyboardId: r.storyboard_id, assetId: r.vod_asset_id,
+      startMs: r.start_ms == null ? null : Number(r.start_ms), intervalMs: r.interval_ms, tiles: r.tiles,
+      width: r.width, height: r.height, bytes: Number(r.size_bytes), updatedAt: r.updated_at,
+      url: r.kind === 'sheet' && r.width && r.height ? signedImageUrl(r.store_key, `${r.width}x${r.height},fill,fmt=jpeg,q=85,v=${r.tiles}`) : null,
+    })),
+  });
 }));

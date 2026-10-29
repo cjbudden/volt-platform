@@ -17,7 +17,7 @@
 //  means the pipeline is down NOW, and we report it that way.
 // ============================================================================
 
-/** A running stream with no source this long has its own flag (NO SOURCE). */
+/** A running stream with no source this long has its own badge (AWAITING SOURCE). */
 export const SOURCE_WAIT_MS = 20_000;
 
 export type GateName = 'server' | 'input' | 'encoder' | 'output' | 'public';
@@ -140,7 +140,9 @@ function d(detail: any): any {
 
 /** A channel.stop reason that means "asked to stop", not a crash. */
 function isCleanStop(reason: string): boolean {
-  return /^(stopped|operator|signal:SIG(TERM|INT)|server_window_closed|.*window.*)/i.test(reason || '')
+  // 'terminated' is what the encoder writes for SIGTERM (encoder.py), which is
+  // exactly how a Stop reaches it. It was missing here, so every stop read as a crash.
+  return /^(stopped|operator|terminated|interrupted|signal:SIG(TERM|INT)|server_window_closed|.*window.*)/i.test(reason || '')
     && !/exited rc=|stall|fatal|error|bind|file_failure/i.test(reason || '');
 }
 
@@ -236,14 +238,14 @@ export function applyBadges(gates: Gate[], inp: HealthInput): Gate[] {
         break;
       case 'input':
         g.badge = st === 'healthy' ? 'RECEIVING' : st === 'degraded' ? 'DEGRADED' : st === 'failed' ? 'NO SIGNAL'
-          : st === 'starting' ? 'CONNECTING' : inp.hasPrimarySource ? 'NOT CONNECTED' : 'NO SOURCE';
+          : st === 'starting' ? (/no source pushed/.test(d) ? 'AWAITING SOURCE' : 'CONNECTING') : inp.hasPrimarySource ? 'NOT CONNECTED' : 'NO SOURCE';
         break;
       case 'encoder':
         g.badge = st === 'healthy' ? 'RUNNING' : st === 'degraded' ? 'STALLED' : st === 'failed' ? 'FAILED'
           : st === 'starting' ? (/stopping/i.test(d) ? 'STOPPING' : 'STARTING') : 'NOT RUNNING';
         break;
       case 'output':
-        g.badge = st === 'healthy' ? 'PRODUCING' : st === 'degraded' ? 'STALLED' : st === 'failed' ? 'FAILED'
+        g.badge = st === 'healthy' ? 'PRODUCING' : st === 'degraded' ? (/^timing fault/.test(d) ? 'TIMING FAULT' : 'STALLED') : st === 'failed' ? 'FAILED'
           : st === 'starting' ? 'STARTING' : 'NONE';
         break;
       case 'public':
@@ -426,7 +428,7 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
   });
 
   // ---- 2) INPUT (is the source arriving?) ----------------------------------
-  let inputStatus: GateStatus; let inputDetail: string; let inputBadge = '';
+  let inputStatus: GateStatus; let inputDetail: string;
   if (crashIsInput) { inputStatus = 'failed'; inputDetail = inputErrMsg || firstErrLine || stopReason; }
   else if (!live && !crashed) { inputStatus = ended ? 'stopped' : 'idle'; inputDetail = inp.hasPrimarySource ? 'source configured · idle' : 'no source configured'; }
   else if (inputErr) { inputStatus = 'failed'; inputDetail = inputErrMsg || firstErrLine || 'input error'; }
@@ -460,11 +462,10 @@ export function computePipelineHealth(inp: HealthInput): PipelineHealth {
     if (waited || waitedMs > SOURCE_WAIT_MS) {
       inputStatus = 'starting';
       inputDetail = `no source pushed yet · waiting ${Math.max(1, Math.round(waitedMs / 1000))}s`;
-      inputBadge = 'NO SOURCE';
     } else { inputStatus = 'starting'; inputDetail = 'waiting for the source to arrive'; }
   }
   else { inputStatus = 'starting'; inputDetail = 'connecting to source'; }
-  gates.push({ gate: 'input', label: 'Input', billable: false, status: inputStatus, detail: inputDetail, ...(inputBadge ? { badge: inputBadge } : {}) });
+  gates.push({ gate: 'input', label: 'Input', billable: false, status: inputStatus, detail: inputDetail });
 
   // ---- 3) ENCODER (running & keeping up?) -----------------------------------
   let encStatus: GateStatus; let encDetail: string;

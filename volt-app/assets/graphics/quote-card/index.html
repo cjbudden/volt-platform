@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Quote card</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     In and out sequences: see volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md section 4.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Quote card (pull quote with attribution)",
+  "bbox": [
+    260,
+    250,
+    1400,
+    580
+  ],
+  "fields": [
+    {
+      "id": "quote",
+      "type": "text",
+      "label": "Quote"
+    },
+    {
+      "id": "name",
+      "type": "text",
+      "label": "Who said it"
+    },
+    {
+      "id": "role",
+      "type": "text",
+      "label": "Their role (optional)"
+    },
+    {
+      "id": "image",
+      "type": "image",
+      "label": "Photo (optional)"
+    },
+    {
+      "id": "dim",
+      "type": "boolean",
+      "label": "Darken the picture behind"
+    },
+    {
+      "id": "accent",
+      "type": "color",
+      "label": "Quote mark and rule colour"
+    },
+    {
+      "id": "panelColor",
+      "type": "color",
+      "label": "Card colour"
+    },
+    {
+      "id": "textColor",
+      "type": "color",
+      "label": "Text colour"
+    }
+  ],
+  "sample": {
+    "quote": "We are not going to rebuild the same town. We are going to rebuild a better one, together.",
+    "name": "Mayor Jo Petersen",
+    "role": "Gympie Regional Council",
+    "image": "",
+    "dim": true,
+    "accent": "#f2a900",
+    "panelColor": "#0b1220",
+    "textColor": "#ffffff"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+:root{--ein:cubic-bezier(.16,1,.3,1);--eout:cubic-bezier(.7,0,.84,0);--pop:cubic-bezier(.34,1.56,.64,1)}
+/* Three states: initial (hidden), .on (in sequence to on air), .out (out sequence to a different
+   hidden pose). After the out sequence .reset snaps back to initial with no transition. */
+.reset *,.reset *::before,.reset *::after{transition:none!important;animation:none!important}
+:root{--accent:#f2a900;--panel:#0b1220;--ink:#fff;--after:1s}
+#dim{position:absolute;inset:0;background:rgba(0,0,0,.45);opacity:0}
+.nodim #dim{display:none}
+#wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+#qc{position:relative;width:1220px;padding:84px 90px 64px;background:var(--panel);color:var(--ink);box-shadow:0 20px 50px rgba(0,0,0,.45);
+  opacity:0;transform:translateY(40px)}
+#mark{position:absolute;left:62px;top:-28px;font:600 220px/1 "Volt Serif",serif;color:var(--accent);transform:scale(.3) rotate(-20deg);opacity:0}
+#q{font:400 54px/1.32 "Volt Serif","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif}
+#q .w{display:inline-block;opacity:0;transform:translateY(26px)}
+#rule{width:120px;height:5px;background:var(--accent);margin:40px 0 28px;transform:scaleX(0);transform-origin:left}
+#who{display:flex;align-items:center;gap:22px;opacity:0;transform:translateY(16px)}
+#pic{width:88px;height:88px;border-radius:50%;object-fit:cover}
+#pic[src=""]{display:none}
+#nm{font:700 34px/1.1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;letter-spacing:.02em}
+#rl{font:500 26px/1.2 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;opacity:.75;margin-top:4px}
+/* in: the card rises, the quote mark swings in, the words land one after another, then the rule
+   draws and the attribution follows */
+.on #dim{opacity:1;transition:opacity .5s}
+.on #qc{opacity:1;transform:none;transition:opacity .4s,transform .6s var(--ein)}
+.on #mark{opacity:1;transform:none;transition:transform .7s var(--pop) .2s,opacity .3s .2s}
+.on #q .w{opacity:1;transform:none;transition:opacity .45s var(--d),transform .55s var(--ein) var(--d)}
+.on #rule{transform:none;transition:transform .5s var(--ein) var(--after)}
+.on #who{opacity:1;transform:none;transition:opacity .4s calc(var(--after) + .15s),transform .5s var(--ein) calc(var(--after) + .15s)}
+/* out: the words and attribution clear together, the card lifts away and the picture brightens */
+.out #q .w,.out #who,.out #mark{opacity:0;transition:opacity .2s}
+.out #qc{opacity:0;transform:translateY(-24px) scale(.98);transition:opacity .35s .12s,transform .45s var(--eout) .12s}
+.out #dim{opacity:0;transition:opacity .4s .25s}
+</style>
+</head>
+<body>
+<div id="dim"></div><div id="wrap"><div id="qc"><div id="mark">&ldquo;</div><div id="q"></div><div id="rule"></div><div id="who"><img id="pic" src="" alt=""><div><div id="nm"></div><div id="rl"></div></div></div></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+function truthy(v){return !(v===false||v==='false'||v===0||v==='0'||v==='no'||v==='off')}
+function css(k,v){if(v!=null&&v!=='')document.documentElement.style.setProperty(k,String(v))}
+// Shrink one line until it fits its box, down to `floor` of its size.
+function fit(el,floor){if(!el)return;el.style.fontSize='';var s=parseFloat(getComputedStyle(el).fontSize),min=s*(floor||.72);
+  while(el.scrollWidth>el.clientWidth+1&&s>min){s-=1;el.style.fontSize=s+'px'}}
+var B=document.body,data={},playing=false,resetTimer=null;
+function play(){clearTimeout(resetTimer);B.classList.remove('out','reset');void B.offsetWidth;B.classList.add('on');playing=true;
+  if(typeof onPlay==='function')onPlay()}
+function stop(){if(!playing)return;playing=false;B.classList.add('out');B.classList.remove('on');
+  if(typeof onStop==='function')onStop();clearTimeout(resetTimer);
+  resetTimer=setTimeout(function(){B.classList.add('reset');B.classList.remove('out');void B.offsetWidth;B.classList.remove('reset');
+    if(typeof onReset==='function')onReset()},OUT_MS)}
+function next(){if(typeof onNext==='function')onNext()}
+var OUT_MS=650;
+var CJKRE=/[぀-ヿ㐀-鿿가-힯豈-﫿]/;
+// Words (or characters, for Chinese, Japanese and Korean) each land a moment after the last.
+function setQuote(s){var q=$('q');q.textContent='';s=String(s||'');
+  var parts=CJKRE.test(s)?Array.from(s):s.split(/(\s+)/),i=0;
+  parts.forEach(function(p){if(/^\s+$/.test(p)){q.appendChild(document.createTextNode(' '));return}if(!p)return;
+    var w=document.createElement('span');w.className='w';w.textContent=p;w.style.setProperty('--d',(.35+Math.min(i*.035,1.6)).toFixed(3)+'s');i++;q.appendChild(w)});
+  css('--after',(.35+Math.min(i*.035,1.6)+.3).toFixed(2)+'s')}
+function update(raw){var d=parse(raw);for(var k in d)data[k]=d[k];
+  css('--accent',d.accent);css('--panel',d.panelColor);css('--ink',d.textColor);
+  if('quote' in d)setQuote(d.quote);if('name' in d)setText($('nm'),d.name);if('role' in d)setText($('rl'),d.role);
+  if('image' in d)$('pic').setAttribute('src',d.image||'');if('dim' in d)B.classList.toggle('nodim',!truthy(d.dim))}
+</script>
+</body>
+</html>

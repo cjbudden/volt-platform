@@ -242,7 +242,8 @@ export async function ingestVideoItem(
       accountId: f.accountId, assetId: asset.id, path: dest, originalName: name,
       relativePath: item.objectKey, bytes, sha256, source: f.id,
     });
-    if (ing.status !== 'ingested') {
+    // A metadata gate holds the ingest, not the media: encode it now (as an upload).
+    if (ing.status !== 'ingested' && ing.status !== 'awaiting_metadata') {
       // In the library with the reason on the asset; no encode, as an upload.
       await store.markLanded(item.id, `in the Media Library as "${title}", held by the ingest rules (${ing.status.replace(/_/g, ' ')})`);
       return { result: 'held', itemId: item.id, assetId: asset.id, target: 'vod', status: ing.status };
@@ -256,7 +257,7 @@ export async function ingestVideoItem(
       // file into the same directory.
       dedupeKey: `vod.encode:${asset.id}`,
     });
-    await store.markLanded(item.id, `in the Media Library as "${title}", queued for encoding`);
+    await store.markLanded(item.id, `in the Media Library as "${title}", queued for encoding${ing.status === 'awaiting_metadata' ? ' (waiting for required metadata before it is ingested)' : ''}`);
     return { result: 'queued', itemId: item.id, assetId: asset.id, jobId: job.id, target: 'vod' };
   } catch (e: any) {
     const why = String(e?.message ?? e).slice(0, 500);

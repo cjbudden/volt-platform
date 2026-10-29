@@ -165,13 +165,13 @@ export function RecordingSection({ ctx, recOn, setRecOn, retNum, setRetNum, retU
           <div className="tt">Recording and clipping</div>
           <div className="td">{ctx === 'event'
             ? "Keep the event's output as one contained recording: review it, clip highlights, publish VOD. Off means nothing can be clipped later."
-            : 'Keep the live output as a recording: review it, clip highlights, and publish VOD assets. Off means segments are cleared after the DVR window and nothing can be clipped later.'}</div>
+            : 'Keep the live output as a recording: review it, clip highlights, and publish VOD assets. Off means segments are cleared after the DVR window (how far viewers can rewind) and nothing can be clipped later. Everything kept can still become VOD until it is removed.'}</div>
         </div>
         <div className={`sw ${recOn ? '' : 'off'}`} {...pressable((e: any) => { ((() => setRecOn(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
       </div>
       {recOn && (
         <>
-          <div className="field"><label>Retention <span style={{ color: 'var(--faint)' }}>— blank number = keep forever</span></label>
+          <div className="field"><label>Keep recordings for <span style={{ color: 'var(--faint)' }}>(blank = keep indefinitely)</span></label>
             <div style={{ display: 'flex', gap: 8 }}>
               <input className="inp" style={{ width: 110 }} inputMode="numeric" placeholder="keep forever"
                 value={retNum} onChange={e => setRetNum(e.target.value.replace(/[^0-9]/g, ''))} />

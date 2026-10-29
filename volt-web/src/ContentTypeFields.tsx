@@ -103,16 +103,20 @@ export function MetadataForm({ typeId, value, onChange, compact, entityName, hid
           <div key={f.key} className="field">{label}
             {f.multiple ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {(f.options ?? []).map(o => {
+                {/* A retired list value stays on what has it: shown while set, so it can be taken off. */}
+                {[...(f.options ?? []), ...(f.retiredOptions ?? []).filter(o => Array.isArray(v) && v.includes(o))].map(o => {
                   const sel = Array.isArray(v) && v.includes(o)
+                  const retired = !(f.options ?? []).includes(o)
                   return <button key={o} type="button" className={`chip ${sel ? 'active' : ''}`} style={{ padding: '3px 10px', fontSize: 'var(--fs-xs)' }}
-                    onClick={() => set(f.key, sel ? (v as string[]).filter(x => x !== o) : [...(Array.isArray(v) ? v : []), o])}>{o}</button>
+                    title={retired ? 'Retired from the list: kept here until you take it off' : undefined}
+                    onClick={() => set(f.key, sel ? (v as string[]).filter(x => x !== o) : [...(Array.isArray(v) ? v : []), o])}>{o}{retired ? ' (retired)' : ''}</button>
                 })}
               </div>
             ) : (
               <select className="inp" value={v ?? ''} onChange={e => set(f.key, e.target.value)}>
                 <option value="">—</option>
                 {(f.options ?? []).map(o => <option key={o} value={o}>{o}</option>)}
+                {typeof v === 'string' && v && !(f.options ?? []).includes(v) && (f.retiredOptions ?? []).includes(v) && <option value={v}>{v} (retired)</option>}
               </select>
             )}
           </div>)

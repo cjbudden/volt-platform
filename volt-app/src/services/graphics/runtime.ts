@@ -88,7 +88,11 @@ export async function imageUrls(acct: string, ids: string[]): Promise<Map<string
   const out = new Map<string, string>();
   const clean = ids.filter((x) => /^[0-9a-f-]{36}$/i.test(x));
   if (!clean.length) return out;
-  for (const r of await query<any>(`SELECT id, store_key FROM media_files WHERE account_id = $1 AND id = ANY($2::uuid[])`, [acct, clean])) out.set(r.id, '/' + r.store_key);
+  // An alpha video (metadata.motion, services/motionGraphics.ts) binds as its WebM; its
+  // store_key is the first-frame PNG that thumbnails use.
+  for (const r of await query<any>(`SELECT id, store_key, kind, metadata FROM media_files WHERE account_id = $1 AND id = ANY($2::uuid[])`, [acct, clean])) {
+    out.set(r.id, '/' + (r.metadata?.motion?.video ? r.metadata.motion.video : r.store_key));
+  }
   return out;
 }
 

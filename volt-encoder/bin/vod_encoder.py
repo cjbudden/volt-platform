@@ -37,6 +37,7 @@ THREE THINGS THAT ARE DIFFERENT FROM LIVE AND ARE DELIBERATE:
 Usage:  vod_encoder.py /path/to/job.json
 """
 import json
+import collections
 import os
 import shlex
 import subprocess
@@ -199,6 +200,17 @@ def rendition_dir(out_dir, label):
     return d
 
 
+def box_filter(r):
+    """Fit the picture into the rung's box (16:9 when the rung gives no width):
+    scale down or up keeping its shape, pad the rest with black, square pixels.
+    A 2.39:1 film becomes 1920x1080 with bars, not 1920x804."""
+    h = int(r["height"])
+    w = int(r.get("width") or 0) or int(round(h * 16 / 9))
+    w += w % 2
+    return (f"scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1")
+
+
 def build_encode_cmd(cfg, work_dir):
     """One ffmpeg run producing every rendition, plus the audio track.
 
@@ -214,16 +226,24 @@ def build_encode_cmd(cfg, work_dir):
     if not ladder:
         die("the job config has no rungs; the control plane must not enqueue an empty ladder")
 
-    cmd = [FFMPEG_BIN, "-hide_banner", "-loglevel", "warning", "-nostdin", "-y"]
+    # -progress pipe:2: machine-readable progress on stderr (key=value lines) that run()
+    # turns into a "progress encode N%" line every few seconds. The control plane
+    # extends the job's lease from those lines and from a timer; before this, ffmpeg ran
+    # silent for the whole encode, a 4K feature outlived the 120 s lease, the job was
+    # reaped mid-encode and a second worker started the same encode beside the first.
+    cmd = [FFMPEG_BIN, "-hide_banner", "-loglevel", "warning", "-nostdin", "-y", "-progress", "pipe:2"]
     if gpu:
         cmd += ["-hwaccel", "cuda"]
     cmd += ["-i", src]
 
     parts = []
+    box = cfg.get("fit") == "box"
     for r in ladder:
         label = f"{r['height']}p"
-        # THE SHARED SETTINGS. Not a copy of them.
-        cmd += video_rung_args(r, seg=seg, fps=fps, gpu=gpu)
+        # THE SHARED SETTINGS. Not a copy of them. A FAST ladder variant ("fit":
+        # "box") puts every rung in its own WxH box whatever the source's shape,
+        # so each rung is the same picture size on every asset of the channel.
+        cmd += video_rung_args(r, seg=seg, fps=fps, gpu=gpu, vf=box_filter(r) if box else None)
         # An elementary MPEG-TS per rendition, the same intermediate the live
         # path puts on the UDP bus, so the packager sees exactly what it sees
         # live: parameter sets in band ahead of every IDR.
@@ -287,19 +307,50 @@ def build_package_cmd(cfg, parts, audio_path, out_dir):
     return cmd
 
 
-def run(cmd, what):
+PROGRESS_KEYS = {"frame", "fps", "stream_0_0_q", "bitrate", "total_size", "out_time_us", "out_time_ms",
+                 "out_time", "dup_frames", "drop_frames", "speed", "progress"}
+
+
+def run(cmd, what, duration_sec=None):
+    """Run a step, streaming its stderr. ffmpeg's -progress lines become a log line
+    about every five seconds ("progress encode 42.0% at 1.8x"), so a long encode
+    keeps talking; anything else is kept as the tail shown if the step fails."""
     log(f"{what}: {' '.join(shlex.quote(c) for c in cmd)}")
     t0 = time.time()
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True)
+        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                             errors="replace", bufsize=1)
     except FileNotFoundError:
         # A MISSING BINARY IS A DIAGNOSIS, NOT A STACK TRACE. This surfaces in
         # the job's last_error, where an operator reads it; a Python traceback
         # there tells them the encoder crashed rather than that the box is
         # missing a tool somebody can install.
         die(f"{what} could not start: {cmd[0]} is not installed or not on PATH")
+    tail = collections.deque(maxlen=12)
+    out_us, speed, last = None, "", 0.0
+    for line in p.stderr:
+        line = line.rstrip("\n")
+        key, _, val = line.partition("=")
+        if _ and key in PROGRESS_KEYS:
+            if key in ("out_time_us", "out_time_ms"):
+                try:
+                    out_us = int(val)
+                except ValueError:
+                    pass
+            elif key == "speed":
+                speed = val.strip()
+            elif key == "progress" and time.time() - last >= 5:
+                last = time.time()
+                if duration_sec and out_us is not None:
+                    pct = max(0.0, min(100.0, out_us / 1e6 / float(duration_sec) * 100))
+                    log(f"progress {what} {pct:.1f}% at {speed or '?'}")
+                else:
+                    log(f"progress {what} running {time.time() - t0:.0f}s")
+            continue
+        if line.strip():
+            tail.append(line)
+    p.wait()
     if p.returncode != 0:
-        tail = (p.stderr or "").strip().splitlines()[-12:]
         die(f"{what} failed (exit {p.returncode}):\n" + "\n".join(tail), code=p.returncode or 1)
     log(f"{what} finished in {time.time() - t0:.1f}s")
 
@@ -333,7 +384,7 @@ def main():
         return
 
     cmd, parts, audio_path = build_encode_cmd(cfg, work_dir)
-    run(cmd, "encode")
+    run(cmd, "encode", cfg.get("duration_sec"))
     run(build_package_cmd(cfg, parts, audio_path, out_dir), "package")
 
     # THE INTERMEDIATES ARE NOT THE OUTPUT. Leaving them doubles the disk cost of

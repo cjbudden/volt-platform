@@ -41,6 +41,8 @@ export const TARGETS: Record<string, TargetSpec> = {
   'movie': { required: ['title', 'description', 'year'], recommended: ['genre', 'cast', 'director', 'rating', 'image'] },
   'song': { required: ['title', 'artist'], recommended: ['album', 'genre', 'released', 'artwork'] },
   'interview': { required: ['title', 'guests'], recommended: ['interviewer', 'topic', 'description', 'image'] },
+  'trailer': { required: ['title', 'trailerFor'], recommended: ['trailerType', 'description', 'rating', 'image'] },
+  'music-video': { required: ['title', 'artist'], recommended: ['album', 'director', 'genre', 'released', 'image'] },
   'sports-match': { required: ['name', 'sport', 'competition', 'homeTeam', 'awayTeam'], recommended: ['venue', 'round', 'description', 'image'] },
   'multi-sport-event': { required: ['name', 'sports'], recommended: ['edition', 'venues', 'description', 'image'] },
   'broadcast-event': { required: ['name', 'description'], recommended: ['category', 'organizer', 'location', 'image'] },
@@ -149,11 +151,40 @@ export function completenessPctSql(fields: string, std: string, meta: string): s
 }
 
 /** Where an asset came from, as one filterable value. */
-export const ORIGIN_SQL = `(CASE WHEN v.kind = 'clip' THEN 'clip'
-  WHEN v.source_kind = 'upload' THEN 'upload'
+// The file's source first: an upload is stored with kind 'clip', so testing the
+// kind first counted every upload as a clip.
+export const ORIGIN_SQL = `(CASE WHEN v.source_kind = 'upload' THEN 'upload'
   WHEN v.source_kind = 'watchfolder' THEN 'watchfolder'
+  WHEN v.kind = 'clip' THEN 'clip'
   ELSE 'recording' END)`;
 export const ORIGINS = ['recording', 'clip', 'upload', 'watchfolder'] as const;
+
+/**
+ * SOURCE: what the asset belongs to, the way an operator thinks of it.
+ * A channel, an event or a radio station it was recorded or cut from, or an
+ * upload (a file or a watch-folder drop). `none` is an asset whose channel or
+ * event no longer exists, or that never had one and was not uploaded: the
+ * orphans a library needs to be able to find.
+ * Needs `c` (channels) and `e` (events) joined, as every library query does.
+ */
+export const SOURCE_SQL = `(CASE WHEN c.id IS NOT NULL AND c.kind = 'radio' THEN 'radio'
+  WHEN c.id IS NOT NULL THEN 'channel'
+  WHEN e.id IS NOT NULL THEN 'event'
+  WHEN v.source_kind IN ('upload', 'watchfolder') THEN 'upload'
+  ELSE 'none' END)`;
+export const SOURCES = ['channel', 'event', 'radio', 'upload', 'none'] as const;
+
+/**
+ * ASSET TYPE: video, audio or song. Song is the content type (or a song
+ * classification); audio is anything without a picture (a station, an audio
+ * upload, an MP3/M4A export with no video rendition). Same test as the grid's
+ * colour key and services/media/assetImage.ts isAudioAsset. Needs `ms` joined.
+ */
+export const MEDIA_TYPE_SQL = `(CASE WHEN ms.standard_key = 'song' OR v.metadata->>'class' = 'song' THEN 'song'
+  WHEN COALESCE(c.kind = 'radio', false) OR COALESCE(v.ingest -> 'probe' ->> 'hasVideo' = 'false', false)
+    OR ((v.export_mp3_key IS NOT NULL OR v.export_m4a_key IS NOT NULL) AND v.top_height IS NULL AND v.progressive_key IS NULL) THEN 'audio'
+  ELSE 'video' END)`;
+export const MEDIA_TYPES = ['video', 'audio', 'song'] as const;
 
 // ============================================================================
 //  ENCODE DETAILS.

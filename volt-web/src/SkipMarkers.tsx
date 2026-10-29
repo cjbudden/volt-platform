@@ -91,6 +91,7 @@ export default function SkipMarkers({ asset }: { asset: { id: string; master_key
     try {
       await api.setVodMarker(asset.id, k, Math.round(startMs), Math.round(endMs))
       await load(); reloadPlayer()
+      notify({ kind: 'ok', message: 'Marker saved.' })
     } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally {
       setBusy(''); setDraft((d) => { const n = { ...d }; delete n[k]; return n })
     }

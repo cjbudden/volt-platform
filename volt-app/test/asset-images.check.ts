@@ -305,14 +305,14 @@ process.env.ITUNES_API_BASE = `http://127.0.0.1:${mbPort}/itunes`;   // the fake
     {
       const { buildFileSprites, fileSpriteVtt, spriteInterval } = await import('../src/services/thumbnails/fileSprites');
       const sp = await buildFileSprites(up, acct, vid, 12_000);
-      ok(!!sp && sp.sheets.length >= 1 && !!(await imageStore().get(sp.sheets[0].key)) && sp.sheets[0].key.startsWith(`library/${acct}/thumbnails/files/${up}/`), 'an upload gets sprite sheets in the library', JSON.stringify(sp));
+      ok(!!sp && sp.sheets.length >= 1 && !!(await imageStore().get(sp.sheets[0].key)) && sp.sheets[0].key.startsWith(`derived/${acct}/sprites/assets/${up}/`), 'an upload gets sprite sheets in the sprite store', JSON.stringify(sp));
       const vtt = fileSpriteVtt(sp!, (k) => `/img/x/${k}`);
       const cues = vtt.split('\n').filter((l) => l.includes(' --> '));
       ok(vtt.startsWith('WEBVTT') && cues.length === Math.ceil(12_000 / sp!.intervalMs) && /#xywh=\d+,\d+,\d+,\d+/.test(vtt) && cues[0].startsWith('00:00:00.000 --> '), 'one cue per tile across the file', `${cues.length} cues, every ${sp!.intervalMs} ms`);
       eq([spriteInterval(40_000), spriteInterval(3600_000), spriteInterval(2 * 3600_000)], [1000, 18000, 36000], 'about 200 previews whatever the length, at least a second apart');
       const g = await fetch(`${base}/api/thumbnails/vod/${up}.vtt`, { headers: { authorization: `Bearer ${tok}` } });
       const text = await g.text();
-      ok(g.status === 200 && /\/img\/[^/]+\/\d+x\d+,fill.*\/library\/.*sheet-000\.jpg#xywh=0,0,/.test(text), 'the VTT route serves it with signed sheet URLs', text.slice(0, 200));
+      ok(g.status === 200 && /\/img\/[^/]+\/\d+x\d+,fill.*\/derived\/[^/]+\/sprites\/assets\/.*sheet-000\.jpg#xywh=0,0,/.test(text), 'the VTT route serves it with signed sheet URLs', text.slice(0, 200));
       const old = await asset({ title: 'Uploaded last month', dur: 12_000 });
       await query(`UPDATE vod_assets SET encode_result = '{}'::jsonb, source_key = $2 WHERE id = $1`, [old, vid]);
       const { prepareFileFrames } = await import('../src/services/media/assetImage');

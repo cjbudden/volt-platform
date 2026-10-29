@@ -1,0 +1,139 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>QR callout</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     In and out sequences: see volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md section 4.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "QR callout (scan to watch, vote or shop)",
+  "bbox": [
+    1350,
+    58,
+    474,
+    236
+  ],
+  "fields": [
+    {
+      "id": "url",
+      "type": "text",
+      "label": "Link the QR code opens"
+    },
+    {
+      "id": "cta",
+      "type": "text",
+      "label": "Call to action (SCAN TO WATCH)"
+    },
+    {
+      "id": "caption",
+      "type": "text",
+      "label": "Caption under it (optional; the link if blank)"
+    },
+    {
+      "id": "position",
+      "type": "text",
+      "label": "Position: top-right, top-left, bottom-right, bottom-left"
+    },
+    {
+      "id": "accent",
+      "type": "color",
+      "label": "Accent colour"
+    },
+    {
+      "id": "panelColor",
+      "type": "color",
+      "label": "Panel colour"
+    }
+  ],
+  "sample": {
+    "url": "https://volt.example/live",
+    "cta": "Scan to watch on your phone",
+    "caption": "",
+    "position": "top-right",
+    "accent": "#f2a900",
+    "panelColor": "#0a2350"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+:root{--ein:cubic-bezier(.16,1,.3,1);--eout:cubic-bezier(.7,0,.84,0);--pop:cubic-bezier(.34,1.56,.64,1)}
+/* Three states: initial (hidden), .on (in sequence to on air), .out (out sequence to a different
+   hidden pose). After the out sequence .reset snaps back to initial with no transition. */
+.reset *,.reset *::before,.reset *::after{transition:none!important;animation:none!important}
+:root{--accent:#f2a900;--panel:#0a2350}
+#qk{position:absolute;right:96px;top:58px;display:flex;align-items:center;gap:24px;padding:18px 26px 18px 18px;background:var(--panel);
+  box-shadow:0 8px 22px rgba(0,0,0,.35);clip-path:inset(0 0 100% 0)}
+.pos-tl #qk{left:96px;right:auto}.pos-br #qk{top:auto;bottom:54px;clip-path:inset(100% 0 0 0)}.pos-bl #qk{left:96px;right:auto;top:auto;bottom:54px;clip-path:inset(100% 0 0 0)}
+#qr{position:relative;width:200px;height:200px;background:#fff;padding:10px;flex:none;overflow:hidden;clip-path:circle(0 at 50% 50%)}
+#qr svg{width:100%;height:100%;display:block;shape-rendering:crispEdges}
+#scan{position:absolute;left:0;right:0;top:-12%;height:10%;background:linear-gradient(180deg,transparent,var(--accent),transparent);opacity:.5}
+#tx{width:210px;opacity:0;transform:translateX(16px)}
+#cta{font:700 34px/1.08 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;text-transform:uppercase;letter-spacing:.02em}
+#ar{width:56px;height:5px;background:var(--accent);margin:16px 0 14px}
+#cap{font:500 24px/1.2 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;opacity:.8;word-break:break-all}
+@keyframes scan{0%{top:-12%}100%{top:102%}}
+/* in: the panel unrolls, the code opens out from its centre (one scan line passes over it), then the
+   call to action slides in */
+.on #qk{clip-path:inset(0 0 0 0);transition:clip-path .5s var(--ein)}
+.on #qr{clip-path:circle(75% at 50% 50%);transition:clip-path .6s var(--ein) .25s}
+.on #scan{animation:scan 1.1s cubic-bezier(.5,0,.5,1) .8s 1 both}
+.on #tx{opacity:1;transform:none;transition:opacity .35s .45s,transform .5s var(--ein) .45s}
+/* out: the text clears, the code closes to its centre, the panel rolls back up */
+.out #tx{opacity:0;transform:translateX(16px);transition:opacity .2s,transform .2s var(--eout)}
+.out #qr{clip-path:circle(0 at 50% 50%);transition:clip-path .3s var(--eout) .08s}
+.out #qk{clip-path:inset(0 0 100% 0);transition:clip-path .35s var(--eout) .3s}
+.pos-br.out #qk,.pos-bl.out #qk{clip-path:inset(100% 0 0 0)}
+</style>
+</head>
+<body>
+<div id="qk"><div id="qr"><div id="code"></div><div id="scan"></div></div><div id="tx"><div id="cta"></div><div id="ar"></div><div id="cap"></div></div></div>
+<script src="lib/qrcode.js"></script>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+function truthy(v){return !(v===false||v==='false'||v===0||v==='0'||v==='no'||v==='off')}
+function css(k,v){if(v!=null&&v!=='')document.documentElement.style.setProperty(k,String(v))}
+// Shrink one line until it fits its box, down to `floor` of its size.
+function fit(el,floor){if(!el)return;el.style.fontSize='';var s=parseFloat(getComputedStyle(el).fontSize),min=s*(floor||.72);
+  while(el.scrollWidth>el.clientWidth+1&&s>min){s-=1;el.style.fontSize=s+'px'}}
+var B=document.body,data={},playing=false,resetTimer=null;
+function play(){clearTimeout(resetTimer);B.classList.remove('out','reset');void B.offsetWidth;B.classList.add('on');playing=true;
+  if(typeof onPlay==='function')onPlay()}
+function stop(){if(!playing)return;playing=false;B.classList.add('out');B.classList.remove('on');
+  if(typeof onStop==='function')onStop();clearTimeout(resetTimer);
+  resetTimer=setTimeout(function(){B.classList.add('reset');B.classList.remove('out');void B.offsetWidth;B.classList.remove('reset');
+    if(typeof onReset==='function')onReset()},OUT_MS)}
+function next(){if(typeof onNext==='function')onNext()}
+var OUT_MS=700;
+// QR code drawn by qrcode-generator (Kazuhiko Arase, MIT licence, lib/qrcode.js), error correction M.
+function drawQr(url){var box=$('code');box.textContent='';if(!url||typeof qrcode!=='function')return;
+  try{if(qrcode.stringToBytesFuncs&&qrcode.stringToBytesFuncs['UTF-8'])qrcode.stringToBytes=qrcode.stringToBytesFuncs['UTF-8'];
+    var q=qrcode(0,'M');q.addData(String(url));q.make();var n=q.getModuleCount(),p='';
+    for(var r=0;r<n;r++)for(var c=0;c<n;c++)if(q.isDark(r,c))p+='M'+c+' '+r+'h1v1h-1z';
+    box.innerHTML='<svg viewBox="-1 -1 '+(n+2)+' '+(n+2)+'"><path fill="#000" d="'+p+'"/></svg>'}catch(e){box.textContent=''}}
+function update(raw){var d=parse(raw);for(var k in d)data[k]=d[k];
+  css('--accent',d.accent);css('--panel',d.panelColor);
+  if('position' in d){B.classList.remove('pos-tl','pos-br','pos-bl');var p=String(d.position||'').toLowerCase();
+    if(p==='top-left')B.classList.add('pos-tl');if(p==='bottom-right')B.classList.add('pos-br');if(p==='bottom-left')B.classList.add('pos-bl')}
+  if('url' in d)drawQr(d.url);if('cta' in d)setText($('cta'),d.cta||'');
+  if('caption' in d||'url' in d)setText($('cap'),data.caption||String(data.url||'').replace(/^https?:\/\//,'').replace(/\/$/,''))}
+</script>
+</body>
+</html>

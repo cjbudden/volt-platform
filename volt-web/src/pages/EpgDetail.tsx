@@ -3,10 +3,11 @@ import { api, ApiError, type EpgOwner, type EpgOwnerRow, type ProgrammeRow, type
 import { ImagePicker } from '../ImagePicker'
 import { pressable } from '../a11y'
 import { navigate } from '../router'
-import { FormStatus, useNotify, usePageNotice } from '../notices'
+import { FormStatus, useNotify, usePageNotice, useSaveResult } from '../notices'
 import { Segmented } from '../listFilters'
 import { EpgTimeline } from './EpgTimeline'
 import { CopyDayModal, RepeatEditor, PolicyPicker, PlacePreview, usePreview, defaultRepeat, toRule, browserTz, toDateInput as ymd, type RepeatValue } from './EpgRepeat'
+import { assetHref, recordingHref, ProgrammeFlagMark } from '../programmeMedia'
 
 /* ============================================================================
    EPG builder — the guide for ONE channel or event, edited a day at a time in
@@ -71,7 +72,20 @@ function daysUntil(iso: string): number {
 
 export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: () => void }) {
   const [ownerRow, setOwnerRow] = useState<EpgOwnerRow | null>(null)
-  const [day, setDay] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d })
+  // ?day=YYYY-MM-DD opens on that day, ?p=<id> marks that programme: the
+  // guide strip's double click lands here (ChannelDetail EpgStrip).
+  const linkQ = useMemo(() => new URLSearchParams(window.location.search), [])
+  const [day, setDay] = useState(() => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(linkQ.get('day') ?? '')
+    const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date()
+    d.setHours(0, 0, 0, 0); return d
+  })
+  const [marked, setMarked] = useState<string | null>(() => linkQ.get('p'))
+  useEffect(() => {
+    if (!marked) return
+    const el = document.querySelector(`[data-prog="${CSS.escape(marked)}"]`)
+    if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); const t = window.setTimeout(() => setMarked(null), 4000); return () => window.clearTimeout(t) }
+  })
   const [progs, setProgs] = useState<ProgrammeRow[] | null>(null)
   const [vod, setVod] = useState<Record<string, ProgrammeVod>>({})
   const [converting, setConverting] = useState<string | null>(null)
@@ -265,7 +279,7 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
                 const v = vod[p.id]
                 const overlaps = overlapsById.get(p.id)
                 return (
-                  <tr key={p.id} onClick={() => setEditing(p)}
+                  <tr key={p.id} data-prog={p.id} className={marked === p.id ? 'row-marked' : undefined} onClick={() => setEditing(p)}
                     title={overlaps ? `Overlaps ${overlaps.map(t => `"${t}"`).join(', ')}` : undefined}
                     style={{
                       cursor: 'pointer',
@@ -349,6 +363,15 @@ function VodCell({ v, p }: { v: ProgrammeVod | undefined; p: ProgrammeRow }) {
   }
   const ui = VOD_UI[v.state]
   const days = v.expiresAt ? daysUntil(v.expiresAt) : null
+  // THE PROGRAMME FLAG (programmeMedia.tsx) is the column now: the same flag
+  // as every other surface, a link to what exists, the details on hover. An
+  // entry with no flag (upcoming, not set to Auto VOD) shows a quiet dash.
+  if ('flag' in v) {
+    return v.flag
+      ? <div className="flex items-center gap-2"><ProgrammeFlagMark flag={v.flag} />
+          {v.state === 'convertible' && v.coveragePct < 99.9 && <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)' }}>{v.coveragePct}% recorded</span>}</div>
+      : <span style={{ color: 'var(--faint)' }} title="Will be recorded. Not set to become VOD.">—</span>
+  }
   return (
     <div title={ui.hint}>
       <span style={{ color: ui.color, fontWeight: 600 }}>{ui.label}</span>
@@ -450,11 +473,19 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initia
   const [startT, setStartT] = useState(p ? timeOf(p.starts_at) : (initialStart ?? '09:00'))
   const [endT, setEndT] = useState(p ? timeOf(p.ends_at) : (initialEnd ?? ''))
   const [autoVod, setAutoVod] = useState(p?.auto_vod ?? false)
+  const saved = useSaveResult()
   const [geoMode, setGeoMode] = useState<'worldwide' | 'allow' | 'block'>(p?.geo_mode ?? 'worldwide')
   const [geoCountries, setGeoCountries] = useState((p?.geo_countries ?? []).join(', '))
   const [replKind, setReplKind] = useState<'none' | 'slate' | 'loop' | 'vod'>(p?.replacement_kind ?? 'none')
   const [replRef, setReplRef] = useState(p?.replacement_ref ?? '')
   const [pickerOpen, setPickerOpen] = useState(false)
+  // A VOD REPLACEMENT IS PICKED FROM READY ASSETS ONLY: what a blocked viewer
+  // gets must play (volt-app services/assetReadiness.ts; the API refuses others).
+  const [readyVods, setReadyVods] = useState<{ id: string; title: string | null; duration_ms: any }[] | null>(null)
+  useEffect(() => {
+    if (replKind !== 'vod' || readyVods) return
+    api.vodAssets().then(rows => setReadyVods(rows.filter(r => r.usage_status === 'ready'))).catch(() => setReadyVods([]))
+  }, [replKind, readyVods])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [conflictNote, setConflictNote] = useState('')
@@ -541,24 +572,28 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initia
           : { tags: undefined }),
       },
     }
-    setBusy(true)
+    setBusy(true); saved.clear()
     try {
       let id = p?.id
       let note: string | undefined
+      let overlap: string | null = null
       if (isEdit) {
         const r: any = await api.patchProgramme(p!.id, isSeries ? { ...body, scope } : body)
         if (r?.repeat) note = `Changed ${r.repeat.updated} repeat(s)${r.repeat.keptEdited ? `. ${r.repeat.keptEdited} changed on their own were left as they are` : ''}`
       } else {
         const created = await api.createProgramme(owner, body)
         id = created.id
-        if (created.conflicts?.length) setConflictNote(`Note: overlaps ${created.conflicts.map(c => `"${c.title}"`).join(', ')}`)
+        if (created.conflicts?.length) { overlap = `It overlaps ${created.conflicts.map(c => `"${c.title}"`).join(', ')}.`; setConflictNote(`Note: ${overlap}`) }
       }
       if (repeatRule && !('error' in repeatRule) && id) {
         const r = await api.epgRepeat({ programmeId: id, ...repeatRule, policy, tz })
-        onDone(`"${title.trim()}" now repeats (${r.describe ?? 'repeat'}): ${r.summary.added} added${r.summary.replaced ? `, ${r.summary.replaced} replaced` : ''}${r.summary.skipped ? `, ${r.summary.skipped} skipped` : ''}`, r.batchId)
+        const msg = `"${title.trim()}" now repeats (${r.describe ?? 'repeat'}): ${r.summary.added} added${r.summary.replaced ? `, ${r.summary.replaced} replaced` : ''}${r.summary.skipped ? `, ${r.summary.skipped} skipped` : ''}`
+        if (r.summary.skipped || overlap) saved.warn(`${msg}${overlap ? `. ${overlap}` : ''}`, () => onDone(msg, r.batchId))
+        else saved.show(isEdit ? 'Programme saved' : 'Programme added', () => onDone(msg, r.batchId))
         return
       }
-      onDone(note)
+      if (overlap) saved.warn(overlap, () => onDone(note))
+      else saved.show(isEdit ? 'Programme saved' : 'Programme added', () => onDone(note))
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
 
@@ -650,7 +685,15 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initia
           {replKind !== 'none' && (
             <div className="field"><label>{replKind === 'vod' ? 'VOD reference' : replKind === 'loop' ? 'Loop video' : 'Slate image'}</label>
               <div style={{ display: 'flex', gap: 8 }}>
-                <input className="inp" value={replRef} onChange={e => setReplRef(e.target.value)} placeholder={replKind === 'vod' ? 'vod asset URL or id' : 'Pick from library or paste a URL'} />
+                {replKind === 'vod' ? (
+                  <select className="inp" value={replRef} onChange={e => setReplRef(e.target.value)} aria-label="Replacement asset">
+                    <option value="">{readyVods == null ? 'Loading ready assets…' : readyVods.length ? 'Choose a ready asset' : 'No assets are ready to use'}</option>
+                    {replRef && readyVods && !readyVods.some(v => v.id === replRef) && <option value={replRef}>Current: {replRef} (not ready)</option>}
+                    {(readyVods ?? []).map(v => <option key={v.id} value={v.id}>{v.title || 'Untitled'}{v.duration_ms ? ` · ${Math.round(Number(v.duration_ms) / 60000)} min` : ''}</option>)}
+                  </select>
+                ) : (
+                  <input className="inp" value={replRef} onChange={e => setReplRef(e.target.value)} placeholder="Pick from library or paste a URL" />
+                )}
                 {replKind !== 'vod' && <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>Browse…</button>}
               </div>
             </div>
@@ -662,7 +705,7 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initia
 
           <div className="sec-label">Post-broadcast VOD</div>
           <div className="toggle-row">
-            <div><div className="tt">Convert to a VOD automatically</div><div className="td">When this slot finishes airing, cut a VOD asset of exactly this period from the recording. The asset is named from the title above and carries the genre, tags and rating set here.</div></div>
+            <div><div className="tt">Auto VOD</div><div className="td">Every slot is recorded and kept for the channel's keep period. With Auto VOD on, the guide shows an <b>Auto VOD</b> flag until it airs, and when it finishes airing a VOD asset is cut of exactly this period from the recording. The asset is named from the title above and carries the genre, tags and rating set here.</div></div>
             <div className={`sw ${autoVod ? '' : 'off'}`} {...pressable((e: any) => { ((() => setAutoVod(v => !v)) as any)(e) })} data-a11y-click=""><i /></div>
           </div>
           {/* Turning the switch off on a slot that has ALREADY aired changes
@@ -686,8 +729,17 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initia
               background: 'var(--panel-2)',
             }}>
               <div className="flex items-center" style={{ gap: 10 }}>
-                <span className={`tag ${VOD_UI[vod.state].tone}`}><span className={`dot-s ${VOD_UI[vod.state].tone}`} />{VOD_UI[vod.state].label}</span>
+                {vod.flag
+                  ? <ProgrammeFlagMark flag={vod.flag} link={false} />
+                  : <span className={`tag ${VOD_UI[vod.state].tone}`}><span className={`dot-s ${VOD_UI[vod.state].tone}`} />{VOD_UI[vod.state].label}</span>}
                 <span className="spacer" />
+                {/* Open what exists: the VOD, else the recording playing from this slot. */}
+                {vod.state === 'converted' && vod.assetId && (
+                  <button type="button" className="btn ghost" onClick={() => navigate(assetHref(vod.assetId!))}>Open VOD asset</button>
+                )}
+                {vod.state !== 'converted' && vod.recording && (
+                  <button type="button" className="btn ghost" onClick={() => navigate(recordingHref(vod.recording!))}>Play recording</button>
+                )}
                 {(vod.state === 'convertible' || vod.state === 'failed') && onConvert && (
                   <button type="button" className="btn" disabled={!!converting} onClick={onConvert}>
                     {converting ? 'Converting…' : vod.state === 'failed' ? 'Retry conversion' : 'Convert now'}
@@ -695,7 +747,7 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initia
                 )}
               </div>
               <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginTop: 4 }}>
-                {VOD_UI[vod.state].hint}
+                {vod.flag?.note || VOD_UI[vod.state].hint}
               </div>
               {vod.state === 'convertible' && (
                 <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', marginTop: 6 }}>
@@ -712,7 +764,7 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initia
               )}
               {vod.state === 'converted' && vod.assetTitle && (
                 <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', marginTop: 6 }}>
-                  Asset: {vod.assetTitle}{vod.assetState ? ` (${vod.assetState})` : ''} — find it in the Media Library.
+                  Asset: {vod.assetTitle}{vod.assetState ? ` (${vod.assetState})` : ''}, in the Media Library.
                 </div>
               )}
               {vod.state === 'failed' && vod.error && <div className="err" style={{ marginTop: 8 }}>{vod.error}</div>}
@@ -722,11 +774,11 @@ export function ProgrammeDrawer({ owner, day, programme: p, initialStart, initia
           {conflictNote && <div className="hintxt" style={{ color: 'var(--warn)' }}>{conflictNote}</div>}
         </div>
         <div className="drawer-f">
-          <FormStatus error={err} />
-          {isEdit && <button className="btn ghost" style={{ color: 'var(--down,#f87171)' }} disabled={busy} onClick={del}>{isSeries && scope !== 'this' ? `Delete ${scopeWord}` : 'Delete'}</button>}
+          <FormStatus error={err} success={saved.message} warning={saved.warning} onDismiss={err ? () => setErr('') : undefined} />
+          {isEdit && <button className="btn ghost" style={{ color: 'var(--down,#f87171)' }} disabled={busy || saved.saving} onClick={del}>{isSeries && scope !== 'this' ? `Delete ${scopeWord}` : 'Delete'}</button>}
           <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy} onClick={submit}>
-            {busy ? 'Saving…' : isEdit ? (isSeries ? `Save ${scopeWord}` : repeatRule && !('error' in repeatRule) ? 'Save and repeat' : 'Save changes') : repeatRule && !('error' in repeatRule) ? 'Add and repeat' : 'Add programme'}
+          <button className="btn primary" disabled={busy || saved.saving} onClick={submit}>
+            {busy ? 'Saving…' : saved.saving ? 'Saved' : isEdit ? (isSeries ? `Save ${scopeWord}` : repeatRule && !('error' in repeatRule) ? 'Save and repeat' : 'Save changes') : repeatRule && !('error' in repeatRule) ? 'Add and repeat' : 'Add programme'}
           </button>
         </div>
       </div>

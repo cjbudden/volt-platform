@@ -5,6 +5,8 @@ import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
 import { createClipVod, formatsFor, enqueueClipBuild } from '../services/clips';
+import { inheritedMetadata } from '../services/contentTypes';
+import { previewFill } from '../services/epgFill';
 import { resolveRange, assessRange, segmentCount } from '../services/clips/resolve';
 import { plan, type OutputFormat } from '../services/clips/extract';
 import { clipsFromRecording } from '../services/clips/provenance';
@@ -612,6 +614,49 @@ recordingsRouter.post(
   })
 );
 
+/**
+ * WHAT A CLIP OF THIS RANGE SHOULD BE CALLED, AND WHAT IT CARRIES, from the
+ * guide. The programme on air over the marks names the clip and fills the
+ * chosen content type's fields (services/epgFill.ts, the same rules as the
+ * library's EPG fill: suggestions only, nothing written here). With no
+ * `schemaId` the owner's type is used, and the programme may suggest a better
+ * one (a sports match, an episode). Called by the clip form as the marks or
+ * the type change.
+ */
+recordingsRouter.get(
+  '/:id/clip-defaults',
+  asyncHandler(async (req, res) => {
+    const q = z.object({
+      startMs: z.coerce.number().int().nonnegative(),
+      endMs: z.coerce.number().int().positive(),
+      schemaId: z.string().uuid().optional(),
+    }).parse(req.query);
+    const rec = await fetchOwned(req.params.id, accountId(req));
+    if (!rec) throw notFound('Recording not found');
+    const ownerCol = rec.event_id ? 'event_id' : 'channel_id';
+    const inh = await inheritedMetadata(ownerCol, rec.event_id ?? rec.channel_id);
+    const schemaId = q.schemaId ?? inh.schemaId;
+    const pv = await previewFill({
+      id: '00000000-0000-0000-0000-000000000000', channel_id: rec.channel_id, event_id: rec.event_id,
+      start_epoch_ms: q.startMs, end_epoch_ms: q.endMs, source_kind: 'recording',
+      schema_id: schemaId, metadata: {}, title: null,
+    }, accountId(req));
+    const metadata: Record<string, unknown> = {};
+    for (const sg of pv.suggestions) if (sg.action === 'fill') metadata[sg.field] = sg.value;
+    res.json({
+      programme: pv.programme,
+      confident: !!pv.match.confident,
+      reason: pv.match.reason ?? null,
+      title: pv.titleSuggestion?.value ?? pv.programme?.title ?? null,
+      schemaId,
+      ownerSchemaId: inh.schemaId,
+      suggestedType: pv.suggestedType ? { id: pv.suggestedType.id, name: pv.suggestedType.name, key: pv.suggestedType.key } : null,
+      metadata,
+      fields: pv.suggestions.map((sg) => ({ field: sg.field, label: sg.label, value: sg.value, required: sg.required })),
+    });
+  })
+);
+
 /** Clip a time-range of the recording into a VOD asset (kind = clip). */
 recordingsRouter.post(
   '/:id/clip',
@@ -634,9 +679,17 @@ recordingsRouter.post(
          * worse than a blunt one, so the option is real now.
          */
         acceptGapsMs: z.number().int().nonnegative().max(600_000).default(0),
+        /** The clip's content type, chosen when it is cut. Absent: the owner's type. */
+        schemaId: z.string().uuid().nullable().optional(),
+        /** Starting values for that type's fields (the clip form fills them from the guide). */
+        metadata: z.record(z.string(), z.any()).optional(),
       })
       .parse(req.body);
     if (body.endMs <= body.startMs) throw badRequest('endMs must be after startMs');
+    if (body.schemaId) {
+      const ok = await one(`SELECT 1 FROM metadata_schemas WHERE id = $1 AND account_id = $2`, [body.schemaId, accountId(req)]);
+      if (!ok) throw badRequest('That content type does not exist in this account');
+    }
     const rec = await fetchOwned(req.params.id, accountId(req));
     if (!rec) throw notFound('Recording not found');
     if (body.startMs < rec.start_epoch_ms || (rec.end_epoch_ms && body.endMs > rec.end_epoch_ms))
@@ -671,6 +724,18 @@ recordingsRouter.post(
       outputKind: body.outputKind,
       masterKeyBase: rec.master_key ?? 'vod',
     });
+
+    // THE TYPE CHOSEN AT CUT TIME, and its starting values. The owner's values
+    // are kept only when the clip stays the owner's type: a station's fields
+    // mean nothing on a sports-match clip.
+    if (body.schemaId !== undefined || body.metadata) {
+      const sameType = body.schemaId === undefined || body.schemaId === row.schema_id;
+      const merged = { ...(sameType ? (row.metadata ?? {}) : {}), ...(body.metadata ?? {}) };
+      const upd = await one<any>(
+        `UPDATE vod_assets SET schema_id = $2, metadata = $3::jsonb, updated_at = now() WHERE id = $1 RETURNING schema_id, metadata`,
+        [row.id, body.schemaId === undefined ? row.schema_id : body.schemaId, JSON.stringify(merged)]);
+      if (upd) { row.schema_id = upd.schema_id; row.metadata = upd.metadata; }
+    }
 
     // Through the shared helper. Formats, the audio MP3 addition and the dedupe
     // key are decided in one place now, because there were three callers of

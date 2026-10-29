@@ -48,7 +48,23 @@ export interface PlaylistItem {
   playbackToken?: string | null;
   /** On-demand ads the play gate gave this item (sdk/ads.ts). */
   ads?: import('./ads').ItemAds | null;
+  /** The channel's brand mark, drawn over the picture (a FAST channel's watermark: its segments are not re-encoded). */
+  brandMark?: BrandMark | null;
   meta?: Record<string, unknown>;
+}
+
+/**
+ * A channel watermark the PLAYER draws, positioned as the encoder would burn
+ * it: offsets in pixels of a 1920x1080 frame from the corner, height as a
+ * percentage of the frame height, opacity 0 to 100.
+ */
+export interface BrandMark {
+  url: string;
+  position: 'tl' | 'tc' | 'tr' | 'bl' | 'bc' | 'br';
+  offsetX: number;
+  offsetY: number;
+  opacity: number;
+  scale: number;
 }
 
 /** A programme in a channel's guide. Instants are epoch ms, formatted at the last moment. */
@@ -60,6 +76,13 @@ export interface Programme {
   imageUrl?: string | null;
   startsAt: number;
   endsAt: number;
+  /**
+   * The programme's key metadata as the stream carries it (the programme
+   * marker's X- attributes / DASH payload, keys lower case): genre, series,
+   * season, episode, rating, year, artist, album, language, asset, duration,
+   * media. Only what the channel set. Empty for a programme from a fetched guide.
+   */
+  meta?: Record<string, string>;
 }
 
 /** A track on an audio service: what is playing, what played, what is next. */
@@ -441,6 +464,8 @@ export interface VoltPlayerSdkOptions {
   poster?: string | null;
   /** Diagonal text over the picture (share links). */
   watermark?: string | null;
+  /** A channel brand mark over the picture for every item (the gate's own, per item, wins). */
+  brandMark?: BrandMark | null;
   /** Start position in seconds for VOD. */
   startAt?: number;
   /** Extra request headers for manifests and segments (the console's own /api playlists). */

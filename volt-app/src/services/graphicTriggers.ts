@@ -44,6 +44,53 @@ export interface ScheduleItem {
   startsAt: Date;
   endsAt: Date | null;
   kind?: string | null;
+  /**
+   * The programme's KEY METADATA for players' now and next displays, carried in
+   * the manifests as X- attributes (HLS) and messageData keys (DASH):
+   * DESCRIPTION, GENRE, SERIES, SEASON, EPISODE, RATING, YEAR, ARTIST, ALBUM,
+   * LANGUAGE, ASSET, DURATION. Keys upper case, values plain text (see keyMetadata).
+   */
+  extra?: Record<string, string> | null;
+}
+
+/** The fields Up next repeats about the programme it names (the rest ride on the programme's own marker). */
+const NEXT_KEYS = ['GENRE', 'SERIES', 'SEASON', 'EPISODE', 'RATING', 'ARTIST', 'DESCRIPTION'];
+
+/**
+ * KEY METADATA from a programme's and its asset's metadata, ready for the
+ * manifests: plain one-line text (quotes and line breaks cannot ride in an
+ * HLS attribute), short (a description is cut at 280 characters on a word),
+ * and only what is set.
+ */
+export function keyMetadata(pm: Record<string, any> | null | undefined, am: Record<string, any> | null | undefined, extra: { assetId?: string | null; durationSec?: number | null; audio?: boolean } = {}): Record<string, string> {
+  const p = pm ?? {}, a = am ?? {};
+  const pick = (...vals: unknown[]) => {
+    for (const v of vals) {
+      if (v == null || v === '') continue;
+      const t = Array.isArray(v) ? v.filter((x) => x != null && x !== '').map((x) => (typeof x === 'object' ? (x as any).name ?? '' : String(x))).filter(Boolean).join(', ')
+        : typeof v === 'object' ? String((v as any).name ?? (v as any).value ?? '') : String(v);
+      const clean = t.replace(/["\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+      if (clean) return clean;
+    }
+    return null;
+  };
+  const cut = (t: string | null, n: number) => (t && t.length > n ? t.slice(0, t.lastIndexOf(' ', n) > n * 0.6 ? t.lastIndexOf(' ', n) : n).trim() + '…' : t);
+  const out: Record<string, string | null> = {
+    DESCRIPTION: cut(pick(p.description, p.desc, a.description, a.shortDescription, a.longDescription), 280),
+    GENRE: pick(p.genre, p.category, a.genre),
+    SERIES: pick(p.series, a.series, a.partOfSeries),
+    SEASON: pick(p.season, p.seasonNumber, a.season, a.seasonNumber),
+    EPISODE: pick(p.episode, p.episodeNumber, a.episode, a.episodeNumber),
+    RATING: pick(p.rating, a.rating, a.contentRating),
+    YEAR: pick(p.year, a.year, a.releaseYear, typeof a.datePublished === 'string' ? a.datePublished.slice(0, 4) : null),
+    ARTIST: pick(p.artist, a.artist, a.byArtist, a.performer),
+    ALBUM: pick(p.album, a.album, a.inAlbum),
+    LANGUAGE: pick(p.language, a.language, a.inLanguage),
+    ASSET: extra.assetId ? String(extra.assetId) : null,
+    DURATION: extra.durationSec && extra.durationSec > 0 ? String(Math.round(extra.durationSec)) : null,
+    ...(extra.audio ? { MEDIA: 'audio' } : {}),
+  };
+  return Object.fromEntries(Object.entries(out).filter(([, v]) => v != null && v !== '')) as Record<string, string>;
 }
 
 /** Per channel or event, stored as overrides in `graphics` (migration 0060). */
@@ -167,9 +214,12 @@ export function buildTriggers(items: ScheduleItem[], settings: GraphicsSettings,
       scte35: breakCue(b.id, b.durationSec, b.scteEventId),
     });
   }
-  for (const p of list) {
+  for (let pi = 0; pi < list.length; pi++) {
+    const p = list[pi];
     const isAd = String(p.kind ?? '').toLowerCase() === 'ad';
     const dur = p.endsAt ? (p.endsAt.getTime() - p.startsAt.getTime()) / 1000 : null;
+    // what follows it, so a player at any point of a programme can say "next"
+    const nx = isContent(p) ? list.slice(pi + 1).find((n) => isContent(n) && n.startsAt.getTime() >= p.startsAt.getTime() + 1000) : undefined;
     out.push({
       id: p.id, cls: isAd ? CLASS_AD : CLASS_PROGRAMME, graphic: isAd ? 'ad' : 'programme',
       start: p.startsAt, durationSec: dur != null && dur > 0 ? dur : null,
@@ -178,6 +228,12 @@ export function buildTriggers(items: ScheduleItem[], settings: GraphicsSettings,
         ...(p.kind ? { KIND: String(p.kind) } : {}),
         ...(p.subtitle ? { SUBTITLE: p.subtitle } : {}),
         ...(fetchable(p.imageUrl) ? { IMAGE: fetchable(p.imageUrl)! } : {}),
+        ...(p.extra ?? {}),
+        ...(nx ? {
+          'NEXT-TITLE': nx.title, 'NEXT-START': nx.startsAt.toISOString(), 'NEXT-ID': nx.id,
+          ...(nx.subtitle ? { 'NEXT-SUBTITLE': nx.subtitle } : {}),
+          ...(fetchable(nx.imageUrl) ? { 'NEXT-IMAGE': fetchable(nx.imageUrl)! } : {}),
+        } : {}),
       },
     });
   }
@@ -211,6 +267,7 @@ export function buildTriggers(items: ScheduleItem[], settings: GraphicsSettings,
         PROGRAMME: next.id,
         ...(next.subtitle ? { SUBTITLE: next.subtitle } : {}),
         ...(fetchable(next.imageUrl) ? { IMAGE: fetchable(next.imageUrl)! } : {}),
+        ...Object.fromEntries(Object.entries(next.extra ?? {}).filter(([k]) => NEXT_KEYS.includes(k))),
       },
     });
   }
@@ -311,17 +368,23 @@ async function loadBlock(kind: 'channel' | 'event', id: string, blockStart: numb
       // A programme ending just after the block still names what is next, so the
       // read runs on past the block by the longest lead plus a margin.
       const from = new Date(blockStart - 3600_000), to = new Date(blockStart + BLOCK_MS + 3600_000);
+      // The asset behind each programme (a FAST programme points at one, so do
+      // auto-VOD and clip programmes) for its key metadata and poster.
       const rows = await query<any>(
-        `SELECT id, title, starts_at, ends_at, metadata
-           FROM programmes
-          WHERE ${kind === 'channel' ? 'channel_id' : 'event_id'} = $1
-            AND COALESCE(metadata->>'source','') <> 'icy'
-            AND starts_at < $3::timestamptz
-            AND (ends_at IS NULL OR ends_at > $2::timestamptz)
-          ORDER BY starts_at
+        `SELECT p.id, p.title, p.starts_at, p.ends_at, p.metadata, v.id AS asset_id, v.metadata AS asset_meta, v.poster_key, v.duration_ms AS asset_ms
+           FROM programmes p
+           LEFT JOIN vod_assets v ON v.id = CASE WHEN COALESCE(p.metadata->>'vodAssetId', '') ~* '^[0-9a-f-]{36}$' THEN (p.metadata->>'vodAssetId')::uuid END
+          WHERE p.${kind === 'channel' ? 'channel_id' : 'event_id'} = $1
+            AND COALESCE(p.metadata->>'source','') <> 'icy'
+            AND p.starts_at < $3::timestamptz
+            AND (p.ends_at IS NULL OR p.ends_at > $2::timestamptz)
+          ORDER BY p.starts_at
           LIMIT 500`,
         [id, from.toISOString(), to.toISOString()]);
-      const owner = await one<any>(`SELECT graphics FROM ${kind === 'channel' ? 'channels' : 'events'} WHERE id = $1`, [id]).catch(() => null);
+      const owner = await one<any>(`SELECT graphics${kind === 'channel' ? `, COALESCE(fast_media, 'video') AS fast_media` : ''} FROM ${kind === 'channel' ? 'channels' : 'events'} WHERE id = $1`, [id]).catch(() => null);
+      const { config } = await import('../config');
+      const cdn = String(config.aws.cdnBaseUrl ?? '').replace(/\/$/, '');
+      const audio = owner?.fast_media === 'audio';
       // Ad breaks (migration 0064). A database without the table yet has none.
       const brk = await query<any>(
         `SELECT id, starts_at, duration_ms, source, hide_graphics, scte_event_id FROM stream_breaks
@@ -337,9 +400,10 @@ async function loadBlock(kind: 'channel' | 'event', id: string, blockStart: numb
           return {
             id: String(r.id), title: String(r.title ?? ''),
             subtitle: m.subTitle ?? m.sub_title ?? m.subtitle ?? null,
-            imageUrl: m.image ?? m.icon ?? m.thumbnail ?? null,
+            imageUrl: m.image ?? m.icon ?? m.thumbnail ?? (r.poster_key && /^https?:\/\//.test(cdn) ? `${cdn}/${String(r.poster_key).replace(/^\//, '')}` : null) ?? r.asset_meta?.image ?? null,
             startsAt: new Date(r.starts_at).toISOString(), endsAt: r.ends_at ? new Date(r.ends_at).toISOString() : null,
             kind: m.kind ?? m.class ?? 'content',
+            extra: keyMetadata(m, r.asset_meta, { assetId: r.asset_id ? String(r.asset_id) : null, durationSec: r.asset_ms != null ? Number(r.asset_ms) / 1000 : null, audio }),
           };
         }),
       };

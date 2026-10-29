@@ -9,9 +9,11 @@
 //  question "where did my file go" has one answer.
 // ============================================================================
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api, type IngestHeld, type IngestTransfer } from './api'
 import { subscribe, cancel, pause, resume, retryFailed, clearFinished, type UploadItem } from './uploadManager'
 import { MetadataForm } from './ContentTypeFields'
+import { announceAssetsChanged } from './assetEvents'
 import { fmtBytes, label } from './IngestPanel'
 import './ingest.css'
 
@@ -37,17 +39,22 @@ export function IngestQueue() {
   const count = active.length + held.length + failed.length + transfers.length
   if (!count && !open) return null
 
-  const act = async (fn: () => Promise<any>) => { setErr(''); try { await fn(); setFill(null); setMeta({}); loadHeld() } catch (e: any) { setErr(String(e?.message ?? e)) } }
+  // `id`: the asset the action changed, announced so an open Media Library refreshes its card (assetEvents.ts)
+  const act = async (fn: () => Promise<any>, id?: string) => { setErr(''); try { await fn(); setFill(null); setMeta({}); loadHeld(); announceAssetsChanged([id]) } catch (e: any) { setErr(String(e?.message ?? e)) } }
 
   return (
     <>
-      {!open && count > 0 && (
-        <button type="button" className="iq-fab" onClick={() => setOpen(true)} style={{ ['--p' as any]: `${pct}%` }}>
+      {count > 0 && (
+        <button type="button" aria-expanded={open} className={`iq-fab${held.length && !active.length ? ' warn' : ''}${failed.length && !active.length && !held.length ? ' bad' : ''}`} onClick={() => setOpen(o => !o)} style={{ ['--p' as any]: `${pct}%` }}
+          title={[active.length && `Uploading ${active.length} file${active.length === 1 ? '' : 's'}, ${pct}%`, held.length && `${held.length} waiting on you in the ingest queue`,
+            failed.length && `${failed.length} failed`, transfers.length && `${transfers.length} accelerated transfer${transfers.length === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}
+          aria-label="Open the ingest queue">
           <span className="ring" />
-          <span>{active.length ? `Uploading ${active.length} · ${pct}%` : held.length ? `${held.length} waiting on you` : failed.length ? `${failed.length} failed` : `${transfers.length} transfer${transfers.length === 1 ? '' : 's'} running`}</span>
+          <span className="lbl">{active.length ? `${pct}%` : held.length ? `${held.length} waiting` : failed.length ? `${failed.length} failed` : `${transfers.length} transfer${transfers.length === 1 ? '' : 's'}`}</span>
         </button>
       )}
-      {open && (
+      {/* Portalled: the top bar's backdrop blur would otherwise make it the drawer's containing block. */}
+      {open && createPortal(
         <aside className="iq" role="dialog" aria-label="Ingest queue">
           <div className="iq-h">Ingest Queue<span className="sp" /><button type="button" className="iq-ic" aria-label="Close" onClick={() => setOpen(false)}>✕</button></div>
           {(active.length > 0 || done.length > 0 || failed.length > 0) && (
@@ -58,14 +65,15 @@ export function IngestQueue() {
             </div>
           )}
           <div className="iq-list">
-            {items.slice().reverse().map(i => {
+            {/* A finished upload that is held for metadata is listed once, under Needs you. */}
+            {items.slice().reverse().filter(i => !(i.status === 'done' && i.assetId && held.some(h => h.id === i.assetId))).map(i => {
               const p = i.totalBytes ? Math.round((i.sentBytes / i.totalBytes) * 100) : 0
               return (
                 <div key={i.id} className="iq-row">
                   <div className="th">{(i.filename.split('.').pop() ?? '').slice(0, 4).toUpperCase()}</div>
                   <div className="b">
                     <div className="nm" title={i.error || i.filename}>{i.filename}</div>
-                    <div className="mt">{fmtBytes(i.totalBytes)}{i.status === 'done' ? ` · ${label(i.ingest)}` : i.status === 'error' ? ` · ${i.error ?? 'failed'}` : i.status === 'background' ? ' · the browser is carrying it' : i.status === 'paused' ? ' · paused' : i.status === 'assembling' ? ' · assembling' : i.rate ? ` · ${fmtBytes(i.rate)}/s` : ''}</div>
+                    <div className="mt">{fmtBytes(i.totalBytes)}{i.status === 'done' ? ` · ${i.ingest?.status === 'awaiting_metadata' ? 'in the Media Library' : label(i.ingest)}` : i.status === 'error' ? ` · ${i.error ?? 'failed'}` : i.status === 'background' ? ' · the browser is carrying it' : i.status === 'paused' ? ' · paused' : i.status === 'assembling' ? ' · assembling' : i.rate ? ` · ${fmtBytes(i.rate)}/s` : ''}</div>
                     <div className={`pb${i.status === 'done' ? ' ok' : i.status === 'error' ? ' bad' : ''}`}><i style={{ width: `${i.status === 'done' ? 100 : p}%` }} /></div>
                   </div>
                   {i.status === 'uploading' && <button type="button" className="iq-ic" title="Pause" onClick={() => pause(i.id)}>❚❚</button>}
@@ -91,21 +99,21 @@ export function IngestQueue() {
                   <div className="th">{(h.originalFilename?.split('.').pop() ?? '').slice(0, 4).toUpperCase()}</div>
                   <div className="b">
                     <div className="nm">{h.originalFilename ?? h.title}</div>
-                    <div className="mt" style={{ color: 'var(--warn)' }}>{h.status === 'awaiting_metadata' ? `needs ${(h.awaitingMetadata ?? []).join(', ')}` : h.status === 'duplicate' ? `same ${h.duplicate?.strength === 'content' ? 'content' : 'name and size'} as a library asset` : `refused by ${h.rules.map(r => r.ruleName).join(', ')}`}</div>
+                    <div className="mt" style={{ color: 'var(--warn)' }}>{h.status === 'awaiting_metadata' ? `needs ${(h.awaitingMetadata ?? []).join(', ')}${h.encoded ? ' · encoded, can be published once filled in' : h.mediaState === 'failed' ? ' · encode failed' : ' · encoding'}` : h.status === 'duplicate' ? `same ${h.duplicate?.strength === 'content' ? 'content' : 'name and size'} as a library asset` : `refused by ${h.rules.map(r => r.ruleName).join(', ')}`}</div>
                   </div>
-                  {h.status === 'awaiting_metadata' && <button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => { setFill(fill === h.id ? null : h.id); setMeta({}) }}>{fill === h.id ? 'Close' : 'Fill in'}</button>}
+                  {h.status === 'awaiting_metadata' && <button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => { setFill(fill === h.id ? null : h.id); setMeta({ ...(h.metadata ?? {}) }) }}>{fill === h.id ? 'Close' : 'Fill in'}</button>}
                 </div>
                 {h.status === 'duplicate' && (
                   <div style={{ display: 'flex', gap: 6, padding: '0 18px 12px 86px' }}>
-                    <button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => act(() => api.ingestResolveDuplicate(h.id, 'skip'))}>Skip it</button>
-                    <button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => act(() => api.ingestResolveDuplicate(h.id, 'version'))}>Keep both</button>
-                    <button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => act(() => api.ingestResolveDuplicate(h.id, 'replace'))}>Replace old</button>
+                    <button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => act(() => api.ingestResolveDuplicate(h.id, 'skip'), h.id)}>Skip it</button>
+                    <button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => act(() => api.ingestResolveDuplicate(h.id, 'version'), h.id)}>Keep both</button>
+                    <button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 'var(--fs-xs)' }} onClick={() => act(() => api.ingestResolveDuplicate(h.id, 'replace'), h.id)}>Replace old</button>
                   </div>
                 )}
                 {fill === h.id && (
                   <div style={{ padding: '0 18px 12px' }}>
                     <MetadataForm typeId={h.schemaId} value={meta} onChange={setMeta} compact />
-                    <button type="button" className="btn primary" style={{ marginTop: 8, padding: '6px 12px', fontSize: 'var(--fs-xs)' }} onClick={() => act(() => api.ingestSetMetadata(h.id, meta))}>Save and ingest</button>
+                    <button type="button" className="btn primary" style={{ marginTop: 8, padding: '6px 12px', fontSize: 'var(--fs-xs)' }} onClick={() => act(() => api.ingestSetMetadata(h.id, meta), h.id)}>Save</button>
                   </div>
                 )}
               </div>
@@ -114,7 +122,7 @@ export function IngestQueue() {
           </div>
           {active.length > 0 && (
             <div className="iq-f">
-              <span className="iq-fab" style={{ position: 'static', padding: 0, border: 0, boxShadow: 'none', background: 'transparent', ['--p' as any]: `${pct}%` }}><span className="ring" /></span>
+              <span className="iq-fab" style={{ height: 'auto', padding: 0, border: 0, boxShadow: 'none', background: 'transparent', ['--p' as any]: `${pct}%` }}><span className="ring" /></span>
               <div className="b">
                 <div><b>Uploading: {pct}%</b></div>
                 <div className="mt">{done.length} of {done.length + active.length} files uploaded · {fmtBytes(sent)} of {fmtBytes(tot)}{rate > 0 ? ` · ${fmtBytes(rate)}/s` : ''}{eta != null ? ` · ${eta >= 60 ? Math.round(eta / 60) + 'm ' + (eta % 60) + 's' : eta + 's'} left` : ''}</div>
@@ -124,7 +132,7 @@ export function IngestQueue() {
               <button type="button" className="iq-ic" title="Cancel all" onClick={() => active.forEach(i => cancel(i.id))}>✕</button>
             </div>
           )}
-        </aside>
+        </aside>, document.body
       )}
     </>
   )

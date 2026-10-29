@@ -1,0 +1,53 @@
+/* ENCODING QUEUE (pages/EncodeJobs.tsx). Tokens only; no one-edge accent borders. */
+.ej-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-bottom:8px}
+.ej-run{padding:14px;cursor:pointer;transition:border-color .15s}
+.ej-run:hover,.ej-run:focus-visible{border-color:var(--border-2,rgba(255,255,255,.14));outline:none}
+.ej-run .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ej-run .f{color:var(--faint);font-size:var(--fs-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.ej-bar{height:6px;border-radius:3px;background:var(--panel-3);overflow:hidden;margin:12px 0 6px}
+.ej-bar i{display:block;height:100%;background:var(--brand);transition:width .6s}
+.ej-bar.fail i{background:var(--down)}
+.ej-bar.done i{background:var(--live)}
+.ej-note{display:flex;gap:10px;justify-content:space-between;font-size:var(--fs-sm);color:var(--muted)}
+.ej-note .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ej-table tbody tr{cursor:pointer}
+.ej-table tbody tr:hover td{background:rgba(255,255,255,.02)}
+.ej-table td,.ej-table th{vertical-align:top}
+.ej-sub{color:var(--faint);font-size:var(--fs-sm);margin-top:2px}
+.ej-pos{font-variant-numeric:tabular-nums;font-weight:700;color:var(--muted)}
+.ej-err{color:#fca5a5;font-size:var(--fs-sm);max-width:52ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ej-empty{color:var(--faint);padding:14px;font-size:var(--fs-sm)}
+.ej-filter{display:inline-flex;gap:4px;margin-left:auto}
+.ej-head-row{display:flex;align-items:center;gap:10px;margin:20px 0 10px}
+.ej-head-row .sec-label{margin:0}
+
+/* detail */
+.ej-back{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:var(--fs-sm);background:none;border:0;padding:0;cursor:pointer;margin-bottom:10px}
+.ej-back:hover{color:var(--text)}
+.ej-detail{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;align-items:start}
+@media (max-width:1100px){.ej-detail{grid-template-columns:1fr}}
+.ej-card{padding:16px;margin-bottom:16px}
+.ej-card .sec-label{margin-top:0}
+.ej-outs td{font-size:var(--fs-sm)}
+.ej-outs .nm{font-weight:600;white-space:nowrap}
+.ej-state{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-xs);font-weight:600;text-transform:uppercase;letter-spacing:.02em;white-space:nowrap}
+.ej-state i{width:7px;height:7px;border-radius:50%;background:currentColor}
+.ej-state.ok{color:var(--live)}
+.ej-state.running{color:var(--brand)}
+.ej-state.running i{animation:pulse2 1.4s infinite}
+.ej-state.pending,.ej-state.skipped{color:var(--faint)}
+.ej-state.failed,.ej-state.missing{color:var(--down)}
+.ej-log-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.ej-log{background:#0b0e14;border:1px solid var(--border);border-radius:10px;padding:10px 12px;max-height:520px;overflow:auto;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.ej-log .l{display:grid;grid-template-columns:74px minmax(0,1fr);gap:10px}
+.ej-log .ts{color:var(--faint);user-select:none}
+.ej-log .step{color:#cdd8ff;font-weight:600}
+.ej-log .warn{color:var(--warn)}
+.ej-log .err{color:#c9b2b2}
+.ej-log .fail{color:#fca5a5;font-weight:600}
+.ej-log .att{color:var(--faint);margin:6px 0;border-top:1px dashed var(--border);padding-top:6px}
+.ej-log-empty{color:var(--faint)}
+.ej-follow{display:grid;gap:8px}
+.ej-follow .row{display:flex;align-items:center;gap:10px;font-size:var(--fs-sm)}
+.ej-follow .row .lb{flex:1;min-width:0}

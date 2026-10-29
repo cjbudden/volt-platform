@@ -68,13 +68,15 @@ A role is a named set of levels, one per feature. A user can hold several roles,
 | Feature | Label | API prefixes | `operate` covers |
 |---|---|---|---|
 | `monitoring` | Live & monitoring | `/api/status`, `/api/monitoring` | |
-| `channels` | TV channels | `/api/channels` (TV), `/api/daypart-presets` | start, stop, air, auto-connect, test-stream, failover-test |
+| `channels` | TV channels | `/api/channels` (live TV), `/api/daypart-presets` | start, stop, air, auto-connect, test-stream, failover-test |
+| `fast` | FAST channels | `/api/fast`, and `/api/channels/:id` when the channel is a FAST channel (`origin = 'playlist'`) | on/off air, activate a run order, start/stop the playout, decide a break |
 | `radio` | Radio stations | `/api/radio`, and `/api/channels/:id` when the channel is a radio station | start, stop, air, auto-connect, clear-recovery, probe |
 | `events` | Events | `/api/events` | start, stop, auto-connect |
 | `epg` | EPG & schedules | `/api/epg` | XMLTV import run and test |
 | `recordings` | Recordings & clips | `/api/recordings`, `/api/scheduled-clips` | publish |
 | `vod` | Media library & publishing | `/api/vod`, `/api/publications`, `/api/social` | publish, withdraw, social publish and retry |
-| `media` | Files, uploads & storage | `/api/files`, `/api/filler-assets`, `/api/uploads`, `/api/tus`, `/api/watchfolders`, `/api/storage`, `/api/jobs` | job retry and cancel, watchfolder dry run |
+| `media` | Files, uploads & storage | `/api/files`, `/api/filler-assets`, `/api/uploads`, `/api/tus`, `/api/watchfolders`, `/api/storage`, `/api/jobs`, and the ingest queue (`/api/ingest/held`, `/assets`, `/transfers`, `/remote`, `/locate`) | job retry and cancel, watchfolder dry run |
+| `encoding` | Encoding profiles & ladders | `/api/encode-profiles` (read open) | |
 | `sharing` | Share links | `/api/share-links` | |
 | `analytics` | Analytics & reports | `/api/analytics` | |
 | `fleet` | Fleet & usage | `/api/fleet` | |
@@ -83,12 +85,13 @@ A role is a named set of levels, one per feature. A user can hold several roles,
 | `viewers` | Public users | `/api/viewers` | sign out everywhere |
 | `apps` | Apps, API keys & players | `/api/apps`, `/api/player-config` | |
 | `payments` | Payments & products | `/api/payments` | |
-| `settings` | Account settings | `/api/groups`, `/api/output-profiles`, `/api/metadata-schemas`, `/api/notification-templates`, `/api/publish-targets`, `/api/engines`, `/api/addons`, `/api/workflows`, `/api/encode-profiles`, `/api/ingest`, `/api/publishing-rules` | workflow run, cancel and retry |
+| `settings` | Account settings | `/api/groups`, `/api/output-profiles`, `/api/metadata-schemas`, `/api/notification-templates`, `/api/publish-targets`, `/api/engines`, `/api/addons`, `/api/workflows`, `/api/ingest` (rules, webhooks, providers), `/api/publishing-rules` | workflow run, cancel and retry |
 
 **Mapping rules:**
 - **Method:** reads (`GET`) need `view`. Writes need `operate` if the path matches the feature's operate list, otherwise `manage`.
 - **Shared paths:** `/api/sources` is allowed for anyone holding the needed level on channels, radio or events.
 - **Shared lookups:** groups, output profiles, metadata schemas, engines, add-ons and encode profiles can be read by any signed-in admin user, because other features' forms need them.
+- **Split features (28 Oct 2026):** FAST channels came out of TV channels and Encoding profiles & ladders out of Account settings. A role saved before the split has no key for them and keeps the level it had through the old feature (`cleanPerms`), so nobody lost access; saving the role in the editor writes the new key.
 - **Unlisted paths:** a signed-in user's own notifications, tickets, search and discovery documents. Anyone can read them; writing needs at least the operator tier.
 - **Filtered lists:** search results and the live board only include kinds the user can see.
 
@@ -96,6 +99,8 @@ A role is a named set of levels, one per feature. A user can hold several roles,
 | | Administrator | Report & Analytics Manager | Event Manager | Radio Manager | System Viewer |
 |---|---|---|---|---|---|
 | Tier | admin | operator | operator | operator | viewer |
+| FAST channels | manage | view | – | – | view |
+| Encoding profiles & ladders | manage | – | – | – | view |
 | Live & monitoring | manage | view | view | view | view |
 | TV channels | manage | view | view | – | view |
 | Radio stations | manage | view | – | **manage** | view |
@@ -227,10 +232,14 @@ npm run test:identity    # 59 checks: email change, mobile, two-step sign-in, po
 | analytics@volt.test | `VoltTest!2026` | Report and Analytics Manager |
 | events@volt.test | `VoltTest!2026` | Event Manager |
 | radio@volt.test | `VoltTest!2026` | Radio Manager |
+| fast@volt.test | `VoltTest!2026` | FAST Manager |
 | viewer@volt.test | `VoltTest!2026` | System Viewer |
 | fan@volt.test | `VoltTest!2026` | Public user (sign in through the printed publishable key) |
 
 - **Options:** `SEED_ACCOUNT_ID`, `SEED_DOMAIN` and `SEED_PASSWORD` change the account, email domain and password.
+- **One FAST user in the local demo account:** `npm run seed:fast-user` adds `fast@rtm.example` / `volt1234` with the FAST Manager role to the account of `admin@rtm.example`, touching nothing else (`SEED_ACCOUNT_ID`, `SEED_EMAIL`, `SEED_PASSWORD` to change it).
+
+**FAST Manager** (operator tier, `fast_manager`): FAST channels, Media library & publishing, Files, uploads & storage (Image Library, Loops & Fillers, uploads, the encode queue, the ingest queue), Encoding profiles & ladders and Share links at manage; Downloads at operate; Analytics & reports, EPG and Graphics at view. No live TV, radio, events, monitoring, users, apps or account settings. `test/fast-access.check.ts` checks it end to end.
 - **Production:** the script refuses to run with `NODE_ENV=production`.
 
 ## 11. What changed for existing clients and deployments
@@ -340,3 +349,85 @@ A group sets:
 - **Names are unique** within an account. Migration 0048 renames any existing duplicates to "Name (2)" and so on.
 - **Deleting:** only an empty group can be deleted.
 - **The demo data:** "RTM Main" comes from `scripts/seed-demo.ts`.
+
+## 14. Single sign-on (OIDC and SAML)
+
+Admin users can sign in with their organisation's identity provider: Microsoft Entra ID, Okta, Google Workspace,
+Auth0, Keycloak, Ping, OneLogin, ADFS, or any OpenID Connect or SAML 2.0 provider. Set up in **Admin > Access >
+Single sign-on** (admin tier and up, feature *Admin users*). Public users (viewers) are not covered.
+
+Code: `volt-app/src/auth/sso/` (`oidc.ts`, `saml.ts`, `sso.ts` the rules, `routes.ts`), console `pages/SingleSignOn.tsx`
+and `sso.tsx` (sign-in page). Migration `0095_sso.sql`. Test: `test/sso.e2e.ts` (51, with a mock OpenID provider and a
+mock SAML IdP signing real responses).
+
+### Protocols
+
+| | OpenID Connect | SAML 2.0 |
+|---|---|---|
+| Flow | Authorization code with PKCE (S256), state and nonce | SP-initiated, HTTP-Redirect AuthnRequest, HTTP-POST response |
+| Checked | ID token signature against the provider's JWKS (RS/PS/ES, key rotation followed), issuer, audience, expiry, nonce, azp | XML signature on the assertion against the provider's certificate(s), issuer, audience, destination, time conditions, InResponseTo |
+| Library | none beyond jsonwebtoken (Node crypto for keys) | `@node-saml/node-saml` (MIT): run `npm install` in volt-app |
+| Volt gives the provider | Redirect URI `<base>/api/auth/sso/oidc/callback` | ACS `<base>/api/auth/sso/saml/acs/<id>`, Entity ID and metadata `<base>/api/auth/sso/saml/metadata/<id>` |
+
+`<base>` is `SSO_BASE_URL`, else `PUBLIC_BASE_URL`: the public https address of the API. After sign-in the person lands
+on `CONSOLE_BASE_URL` (default: the same) with a one-time code the console exchanges for a session (two minutes, single
+use). Tokens never travel in a URL. Unsolicited (IdP-initiated) SAML responses are refused.
+
+### Domains
+
+A connection signs in for email domains. A domain is **verified** by a DNS TXT record
+(`_volt-sso.<domain>` = `volt-sso-verification=<token>`) before Volt offers the provider for it, links users by email or
+creates users from it, so no provider can claim addresses it does not own. One domain belongs to one connection in all
+of Volt; public mail domains (gmail.com, outlook.com and the like) cannot be added.
+
+### Who the person is
+
+1. The provider's subject already linked to a user: that user.
+2. Otherwise the email, at a verified domain of the connection (and not marked unverified by the provider): a user
+   with that email in this account is linked; one in another Volt account is refused.
+3. Otherwise, when *Create Volt users on first sign-in* is on: a new active user at the connection's tier, with the
+   roles the provider's groups map to (or the default role). Its password is unusable until one is set.
+
+Disabled users stay out. Nobody becomes an owner through SSO. **Groups to roles:** a map of provider group values to
+Volt roles; the tier follows the highest mapped role, never above admin. With *Keep roles in sync*, mapped roles are
+added and removed at every sign-in; roles the map does not mention are left alone.
+
+### Two-step sign-in
+
+When the provider reports a second factor (OIDC `amr` such as mfa, otp, hwk, or a multi-factor `acr`; SAML
+authentication context or Entra's multipleauthn) and the connection trusts it, the session counts as two-step
+(`amr: ext, mfa`). Otherwise the person's own Volt methods apply, and an account that requires two-step for admins asks
+for it exactly as after a password.
+
+### Compulsory SSO
+
+*Make single sign-on compulsory* closes password sign-in for users at the connection's verified domains
+(`403 sso_required` with the connection, after the password check so nothing is learned without it). **Owners keep
+their password and two-step sign-in**, so a provider outage or a misconfiguration cannot lock an account out.
+
+### Sign-in page
+
+As an email is typed, its domain is looked up (`GET /api/auth/sso/discover`, by domain only, never by user) and
+"Continue with <provider>" is offered. With compulsory SSO the password field is hidden behind "Use a password
+instead". A provider's problem comes back as a message on the sign-in page and is kept on the connection
+(*Last problem*), with a **Test** button that checks discovery, keys, certificates (and their expiry) and domains.
+
+### Audit
+
+Every connection change, domain added, verified or removed, every SSO sign-in (created, linked, provider two-step,
+groups) and every refusal is in the audit log.
+
+| | |
+|---|---|
+| `GET /api/auth/sso/discover?email=` | connections for that domain, and whether SSO is required |
+| `GET /api/auth/sso/start/:id[?return=/path&login_hint=]` | off to the provider |
+| `GET /api/auth/sso/oidc/callback`, `POST /api/auth/sso/saml/acs/:id` | the provider's return |
+| `GET /api/auth/sso/saml/metadata/:id` | Volt's SAML metadata |
+| `POST /api/auth/sso/finish {code}` | session, or a two-step challenge |
+| `GET, POST /api/sso-connections`, `PATCH, DELETE /api/sso-connections/:id` | connections (client secret write-only, sealed) |
+| `POST /api/sso-connections/metadata {xml or url}` | read a provider's SAML metadata (https, public addresses only) |
+| `POST /api/sso-connections/:id/test` | check the connection |
+| `POST /api/sso-connections/:id/domains`, `POST …/domains/:domain/verify`, `DELETE …/domains/:domain` | domains |
+
+Not yet: SCIM provisioning (users created and removed by the provider ahead of sign-in), single logout, SSO for public
+users, encrypted SAML assertions.

@@ -749,7 +749,13 @@ def start_relay(inp, idx):
         # NDI / ST 2110: uncompressed, so this rendition is encoded once (ingest_args)
         cmd += ingest_args.encode_rendition_args(inp) + ["-f", "mpegts", udp_out(idx)]
     else:
-        cmd += ["-c", "copy", "-f", "mpegts", udp_out(idx)]
+        cmd += ["-c", "copy",
+            # Start the timeline at the first frame, not 1.4 s in (mpegts muxdelay +
+            # preload). With the default, keyframes sat 1.44 s off the packager's
+            # segment grid, so audio (cut on the grid) and video (cut on keyframes)
+            # never shared boundaries, even with segments a whole GOP (gop_align.py).
+            "-muxdelay", "0", "-muxpreload", "0", *gop_align.timeline_args(inp),
+            "-f", "mpegts", udp_out(idx)]
     name = f"relay:{inp.get('rendition_label', idx)}"
     return spawn(name, cmd)
 
@@ -875,6 +881,16 @@ def prepare_failover_inputs(inputs):
             except Exception as e:  # noqa: BLE001
                 log(f"failover input: edge-flag probe failed ({e}); using default flags")
             inp["_pace"] = True
+
+
+# THE TRANSCODER'S OUTPUTS START AT ZERO TOO (24 Oct 2026), like the copy relay
+# above. ffmpeg's MPEG-TS muxer otherwise adds ~1.4 s (muxdelay 0.7 + preload 0.5,
+# plus the encoder delay) to every timestamp. The keyframes are forced every
+# segment length of ENCODER time, so they landed at 1.48, 5.48, 9.48 s while the
+# packager cut audio on the clean 4, 8, 12 s grid: audio and video segments 1.48 s
+# apart on every segment (output_check index_misaligned), on every run, because a
+# restart rebuilt the same command. Measured on the Berita transcode channel.
+TS_ZERO = ["-muxdelay", "0", "-muxpreload", "0"]
 
 
 def _overlay_vf(scale_h, wm_path, wm):
@@ -1015,18 +1031,18 @@ def start_transcode(cfg, keys_unused, source_override=None):
         cmd += gin + ["-filter_complex", graph]
         for i, r in enumerate(ladder):
             cmd += video_rung_args(r, seg=seg, fps=fps, gpu=gpu, vmap=labels[i])
-            cmd += ["-f", "mpegts", udp_out(i)]
+            cmd += TS_ZERO + ["-f", "mpegts", udp_out(i)]
     else:
         for i, r in enumerate(ladder):
             vf = _overlay_vf(r['height'], wm_path, wm) if wm_path else None
             cmd += video_rung_args(r, seg=seg, fps=fps, gpu=gpu, vf=vf)
-            cmd += ["-f", "mpegts", udp_out(i)]
+            cmd += TS_ZERO + ["-f", "mpegts", udp_out(i)]
 
     # AUDIO: transcode EACH source audio track to its own AAC MPEG-TS on a dedicated
     # port. Track 0 always exists; extra tracks (multi-language sources) each get one.
     for a, _t in enumerate(tracks):
         cmd += audio_track_args(a)
-        cmd += ["-f", "mpegts", udp_out(AUDIO_IDX_BASE + a)]
+        cmd += TS_ZERO + ["-f", "mpegts", udp_out(AUDIO_IDX_BASE + a)]
     # SUPERVISED: a transcoder death (mid-stream TS error, codec hiccup) previously took
     # the whole channel down until a manual restart. Respawned, it rejoins the UDP feed
     # (or re-pulls the source) and the packager continues the same timeline.

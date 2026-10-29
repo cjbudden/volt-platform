@@ -4,11 +4,11 @@ import { useProtocols, SourceInput, hlsChoicePending, type SourceValue } from '.
 import { ImageRefField, GuideIconField } from '../ImageRefField'
 import { isFull, fullReason, noRoomReason, planFullReason } from '../lib/capacity'
 import DeleteChannelDialog, { BulkRemoveDialog } from '../DeleteChannelDialog'
-import { usePageNotice, useNotify, FormStatus } from '../notices'
+import { usePageNotice, useNotify, FormStatus, useSaveResult } from '../notices'
 import { usePref, byName, ChipGroup, GroupFilter, SortSelect, ListToolbar, ClearFilters, NoMatches } from '../listFilters'
 import { RowMenu, Icons, useSelection, SelectCell, SelectAllHead, BulkBar, ConfirmDialog, runBulk, bulkSummary, type MenuItem } from '../listActions'
 import { PageHead, NewButton, EntityCell, StatusPill, Preset, RecordingSection, RET_UNIT_SEC, splitDuration, type RetUnit, type PipelineState } from '../scaffold'
-import { SourceMetadataButton } from '../SourceMetadata'
+import { SourceValidateButton } from '../SourceMetadata'
 import { navigate, useRoute } from '../router'
 import { thumbUrl } from '../api'
 import { pressable } from '../a11y'
@@ -379,7 +379,9 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
     }
   }
 
+  const saved = useSaveResult()
   async function submitInner() {
+    saved.clear()
     if (!name.trim()) { setErr('Give the station a name'); return }
     if (!isEdit && !primary.url.trim()) { setErr('Add the source stream URL'); return }
     if (!isEdit && !groupId) { setErr('No group set up yet'); return }
@@ -405,7 +407,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
           ...(typeId ? { schemaId: typeId, metadata: meta } : {}),
           version: station!.version,
         } as any)
-        onDone()
+        saved.show('Station settings saved', () => onDone())
       } else {
         const ch = await api.createChannel({
           groupId, name: name.trim(), kind: 'radio', radio,
@@ -413,7 +415,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
           sources, brandRef: artRef.trim() || null, guideIconRef: guideIcon.trim() || null,
           ...(typeId ? { schemaId: typeId, metadata: meta } : {}),
         })
-        onDone(ch.id)
+        saved.show('Station created', () => onDone(ch.id))
       }
     } catch (e: any) {
       if (/version|match|409/i.test(String(e.message))) setErr('This station changed since you opened it. Reopen and retry.')
@@ -460,14 +462,14 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
               often a logo. Read it here and adopt what is useful, rather than
               retyping it from the station's website. */}
           <div className="flex items-center gap-2" style={{ marginTop: 8 }}>
-            <SourceMetadataButton url={primary.url} targets={{
+            <SourceValidateButton url={primary.url} protocol={primary.protocol} targets={{
               onName: (v) => setName(v),
               onArtwork: (v) => setArtRef(v),
               onBitrate: (v) => setBitrate(v),
               onUrl: (v) => setPrimary(p => ({ ...p, url: v })),
             }} />
             <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
-              Reads the stream's own name, genre, bitrate and artwork. Nothing is saved until you apply it.
+              Checks the source plays as it is and lets you listen to a sample. For Icecast it also reads the station's name, genre, bitrate and artwork; nothing is saved until you apply it.
             </span>
           </div>
           {isIcecast && <div className="hintxt">Icecast mounts carry now-playing (ICY) metadata: enable the log below to capture it.</div>}
@@ -513,10 +515,10 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
           </TabPane>
         </div>
         <div className="drawer-f">
-          {/* In the footer, so a problem is seen whichever tab is open. */}
-          <FormStatus error={err} blocked={blocked} />
+          {/* The save result shows at the top of the panel (FormStatus). */}
+          <FormStatus error={err} blocked={blocked} success={saved.message} onDismiss={err ? () => setErr('') : undefined} />
           <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy || !!blocked} title={blocked ?? ''} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save changes' : 'Create station'}</button>
+          <button className="btn primary" disabled={busy || !!blocked || saved.saving} title={blocked ?? ''} onClick={submit}>{busy ? 'Saving…' : saved.saving ? (isEdit ? 'Saved' : 'Created') : isEdit ? 'Save changes' : 'Create station'}</button>
         </div>
       </div>
     </div>

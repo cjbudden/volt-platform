@@ -17,8 +17,14 @@ export interface LibraryFilters {
   types: string[]
   /** availability states, any of */
   avail: string[]
-  /** recording | clip | upload | watchfolder, any of */
+  /** how it was made: recording | clip | upload | watchfolder, any of */
   origin: string[]
+  /** what it belongs to: channel | event | radio | upload | none, any of */
+  source: string[]
+  /** asset type: video | audio | song, any of */
+  media: string[]
+  /** usage status (can it be used): ready | unchecked | qc_failed | processing | failed | unplayable | no_media, any of */
+  status: string[]
   /** review: needs (in review or changes requested) | approved */
   review: '' | 'needs' | 'approved'
   /** a published copy is older than the asset */
@@ -37,11 +43,15 @@ export interface LibraryFilters {
   durMax: number | null
   q: string
   sort: SortKey
+  /** a collection id (collections.tsx); '' = the whole library */
+  col: string
+  /** include the collection's sub-collections (default on) */
+  colDeep: boolean
 }
 
 export const EMPTY_FILTERS: LibraryFilters = {
-  types: [], avail: [], origin: [], review: '', stale: false, missing: false, res: [], codec: [],
-  from: '', to: '', durMin: null, durMax: null, q: '', sort: 'newest',
+  types: [], avail: [], origin: [], source: [], media: [], status: [], review: '', stale: false, missing: false, res: [], codec: [],
+  from: '', to: '', durMin: null, durMax: null, q: '', sort: 'newest', col: '', colDeep: true,
 }
 
 export const SORTS: { value: SortKey; label: string; api: string }[] = [
@@ -56,6 +66,11 @@ export const SORTS: { value: SortKey; label: string; api: string }[] = [
 
 const AVAIL = ['draft', 'scheduled', 'available', 'expired', 'withdrawn']
 const ORIGIN = ['recording', 'clip', 'upload', 'watchfolder']
+export const SOURCE_VALUES = ['channel', 'event', 'radio', 'upload', 'none']
+export const MEDIA_VALUES = ['video', 'audio', 'song']
+export const STATUS_VALUES = ['ready', 'unchecked', 'qc_failed', 'processing', 'failed', 'unplayable', 'no_media']
+/** The statuses that need somebody: the "Problems" shortcut selects these. */
+export const PROBLEM_STATUSES = ['failed', 'unplayable', 'no_media', 'qc_failed']
 const isDate = (s: string | null) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
 const list = (s: string | null) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean)
 const posNum = (s: string | null): number | null => { if (s == null || s === '') return null; const n = Number(s); return Number.isFinite(n) && n >= 0 ? n : null }
@@ -68,6 +83,9 @@ export function parseFilters(search: string | URLSearchParams): LibraryFilters {
     types: list(p.get('type')).filter((x) => /^[0-9a-f-]{36}$/i.test(x)),
     avail: list(p.get('avail')).filter((x) => AVAIL.includes(x)),
     origin: list(p.get('origin')).filter((x) => ORIGIN.includes(x)),
+    source: list(p.get('src')).filter((x) => SOURCE_VALUES.includes(x)),
+    media: list(p.get('media')).filter((x) => MEDIA_VALUES.includes(x)),
+    status: list(p.get('status')).filter((x) => STATUS_VALUES.includes(x)),
     review: p.get('review') === 'needs' || p.get('review') === 'approved' ? p.get('review') as 'needs' | 'approved' : '',
     stale: p.get('stale') === '1',
     missing: p.get('missing') === '1',
@@ -79,6 +97,8 @@ export function parseFilters(search: string | URLSearchParams): LibraryFilters {
     durMax: posNum(p.get('dmax')),
     q: (p.get('q') ?? '').slice(0, 200),
     sort: SORTS.some((s) => s.value === sort) ? sort! : 'newest',
+    col: /^[0-9a-f-]{36}$/i.test(p.get('col') ?? '') ? p.get('col')! : '',
+    colDeep: p.get('coldeep') !== '0',
   }
 }
 
@@ -89,6 +109,9 @@ export function filtersToSearch(f: LibraryFilters): string {
   if (f.types.length) p.set('type', f.types.join(','))
   if (f.avail.length) p.set('avail', f.avail.join(','))
   if (f.origin.length) p.set('origin', f.origin.join(','))
+  if (f.source.length) p.set('src', f.source.join(','))
+  if (f.media.length) p.set('media', f.media.join(','))
+  if (f.status.length) p.set('status', f.status.join(','))
   if (f.review) p.set('review', f.review)
   if (f.stale) p.set('stale', '1')
   if (f.missing) p.set('missing', '1')
@@ -99,6 +122,7 @@ export function filtersToSearch(f: LibraryFilters): string {
   if (f.durMin != null) p.set('dmin', String(f.durMin))
   if (f.durMax != null) p.set('dmax', String(f.durMax))
   if (f.sort !== 'newest') p.set('sort', f.sort)
+  if (f.col) { p.set('col', f.col); if (!f.colDeep) p.set('coldeep', '0') }
   const s = p.toString()
   return s ? `?${s}` : ''
 }
@@ -112,6 +136,9 @@ export function filtersToApi(f: LibraryFilters, opts: { limit?: number; cursor?:
   if (f.types.length) p.set('schema_id', f.types.join(','))
   if (f.avail.length) p.set('availability_state', f.avail.join(','))
   if (f.origin.length) p.set('origin', f.origin.join(','))
+  if (f.source.length) p.set('source', f.source.join(','))
+  if (f.media.length) p.set('media_type', f.media.join(','))
+  if (f.status.length) p.set('usage_status', f.status.join(','))
   if (f.review === 'needs') p.set('review_state', 'in_review,changes_requested')
   if (f.review === 'approved') p.set('review_state', 'approved')
   if (f.stale) p.set('has_stale_publication', 'true')
@@ -123,6 +150,7 @@ export function filtersToApi(f: LibraryFilters, opts: { limit?: number; cursor?:
   if (f.to) p.set('created_at[lt]', nextDay(f.to))
   if (f.durMin != null) p.set('duration_ms[gte]', String(Math.round(f.durMin * 60000)))
   if (f.durMax != null) p.set('duration_ms[lte]', String(Math.round(f.durMax * 60000)))
+  if (f.col) { p.set('collection', f.col); if (f.colDeep) p.set('collection_deep', 'true') }
   if (!opts.facets) {
     p.set('sort', SORTS.find((s) => s.value === f.sort)?.api ?? '-created_at')
     p.set('limit', String(opts.limit ?? 48))

@@ -26,8 +26,18 @@ export interface Extracted {
   type: Sniffed & { kind: MediaKind; declaredMime?: string | null; extensionMismatch: boolean };
   probe?: {
     format?: string; durationSec?: number | null; bitrateKbps?: number | null;
-    video?: { codec?: string; width?: number; height?: number; fps?: number | null; fieldOrder?: string | null; pixFmt?: string | null } | null;
-    audio?: { codec?: string; channels?: number; sampleRate?: number; count: number } | null;
+    /** The container in words ("QuickTime / MOV"), the file size ffprobe read, and how many streams it holds. */
+    formatLong?: string | null; sizeBytes?: number | null; streams?: number;
+    video?: {
+      codec?: string; width?: number; height?: number; fps?: number | null; fieldOrder?: string | null; pixFmt?: string | null
+      codecLong?: string | null; profile?: string | null; level?: number | null; bitrateKbps?: number | null; bitDepth?: number | null
+      displayAspect?: string | null; sampleAspect?: string | null; frames?: number | null
+      colorSpace?: string | null; colorPrimaries?: string | null; colorTransfer?: string | null; colorRange?: string | null
+    } | null;
+    audio?: { codec?: string; channels?: number; sampleRate?: number; count: number; profile?: string | null; channelLayout?: string | null; bitrateKbps?: number | null; language?: string | null } | null;
+    /** Every audio track, in order (the summary above is the first). */
+    audioTracks?: { codec?: string; profile?: string | null; channels?: number; channelLayout?: string | null; sampleRate?: number; bitrateKbps?: number | null; language?: string | null }[];
+    subtitles?: { codec?: string; language?: string | null }[];
     tags?: Record<string, string>;
   } | null;
   id3?: Id3Tags | null;
@@ -77,6 +87,12 @@ function fpsOf(s: any): number | null {
   return Number.isFinite(v) && v > 0 ? Math.round(v * 1000) / 1000 : null;
 }
 
+/** The source's technical facts (interpretProbe), read fresh. Null when ffprobe cannot read it. */
+export async function probeFileFacts(path: string): Promise<NonNullable<Extracted['probe']> | null> {
+  const j = await ffprobe(path);
+  return j ? interpretProbe(j) : null;
+}
+
 /** Pure part: interpret ffprobe JSON. Exported so tests can feed captured output. */
 export function interpretProbe(j: any): NonNullable<Extracted['probe']> {
   const streams: any[] = j?.streams ?? [];
@@ -85,12 +101,31 @@ export function interpretProbe(j: any): NonNullable<Extracted['probe']> {
   const dur = Number(j?.format?.duration); const br = Number(j?.format?.bit_rate);
   const tags: Record<string, string> = {};
   for (const [k, val] of Object.entries(j?.format?.tags ?? {})) tags[k.toLowerCase()] = String(val);
+  // THE SOURCE'S TECHNICAL FACTS, as the asset page shows them (27 Oct 2026):
+  // everything an operator checks first about a delivered file.
+  const kbps = (x: unknown) => { const n = Number(x); return Number.isFinite(n) && n > 0 ? Math.round(n / 1000) : null; };
+  const num = (x: unknown) => { const n = Number(x); return Number.isFinite(n) && n > 0 ? n : null; };
+  const str = (x: unknown) => (typeof x === 'string' && x && x !== 'unknown' && x !== 'und' && x !== 'N/A' ? x : null);
+  const track = (t: any) => ({ codec: t.codec_name, profile: str(t.profile), channels: t.channels, channelLayout: str(t.channel_layout),
+    sampleRate: Number(t.sample_rate) || undefined, bitrateKbps: kbps(t.bit_rate ?? t.tags?.BPS), language: str(t.tags?.language) });
+  const subs: any[] = streams.filter((s) => s.codec_type === 'subtitle');
   return {
     format: j?.format?.format_name,
+    formatLong: str(j?.format?.format_long_name),
+    sizeBytes: num(j?.format?.size),
+    streams: streams.length,
     durationSec: Number.isFinite(dur) ? Math.round(dur * 1000) / 1000 : null,
     bitrateKbps: Number.isFinite(br) ? Math.round(br / 1000) : null,
-    video: v ? { codec: v.codec_name, width: v.width, height: v.height, fps: fpsOf(v), fieldOrder: v.field_order ?? null, pixFmt: v.pix_fmt ?? null } : null,
-    audio: a.length ? { codec: a[0].codec_name, channels: a[0].channels, sampleRate: Number(a[0].sample_rate) || undefined, count: a.length } : null,
+    video: v ? {
+      codec: v.codec_name, width: v.width, height: v.height, fps: fpsOf(v), fieldOrder: v.field_order ?? null, pixFmt: v.pix_fmt ?? null,
+      codecLong: str(v.codec_long_name), profile: str(v.profile), level: Number.isFinite(Number(v.level)) && Number(v.level) > 0 ? Number(v.level) : null,
+      bitrateKbps: kbps(v.bit_rate ?? v.tags?.BPS), bitDepth: num(v.bits_per_raw_sample),
+      displayAspect: str(v.display_aspect_ratio), sampleAspect: str(v.sample_aspect_ratio), frames: num(v.nb_frames),
+      colorSpace: str(v.color_space), colorPrimaries: str(v.color_primaries), colorTransfer: str(v.color_transfer), colorRange: str(v.color_range),
+    } : null,
+    audio: a.length ? { ...track(a[0]), count: a.length } : null,
+    audioTracks: a.map(track),
+    subtitles: subs.map((t) => ({ codec: t.codec_name, language: str(t.tags?.language) })),
     tags,
   };
 }

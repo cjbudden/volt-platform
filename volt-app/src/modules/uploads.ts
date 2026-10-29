@@ -76,6 +76,9 @@ const openBody = z.object({
   schemaId: z.string().uuid().nullable().optional(),
   metadata: z.record(z.any()).optional(),
   source: z.string().max(80).optional(),
+  /** 'vod' only: a re-upload of a record whose encode failed, and what to do with it
+   *  (reattach: becomes its source; replace: the failed record is deleted; new: keep both). */
+  retryOf: z.object({ assetId: z.string().uuid(), action: z.enum(['reattach', 'replace', 'new']) }).nullable().optional(),
 });
 
 uploadsRouter.post('/', asyncHandler(async (req, res) => {
@@ -94,6 +97,7 @@ uploadsRouter.post('/', asyncHandler(async (req, res) => {
     schemaId: b.schemaId ?? null,
     metadata: b.metadata ?? null,
     source: b.source ?? 'panel',
+    retryOf: b.purpose === 'vod' ? b.retryOf ?? null : null,
   });
   res.status(201).json(view(session, true));
 }));

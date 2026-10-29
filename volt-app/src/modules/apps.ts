@@ -424,6 +424,12 @@ interface AssetMeta {
   manifests?: { hls: string | null; dash: string | null };
   /** On-demand only: the skippable stretches (intro, recap, credits), seconds into the asset. */
   skip?: Array<{ kind: string; from: number; to: number }>;
+  /**
+   * FAST channels only: the channel's watermark, drawn by the player over the
+   * picture. A FAST channel's segments are copied, never re-encoded, so there is
+   * nothing to burn it into (volt-player sdk BrandMark).
+   */
+  brandMark?: { url: string; position: string; offsetX: number; offsetY: number; opacity: number; scale: number } | null;
 }
 
 const imageUrl = (v: unknown): string | null => typeof v === 'string' && /^(https?:\/\/|\/(?!\/))/.test(v) ? v : null;
@@ -456,20 +462,33 @@ function assetMeta(acct: string, kind: string, id: string): Promise<AssetMeta | 
       }
       const table = kind === 'event' ? 'events' : 'channels';
       const r = await one<any>(
-        `SELECT x.name, x.metadata${kind === 'event' ? '' : ', x.kind AS ckind, x.brand_ref'} FROM ${table} x JOIN groups g ON g.id = x.group_id
+        `SELECT x.name, x.metadata${kind === 'event' ? '' : `, x.kind AS ckind, x.brand_ref, x.origin, x.watermark_enabled, x.watermark_ref, x.watermark_position,
+                 x.watermark_offset_x, x.watermark_offset_y, x.watermark_opacity, x.watermark_scale`} FROM ${table} x JOIN groups g ON g.id = x.group_id
           WHERE x.id = $1 AND g.account_id = $2`, [id, acct]);
       if (!r) return null;
       return { title: r.name ?? null, description: r.metadata?.description ?? null,
         artworkUrl: imageUrl(r.metadata?.artworkUrl) ?? imageUrl(r.metadata?.image) ?? imageUrl(r.metadata?.posterUrl) ?? imageUrl(r.brand_ref),
-        durationMs: null, live: true, kind, radio: r.ckind === 'radio' };
+        durationMs: null, live: true, kind, radio: r.ckind === 'radio', brandMark: await fastBrandMark(r) };
     });
+}
+
+/** A FAST channel's watermark as the player draws it, or null (live channels burn theirs in). */
+async function fastBrandMark(r: any): Promise<AssetMeta['brandMark']> {
+  if (r.origin !== 'playlist' || !r.watermark_enabled || !r.watermark_ref) return null;
+  const { absoluteImage } = await import('./xmltv');
+  let url: string | null = null;
+  try { url = absoluteImage(r.watermark_ref, 640, 640); } catch { url = null; }
+  if (!url) return null;
+  return { url, position: r.watermark_position ?? 'br', offsetX: Number(r.watermark_offset_x ?? 24), offsetY: Number(r.watermark_offset_y ?? 24),
+    opacity: Number(r.watermark_opacity ?? 100), scale: Number(r.watermark_scale ?? 12) };
 }
 
 /** The public part of the meta, for the gate's answer. */
 async function metaFor(acct: string, kind: string, id: string) {
   const m = await assetMeta(acct, kind, id).catch(() => null);
   if (!m) return undefined;
-  return { title: m.title, description: m.description, artworkUrl: m.artworkUrl, durationMs: m.durationMs, live: m.live, kind: m.kind };
+  return { title: m.title, description: m.description, artworkUrl: m.artworkUrl, durationMs: m.durationMs, live: m.live, kind: m.kind,
+    ...(m.brandMark ? { brandMark: m.brandMark } : {}) };
 }
 
 function send(res: Response, a: GateAnswer): void {

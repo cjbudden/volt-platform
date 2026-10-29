@@ -108,10 +108,17 @@ export interface LiveRow {
    */
   sources: Record<string, string>;
   outputAvailable: boolean | null;
-  /** Running and listening, but no source has been pushed (input gate NO SOURCE). */
+  /** Running and listening, but no source has been pushed (input gate AWAITING SOURCE). */
   noSource: boolean;
   /** Output advancing but its timing is wrong (encoder output_check.py), or null. */
   timingFault: string | null;
+  /**
+   * NOTHING IS RUNNING AND NOTHING IS MEANT TO BE. The stream is not up, and
+   * either somebody stopped it or auto connect is not going to bring it back.
+   * An error on such a stream describes a run that has ENDED: worth a line on
+   * the board, never a red "is down" headline (27 Oct 2026).
+   */
+  atRest: boolean;
 }
 
 /** {source: state} from a stream_status.sources value, filler included. */
@@ -219,9 +226,22 @@ export async function liveRowsFor(
     if (key) report.set(key, r);
   }
 
+  // THE STOP INTENT AND AUTO CONNECT STATE. The board used to hand the health
+  // model only {id, status, on_air}, so it never knew a stream had been stopped
+  // on purpose: every channel an operator switched off read as DOWN on the
+  // Dashboard, Monitoring and Multiview while its own page said STOPPED.
+  const RECOVERY_COLS = `id, desired_state, stop_requested_at, stop_requested_by, auto_connect,
+            resume_armed_at, resume_attempts, resume_gave_up_at, resume_last_error`;
+  const recov = new Map<string, any>();
+  for (const table of ['channels', 'events']) {
+    const rs = await query<any>(`SELECT ${RECOVERY_COLS} FROM ${table} WHERE id = ANY($1)`, [ids]).catch(() => [] as any[]);
+    for (const r of rs) recov.set(r.id, r);
+  }
+
   const build = async (row: any, kind: OwnerKind): Promise<LiveRow> => {
+    const rc = recov.get(row.id) ?? {};
     const health = await loadChannelHealthLite(
-      { id: row.id, status: row.status, on_air: row.on_air === true },
+      { ...rc, id: row.id, status: row.status, on_air: row.on_air === true },
       now,
       kind === 'event' ? 'event' : 'channel'
     );
@@ -280,16 +300,47 @@ export async function liveRowsFor(
       audioOnly: kind === 'radio',
       sources: serverUp ? sourceStates(st?.sources) : {},
       outputAvailable: serverUp && st ? !!st.output_available : null,
-      noSource: serverUp && health.gates.some((g) => g.gate === 'input' && g.badge === 'NO SOURCE'),
+      noSource: serverUp && health.gates.some((g) => g.gate === 'input' && g.badge === 'AWAITING SOURCE'),
       timingFault: (() => {
         const g = health.gates.find((x) => x.gate === 'output');
         return g && /^timing fault/.test(g.detail) ? g.detail.replace(/^timing fault · /, '') : null;
       })(),
+      atRest: !serverUp && row.status !== 'live' && (
+        rc.desired_state === 'stopped' || rc.auto_connect === false || rc.resume_gave_up_at != null
+        || rc.resume_armed_at == null),
     };
   };
 
   return Promise.all(streams.map((s) => build(s, s.kind)));
 }
+
+/**
+ * VIEW AS A COUNTRY: what the edge would give a viewer in `cc` right now, and
+ * why. Multiview shows this beside a tile played through
+ * /origin/<id>/as/<cc>/..., so an operator sees the decision and the picture
+ * together. Without `cc`: the countries the stream's rules name (the ones worth
+ * testing). Rules are cached per stream for a few seconds (edgeViewAs.ts).
+ */
+monitoringRouter.get(
+  '/edge/:id',
+  asyncHandler(async (req, res) => {
+    const id = String(req.params.id);
+    if (!/^[0-9a-f-]{36}$/i.test(id)) { res.status(400).json({ error: 'bad id' }); return; }
+    // only a stream in the caller's account
+    const own = await one<any>(
+      `SELECT 1 FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1 AND g.account_id = $2
+       UNION ALL SELECT 1 FROM events e JOIN groups g ON g.id = e.group_id WHERE e.id = $1 AND g.account_id = $2 LIMIT 1`,
+      [id, accountId(req)]);
+    if (!own) { res.status(404).json({ error: 'not found' }); return; }
+    const { rulesFor, explain, ruleCountries } = await import('../services/edgeViewAs');
+    const rules = await rulesFor(id);
+    const raw = String(req.query.cc ?? '').toUpperCase();
+    if (!raw) { res.json({ countries: ruleCountries(rules), restricted: !!rules }); return; }
+    if (!/^[A-Z]{2}$/.test(raw)) { res.status(400).json({ error: 'cc must be a two-letter country code (XX = unknown)' }); return; }
+    const cc = raw === 'XX' ? '' : raw;
+    res.json({ cc: raw, ...explain(rules, cc, Math.floor(Date.now() / 1000)) });
+  })
+);
 
 /** WHAT IS RUNNING. */
 monitoringRouter.get(
@@ -362,7 +413,17 @@ monitoringRouter.get(
     // A failed gate on a running stream is the most urgent thing in the system:
     // it means viewers are affected right now.
     for (const s of streams) {
-      if (s.overall === 'error') {
+      if (s.overall === 'error' && s.atRest) {
+        // The run that failed is over and nothing is trying to restart it. Say
+        // so once, quietly: a stopped stream is not an outage, and a red
+        // headline here made a healthy system look broken.
+        alerts.push({
+          id: `pipeline:${s.id}`, severity: 'warning', source: 'pipeline',
+          title: `${s.name} stopped after a fault`,
+          detail: s.primaryError ? `Last run: ${s.primaryError.label}: ${s.primaryError.message}` : 'The last run ended with a fault.',
+          href: s.href, at: null,
+        });
+      } else if (s.overall === 'error') {
         alerts.push({
           id: `pipeline:${s.id}`, severity: 'critical', source: 'pipeline',
           title: `${s.name} is down`,
@@ -427,6 +488,13 @@ monitoringRouter.get(
          JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
         WHERE g.account_id = $1 AND j.state = 'failed'
           AND COALESCE(j.finished_at, j.created_at) > now() - interval '7 days'
+          -- A failure that a later run of the same job on the same stream has
+          -- since fixed is history, not something needing attention.
+          AND NOT EXISTS (
+            SELECT 1 FROM jobs j2
+             WHERE j2.type = j.type AND j2.state = 'succeeded'
+               AND COALESCE(j2.channel_id, j2.event_id) = COALESCE(j.channel_id, j.event_id)
+               AND j2.created_at > j.created_at)
         ORDER BY 5 DESC LIMIT 25`,
       [acct]
     );
@@ -439,8 +507,10 @@ monitoringRouter.get(
       else byType.set(j.type, { n: 1, first: j });
     }
     for (const [type, { n, first }] of byType) {
+      // Serious while fresh; after a day it is a record of what happened.
+      const fresh = first.at && Date.now() - new Date(first.at).getTime() < 24 * 3600_000;
       alerts.push({
-        id: `job:${type}`, severity: 'serious', source: 'jobs',
+        id: `job:${type}`, severity: fresh ? 'serious' : 'warning', source: 'jobs',
         title: n === 1
           ? `${type} failed${first.owner_name ? ` on ${first.owner_name}` : ''}`
           : `${type} failed ${n} times`,

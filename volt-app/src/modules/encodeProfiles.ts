@@ -128,6 +128,18 @@ encodeProfilesRouter.delete('/:id', asyncHandler(async (req, res) => {
 
 /* ------------------------------------------------------------ ladder groups */
 
+/**
+ * WHAT USES A LADDER, so a change to a shared ladder says what it reaches:
+ * watch folders that name it, FAST channels on it (named, or by default), and
+ * uploads (which use the account default).
+ */
+async function usageOf(accId: string, g: any) {
+  const wf = await one<{ n: number }>(`SELECT count(*)::int n FROM watchfolders WHERE ladder_group_id = $1`, [g.id]).catch(() => ({ n: 0 }));
+  const { channelsOnLadder } = await import('../services/fast/ladder');
+  const fast = await channelsOnLadder(accId, g.id);
+  return { watchfolders: Number(wf?.n ?? 0), fastChannels: fast.map((c) => ({ id: c.id, name: c.name, inherited: c.inherited })), uploads: !!g.is_default };
+}
+
 /** A group, with its rungs RESOLVED — see the header. */
 async function withRungs(accId: string, g: any) {
   try {
@@ -138,6 +150,8 @@ async function withRungs(accId: string, g: any) {
       segment_seconds: l.segmentSeconds,
       effective_fps: l.fps,
       origin: l.origin,
+      frame_mode: l.frameMode,
+      usage: await usageOf(accId, g),
       problem: null as string | null,
     };
   } catch (e: any) {
@@ -145,7 +159,7 @@ async function withRungs(accId: string, g: any) {
     // as empty. Its live profile may have been deleted, and the operator needs
     // to see that on the screen where they can fix it.
     return { ...g, rungs: [], segment_seconds: null, effective_fps: null,
-             origin: null, problem: String(e?.message ?? e) };
+             origin: null, usage: await usageOf(accId, g).catch(() => null), problem: String(e?.message ?? e) };
   }
 }
 
@@ -164,6 +178,8 @@ const ladderBody = z.object({
   packaging: z.enum(['hls', 'dash', 'both']).optional(),
   codecBackend: z.enum(['x264', 'nvenc']).optional(),
   capToSource: z.boolean().optional(),
+  /** 'box': every rung at its fixed 16:9 size, none dropped (what FAST channels need); 'scale': follow the source. */
+  frameMode: z.enum(['scale', 'box']).optional(),
   isDefault: z.boolean().optional(),
 });
 
@@ -190,15 +206,15 @@ encodeProfilesRouter.post('/ladders', asyncHandler(async (req, res) => {
   const row = await one<any>(
     `INSERT INTO encode_ladder_groups
        (account_id, name, description, tracks_output_profile_id, segment_dur, fps,
-        packaging, codec_backend, cap_to_source, is_default, created_by, updated_by)
+        packaging, codec_backend, cap_to_source, is_default, created_by, updated_by, frame_mode)
      VALUES ($1,$2,$3,$4,COALESCE($5,4.00),COALESCE($6,25.000),
              COALESCE($7,'both')::packaging_kind, COALESCE($8,'x264')::codec_backend,
-             COALESCE($9,true), COALESCE($10,false), $11,$11)
+             COALESCE($9,true), COALESCE($10,false), $11,$11, COALESCE($12,'scale'))
      ON CONFLICT (account_id, name) DO NOTHING
      RETURNING *`,
     [acc, b.name, b.description ?? null, b.tracksOutputProfileId ?? null,
      b.segmentDur ?? null, b.fps ?? null, b.packaging ?? null, b.codecBackend ?? null,
-     b.capToSource ?? null, b.isDefault ?? null, who.userId]
+     b.capToSource ?? null, b.isDefault ?? null, who.userId, b.frameMode ?? null]
   );
   if (!row) throw conflict(`a ladder called "${b.name}" already exists`);
   await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label,
@@ -208,7 +224,7 @@ encodeProfilesRouter.post('/ladders', asyncHandler(async (req, res) => {
 }));
 
 const LADDER_EDITABLE = ['name', 'description', 'tracks_output_profile_id', 'segment_dur',
-  'fps', 'packaging', 'codec_backend', 'cap_to_source', 'is_default'];
+  'fps', 'packaging', 'codec_backend', 'cap_to_source', 'is_default', 'frame_mode'];
 
 encodeProfilesRouter.patch('/ladders/:id', asyncHandler(async (req, res) => {
   const acc = accountId(req);
@@ -226,6 +242,10 @@ encodeProfilesRouter.patch('/ladders/:id', asyncHandler(async (req, res) => {
   if ('codecBackend' in b) patch.codec_backend = b.codecBackend;
   if ('capToSource' in b) patch.cap_to_source = !!b.capToSource;
   if ('isDefault' in b) patch.is_default = !!b.isDefault;
+  if ('frameMode' in b) {
+    if (b.frameMode !== 'scale' && b.frameMode !== 'box') throw badRequest('frameMode is "scale" or "box"');
+    patch.frame_mode = b.frameMode;
+  }
 
   if ('tracksOutputProfileId' in b) {
     if (b.tracksOutputProfileId) {
@@ -250,6 +270,12 @@ encodeProfilesRouter.patch('/ladders/:id', asyncHandler(async (req, res) => {
     entityType: 'encode_ladder_group', userId: who.userId, label: who.label,
     expectedVersion: b.version ?? null,
   });
+  // FAST channels on this ladder (or, after a default change, on the old one) re-package behind the scenes
+  if (changed) {
+    const { ladderChanged } = await import('../services/fast/ladder');
+    ladderChanged(acc, cur.id);
+    if (patch.is_default) for (const o of await query<any>(`SELECT id FROM encode_ladder_groups WHERE account_id = $1 AND id <> $2`, [acc, cur.id])) ladderChanged(acc, o.id);
+  }
   res.json({ ...(await withRungs(acc, row)), changed });
 }));
 
@@ -260,6 +286,8 @@ encodeProfilesRouter.delete('/ladders/:id', asyncHandler(async (req, res) => {
   // starts producing a different ladder with nothing on screen having changed.
   const used = await query<any>(
     `SELECT 'watchfolder' AS kind, name FROM watchfolders WHERE ladder_group_id = $1
+     UNION ALL
+     SELECT 'FAST channel', name FROM channels WHERE fast_ladder_group_id = $1
      UNION ALL
      SELECT 'asset', COALESCE(title, id::text) FROM vod_assets WHERE ladder_group_id = $1 LIMIT 20`,
     [req.params.id]);
@@ -319,6 +347,7 @@ encodeProfilesRouter.put('/ladders/:id/members', asyncHandler(async (req, res) =
   await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label,
     action: 'update', entityType: 'encode_ladder_group', entityId: g.id,
     snapshot: { members: b.profileIds.length } });
+  (await import('../services/fast/ladder')).ladderChanged(acc, g.id);
   res.json(await withRungs(acc, g));
 }));
 

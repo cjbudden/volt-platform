@@ -50,7 +50,9 @@ const WATERMARK = z.object({
   offsetX: z.number().int().min(0).max(4000).optional(),
   offsetY: z.number().int().min(0).max(4000).optional(),
   opacity: z.number().int().min(0).max(100).optional(),
-  scale: z.number().int().min(1).max(100).optional(),  // % of the video height
+  // % of the video height. A decimal: a wide logo sized by width in the console
+  // arrives as the height that width gives at the logo's own aspect ratio.
+  scale: z.number().min(1).max(100).transform((v) => Math.round(v * 100) / 100).optional(),
 }).optional();
 
 /** List channels for the tenant (scoped via group -> account). */

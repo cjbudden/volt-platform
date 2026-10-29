@@ -8,6 +8,9 @@ import type { Waveform } from '../api'
 import { pressable } from '../a11y'
 import { Notice, PageError } from '../notices'
 import { SendToAddon } from './Workflows'
+import { removalText } from '../programmeMedia'
+import { MetadataForm } from '../ContentTypeFields'
+import type { ClipDefaults, ContentType } from '../api'
 
 /* ============================================================================
    Recording detail — the review/trim/clip page, following the same structural
@@ -89,8 +92,11 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   const deepLink = useMemo(() => {
     const q = new URLSearchParams(window.location.search)
     const n = (k: string) => { const v = Number(q.get(k)); return Number.isFinite(v) && v > 0 ? v : null }
-    return { from: n('from'), to: n('to'), t: n('t') }
+    return { from: n('from'), to: n('to'), t: n('t'), play: q.get('play') === '1' }
   }, [])
+  // The deep link's moment, sought to ONCE when its range first loads (see
+  // the seek effect below the player wiring). Null after that.
+  const pendingSeek = useRef<number | null>(null)
   const [rec, setRec] = useState<Rec | null>(null)
   const [tl, setTl] = useState<RecordingTimeline | null>(null)
   const [err, setErr] = useState('')
@@ -122,6 +128,32 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   // clip creation
   const [clipTitle, setClipTitle] = useState('')
   const [outputKind, setOutputKind] = useState<'manifest' | 'progressive' | 'both'>('manifest')
+  // THE CLIP'S CONTENT TYPE, chosen when it is cut, and its starting values
+  // from the guide (GET /recordings/:id/clip-defaults). '' = the channel's or
+  // event's own type. The title follows the guide until somebody types one.
+  const [clipType, setClipType] = useState<string>('')
+  const [clipMeta, setClipMeta] = useState<Record<string, any>>({})
+  const [clipDefaults, setClipDefaults] = useState<ClipDefaults | null>(null)
+  const [titleTyped, setTitleTyped] = useState(false)
+  const [showFields, setShowFields] = useState(false)
+  const [vodTypes, setVodTypes] = useState<ContentType[]>([])
+  useEffect(() => { api.contentTypes().then(setVodTypes).catch(() => setVodTypes([])) }, [])
+  const clipMarks = selFrom != null && selTo != null && selTo > selFrom ? `${Math.round(selFrom)}-${Math.round(selTo)}` : ''
+  useEffect(() => {
+    if (!clipMarks) { setClipDefaults(null); return }
+    let gone = false
+    const t = setTimeout(() => {
+      api.clipDefaults(id, selFrom!, selTo!, clipType || null).then(d => {
+        if (gone) return
+        setClipDefaults(d)
+        // The guide fills what is empty; a value somebody typed stays.
+        setClipMeta(cur => ({ ...d.metadata, ...Object.fromEntries(Object.entries(cur).filter(([, v]) => v !== '' && v != null)) }))
+        if (!titleTyped && d.title) setClipTitle(d.title)
+      }).catch(() => { if (!gone) setClipDefaults(null) })
+    }, 350)
+    return () => { gone = true; clearTimeout(t) }
+    // eslint-disable-next-line
+  }, [clipMarks, clipType, id])
   const [busy, setBusy] = useState('')
   /** Which clip has its source chain open. One at a time: the panel is a
    *  record you consult, not a column you scan. */
@@ -185,12 +217,14 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
       loadRange(deepLink.from - pad, deepLink.to + pad)
       setSelFrom(deepLink.from); setSelTo(deepLink.to)
       setPlayheadMs(deepLink.from)
+      pendingSeek.current = deepLink.from
       return
     }
     if (deepLink.t != null) {
       loadRange(deepLink.t - 10 * 60_000, deepLink.t + 20 * 60_000)
       setSelFrom(deepLink.t); setSelTo(deepLink.t + 5 * 60_000)
       setPlayheadMs(deepLink.t)
+      pendingSeek.current = deepLink.t
       return
     }
     const last = tl.spans[tl.spans.length - 1]
@@ -336,6 +370,26 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     return () => v.removeEventListener('timeupdate', onTime)
   }, [loaded])
 
+  // DEEP LINK LANDS ON ITS MOMENT (24 Oct 2026). The range loads with some
+  // context before the song or programme, so the player used to start at the
+  // context and the marks only SHOWED where it began. Now the player seeks to
+  // the start once the media can play, and with ?play=1 (every flag link)
+  // starts playing there. Reached by a click, so autoplay with sound is allowed.
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v || !loaded || pendingSeek.current == null) return
+    const at = pendingSeek.current
+    const go = () => {
+      if (pendingSeek.current == null) return
+      pendingSeek.current = null
+      v.currentTime = Math.max(0, (at - loaded.from) / 1000)
+      if (deepLink.play) v.play().catch(() => {})
+    }
+    if (v.readyState >= 1) { go(); return }
+    v.addEventListener('loadedmetadata', go, { once: true })
+    return () => v.removeEventListener('loadedmetadata', go)
+  }, [loaded, playUrl])
+
   // ---- NLE keyboard controls ------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -413,9 +467,10 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     if (!clipTitle.trim()) { setActErr('Give the clip a title'); return }
     setActErr(''); setMsg(''); setGapOffer(null); setBusy('clip')
     try {
-      await api.clipRecording(id, { title: clipTitle.trim(), startMs: Math.round(selFrom!), endMs: Math.round(selTo!), outputKind, acceptGapsMs })
+      await api.clipRecording(id, { title: clipTitle.trim(), startMs: Math.round(selFrom!), endMs: Math.round(selTo!), outputKind, acceptGapsMs,
+        ...(clipType ? { schemaId: clipType } : {}), ...(Object.keys(clipMeta).length ? { metadata: clipMeta } : {}) })
       setMsg(acceptGapsMs ? 'Clip created across the gap. Listed below and in the Media Library.' : 'Clip created. Listed below and in the Media Library.')
-      setClipTitle(''); loadRec()
+      setClipTitle(''); setTitleTyped(false); setClipMeta({}); loadRec()
     } catch (e: any) { setActErr(e.message); offerGaps(e, 'clip') } finally { setBusy('') }
   }
   async function publishFull() {
@@ -454,7 +509,13 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
           <h1 style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>{rec.source_name || 'Recording'}
             <span style={{ fontSize: 'var(--fs-body)', fontWeight: 400, color: 'var(--faint)' }}>{KIND_LABEL[rec.kind] || rec.kind} · {fmtDate(domain.start)} {fmtClock(domain.start)} → {rec.end_epoch_ms != null ? fmtClock(domain.end) : 'recording…'}</span>
           </h1>
-          <p>{rec.title || 'Scrub with the keyboard, mark the range, cut the clip.'}</p>
+          <p>{rec.title || 'Scrub with the keyboard, mark the range, cut the clip.'}
+            {/* WHEN IT GOES. Anything here can still become VOD until then. */}
+            {(() => { const r = removalText(rec.expires_at); return (
+              <span title="When the recording is deleted by the source's keep period. Cut what you need into VOD before then."
+                style={{ marginLeft: 10, color: r.warn ? '#fbbf24' : 'var(--faint)', fontWeight: r.warn ? 600 : 400 }}>· {r.text}</span>
+            ) })()}
+          </p>
           {/* SAID UP FRONT. The holes are drawn on the timeline, but a day-long
               recording can hide them off screen; the count and total sit here
               and each chip zooms to its gap. */}
@@ -602,7 +663,14 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
             <span style={{ flex: 1 }} />
             <div className="field" style={{ margin: 0, flex: '1 1 200px', maxWidth: 300 }}>
               <label>Clip title</label>
-              <input className="inp" value={clipTitle} onChange={e => setClipTitle(e.target.value)} placeholder="e.g. Goal 73' — highlight" />
+              <input className="inp" value={clipTitle} onChange={e => { setClipTitle(e.target.value); setTitleTyped(!!e.target.value.trim()) }} placeholder="e.g. Goal 73' — highlight" />
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label>Content type</label>
+              <select className="inp" value={clipType} onChange={e => { setClipType(e.target.value); setClipMeta({}) }} aria-label="Content type of the clip">
+                <option value="">{`Same as the ${rec.event_id ? 'event' : 'channel'}${vodTypes.find(t => t.id === clipDefaults?.ownerSchemaId) ? ` (${vodTypes.find(t => t.id === clipDefaults?.ownerSchemaId)!.name})` : ''}`}</option>
+                {vodTypes.filter(t => t.applies_to.includes('vod') || t.id === clipType).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label>Output</label>
@@ -620,6 +688,25 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
               {busy === 'clip' ? 'Creating…' : selGaps.ms > 0 ? `Create clip (skips ${(selGaps.ms / 1000).toFixed(1)}s gap)` : 'Create clip'}
             </button>
           </div>
+          {selOk && (
+            <div className="clip-guide" style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 'var(--fs-sm)', color: 'var(--muted)', margin: '4px 0' }}>
+              {clipDefaults?.programme ? <>
+                <span>From the guide: <b style={{ color: 'var(--text)' }}>{clipDefaults.programme.title}</b>{clipDefaults.confident ? '' : ' (partial overlap)'}</span>
+                <span>· fills {Object.keys(clipMeta).length} field{Object.keys(clipMeta).length === 1 ? '' : 's'}</span>
+                {clipDefaults.suggestedType && clipDefaults.suggestedType.id !== (clipType || clipDefaults.ownerSchemaId) && (
+                  <button type="button" className="btn ghost sm" onClick={() => { setClipType(clipDefaults.suggestedType!.id); setClipMeta({}) }}>Looks like {clipDefaults.suggestedType.name}: use it</button>
+                )}
+              </> : <span>{clipDefaults?.reason ?? 'No guide programme over these marks: name the clip yourself.'}</span>}
+              {(clipType || clipDefaults?.schemaId) && (
+                <button type="button" className="btn ghost sm" onClick={() => setShowFields(v => !v)} aria-expanded={showFields}>{showFields ? 'Hide fields' : 'Edit fields'}</button>
+              )}
+            </div>
+          )}
+          {selOk && showFields && (clipType || clipDefaults?.schemaId) && (
+            <div style={{ margin: '6px 0 10px', padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
+              <MetadataForm typeId={(clipType || clipDefaults?.schemaId)!} value={clipMeta} onChange={setClipMeta} compact />
+            </div>
+          )}
           {selGaps.ms > 0 && (
             <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(248,113,113,.08)', border: '1px solid rgba(248,113,113,.35)', fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
               <b style={{ color: '#fca5a5' }}>Missing media inside the marks.</b>{' '}

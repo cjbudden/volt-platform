@@ -28,7 +28,7 @@ import type { TriggerReport } from './engine';
 import { errorCode, errorStep } from './engine';
 import { CmcdSender, PlayAttempt, deviceModel, identityKeys } from './cmcd';
 import { VodAds } from './ads';
-import { StatsPanel, bindDebugMenu, combineProbes, mediaProbe, SDK_VERSION, type StatsSample } from './stats';
+import { StatsPanel, bindDebugMenu, combineProbes, mediaProbe, isDebugKey, watchConnection, SDK_VERSION, type StatsSample } from './stats';
 
 const EPG_REFRESH_MS = 5 * 60_000;
 const NOW_PLAYING_MS = 15_000;
@@ -55,6 +55,14 @@ export function initialState(): PlayerState {
   };
 }
 
+/** The programme marker's key metadata: everything but what Programme already names. */
+const PROGRAMME_OWN = new Set(['id', 'title', 'subtitle', 'description', 'image', 'graphic', 'kind']);
+function programmeMeta(d: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(d)) if (!PROGRAMME_OWN.has(k) && !k.startsWith('next_') && v) out[k] = v;
+  return out;
+}
+
 export class VoltPlayer {
   readonly root: HTMLElement;
   readonly media: HTMLVideoElement;
@@ -64,6 +72,8 @@ export class VoltPlayer {
   private skin: Skin | null = null;
   private skinRoot: HTMLElement;
   private stage: HTMLElement;
+  /** The channel brand mark over the picture (setBrandMark), when there is one. */
+  private brandEl: HTMLImageElement | null = null;
   private theme: ResolvedTheme;
   private themeLayers: Array<Partial<Theme> | undefined>;
   private s: PlayerState = initialState();
@@ -135,6 +145,7 @@ export class VoltPlayer {
       wm.textContent = o.watermark;
       this.stage.appendChild(wm);
     }
+    if (o.brandMark) this.setBrandMark(o.brandMark);
     this.skinRoot = document.createElement('div');
     this.skinRoot.className = 'vp-skin';
     this.root.appendChild(this.skinRoot);
@@ -162,6 +173,8 @@ export class VoltPlayer {
       { label: this.t('copyDebug'), run: () => void this.copyDebugInfo() },
     ], `Volt Player ${SDK_VERSION}`));
     if (typeof this.o.debug === 'object' && this.o.debug.open) this.showStats(true);
+    // A stall that is the viewer's own connection says so (stats.ts watchConnection).
+    if (this.o.debug !== false) this.offs.push(watchConnection(this.root, this.media, () => this.getStats()));
 
     const items = normalizePlaylist([
       ...(this.o.item ? [this.o.item] : []),
@@ -271,6 +284,32 @@ export class VoltPlayer {
   }
 
   /** Change the theme live (the console's preview). */
+  /**
+   * Draw (or clear) the channel's brand mark over the picture, positioned as
+   * the encoder would burn it: offsets in pixels of a 1080p frame from the
+   * corner, height as a percentage of the frame. For a FAST channel this IS
+   * its watermark, because its segments are copied, never re-encoded.
+   */
+  setBrandMark(bm: import('./types').BrandMark | null): void {
+    if (!bm || !bm.url) { this.brandEl?.remove(); this.brandEl = null; return; }
+    const el = this.brandEl ?? document.createElement('img');
+    el.className = 'vp-brandmark';
+    el.alt = '';
+    el.setAttribute('aria-hidden', 'true');
+    el.draggable = false;
+    if (el.getAttribute('src') !== bm.url) el.src = bm.url;
+    const pos = bm.position || 'br';
+    const x = `${(Math.max(0, bm.offsetX || 0) / 1920) * 100}%`, y = `${(Math.max(0, bm.offsetY || 0) / 1080) * 100}%`;
+    el.style.cssText = '';
+    el.style.height = `${Math.max(1, Math.min(60, bm.scale || 12))}%`;
+    el.style.opacity = String(Math.max(0, Math.min(100, bm.opacity ?? 100)) / 100);
+    if (pos[0] === 't') el.style.top = y; else el.style.bottom = y;
+    if (pos[1] === 'l') el.style.left = x;
+    else if (pos[1] === 'r') el.style.right = x;
+    else { el.style.left = '50%'; el.style.transform = 'translateX(-50%)'; }
+    if (!this.brandEl) { this.stage.appendChild(el); this.brandEl = el; }
+  }
+
   setTheme(t: Partial<Theme>): void {
     this.themeLayers = [this.o.theme, t];
     this.theme = resolveTheme(...this.themeLayers);
@@ -382,11 +421,12 @@ export class VoltPlayer {
     const adBreak = adBreakAt(this.streamGraphics.values(), currentTime);
     const graphics = !graphicsOn ? [] : adBreak ? [adBreak] : activeAt(this.streamGraphics.values(), currentTime);
     // No guide loaded: the stream's own programme marker names what is on.
-    const inband = !sched.length && e.presentationStart != null ? graphics.find((g) => g.graphic === 'programme') : undefined;
+    // Read whether or not graphics are drawn: now / next is data, not a graphic.
+    const inband = !sched.length && e.presentationStart != null ? activeAt(this.streamGraphics.values(), currentTime).find((g) => g.graphic === 'programme') : undefined;
     const programme = sched.length ? programmeAt(sched, wallClock ?? Date.now())
-      : inband ? { id: inband.data.id || inband.id, title: inband.data.title || '', subtitle: inband.data.subtitle ?? null, description: null,
+      : inband ? { id: inband.data.id || inband.id, title: inband.data.title || '', subtitle: inband.data.subtitle ?? null, description: inband.data.description ?? null,
           imageUrl: inband.data.image ?? null, startsAt: e.presentationStart! + inband.start * 1000,
-          endsAt: inband.end != null ? e.presentationStart! + inband.end * 1000 : Number.POSITIVE_INFINITY } : null;
+          endsAt: inband.end != null ? e.presentationStart! + inband.end * 1000 : Number.POSITIVE_INFINITY, meta: programmeMeta(inband.data) } : null;
     const guideNext = sched.length ? programmeAfter(sched, programme ? programme.endsAt - 1 : (wallClock ?? Date.now())) : null;
     // No guide: the stream announces the next programme's marker shortly before it
     // starts (90 s look-ahead), which is enough for a skin's "Next" line. Display
@@ -396,9 +436,15 @@ export class VoltPlayer {
     if (!sched.length && inband && e.presentationStart != null) {
       let nx: StreamGraphic | undefined;
       for (const g of this.streamGraphics.values()) if (g.graphic === 'programme' && g.start > inband.start && (!nx || g.start < nx.start)) nx = g;
-      if (nx) nextProgramme = { id: nx.data.id || nx.id, title: nx.data.title || '', subtitle: nx.data.subtitle ?? null, description: null,
+      if (nx) nextProgramme = { id: nx.data.id || nx.id, title: nx.data.title || '', subtitle: nx.data.subtitle ?? null, description: nx.data.description ?? null,
         imageUrl: nx.data.image ?? null, startsAt: e.presentationStart + nx.start * 1000,
-        endsAt: nx.end != null ? e.presentationStart + nx.end * 1000 : Number.POSITIVE_INFINITY };
+        endsAt: nx.end != null ? e.presentationStart + nx.end * 1000 : Number.POSITIVE_INFINITY, meta: programmeMeta(nx.data) };
+      // Not announced yet: the programme on air names what follows it (X-NEXT-TITLE / -START).
+      else if (inband.data.next_title) {
+        const ns = Date.parse(inband.data.next_start ?? '');
+        nextProgramme = { id: inband.data.next_id || `next:${inband.id}`, title: inband.data.next_title, subtitle: inband.data.next_subtitle ?? null, description: null,
+          imageUrl: inband.data.next_image ?? null, startsAt: Number.isFinite(ns) ? ns : (programme?.endsAt ?? Date.now()), endsAt: Number.POSITIVE_INFINITY };
+      }
     }
     const item = this.s.item;
     const dismissKey = programme ? `p:${programme.id}` : `i:${this.s.index}`;
@@ -592,6 +638,7 @@ export class VoltPlayer {
         return;
       }
       if (item.artworkUrl && !this.o.poster && this.ownsMedia) this.media.poster = item.artworkUrl;
+      this.setBrandMark(item.brandMark ?? this.o.brandMark ?? null);
       const startAt = index === (this.o.startIndex ?? 0) ? this.o.startAt : undefined;
       // Guided ads: Shaka plays the interstitials (engine.ts); the overlay is ready
       // before the first frame, since a pre-roll starts at once.
@@ -764,6 +811,8 @@ export class VoltPlayer {
   private wireRoot() {
     const key = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.closest?.('input,select,textarea')) return;
+      // Debug mode: Shift+D, Cmd+D (Mac), Ctrl+D.
+      if (isDebugKey(e)) { if (this.o.debug === false) return; e.preventDefault(); this.showStats(); return; }
       const c = this.cmd;
       switch (e.key) {
         case ' ': case 'k': c.toggle(); break;
@@ -774,7 +823,6 @@ export class VoltPlayer {
         case 'm': c.toggleMute(); break;
         case 'f': c.toggleFullscreen(); break;
         case 'c': if (this.s.textTracks.length) c.setTextTrack(this.s.textTrack ? null : this.s.textTracks[0].id); break;
-        case 'D': if (!e.shiftKey || e.metaKey || e.ctrlKey || this.o.debug === false) return; this.showStats(); break;
         default: return;
       }
       e.preventDefault();

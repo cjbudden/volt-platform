@@ -135,7 +135,7 @@ export function stageBadge(t: Template): { text: string; tone: 'dev' | 'error' }
 }
 
 export function sourceTag(t: Template) {
-  if (t.owner === 'volt') return <span className="tag gfx-volt">Volt</span>
+  if (t.owner === 'volt') return <span className="tag gfx-volt" title={t.set ? `In Volt's ${t.set.name} set` : undefined}>{t.set ? `Volt · ${t.set.name}` : 'Volt'}</span>
   if (!t.latest) return <span className="tag gfx-draft">Draft</span>
   return <span className="tag gfx-imported">{t.source === 'duplicate' ? 'Copy' : 'Imported'}</span>
 }
@@ -144,14 +144,17 @@ function TemplatesTab({ templates }: { templates: Template[] | null }) {
   const [kind, setKind] = useState<Kind | 'all'>('all')
   const [source, setSource] = useState<'all' | 'volt' | 'mine' | 'draft'>('all')
   const [q, setQ] = useState('')
+  const [setKey, setSetKey] = useState('all')
   const [state, setState] = useState<'all' | 'ready' | 'in_development' | 'incomplete'>('all')
   const list = useMemo(() => (templates ?? []).filter((t) =>
     (kind === 'all' || t.kind === kind) &&
     (state === 'all' || t.status?.state === state || (state === 'incomplete' && t.status?.state === 'empty')) &&
     (source === 'all' || (source === 'volt' ? t.owner === 'volt' : source === 'mine' ? t.owner === 'account' : !!t.draft)) &&
-    (!q || t.name.toLowerCase().includes(q.toLowerCase()))), [templates, kind, source, q, state])
+    (setKey === 'all' || t.set?.key === setKey) &&
+    (!q || t.name.toLowerCase().includes(q.toLowerCase()))), [templates, kind, source, q, state, setKey])
   if (!templates) return <div className="loading">Loading templates…</div>
   const kinds = (['all', 'scorebug', 'lower_third', 'ticker', 'bug', 'full_frame', 'other'] as const).filter((k) => k === 'all' || templates.some((t) => t.kind === k))
+  const sets = [...new Map(templates.filter((t) => t.set).map((t) => [t.set!.key, t.set!.name])).entries()]
   return (
     <>
       <div className="gfx-toolbar">
@@ -168,6 +171,10 @@ function TemplatesTab({ templates }: { templates: Template[] | null }) {
           <select className="inp" style={{ width: 'auto' }} value={source} onChange={(e) => setSource(e.target.value as any)}>
             <option value="all">All sources</option><option value="volt">Volt</option><option value="mine">Yours</option><option value="draft">With a draft</option>
           </select></label>
+        {sets.length > 1 && <label className="gfx-meta" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>Set
+          <select className="inp" style={{ width: 'auto' }} value={setKey} onChange={(e) => setSetKey(e.target.value)}>
+            <option value="all">Any set</option>{sets.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
+          </select></label>}
       </div>
       {list.length === 0 ? <div className="empty"><h3>No templates match</h3><p>Change the filters, or add a template.</p></div> : (
         <div className="gfx-grid">
@@ -189,10 +196,11 @@ function TemplatesTab({ templates }: { templates: Template[] | null }) {
                     {sourceTag(t)}
                   </div>
                   <StatusPill t={t} />
+                  {t.available === false && <div className="gfx-meta" style={{ color: 'var(--warn)' }}>{t.retired ? 'Retired by Volt' : 'Not switched on for this account'}: your setups keep working, new ones cannot start from it</div>}
                   <div className="gfx-meta"><span className={`gfx-dot ${used ? 'live' : ''}`} />{t.setups ? `${t.setups} setup${t.setups === 1 ? '' : 's'} · ${used} assigned` : 'Not used yet'}</div>
                   <div className="gfx-actions">
                     <button className="btn ghost sm" onClick={() => navigate(`/graphics/templates/${t.id}`)}>Preview</button>
-                    {t.latest && <button className="btn ghost sm" onClick={() => navigate(`/graphics/setups/new?version=${t.latest!.id}`)}>New setup</button>}
+                    {t.latest && t.available !== false && <button className="btn ghost sm" onClick={() => navigate(`/graphics/setups/new?version=${t.latest!.id}`)}>New setup</button>}
                   </div>
                 </div>
               </div>

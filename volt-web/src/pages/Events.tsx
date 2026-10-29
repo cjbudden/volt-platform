@@ -9,7 +9,7 @@ import { EmbedDrawer } from '../EmbedDrawer'
 import { pressable } from '../a11y'
 import { TypePicker, MetadataForm } from '../ContentTypeFields'
 import { RuleEditor } from '../RuleEditor'
-import { FormStatus, useNotify, usePageNotice } from '../notices'
+import { FormStatus, useNotify, usePageNotice, useSaveResult } from '../notices'
 import { usePref, byName, ChipGroup, GroupFilter, SortSelect, ListToolbar, ClearFilters, NoMatches, Segmented } from '../listFilters'
 import { RowMenu, Icons, useSelection, SelectCell, SelectAllHead, BulkBar, ConfirmDialog, runBulk, bulkSummary, type MenuItem } from '../listActions'
 import EventCalendar from '../EventCalendar'
@@ -361,6 +361,7 @@ export function EventDrawer({ groups, event: ev, onClose, onDone }: {
 
   // destructive action lives INSIDE the drawer (common design language: rows
   // carry one primary action; delete is behind the entity's settings).
+  const saved = useSaveResult()
   async function remove() {
     if (!ev) return
     if (!window.confirm(`Delete event "${ev.name}"? Its recording (if any) stays in the Recordings library.`)) return
@@ -410,7 +411,7 @@ export function EventDrawer({ groups, event: ev, onClose, onDone }: {
     try {
       if (isEdit) await api.updateEvent(ev!.id, { ...body, version: ev!.version })
       else await api.createEvent({ groupId, ...body })
-      onDone()
+      saved.show(isEdit ? 'Event saved' : 'Event created', () => onDone())
     } catch (e: any) {
       if (/version|match|409/i.test(String(e.message))) setErr('This event changed since you opened it. Reopen and retry.')
       else setErr(e.message)
@@ -541,9 +542,9 @@ export function EventDrawer({ groups, event: ev, onClose, onDone }: {
           {isEdit && canManage && ev!.status !== 'live' && (
             <button className="btn ghost" style={{ color: 'var(--down,#f87171)', marginRight: 'auto' }} disabled={busy} onClick={remove}>Delete event</button>
           )}
-          <FormStatus error={err} />
+          <FormStatus error={err} success={saved.message} onDismiss={err ? () => setErr('') : undefined} />
           <button className="btn ghost" onClick={onClose}>Cancel</button>
-          {canManage && <button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save changes' : 'Create event'}</button>}
+          {canManage && <button className="btn primary" disabled={busy || saved.saving} onClick={() => { saved.clear(); submit() }}>{busy ? 'Saving…' : saved.saving ? (isEdit ? 'Saved' : 'Created') : isEdit ? 'Save changes' : 'Create event'}</button>}
         </div>
       </div>
       {shareOpen && ev && <ShareDrawer target={{ kind: 'event', id: ev.id, name: ev.name }} onClose={() => setShareOpen(false)} />}

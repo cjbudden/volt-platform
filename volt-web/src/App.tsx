@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, type ReactElement } from 'react'
 import { api, setSession, clearSession, restoreSession, getToken, accessExpiresIn, noteActivity, setUnauthorizedHandler, isMfaStep, ensureImageSigning, type SearchHit, type Me, type MfaStep, type Session } from './api'
 import { useImageSigning } from './imageSigning'
 import { SignInSecondStep } from './security'
+import { useSsoDiscovery, SsoButtons, takeSsoReturn, finishSso } from './sso'
+import SingleSignOnPage from './pages/SingleSignOn'
 import { OnboardingFlow, onboardingKindFor } from './Onboarding'
 import AccountPage from './pages/Account'
 import ChannelGroupsPage from './pages/ChannelGroups'
@@ -10,12 +12,14 @@ import ChannelDetail from './pages/ChannelDetail'
 import ImageLibrary from './pages/ImageLibrary'
 import Watchfolders from './pages/Watchfolders'
 import EncodingProfiles from './pages/EncodingProfiles'
+import EncodeJobsPage from './pages/EncodeJobs'
 import Recordings from './pages/Recordings'
 import RecordingDetail from './pages/RecordingDetail'
 import RecordingSourceView from './pages/RecordingSource'
 import StoragePage from './pages/Storage'
 import LoopsPage from './pages/Loops'
 import VodPage from './pages/Vod'
+import CollectionsPage from './pages/Collections'
 import ReviewPage from './pages/Review'
 import AnalyticsPage from './pages/Analytics'
 import AuditLogPage from './pages/AuditLog'
@@ -44,6 +48,7 @@ import SystemAdmin from './pages/SystemAdmin'
 import Radio from './pages/Radio'
 import RadioDetail from './pages/RadioDetail'
 import ContentTypesPage from './pages/ContentTypes'
+import GenresPage from './pages/Genres'
 import PublishingPage from './pages/Publishing'
 import IngestRulesPage from './pages/IngestRules'
 import PaymentsPage from './pages/Payments'
@@ -81,6 +86,7 @@ const I = {
   multiview: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>,
   analytics: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18" /><path d="m7 14 4-4 3 3 5-6" /></svg>,
   epg: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M8 4v16M3 14h18" /></svg>,
+  tag: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" /><circle cx="7.5" cy="7.5" r="1.5" /></svg>,
   fast: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M7 9h4M7 12h7M7 15h5M17 9v6" /></svg>,
   radio: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 11h16a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><circle cx="8" cy="15.5" r="2.5" /><path d="M17 14h2M17 17h2M18 3 7 8" /></svg>,
   key: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.8 7.8 5.5 5.5 0 017.8-7.8zm0 0L15 8m-2 2 4-4m0 0 3 3 3-3-3-3" /></svg>,
@@ -93,6 +99,7 @@ const I = {
   // A frame with a lower third in it: HTML graphics.
   captions: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M10 10.5a2 2 0 1 0 0 3M17 10.5a2 2 0 1 0 0 3" /></svg>,
   graphics: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M6 15h8M6 12h5" /></svg>,
+  collections: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M7 13h10M7 16h6" /></svg>,
   storage: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5" /><path d="M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6" /></svg>,
 }
 
@@ -101,12 +108,14 @@ const I = {
 const NAV_FEATURE: Record<string, string> = {
   dashboard: 'monitoring', live: 'monitoring', monitoring: 'monitoring', multiview: 'monitoring',
   fleet: 'fleet', workflows: 'settings',
-  channels: 'channels', radio: 'radio', events: 'events', epg: 'epg', loops: 'media', graphics: 'graphics', fast: 'channels',
-  recordings: 'recordings', vod: 'vod', images: 'media', analytics: 'analytics',
+  channels: 'channels', radio: 'radio', events: 'events', epg: 'epg', loops: 'media', graphics: 'graphics', fast: 'fast',
+  recordings: 'recordings', vod: 'vod', collections: 'vod', images: 'media', analytics: 'analytics',
   review: 'vod', watchfolders: 'media', storage: 'media',
-  encoding: 'settings', groups: 'settings', captions: 'settings', reframing: 'settings', plan: 'settings', 'account-settings': 'settings', permissions: 'access',
+  // The encode jobs are read and controlled through /api/jobs: Files, uploads & storage.
+  'encode-jobs': 'media',
+  encoding: 'encoding', groups: 'settings', captions: 'settings', reframing: 'settings', plan: 'settings', 'account-settings': 'settings', permissions: 'access', sso: 'users',
   // Admin sections
-  'content-types': 'settings', publishing: 'settings', ingest: 'settings', social: 'settings',
+  'content-types': 'settings', genres: 'settings', publishing: 'settings', ingest: 'settings', social: 'settings',
   // On-demand ads are read and changed through /api/vod/ads: Media library & publishing.
   'on-demand-ads': 'vod',
   payments: 'payments', apikeys: 'apps',
@@ -138,9 +147,11 @@ const NAV: NavGroup[] = [
   ] },
   { group: 'Media', items: [
     { key: 'vod', label: 'Media Library', icon: I.vod },
+    { key: 'collections', label: 'Collections', icon: I.collections },
     { key: 'recordings', label: 'Recordings', icon: I.rec },
     { key: 'images', label: 'Image Library', icon: I.images },
     { key: 'review', label: 'Review', icon: I.review },
+    { key: 'encode-jobs', label: 'Encoding Queue', icon: I.fleet },
   ] },
 ]
 
@@ -155,6 +166,7 @@ const ADMIN_NAV: NavGroup[] = [
     { key: 'storage', label: 'Storage', icon: I.storage },
     { key: 'workflows', label: 'Workflows', icon: I.workflows },
     { key: 'content-types', label: 'Content Types', icon: I.epg },
+    { key: 'genres', label: 'Genres', icon: I.tag },
     { key: 'publishing', label: 'Publishing Rules', icon: I.vod },
     { key: 'on-demand-ads', label: 'On-demand ads', icon: I.vod },
     { key: 'ingest', label: 'Ingest Rules', icon: I.vod },
@@ -172,6 +184,7 @@ const ADMIN_NAV: NavGroup[] = [
   ] },
   { group: 'Access', items: [
     { key: 'users', label: 'Users & Roles', icon: I.users },
+    { key: 'sso', label: 'Single sign-on', icon: I.key },
     { key: 'permissions', label: 'Permissions map', icon: I.shield },
     { key: 'apikeys', label: 'API Keys & Apps', icon: I.key },
     { key: 'audit', label: 'Audit log', icon: I.shield },
@@ -201,6 +214,24 @@ export default function App() {
   // (api.ts restoreSession), show nothing rather than flash the sign-in form.
   const [restoring, setRestoring] = useState(true)
   const ssoReturning = useRef(false)
+  // SINGLE SIGN-ON (sso.tsx): the provider for the email's domain, and its return to the console.
+  const ssoOffer = useSsoDiscovery(authed ? '' : email)
+  const [usePassword, setUsePassword] = useState(false)
+  const [ssoFor, setSsoFor] = useState<{ id: string; name: string } | null>(null)
+  useEffect(() => {
+    const back = takeSsoReturn()
+    if (!back) return
+    ssoReturning.current = true
+    if (back.error) { setErr(back.error); return }
+    setBusy(true)
+    finishSso(back.code!)
+      .then((r: any) => {
+        if (r.returnTo) navigate(r.returnTo, { replace: true })
+        if (isMfaStep(r)) { setStep(r); return }
+        finishSignIn(r)
+      }, (e: any) => setErr(e.message))
+      .finally(() => setBusy(false))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     // Returning from single sign-on is its own sign-in; do not race it.
     if (ssoReturning.current) { setRestoring(false); return }
@@ -279,7 +310,7 @@ export default function App() {
   // Everything comes from /auth/me (the server), never from the email domain.
   const who = me?.displayName?.trim() || me?.email || email
   const initials = (who.includes('@') ? who.split('@')[0] : who).split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '·'
-  const EXTRA_LABEL: Record<string, string> = { plan: 'Plan & limits', 'account-settings': 'Account settings', permissions: 'Permissions map', 'ui-samples': 'Notices and errors: samples', account: 'My account', groups: 'Channel Groups', apikeys: 'API Keys & Apps', users: 'Users & Roles', system: 'System Admin', 'content-types': 'Content Types', publishing: 'Publishing Rules', ingest: 'Ingest Rules', payments: 'Payments', notifications: 'Notifications', social: 'Social accounts', 'on-demand-ads': 'On-demand ads' }
+  const EXTRA_LABEL: Record<string, string> = { plan: 'Plan & limits', 'account-settings': 'Account settings', permissions: 'Permissions map', 'ui-samples': 'Notices and errors: samples', account: 'My account', groups: 'Channel Groups', apikeys: 'API Keys & Apps', users: 'Users & Roles', sso: 'Single sign-on', system: 'System Admin', 'content-types': 'Content Types', genres: 'Genres', publishing: 'Publishing Rules', ingest: 'Ingest Rules', payments: 'Payments', notifications: 'Notifications', social: 'Social accounts', 'on-demand-ads': 'On-demand ads' }
   const label = [...NAV, ...ADMIN_NAV].flatMap(g => g.items).find(i => i.key === section)?.label
     || EXTRA_LABEL[section]
     || (section ? section.charAt(0).toUpperCase() + section.slice(1) : 'Channels')
@@ -298,7 +329,11 @@ export default function App() {
       if (isMfaStep(r)) { setStep(r); setPw(''); return }
       finishSignIn(r)
     }
-    catch (e: any) { setErr('Sign in failed: ' + e.message) } finally { setBusy(false) }
+    catch (e: any) {
+      // Compulsory SSO for this address: say so, and offer the provider.
+      if (e?.body?.code === 'sso_required' && e.body.details?.connectionId) { setSsoFor({ id: e.body.details.connectionId, name: e.body.details.name }); setErr(e.message); return }
+      setErr('Sign in failed: ' + e.message)
+    } finally { setBusy(false) }
   }
 
   function finishSignIn(r: Session) {
@@ -470,13 +505,24 @@ export default function App() {
             <input id="signin-email" name="email" className="inp" type="email"
               autoComplete="username" autoCapitalize="none" spellCheck={false}
               value={email} onChange={e => setEmail(e.target.value)} /></div>
-          <div className="field"><label htmlFor="signin-pw">Password</label>
-            <input id="signin-pw" name="password" className="inp" type="password"
-              autoComplete="current-password"
-              value={pw} onChange={e => setPw(e.target.value)} /></div>
+          <SsoButtons offer={ssoFor ? { connections: [{ ...ssoFor, protocol: 'oidc' }], required: true } : ssoOffer} email={email} primary={!!(ssoOffer?.required || ssoFor)} />
+          {(ssoOffer?.required || ssoFor) && !usePassword ? (
+            <div className="hintxt" style={{ textAlign: 'center', margin: '2px 0 6px' }}>
+              Your organisation signs in with {(ssoFor ?? ssoOffer!.connections[0]).name}.{' '}
+              <button type="button" className="linklike" onClick={() => setUsePassword(true)} title="Account owners keep a password for when the provider is unavailable">Use a password instead</button>
+            </div>
+          ) : (
+            <>
+              {ssoOffer && !ssoOffer.required && <div className="hintxt" style={{ textAlign: 'center', margin: '0 0 8px' }}>or sign in with your password</div>}
+              <div className="field"><label htmlFor="signin-pw">Password</label>
+                <input id="signin-pw" name="password" className="inp" type="password"
+                  autoComplete="current-password"
+                  value={pw} onChange={e => setPw(e.target.value)} /></div>
+            </>
+          )}
           {/* outside the shell (no page region): a compact notice in the form */}
           {err && <div style={{ marginBottom: 10 }}><Notice kind="error" variant="compact" message={err} /></div>}
-          <button className="btn primary" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }} disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+          {(!(ssoOffer?.required || ssoFor) || usePassword) && <button className="btn primary" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }} disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>}
           <div style={{ textAlign: 'center', marginTop: 12 }}>
             <a href="/forgot-password" className="hintxt" style={{ color: 'var(--muted)' }}
               onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate('/forgot-password') }}>Forgot your password?</a>
@@ -564,7 +610,7 @@ export default function App() {
             <IngestQueue />
             <NotificationBell canManage={isAdmin} />
             {/* NEW STREAM asks which kind first (NewStreamChooser), then opens that form. */}
-            {(access.can('channels', 'manage') || access.can('events', 'manage') || access.can('radio', 'manage')) && (
+            {(access.can('channels', 'manage') || access.can('events', 'manage') || access.can('radio', 'manage') || access.can('fast', 'manage')) && (
               <button className="btn primary" onClick={() => setChooserOpen(true)} aria-haspopup="dialog" aria-label="New Stream">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg><span className="btn-label">New Stream</span>
               </button>
@@ -612,6 +658,8 @@ export default function App() {
             ? <Watchfolders />
             : section === 'encoding'
             ? <EncodingProfiles />
+            : section === 'encode-jobs'
+            ? <EncodeJobsPage />
             : section === 'recordings'
             ? (route.recordingId
                 ? <RecordingDetail key={route.recordingId} id={route.recordingId} onBack={() => navigate('/recordings')} />
@@ -622,6 +670,8 @@ export default function App() {
             ? <ReviewPage />
             : section === 'vod'
             ? <VodPage />
+            : section === 'collections'
+            ? <CollectionsPage />
             : section === 'loops'
             ? <LoopsPage />
             : section === 'storage'
@@ -659,6 +709,8 @@ export default function App() {
                 : <Radio />)
             : section === 'content-types'
             ? <ContentTypesPage />
+            : section === 'genres'
+            ? <GenresPage />
             : section === 'publishing'
             ? <PublishingPage />
             : section === 'ingest'
@@ -675,6 +727,8 @@ export default function App() {
             ? <ApiKeys />
             : section === 'users'
             ? <Users />
+            : section === 'sso'
+            ? <SingleSignOnPage />
             : section === 'account' && me
             ? <AccountPage me={me} onChanged={reloadMe} />
             : section === 'groups'

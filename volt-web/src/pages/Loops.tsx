@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, thumbUrl, ApiError, type FillerAsset, type FillerElsewhere, type FillerUser } from '../api'
-import { navigate } from '../router'
+import { navigate, useRoute } from '../router'
+import LoopDetail from './LoopDetail'
 import {
   cancel, dismiss, initBackground, listResumable,
   resumeWithFile, startUpload, subscribe, type UploadItem,
@@ -258,6 +259,14 @@ function Elsewhere({ items, onCopied }: { items: FillerElsewhere[]; onCopied: ()
 }
 
 export default function LoopsPage() {
+  // /loops/:id is one item's details (LoopDetail.tsx); /loops is the list
+  const route = useRoute()
+  const detailId = route.path.replace(/^\/+|\/+$/g, '').split('/')[1]
+  if (detailId) return <LoopDetail key={detailId} id={decodeURIComponent(detailId)} />
+  return <LoopsList />
+}
+
+function LoopsList() {
   const [assets, setAssets] = useState<FillerAsset[] | null>(null)
   const [uploads, setUploads] = useState<UploadItem[]>([])
   const [resumable, setResumable] = useState<any[]>([])
@@ -397,6 +406,10 @@ export default function LoopsPage() {
             {shown.map(a => (
               <tr key={a.id}>
                 <td>
+                  {/* The preview opens the item's details, like the Details button: users expect a thumbnail to be clickable. */}
+                  <a href={`/loops/${a.id}`} title={`Open ${a.name}`} aria-label={`Open details for ${a.name}`}
+                    style={{ display: 'block', width: 112, height: 63, cursor: 'pointer' }}
+                    onClick={e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return; e.preventDefault(); navigate(`/loops/${a.id}`) }}>
                   {a.status === 'ready' && a.source_key ? (
                     a.kind === 'slate'
                       ? <img src={`/${a.source_key}`} alt=""
@@ -412,6 +425,7 @@ export default function LoopsPage() {
                       color: 'var(--faint)', fontSize: 'var(--fs-micro)',
                     }}>{a.status === 'uploading' ? 'uploading' : 'no preview'}</div>
                   )}
+                  </a>
                 </td>
                 <td>
                   {renaming === a.id ? (
@@ -444,9 +458,8 @@ export default function LoopsPage() {
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{new Date(a.created_at).toLocaleString()}</td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  {a.status === 'ready' && a.source_key && (
-                    <a className="btn ghost" href={`/${a.source_key}`} target="_blank" rel="noreferrer">Open</a>
-                  )}
+                  <a className="btn ghost" href={`/loops/${a.id}`}
+                    onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(`/loops/${a.id}`) }}>Details</a>
                   <button className="btn ghost" style={{ marginLeft: 6 }}
                     onClick={async () => {
                       const users = a.used_by ?? []

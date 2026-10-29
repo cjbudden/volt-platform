@@ -8,7 +8,8 @@
 // ============================================================================
 import { one, query } from '../../db';
 import { imageStore } from '../imageStore';
-import { buildVtt, slugify, type UnitRecord } from './naming';
+import { buildVtt, type UnitRecord } from './naming';
+import { assetSpriteKey, recordSprite } from './spriteStore';
 import { sheetUrl, streamInfo, unitsFor } from './builder';
 
 export interface Piece { from: number; to: number; offset: number }
@@ -56,7 +57,8 @@ export async function recordingPieces(recId: string, accountId?: string): Promis
 }
 
 /**
- * After a clip is built: write its VTT next to the stream's thumbnails and
+ * After a clip is built: write its VTT in the asset's sprite folder
+ * (derived/{account}/sprites/assets/{asset}/thumbs.vtt, spriteStore.ts) and
  * point the asset at it, with the still nearest its start as the poster.
  * Best effort; the API serves a fresh VTT on request either way.
  */
@@ -67,8 +69,9 @@ export async function writeClipThumbnails(vodId: string): Promise<{ vttKey: stri
   if (!s) return { vttKey: null, cues: 0 };
   const { vtt, cues } = await vttForRange(c.streamId, c.pieces);
   if (!cues) return { vttKey: null, cues: 0 };
-  const vttKey = `library/${s.accountId}/thumbnails/${s.slug}/clips/${slugify(c.title)}-${vodId.slice(0, 8)}.vtt`;
+  const vttKey = assetSpriteKey(s.accountId, vodId, 'thumbs.vtt');
   await imageStore().put(vttKey, Buffer.from(vtt), 'text/vtt');
+  await recordSprite({ accountId: s.accountId, ownerKind: 'asset', kind: 'vtt', storeKey: vttKey, vodAssetId: vodId, sizeBytes: Buffer.byteLength(vtt) });
   const first = c.pieces[0].from;
   const poster = await one<{ store_key: string }>(
     `SELECT store_key FROM media_files WHERE channel_id = $1 AND source = 'encoder' AND kind = 'keyframe'

@@ -71,6 +71,22 @@ export interface StatsSample {
   programme: string | null;
   /** The playhead's wall clock (live with PROGRAM-DATE-TIME), else now. Epoch ms. */
   wallClock: number | null;
+  // ---- what diagnose() needs (see WHERE IS THE FAULT below) ----
+  /** HTTP status of the last failed request (0 = no response at all). */
+  httpStatus: number | null;
+  /** The engine's error family: 'network' | 'media' | 'mux' | 'key' | 'other'. */
+  errorType: string | null;
+  /** The last error stopped playback (not one the engine recovered from). */
+  errorFatal: boolean | null;
+  /** The lowest rendition's bitrate: below it, no quality can play smoothly. */
+  lowestBitrate: number | null;
+  /** Live playlist reloads in a row that brought nothing new. */
+  playlistMisses: number | null;
+  online: boolean | null;
+  hidden: boolean | null;
+  /** The platform's own verdict on the stream, when the host knows it (the
+   *  console's monitors pass the five-gate board's view): fault = server side. */
+  server: { state: 'ok' | 'fault'; detail?: string | null } | null;
 }
 
 export type StatsProbe = () => Partial<StatsSample>;
@@ -83,6 +99,8 @@ export function emptySample(): StatsSample {
     bitrate: null, abr: null, bandwidth: null, bytes: null, buffer: null,
     live: null, latency: null, targetLatency: null, lowLatency: null, dvrWindow: null, segmentDuration: null,
     drm: null, cdn: null, stalls: null, stallSeconds: null, errors: null, lastError: null, programme: null, wallClock: null,
+    httpStatus: null, errorType: null, errorFatal: null, lowestBitrate: null, playlistMisses: null,
+    online: null, hidden: null, server: null,
   };
 }
 
@@ -98,6 +116,64 @@ export function combineProbes(...probes: Array<StatsProbe | null | undefined>): 
     }
     return out as StatsSample;
   };
+}
+
+// --------------------------------------------------------------- WHERE IS THE FAULT
+
+/**
+ * WHERE IS THE FAULT: the viewer's side, the delivery, the stream, or our code.
+ *
+ * Most "the player is broken" reports are not about the player or the stream:
+ * a slow connection, a country the rights exclude, an expired token, a laptop
+ * decoding nine tiles at once. Each of those looks the same to the person
+ * watching (it stutters, or it stops), and each was reported the same way.
+ *
+ * diagnose() reads what the panel already measures and says which side of the
+ * line the problem is on, in words, with `report` true ONLY when the fault is
+ * ours to fix (server, delivery, code). The panel leads with it, the copied
+ * report carries it, and a viewer-side problem says plainly that there is
+ * nothing to report. Pure, so every rule is tested
+ * (volt-app/test/player-diagnose.check.ts).
+ */
+export type FaultSide = 'ok' | 'local' | 'access' | 'delivery' | 'server' | 'code';
+export interface Diagnosis { side: FaultSide; title: string; detail: string; report: boolean }
+
+export const SIDE_LABEL: Record<FaultSide, string> = {
+  ok: 'Healthy', local: 'This device or connection', access: 'Access rules',
+  delivery: 'Delivery (CDN / network path)', server: 'Stream output (server side)', code: 'Player code',
+};
+
+export function diagnose(s: Partial<StatsSample>): Diagnosis {
+  const st = s.httpStatus ?? null;
+  const err = String(s.lastError ?? '');
+  const D = (side: FaultSide, title: string, detail: string): Diagnosis => ({ side, title, detail, report: side === 'server' || side === 'delivery' || side === 'code' });
+
+  // 1) the platform already knows the stream is wrong
+  if (s.server?.state === 'fault') return D('server', 'The stream itself has a fault', s.server.detail || 'The platform reports a problem with this output. It affects every viewer, not just you.');
+  // 2) offline is offline
+  if (s.online === false) return D('local', 'This device is offline', 'No network connection. Nothing is wrong with the stream.');
+  // 3) answers that are rules, not faults
+  if (st === 451) return D('access', 'Not available in this region', 'The rights for this stream exclude the viewer\'s country (HTTP 451). Working as configured, nothing to report.');
+  if (st === 401 || st === 403) return D('access', 'Not permitted', `The request was refused (HTTP ${st}): an expired or missing playback token, or no entitlement. Sign in again or check the viewer's access.`);
+  // 4) the stream is missing pieces
+  if (st === 404 || st === 410) return D('server', 'Stream files missing', `The manifest or a segment was not found (HTTP ${st}). The output is not being written or published where the player was sent.`);
+  if (st != null && st >= 500) return D('delivery', 'Delivery error', `The CDN or origin answered HTTP ${st}. Every viewer on this path is likely affected.`);
+  if ((s.playlistMisses ?? 0) >= 3 && s.live) return D('server', 'Live playlist has stopped advancing', `The last ${s.playlistMisses} playlist reloads brought no new segments. The encoder or packager is not producing output.`);
+  // 5) the bytes arrive but cannot be used
+  if (/Incompatible|codec|NotSupported|SRC_NOT_SUPPORTED/i.test(err) && s.errorType !== 'network') return D('local', 'This browser cannot play this format', `${err}. Another browser or device will play it. Report only if it fails on a supported browser.`);
+  if (/fragParsingError|bufferAppendError|demux|corrupt|MEDIA_ERR_DECODE/i.test(err) && s.errorFatal) return D('server', 'Corrupt media', `The player received media it could not decode (${err}). The packaged output is likely damaged.`);
+  if (s.errorType === 'other' && s.errorFatal) return D('code', 'Player error', `${err || 'An unexpected player error'}. This is a defect in the player, please report it.`);
+  // 6) connection without a status: the network between viewer and us
+  if (st === 0 || (s.errorType === 'network' && s.errorFatal && st == null)) return D('local', 'Cannot reach the stream from here', 'Requests got no answer: a firewall, VPN, proxy or dropped connection on the viewer\'s side. If every viewer sees this, it is delivery.');
+  // 7) bandwidth and the device
+  const bw = s.bandwidth ?? null;
+  if (bw != null && s.lowestBitrate != null && bw < s.lowestBitrate * 1.2) return D('local', 'Connection too slow for this stream', `Measured ${fmtKbps(bw)}, the lowest quality needs about ${fmtKbps(s.lowestBitrate * 1.2)}. Expect buffering on this connection. Nothing is wrong with the stream.`);
+  if ((s.stalls ?? 0) > 0 && bw != null && s.bitrate != null && bw < s.bitrate) return D('local', 'Connection below the current quality', `Measured ${fmtKbps(bw)} against ${fmtKbps(s.bitrate)} playing; the player is stepping quality down. Local to this connection.`);
+  const fr = s.frames;
+  if (fr && fr.total > 250 && fr.dropped / fr.total > 0.1) return D('local', 'This device is dropping frames', `${Math.round((fr.dropped / fr.total) * 100)}% of frames dropped: the device cannot decode fast enough (too many players, tabs or a high resolution). Not a stream fault.`);
+  if (s.hidden) return D('local', 'Playing in a background tab', 'The browser slows background tabs, so stalls here mean nothing.');
+  if ((s.stalls ?? 0) > 0) return D('ok', 'Recovered from a stall', 'Playback stalled and resumed. Watch the buffer and connection graphs; a repeat on a good connection is worth reporting.');
+  return D('ok', 'Playback healthy', 'Nothing to report.');
 }
 
 // --------------------------------------------------------------- formatting
@@ -287,8 +363,11 @@ export function statsRows(s: StatsSample, netDelta: number | null = null, now = 
 export function statsReport(s: StatsSample, netDelta: number | null = null, meta: { version?: string; userAgent?: string; page?: string } = {}, now = Date.now()): string {
   const rows = statsRows(s, netDelta, now);
   const w = Math.max(...rows.map((r) => r.label.length), 10);
+  const dg = diagnose(s);
   const lines = [
     `Volt Player debug info${meta.version ? ` (SDK ${meta.version})` : ''}`,
+    `Diagnosis   ${SIDE_LABEL[dg.side]}: ${dg.title}. ${dg.detail}`,
+    `Report      ${dg.report ? 'YES, this is a platform fault' : 'no, not a platform fault'}`,
     `Taken       ${new Date(now).toISOString()}`,
     ...(meta.page ? [`Page        ${redactUrl(meta.page)}`] : []),
     ...(meta.userAgent ? [`Browser     ${meta.userAgent}`] : []),
@@ -335,6 +414,12 @@ export function mediaProbe(media: HTMLVideoElement, box?: HTMLElement | null): S
       stalls: st.stalls, stallSeconds: st.seconds + (st.since != null ? (performance.now() - st.since) / 1000 : 0),
       wallClock: live && t0 ? t0 + media.currentTime * 1000 : null,
       engine: media.currentSrc && !media.currentSrc.startsWith('blob:') ? (/\.m3u8/i.test(media.currentSrc) ? 'Browser HLS' : 'Progressive') : null,
+      online: typeof navigator !== 'undefined' ? navigator.onLine : null,
+      hidden: typeof document !== 'undefined' ? document.hidden : null,
+      ...(media.error ? {
+        lastError: (['', 'MEDIA_ERR_ABORTED', 'MEDIA_ERR_NETWORK', 'MEDIA_ERR_DECODE', 'MEDIA_ERR_SRC_NOT_SUPPORTED'][media.error.code] || 'media error'),
+        errorType: media.error.code === 2 ? 'network' : 'media', errorFatal: true,
+      } : {}),
     } as Partial<StatsSample>;
   }) as StatsProbe & { destroy(): void };
   probe.destroy = () => { media.removeEventListener('playing', playing); media.removeEventListener('waiting', waiting); };
@@ -356,8 +441,18 @@ export function hlsJsProbe(hls: any, media?: HTMLVideoElement | null): StatsProb
       else cdn = { host: hostOf(d?.frag?.url), pop: null, cache: null, server: null };
     } catch { /* */ }
   };
-  const onErr = (_e: unknown, d: any) => { if (!d?.fatal) errors++; lastError = d?.details ?? null; };
-  try { hls.on('hlsFragLoaded', onFrag); hls.on('hlsError', onErr); } catch { /* */ }
+  let httpStatus: number | null = null, errorType: string | null = null, errorFatal: boolean | null = null;
+  const onErr = (_e: unknown, d: any) => {
+    errors++;
+    lastError = d?.details ?? null;
+    errorType = String(d?.type || '').replace(/Error$/, '') || null;   // networkError -> network
+    errorFatal = !!d?.fatal;
+    const code = d?.response?.code ?? d?.networkDetails?.status;
+    httpStatus = typeof code === 'number' ? code : (errorType === 'network' ? 0 : httpStatus);
+  };
+  // A good load clears the network verdict: an old 404 must not haunt a stream that recovered.
+  const onOk = () => { if (errorType === 'network') { httpStatus = null; errorType = null; errorFatal = null; } };
+  try { hls.on('hlsFragLoaded', onFrag); hls.on('hlsFragLoaded', onOk); hls.on('hlsError', onErr); } catch { /* */ }
   const probe = (() => {
     const lv = hls.levels?.[hls.currentLevel] ?? hls.levels?.[hls.loadLevel] ?? null;
     const det = lv?.details ?? null;
@@ -386,10 +481,12 @@ export function hlsJsProbe(hls: any, media?: HTMLVideoElement | null): StatsProb
       lowLatency: !!hls.config?.lowLatencyMode && !!det?.partList,
       dvrWindow: live && det ? det.totalduration : null,
       segmentDuration: det?.targetduration ?? null,
-      cdn, errors, lastError,
+      cdn, errors, lastError, httpStatus, errorType, errorFatal,
+      lowestBitrate: (hls.levels ?? []).reduce((m: number | null, l: any) => (l?.bitrate && (m == null || l.bitrate < m) ? l.bitrate : m), null),
+      playlistMisses: live && det ? (det.misses ?? null) : null,
     } as Partial<StatsSample>;
   }) as StatsProbe & { destroy(): void };
-  probe.destroy = () => { try { hls.off('hlsFragLoaded', onFrag); hls.off('hlsError', onErr); } catch { /* */ } };
+  probe.destroy = () => { try { hls.off('hlsFragLoaded', onFrag); hls.off('hlsFragLoaded', onOk); hls.off('hlsError', onErr); } catch { /* */ } };
   return probe;
 }
 
@@ -475,6 +572,8 @@ export class StatsPanel {
   private lastDelta: number | null = null;
   private last: StatsSample | null = null;
   private rowEls = new Map<string, { row: HTMLElement; val: HTMLElement; cv?: HTMLCanvasElement }>();
+  private verdict!: HTMLElement;
+  private copyBtn!: HTMLButtonElement;
   open = false;
 
   constructor(o: StatsPanelOptions) {
@@ -500,7 +599,10 @@ export class StatsPanel {
     head.append(title, copy, close);
     this.body = document.createElement('div');
     this.body.className = 'vp-stats-body';
-    this.el.append(head, this.body);
+    this.verdict = document.createElement('div');
+    this.verdict.className = 'vp-stats-verdict';
+    this.copyBtn = copy;
+    this.el.append(head, this.verdict, this.body);
     // Clicks inside never reach the stage (which would play/pause).
     for (const ev of ['click', 'dblclick', 'pointerdown', 'contextmenu']) this.el.addEventListener(ev, (e) => e.stopPropagation());
     o.host.appendChild(this.el);
@@ -549,6 +651,18 @@ export class StatsPanel {
     let delta: number | null = null;
     if (s.bytes != null) { delta = this.lastBytes == null ? 0 : Math.max(0, s.bytes - this.lastBytes); this.lastBytes = s.bytes; }
     this.lastDelta = delta;
+    // The verdict leads: which side of the line the problem is on, and whether
+    // it is worth reporting at all.
+    const dg = diagnose(s);
+    const vt = `${SIDE_LABEL[dg.side]} · ${dg.title}`;
+    if (this.verdict.dataset.side !== dg.side || this.verdict.firstChild?.textContent !== vt) {
+      this.verdict.dataset.side = dg.side;
+      this.verdict.replaceChildren();
+      const b = document.createElement('b'); b.textContent = vt;
+      const p = document.createElement('div'); p.textContent = dg.report ? `${dg.detail} Copy this panel into the support ticket.` : dg.detail;
+      this.verdict.append(b, p);
+      this.copyBtn.title = dg.report ? 'Copy for a support ticket: this looks like a platform fault' : 'Copy these stats (no platform fault found)';
+    }
     const rows = statsRows(s, delta);
     const seen = new Set<string>();
     let prev: HTMLElement | null = null;
@@ -677,20 +791,69 @@ export interface AttachedStats {
  *
  * Right-click on `host` opens the menu; Shift+D toggles while it has focus.
  */
-export function attachStats(host: HTMLElement, probe: StatsProbe, o: { version?: string; menu?: boolean; onChange?: (open: boolean) => void } = {}): AttachedStats {
+/** Debug mode: Shift+D, or Cmd+D (Mac) / Ctrl+D. Never inside a text field. */
+export function isDebugKey(e: KeyboardEvent): boolean {
+  if ((e.target as HTMLElement)?.closest?.('input,select,textarea,[contenteditable]')) return false;
+  if (e.key !== 'D' && e.key !== 'd') return false;
+  if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) return true;
+  return (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
+}
+
+/**
+ * A POOR CONNECTION SAYS SO, WITHOUT DEBUG MODE.
+ *
+ * Event driven, so it costs nothing while playback is fine: only a stall that
+ * lasts three seconds takes one sample. When diagnose() puts the problem on
+ * the viewer's side, a small note says so for a few seconds, so the viewer
+ * knows to look at their own connection rather than file a report.
+ */
+export function watchConnection(host: HTMLElement, media: HTMLMediaElement, sample: () => Partial<StatsSample>): () => void {
+  injectStatsStyles();
+  let t: ReturnType<typeof setTimeout> | null = null;
+  let note: HTMLElement | null = null;
+  let shownAt = 0;
+  const clear = () => { if (t) { clearTimeout(t); t = null; } };
+  const waiting = () => {
+    clear();
+    t = setTimeout(() => {
+      t = null;
+      if (Date.now() - shownAt < 60_000) return;          // once a minute at most
+      let dg: Diagnosis;
+      try { dg = diagnose(sample()); } catch { return; }
+      if (dg.side !== 'local') return;
+      note?.remove();
+      note = document.createElement('div');
+      note.className = 'vp-net-note';
+      note.textContent = `${dg.title}. Not a stream fault.`;
+      host.appendChild(note);
+      shownAt = Date.now();
+      const n = note;
+      setTimeout(() => { n.remove(); if (note === n) note = null; }, 8000);
+    }, 3000);
+  };
+  media.addEventListener('waiting', waiting);
+  media.addEventListener('playing', clear);
+  return () => { clear(); note?.remove(); media.removeEventListener('waiting', waiting); media.removeEventListener('playing', clear); };
+}
+
+export function attachStats(host: HTMLElement, probe: StatsProbe, o: { version?: string; menu?: boolean; onChange?: (open: boolean) => void; media?: HTMLMediaElement } = {}): AttachedStats {
   if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
   const panel = new StatsPanel({ host, probe, version: o.version, onClose: () => o.onChange?.(false) });
   const show = (on?: boolean) => { panel.setOpen(on ?? !panel.open); o.onChange?.(panel.open); };
   const unbind = o.menu === false ? () => {} : bindDebugMenu(host, () => [
-    { label: 'Playback stats', checked: panel.open, run: () => show() },
+    { label: 'Debug mode', checked: panel.open, run: () => show() },
     { label: 'Copy debug info', run: () => void panel.copy() },
   ], o.version ? `Volt Player ${o.version}` : undefined);
-  const key = (e: KeyboardEvent) => { if (e.key === 'D' && e.shiftKey && !e.metaKey && !e.ctrlKey && !(e.target as HTMLElement)?.closest?.('input,select,textarea')) { e.preventDefault(); show(); } };
+  const key = (e: KeyboardEvent) => { if (isDebugKey(e)) { e.preventDefault(); e.stopPropagation(); show(); } };
   if (!host.hasAttribute('tabindex')) host.tabIndex = -1;
   host.addEventListener('keydown', key);
+  // Cmd/Ctrl+D while the pointer is over the player, without focusing it first.
+  const hover = (e: KeyboardEvent) => { if (host.matches(':hover') && !host.contains(document.activeElement)) key(e); };
+  document.addEventListener('keydown', hover);
+  const hint = o.media ? watchConnection(host, o.media, () => panel.read()) : null;
   return {
     panel, show, copy: () => panel.copy(), setProbe: (p) => panel.setProbe(p),
-    destroy: () => { unbind(); host.removeEventListener('keydown', key); panel.destroy(); },
+    destroy: () => { unbind(); host.removeEventListener('keydown', key); document.removeEventListener('keydown', hover); hint?.(); panel.destroy(); },
   };
 }
 
@@ -716,6 +879,13 @@ const STATS_CSS = `
 .vp-stats-head span{flex:1}
 .vp-stats-btn{all:unset;cursor:pointer;padding:1px 7px;border-radius:3px;color:#cbd5e1;font:500 12px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
 .vp-stats-btn:hover,.vp-stats-btn:focus-visible{background:rgba(255,255,255,.12);color:#fff}
+.vp-stats-verdict{margin:2px 0 6px;padding:5px 8px;border-radius:3px;font:12px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;white-space:normal;max-width:460px;background:rgba(148,163,184,.14)}
+.vp-stats-verdict b{display:block;font-weight:600}
+.vp-stats-verdict div{color:#cbd5e1}
+.vp-stats-verdict[data-side=ok]{background:rgba(74,222,128,.14)}
+.vp-stats-verdict[data-side=local],.vp-stats-verdict[data-side=access]{background:rgba(96,165,250,.16)}
+.vp-stats-verdict[data-side=delivery],.vp-stats-verdict[data-side=server],.vp-stats-verdict[data-side=code]{background:rgba(248,113,113,.2)}
+.vp-net-note{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);z-index:35;max-width:calc(100% - 24px);padding:5px 10px;border-radius:4px;background:rgba(12,14,18,.85);color:#e5e7eb;font:12px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;pointer-events:none}
 .vp-stats-body{display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:12px}
 .vp-stats-row{display:contents}
 .vp-stats-k{color:#9ca3af;text-align:right;white-space:nowrap}

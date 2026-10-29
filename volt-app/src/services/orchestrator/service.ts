@@ -1331,6 +1331,7 @@ export class Orchestrator {
           fromMs: sc.start_epoch_ms, toMs: sc.end_epoch_ms,
           outputKind: sc.output_kind,
           channelId: sc.channel_id ?? null, eventId: sc.event_id ?? null,
+          acceptGapsMs: (await import('../clips')).AUTO_BUILD_ACCEPT_GAPS_MS,
         });
         await query(`UPDATE scheduled_clips SET status='done', vod_asset_id=$2 WHERE id=$1`, [sc.id, (vod as any).id]);
       } catch (e) {
@@ -1409,7 +1410,13 @@ export class Orchestrator {
     for (const rec of legacy) {
       const rule = await ruleFor({ channelId: rec.channel_id, eventId: rec.event_id, appliesTo: 'recording' });
       if (rule) continue;            // the ladder owns it; leave it alone
-      const objs = await query<any>(`SELECT id FROM media_objects WHERE recording_id = $1`, [rec.id]);
+      // Runs on local disk go through the clip-aware prune (clips' sources kept, the rest
+      // to the restore bin); anything else left is removed as before.
+      try {
+        const { pruneRecording } = await import('../media/prune');
+        await pruneRecording(rec.id, { reason: 'expires_at passed and no retention rule governs this channel', actor: 'retention:legacy-expiry' });
+      } catch (e) { console.error('[retention] legacy prune failed for', rec.id, e); }
+      const objs = await query<any>(`SELECT id FROM media_objects WHERE recording_id = $1 AND state <> 'deleted' AND NOT hold`, [rec.id]);
       for (const o of objs) {
         try {
           await transition(o.id, 'deleting', { action: 'delete', actor: 'retention:legacy-expiry' });
@@ -1423,7 +1430,9 @@ export class Orchestrator {
           });
         } catch (e) { console.error('[retention] legacy expiry failed for', o.id, e); }
       }
-      await query(`UPDATE recordings SET storage_state = 'deleted' WHERE id = $1`, [rec.id]);
+      const left = await one<any>(`SELECT count(*)::int AS n FROM media_objects WHERE recording_id = $1 AND state <> 'deleted'`, [rec.id]);
+      await query(`UPDATE recordings SET storage_state = $2::media_state, expires_at = CASE WHEN $3 THEN NULL ELSE expires_at END WHERE id = $1`,
+        [rec.id, left?.n ? 'available' : 'deleted', !!left?.n]);
       legacyDone++;
     }
     if (legacyDone) console.log(`[retention] ${legacyDone} recording(s) expired under the legacy expires_at column`);
@@ -1433,6 +1442,9 @@ export class Orchestrator {
     // Reports outlive the events they were computed from; that is the promise,
     // and the ordering is what keeps it.
     await sweepAnalytics().catch((e) => console.error('[analytics] sweep failed', e));
+
+    // THE RESTORE BIN: what retention and deletes moved there is purged once its days are up.
+    await (await import('../media/trash')).purgeExpired().catch((e) => console.error('[bin] purge failed', e));
 
     // Abandoned uploads hold staged chunks on disk, and a half-uploaded loop is
     // the one thing nobody comes back for. The expiry is extended by every chunk

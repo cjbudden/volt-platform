@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ProgrammeRow, ProgrammeVod, VodState } from '../api'
+import { ProgrammeFlagMark } from '../programmeMedia'
 
 /* ============================================================================
    EPG TIMELINE: the same day as the list, drawn as a vertical time axis.
@@ -229,10 +230,14 @@ export function EpgTimeline({ day, progs, vod, overlapsById, ownerWord, onEdit, 
                 color: 'var(--warn,#e2b64f)', title: p.geo_mode === 'allow' ? 'Allow-list' : 'Block-list',
               })
               if (p.replacement_kind !== 'none') tags.push({ label: `Replaced: ${p.replacement_kind}`, color: 'var(--down,#f87171)', title: p.replacement_ref ?? undefined })
-              if (vt) tags.push(vt)
+              // The programme flag (programmeMedia.tsx) is drawn on its own,
+              // first, so it survives a tight block; vt stays only as the
+              // fallback for an older server that sends no flag.
+              if (vt && !v?.flag) tags.push(vt)
               if (overlaps) tags.push({ label: overlaps.length === 1 ? `Overlaps "${overlaps[0]}"` : `Overlaps ${overlaps.length}`, color: 'var(--warn,#e2b64f)' })
               const w = 100 / x.lanes
               // Flags sit top right on the title row. A tight block has room for the REC flag only.
+              const flag = v?.flag ?? null
               const shown = tight ? tags.filter(t => t.rec) : tags
               return (
                 <button key={p.id} type="button" className={cls}
@@ -243,8 +248,9 @@ export function EpgTimeline({ day, progs, vod, overlapsById, ownerWord, onEdit, 
                     <b>{p.title}</b>
                     {tight && <span className="t">{fmtT(x.rawS)}</span>}
                     {tight && live && <span className="dot" aria-label="On now" />}
-                    {shown.length > 0 && (
+                    {(shown.length > 0 || flag) && (
                       <div className="tags">
+                        {flag && <ProgrammeFlagMark flag={flag} link={false} className="sm" />}
                         {shown.map(t => t.rec
                           ? <span key={t.label} className="tl-tag rec" title={t.title}><i className="rd" aria-hidden />REC</span>
                           : <span key={t.label} className="tl-tag" title={t.title} style={{ color: t.color, borderColor: `color-mix(in srgb, ${t.color} 45%, transparent)` }}>{t.label}</span>)}

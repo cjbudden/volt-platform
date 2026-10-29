@@ -31,6 +31,20 @@ import { query, one } from '../../db';
 import { fastConfig, channelPrefix } from './media';
 
 const children = new Map<string, ChildProcess>();
+/**
+ * How FAST playouts run here. ECS on AWS; otherwise a child process on this
+ * box. The Docker launcher (run-on-mac.sh with the encoder image) runs
+ * TELEVISION encoders in containers, but a FAST playout only copies packaged
+ * segments, so it runs on the host like 'local': before this, launcher=docker
+ * started no playout at all and every FAST channel sat at "Starting" with
+ * nothing to preview. FAST_LAUNCHER overrides (local | ecs | off).
+ */
+function fastLauncher(): string {
+  const v = process.env.FAST_LAUNCHER;
+  if (v) return v;
+  const l = config.orchestrator.launcher;
+  return l === 'docker' ? 'local' : l;
+}
 let warned = false;
 const HUNG_MS = 3 * 60_000;
 
@@ -68,7 +82,7 @@ async function ecs() {
 
 /** Start a channel's playout now. Returns how it is running. */
 export async function startPlayout(channelId: string, restart = false): Promise<'running' | 'starting' | 'run separately'> {
-  const launcher = config.orchestrator.launcher;
+  const launcher = fastLauncher();
   if (launcher === 'local') {
     if (children.has(channelId)) return 'running';
     // the same job an ECS task gets (so FAST_OUTPUT=s3 works here too), with
@@ -116,16 +130,26 @@ export async function stopPlayout(channelId: string, reason = 'lineup deactivate
   console.log(`[fast] playout stopped for ${channelId} (${reason})`);
 }
 
+const lastPrepared = new Map<string, number>();
+const PREPARE_EVERY_MS = 5 * 60_000;
+
 /** Scheduler tick: a healthy playout for every channel with an active lineup, none for the rest. */
 export async function reconcilePlayouts(): Promise<{ started: number; stopped: number; restarted: number }> {
   const out = { started: 0, stopped: 0, restarted: 0 };
-  const launcher = config.orchestrator.launcher;
+  const launcher = fastLauncher();
   if (launcher !== 'local' && launcher !== 'ecs') return out;
   const want = new Set((await query<any>(
     `SELECT c.id FROM channels c JOIN fast_lineups l ON l.channel_id = c.id AND l.status = 'active' WHERE c.origin = 'playlist'`)).map((r) => String(r.id)));
   const rows = new Map((await query<any>(`SELECT * FROM fast_playouts`)).map((r) => [String(r.channel_id), r]));
   for (const id of want) {
     const r = rows.get(id);
+    // BEHIND THE SCENES (ladder.ts): every few minutes, whatever an on-air channel
+    // uses that is not packaged to its ladder (a re-encoded title, a series'
+    // newest episode, a changed ladder) is queued without anyone pressing Prepare.
+    if (Date.now() - (lastPrepared.get(id) ?? 0) > PREPARE_EVERY_MS) {
+      lastPrepared.set(id, Date.now());
+      void import('./prepare').then((m) => m.prepare(id, { auto: true })).catch((e) => console.error('[fast] prepare failed for', id, e?.message ?? e));
+    }
     try {
       if (launcher === 'local') {
         if (!children.has(id)) { await startPlayout(id, !!r); r ? out.restarted++ : out.started++; }
@@ -161,7 +185,7 @@ export async function heartbeat(channelId: string, b: { state?: unknown; lastPdt
      VALUES ($1, $2, $3, now(), $4, $5, $6::jsonb, $7::jsonb)
      ON CONFLICT (channel_id) DO UPDATE SET status = $3, last_seen_at = now(), last_pdt = $4, media_sequence = $5,
        state = COALESCE($6::jsonb, fast_playouts.state), unreadable = $7::jsonb, updated_at = now()`,
-    [channelId, config.orchestrator.launcher, b.stopping ? 'stopped' : 'running', b.lastPdt ?? null, b.mediaSequence ?? null,
+    [channelId, fastLauncher(), b.stopping ? 'stopped' : 'running', b.lastPdt ?? null, b.mediaSequence ?? null,
      b.state ? JSON.stringify(b.state) : null, JSON.stringify(b.unreadable ?? [])]);
   if (!b.stopping) {
     await query(`UPDATE channels SET status = 'live', updated_at = now() WHERE id = $1 AND origin = 'playlist' AND status <> 'live'`, [channelId]);

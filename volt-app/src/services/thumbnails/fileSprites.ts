@@ -5,8 +5,10 @@
 //  uploaded file has no stream, so its sheets are made from the file itself
 //  while the encode job still has it on disk: one ffmpeg pass, frames at a
 //  fixed interval, tiled into sheets in the same layout as the live ones
-//  (config.thumbnails: tile size, columns, rows), stored in the Image Library
-//  under thumbnails/files/<asset>/ and served through the signed image service.
+//  (config.thumbnails: tile size, columns, rows), stored in the sprite store
+//  under derived/<account>/sprites/assets/<asset>/ with a sprite_sheets row
+//  each (spriteStore.ts; not in the Image Library), and served through the
+//  signed image service.
 //
 //  The interval follows the file: about 200 previews whatever its length (one
 //  a second for a short clip, one every 36 s for a two-hour film), never
@@ -21,7 +23,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { query, one } from '../../db';
 import { imageStore } from '../imageStore';
-import { upsertMediaRow } from '../mediaLibrary';
+import { assetSpriteKey, deleteSprites, recordSprite, staleAssetSprites } from './spriteStore';
 import { layoutOf } from './builder';
 import { signedImageUrl } from '../../modules/images';
 
@@ -52,20 +54,30 @@ export async function buildFileSprites(assetId: string, acct: string, input: str
     const files = (await readdir(dir)).filter((f) => /^sheet-\d+\.jpg$/.test(f)).sort();
     if (!files.length) return null;
     const total = Math.max(1, Math.ceil(dur / intervalMs));
-    const folder = `thumbnails/files/${assetId}`;
+    const folder = `sprites/assets/${assetId}`;
     const sheets: FileSprite['sheets'] = [];
     for (const [i, f] of files.entries()) {
       const buf = await readFile(join(dir, f));
       const name = `sheet-${String(i).padStart(3, '0')}.jpg`;
-      const key = `library/${acct}/${folder}/${name}`;
+      const key = assetSpriteKey(acct, assetId, name);
+      const from = i * perSheet * intervalMs, tiles = Math.min(perSheet, total - i * perSheet);
+      if (tiles <= 0) continue;
       await imageStore().put(key, buf, 'image/jpeg');
-      await upsertMediaRow({ accountId: acct, kind: 'storyboard', path: `${folder}/${name}`, folder, name, storeKey: key, sizeBytes: buf.length,
-        contentType: 'image/jpeg', tags: ['auto', 'storyboard'], source: 'auto', facts: { width: L.cols * L.tileW, height: L.rows * L.tileH } as any, extra: { assetId, intervalMs } });
-      sheets.push({ key, from: i * perSheet * intervalMs, tiles: Math.min(perSheet, total - i * perSheet) });
+      await recordSprite({ accountId: acct, ownerKind: 'asset', storeKey: key, vodAssetId: assetId, startMs: from, intervalMs,
+        tileW: L.tileW, tileH: L.tileH, cols: L.cols, rows: L.rows, tiles, width: L.cols * L.tileW, height: L.rows * L.tileH, sizeBytes: buf.length });
+      sheets.push({ key, from, tiles });
     }
-    const sprite: FileSprite = { folder, intervalMs, tileW: L.tileW, tileH: L.tileH, cols: L.cols, rows: L.rows, durationMs: dur, sheets: sheets.filter((s) => s.tiles > 0) };
+    const sprite: FileSprite = { folder, intervalMs, tileW: L.tileW, tileH: L.tileH, cols: L.cols, rows: L.rows, durationMs: dur, sheets };
+    // A previous build (a longer file, a rebuild) may have left more sheets than this one made, or library-era ones.
+    const before = await one<any>(`SELECT sprite FROM vod_assets WHERE id = $1`, [assetId]);
+    const keep = sheets.map((x) => x.key);
+    const old = [...(before?.sprite?.sheets ?? []).map((x: any) => String(x.key)).filter((k: string) => !keep.includes(k)), ...await staleAssetSprites(assetId, keep)];
     await query(`UPDATE vod_assets SET sprite = $2::jsonb, storyboard_key = $3, thumb_status = 'ready', updated_at = now() WHERE id = $1`,
       [assetId, JSON.stringify(sprite), sprite.sheets[0]?.key ?? null]);
+    if (old.length) {
+      await deleteSprites([...new Set(old)]);
+      await query(`DELETE FROM media_files WHERE account_id = $1 AND store_key = ANY($2::text[])`, [acct, old]);
+    }
     return sprite;
   } finally { await rm(dir, { recursive: true, force: true }); }
 }

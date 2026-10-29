@@ -1,0 +1,264 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Squash score</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     In and out sequences: see volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md section 4.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Squash score (games to 11)",
+  "bbox": [
+    96,
+    58,
+    760,
+    190
+  ],
+  "fields": [
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title (event, round, court)"
+    },
+    {
+      "id": "p1Name",
+      "type": "text",
+      "label": "Player or team 1"
+    },
+    {
+      "id": "p2Name",
+      "type": "text",
+      "label": "Player or team 2"
+    },
+    {
+      "id": "sets",
+      "type": "list",
+      "label": "Finished games: 11-8, 7-11"
+    },
+    {
+      "id": "points",
+      "type": "text",
+      "label": "Points in this game: 6-4"
+    },
+    {
+      "id": "server",
+      "type": "number",
+      "label": "Serving: 1 or 2 (0 for none)"
+    },
+    {
+      "id": "status",
+      "type": "text",
+      "label": "Callout (MATCH POINT, TIE-BREAK, CHALLENGE, FINAL)"
+    },
+    {
+      "id": "winner",
+      "type": "number",
+      "label": "Winner when it is over: 1 or 2"
+    },
+    {
+      "id": "p1Image",
+      "type": "image",
+      "label": "Flag or logo 1 (optional)"
+    },
+    {
+      "id": "p2Image",
+      "type": "image",
+      "label": "Flag or logo 2 (optional)"
+    },
+    {
+      "id": "p1Color",
+      "type": "color",
+      "label": "Colour 1 (when there is no flag)"
+    },
+    {
+      "id": "p2Color",
+      "type": "color",
+      "label": "Colour 2 (when there is no flag)"
+    },
+    {
+      "id": "accent",
+      "type": "color",
+      "label": "Points and title colour"
+    },
+    {
+      "id": "panelColor",
+      "type": "color",
+      "label": "Panel colour"
+    },
+    {
+      "id": "ballColor",
+      "type": "color",
+      "label": "Serve marker colour"
+    }
+  ],
+  "sample": {
+    "title": "BRITISH OPEN · ROUND 2",
+    "p1Name": "A. Farag",
+    "p2Name": "P. Coll",
+    "sets": [
+      "11-8",
+      "7-11"
+    ],
+    "points": "6-4",
+    "server": 1,
+    "status": "",
+    "p1Color": "#ce1126",
+    "p2Color": "#00247d",
+    "winner": 0,
+    "p1Image": "",
+    "p2Image": "",
+    "accent": "#f2c200",
+    "panelColor": "#0b1220",
+    "ballColor": "#ffd400"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+:root{--ein:cubic-bezier(.16,1,.3,1);--eout:cubic-bezier(.7,0,.84,0);--pop:cubic-bezier(.34,1.56,.64,1)}
+/* Three states: initial (hidden), .on (in sequence to on air), .out (out sequence to a different
+   hidden pose). After the out sequence .reset snaps back to initial with no transition. */
+.reset *,.reset *::before,.reset *::after{transition:none!important;animation:none!important}
+:root{--panel:rgba(9,15,30,.94);--row2:rgba(255,255,255,.06);--accent:#f2c200;--accentInk:#0b1220;--ball:#ffd400;--p1:#c8102e;--p2:#00247d}
+#sb{position:absolute;left:96px;top:58px;display:flex;flex-direction:column;align-items:flex-start;filter:drop-shadow(0 8px 20px rgba(0,0,0,.4))}
+#ttl{background:var(--accent);color:var(--accentInk);font:700 20px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px 6px;
+  white-space:nowrap;transform:translateY(100%);opacity:0}
+#ttl:empty{display:none}
+#card{background:var(--panel);clip-path:inset(0 0 100% 0)}
+.row{display:flex;align-items:center;height:56px;transform:translateX(-30px);opacity:0}
+.row+.row{border-top:1px solid rgba(255,255,255,.12)}
+.who{display:flex;align-items:center;gap:14px;padding:0 14px 0 16px;width:var(--nameW,330px);box-sizing:border-box;position:relative}
+.chip{width:14px;height:14px;flex:none;background:var(--c)}
+.flag{width:40px;height:28px;object-fit:cover;flex:none;display:none;box-shadow:0 0 0 1px rgba(255,255,255,.25)}
+.hasimg .flag{display:block}.hasimg .chip{display:none}
+.nm{flex:1;min-width:0;font:700 31px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;white-space:nowrap;overflow:hidden;letter-spacing:.01em}
+.lost .nm{opacity:.55}
+.won .nm::after{content:" \2713";color:var(--accent)}
+.srv{width:26px;flex:none;display:flex;align-items:center;justify-content:center;gap:3px}
+.cells{display:flex;height:100%}
+.c{width:50px;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;
+  font:600 30px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;font-variant-numeric:tabular-nums;color:rgba(255,255,255,.55);transition:width .45s var(--ein)}
+.c.w{color:#fff}
+.c.cur{background:var(--row2);color:#fff}
+.c.pts{width:76px;background:var(--accent);color:var(--accentInk);font-weight:700;font-size:32px}
+.c.new{width:0}
+.c span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transition:transform .4s var(--ein),opacity .4s}
+.c span.in{transform:translateY(100%);opacity:0}.c span.gone{transform:translateY(-100%);opacity:0}
+.c.flash{animation:flash .9s ease-out}
+@keyframes flash{0%{filter:brightness(1.7)}100%{filter:none}}
+#ballrail{position:absolute;left:0;top:0;width:26px;height:112px;pointer-events:none}
+#ball{position:absolute;left:5px;width:16px;height:16px;border-radius:50%;background:var(--ball);box-shadow:0 0 0 2px rgba(0,0,0,.25);
+  top:20px;transform:scale(0);transition:top .45s var(--ein),transform .35s var(--pop)}
+#sn{position:absolute;left:24px;font:700 18px/1 "Volt Sans";color:var(--ball);top:19px;transition:top .45s var(--ein);opacity:0}
+.s2 #ball{top:76px}.s2 #sn{top:75px}
+.on.s1 #ball,.on.s2 #ball{transform:scale(1);transition:top .45s var(--ein),transform .35s var(--pop) .55s}
+.on.s1.withnum #sn,.on.s2.withnum #sn{opacity:1;transition:top .45s var(--ein),opacity .3s .6s}
+#st{background:var(--accent);color:var(--accentInk);font:700 22px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;padding:9px 14px 8px;
+  white-space:nowrap;clip-path:inset(0 100% 0 0);transition:clip-path .4s var(--ein)}
+.on #st.show{clip-path:inset(0 0 0 0);transition:clip-path .45s var(--ein) .7s}
+.on #st.show.live{transition:clip-path .4s var(--ein)}
+#st.pulse{animation:pulse 1.6s ease-in-out 1.2s infinite}
+@keyframes pulse{0%,100%{filter:none}50%{filter:brightness(1.25)}}
+/* in: the title tab rises, the card unrolls downward, the two rows slide in one after the other,
+   the serve marker pops beside the server and the status tab wipes out under the card */
+.on #ttl{transform:none;opacity:1;transition:transform .4s var(--ein),opacity .25s}
+.on #card{clip-path:inset(0 0 0 0);transition:clip-path .5s var(--ein) .1s}
+.on .row{transform:none;opacity:1;transition:transform .5s var(--ein) calc(.25s + var(--r) * .1s),opacity .3s calc(.25s + var(--r) * .1s)}
+/* out: status and marker go first, the rows slide out left, the card rolls up, the title drops */
+.out #st{clip-path:inset(0 100% 0 0);transition:clip-path .25s var(--eout)}
+.out #ball{transform:scale(0);transition:transform .2s var(--eout)}
+.out .row{transform:translateX(-30px);opacity:0;transition:transform .3s var(--eout) calc((1 - var(--r)) * .06s),opacity .25s calc((1 - var(--r)) * .06s)}
+.out #card{clip-path:inset(0 0 100% 0);transition:clip-path .35s var(--eout) .2s}
+.out #ttl{transform:translateY(100%);opacity:0;transition:transform .3s var(--eout) .35s,opacity .2s .4s}
+</style>
+</head>
+<body>
+<div id="sb"><div id="ttl"></div><div id="card"><div style="position:relative">
+<div id="ballrail"><div id="ball"></div><div id="sn"></div></div>
+<div class="row" id="r1" style="--r:0"><div class="srv"></div><div class="who"><span class="chip" style="--c:var(--p1)"></span><img class="flag" alt=""><div class="nm"></div></div><div class="cells"></div></div>
+<div class="row" id="r2" style="--r:1"><div class="srv"></div><div class="who"><span class="chip" style="--c:var(--p2)"></span><img class="flag" alt=""><div class="nm"></div></div><div class="cells"></div></div>
+</div></div><div id="st"></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+function truthy(v){return !(v===false||v==='false'||v===0||v==='0'||v==='no'||v==='off')}
+function css(k,v){if(v!=null&&v!=='')document.documentElement.style.setProperty(k,String(v))}
+// Shrink one line until it fits its box, down to `floor` of its size.
+function fit(el,floor){if(!el)return;el.style.fontSize='';var s=parseFloat(getComputedStyle(el).fontSize),min=s*(floor||.72);
+  while(el.scrollWidth>el.clientWidth+1&&s>min){s-=1;el.style.fontSize=s+'px'}}
+var B=document.body,data={},playing=false,resetTimer=null;
+function play(){clearTimeout(resetTimer);B.classList.remove('out','reset');void B.offsetWidth;B.classList.add('on');playing=true;
+  if(typeof onPlay==='function')onPlay()}
+function stop(){if(!playing)return;playing=false;B.classList.add('out');B.classList.remove('on');
+  if(typeof onStop==='function')onStop();clearTimeout(resetTimer);
+  resetTimer=setTimeout(function(){B.classList.add('reset');B.classList.remove('out');void B.offsetWidth;B.classList.remove('reset');
+    if(typeof onReset==='function')onReset()},OUT_MS)}
+function next(){if(typeof onNext==='function')onNext()}
+// Squash score: games listed, then the live score of the current game.
+var OUT_MS=750;
+// One engine for racket and net sports. Scores arrive as "a-b" text (or {a,b} objects, or two
+// numbers), finished sets or games as a list, and the live score of the current game separately.
+function pair(v){if(v==null||v==='')return null;if(typeof v==='object'&&!Array.isArray(v))return [txtv(v.a!=null?v.a:v.p1!=null?v.p1:v.home),txtv(v.b!=null?v.b:v.p2!=null?v.p2:v.away)];
+  if(Array.isArray(v))return [txtv(v[0]),txtv(v[1])];var m=String(v).trim().match(/^(.+?)\s*[-:–\/]\s*(.+)$/);return m?[m[1].trim(),m[2].trim()]:null}
+function txtv(x){return x==null?'':String(x)}
+function num(x){var n=parseInt(x,10);return isNaN(n)?null:n}
+function roll(cell,v){var cur=cell.querySelector('span:not(.gone)');if(cur&&cur.textContent===v)return;
+  var n=document.createElement('span');n.className='in';n.textContent=v;cell.appendChild(n);void n.offsetWidth;n.className='';
+  if(cur){cur.className='gone';setTimeout(function(){cur.remove()},450);if(playing){cell.classList.remove('flash');void cell.offsetWidth;cell.classList.add('flash')}}}
+// Cells: one per set or game (the current one marked in tennis), then the points cell.
+function cells(rowIdx,list,pts){var box=document.querySelectorAll('.cells')[rowIdx],want=list.length+(pts?1:0);
+  while(box.children.length<want){var c=document.createElement('div');c.className='c'+(playing?' new':'');box.insertBefore(c,box.querySelector('.pts'));
+    if(playing)(function(c){requestAnimationFrame(function(){requestAnimationFrame(function(){c.classList.remove('new')})})})(c)}
+  while(box.children.length>want)box.removeChild(box.lastChild);
+  var kids=box.children;
+  function cls(c,x){c.className='c'+(c.classList.contains('new')?' new':'')+(x?' '+x:'')}
+  list.forEach(function(s,i){var c=kids[i];cls(c,s.cls);roll(c,s.v)});
+  if(pts){var p=kids[want-1];cls(p,'pts');roll(p,pts)}}
+function apply(){
+  var over=Number(data.winner)>0,sets=asList(data.sets).map(pair).filter(Boolean),pts=over?null:pair(data.points),cur=false&&sets.length&&!over?sets.length-1:-1;
+  var a=[],b=[];sets.forEach(function(s,i){var x=num(s[0]),y=num(s[1]),done=i!==cur;
+    a.push({v:s[0],cls:i===cur?'cur':done&&x!=null&&y!=null&&x>y?'w':''});b.push({v:s[1],cls:i===cur?'cur':done&&x!=null&&y!=null&&y>x?'w':''})});
+  cells(0,a,pts&&pts[0]);cells(1,b,pts&&pts[1]);
+  // Once there is a winner the match is over: no live points, no serve marker, every set counted.
+  var s=over?0:Number(data.server)||0;B.classList.toggle('s1',s===1);B.classList.toggle('s2',s===2);
+  var sn=false&&data.serverNumber!=null&&data.serverNumber!==''?String(data.serverNumber):'';setText($('sn'),sn);B.classList.toggle('withnum',!!sn);
+  var w=Number(data.winner)||0;$('r1').classList.toggle('won',w===1);$('r2').classList.toggle('won',w===2);$('r1').classList.toggle('lost',w===2);$('r2').classList.toggle('lost',w===1)}
+function setStatus(v){var st=$('st');v=v==null?'':String(v);if(st.textContent===v&&st.classList.contains('show')===!!v)return;
+  st.classList.add('live');if(!v){st.classList.remove('show','pulse');return}
+  if(st.classList.contains('show')&&playing){st.classList.remove('show');setTimeout(function(){st.textContent=v;st.classList.add('show')},380)}
+  else{st.textContent=v;st.classList.add('show')}
+  st.classList.toggle('pulse',/MATCH|CHAMPIONSHIP|SET POINT|BREAK/i.test(v))}
+function sizeNames(){var w=280;[].forEach.call(document.querySelectorAll('.nm'),function(n){n.style.fontSize='';
+  var probe=document.createElement('span');probe.style.cssText='position:absolute;visibility:hidden;white-space:nowrap;font:inherit';probe.textContent=n.textContent;n.appendChild(probe);
+  w=Math.max(w,probe.offsetWidth+110);probe.remove()});w=Math.min(w,520);css('--nameW',w+'px');
+  [].forEach.call(document.querySelectorAll('.nm'),function(n){fit(n,.75)})}
+function player(i,d){var r=$('r'+i);
+  if(('p'+i+'Name') in d)setText(r.querySelector('.nm'),d['p'+i+'Name']);
+  if(('p'+i+'Image') in d){var img=r.querySelector('.flag');img.setAttribute('src',d['p'+i+'Image']||'');r.classList.toggle('hasimg',!!d['p'+i+'Image'])}
+  if(d['p'+i+'Color'])css('--p'+i,d['p'+i+'Color'])}
+function update(raw){var d=parse(raw);for(var k in d)data[k]=d[k];
+  css('--accent',d.accent);css('--accentInk',d.accentText);if(d.panelColor)css('--panel',d.panelColor);css('--ball',d.ballColor);
+  if('title' in d)setText($('ttl'),d.title||'');player(1,d);player(2,d);
+  if('p1Name' in d||'p2Name' in d)sizeNames();
+  apply();if('status' in d)setStatus(d.status)}
+function onPlay(){$('st').classList.remove('live')}
+function onReset(){$('st').classList.remove('live')}
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(sizeNames);
+</script>
+</body>
+</html>

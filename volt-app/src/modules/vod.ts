@@ -22,8 +22,9 @@ import { publish, withdraw, republish, NotPublishable } from '../services/availa
 import { resolveForAsset } from '../services/publishingRules';
 import { cleanSettings } from './publishingRules';
 import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage, onlyIdParam } from '../util/listQuery';
-import { ORIGIN_SQL, ORIGINS, completenessPctSql, missingRequiredCountSql, completeness as metadataCompleteness, targetFields, encodeDetails } from '../services/vodLibrary';
+import { ORIGIN_SQL, ORIGINS, SOURCE_SQL, SOURCES, MEDIA_TYPE_SQL, MEDIA_TYPES, completenessPctSql, missingRequiredCountSql, completeness as metadataCompleteness, targetFields, encodeDetails } from '../services/vodLibrary';
 import { previewFill, applyFill, pruneProvenance, typeOf } from '../services/epgFill';
+import { usageStatusSql, USAGE_STATUSES } from '../services/assetReadiness';
 
 /**
  * VOD Library — assets DERIVED from a recording (auto-published, clips, exports).
@@ -57,6 +58,8 @@ const OWNED = `
 
 /** The account that owns the asset, whichever way it got here. */
 const OWNER_ACCOUNT = `COALESCE(g.account_id, v.account_id)`;
+/** Slates and loops rendered for FAST channels (services/fast/fillerBridge.ts) live in Loops & Fillers, not the Media Library. */
+const HIDE_FAST_FILLER = `AND COALESCE(v.metadata->>'fastFiller', '') <> 'true'`;
 
 /**
  * THE LIBRARY VIEW COLUMNS (services/vodLibrary.ts): the asset's content type
@@ -69,6 +72,8 @@ const MISSING_REQUIRED_SQL = missingRequiredCountSql(EFFECTIVE_FIELDS, 'ms.stand
 const COMPLETENESS_SQL = completenessPctSql(EFFECTIVE_FIELDS, 'ms.standard_key', 'v.metadata');
 const RENDITION_COUNT_SQL = `COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(v.encode_result->'kept') = 'array' THEN v.encode_result->'kept' END),
   (SELECT jsonb_array_length(op.rungs) FROM output_profiles op WHERE op.id = g.output_profile_id AND jsonb_typeof(op.rungs) = 'array'))`;
+/** CAN IT BE USED (services/assetReadiness.ts). The list and facets join the encode job as `j`. */
+const USAGE_SQL = usageStatusSql('v', 'j.state::text');
 const LIBRARY_JOINS = `
        LEFT JOIN metadata_schemas ms ON ms.id = v.schema_id
        LEFT JOIN metadata_schemas msp ON msp.id = ms.extends_id`;
@@ -112,7 +117,9 @@ const VOD_LIST = defineList({
     // Library views (DESIGN_media_library.md, "Library views, filters and target metadata")
     schema_key: { sql: 'ms.standard_key', type: 'string', doc: 'Standard content type key (episode, movie, clip, sports-match ...)' },
     schema_org_type: { sql: 'ms.schema_org_type', type: 'string', doc: 'schema.org type of the content type (Episode, Movie, VideoObject, SportsEvent ...)' },
-    origin: { sql: ORIGIN_SQL, type: 'enum', values: ORIGINS, doc: 'recording, clip, upload or watchfolder' },
+    origin: { sql: ORIGIN_SQL, type: 'enum', values: ORIGINS, doc: 'How it was made: recording, clip, upload or watchfolder' },
+    source: { sql: SOURCE_SQL, type: 'enum', values: SOURCES, doc: 'What it belongs to: channel, event, radio, upload, or none (its channel or event is gone)' },
+    media_type: { sql: MEDIA_TYPE_SQL, type: 'enum', values: MEDIA_TYPES, doc: 'video, audio or song' },
     metadata_completeness: { sql: COMPLETENESS_SQL, type: 'number', doc: 'Target metadata filled, 0 to 100' },
     metadata_missing_required: { sql: `(${MISSING_REQUIRED_SQL} > 0)`, type: 'boolean', doc: 'A required target field is empty, or the asset has no content type' },
     top_height: { sql: 'v.top_height', type: 'number', doc: 'Height of the top rendition (2160, 1080, 720 ...)' },
@@ -121,6 +128,8 @@ const VOD_LIST = defineList({
     has_stale_publication: { sql: 'EXISTS (SELECT 1 FROM publications p WHERE p.vod_asset_id = v.id AND p.stale)', type: 'boolean', doc: 'A published copy is older than this asset' },
     publication_count: { sql: '(SELECT count(*) FROM publications p WHERE p.vod_asset_id = v.id)::int', type: 'number' },
     encode_state: { sql: 'j.state', type: 'enum', values: ['queued', 'running', 'succeeded', 'failed', 'cancelled'] },
+    usage_status: { sql: USAGE_SQL, type: 'enum', values: [...USAGE_STATUSES], doc: 'Can it be used: ready, unchecked, qc_failed, processing, failed, unplayable or no_media. Only ready is offered to FAST, loops and blocking' },
+    media_state: { sql: 'v.media_state', type: 'enum', values: ['processing', 'ready', 'failed', 'missing', 'unplayable'] },
     encode_pct: { sql: 'j.progress_pct', type: 'number' },
     created_at: { sql: 'v.created_at', type: 'timestamp', notNull: true },
     updated_at: { sql: 'v.updated_at', type: 'timestamp' },
@@ -132,16 +141,50 @@ const VOD_LIST = defineList({
   // The hypermedia links (services/hypermedia.ts) and older callers use camelCase.
   aliases: { recordingId: 'recording_id', channelId: 'channel_id', eventId: 'event_id' },
   unpagedLimit: 1000,
+  // COLLECTIONS (modules/collections.ts): collection=<id>[,<id>] keeps assets in
+  // any of them; collection_deep=true includes their sub-collections;
+  // not_in_collection=<id> leaves out what is already in one (the picker's
+  // "not yet added" view). Applied by collectionWhere below.
+  extraParams: ['collection', 'collection_deep', 'not_in_collection'],
 });
+
+/**
+ * The collection filters as SQL on `v`, with their params pushed (tenant-safe:
+ * only the account's own collections count). Empty when not asked for.
+ */
+async function collectionWhere(q: Record<string, any>, params: unknown[], account: string): Promise<string> {
+  const idsOf = (v: unknown) => String(v ?? '').split(',').map((s) => s.trim()).filter((s) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)).slice(0, 50);
+  const deep = q.collection_deep === 'true' || q.collection_deep === '1';
+  let sql = '';
+  const inSet = async (ids: string[]) => {
+    if (!deep) return ids;
+    const { subtreeIds } = await import('./collections');
+    return [...new Set((await Promise.all(ids.map(subtreeIds))).flat())];
+  };
+  const want = idsOf(q.collection);
+  if (q.collection != null && q.collection !== '' && !want.length) throw badRequest('collection must be a collection id');
+  if (want.length) {
+    params.push(await inSet(want), account);
+    sql += ` AND EXISTS (SELECT 1 FROM collection_items ci JOIN collections cc ON cc.id = ci.collection_id
+               WHERE ci.vod_asset_id = v.id AND ci.collection_id = ANY($${params.length - 1}::uuid[]) AND cc.account_id = $${params.length})`;
+  }
+  const not = idsOf(q.not_in_collection);
+  if (not.length) {
+    params.push(not);
+    sql += ` AND NOT EXISTS (SELECT 1 FROM collection_items ci WHERE ci.vod_asset_id = v.id AND ci.collection_id = ANY($${params.length}::uuid[]))`;
+  }
+  return sql;
+}
 
 vodRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const params: unknown[] = [accountId(req)];
+    const inCollection = await collectionWhere(req.query as any, params, accountId(req));
     const pl = parseList(VOD_LIST, req.query, params);
     const from = `${OWNED}${LIBRARY_JOINS}
        LEFT JOIN jobs j ON j.id = v.encode_job_id
-       WHERE COALESCE(g.account_id, v.account_id) = $1`;
+       WHERE COALESCE(g.account_id, v.account_id) = $1 ${HIDE_FAST_FILLER}${inCollection}`;
     const fromCount = from + countWhereSql(pl);  // totals ignore the cursor
     const fromPage = from + whereSql(pl);
     const rows = await query(
@@ -161,6 +204,7 @@ vodRouter.get(
               -- THE LIBRARY VIEW: content type, completeness, origin, encode summary.
               ms.standard_key AS schema_key, ms.schema_org_type,
               ${ORIGIN_SQL} AS origin,
+              ${SOURCE_SQL} AS source, ${MEDIA_TYPE_SQL} AS media_type,
               ${COMPLETENESS_SQL} AS metadata_completeness,
               (${MISSING_REQUIRED_SQL} > 0) AS metadata_missing_required,
               ${RENDITION_COUNT_SQL} AS rendition_count,
@@ -173,7 +217,8 @@ vodRouter.get(
                    WHEN COALESCE(c.kind = 'radio', false) OR COALESCE(v.ingest -> 'probe' ->> 'hasVideo' = 'false', false)
                      OR ((v.export_mp3_key IS NOT NULL OR v.export_m4a_key IS NOT NULL) AND v.top_height IS NULL AND v.progressive_key IS NULL) THEN 'audio'
                    ELSE 'video' END AS media_kind,
-              (v.export_mp3_key IS NOT NULL) AS has_mp3
+              (v.export_mp3_key IS NOT NULL) AS has_mp3,
+              ${USAGE_SQL} AS usage_status
        ${fromPage}
        ${pageSql(pl)}`,
       params
@@ -194,17 +239,23 @@ const FACET_PARAMS: Record<string, string[]> = {
   types: ['schema_id', 'schema_key', 'schema_org_type', 'schema_name'],
   availability: ['availability_state', 'published'],
   origins: ['origin', 'source_kind', 'kind'],
+  sources: ['source', 'channel_id', 'event_id'],
+  media_types: ['media_type'],
   resolutions: ['top_height'],
   codecs: ['video_codec'],
   metadata: ['metadata_missing_required', 'metadata_completeness'],
+  usage: ['usage_status', 'media_state'],
 };
 const FACET_SQL: Record<string, { select: string; group: string }> = {
   types: { select: `ms.id AS id, ms.name AS name, ms.standard_key AS key, ms.schema_org_type AS schema_org_type`, group: 'ms.id, ms.name, ms.standard_key, ms.schema_org_type' },
   availability: { select: `v.availability_state AS value`, group: 'v.availability_state' },
   origins: { select: `${ORIGIN_SQL} AS value`, group: '1' },
+  sources: { select: `${SOURCE_SQL} AS value`, group: '1' },
+  media_types: { select: `${MEDIA_TYPE_SQL} AS value`, group: '1' },
   resolutions: { select: `v.top_height AS value`, group: 'v.top_height' },
   codecs: { select: `v.video_codec AS value`, group: 'v.video_codec' },
   metadata: { select: `(${MISSING_REQUIRED_SQL} > 0) AS value`, group: '1' },
+  usage: { select: `${USAGE_SQL} AS value`, group: '1' },
 };
 
 vodRouter.get(
@@ -218,6 +269,7 @@ vodRouter.get(
     const out: Record<string, any[]> = {};
     for (const [name, keys] of Object.entries(FACET_PARAMS)) {
       const params: unknown[] = [accountId(req)];
+      const inCollection = await collectionWhere(req.query as any, params, accountId(req));
       const pl = parseList(VOD_LIST, strip(keys) as any, params);
       const f = FACET_SQL[name];
       const groupBy = f.group === '1' ? '1' : f.group;
@@ -228,14 +280,15 @@ vodRouter.get(
            LEFT JOIN events   e ON e.id = v.event_id
            LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)${LIBRARY_JOINS}
            LEFT JOIN jobs j ON j.id = v.encode_job_id
-          WHERE COALESCE(g.account_id, v.account_id) = $1 ${countWhereSql(pl)}
+          WHERE COALESCE(g.account_id, v.account_id) = $1 ${HIDE_FAST_FILLER}${inCollection} ${countWhereSql(pl)}
           GROUP BY ${groupBy} ORDER BY n DESC`, countParams(pl, params));
     }
     const allParams: unknown[] = [accountId(req)];
+    const allIn = await collectionWhere(req.query as any, allParams, accountId(req));
     const all = parseList(VOD_LIST, strip([]) as any, allParams);
     const total = await one<{ n: number }>(
       `SELECT count(*)::int AS n ${OWNED}${LIBRARY_JOINS} LEFT JOIN jobs j ON j.id = v.encode_job_id
-        WHERE COALESCE(g.account_id, v.account_id) = $1 ${countWhereSql(all)}`, countParams(all, allParams));
+        WHERE COALESCE(g.account_id, v.account_id) = $1 ${HIDE_FAST_FILLER}${allIn} ${countWhereSql(all)}`, countParams(all, allParams));
     res.json({ total: total?.n ?? 0, facets: out });
   })
 );
@@ -375,7 +428,7 @@ vodRouter.post(
 
 async function fetchOwned(id: string, acct: string) {
   return one<any>(
-    `SELECT v.* ${OWNED} WHERE v.id = $1 AND ${OWNER_ACCOUNT} = $2`, [id, acct]);
+    `SELECT v.*, ${usageStatusSql('v')} AS usage_status ${OWNED} WHERE v.id = $1 AND ${OWNER_ACCOUNT} = $2`, [id, acct]);
 }
 
 vodRouter.get(
@@ -585,6 +638,67 @@ vodRouter.post(
   })
 );
 
+/**
+ * QC EVERYTHING NOT YET CHECKED. Assets made before QC ran on every build (and
+ * uploads, which were never QC'd) read "not checked" and are not offered to
+ * FAST, loops or blocking until they are. One call queues them all.
+ */
+vodRouter.post(
+  '/qc-unchecked',
+  asyncHandler(async (req, res) => {
+    const rows = await query<any>(
+      `SELECT v.id, v.channel_id, v.event_id ${OWNED}
+        WHERE ${OWNER_ACCOUNT} = $1 AND ${usageStatusSql('v')} IN ('unchecked', 'qc_failed', 'unplayable', 'no_media')
+        LIMIT 500`, [accountId(req)]);
+    for (const r of rows) {
+      await enqueue({ type: QC_RUN, payload: { vodAssetId: r.id }, channelId: r.channel_id, eventId: r.event_id,
+                      dedupeKey: `qc.run:${r.id}`, priority: 30 });
+    }
+    res.status(202).json({ queued: rows.length });
+  })
+);
+
+/**
+ * BUILD IT AGAIN, over the same range. For a clip whose build failed or never
+ * ran. Refuses with the coverage when the recording cannot cover the range at
+ * the tolerance asked for, so the console can offer "accept the gaps".
+ * An uploaded file is rebuilt by retrying its encode job (/api/jobs/:id/retry).
+ */
+vodRouter.post(
+  '/:id/rebuild',
+  asyncHandler(async (req, res) => {
+    const b = z.object({ acceptGapsMs: z.number().int().nonnegative().max(600_000).default(0) }).parse(req.body ?? {});
+    const asset = await fetchOwned(req.params.id, accountId(req));
+    if (!asset) throw notFound('VOD asset not found');
+    if (asset.source_kind !== 'recording' || asset.kind !== 'clip') {
+      throw badRequest('Only a clip cut from a recording can be rebuilt here. An uploaded file is rebuilt by retrying its encode.');
+    }
+    const streamId = asset.channel_id ?? asset.event_id;
+    const fromMs = Number(asset.start_epoch_ms), toMs = Number(asset.end_epoch_ms);
+    const kind = isAudioOnly(streamId) ? 'audio' : 'video';
+    const resolution = resolveRange(streamId, fromMs, toMs, kind);
+    const verdict = assessRange(resolution, { maxGapMs: b.acceptGapsMs });
+    if (!verdict.ok) {
+      res.status(409).json({
+        error: verdict.message, code: verdict.code,
+        coveragePct: resolution.coveragePct,
+        gapMs: resolution.gaps.reduce((n, g) => n + g.ms, 0),
+        gaps: resolution.gaps.length,
+      });
+      return;
+    }
+    // New media will be judged afresh.
+    await query(`UPDATE vod_assets SET qc_state = NULL, qc_at = NULL, built_at = NULL, updated_at = now() WHERE id = $1`, [asset.id]);
+    await query(`DELETE FROM qc_events WHERE vod_asset_id = $1`, [asset.id]);
+    const job = await enqueueClipBuild({
+      vodAssetId: asset.id, streamId, fromMs, toMs, outputKind: asset.output_kind,
+      channelId: asset.channel_id, eventId: asset.event_id, acceptGapsMs: b.acceptGapsMs,
+    });
+    { const who = actor(req); await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label, action: 'update', entityType: 'vod_asset', entityId: asset.id, changes: { rebuild: { from: asset.media_state ?? null, to: { acceptGapsMs: b.acceptGapsMs, jobId: job.id } } } }).catch(() => {}); }
+    res.status(202).json({ jobId: job.id, state: job.state, coveragePct: resolution.coveragePct });
+  })
+);
+
 /** schema.org VideoObject (JSON-LD) — for the portal, SEO, and social metadata. */
 vodRouter.get(
   '/:id/schema.org',
@@ -690,13 +804,42 @@ vodRouter.put(
       ]
     );
     if (!row) throw notFound('VOD asset not found');
+    // RENAMED: the FAST guide's programmes for it (now and ahead, every repeat) follow.
+    if (cleanMeta !== undefined || body.title != null) {
+      const titleOf = (md: any, t: any) => String(md?.title || t || 'Untitled');   // as the FAST planner names it (store.ts assetFromRow)
+      const before = titleOf(asset.metadata, asset.title), after = titleOf(row.metadata, row.title);
+      if (before !== after) await (await import('../services/fast/store')).retitleProgrammes(row.id, before, after)
+        .catch((e) => console.warn(`[vod] ${row.id}: guide titles not updated:`, e?.message ?? e));
+    }
+    // AN UPLOAD WAITING FOR METADATA is released by any save that fills it in,
+    // not only by the ingest queue's Fill in (services/ingest/pipeline.ts).
+    if (asset.ingest?.status === 'awaiting_metadata' && (cleanMeta !== undefined || body.title != null)) {
+      await (await import('../services/ingest/pipeline')).completeMetadata(accountId(req), row.id, {})
+        .then(() => one<any>(`SELECT ingest, awaiting_metadata FROM vod_assets WHERE id = $1`, [row.id]))
+        .then((r) => { if (r) Object.assign(row, r); })
+        .catch((e) => console.warn(`[vod] ${row.id}: ingest hold not re-checked:`, e?.message ?? e));
+    }
     // New metadata can change the asset's image (an image set by hand, a song's
     // artist or title): pick again unless a person chose the image.
-    if (cleanMeta !== undefined && !row.poster_locked) await (await import('../services/jobs/handlers/vodImage')).queueAssetImage(row.id);
     // A field changed by hand is no longer the EPG's value: drop its provenance.
     if (cleanMeta !== undefined || body.title != null) {
       await pruneProvenance(row.id, asset.metadata, cleanMeta ?? asset.metadata, asset.title, body.title ?? asset.title);
     }
+    // AN IMAGE FIELD A PERSON CHANGED IS THEIR CHOICE, applied now, during the
+    // save, even over an image chosen earlier: the main image, or the type it is
+    // named after (poster, hero...). It used to be only queued, and skipped when
+    // locked, so a newly chosen image did not replace the old one
+    // (services/media/assetImageSet.ts applyImageFieldChanges).
+    let imageNow = false;
+    if (cleanMeta !== undefined) {
+      try {
+        const r = await (await import('../services/media/assetImageSet')).applyImageFieldChanges(row.id, accountId(req), asset.metadata ?? {}, cleanMeta ?? {}, (await actorLabel(req)) ?? 'someone');
+        imageNow = r.primary;
+        if (r.primary || r.slots.length) Object.assign(row, await one<any>(`SELECT poster_key, poster_source, poster_shape, poster_reason, poster_locked, poster_picked_at, updated_at FROM vod_assets WHERE id = $1`, [row.id]));
+      } catch (e) { console.error(`[vod] ${row.id}: image fields not applied:`, e); }
+    }
+    // Other new metadata can still change the image (a song's artist or title): pick again unless a person chose it.
+    if (cleanMeta !== undefined && !imageNow && !row.poster_locked) await (await import('../services/jobs/handlers/vodImage')).queueAssetImage(row.id);
     res.json(row);
   })
 );
@@ -944,18 +1087,78 @@ vodRouter.post('/:id/withdraw', asyncHandler(async (req, res) => {
   res.json(row);
 }));
 
+// WHAT A DELETE WOULD TAKE, shown by the console's delete dialog before anything goes (the
+// same workflow as removing a channel or station: DeleteChannelDialog). `blocker` says why
+// it would be refused now; the delete checks it again.
+async function assetDeleteImpact(id: string, acc: string) {
+  const a = await fetchOwned(id, acc);
+  if (!a) throw notFound('VOD asset not found');
+  const n = await one<any>(
+    `SELECT (SELECT count(*)::int FROM vod_markers WHERE vod_asset_id = $1) AS markers,
+            (SELECT count(*)::int FROM vod_formats WHERE vod_asset_id = $1) AS formats,
+            (SELECT count(*)::int FROM asset_reviews WHERE vod_asset_id = $1) AS reviews,
+            (SELECT count(*)::int FROM publications WHERE vod_asset_id = $1 AND platform IN ('portal','app') AND status <> 'removed') AS publishing_points,
+            (SELECT count(*)::int FROM publications WHERE vod_asset_id = $1 AND platform NOT IN ('portal','app') AND status = 'published') AS social_posts`, [a.id]);
+  // Airing in a FAST channel's active lineup: the playout would hit a missing asset.
+  const fast = await query<{ name: string }>(
+    `SELECT c.name FROM fast_lineups l JOIN channels c ON c.id = l.channel_id
+      WHERE l.status = 'active' AND l.slots::text LIKE '%' || $1 || '%' ORDER BY c.name`, [a.id]).catch(() => [] as { name: string }[]);
+  const names = fast.map((f) => f.name);
+  const blocker = names.length
+    ? `It is in the active lineup of FAST ${names.length === 1 ? 'channel' : 'channels'} ${names.join(', ')}. Take it out of the lineup first.`
+    : null;
+  const { TRASH_DAYS } = await import('../services/media/trash');
+  return {
+    id: a.id, name: (a.title as string | null)?.trim() || 'Untitled', availability: a.availability_state ?? null,
+    binDays: TRASH_DAYS, blocker, fastChannels: names, counts: n,
+  };
+}
+
+vodRouter.get('/:id/delete-impact', asyncHandler(async (req, res) => {
+  res.json(await assetDeleteImpact(req.params.id, accountId(req)));
+}));
+
 vodRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    const row = await one(
-      `DELETE FROM vod_assets v USING groups g
-        WHERE (v.channel_id IN (SELECT id FROM channels WHERE group_id = g.id)
-            OR v.event_id   IN (SELECT id FROM events   WHERE group_id = g.id))
-          AND v.id = $1 AND ${OWNER_ACCOUNT} = $2
-        RETURNING v.id`,
-      [req.params.id, accountId(req)]
-    );
-    if (!row) throw notFound('VOD asset not found');
-    res.status(204).end();
+    // INTO THE RESTORE BIN, not gone: the row and what cascades from it, its encode output
+    // and an uploaded source move to the bin for VOLT_TRASH_DAYS (services/vodRemove.ts).
+    // This also covers uploaded assets, which the old join-on-group delete never found
+    // (a failed sintel_4k.mov could not be deleted at all).
+    const own = await fetchOwned(req.params.id, accountId(req));
+    if (!own) throw notFound('VOD asset not found');
+    const { blocker } = await assetDeleteImpact(own.id, accountId(req));
+    if (blocker) throw badRequest(blocker);
+    const who = actor(req);
+    const { removeVodAsset } = await import('../services/vodRemove');
+    const binId = await removeVodAsset(own.id, { reason: `deleted from the Media Library by ${who.label}`, by: who.label });
+    await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label, action: 'delete', entityType: 'vod_asset', entityId: own.id,
+      snapshot: { title: own.title, source: own.source_kind, bin: binId } }).catch(() => {});
+    // Say where it went, so the console can offer Undo (POST /api/vod/:id/restore) and
+    // name how long it can wait.
+    const { TRASH_DAYS } = await import('../services/media/trash');
+    const held = binId ? await one<{ purge_after: string }>(`SELECT purge_after FROM trash_items WHERE id = $1`, [binId]) : null;
+    res.json({ id: own.id, bin: binId, binDays: TRASH_DAYS, purgeAfter: held?.purge_after ?? null });
+  })
+);
+
+// UNDELETE: put a deleted asset back from the restore bin, with the same permission as the
+// delete (vod: manage). The bin's own restore (POST /api/storage/bin/:id/restore) needs the
+// storage permission, which an editor who deleted by mistake may not have. Restores the
+// asset's latest held bin item; 404 once the bin has purged it.
+vodRouter.post(
+  '/:id/restore',
+  asyncHandler(async (req, res) => {
+    const item = await one<{ id: string; label: string; purge_after: string }>(
+      `SELECT id, label, purge_after FROM trash_items
+        WHERE kind = 'vod_asset' AND subject_id = $1 AND account_id = $2 AND state = 'held'
+        ORDER BY created_at DESC LIMIT 1`, [req.params.id, accountId(req)]);
+    if (!item) throw notFound('This asset is not in the restore bin (it was never deleted, is already back, or has been purged)');
+    const who = actor(req);
+    const { restoreItem } = await import('../services/media/trash');
+    const r = await restoreItem(item.id, { accountId: accountId(req), by: who.label });
+    await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label, action: 'update', entityType: 'vod_asset', entityId: req.params.id,
+      changes: { restored: { from: false, to: true } }, snapshot: { title: item.label, bin: item.id } }).catch(() => {});
+    res.json({ id: req.params.id, title: item.label, bin: item.id, files: r.files, rows: r.rows });
   })
 );

@@ -11,7 +11,7 @@
 // does not appear in the one place that lists uploads is an upload people think
 // has stopped.
 import { useSyncExternalStore, useEffect, useState } from 'react'
-import { api } from './api'
+import { api, isMotionFile, type BugAd } from './api'
 import {
   subscribe as subscribeChunked,
   clearFinished as clearChunked,
@@ -20,7 +20,7 @@ import {
 } from './uploadManager'
 
 export type UpStatus = 'queued' | 'uploading' | 'done' | 'error'
-export interface UploadJob { id: string; name: string; folder: string; kind: string; size: number; status: UpStatus; error?: string }
+export interface UploadJob { id: string; name: string; folder: string; kind: string; size: number; status: UpStatus; error?: string; ad?: BugAd; warning?: string }
 interface State { jobs: UploadJob[]; seq: number } // seq bumps on each successful upload (pages watch it)
 
 let state: State = { jobs: [], seq: 0 }
@@ -37,8 +37,8 @@ function fileToDataURL(file: File): Promise<string> {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(file) })
 }
 
-export function enqueueUploads(items: { file: File; folder: string; name: string; kind: string }[]) {
-  const jobs = items.map((it) => { const id = 'u' + (++counter); fileById.set(id, it.file); return { id, name: it.name, folder: it.folder, kind: it.kind, size: it.file.size, status: 'queued' as UpStatus } })
+export function enqueueUploads(items: { file: File; folder: string; name: string; kind: string; ad?: BugAd }[]) {
+  const jobs = items.map((it) => { const id = 'u' + (++counter); fileById.set(id, it.file); return { id, name: it.name, folder: it.folder, kind: it.kind, size: it.file.size, status: 'queued' as UpStatus, ad: it.ad } })
   setJobs([...state.jobs, ...jobs])
   void run()
 }
@@ -54,9 +54,17 @@ async function run() {
       const file = fileById.get(job.id)
       try {
         if (!file) throw new Error('file missing')
+        // A VIDEO (an animated bug): sent raw and converted to alpha WebM by the server.
+        if (isMotionFile(file)) {
+          if (file.size > 500 * 1024 * 1024) throw new Error(`too large (${(file.size / 1048576).toFixed(0)} MB, the limit is 500 MB)`)
+          const r = await api.uploadMotion(file, { folder: job.folder, name: job.name, kind: job.kind, ad: job.ad })
+          patch(job.id, { status: 'done', warning: r.warning ?? undefined }, true)
+          fileById.delete(job.id)
+          continue
+        }
         if (file.size > 28 * 1024 * 1024) throw new Error(`too large (${(file.size / 1048576).toFixed(1)} MB)`)
         const dataUrl = await fileToDataURL(file)
-        await api.uploadFile({ folder: job.folder, name: job.name, kind: job.kind, contentType: file.type, dataBase64: dataUrl })
+        await api.uploadFile({ folder: job.folder, name: job.name, kind: job.kind, contentType: file.type, dataBase64: dataUrl, ad: job.kind === 'bug' ? job.ad : undefined })
         patch(job.id, { status: 'done' }, true)
       } catch (e: any) { patch(job.id, { status: 'error', error: e.message }) }
       fileById.delete(job.id)
@@ -150,6 +158,7 @@ export function UploadIndicator() {
                   title={c.error || c.name}>{c.name}</span>
                 <span style={{ color: 'var(--faint)' }}>
                   {c.status === 'done' ? c.kind
+                    : c.status === 'assembling' ? 'joining'
                     : c.status === 'background' ? `${pct}% bg`
                     : c.status === 'error' ? 'failed' : `${pct}%`}
                 </span>

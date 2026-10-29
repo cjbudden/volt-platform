@@ -20,6 +20,8 @@ import { config } from '../../config';
 import type { TaskLauncher, LaunchResult, Liveness } from './launcher';
 import type { Placement } from '../fleet/placement';
 import { onboxPlacement } from '../fleet/onbox';
+import { connect as netConnect } from 'node:net';
+import { makeLocalLauncher, type LocalTaskLauncher } from './localLauncher';
 
 interface Proc { taskArn: string; child: ChildProcess; name: string; kind: string; streamId?: string; }
 
@@ -96,14 +98,83 @@ function reportUnexpectedExit(streamId: string, what: string, image: string, cod
   void reportOnBehalf(streamId, events);
 }
 
+/** Every http(s), SRT or RTMP URL on loopback (not udp: the encoder's internal bus), anywhere in the job, pointed at the Docker host. */
+export function toHostDocker<T>(v: T): T {
+  const rx = /^((?:https?|srt|rtmp|rtmps):\/\/)(localhost|127\.0\.0\.1)(?=[:/?]|$)/i;
+  const walk = (x: any): any => {
+    if (typeof x === 'string') return rx.test(x) ? x.replace(rx, '$1host.docker.internal') : x;
+    if (Array.isArray(x)) return x.map(walk);
+    if (x && typeof x === 'object') return Object.fromEntries(Object.entries(x).map(([k, val]) => [k, walk(val)]));
+    return x;
+  };
+  return walk(v);
+}
+
+// ----------------------------------------------------------------------------
+//  CAN THE STATION CONTAINER REACH ITS SOURCE? (24 Oct 2026)
+//
+//  A station pulls its source from the Internet from INSIDE the container. On
+//  a Mac that goes through Docker Desktop's own network, which is not the
+//  Mac's: a proxy configured in Docker Desktop (Settings > Resources >
+//  Proxies) is applied transparently to container traffic on ports 80 and 443,
+//  and a VPN or firewall on the Mac can treat Docker's traffic differently.
+//  The symptom was a station that played everywhere else and in Docker died
+//  with "Connection to tcp://ice5.somafm.com:443 failed: Connection refused",
+//  so the console had nothing to play.
+//
+//  Before a station starts, the launcher dials the source host from this
+//  machine and from a throwaway container of the same image. When this machine
+//  reaches it and the container cannot, the station runs on this machine
+//  instead (the same radio.py, LocalTaskLauncher) and the event log says why.
+//  Both failing is a real source fault: it is left to the station to report.
+//  RADIO_DOCKER_PREFLIGHT=0 turns the check off.
+// ----------------------------------------------------------------------------
+function sourceEndpoint(url: unknown): { host: string; port: number } | null {
+  if (typeof url !== 'string') return null;
+  try {
+    const u = new URL(url.trim());
+    const port = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : u.protocol === 'http:' ? 80 : 0;
+    if (!port || !/^https?:$/.test(u.protocol)) return null;
+    if (/^(localhost|127\.0\.0\.1|host\.docker\.internal)$/i.test(u.hostname)) return null;
+    return { host: u.hostname.replace(/^\[|\]$/g, ''), port };
+  } catch { return null; }
+}
+
+function hostReaches(host: string, port: number, timeoutMs = 5000): Promise<string | null> {
+  return new Promise((done) => {
+    const sock = netConnect({ host, port });
+    const t = setTimeout(() => { sock.destroy(); done('timed out'); }, timeoutMs);
+    sock.once('connect', () => { clearTimeout(t); sock.destroy(); done(null); });
+    sock.once('error', (e: any) => { clearTimeout(t); done(String(e?.code ?? e?.message ?? e)); });
+  });
+}
+
+function containerReaches(image: string, host: string, port: number, timeoutMs = 15000): Promise<string | null> {
+  const py = 'import socket,sys\ntry:\n socket.create_connection((sys.argv[1],int(sys.argv[2])),6).close()\nexcept Exception as e:\n print(e); sys.exit(3)';
+  return new Promise((done) => {
+    const c = spawn('docker', ['run', '--rm', '--add-host', 'host.docker.internal:host-gateway', '--entrypoint', 'python3', image, '-c', py, host, String(port)],
+      { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    c.stdout?.on('data', (d) => { out += d; });
+    c.stderr?.on('data', (d) => { out += d; });
+    const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { /* ignore */ } done(null); }, timeoutMs);   // undecided: do not fall back
+    c.on('exit', (code) => { clearTimeout(t); done(code === 0 ? null : (out.trim().split('\n').pop() || `exit ${code}`).slice(0, 200)); });
+    c.on('error', () => { clearTimeout(t); done(null); });
+  });
+}
+
 export class DockerTaskLauncher implements TaskLauncher {
   private procs = new Map<string, Proc>();
   private n = 0;
+  /** Stations that run on this machine because Docker could not reach their source. */
+  private native: LocalTaskLauncher | null = null;
+  private nativeArns = new Set<string>();
   private image() { return config.orchestrator.encoderImage; }
   private radioImage() { return config.orchestrator.radioImage; }
   private originDir() { return resolve(config.testStream.originDir); }
   private originFor(streamId: string) { return resolve(this.originDir(), streamId); }
   private encoderBin() { return resolve(config.testStream.encoderBin); }
+  private rendererJs() { return resolve(config.testStream.encoderBin, '..', 'gfx', 'burn_renderer.js'); }
 
   /**
    * Refuse to launch from an image that is not there, and say so in the
@@ -136,18 +207,15 @@ export class DockerTaskLauncher implements TaskLauncher {
     // housekeeping itself, by the recording retention (manage_runs).
     mkdirSync(resolve(out, 'runs'), { recursive: true });
 
-    const localJob: Record<string, any> = { ...job, output: { mode: 'local', dir: out } };
     // The encoder runs INSIDE the container, so localhost is the container, not
-    // the host. Rewrite the status-report callback to host.docker.internal so the
-    // encoder can POST live status/events back to the host control plane. (Only
-    // this callback is rewritten — the API's public @id URLs stay on localhost.)
-    const rep = localJob.status_report;
-    if (rep && typeof rep.url === 'string') {
-      localJob.status_report = {
-        ...rep,
-        url: rep.url.replace(/\/\/(localhost|127\.0\.0\.1)(:|\/|$)/, '//host.docker.internal$2'),
-      };
-    }
+    // the host. EVERY loopback address in the job is rewritten to
+    // host.docker.internal: the status callback, and also the slate the filler
+    // fetches, the timed-events (graphics triggers) feed, a source served from
+    // the Mac, and anything added later. Only the status callback used to be
+    // rewritten, so the encoder log said "filler slate: fetch failed
+    // (Connection refused)" and "timed events: control plane not answering"
+    // on every Docker start, and the slate was a plain generated one.
+    const localJob: Record<string, any> = toHostDocker({ ...job, output: { mode: 'local', dir: out } });
     const name = `volt-enc-${streamId}`;
     const taskArn = `docker:encoder:${name}:${++this.n}`;
     // clear any stale container with the same name (idempotent restart)
@@ -161,6 +229,12 @@ export class DockerTaskLauncher implements TaskLauncher {
       '--add-host', 'host.docker.internal:host-gateway',
       '-v', `${this.originDir()}:${this.originDir()}`,   // out path resolves identically in-container
       '-v', `${this.encoderBin()}:/app/bin:ro`,          // live encoder code, no rebuild for edits
+      // The graphics renderer runs live from the repo too (its node_modules and
+      // Chromium are in the image), so an edit to it needs no image rebuild.
+      ...(existsSync(this.rendererJs()) ? ['-v', `${this.rendererJs()}:/app/gfx/burn_renderer.js:ro`] : []),
+      // Headless Chromium (burned-in graphics) crashes on Docker's default 64 MB
+      // /dev/shm under load; 512 MB is what it needs at 1080p.
+      '--shm-size', '512m',
       '-e', `JOB_CONFIG_JSON=${JSON.stringify(localJob)}`,
       '-e', `WORK_DIR=${out}`,
       this.image(),
@@ -199,7 +273,29 @@ export class DockerTaskLauncher implements TaskLauncher {
     const out = this.originFor(streamId);
     await this.requireImage(streamId, this.radioImage(), 'station');
     mkdirSync(out, { recursive: true });
-    const localJob: Record<string, any> = { ...job, output: { mode: 'local', dir: out } };
+
+    const ep = process.env.RADIO_DOCKER_PREFLIGHT === '0' ? null : sourceEndpoint(job.url);
+    if (ep) {
+      const [fromHost, fromDocker] = await Promise.all([hostReaches(ep.host, ep.port), containerReaches(this.radioImage(), ep.host, ep.port)]);
+      if (!fromHost && fromDocker) {
+        const message = `Docker cannot reach ${ep.host}:${ep.port} (${fromDocker}), but this machine can, so the station runs here instead of in its container. `
+          + `Usually a proxy in Docker Desktop (Settings > Resources > Proxies), a VPN or a firewall. RADIO_DOCKER_PREFLIGHT=0 turns this check off.`;
+        console.warn(`[docker-launcher] radio ${streamId}: ${message}`);
+        await reportOnBehalf(streamId, [{ type: 'source.notice', detail: { message, source: 'docker' } }]);
+        if (!this.native) this.native = makeLocalLauncher();
+        const r = await this.native.launchRadio(streamId, job);
+        this.nativeArns.add(r.taskArn);
+        return r;
+      }
+    }
+
+    // EVERY loopback URL in the job points at the Docker host (the status
+    // callback, the timed-events feed, a source served from this machine), the
+    // same rule as the encoder (toHostDocker). The radio used to rewrite only
+    // the status callback, so the log said "timed events: control plane not
+    // answering" on every Docker start. The relay is a host, not a URL, and is
+    // handled just below.
+    const localJob: Record<string, any> = toHostDocker({ ...job, output: { mode: 'local', dir: out } });
     // Icecast on the developer's machine is published on the HOST (run-on-mac
     // maps :8000), and inside the container localhost is the container. Only a
     // loopback host is rewritten: a named relay (a compose service, a real
@@ -207,13 +303,6 @@ export class DockerTaskLauncher implements TaskLauncher {
     const ice = localJob.icecast;
     if (ice && typeof ice.host === 'string' && /^(localhost|127\.0\.0\.1)$/.test(ice.host)) {
       localJob.icecast = { ...ice, host: 'host.docker.internal' };
-    }
-    const rep = localJob.status_report;
-    if (rep && typeof rep.url === 'string') {
-      localJob.status_report = {
-        ...rep,
-        url: rep.url.replace(/\/\/(localhost|127\.0\.0\.1)(:|\/|$)/, '//host.docker.internal$2'),
-      };
     }
     const name = `volt-radio-${streamId}`;
     const taskArn = `docker:radio:${name}:${++this.n}`;
@@ -248,6 +337,7 @@ export class DockerTaskLauncher implements TaskLauncher {
   }
 
   async stopTask(taskArn: string, reason: string): Promise<void> {
+    if (this.nativeArns.has(taskArn)) { this.nativeArns.delete(taskArn); return this.native!.stopTask(taskArn, reason); }
     const p = this.procs.get(taskArn);
     if (!p) return;
     console.log(`[docker-launcher] stop ${p.name} (${reason})`);
@@ -265,6 +355,7 @@ export class DockerTaskLauncher implements TaskLauncher {
    * daemon restart never reads as "every channel crashed".
    */
   async isRunning(taskArn: string): Promise<Liveness> {
+    if (this.nativeArns.has(taskArn)) return this.native!.isRunning(taskArn);
     const p = this.procs.get(taskArn);
     if (!p) return 'dead';
     try {
@@ -290,7 +381,7 @@ export class DockerTaskLauncher implements TaskLauncher {
    * splitting them would report one physical box as two.
    */
   async describePlacement(taskArn: string): Promise<Placement | null> {
-    return this.procs.has(taskArn) ? onboxPlacement() : null;
+    return this.procs.has(taskArn) || this.nativeArns.has(taskArn) ? onboxPlacement() : null;
   }
 
   killAll(): void {

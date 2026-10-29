@@ -27,7 +27,14 @@ export const IMAGE_KEYS = /^(logo|image|thumbnail|artwork|poster|cover|picture|p
 export async function saveToLibrary(acct: string, folder: string, file: string, buf: Buffer, ct: string, kind: string, extra: Record<string, unknown>, title?: string): Promise<string> {
   const path = `${folder}/${file}`;
   const key = `library/${acct}/${path}`;
+  // NO COPIES. The same bytes already in the library are used where they are (the same
+  // album cover for every song on it, the same frame chosen twice): one image, many uses.
+  const sum = createHash('sha256').update(buf).digest('hex');
+  const same = await (await import('./libraryMoves')).existingCopy(acct, sum);
+  if (same) return same;
   await imageStore().put(key, buf, ct);
+  // Replaced at the same path: the image service must not render the old bytes it holds in memory.
+  try { (await import('../../modules/images')).imageService().forgetSource(key); } catch { /* service not set up here */ }
   let width: number | null = null, height: number | null = null;
   try { const m = await sharp(buf).metadata(); width = m.width ?? null; height = m.height ?? null; } catch { /* svg or odd */ }
   await upsertMediaRow({
@@ -58,14 +65,14 @@ export async function fetchPublicImage(url: string): Promise<{ data: Buffer; con
  * `name` (else after the file in the address). Downloaded once: the same
  * address already in the library answers with that copy. Returns the store key.
  */
-export async function importImageUrl(acct: string, url: string, folder: string, name?: string): Promise<string | null> {
+export async function importImageUrl(acct: string, url: string, folder: string, name?: string, kind = 'imported'): Promise<string | null> {
   const existing = await one<any>(`SELECT store_key FROM media_files WHERE account_id = $1 AND metadata->>'sourceUrl' = $2 ORDER BY created_at LIMIT 1`, [acct, url]);
   if (existing) return existing.store_key;
   const img = await fetchPublicImage(url);
   if (!img) return null;
   const fromUrl = (() => { try { return decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '').replace(/\.[a-z0-9]{2,5}$/i, ''); } catch { return ''; } })();
   const base = name || fromUrl || createHash('sha1').update(url).digest('hex').slice(0, 12);
-  return saveToLibrary(acct, folder, fileName(base, img.contentType), img.data, img.contentType, 'imported', { sourceUrl: url });
+  return saveToLibrary(acct, folder, fileName(base, img.contentType), img.data, img.contentType, kind, { sourceUrl: url });
 }
 
 /**

@@ -1,0 +1,151 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Breaking banner</title>
+<!-- Volt template: CasparCG HTML contract (update / play / next / stop), 1920x1080, transparent.
+     In and out sequences: see volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md section 4.
+     Standard: volt-app/docs/GRAPHICS_TEMPLATE_STANDARD.md -->
+<script type="application/json" id="volt-manifest">
+{
+  "contract": "casparcg-html",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "fps": 25,
+  "name": "Breaking banner (tag, headline, subline)",
+  "bbox": [
+    120,
+    846,
+    1680,
+    138
+  ],
+  "fields": [
+    {
+      "id": "tag",
+      "type": "text",
+      "label": "Tag (BREAKING NEWS, JUST IN, LIVE)"
+    },
+    {
+      "id": "headline",
+      "type": "text",
+      "label": "Headline"
+    },
+    {
+      "id": "subline",
+      "type": "text",
+      "label": "Subline (optional)"
+    },
+    {
+      "id": "pulse",
+      "type": "boolean",
+      "label": "Pulsing dot and sheen on the tag"
+    },
+    {
+      "id": "accent",
+      "type": "color",
+      "label": "Tag colour"
+    },
+    {
+      "id": "barColor",
+      "type": "color",
+      "label": "Headline bar colour"
+    },
+    {
+      "id": "textColor",
+      "type": "color",
+      "label": "Headline text colour"
+    },
+    {
+      "id": "sublineColor",
+      "type": "color",
+      "label": "Subline bar colour"
+    }
+  ],
+  "sample": {
+    "tag": "BREAKING NEWS",
+    "headline": "Power restored to most homes after overnight storm",
+    "subline": "Crews expect every suburb back on by midday",
+    "pulse": true,
+    "accent": "#c1121f",
+    "barColor": "#ffffff",
+    "textColor": "#0b1220",
+    "sublineColor": "#0a2350"
+  }
+}
+</script>
+<style>
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-400.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"Volt Serif";src:url(fonts/serif-600.woff2) format("woff2");font-weight:600;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-500.woff2) format("woff2");font-weight:500;font-display:block}
+@font-face{font-family:"Volt Sans";src:url(fonts/sans-700.woff2) format("woff2");font-weight:700;font-display:block}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent}
+body{font-family:"Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+:root{--ein:cubic-bezier(.16,1,.3,1);--eout:cubic-bezier(.7,0,.84,0);--pop:cubic-bezier(.34,1.56,.64,1)}
+/* Three states: initial (hidden), .on (in sequence to on air), .out (out sequence to a different
+   hidden pose). After the out sequence .reset snaps back to initial with no transition. */
+.reset *,.reset *::before,.reset *::after{transition:none!important;animation:none!important}
+:root{--accent:#c1121f;--bar:#ffffff;--ink:#0b1220;--bar2:#0a2350}
+#bk{position:absolute;left:120px;top:846px;width:1680px}
+#row{display:flex;height:92px;filter:drop-shadow(0 8px 18px rgba(0,0,0,.35))}
+#tag{position:relative;overflow:hidden;flex:none;background:var(--accent);display:flex;align-items:center;padding:0 30px;transform:scaleX(0);transform-origin:left}
+#tt{display:flex;align-items:center;gap:16px;font:700 44px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;transform:translateY(130%)}
+.dot{width:16px;height:16px;border-radius:50%;background:#fff;flex:none}
+.nopulse .dot{display:none}
+#tag::after{content:"";position:absolute;top:0;bottom:0;left:-60%;width:40%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.4),transparent)}
+#hl{flex:1;min-width:0;background:var(--bar);display:flex;align-items:center;padding:0 30px;overflow:hidden;clip-path:inset(0 100% 0 0)}
+#hlt{width:100%;color:var(--ink);font:600 50px/1 "Volt Serif","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;white-space:nowrap;overflow:hidden;transform:translateX(-40px);opacity:0}
+#sub{display:inline-flex;align-items:center;height:46px;padding:0 30px;background:var(--bar2);font:500 28px/1 "Volt Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK JP","Noto Sans CJK KR",Arial,sans-serif;white-space:nowrap;clip-path:inset(0 100% 0 0)}
+#sub:empty{display:none}
+@keyframes sheen{0%{left:-60%}35%,100%{left:130%}}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
+/* in: the tag snaps open from the left, its words rise, the headline bar wipes out of the tag and the
+   headline slides after it; the subline follows */
+.on #tag{transform:none;transition:transform .45s var(--ein)}
+.on #tt{transform:none;transition:transform .45s var(--ein) .22s}
+.on #hl{clip-path:inset(0 0 0 0);transition:clip-path .6s var(--ein) .3s}
+.on #hlt{transform:none;opacity:1;transition:transform .55s var(--ein) .5s,opacity .3s .5s}
+.on #sub{clip-path:inset(0 0 0 0);transition:clip-path .5s var(--ein) .65s}
+.on:not(.nopulse) #tag::after{animation:sheen 4s 1.1s infinite}
+.on:not(.nopulse) .dot{animation:pulse 1.2s .8s infinite}
+/* out: the headline slides back into the tag, the bars retract into it, then the tag folds away */
+.out #hlt{transform:translateX(-40px);opacity:0;transition:transform .25s var(--eout),opacity .25s}
+.out #sub{clip-path:inset(0 100% 0 0);transition:clip-path .3s var(--eout)}
+.out #hl{clip-path:inset(0 100% 0 0);transition:clip-path .4s var(--eout) .1s}
+.out #tt{transform:translateY(-130%);transition:transform .25s var(--eout) .35s}
+.out #tag{transform:scaleX(0);transition:transform .35s var(--eout) .45s}
+</style>
+</head>
+<body>
+<div id="bk"><div id="row"><div id="tag"><div id="tt"><span class="dot"></span><span id="tagt"></span></div></div><div id="hl"><div id="hlt"></div></div></div><div id="sub"></div></div>
+<script>
+function parse(d){if(typeof d!=='string')return d||{};try{return JSON.parse(d)}catch(e){return {}}}
+function asList(v){if(v&&!Array.isArray(v)&&Array.isArray(v.items))v=v.items;if(Array.isArray(v))return v;if(typeof v==='string'&&v.trim())return v.split(/\n|\s*;\s*/).filter(Boolean);return []}
+function txt(x){if(x==null)return '';if(typeof x==='string'||typeof x==='number')return String(x);return x.title||x.text||x.name||x.headline||''}
+function $(id){return document.getElementById(id)}
+function setText(el,v){v=v==null?'':String(v);if(el.textContent!==v)el.textContent=v}
+function truthy(v){return !(v===false||v==='false'||v===0||v==='0'||v==='no'||v==='off')}
+function css(k,v){if(v!=null&&v!=='')document.documentElement.style.setProperty(k,String(v))}
+// Shrink one line until it fits its box, down to `floor` of its size.
+function fit(el,floor){if(!el)return;el.style.fontSize='';var s=parseFloat(getComputedStyle(el).fontSize),min=s*(floor||.72);
+  while(el.scrollWidth>el.clientWidth+1&&s>min){s-=1;el.style.fontSize=s+'px'}}
+var B=document.body,data={},playing=false,resetTimer=null;
+function play(){clearTimeout(resetTimer);B.classList.remove('out','reset');void B.offsetWidth;B.classList.add('on');playing=true;
+  if(typeof onPlay==='function')onPlay()}
+function stop(){if(!playing)return;playing=false;B.classList.add('out');B.classList.remove('on');
+  if(typeof onStop==='function')onStop();clearTimeout(resetTimer);
+  resetTimer=setTimeout(function(){B.classList.add('reset');B.classList.remove('out');void B.offsetWidth;B.classList.remove('reset');
+    if(typeof onReset==='function')onReset()},OUT_MS)}
+function next(){if(typeof onNext==='function')onNext()}
+var OUT_MS=850;
+function refit(){fit($('hlt'),.7)}
+function update(raw){var d=parse(raw);for(var k in d)data[k]=d[k];
+  css('--accent',d.accent);css('--bar',d.barColor);css('--ink',d.textColor);css('--bar2',d.sublineColor);
+  if('tag' in d)setText($('tagt'),d.tag||'');if('subline' in d)setText($('sub'),d.subline||'');
+  if('pulse' in d)B.classList.toggle('nopulse',!truthy(d.pulse));
+  if('headline' in d){setText($('hlt'),d.headline||'');refit();requestAnimationFrame(refit)}}
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(refit);
+</script>
+</body>
+</html>

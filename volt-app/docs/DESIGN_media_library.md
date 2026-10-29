@@ -171,6 +171,38 @@ credits, and a Town hall's speakers land as credits with role "presenter". A
 programme created from an event copies the event's metadata into the
 programme's `metadata` JSONB under the same keys.
 
+### 3.5 The account's genre list (BUILT 26 Oct 2026)
+
+A client manages its own genres in **Admin > Media setup > Genres** instead of
+living with the fixed platform list. One list per account (`metadata_lists`,
+migration 0089, `list_key = 'genres'`); an account with no row uses the
+platform default (`DEFAULT_GENRES` in `services/metadataLists.ts`).
+
+- **Linking.** An enum field with `optionsList: 'genres'` takes its options
+  from the list. The standard Radio station, TV channel, Broadcast event (and
+  its children through inheritance), Song, Programme / episode and Movie types
+  are linked; 0089 links existing accounts' standard fields only where the
+  options were still the untouched platform list. Content Types can link or
+  unlink any enum field (Options: Own list / Genres list).
+- **Copied in, not looked up.** On every list save and type save the list is
+  written into the linked fields (`options`, plus `retiredOptions`), so every
+  reader of `metadata_schemas.fields` (forms, validation, EPG fill, library
+  completeness, XMLTV) sees the account's list unchanged.
+- **Edits never break what is tagged.** Add and reorder freely. *Retire*: still
+  valid where set (the validator accepts `retiredOptions`), not offered, shown
+  as "(retired)" on a record that has it. *Rename* in place and *Merge into*
+  another rewrite the value on every channel, station, event and asset whose
+  type links the list, in the same transaction as the save. *Remove* is
+  refused (409, with counts) for a value anything carries. *Reset* restores the
+  platform list, keeping used custom values as retired. EPG programmes keep the
+  categories they were announced with.
+- API: `GET /api/metadata-lists`, `GET|PUT /api/metadata-lists/genres`
+  (`{items:[{value,retired?}], renames?:[{from,to}], version?}`, If-Match),
+  `POST /api/metadata-lists/genres/reset`. Feature `settings`: read-open,
+  manage to change. Every save is in the audit log (`metadata_list`).
+- Checks: `test/metadata-lists.check.ts` (38, pure); the SQL (migration,
+  usage, rename/merge, sync, reset) was run against Postgres 16.
+
 ## 4. Publishing rules and availability
 
 ### 4.0 Everything here is CLIENT-LEVEL (added 5 Sep, Christian)
@@ -370,6 +402,23 @@ types' own field keys. Required first, then recommended.
   required, and an EPG marker on any value filled from the guide.
 - `GET /api/vod/:id/target-metadata` returns the type, the target fields,
   the completeness and the provenance.
+
+**Required is a publish rule, not a save rule (28 Oct 2026).** Content is
+created empty and filled in over time: an API create, an upload or a watch
+folder item, then edits along the way. So saving never fails because a
+required field is empty (`services/metadataValidator.ts`); what is there is
+still checked strictly (types, list values, unknown keys). Publishing is where
+it counts: the publish gate (`services/review.ts publishGate`, which every
+publish goes through: the Publish button, bulk publish, the publishing API,
+social, auto-publish rules, republish) refuses with code
+`metadata_incomplete` while any required field above is empty, and names
+them ("Fill in the required fields before publishing: Headline, Genre."),
+also returned as `gate.missingRequired` with each field's label. An asset with
+no content type is not held back by this (recording clips often have none);
+the list still counts it as missing metadata. The ingest gate
+(`DESIGN_uploader_framework.md`, "awaiting metadata") works as before, and its
+form can now be saved part-filled. Checked by
+`test/publish-required-metadata.check.ts`.
 
 ### 7.4 Fill metadata from the EPG
 

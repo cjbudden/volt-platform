@@ -106,13 +106,26 @@ export async function historyOf(assetId: string) {
 
 export interface PublishGate {
   allowed: boolean;
-  code: 'ok' | 'not_approved' | 'qc_failed';
+  code: 'ok' | 'not_approved' | 'qc_failed' | 'metadata_incomplete';
   message: string;
   reviewState: ReviewState;
   qcState: string | null;
   /** True when publishing would go ahead over an outstanding QC finding. The
    *  caller shows this so the decision is taken knowingly rather than silently. */
   wouldOverride: boolean;
+  /** code 'metadata_incomplete': the required fields still empty, key and label. */
+  missingRequired?: { key: string; label: string }[];
+}
+
+/** Required fields of an asset's content type that are still empty (none without a type). */
+export async function missingRequiredFor(schemaId: string | null, accountId: string | null, metadata: Record<string, any> | null): Promise<{ key: string; label: string }[]> {
+  if (!schemaId || !accountId) return [];
+  const { typeOf } = await import('./epgFill');
+  const type = await typeOf(schemaId, accountId).catch(() => null);
+  if (!type) return [];
+  const { completeness } = await import('./vodLibrary');
+  const keys = completeness(type.fields, type.standardKey, metadata ?? {}).missingRequired;
+  return keys.map((k) => ({ key: k, label: type.fields.find((f) => f.key === k)?.label ?? k }));
 }
 
 /**
@@ -124,14 +137,14 @@ export interface PublishGate {
  */
 export async function publishGate(assetId: string): Promise<PublishGate> {
   const row = await one<any>(
-    `SELECT v.review_state, v.qc_state,
+    `SELECT v.review_state, v.qc_state, v.schema_id, v.metadata, COALESCE(g.account_id, v.account_id) AS account_id,
             COALESCE(ga.require_review_to_publish, false) AS need_review,
             COALESCE(ga.block_publish_on_qc_error, false) AS block_qc
        FROM vod_assets v
        LEFT JOIN channels c ON c.id = v.channel_id
        LEFT JOIN events   e ON e.id = v.event_id
        LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
-       LEFT JOIN accounts ga ON ga.id = g.account_id
+       LEFT JOIN accounts ga ON ga.id = COALESCE(g.account_id, v.account_id)
       WHERE v.id = $1`,
     [assetId]
   );
@@ -140,6 +153,20 @@ export async function publishGate(assetId: string): Promise<PublishGate> {
   const reviewState: ReviewState = row.review_state ?? 'draft';
   const qcState: string | null = row.qc_state ?? null;
   const wouldOverride = qcState === 'failed' || qcState === 'warnings';
+
+  // REQUIRED METADATA. Saving lets required fields stay empty while content is being
+  // put together (metadataValidator.ts); publishing does not. "Required" is what the
+  // library's completeness shows (services/vodLibrary.ts): the fields the content type
+  // marks required plus its catalogue-required target fields. No content type, nothing
+  // to require.
+  const missing = await missingRequiredFor(row.schema_id, row.account_id, row.metadata);
+  if (missing.length) {
+    return {
+      allowed: false, code: 'metadata_incomplete',
+      message: `Fill in the required field${missing.length === 1 ? '' : 's'} before publishing: ${missing.map((m) => m.label).join(', ')}.`,
+      reviewState, qcState, wouldOverride, missingRequired: missing,
+    };
+  }
 
   if (row.need_review && reviewState !== 'approved') {
     return {

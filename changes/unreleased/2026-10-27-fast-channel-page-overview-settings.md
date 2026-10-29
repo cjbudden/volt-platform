@@ -1,0 +1,6 @@
+---
+scope: core
+type: added
+area: FAST
+---
+A FAST channel now has a channel page like a live channel or an event: **Overview** (laid out like a live channel: the guide strip with what is on now and up next, then a split with the output preview on the left and **On air now** on the right: the asset playing with its poster, position in the asset, metadata, encode (resolution, codecs, bitrates, renditions, formats) and its source file in full; below, what goes to air next, viewers, the log, the playout and its media, graphics on the channel, and every URL: public HLS and DASH, console monitoring, per-viewer stitched sessions and the public guide API), **Build** (run order, week, repeats, ads, brand loop) and **Settings** (name, content type with title, description and genre, logo, guide icon, watermark and Up next graphics). The header has Share, Embed, live graphics control and **Go live** / **Take off air**; Go live activates the run order first when nothing is on air yet. A FAST channel's watermark is drawn by the player over the picture, because its programmes are copied to air without re-encoding: every Volt player, embed and share link shows it, and the play gate gives apps the mark (`meta.brandMark`) to draw themselves.

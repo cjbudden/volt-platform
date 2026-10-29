@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { z } from 'zod';
 import { query, one, tx } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
@@ -13,10 +13,44 @@ import { buildFileSearch, childFolders, matchFolders, type FileFilters } from '.
 export const mediaFilesRouter = Router();
 mediaFilesRouter.use(requireAuth);
 
-const KIND = z.enum(['watermark', 'slate', 'poster', 'brand', 'keyframe', 'storyboard', 'other']);
+// 'storyboard' (sprite sheets) is gone: they live in the sprite store (thumbnails/spriteStore.ts), not the library.
+const KIND = z.enum(['watermark', 'slate', 'poster', 'cover', 'brand', 'bug', 'keyframe', 'motion', 'other', 'imported']);
+
+// A BUG's advertising metadata (migration 0084): who it is for, who made it, which campaign,
+// and the ad's industry code. Kept small on purpose.
+const AD = z.object({
+  advertiser: z.string().trim().max(200).optional().nullable(),
+  agency: z.string().trim().max(200).optional().nullable(),
+  campaign: z.string().trim().max(200).optional().nullable(),
+  adCode: z.string().trim().max(80).optional().nullable(),
+});
+type Ad = z.infer<typeof AD>;
+const cleanAd = (a: Ad | undefined | null) => {
+  const out: Record<string, string> = {};
+  for (const k of ['advertiser', 'agency', 'campaign', 'adCode'] as const) if (a?.[k]) out[k] = String(a[k]);
+  return out;
+};
+/** schema.org for a bug (JSON-LD). schema.org has no advertisement type: the closest fit is the
+ *  creative work itself with sponsor (the advertiser), producer (the agency), isPartOf (the
+ *  campaign, as a CreativeWorkSeries) and identifier (Ad-ID or key number). */
+function adJsonLd(row: any) {
+  const ad = row.metadata?.ad; if (!ad) return null;
+  const video = !!row.metadata?.motion?.video;
+  return {
+    '@context': 'https://schema.org', '@type': video ? 'VideoObject' : 'ImageObject', name: row.name, genre: 'Advertising',
+    contentUrl: '/' + (video ? row.metadata.motion.video : row.store_key), ...(video ? { thumbnailUrl: '/' + row.store_key } : {}),
+    ...(row.width && row.height ? { width: row.width, height: row.height } : {}),
+    ...(ad.advertiser ? { sponsor: { '@type': 'Organization', name: ad.advertiser } } : {}),
+    ...(ad.agency ? { producer: { '@type': 'Organization', name: ad.agency } } : {}),
+    ...(ad.campaign ? { isPartOf: { '@type': 'CreativeWorkSeries', name: ad.campaign } } : {}),
+    ...(ad.adCode ? { identifier: { '@type': 'PropertyValue', propertyID: 'Ad-ID', value: ad.adCode } } : {}),
+  };
+}
 
 function cleanPath(p: string): string {
-  return safeKey(p).replace(/\/+/g, '/').replace(/^\/|\/$/g, '');
+  // '' is the top level: path.normalize('') is '.', which made a folder called '.'.
+  const k = safeKey(p || '').replace(/\/+/g, '/').replace(/^\/|\/$/g, '');
+  return k === '.' ? '' : k.replace(/^\.\//, '');
 }
 function folderOf(path: string): string { const i = path.lastIndexOf('/'); return i < 0 ? '' : path.slice(0, i); }
 function storeKeyFor(account: string, path: string): string { return `library/${account}/${path}`; }
@@ -65,17 +99,29 @@ mediaFilesRouter.get('/', asyncHandler(async (req, res) => {
   res.json(r.items);
 }));
 
-/** All folder paths for an account: explicit folders plus every folder a file implies. */
-async function allFolderPaths(acc: string): Promise<{ paths: string[]; counts: Map<string, number> }> {
+/** Which images a count covers, as the grid's source filter does: 'library' = everything but
+ *  encoder thumbnails, 'encoder' = only those, anything else = all. */
+function sourceSql(source?: string): string {
+  return source === 'library' ? ` AND COALESCE(source, '') <> 'encoder'` : source === 'encoder' ? ` AND source = 'encoder'` : '';
+}
+
+/** All folder paths for an account: explicit folders plus every folder a file implies.
+ *  COUNTS FOLLOW THE GRID. They used to count every image whatever the grid showed, so with
+ *  "Uploaded" selected a folder of encoder stills read 1,440 and opened empty. With a source,
+ *  only matching images count, and folders that hold none of them are not listed (a folder a
+ *  person created is, at 0). */
+async function allFolderPaths(acc: string, source?: string): Promise<{ paths: string[]; counts: Map<string, number>; top: number }> {
   const explicit = await query('SELECT path FROM media_folders WHERE account_id = $1', [acc]);
   const counts = await query(
-    `SELECT folder, count(*)::int AS n FROM media_files WHERE account_id = $1 AND folder <> '' GROUP BY folder`, [acc]);
+    `SELECT folder, count(*)::int AS n FROM media_files WHERE account_id = $1${sourceSql(source)} GROUP BY folder`, [acc]);
+  const top = Number(counts.find((c: any) => c.folder === '')?.n ?? 0);
+  counts.splice(0, counts.length, ...counts.filter((c: any) => c.folder !== ''));
   const set = new Set<string>();
   for (const r of [...explicit.map((e: any) => e.path), ...counts.map((c: any) => c.folder)] as string[]) {
     const parts = r.split('/');
     for (let i = 1; i <= parts.length; i++) set.add(parts.slice(0, i).join('/'));
   }
-  return { paths: [...set].sort(), counts: new Map(counts.map((c: any) => [c.folder, c.n])) };
+  return { paths: [...set].sort(), counts: new Map(counts.map((c: any) => [c.folder, c.n])), top };
 }
 
 /** Files AND folders for one search box: { folders, files, total }. */
@@ -83,7 +129,7 @@ mediaFilesRouter.get('/search', asyncHandler(async (req, res) => {
   const acc = accountId(req);
   const qs = req.query as Record<string, string>;
   const f = filtersFrom(qs);
-  const [files, tree] = await Promise.all([searchFiles(acc, { ...f, limit: f.limit ?? 200 }), f.q ? allFolderPaths(acc) : null]);
+  const [files, tree] = await Promise.all([searchFiles(acc, { ...f, limit: f.limit ?? 200 }), f.q ? allFolderPaths(acc, (f as any).source) : null]);
   const folders = tree ? matchFolders(tree.paths, f.q!).map((path) => ({
     path, name: path.split('/').pop(), count: tree.counts.get(path) ?? 0,
   })) : [];
@@ -122,8 +168,8 @@ mediaFilesRouter.post('/metadata/backfill', asyncHandler(async (req, res) => {
  *  ?q=<words> answers folders whose path contains every word. */
 mediaFilesRouter.get('/folders', asyncHandler(async (req, res) => {
   const acc = accountId(req);
-  const { q, parent } = req.query as Record<string, string>;
-  const { paths, counts } = await allFolderPaths(acc);
+  const { q, parent, source } = req.query as Record<string, string>;
+  const { paths, counts, top } = await allFolderPaths(acc, source);
   const deep = (p: string) => {
     let n = 0;
     for (const [f, c] of counts) if (f === p || f.startsWith(p + '/')) n += c;
@@ -134,8 +180,95 @@ mediaFilesRouter.get('/folders', asyncHandler(async (req, res) => {
     hasChildren: paths.some((x) => x.startsWith(path + '/')),
   });
   if (q && q.trim()) return res.json({ folders: matchFolders(paths, q).map(shape) });
-  if (parent !== undefined) return res.json({ folders: childFolders(paths, parent).map(shape) });
+  // `total`: every matching image in the library, top level included (the tree's "All images").
+  if (parent !== undefined) return res.json({ folders: childFolders(paths, parent).map(shape), total: top + [...counts.values()].reduce((a, b) => a + b, 0), top });
   res.json({ folders: paths.map((path) => ({ path, name: path.split('/').pop(), count: counts.get(path) ?? 0 })) });
+}));
+
+/** Images with the same bytes, grouped: which copy stays (a person's upload first, then the
+ *  oldest) and which go. Nothing changes. */
+mediaFilesRouter.get('/duplicates', asyncHandler(async (req, res) => {
+  const groups = await (await import('../services/media/libraryMoves')).findDuplicates(accountId(req));
+  res.json({ groups: groups.map((g) => ({ ...g, keep: { ...g.keep, url: urlFor(g.keep.storeKey) }, drop: g.drop.map((d) => ({ ...d, url: urlFor(d.storeKey) })) })),
+    copies: groups.reduce((n, g) => n + g.drop.length, 0), bytes: groups.reduce((n, g) => n + g.drop.reduce((m, d) => m + d.size, 0), 0) });
+}));
+
+/** Merge duplicates: whatever used a copy uses the one that stays, old addresses forward, copies go.
+ *  { keepers?: {checksum: fileId}, checksums?: [...] } limits or steers it. */
+mediaFilesRouter.post('/duplicates/merge', asyncHandler(async (req, res) => {
+  const acc = accountId(req);
+  const b = z.object({ keepers: z.record(z.string().uuid()).optional(), checksums: z.array(z.string().max(128)).max(5000).optional() }).parse(req.body ?? {});
+  const who = actor(req);
+  const r = await (await import('../services/media/libraryMoves')).mergeDuplicates(acc, { ...b, userId: who.userId });
+  await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'delete', entityType: 'media_file', entityId: 'duplicates',
+    snapshot: { groups: r.groups, removed: r.removed, bytes: r.bytes, references: r.references } });
+  res.json(r);
+}));
+
+/** Where images are used: every place a move would rewrite (assets, typed images, channels,
+ *  metadata, song details, social posts, links...). GET /api/files/uses?ids=a,b */
+mediaFilesRouter.get('/uses', asyncHandler(async (req, res) => {
+  const acc = accountId(req);
+  const ids = String(req.query.ids ?? '').split(',').map((x) => x.trim()).filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 50);
+  if (!ids.length) throw badRequest('ids: one or more image ids, comma separated');
+  const rows = await query<any>(`SELECT id, store_key, path, metadata FROM media_files WHERE account_id = $1 AND id = ANY($2::uuid[])`, [acc, ids]);
+  const { findUses, partsOf } = await import('../services/media/libraryMoves');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.json({ uses: await findUses(acc, rows.map((r) => ({ id: r.id, storeKey: r.store_key, path: r.path, keys: partsOf(r).map((x) => x.key) }))) });
+}));
+
+/** Replace images with one that stays (a duplicate, or the same picture in another file):
+ *  everything that used them uses `keep`, their old addresses forward there, and they go to
+ *  the restore bin. { keep: id, drop: [ids] } */
+mediaFilesRouter.post('/replace', asyncHandler(async (req, res) => {
+  const acc = accountId(req);
+  const b = z.object({ keep: z.string().uuid(), drop: z.array(z.string().uuid()).min(1).max(100) }).parse(req.body ?? {});
+  const who = actor(req);
+  const { replaceImages, ReplaceError } = await import('../services/media/libraryMoves');
+  try {
+    const r = await replaceImages(acc, b.keep, b.drop, { userId: who.userId });
+    await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'delete', entityType: 'media_file', entityId: r.kept.id,
+      snapshot: { replaced: r.removed, keptPath: r.kept.path, references: r.references, binId: r.binId } });
+    res.json(r);
+  } catch (e: any) {
+    if (e instanceof ReplaceError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+}));
+
+/** Move images to a folder ('' = top level), keeping their names. References to them are
+ *  rewritten and their old addresses forward (services/media/libraryMoves.ts). */
+mediaFilesRouter.post('/move', asyncHandler(async (req, res) => {
+  const acc = accountId(req);
+  const b = z.object({ ids: z.array(z.string().uuid()).min(1).max(500), folder: z.string().max(500) }).parse(req.body ?? {});
+  const who = actor(req);
+  const r = await (await import('../services/media/libraryMoves')).moveFiles(acc, b.ids, b.folder, who);
+  for (const m of r.moved) await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label,
+    action: 'update', entityType: 'media_file', entityId: m.id, snapshot: { from: m.from, to: m.to } });
+  res.json(r);
+}));
+
+/** What a folder holds (everything below it counted): whether it can be removed. */
+mediaFilesRouter.get('/folders/contents', asyncHandler(async (req, res) => {
+  const { folderContents } = await import('../services/media/libraryMoves');
+  try { res.json(await folderContents(accountId(req), String(req.query.path ?? ''))); }
+  catch (e: any) { if (e?.status) return res.status(e.status).json({ error: e.message }); throw e; }
+}));
+
+/** Remove a folder. Only when it holds no images, in it or below it; its empty subfolders go too. */
+mediaFilesRouter.delete('/folders', asyncHandler(async (req, res) => {
+  const acc = accountId(req);
+  const path = String(req.query.path ?? (req.body && req.body.path) ?? '');
+  const { deleteFolder } = await import('../services/media/libraryMoves');
+  try {
+    const r = await deleteFolder(acc, path);
+    const who = actor(req);
+    await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'delete', entityType: 'media_folder', entityId: path, snapshot: r });
+    res.json(r);
+  } catch (e: any) {
+    if (e?.status) return res.status(e.status).json({ error: e.message, ...(e.contents ? { contents: e.contents } : {}) });
+    throw e;
+  }
 }));
 
 /** Create an (empty) folder. */
@@ -152,6 +285,7 @@ const uploadSchema = z.object({
   contentType: z.string().optional(),
   tags: z.array(z.string()).optional(),
   dataBase64: z.string().min(1),   // the image bytes, base64 (data URL prefix tolerated)
+  ad: AD.optional(),               // bugs: advertiser, agency, campaign, ad code
 });
 
 /** Upload an image (base64 body → store + indexed row). Direct-to-S3 presign is the
@@ -178,6 +312,7 @@ mediaFilesRouter.post('/', asyncHandler(async (req, res) => {
     accountId: acc, kind: b.kind, path, folder, name, storeKey, sizeBytes: buf.length, contentType,
     tags: b.tags ?? [], userId: who.userId, source: 'upload',
     facts: { ...facts, width: facts.width ?? info.width, height: facts.height ?? info.height, contentType },
+    ...(b.ad && Object.keys(cleanAd(b.ad)).length ? { extra: { ad: cleanAd(b.ad) } } : {}),
   });
   // Same bytes already in the library? Say so (informational, never refused).
   const dupes = await query(
@@ -189,11 +324,50 @@ mediaFilesRouter.post('/', asyncHandler(async (req, res) => {
   res.status(201).json({ ...row, url: urlFor(row.store_key), duplicateOf: dupes });
 }));
 
+/** Upload a VIDEO, raw body: an animated bug or sting, ideally with transparency (ProRes
+ *  4444, QuickTime Animation, WebM with alpha). Stored as VP9-with-alpha WebM plus a
+ *  transparent first-frame PNG and the original (services/motionGraphics.ts).
+ *  POST /api/files/motion?folder=&name=   body: the file */
+mediaFilesRouter.post('/motion', express.raw({ type: () => true, limit: '520mb' }), asyncHandler(async (req, res) => {
+  const acc = accountId(req);
+  const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  const name = String(req.query.name ?? '').replace(/[/\\]/g, '_');
+  if (!name) throw badRequest('Give the file a name (?name=).');
+  const folder = req.query.folder ? cleanPath(String(req.query.folder)) : '';
+  const { ingestMotion, MotionError } = await import('../services/motionGraphics');
+  try {
+    const who = actor(req);
+    const kind = KIND.safeParse(req.query.kind ?? 'bug');
+    const ad = cleanAd(AD.parse({ advertiser: req.query.advertiser, agency: req.query.agency, campaign: req.query.campaign, adCode: req.query.adCode }));
+    const out = await ingestMotion({ accountId: acc, folder, name, data: body, userId: who.userId, kind: kind.success ? kind.data : 'bug', ad });
+    await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'create', entityType: 'media_file', entityId: out.row.id,
+      snapshot: { path: out.row.path, kind: 'motion', bytes: body.length, alpha: out.alpha } });
+    delete out.row.search;
+    res.status(201).json({ ...out.row, url: urlFor(out.row.store_key), videoUrl: '/' + out.row.metadata.motion.video, warning: out.warning });
+  } catch (e: any) {
+    if (e instanceof MotionError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+}));
+
 mediaFilesRouter.get('/:id', asyncHandler(async (req, res) => {
   const row = await one<any>('SELECT * FROM media_files WHERE id=$1 AND account_id=$2', [req.params.id, accountId(req)]);
   if (!row) throw notFound('Image not found');
   delete row.search;
-  res.json({ ...row, url: urlFor(row.store_key) });
+  res.json({ ...row, url: urlFor(row.store_key), jsonLd: adJsonLd(row) });
+}));
+
+/** A bug's advertising metadata. PUT /api/files/:id/ad { advertiser, agency, campaign, adCode } (empty clears a field). */
+mediaFilesRouter.put('/:id/ad', asyncHandler(async (req, res) => {
+  const acc = accountId(req);
+  const ad = cleanAd(AD.parse(req.body ?? {}));
+  const row = await one<any>(`UPDATE media_files SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{ad}', $3::jsonb), version = version + 1, updated_at = now()
+                               WHERE id = $1 AND account_id = $2 RETURNING *`, [req.params.id, acc, JSON.stringify(ad)]);
+  if (!row) throw notFound('Image not found');
+  const who = actor(req);
+  await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'update', entityType: 'media_file', entityId: row.id, snapshot: { ad } });
+  delete row.search;
+  res.json({ ...row, url: urlFor(row.store_key), jsonLd: adJsonLd(row) });
 }));
 
 const patchSchema = z.object({
@@ -235,6 +409,9 @@ mediaFilesRouter.patch('/:id', asyncHandler(async (req, res) => {
     await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label,
       action: 'update', entityType: 'media_file', entityId: cur.id,
       snapshot: { from: cur.path, to: path, kind: row.kind } });
+    // A moved image keeps working wherever it is used: references rewritten, old key forwards.
+    if (moved) await (await import('../services/media/libraryMoves')).afterSingleMove(acc, cur.store_key, newKey, cur.path, path)
+      .catch((e) => console.warn(`[files] references after moving ${cur.path} not all updated:`, e));
     res.set('ETag', String(row.version));
     delete row.search;
     res.json({ ...row, url: urlFor(row.store_key) });
@@ -250,12 +427,10 @@ mediaFilesRouter.delete('/:id', asyncHandler(async (req, res) => {
   const row = await one<any>('SELECT * FROM media_files WHERE id=$1 AND account_id=$2', [req.params.id, acc]);
   if (!row) throw notFound('Image not found');
 
-  const url = urlFor(row.store_key);
-  const users = await query(
-    `SELECT c.id, c.name FROM channels c JOIN groups g ON g.id=c.group_id
-      WHERE g.account_id=$1 AND (c.filler_slate_ref = $2 OR c.filler_slate_ref = $3)`,
-    [acc, url, row.path]
-  );
+  // Everything that uses it (libraryMoves.ts findUses: assets, typed images, channels, metadata, links...).
+  const { findUses, partsOf } = await import('../services/media/libraryMoves');
+  const users = ((await findUses(acc, [{ id: row.id, storeKey: row.store_key, path: row.path, keys: partsOf(row).map((x) => x.key) }]))[row.id] ?? [])
+    .map((u) => ({ ...u, name: u.label ? `${u.what}: ${u.label}` : u.what }));
   if (!confirm) {
     return res.status(428).json({ confirmationRequired: true,
       message: `Delete image "${row.path}"? This can't be undone. Re-send with confirm=true.`,
@@ -263,9 +438,10 @@ mediaFilesRouter.delete('/:id', asyncHandler(async (req, res) => {
   }
   if (users.length && !force) {
     return res.status(409).json({ error: 'Image is in use', inUseBy: users,
-      message: `Used as a slate by ${users.length} channel(s). Reassign them or re-send with force=true.` });
+      message: `Used in ${users.length} place(s). Replace it with another image (POST /api/files/replace), or re-send with force=true.` });
   }
-  await imageStore().delete(row.store_key);
+  // Every file of the item: a video item's WebM, first frame and original go together.
+  await (await import('../services/media/libraryMoves')).deleteItemFiles(row);
   await query('DELETE FROM media_files WHERE id=$1', [row.id]);
   const who = actor(req);
   await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label,

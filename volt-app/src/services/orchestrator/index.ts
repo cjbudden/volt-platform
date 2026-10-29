@@ -223,6 +223,28 @@ export function startScheduler(): () => void {
   ) : null;
   thumbs?.unref?.();
 
+  // ONE-OFF TIDY A MINUTE AFTER START, own error boundary, nothing on air depends on it:
+  //  * references an earlier image move left behind are rewritten (libraryMoves.ts
+  //    repairMovedReferences: moves used to rewrite only columns with image-like names);
+  //  * sprite sheets still in the Image Library move to the sprite store. The thumbnail pass
+  //    does this a batch per pass; with thumbnails off it is done here (spriteStore.ts).
+  const tidyOnce = setTimeout(() => {
+    import('../media/libraryMoves').then(async (m) => {
+      // Video items an earlier move split (first frame moved, WebM and original left behind).
+      const v = await m.repairVideoItems();
+      if (v.repaired.length || v.skipped.length) console.log(`[library] video items put back together: ${v.repaired.length}${v.skipped.length ? `, ${v.skipped.length} left (${v.skipped.map((x) => `${x.path}: ${x.reason}`).join('; ')})` : ''}`);
+      const r = await m.repairMovedReferences();
+      const n = Object.values(r.references).reduce((a, b) => a + b, 0);
+      if (n) console.log(`[library] ${n} reference(s) left by earlier moves rewritten`, r.references);
+    }).catch((e) => console.error('[library] reference repair failed', e));
+    if (!config.thumbnails.enabled) {
+      import('../thumbnails/builder').then(async (m) => {
+        for (let i = 0; i < 500 && await m.relocateWhilePending(); i++) { /* a batch at a time until none are left */ }
+      }).catch((e) => console.error('[sprites] relocation failed', e));
+    }
+  }, 60_000);
+  tidyOnce.unref?.();
+
   const watch = setInterval(
     () => import('../watchfolder/store').then(async (m) => {
       const rs = await m.scanAllFolders();
@@ -301,6 +323,7 @@ export function startScheduler(): () => void {
     void stopS3Events?.();
     void stopCdnLogs?.();
     if (thumbs) clearInterval(thumbs);
+    clearTimeout(tidyOnce);
     if (resume) clearInterval(resume);
   };
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, thumbUrl, type MediaFile, type LibraryFolder } from '../api'
+import { api, apiRequest, thumbUrl, isMotionFile, type MediaFile, type LibraryFolder, type BugAd } from '../api'
+import { MotionThumb, motionOf } from '../MotionThumb'
 import { signImage } from '../imageSigning'
 
 /** The service's default IMAGE_MAX_DIMENSION; larger sizes are refused, not clamped. */
@@ -8,10 +9,12 @@ import { enqueueUploads, useUploads } from '../uploads'
 import { pressable } from '../a11y'
 import { SocialComposer, SocialPanel } from './SocialPublish'
 import { FieldError, FormStatus, Notice, useNotify, usePageNotice } from '../notices'
+import { MoveDialog, DeleteFolderDialog, DuplicatesDialog, ReplaceDialog, describeMove, DRAG_TYPE } from './library/LibraryMove'
 
-const KINDS = ['all', 'slate', 'watermark', 'poster', 'brand', 'other', 'keyframe', 'storyboard'] as const
-const ASSIGNABLE = ['slate', 'watermark', 'poster', 'brand', 'other'] // user-assignable usage types
-const STD_FOLDERS = ['slates', 'watermarks', 'brands', 'posters']
+// Sprite sheets are not library images (they live in the sprite store, docs/THUMBNAILS.md), so no chip for them.
+const KINDS = ['all', 'slate', 'watermark', 'poster', 'cover', 'brand', 'bug', 'other', 'keyframe'] as const
+const ASSIGNABLE = ['slate', 'watermark', 'poster', 'cover', 'brand', 'bug', 'other'] // user-assignable usage types (cover: song and album artwork)
+const STD_FOLDERS = ['slates', 'watermarks', 'brands', 'posters', 'bugs']
 
 function inferKind(folder: string): string {
   const top = folder.split('/')[0]
@@ -19,6 +22,7 @@ function inferKind(folder: string): string {
   if (top === 'watermarks') return 'watermark'
   if (top === 'brands') return 'brand'
   if (top === 'posters') return 'poster'
+  if (top === 'bugs') return 'bug'
   return 'other'
 }
 function human(bytes: number | null) {
@@ -28,7 +32,7 @@ function human(bytes: number | null) {
   return (bytes / 1024 / 1024).toFixed(1) + ' MB'
 }
 
-interface Staged { file: File; name: string; kind: string; preview: string }
+interface Staged { file: File; name: string; kind: string; preview: string; video?: boolean }
 
 type SourceFilter = 'library' | 'encoder' | 'all'
 type SortBy = 'name' | 'newest' | 'taken'
@@ -62,6 +66,11 @@ export default function ImageLibrary() {
   const [delErr, setDelErr] = useState<{ id: string; msg: string } | null>(null)
   const [confirm, setConfirm] = useState<{ file: MediaFile; inUse?: any[] } | null>(null)
   const [folderModal, setFolderModal] = useState<null | string>(null)
+  // What previews sit on. A dark logo vanishes on the dark checker and a white one on light,
+  // so it is the viewer's choice, remembered in this browser.
+  const [backdrop, setBackdrop] = useState<Backdrop>(() => { try { const v = localStorage.getItem('volt.images.backdrop'); return v === 'dark' || v === 'light' ? v : 'checker' } catch { return 'checker' } })
+  const setBackdropSaved = (b: Backdrop) => { setBackdrop(b); try { localStorage.setItem('volt.images.backdrop', b) } catch { /* private window */ } }
+  const [stagedAd, setStagedAd] = useState<Required<BugAd>>({ advertiser: '', agency: '', campaign: '', adCode: '' })
   const [staged, setStaged] = useState<{ items: Staged[]; folder: string } | null>(null)
   const [preview, setPreview] = useState<MediaFile | null>(null)
   const [builder, setBuilder] = useState<MediaFile | null>(null)
@@ -70,6 +79,12 @@ export default function ImageLibrary() {
   const [socialKey, setSocialKey] = useState(0)
   const [dragging, setDragging] = useState(false)
   const [toast, setToast] = useState('')
+  // SELECTING AND MOVING (library/LibraryMove.tsx): pick images (tick, Ctrl/Cmd or Shift
+  // click), then Move to folder, or drag them onto a folder in the tree.
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [lastPick, setLastPick] = useState<number | null>(null)
+  const [moving, setMoving] = useState<MediaFile[] | null>(null)
+  const [delFolder, setDelFolder] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement | null>(null)
   const uploads = useUploads()
 
@@ -78,7 +93,16 @@ export default function ImageLibrary() {
   // refresh the grid as background uploads complete (seq bumps per success)
   useEffect(() => { if (uploads.seq) { loadFolders(); load() } /* eslint-disable-next-line */ }, [uploads.seq])
 
-  async function loadFolders() { try { setFolders((await api.folderChildren('')).folders); setTreeKey(k => k + 1) } catch { /* */ } }
+  // Folder counts follow the grid's source filter, and "All images" counts the top level too.
+  const [allCount, setAllCount] = useState<number | null>(null)
+  const [dupes, setDupes] = useState(false)
+  const [replacing, setReplacing] = useState<MediaFile[] | null>(null)
+  async function loadFolders() {
+    try {
+      const r: any = await apiRequest(`/files/folders?parent=&source=${source === 'all' ? '' : source}`)
+      setFolders(r.folders); setAllCount(typeof r.total === 'number' ? r.total : null); setTreeKey(k => k + 1)
+    } catch { /* */ }
+  }
   async function load(more = false) {
     try {
       setErr('')
@@ -96,10 +120,11 @@ export default function ImageLibrary() {
     }
     catch (e: any) { setErr(e.message) }
   }
-  useEffect(() => { loadFolders() }, [])
+  useEffect(() => { loadFolders() /* eslint-disable-next-line */ }, [source])
   // folder / filter changes reload immediately; the search term is debounced so typing
   // doesn't fire a request per keystroke (and doesn't flicker the grid to Loading).
   useEffect(() => { setFiles(null); load() /* eslint-disable-next-line */ }, [folder, kind, source, hasLocation, sort, near])
+  useEffect(() => { setSel(new Set()); setLastPick(null) }, [folder, kind, source, hasLocation, sort, near, q])
   useEffect(() => {
     const t = setTimeout(() => { load() }, 200)
     return () => clearTimeout(t)
@@ -108,10 +133,11 @@ export default function ImageLibrary() {
 
   // ---- staging: build a review list instead of uploading immediately ---------
   function stageFiles(list: FileList | File[]) {
-    const arr = Array.from(list).filter(f => f.type.startsWith('image/'))
-    if (!arr.length) { notify({ kind: 'error', message: 'No image files in that selection' }); return }
-    const items: Staged[] = arr.map(file => ({ file, name: file.name, kind: inferKind(folder), preview: URL.createObjectURL(file) }))
-    setStaged({ items, folder })
+    // Images, and videos for graphics (animated bugs: converted to alpha WebM on upload).
+    const arr = Array.from(list).filter(f => f.type.startsWith('image/') || isMotionFile(f))
+    if (!arr.length) { notify({ kind: 'error', message: 'No image or video files in that selection' }); return }
+    const items: Staged[] = arr.map(file => ({ file, name: file.name, kind: isMotionFile(file) ? 'bug' : inferKind(folder), preview: URL.createObjectURL(file), video: isMotionFile(file) }))
+    setStaged({ items, folder: folder || (items.every(i => i.video) ? 'bugs' : folder) })
   }
   function updateStaged(i: number, patch: Partial<Staged>) {
     setStaged(s => s ? { ...s, items: s.items.map((it, j) => j === i ? { ...it, ...patch } : it) } : s)
@@ -120,7 +146,9 @@ export default function ImageLibrary() {
   // the topbar indicator and the grid refreshes as each item completes.
   function commitUpload() {
     if (!staged) return
-    enqueueUploads(staged.items.map(it => ({ file: it.file, folder: staged.folder, name: it.name, kind: it.kind })))
+    const ad = Object.fromEntries(Object.entries(stagedAd).filter(([, v]) => v.trim())) as BugAd
+    enqueueUploads(staged.items.map(it => ({ file: it.file, folder: staged.folder, name: it.name, kind: it.kind, ad: it.kind === 'bug' ? ad : undefined })))
+    setStagedAd({ advertiser: '', agency: '', campaign: '', adCode: '' })
     const n = staged.items.length
     staged.items.forEach(it => URL.revokeObjectURL(it.preview))
     setStaged(null)
@@ -141,6 +169,30 @@ export default function ImageLibrary() {
     catch (e: any) { setKindErr({ id: f.id, msg: e.message }) }
   }
 
+  const movable = (f: MediaFile) => f.source !== 'encoder'
+  function pick(e: any, f: MediaFile, i: number) {
+    const list = files ?? []
+    if (e?.shiftKey && lastPick != null) {
+      const [a, b] = lastPick < i ? [lastPick, i] : [i, lastPick]
+      setSel(s => { const n = new Set(s); list.slice(a, b + 1).filter(movable).forEach(x => n.add(x.id)); return n })
+    } else {
+      setSel(s => { const n = new Set(s); n.has(f.id) ? n.delete(f.id) : n.add(f.id); return n })
+      setLastPick(i)
+    }
+  }
+  function onCard(e: any, f: MediaFile, i: number) {
+    // Plain click opens the image; with a selection going, or Ctrl/Cmd/Shift held, it selects.
+    if (movable(f) && (sel.size || e?.shiftKey || e?.metaKey || e?.ctrlKey)) { e?.preventDefault?.(); pick(e, f, i); return }
+    setPreview(f)
+  }
+  async function dropOnFolder(path: string, ids: string[]) {
+    if (!ids.length) return
+    try {
+      const r = await apiRequest('/files/move', { method: 'POST', body: JSON.stringify({ ids, folder: path }), headers: { 'content-type': 'application/json' } })
+      flash(describeMove(r, path)); setSel(new Set()); await loadFolders(); await load()
+    } catch (e: any) { flash(`Not moved: ${e.message}`) }
+  }
+
   async function doDelete(f: MediaFile, force = false) {
     setDelErr(null)
     const r = await api.deleteFile(f.id, { confirm: true, force })
@@ -154,24 +206,25 @@ export default function ImageLibrary() {
 
   return (
     <div
-      onDragOver={e => { e.preventDefault(); if (!dragging) setDragging(true) }}
+      onDragOver={e => { if (!e.dataTransfer.types.includes('Files')) return; e.preventDefault(); if (!dragging) setDragging(true) }}
       onDragLeave={e => { if (e.currentTarget === e.target) setDragging(false) }}
-      onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files?.length) stageFiles(e.dataTransfer.files) }}
+      onDrop={e => { if (!e.dataTransfer.types.includes('Files')) return; e.preventDefault(); setDragging(false); if (e.dataTransfer.files?.length) stageFiles(e.dataTransfer.files) }}
       style={{ position: 'relative', minHeight: 400 }}
     >
       <div className="page-head">
         <div><h1>Image Library</h1><p>Watermarks, slates, posters and channel brands. Drag &amp; drop or upload; assign a usage type on the way in.</p></div>
         <div className="spacer" />
+        <button className="btn ghost" onClick={() => setDupes(true)} title="Find images stored more than once and keep one">Duplicates…</button>
         <button className="btn ghost" onClick={() => { setFolderErr(''); setFolderModal(folder ? folder + '/' : '') }}>+ New folder</button>
         <button className="btn primary" onClick={() => fileInput.current?.click()}>Upload images</button>
-        <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={e => { if (e.target.files) stageFiles(e.target.files); if (fileInput.current) fileInput.current.value = '' }} />
+        <input ref={fileInput} type="file" accept="image/*,video/*,.mov,.webm" multiple hidden onChange={e => { if (e.target.files) stageFiles(e.target.files); if (fileInput.current) fileInput.current.value = '' }} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 16, alignItems: 'start' }}>
         <div className="card" style={{ padding: 10 }}>
-          <FolderRow label="All images" active={folder === ''} onClick={() => setFolder('')} count={folders.reduce((a, f) => a + (f.total ?? f.count), 0)} depth={0} />
+          <FolderRow label="All images" active={folder === ''} onClick={() => setFolder('')} count={allCount ?? folders.reduce((a, f) => a + (f.total ?? f.count), 0)} depth={0} onDropImages={ids => dropOnFolder('', ids)} />
           {folders.map(f => (
-            <FolderNode key={`${treeKey}-${f.path}`} node={f} active={folder} onPick={setFolder} depth={1} />
+            <FolderNode key={`${treeKey}-${f.path}`} node={f} active={folder} onPick={setFolder} depth={1} onDropImages={dropOnFolder} source={source} />
           ))}
           {folders.length === 0 && (
             <div style={{ padding: '10px 8px', fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>
@@ -190,7 +243,16 @@ export default function ImageLibrary() {
               <input className="inp" style={{ width: '100%', paddingLeft: 34 }} placeholder="Search images and folders: name, tag, place, camera, programme…" value={q} onChange={e => setQ(e.target.value)} aria-label="Search images and folders" />
               {q && <button className="xbtn" onClick={() => setQ('')} title="Clear" style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)' }}>✕</button>}
             </div>
-            {KINDS.map(k => <div key={k} className={`chip ${kind === k ? 'active' : ''}`} {...pressable((e: any) => { ((() => setKind(k)) as any)(e) })} data-a11y-click="">{k === 'keyframe' ? 'still' : k === 'storyboard' ? 'sprite sheet' : k}</div>)}
+            {KINDS.map(k => <div key={k} className={`chip ${kind === k ? 'active' : ''}`} {...pressable((e: any) => { ((() => setKind(k)) as any)(e) })} data-a11y-click="">{k === 'keyframe' ? 'still' : k === 'bug' ? 'bugs' : k}</div>)}
+            <span style={{ flex: 1 }} />
+            <div className="chipset" role="radiogroup" aria-label="Preview background" title="What the previews sit on: transparent logos and bugs read best on the one that contrasts with them">
+              {(['checker', 'dark', 'light'] as const).map(b => (
+                <button key={b} type="button" role="radio" aria-checked={backdrop === b} className={`selchip ${backdrop === b ? 'sel' : ''}`} onClick={() => setBackdropSaved(b)}
+                  style={{ padding: '6px 9px' }} aria-label={`${b} background`}>
+                  <span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: 3, display: 'inline-block', border: '1px solid var(--border-2)', background: BACKDROP[b] }} />
+                </button>
+              ))}
+            </div>
           </div>
           <div className="filters" style={{ marginBottom: 12, gap: 8, alignItems: 'center' }}>
             {([['library', 'Uploaded'], ['encoder', 'Encoder thumbnails'], ['all', 'Everything']] as const).map(([k, label]) => (
@@ -222,6 +284,23 @@ export default function ImageLibrary() {
             </div>
           )}
 
+          {folder && !q.trim() && (
+            <div className="lib-folderbar">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+              <span className="mono">{folder}</span>
+              <button className="btn ghost sm" onClick={() => setDelFolder(folder)} title="A folder can be deleted when it holds no images">Delete folder…</button>
+            </div>
+          )}
+          {sel.size > 0 && (
+            <div className="lib-selbar" role="region" aria-label="Selected images">
+              <b>{sel.size} selected</b>
+              <button className="btn primary sm" onClick={() => setMoving((files ?? []).filter(f => sel.has(f.id)))}>Move to folder…</button>
+              <button className="btn ghost sm" onClick={() => setReplacing((files ?? []).filter(f => sel.has(f.id) && movable(f)))} title="These go to the restore bin; everything that uses them uses the image you choose">Replace with…</button>
+              {(files ?? []).filter(movable).some(f => !sel.has(f.id)) && <button className="btn ghost sm" onClick={() => setSel(new Set((files ?? []).filter(movable).map(f => f.id)))}>Select all {(files ?? []).filter(movable).length} shown</button>}
+              <button className="btn ghost sm" onClick={() => { setSel(new Set()); setLastPick(null) }}>Clear</button>
+              <span className="lib-faint" style={{ marginLeft: 'auto' }}>Or drag them onto a folder. Shift-click selects a range.</span>
+            </div>
+          )}
           {files === null ? <div className="loading">Loading…</div>
             : shown.length === 0 ? (
               <div className="empty" {...pressable((e: any) => { ((() => fileInput.current?.click()) as any)(e) })} data-a11y-click="" style={{ cursor: 'pointer' }}>
@@ -230,16 +309,21 @@ export default function ImageLibrary() {
                 <p>{folder ? `The “${folder}” folder is empty.` : 'Your library is empty.'} Drag images in, or click to upload.</p>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 14 }}>
-                {shown.map(f => (
-                  <div key={f.id} className="card" style={{ overflow: 'hidden', cursor: 'pointer' }} {...pressable((e: any) => { ((() => setPreview(f)) as any)(e) })} data-a11y-click="">
-                    <div style={{ aspectRatio: '16/10', background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 16px 16px', display: 'grid', placeItems: 'center' }}>
-                      <img src={thumbUrl(f.url, 300, 190)} alt={f.name} loading="lazy" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
-                    </div>
+              <div className={sel.size ? 'lib-selecting' : undefined} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 14 }}>
+                {shown.map((f, i) => (
+                  <div key={f.id} className={`card lib-card${sel.has(f.id) ? ' sel' : ''}`} style={{ overflow: 'hidden', cursor: 'pointer' }} {...pressable((e: any) => onCard(e, f, i))} data-a11y-click=""
+                    draggable={movable(f)} onDragStart={e => {
+                      const ids = sel.has(f.id) ? [...sel] : [f.id]
+                      e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids)); e.dataTransfer.effectAllowed = 'move'
+                    }}>
+                    <button type="button" className={`lib-pick${sel.has(f.id) ? ' on' : ''}`} disabled={!movable(f)} aria-pressed={sel.has(f.id)}
+                      aria-label={`${sel.has(f.id) ? 'Unselect' : 'Select'} ${f.name}`} onClick={e => { e.stopPropagation(); pick(e, f, i) }}>{sel.has(f.id) ? '✓' : ''}</button>
+                    <GridThumb f={f} backdrop={backdrop} />
                     <div style={{ padding: '9px 11px' }}>
                       <div style={{ fontWeight: 650, fontSize: 'var(--fs-sm)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={f.path}>{f.name}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
                         <span className="tag type" style={{ fontSize: 'var(--fs-micro)' }}>{f.kind}</span>
+                        {f.kind === 'bug' && f.metadata?.ad?.advertiser && <span style={{ fontSize: 'var(--fs-label)', color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={[f.metadata.ad.advertiser, f.metadata.ad.campaign].filter(Boolean).join(' · ')}>{f.metadata.ad.advertiser}</span>}
                         <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>{f.width && f.height ? `${f.width}×${f.height}` : ''} · {human(f.size_bytes)}</span>
                       </div>
                       {f.source === 'encoder' && f.captured_at
@@ -286,10 +370,18 @@ export default function ImageLibrary() {
                 </div>
                 <div className="hintxt">Pre-filled from the folder. Confirm or change per image below so nothing is stored as the wrong type.</div>
               </div>
+              {staged.items.some(it => it.kind === 'bug') && (
+                <div className="field"><label>Bug details (applied to the bugs above)</label>
+                  <BugAdFields value={stagedAd} onChange={setStagedAd} />
+                  {staged.items.some(it => it.video) && <div className="hintxt">Videos are converted to WebM with transparency for graphics. Export ProRes 4444, QuickTime Animation or WebM with alpha so the background stays clear.</div>}
+                </div>
+              )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {staged.items.map((it, i) => (
                   <div key={i} style={{ display: 'flex', gap: 11, alignItems: 'center', border: '1px solid var(--border)', borderRadius: 11, padding: 9 }}>
-                    <img src={it.preview} alt="" style={{ width: 56, height: 42, objectFit: 'cover', borderRadius: 7, background: '#000', flex: 'none' }} />
+                    {it.video
+                      ? <video src={it.preview} muted style={{ width: 56, height: 42, objectFit: 'cover', borderRadius: 7, background: '#000', flex: 'none' }} />
+                      : <img src={it.preview} alt="" style={{ width: 56, height: 42, objectFit: 'cover', borderRadius: 7, background: '#000', flex: 'none' }} />}
                     <input className="inp" value={it.name} onChange={e => updateStaged(i, { name: e.target.value })} style={{ flex: 1 }} />
                     <select className="inp" style={{ width: 116 }} value={it.kind} onChange={e => updateStaged(i, { kind: e.target.value })}>
                       {ASSIGNABLE.map(k => <option key={k} value={k}>{k}</option>)}
@@ -311,25 +403,37 @@ export default function ImageLibrary() {
       {preview && (
         <div className="drawer-scrim" {...pressable((e: any) => { ((() => setPreview(null)) as any)(e) })} data-a11y-click="" style={{ alignItems: 'center', justifyContent: 'center' }}>
           <div className="card" {...pressable((e: any) => { (((e: any) => e.stopPropagation()) as any)(e) })} data-a11y-click="" style={{ width: 600, maxWidth: '95vw', maxHeight: '92vh', padding: 0, overflow: 'auto' }}>
-            <div style={{ background: 'repeating-conic-gradient(#1a1f2b 0% 25%, #141821 0% 50%) 50% / 18px 18px', display: 'grid', placeItems: 'center', maxHeight: 360 }}>
-              <img src={thumbUrl(preview.url, 1000, 720, 'inside')} alt={preview.name} style={{ maxWidth: '100%', maxHeight: 360, objectFit: 'contain' }} />
+            <div style={{ background: BACKDROP[backdrop], display: 'grid', placeItems: 'center', maxHeight: 360, padding: 12 }}>
+              {preview.metadata?.motion?.video
+                ? <video src={'/' + preview.metadata.motion.video} poster={preview.url} autoPlay muted loop playsInline style={{ maxWidth: '100%', maxHeight: 360, objectFit: 'contain' }} />
+                : <img src={motionOf(preview)?.kind === 'animated' ? preview.url : thumbUrl(preview.url, 1000, 720, 'inside')} alt={preview.name} style={{ maxWidth: '100%', maxHeight: 360, objectFit: 'contain' }} />}
             </div>
             <div style={{ padding: 18 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{ fontWeight: 700, fontSize: 'var(--fs-h2)' }}>{preview.name}</div>
                 <span className="spacer" style={{ flex: 1 }} />
+                {movable(preview) && <button className="btn ghost sm" onClick={() => { setMoving([preview]); setPreview(null) }}>Move…</button>}
+                {movable(preview) && <button className="btn ghost sm" onClick={() => { setReplacing([preview]); setPreview(null) }} title="A duplicate, a better version, or a broken image: everything that uses this image uses the one you choose">Replace with…</button>}
                 <button className="xbtn" title="Delete" onClick={() => setConfirm({ file: preview })}>🗑</button>
               </div>
               <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', margin: '2px 0 12px' }}>{preview.folder ? preview.folder + '/' : '(root)'} · {preview.width && preview.height ? `${preview.width}×${preview.height}` : 'unknown size'} · {human(preview.size_bytes)} · {preview.content_type}</div>
               <MetadataPanel file={preview} onRefreshed={f => { setPreview(f); load() }}
                 onNear={(lat, lng) => { setPreview(null); setQ(''); setFolder(''); setSource('all'); setNear(`${lat.toFixed(5)},${lng.toFixed(5)},5`) }} />
+              {preview.metadata?.motion && (
+                <div className="hintxt" style={{ marginBottom: 10 }}>
+                  Video for graphics: {preview.metadata.motion.alpha ? 'with transparency' : 'no transparency (it will show as a solid rectangle)'}
+                  {preview.metadata.motion.durationSec ? ` · ${Number(preview.metadata.motion.durationSec).toFixed(1)} s` : ''}{preview.metadata.motion.fps ? ` · ${preview.metadata.motion.fps} fps` : ''}
+                  {' '}· plays as WebM in Chrome, Edge, Firefox and burned-in graphics; Safari shows the first frame.
+                </div>
+              )}
+              {preview.kind === 'bug' && <BugAdPanel file={preview} onSaved={f => { setPreview(f); load() }} />}
               {preview.source === 'encoder' ? null : (
               <div className="field"><label>Usage type</label>
                 <select className="inp" value={preview.kind} onChange={e => changeKind(preview, e.target.value)}>
                   {ASSIGNABLE.map(k => <option key={k} value={k}>{k}</option>)}
                 </select>
                 <FieldError>{kindErr?.id === preview.id ? kindErr.msg : null}</FieldError>
-                <div className="hintxt">Controls where it appears in pickers (slate / watermark / brand / poster). Change any time.</div>
+                <div className="hintxt">Controls where it appears in pickers (slate / watermark / brand / poster / bug). Change any time.</div>
               </div>
               )}
               <SocialPanel imageId={preview.id} refreshKey={socialKey} />
@@ -345,6 +449,23 @@ export default function ImageLibrary() {
 
       {publishImg && <SocialComposer imageId={publishImg.id} onClose={() => setPublishImg(null)} onPublished={() => { setSocialKey(k => k + 1); setPreview(publishImg) }} />}
       {builder && <UrlBuilder file={builder} onClose={() => setBuilder(null)} notify={m => { setToast(m); setTimeout(() => setToast(''), 2200) }} />}
+
+      {moving && (
+        <MoveDialog ids={moving.map(f => f.id)} names={moving.map(f => f.name)} from={moving.length && moving.every(f => f.folder === moving[0].folder) ? moving[0].folder : '\u0000'}
+          onClose={() => setMoving(null)}
+          onMoved={async (r, dest) => { setMoving(null); setSel(new Set()); flash(describeMove(r, dest)); await loadFolders(); await load() }} />
+      )}
+      {replacing && replacing.length > 0 && <ReplaceDialog files={replacing} onClose={() => setReplacing(null)}
+        onReplaced={async (msg) => { setReplacing(null); setSel(new Set()); flash(msg); await loadFolders(); await load() }} />}
+      {dupes && <DuplicatesDialog onClose={() => setDupes(false)} onMerged={async (msg) => { setDupes(false); flash(msg); await loadFolders(); await load() }} />}
+      {delFolder !== null && (
+        <DeleteFolderDialog path={delFolder} onClose={() => setDelFolder(null)} onShow={() => { setDelFolder(null); setQ(''); setSource('all') }}
+          onDeleted={async (removed) => {
+            const gone = delFolder; setDelFolder(null)
+            flash(`Deleted ${removed.length > 1 ? `${removed.length} empty folders` : `the folder ${gone}`}.`)
+            setFolder(gone.includes('/') ? gone.slice(0, gone.lastIndexOf('/')) : ''); await loadFolders()
+          }} />
+      )}
 
       {toast && (
         <div style={{ position: 'fixed', left: '50%', bottom: 26, transform: 'translateX(-50%)', zIndex: 60, background: 'var(--panel-3)', border: '1px solid var(--border-2)', color: 'var(--text)', padding: '10px 16px', borderRadius: 10, fontSize: 'var(--fs-body)', boxShadow: 'var(--shadow)' }}>{toast}</div>
@@ -372,11 +493,14 @@ export default function ImageLibrary() {
             <h3 style={{ margin: '0 0 8px' }}>Delete image?</h3>
             <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-body)' }}><b>{confirm.file.path}</b> — this can’t be undone.</p>
             {confirm.inUse && confirm.inUse.length > 0 && (
-              <Notice kind="warn" variant="compact" message={`In use as a slate by ${confirm.inUse.length} channel(s): ${confirm.inUse.map((c: any) => c.name).join(', ')}. Force-delete anyway?`} />
+              <Notice kind="warn" variant="compact" message={`Used in ${confirm.inUse.length} place${confirm.inUse.length === 1 ? '' : 's'}: ${[...new Set(confirm.inUse.map((c: any) => c.name))].slice(0, 5).join(', ')}${confirm.inUse.length > 5 ? ' and more' : ''}. Deleting leaves them without a picture; replacing points them at another image.`} />
             )}
             <div className="modal-f">
               <FormStatus error={delErr?.id === confirm.file.id ? delErr.msg : null} />
               <button className="btn ghost" onClick={() => setConfirm(null)}>Cancel</button>
+              {confirm.inUse && confirm.inUse.length > 0 && movable(confirm.file) && (
+                <button className="btn" onClick={() => { setReplacing([confirm.file]); setConfirm(null); setPreview(null) }}>Replace with another image…</button>
+              )}
               <button className="btn primary danger" onClick={() => doDelete(confirm.file, !!(confirm.inUse && confirm.inUse.length))}>
                 {confirm.inUse && confirm.inUse.length ? 'Force delete' : 'Delete'}
               </button>
@@ -388,9 +512,81 @@ export default function ImageLibrary() {
   )
 }
 
-function FolderRow({ label, active, onClick, count, depth }: { label: string; active: boolean; onClick: () => void; count: number; depth: number }) {
+type Backdrop = 'checker' | 'dark' | 'light'
+const BACKDROP: Record<Backdrop, string> = {
+  checker: 'repeating-conic-gradient(#2a3040 0% 25%, #171b25 0% 50%) 50% / 16px 16px',
+  dark: '#0b0e14',
+  light: 'repeating-conic-gradient(#ffffff 0% 25%, #e9ecf1 0% 50%) 50% / 16px 16px',
+}
+
+/* ONE GRID PREVIEW. The whole image, never cropped (a wide bug or a tall poster keeps its
+   shape), fetched at twice the tile size so it is sharp on a retina screen, padded so a
+   small logo is not edge to edge, on the backdrop the viewer chose. A video (an animated
+   bug) shows its first frame and plays in place while the pointer is over it. */
+function GridThumb({ f, backdrop }: { f: MediaFile; backdrop: Backdrop }) {
+  // Videos and animated GIF / WebP play while hovered (MotionThumb).
+  return <MotionThumb f={f} w={600} h={380} style={{ aspectRatio: '16/10', background: BACKDROP[backdrop], padding: 10 }} />
+}
+
+/* A BUG's advertising details: kept small on purpose. Stored as metadata.ad and
+   described in schema.org as the creative's sponsor (advertiser), producer (agency),
+   isPartOf (campaign) and identifier (Ad-ID or key number). */
+function BugAdFields({ value, onChange }: { value: Required<BugAd>; onChange: (v: Required<BugAd>) => void }) {
+  const f = (k: keyof BugAd, label: string, ph: string) => (
+    <input className="inp" aria-label={label} placeholder={ph} value={value[k]} onChange={e => onChange({ ...value, [k]: e.target.value })} />
+  )
   return (
-    <div {...pressable((e: any) => { ((onClick) as any)(e) })} data-a11y-click="" className={`nav-item ${active ? 'active' : ''}`}
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+      {f('advertiser', 'Advertiser', 'Advertiser, e.g. Qantas')}
+      {f('agency', 'Agency', 'Agency (optional)')}
+      {f('campaign', 'Campaign', 'Campaign, e.g. Summer Sale 2026')}
+      {f('adCode', 'Ad code', 'Ad-ID or key number (optional)')}
+    </div>
+  )
+}
+function BugAdPanel({ file, onSaved }: { file: MediaFile; onSaved: (f: MediaFile) => void }) {
+  const cur = file.metadata?.ad ?? {}
+  const [v, setV] = useState<Required<BugAd>>({ advertiser: cur.advertiser ?? '', agency: cur.agency ?? '', campaign: cur.campaign ?? '', adCode: cur.adCode ?? '' })
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [ok, setOk] = useState('')
+  const dirty = (['advertiser', 'agency', 'campaign', 'adCode'] as const).some(k => (cur[k] ?? '') !== v[k])
+  async function save() {
+    setBusy(true); setErr(''); setOk('')
+    try { onSaved(await api.setFileAd(file.id, v)); setOk('Saved') } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <div className="field"><label>Bug details</label>
+      <BugAdFields value={v} onChange={setV} />
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+        <FormStatus error={err} success={ok} />
+        <span style={{ flex: 1 }} />
+        <button className="btn primary sm" disabled={!dirty || busy} onClick={save}>{busy ? 'Saving…' : 'Save details'}</button>
+      </div>
+    </div>
+  )
+}
+
+/** Drag targets in the folder tree: images dragged from the grid move into the folder. */
+function useImageDrop(onDropImages?: (ids: string[]) => void) {
+  const [over, setOver] = useState(false)
+  if (!onDropImages) return { over: false, props: {} }
+  return {
+    over,
+    props: {
+      onDragOver: (e: React.DragEvent) => { if (!e.dataTransfer.types.includes(DRAG_TYPE)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (!over) setOver(true) },
+      onDragLeave: () => setOver(false),
+      onDrop: (e: React.DragEvent) => {
+        if (!e.dataTransfer.types.includes(DRAG_TYPE)) return
+        e.preventDefault(); e.stopPropagation(); setOver(false)
+        try { onDropImages(JSON.parse(e.dataTransfer.getData(DRAG_TYPE))) } catch { /* not ours */ }
+      },
+    },
+  }
+}
+
+function FolderRow({ label, active, onClick, count, depth, onDropImages }: { label: string; active: boolean; onClick: () => void; count: number; depth: number; onDropImages?: (ids: string[]) => void }) {
+  const drop = useImageDrop(onDropImages)
+  return (
+    <div {...pressable((e: any) => { ((onClick) as any)(e) })} data-a11y-click="" className={`nav-item ${active ? 'active' : ''}${drop.over ? ' lib-drop' : ''}`} {...drop.props}
       style={{ paddingLeft: 8 + depth * 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, borderRadius: 8 }}>
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
       <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
@@ -400,18 +596,19 @@ function FolderRow({ label, active, onClick, count, depth }: { label: string; ac
 }
 
 /** One folder in the lazy tree: its children load the first time it opens. */
-function FolderNode({ node, active, onPick, depth }: { node: LibraryFolder; active: string; onPick: (p: string) => void; depth: number }) {
+function FolderNode({ node, active, onPick, depth, onDropImages, source }: { node: LibraryFolder; active: string; onPick: (p: string) => void; depth: number; onDropImages?: (path: string, ids: string[]) => void; source?: string }) {
+  const drop = useImageDrop(onDropImages ? (ids) => onDropImages(node.path, ids) : undefined)
   const inside = active === node.path || active.startsWith(node.path + '/')
   const [open, setOpen] = useState(inside)
   const [kids, setKids] = useState<LibraryFolder[] | null>(null)
   useEffect(() => { if (inside) setOpen(true) }, [inside])
   useEffect(() => {
     if (!open || kids || !node.hasChildren) return
-    api.folderChildren(node.path).then(r => setKids(r.folders)).catch(() => setKids([]))
-  }, [open, kids, node.path, node.hasChildren])
+    apiRequest(`/files/folders?parent=${encodeURIComponent(node.path)}&source=${source && source !== 'all' ? source : ''}`).then((r: any) => setKids(r.folders)).catch(() => setKids([]))
+  }, [open, kids, node.path, node.hasChildren, source])
   return (
     <>
-      <div className={`nav-item ${active === node.path ? 'active' : ''}`}
+      <div className={`nav-item ${active === node.path ? 'active' : ''}${drop.over ? ' lib-drop' : ''}`} {...drop.props}
         style={{ paddingLeft: 4 + depth * 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, borderRadius: 8 }}
         {...pressable((e: any) => { ((() => { onPick(node.path); setOpen(true) }) as any)(e) })} data-a11y-click="" title={node.path}>
         <button type="button" aria-label={open ? `Collapse ${node.name}` : `Expand ${node.name}`} aria-expanded={open}
@@ -423,7 +620,7 @@ function FolderNode({ node, active, onPick, depth }: { node: LibraryFolder; acti
         <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{node.name}</span>
         <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>{node.total ?? node.count}</span>
       </div>
-      {open && kids?.map(k => <FolderNode key={k.path} node={k} active={active} onPick={onPick} depth={depth + 1} />)}
+      {open && kids?.map(k => <FolderNode key={k.path} node={k} active={active} onPick={onPick} depth={depth + 1} onDropImages={onDropImages} source={source} />)}
     </>
   )
 }

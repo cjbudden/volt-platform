@@ -5,7 +5,8 @@
 //
 //  Usage: npx tsx test/hls-master-pure.check.ts
 // ============================================================================
-import { parsePlaylist, parseAttrs, codecName, looksLikeHls } from '../src/services/hlsMaster';
+import { parsePlaylist, parseAttrs, codecName, looksLikeHls, extinfTitle } from '../src/services/hlsMaster';
+import { readId3 } from '../src/services/sourceValidate';
 
 let pass = 0, fail = 0;
 const check = (m: string, got: unknown, want: unknown) => {
@@ -48,7 +49,31 @@ check('subtitles are a rendition too', a.renditions!.filter((x) => x.type === 'S
 
 const MEDIA = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:1\n#EXTINF:6.0,\nseg1.aac\n#EXTINF:6.0,\nseg2.aac`;
 check('a live media playlist', parsePlaylist(MEDIA, 'https://x.example/v0-221.m3u8'), { ok: true, kind: 'media', live: true, targetDuration: 6,
-  recentSegments: [{ uri: 'https://x.example/seg1.aac', duration: 6, length: null }, { uri: 'https://x.example/seg2.aac', duration: 6, length: null }] });
+  recentSegments: [{ uri: 'https://x.example/seg1.aac', duration: 6, length: null }, { uri: 'https://x.example/seg2.aac', duration: 6, length: null }],
+  segmentTitle: null, markers: { dateRanges: 0, cues: 0, programDateTime: false } });
+
+// NOW PLAYING AND MARKERS IN A MEDIA PLAYLIST (a Revma / RadioJar style radio stream)
+const RADIO = `#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:179606142\n#EXT-X-DISCONTINUITY\n#EXTINF:10,title="OLD SONG",artist="SOMEONE"\nhttps://r.example/1.aac\n#EXTINF:10,title="HINGGA AKHIR NANTI",artist="NEON"\nhttps://r.example/2.aac`;
+const rp = parsePlaylist(RADIO, 'https://r.example/p.m3u8');
+check('now playing from the newest #EXTINF (title="",artist="")', [rp.segmentTitle?.title, rp.segmentTitle?.artist, Object.keys(rp.segmentTitle?.fields ?? {})], ['HINGGA AKHIR NANTI', 'NEON', ['title', 'artist']]);
+check('a plain "Artist - Title" #EXTINF', [extinfTitle('#EXTINF:6,Queen - Bohemian Rhapsody')?.artist, extinfTitle('#EXTINF:6,Queen - Bohemian Rhapsody')?.title], ['Queen', 'Bohemian Rhapsody']);
+check('an empty #EXTINF title is nothing', extinfTitle('#EXTINF:6.0,'), null);
+const MK = `#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-PROGRAM-DATE-TIME:2026-10-28T00:00:00Z\n#EXT-X-DATERANGE:ID="a",START-DATE="2026-10-28T00:00:00Z"\n#EXT-X-CUE-OUT:30\n#EXTINF:6,\ns.ts`;
+check('markers: date ranges, SCTE-35 cues, program date-time', parsePlaylist(MK, 'https://x.example/m.m3u8').markers, { dateRanges: 1, cues: 1, programDateTime: true });
+check('closed captions announced on a variant', parsePlaylist('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1,CLOSED-CAPTIONS="cc"\nv.m3u8', 'https://x.example/m.m3u8').closedCaptions, true);
+
+// ID3 AT THE START OF A PACKED-AUDIO SEGMENT: Apple's timestamp, then title and artist
+const syncsafe = (n: number) => Buffer.from([(n >> 21) & 0x7f, (n >> 14) & 0x7f, (n >> 7) & 0x7f, n & 0x7f]);
+const frame = (id: string, body: Buffer) => Buffer.concat([Buffer.from(id, 'latin1'), syncsafe(body.length), Buffer.from([0, 0]), body]);
+const tag = (frames: Buffer[]) => { const b = Buffer.concat(frames); return Buffer.concat([Buffer.from('ID3\x04\x00\x00', 'latin1'), syncsafe(b.length), b]); };
+const seg = Buffer.concat([
+  tag([frame('PRIV', Buffer.concat([Buffer.from('com.apple.streaming.transportStreamTimestamp\0', 'latin1'), Buffer.from([0, 0, 0, 0, 3, 0xd0, 0x99, 0x4a])]))]),
+  tag([frame('TIT2', Buffer.concat([Buffer.from([3]), Buffer.from('HINGGA AKHIR NANTI')])), frame('TPE1', Buffer.concat([Buffer.from([3]), Buffer.from('NEON')]))]),
+  Buffer.from([0xff, 0xf9, 0x58, 0x80]),
+]);
+const t = readId3(seg);
+check('ID3 in a segment: title, artist and the Apple timestamp', [t?.title, t?.artist, t?.timestamp, t?.frames], ['HINGGA AKHIR NANTI', 'NEON', true, ['PRIV', 'TIT2', 'TPE1']]);
+check('no ID3: nothing', readId3(Buffer.from([0xff, 0xf1, 0x50, 0x80])), null);
 const LONG = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n' + [1, 2, 3, 4, 5].map((n) => `#EXTINF:4.0,\ns${n}.ts`).join('\n');
 check('measuring the bitrate uses the last three segments', parsePlaylist(LONG, 'https://x.example/v/i.m3u8').recentSegments!.map((x) => x.uri.split('/').pop()), ['s3.ts', 's4.ts', 's5.ts']);
 const BR = '#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2.0,\n#EXT-X-BYTERANGE:250000@0\nall.ts\n#EXTINF:2.0,\n#EXT-X-BYTERANGE:260000\nall.ts';

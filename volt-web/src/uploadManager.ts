@@ -228,6 +228,8 @@ export interface StartOptions {
   schemaId?: string | null
   metadata?: Record<string, any> | null
   source?: string
+  /** 'vod' only: a re-upload of a record whose encode failed, and what to do with it. */
+  retryOf?: { assetId: string; action: 'reattach' | 'replace' | 'new' } | null
 }
 
 export async function startUpload(file: File, opts: StartOptions): Promise<UploadItem> {
@@ -251,7 +253,7 @@ export async function startUpload(file: File, opts: StartOptions): Promise<Uploa
           ? { ladderGroupId: opts.ladderGroupId ?? null,
               relativePath: opts.relativePath ?? ((file as any).webkitRelativePath || null),
               schemaId: opts.schemaId ?? null, metadata: opts.metadata ?? undefined,
-              source: opts.source ?? 'panel' }
+              source: opts.source ?? 'panel', retryOf: opts.retryOf ?? null }
           : { fillerKind: opts.kind }),
         name: item.name,
         filename: file.name, contentType: file.type || 'application/octet-stream',
@@ -372,6 +374,60 @@ async function backgroundIsMoving(item: UploadItem): Promise<boolean> {
   return false
 }
 
+/**
+ * KEEP THE BAR MOVING WHILE THE BROWSER CARRIES THE UPLOAD.
+ *
+ * Once a background transfer was seen to be moving, the page stopped asking
+ * and relied on the registration's `progress` event and `uploaded` count.
+ * Chrome raises those mostly for the DOWNLOAD side of a Background Fetch, so an
+ * upload sat at 0% and then jumped to 100% at the end, in every view. The
+ * server's count of received chunks is the truth, so read it every two seconds
+ * until the item finishes, fails, or the tab lets go of it.
+ */
+async function followBackground(item: UploadItem): Promise<void> {
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 2000))
+    if (!items.has(item.id) || item.status !== 'background') return
+    const state = await serverState(item)
+    if (!state) continue
+    const now = Date.now(); const prev = (item as any)._r as { t: number; b: number } | undefined
+    if (prev && now - prev.t > 1500) { item.rate = ((state.receivedBytes - prev.b) * 1000) / (now - prev.t); (item as any)._r = { t: now, b: state.receivedBytes } }
+    else if (!prev) (item as any)._r = { t: now, b: state.receivedBytes }
+    item.received = state.received
+    // never backwards: the worker's own message may have reported more already
+    item.sentBytes = Math.min(item.totalBytes, Math.max(item.sentBytes, state.receivedBytes))
+    if (state.state === 'complete' && item.status === 'background') {
+      item.status = 'done'
+      if (item.sessionId) forget(item.sessionId)
+    }
+    emit()
+  }
+}
+
+/**
+ * One chunk, with progress WHILE it is sent. fetch() cannot report upload
+ * progress, so the bar only moved when a whole 8 MB chunk had landed: with three
+ * in flight, anything up to about 24 MB went from 0% straight to 100%, and
+ * larger files moved in 8 MB jumps. XMLHttpRequest reports every few KB.
+ */
+function putChunk(url: string, token: string, blob: Blob, onBytes: (loaded: number) => void): Promise<{ ok: boolean; status: number; body: any }> {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest()
+    x.open('PUT', url)
+    x.setRequestHeader('authorization', `Bearer ${token}`)
+    x.setRequestHeader('content-type', 'application/octet-stream')
+    x.upload.onprogress = (e) => onBytes(e.loaded)
+    x.onload = () => {
+      let body: any = {}
+      try { body = JSON.parse(x.responseText || '{}') } catch { /* not json */ }
+      resolve({ ok: x.status >= 200 && x.status < 300, status: x.status, body })
+    }
+    x.onerror = () => reject(new Error('the connection dropped while sending'))
+    x.onabort = () => reject(new Error('cancelled'))
+    x.send(blob)
+  })
+}
+
 /** What the server has actually received for this session. */
 async function serverState(item: UploadItem): Promise<
   { received: number[]; receivedBytes: number; state: string } | null
@@ -420,7 +476,7 @@ async function drive(item: UploadItem): Promise<void> {
       // at "background" with zero bytes sent, no error, and no timeout, for as
       // long as the tab stayed open. Watch it; if it has not moved, take the
       // transfer back.
-      if (await backgroundIsMoving(item)) return
+      if (await backgroundIsMoving(item)) { void followBackground(item); return }
       await abandonBackgroundFetch(item)
       // fall through and upload in the page instead
     } catch {
@@ -439,6 +495,15 @@ async function drive(item: UploadItem): Promise<void> {
 
   let next = 0
   let failed: string | null = null
+  // bytes of chunks still in flight, added to the server's count for the bar
+  const inflight = new Map<number, number>()
+  let confirmed = item.sentBytes
+  const show = () => {
+    let extra = 0
+    for (const b of inflight.values()) extra += b
+    item.sentBytes = Math.min(item.totalBytes, confirmed + extra)
+    emit()
+  }
 
   async function worker() {
     for (;;) {
@@ -451,29 +516,29 @@ async function drive(item: UploadItem): Promise<void> {
       const start = index * item.chunkSize
       const blob = item.file!.slice(start, Math.min(start + item.chunkSize, item.totalBytes))
       try {
-        const r = await fetch(`/api/uploads/${item.sessionId}/chunks/${index}`, {
-          method: 'PUT',
-          headers: {
-            authorization: `Bearer ${item.token}`,
-            'content-type': 'application/octet-stream',
-          },
-          body: blob,
+        inflight.set(index, 0)
+        let lastShow = 0
+        const r = await putChunk(`/api/uploads/${item.sessionId}/chunks/${index}`, item.token!, blob, (loaded) => {
+          inflight.set(index, loaded)
+          const now = Date.now()
+          if (now - lastShow > 150) { lastShow = now; show() }   // a repaint every few KB is wasted work
         })
+        inflight.delete(index)
         if (!r.ok) {
-          const body = await r.json().catch(() => ({}))
-          throw new Error(body.error || `chunk ${index} failed (${r.status})`)
+          throw new Error(r.body?.error || `chunk ${index} failed (${r.status})`)
         }
-        const out = await r.json()
+        const out = r.body
         // Progress comes from the SERVER's count, not from what this tab thinks
         // it sent. They differ after a resume, and the server is the one that
         // knows.
         const now = Date.now(); const prev = (item as any)._r as { t: number; b: number } | undefined
         if (prev && now - prev.t > 1500) { item.rate = ((out.receivedBytes - prev.b) * 1000) / (now - prev.t); (item as any)._r = { t: now, b: out.receivedBytes } }
         else if (!prev) (item as any)._r = { t: now, b: out.receivedBytes }
-        item.sentBytes = out.receivedBytes
+        confirmed = Math.max(confirmed, out.receivedBytes)
         if (Array.isArray(out.receivedIndices)) item.received = out.receivedIndices   // so a resume sends only what is missing
-        emit()
+        show()
       } catch (e: any) {
+        inflight.delete(index)
         failed = e.message
         return
       }

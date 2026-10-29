@@ -21,6 +21,7 @@ import { enqueue } from '../queue';
 import { QC_RUN } from './qcRun';
 import { PermanentError, registerHandler, type JobContext } from '../worker';
 import { fireHook } from '../../workflows/hooks';
+import { setMediaState } from '../../assetReadiness';
 
 export interface ClipExtractPayload {
   vodAssetId: string;
@@ -55,7 +56,31 @@ function publicPath(vodAssetId: string, rest: string): string {
   return `/clips/${vodAssetId}/${rest}`;
 }
 
+/**
+ * A BUILD THAT FAILS SAYS SO ON THE ASSET. The job row has always carried the
+ * reason; the asset did not, so a refused build (a gap in the recording, a
+ * missing run) left the clip at thumb_status 'processing' in the library,
+ * looking normal, until somebody pressed play. Sorotan, 27 Oct 2026: a 26.3 s
+ * gap refused the auto-VOD build and the library showed a healthy card.
+ *
+ * Written only when the failure is FINAL (permanent, or the last attempt), so a
+ * transient error that a retry will fix does not flash the asset red.
+ */
 export async function handleClipExtract(ctx: JobContext): Promise<Record<string, unknown>> {
+  try {
+    return await buildClip(ctx);
+  } catch (e: any) {
+    const id = (ctx.job.payload as ClipExtractPayload)?.vodAssetId;
+    const final = e instanceof PermanentError || ctx.job.attempts >= ctx.job.max_attempts;
+    if (id && final) {
+      await setMediaState(id, 'failed', { message: String(e?.message ?? e), code: e?.code ?? null })
+        .catch((w) => console.warn('[clip.extract] could not mark', id, 'failed:', w));
+    }
+    throw e;
+  }
+}
+
+async function buildClip(ctx: JobContext): Promise<Record<string, unknown>> {
   const p = ctx.job.payload as ClipExtractPayload;
   if (!p?.vodAssetId || !p?.streamId) {
     throw new PermanentError('clip.extract payload is missing vodAssetId or streamId', 'bad_payload');
@@ -104,6 +129,11 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
     throw e;
   }
 
+  // WHOLE MILLISECONDS. A range that skips a gap measures a fractional length
+  // (174225.44 ms for Sorotan), and duration_ms is a bigint: the UPDATE below
+  // threw "invalid input syntax for type bigint" after the files were written.
+  result.durationMs = result.durationMs == null ? result.durationMs : Math.round(result.durationMs);
+
   // ---- write the real paths back onto the asset ---------------------------
   const hls = result.files.find((f) => f.format === 'hls');
   const mp4 = result.files.find((f) => f.format === 'mp4');
@@ -119,6 +149,7 @@ export async function handleClipExtract(ctx: JobContext): Promise<Record<string,
        export_m4a_key  = COALESCE($6, export_m4a_key),
        duration_ms     = $4,
        thumb_status    = 'ready',
+       media_state     = 'ready', media_error = NULL, media_error_code = NULL, media_state_at = now(),
        updated_at      = now()
      WHERE id = $1`,
     [

@@ -12,8 +12,8 @@ encoder's own segments while it runs:
 - **Clip VTTs**: every clip gets its own VTT, re-timed to the clip and
   pointing at the same sheets. Nothing is re-rendered.
 
-Code: `src/services/thumbnails/` (naming, builder, clips),
-`src/modules/thumbnails.ts` (API), migration `0049`. Image metadata and library
+Code: `src/services/thumbnails/` (naming, builder, clips, spriteStore),
+`src/modules/thumbnails.ts` (API), migrations `0049` and `0112`. Image metadata and library
 search, which these stills also use, are in [IMAGES.md](IMAGES.md) section 17.
 
 - [1. Where the files go](#1-where-the-files-go)
@@ -30,27 +30,59 @@ search, which these stills also use, are in [IMAGES.md](IMAGES.md) section 17.
 
 ## 1. Where the files go
 
-Everything lives in the account's image library (`library/{account}/` in the
-image store: a local folder in development, the images S3 bucket in the
-cloud), so the Image Library can browse and search it and the image service
-can resize it.
+Two places in the image store (a local folder in development, the images S3
+bucket in the cloud), both served by the signed image service:
+
+* **Stills** go to the account's **Image Library** (`library/{account}/`), so
+  people can browse, search and pick them as posters.
+* **Sprite sheets and VTTs** go to the **sprite store**
+  (`derived/{account}/sprites/`). They are system files: the player's hover
+  previews, the recording and clip timelines and the asset actions read them,
+  nobody picks one as an image, so they are kept out of the library.
 
 ```
-thumbnails/
+library/{account}/thumbnails/                  IMAGE LIBRARY: stills
   Sport-One/                                   the channel (or event) name
     2026-10-16/                                the channel's local date
       18/                                      the channel's local hour
         Sport-One-20261016-180000.jpg          a still, no programme on air
         Morning-Match-20261016-180100.jpg      a still during "Morning Match" (EPG)
         ...                                    one a minute
-        storyboard/
-          Sport-One-20261016-18-m00.jpg        sprite sheet 18:00-18:09:59
-          Sport-One-20261016-18-m10.jpg        sprite sheet 18:10-18:19:59
-          ...                                  six sheets an hour
-          Sport-One-20261016-18.vtt            the hour's WebVTT
-    clips/
-      Goal-of-the-day-0f3a9c12.vtt             a clip's VTT (section 5)
+
+derived/{account}/sprites/                     SPRITE STORE: sheets and VTTs
+  streams/Sport-One/2026-10-16/18/             the same channel / date / hour
+    Sport-One-20261016-18-m00.jpg              sprite sheet 18:00-18:09:59
+    Sport-One-20261016-18-m10.jpg              sprite sheet 18:10-18:19:59
+    ...                                        six sheets an hour
+    Sport-One-20261016-18.vtt                  the hour's WebVTT
+  assets/{asset}/
+    sheet-000.jpg ...                          an uploaded file's own sheets (section 5)
+    thumbs.vtt                                 a clip's VTT (section 5)
 ```
+
+### Where sprites live: the sprite store and `sprite_sheets`
+
+Every object in the sprite store has a `sprite_sheets` row (migration `0112`):
+its owner (`stream`, with the storyboard hour it belongs to, or `asset`), its
+kind (`sheet` or `vtt`), first tile, interval, layout, tiles and bytes. That
+table is the inventory: sprites are counted (`GET /api/thumbnails/sprites`),
+listed per asset or stream, removed with their hour or asset, and go to the
+restore bin with them. Rows cascade when their storyboard hour or asset row is
+deleted. The layout the readers use is unchanged: `storyboards.sheets` for live
+hours, `vod_assets.sprite` for uploaded files.
+
+**Sheets made before the sprite store** (under `library/.../storyboard/`,
+`thumbnails/files/{asset}/` and `thumbnails/{channel}/clips/`, each with an
+Image Library row) are moved automatically
+(`spriteStore.ts relocateLegacySprites`): a batch at the start of each
+thumbnail pass (or, with thumbnails off, a minute after start-up) until none
+are left. Files move to the new keys, `storyboards.sheets`, `vtt_key`,
+`vod_assets.sprite`, `storyboard_key` and `thumbs_vtt_key` are rewritten, clip
+VTTs are written again (their cues held the old sheet URLs), the sheets'
+library rows are dropped, and library sheet rows nothing points at go with
+their files. Running it again changes nothing. Hours being built at that moment
+are left for the next pass; a sheet still on an old key also moves itself the
+next time it gains tiles.
 
 **Names.** `{programme or channel}-{YYYYMMDD}-{HHMMSS}.jpg`. When the EPG has
 a programme on air at that instant (as-run times preferred), the still is
@@ -65,11 +97,12 @@ so the folder an operator opens matches the clock in the gallery. Events use
 the second one is folder `01b`. Zones with half-hour offsets work: an hour is
 always the local hour.
 
-**What the rows say.** Each still and sheet is a `media_files` row with
-`source = 'encoder'`, `kind = 'keyframe'` (stills) or `'storyboard'` (sheets),
-`channel_id`, `captured_at` (the instant the frame shows) and, in `metadata`,
-the channel name and programme. So "Morning Match" or "Sport One" finds them
-in the library search, and the library can filter by channel and time.
+**What the rows say.** Each still is a `media_files` row with
+`source = 'encoder'`, `kind = 'keyframe'`, `channel_id`, `captured_at` (the
+instant the frame shows) and, in `metadata`, the channel name and programme. So
+"Morning Match" or "Sport One" finds them in the library search, and the library
+can filter by channel and time. Sheets have no library row; they are in
+`sprite_sheets` (above).
 
 ## 2. How 24x7 channels are split
 
@@ -149,8 +182,8 @@ sheet is shown.
 When a clip is built, `clip.extract` writes its VTT: the stream's cues for the
 clip's source ranges (from `clip_segments`, so clips stitched from several
 pieces are mapped piece by piece), re-timed to start at 0, trimmed at both
-ends, pointing at the existing sheets. The file goes to
-`thumbnails/{channel}/clips/{clip-title}-{id8}.vtt`, and the asset's
+ends, pointing at the existing sheets. The file goes to the asset's sprite
+folder, `derived/{account}/sprites/assets/{asset}/thumbs.vtt`, and the asset's
 `thumbs_vtt_key` points at it. `poster_key` is set to the library still
 nearest the clip's start, and `storyboard_key` to its first sheet.
 
@@ -168,8 +201,10 @@ soon as the pass has caught up.
 ### Uploaded files
 
 An uploaded or watchfolder file has no stream, so its sprite sheets are made from the file at the end of its encode
-(`services/thumbnails/fileSprites.ts`): the same tile layout, about 200 previews whatever its length, stored under
-`thumbnails/files/<asset>/` and described in `vod_assets.sprite`. `GET /api/thumbnails/vod/:id.vtt` serves them first
+(`services/thumbnails/fileSprites.ts`): the same tile layout, about 200 previews whatever its length, stored in the
+sprite store under `derived/{account}/sprites/assets/<asset>/` (a `sprite_sheets` row each, no library row) and
+described in `vod_assets.sprite`. A rebuild that makes fewer sheets removes the ones left over. Removing the asset
+puts its sheets in the restore bin with it. `GET /api/thumbnails/vod/:id.vtt` serves them first
 when they exist. Its poster is picked from stills of the file (`docs/ASSET_IMAGES.md`).
 
 ## 6. API
@@ -180,6 +215,7 @@ the caller's own channels and events.
 | Route | Answers |
 |---|---|
 | `GET /api/thumbnails/storyboard?stream={id}[&from={ms}&to={ms}][&prime=1]` (default: the last hour) | `{tileW, tileH, intervalMs, units: [{start, end, status, folder}], sheets: [{url, startMs, endMs, intervalMs, cols, tileW, tileH, filled}]}`. At most 48 hours. `prime=1` builds missing hours in the background. |
+| `GET /api/thumbnails/sprites[?asset={id} \| ?stream={id}&from&to]` | The sprite inventory: `usage` (files and bytes by owner and kind), `totals`, and for an asset or a stream's span the `items` (key, owner, kind, start, tiles, size, bytes, and a signed `url` for sheets). At most 7 days and 2,000 rows for a stream. |
 | `GET /api/thumbnails/vtt?stream&from&to` | WebVTT for the span, timed from `from`. At most 7 days. |
 | `GET /api/thumbnails/recordings/{id}.vtt` | A recording's WebVTT. |
 | `GET /api/thumbnails/vod/{id}.vtt` | A clip's WebVTT. |
@@ -197,7 +233,7 @@ natively or through a plugin):
 WEBVTT
 
 00:30:00.000 --> 00:30:10.000
-https://img.example.com/img/{sig}/1600x540,fill,fmt=jpeg,q=85,v=60/library/{acct}/thumbnails/Sport-One/2026-10-16/18/storyboard/Sport-One-20261016-18-m30.jpg#xywh=0,0,160,90
+https://img.example.com/img/{sig}/1600x540,fill,fmt=jpeg,q=85,v=60/derived/{acct}/sprites/streams/Sport-One/2026-10-16/18/Sport-One-20261016-18-m30.jpg#xywh=0,0,160,90
 ```
 
 ## 7. Configuration
@@ -228,10 +264,12 @@ Per channel, at the defaults, with real broadcast pictures:
 |---|---|---|
 | Stills (1,440 × 25 to 40 KB) | 35 to 60 MB | 1 to 1.8 GB |
 | Sheets (144 × 100 to 200 KB) | 15 to 30 MB | 0.4 to 0.9 GB |
-| Library rows | about 1,600 | about 48,000 |
+| Library rows (stills) | about 1,440 | about 43,200 |
+| Sprite rows (sheets + VTT) | about 170 | about 5,000 |
 
 Retention runs with the pass, at most once an hour, and deletes whole hours:
-the files, the library rows and the storyboard row. Clip VTTs are kept (they
+the stills and their library rows, the sheets and VTT and their sprite rows,
+and the storyboard row. Clip VTTs are kept (they
 are tiny), but once their hours are deleted their cues point at sheets that no
 longer exist, so a clip that must keep its previews should be kept inside the
 retention period or have its own thumbnails made.
