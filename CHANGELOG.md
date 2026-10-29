@@ -2,6 +2,20 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.21.0 (2026-10-29)
+
+### Product (in customer release notes)
+
+- added · Radio: An operator can correct a now-playing log entry that was put in the wrong class: choose Song, Ad or Content in its Class column on the station's page. Volt keeps what it had said and who corrected it, and the API has the same with PATCH /api/radio/{id}/log/{entryId}.
+- fixed · Media Library: Set type and metadata for all is now offered beside What are you adding? before any file is added, so the type and fields can be set before Start as soon as added starts the upload.
+- added · Radio: Stations can be deleted through the radio API too: DELETE /api/radio/{id}, with GET /api/radio/{id}/delete-impact to see what goes with it. Same rules as removing a station in the console: owners and administrators, and stop it first.
+- improved · Docs: The Notifications, Monitoring and never-dark channel guides now list the stream alerts (encoder stopped, source unreadable, a minute on the slate, output timing) and the Media Library guides say the Ingest Queue button is in the top bar.
+- improved · Recordings: The Recordings search now finds a channel, station or event by a programme or song that aired inside its recordings, not only by its name, and says what matched and when (for example Played: a song title and the time it aired).
+
+### Internal
+
+- added · Tests: New check suite g5b2-fixes (36 assertions: log class correction, recordings search by what aired, station delete through the radio API) and browser walk volt-web/test/g5b2-fixes.browser.mjs (11 checks at 1440x900).
+
 ## 0.20.0 (2026-10-29)
 
 ### Product (in customer release notes)
