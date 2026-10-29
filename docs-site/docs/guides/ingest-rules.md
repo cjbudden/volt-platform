@@ -64,7 +64,7 @@ Library and media operations staff use it, usually set up once by an administrat
    | **Webhooks** | The webhooks to call (hold Ctrl or Cmd to choose several) |
    | **Refuse with reason (instead of ingesting)** | A reason; matching files are refused instead of ingested |
 
-6. Choose **Save rule**, or **Cancel**. The rule appears on its rung with its order, name, what it applies to and a summary of what it does (**always:** when it has no conditions, or **inherits everything** when it sets nothing).
+6. Choose **Save rule**, or **Cancel**. The rule appears on its rung with its order, name, what it applies to and a summary in words of when it applies and what it does, for example *when the extension is mov or mp4: metadata: Before upload · uploads wait for Start* (**always:** when it has no conditions, or **inherits everything** when it sets nothing).
 
 ### Teach Volt your file names
 
@@ -117,7 +117,8 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 |---|---|
 | See the rules, webhooks and linked accounts | Account settings: View |
 | Add, change, switch off or delete rules, webhooks and providers | Account settings: Manage |
-| Add files in the Media Library (this checks the rules) | Files, uploads & storage: Manage, and Account settings: Manage |
+| Add files in the Media Library (this checks the rules) | Files, uploads & storage: Manage |
+| See how files would be treated before they upload (the upload panel's check) | Files, uploads & storage: View, or Account settings: View |
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).
 
@@ -129,7 +130,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **No rules on this rung.** | Nothing overrides the rung beneath here | Expected; the baseline or a lower rung decides |
 | A rule does not seem to apply | Only one rule per rung is used: a rule with a lower **Order** on the same rung matched first, or the rule is disabled | Check the order and the **When** conditions, and **Enable** it |
 | A rule is called **Untitled rule** | It was saved without a name | **Edit** it and give it a name |
-| A **Link** button is greyed out | The service has not been set up for your Volt service | Contact Volt support |
+| A **Link** button is greyed out | The service has not been set up for your Volt service; hover over it to see why | Ask your Volt provider |
 | **Add provider** shows an error | The connection details are not valid JSON | Keep the quotes and braces from the example and fill in the values |
 | A webhook row shows an error after **last** | Your system did not accept the last call | Check the address and that your system answers; the error text says what came back |
 | Files added in the Media Library show **refused** | A rule with **Refuse with reason** matched | Read the reason; change the file or the rule |

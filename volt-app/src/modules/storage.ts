@@ -26,13 +26,28 @@ import {
 import { reconcileStream } from '../services/media/reconcile';
 import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { actorLabel } from '../util/actor';
+import { seesServerSetup } from '../services/serverSetup';
+
+// WHAT AN ACCOUNT USER IS SHOWN (build queue 1.14-G3a-2). The server setting
+// behind a missing archive (MEDIA_ARCHIVE_ENABLED) and the raw storage
+// addresses of each copy (s3://bucket/..., a disk path) describe the
+// deployment, not the account's media: only whoever runs Volt sees them
+// (services/serverSetup.ts). Everyone else gets the plain reason and the tier.
+function capsFor(req: any) {
+  const c = capabilities();
+  return seesServerSetup(req) ? c : { ...c, archiveSetupHint: null };
+}
+function locationsFor(req: any, locs: any[] | null | undefined) {
+  if (!locs || seesServerSetup(req)) return locs ?? null;
+  return locs.map(({ uri: _uri, ...l }: any) => l);
+}
 
 export const storageRouter = Router();
 storageRouter.use(requireAuth);
 
 /** What this deployment can do. Read by the rule editor and the restore flow. */
-storageRouter.get('/capabilities', asyncHandler(async (_req, res) => {
-  const caps = capabilities();
+storageRouter.get('/capabilities', asyncHandler(async (req, res) => {
+  const caps = capsFor(req);
   res.json({ ...caps, defaultLadder: defaultLadder() });
 }));
 
@@ -98,7 +113,7 @@ storageRouter.get('/objects', asyncHandler(async (req, res) => {
   const page = finishPage(req, res, pl, rows, total);
   // `count` is the number of rows on this page, as it always was. The total
   // is X-Total-Count, with count=true.
-  res.json({ objects: page, count: page.length });
+  res.json({ objects: page.map((o: any) => ({ ...o, locations: locationsFor(req, o.locations) })), count: page.length });
 }));
 
 async function ownedObject(req: any) {
@@ -122,7 +137,7 @@ storageRouter.get('/objects/:id', asyncHandler(async (req, res) => {
   const obj = await ownedObject(req);
   res.json({
     ...obj,
-    locations: await locationsOf(obj.id),
+    locations: locationsFor(req, await locationsOf(obj.id)),
     readability: await readability(obj.id),
     history: await historyOf(obj.id, 50),
   });
@@ -167,7 +182,7 @@ const stageSchema = z.object({
 storageRouter.get('/retention', asyncHandler(async (req, res) => {
   res.json({
     rules: await listRules(accountId(req)),
-    capabilities: capabilities(),
+    capabilities: capsFor(req),
     defaultLadder: defaultLadder(),
   });
 }));

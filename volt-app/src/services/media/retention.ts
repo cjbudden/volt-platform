@@ -30,7 +30,7 @@
 // ============================================================================
 import { one, query } from '../../db';
 import { config } from '../../config';
-import { capabilities, isImmediate, storageDriver, type StorageTier } from './storage';
+import { capabilities, isImmediate, storageDriver, tierWords, actionWords, type StorageTier } from './storage';
 import { locationsOf, transition, type MediaObject } from './objects';
 import { reclaimRunSidecars } from './sidecars';
 
@@ -85,22 +85,22 @@ export function validateStages(stages: RetentionStage[]): Validation {
 
     if (!caps.actions.includes(s.action)) {
       return { ok: false, code: 'action_unavailable',
-        message: `"${s.action}" is not available on this deployment. ` +
+        message: `${actionWords(s.action)} is not available on this Volt service. ` +
                  (caps.archiveUnavailableReason ?? '') +
-                 ` Available actions: ${caps.actions.join(', ')}.` };
+                 ` Available actions: ${caps.actions.map(actionWords).join(', ')}.` };
     }
     if (s.targetTier && !caps.tiers.includes(s.targetTier)) {
       return { ok: false, code: 'tier_unavailable',
-        message: `Tier "${s.targetTier}" is not available here. Available: ${caps.tiers.join(', ')}.` };
+        message: `The tier ${tierWords(s.targetTier)} is not available here. Available: ${caps.tiers.map(tierWords).join(', ')}.` };
     }
     if (s.action === 'to_cold' && s.targetTier && !isImmediate(s.targetTier)) {
       return { ok: false, code: 'not_a_cold_tier',
-        message: `"${s.targetTier}" needs a restore before it can be read, so it is an archive tier, not a cold one. ` +
-                 `Use to_archive, or pick a tier that serves immediately.` };
+        message: `${tierWords(s.targetTier)} needs a restore before it can be read, so it is an archive tier, not cheaper storage. ` +
+                 `Choose Archive, or pick a tier that reads immediately.` };
     }
     if (s.action === 'to_archive' && s.targetTier && isImmediate(s.targetTier)) {
       return { ok: false, code: 'not_an_archive_tier',
-        message: `"${s.targetTier}" serves immediately, so it is a cold tier, not an archive. Use to_cold.` };
+        message: `${tierWords(s.targetTier)} reads immediately, so it is cheaper storage, not an archive. Choose Move to cheaper storage.` };
     }
   }
 
@@ -113,12 +113,12 @@ export function validateStages(stages: RetentionStage[]): Validation {
     if (prev.action === 'keep') continue;
     if (RANK[cur.action] < RANK[prev.action]) {
       return { ok: false, code: 'backwards',
-        message: `A ladder cannot go backwards: "${prev.action}" at ${prev.afterDays} days is followed by ` +
-                 `"${cur.action}" at ${cur.afterDays} days.` };
+        message: `A ladder cannot go backwards: ${actionWords(prev.action)} at ${prev.afterDays} days is followed by ` +
+                 `${actionWords(cur.action)} at ${cur.afterDays} days.` };
     }
     if (RANK[cur.action] === RANK[prev.action] && cur.action !== 'keep') {
       return { ok: false, code: 'repeated',
-        message: `"${cur.action}" is already the stage at ${prev.afterDays} days; repeating it at ` +
+        message: `${actionWords(cur.action)} is already the stage at ${prev.afterDays} days; repeating it at ` +
                  `${cur.afterDays} days does nothing.` };
     }
   }

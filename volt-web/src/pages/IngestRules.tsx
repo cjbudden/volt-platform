@@ -13,6 +13,7 @@ import { api, type IngestRule, type IngestThen, type IngestWhen, type IngestWebh
 import { PageHead } from '../scaffold'
 import { Notice, useNotify, usePageNotice } from '../notices'
 import { FilenameRulesCard } from './FilenameRules'
+import { useAccess } from '../access'
 
 const RUNG_LABEL = { account: 'Account default', type: 'Content type', source: 'Source or folder' } as const
 const NAMING = { honour: 'Keep the name (sanitised)', guid: 'GUID', guid_prefixed: 'GUID + name', template: 'Template' }
@@ -20,6 +21,57 @@ const STRUCTURE = { flat: 'Flat', honour: 'Keep the folder tree', minimal: 'kind
 const DUP = { ask: 'Ask', skip: 'Skip', replace: 'Replace', version: 'Keep both (version)', rename: 'Rename' }
 const GATE = { none: 'Not required', before_ingest: 'Before ingest (bytes move first)', before_upload: 'Before upload' }
 const TRANSFER = { auto: 'Auto (cloud to cloud when possible)', local: 'From this device', cloud: 'Cloud to cloud only' }
+const FILENAME_META = { auto: 'applied when sure', suggest: 'suggested only', off: 'not read' }
+
+// A RULE'S ONE-LINE SUMMARY IN WORDS, not its stored keys (build queue
+// 1.14-G3a-2): the list used to read "when extensions=mov|mp4 then
+// metadataRequired: before_ingest · autoUpload: false". A key this map does not
+// know yet still shows, so a new field is never silently hidden.
+const mb = (n: number) => n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`
+function whenWords(w: IngestWhen): string {
+  const out: string[] = []
+  for (const [k, v] of Object.entries(w) as [keyof IngestWhen, any][]) {
+    if (v === undefined || v === null || (Array.isArray(v) && !v.length)) continue
+    if (k === 'extensions') out.push(`the extension is ${v.join(' or ')}`)
+    else if (k === 'kinds') out.push(`it is ${v.join(' or ')}`)
+    else if (k === 'mimePrefixes') out.push(`the file type starts ${v.join(' or ')}`)
+    else if (k === 'namePattern') out.push(`the name matches ${v.pattern}`)
+    else if (k === 'pathPrefix') out.push(`it is in ${v}`)
+    else if (k === 'minBytes') out.push(`it is at least ${mb(v)}`)
+    else if (k === 'maxBytes') out.push(`it is at most ${mb(v)}`)
+    else if (k === 'minDurationSec') out.push(`it runs at least ${v} s`)
+    else if (k === 'maxDurationSec') out.push(`it runs at most ${v} s`)
+    else if (k === 'minHeight') out.push(`it is at least ${v}p`)
+    else if (k === 'hasTags') out.push(v ? 'it has tags' : 'it has no tags')
+    else out.push(`${k} ${Array.isArray(v) ? v.join(' or ') : String(v)}`)
+  }
+  return out.join(' and ')
+}
+function thenWords(t: IngestThen, typeName: (id: string) => string = (id) => id): string {
+  const out: string[] = []
+  for (const [k, v] of Object.entries(t) as [keyof IngestThen, any][]) {
+    if (v === undefined || v === null || (Array.isArray(v) && !v.length)) continue
+    if (k === 'contentTypeId') out.push(`type ${typeName(v)}`)
+    else if (k === 'targetKind') out.push(`filed as ${v}`)
+    else if (k === 'naming') out.push(`name: ${(NAMING as any)[v] ?? v}`)
+    else if (k === 'structure') out.push(`folders: ${(STRUCTURE as any)[v] ?? v}`)
+    else if (k === 'nameTemplate') out.push(`name template ${v}`)
+    else if (k === 'pathTemplate') out.push(`folder template ${v}`)
+    else if (k === 'lowercase') out.push(v ? 'lower case names' : 'names keep their case')
+    else if (k === 'duplicate') out.push(`duplicates: ${(DUP as any)[v] ?? v}`)
+    else if (k === 'nameCheck') out.push(v ? 'name check on' : 'name check off')
+    else if (k === 'transfer') out.push(`transfer: ${(TRANSFER as any)[v] ?? v}`)
+    else if (k === 'metadataRequired') out.push(`metadata: ${(GATE as any)[v] ?? v}`)
+    else if (k === 'autoUpload') out.push(v ? 'uploads start on their own' : 'uploads wait for Start')
+    else if (k === 'sidecar') out.push(v === 'none' ? 'no sidecar file' : `${String(v).toUpperCase()} sidecar file`)
+    else if (k === 'webhooks') out.push(`${v.length} webhook${v.length === 1 ? '' : 's'}`)
+    else if (k === 'ladderGroupId') out.push('its own encoding ladder')
+    else if (k === 'reject') out.push(`refused: ${v}`)
+    else if (k === 'filenameMetadata') out.push(`file name ${(FILENAME_META as any)[v] ?? v}`)
+    else out.push(`${k}: ${Array.isArray(v) ? v.length : String(v)}`)
+  }
+  return out.join(' · ')
+}
 
 function Sel<T extends string>({ label, value, options, onChange, inherit }: { label: string; value: T | undefined; options: Record<string, string>; onChange: (v: T | undefined) => void; inherit: string }) {
   return (
@@ -116,6 +168,7 @@ export default function IngestRulesPage() {
   const [editing, setEditing] = useState<Partial<IngestRule> | null>(null)
   const [newHook, setNewHook] = useState({ name: '', url: '' })
   const [shownSecret, setShownSecret] = useState<string | null>(null)
+  const { seesServerSetup } = useAccess()
   const [providers, setProviders] = useState<{ linked: { id: string; provider: string; label: string }[]; available: { provider: string; configured: boolean }[] } | null>(null)
   const [accel, setAccel] = useState<{ provider: 'aspera' | 'masv' | 'signiant'; label: string; config: string }>({ provider: 'aspera', label: '', config: '{"nodeUrl":"https://node.example.com:9092","user":"","password":"","destinationRoot":"/volt/inbox"}' })
   const [err, setErr] = useState('')
@@ -139,7 +192,7 @@ export default function IngestRulesPage() {
   usePageNotice('load', err ? { kind: 'error', title: "Couldn't load ingest rules.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
   const scopeName = (r: IngestRule) => r.rung === 'account' ? '' : r.rung === 'type' ? (types.find(t => t.id === r.scopeId)?.name ?? (r.scopeId ? r.scopeId : 'any type')) : (folders.find(f => f.id === r.scopeId)?.name ?? (r.scopeId ?? 'any source'))
-  const thenSummary = (t: IngestThen) => Object.entries(t).filter(([, v]) => v !== undefined && v !== null && !(Array.isArray(v) && !v.length)).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.length : String(v)}`).join(' · ') || 'inherits everything'
+  const thenSummary = (t: IngestThen) => thenWords(t, (id) => types.find(x => x.id === id)?.name ?? 'a content type') || 'inherits everything'
 
   return (
     <>
@@ -147,7 +200,7 @@ export default function IngestRulesPage() {
       {baseline && (
         <div className="card" style={{ padding: 14, marginBottom: 14, fontSize: 'var(--fs-xs)', color: 'var(--muted)' }}>
           <div className="sec-label">Platform baseline (what "inherit" means when nothing else says)</div>
-          naming {NAMING[baseline.naming]} · structure {STRUCTURE[baseline.structure]} · duplicate {DUP[baseline.duplicate]} · metadata {GATE[baseline.metadataRequired]} · transfer {TRANSFER[baseline.transfer]} · sidecar {baseline.sidecar} · auto upload {String(baseline.autoUpload)}
+          naming {NAMING[baseline.naming]} · structure {STRUCTURE[baseline.structure]} · duplicate {DUP[baseline.duplicate]} · metadata {GATE[baseline.metadataRequired]} · transfer {TRANSFER[baseline.transfer]} · {thenWords({ sidecar: baseline.sidecar, autoUpload: baseline.autoUpload })}
         </div>
       )}
       {editing && <div style={{ marginBottom: 14 }}><RuleForm rule={editing} types={types} folders={folders} hooks={hooks} baseline={baseline} onSaved={() => { setEditing(null); load() }} onCancel={() => setEditing(null)} /></div>}
@@ -159,7 +212,7 @@ export default function IngestRulesPage() {
             <div key={r.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', borderTop: '1px solid var(--border)', fontSize: 'var(--fs-sm)', opacity: r.enabled ? 1 : .5 }}>
               <span style={{ fontFamily: 'var(--mono, monospace)', color: 'var(--muted)', width: 28 }}>{r.ordinal}</span>
               <span style={{ minWidth: 160 }}><strong>{r.name}</strong>{scopeName(r) ? <span style={{ color: 'var(--muted)' }}> · {scopeName(r)}</span> : null}</span>
-              <span style={{ flex: 1, color: 'var(--muted)', fontSize: 'var(--fs-xs)' }}>{r.when ? `when ${Object.entries(r.when).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('|') : typeof v === 'object' ? (v as any).pattern : v}`).join(', ')} then ` : 'always: '}{thenSummary(r.then)}</span>
+              <span style={{ flex: 1, color: 'var(--muted)', fontSize: 'var(--fs-xs)' }}>{r.when && whenWords(r.when) ? `when ${whenWords(r.when)}: ` : 'always: '}{thenSummary(r.then)}</span>
               <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)' }} onClick={() => api.updateIngestRule(r.id, { enabled: !r.enabled }).then(load)}>{r.enabled ? 'Disable' : 'Enable'}</button>
               <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)' }} onClick={() => setEditing(r)}>Edit</button>
               <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)' }} onClick={() => { if (confirm(`Delete rule "${r.name}"?`)) api.deleteIngestRule(r.id).then(load) }}>Delete</button>
@@ -180,7 +233,7 @@ export default function IngestRulesPage() {
         ))}
         <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {providers?.available.map(a => (
-            <button key={a.provider} className="btn" disabled={!a.configured} title={a.configured ? '' : 'Set the client id and secret for this provider on the server first'} onClick={() => linkProvider(a.provider)}>Link {a.provider === 'gdrive' ? 'Google Drive' : a.provider === 'onedrive' ? 'OneDrive' : 'Dropbox'}</button>
+            <button key={a.provider} className="btn" disabled={!a.configured} title={a.configured ? '' : seesServerSetup ? 'Set the client id and secret for this provider on the server first' : 'Not set up on this Volt service yet. Your Volt provider sets it up.'} onClick={() => linkProvider(a.provider)}>Link {a.provider === 'gdrive' ? 'Google Drive' : a.provider === 'onedrive' ? 'OneDrive' : 'Dropbox'}</button>
           ))}
           <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)' }}>Google Drive links with the picker scope only: files you pick, never a search of your Drive.</span>
         </div>

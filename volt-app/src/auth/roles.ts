@@ -178,6 +178,25 @@ const SHARED_PREFIXES: { prefix: string; anyOf: string[] }[] = [
   { prefix: '/api/sources', anyOf: ['channels', 'radio', 'events'] },
 ];
 
+/**
+ * LOOKUPS THE UPLOAD PANEL MAKES UNDER /api/ingest (build queue 1.14-G3a-2).
+ * Adding a file asks what the ingest rules will do with it (preview), how a
+ * name will be cleaned (sanitise), what "inherit" means (baseline) and which
+ * cloud drives are linked (providers). None of them changes anything, but they
+ * sit under /api/ingest, which is Account settings, and preview and sanitise
+ * are POSTs, so only Account settings: Manage could upload: the Media
+ * Librarian template could not. They are view-level lookups for either
+ * feature: whoever handles files (media) or sets the rules (settings). Linking
+ * a provider (POST /api/ingest/providers) and the rules themselves stay
+ * Account settings.
+ */
+const INGEST_LOOKUPS: { method: string; path: string }[] = [
+  { method: 'GET', path: '/api/ingest/baseline' },
+  { method: 'GET', path: '/api/ingest/providers' },
+  { method: 'POST', path: '/api/ingest/preview' },
+  { method: 'POST', path: '/api/ingest/sanitise' },
+];
+
 /** The features legacy (pre-0047) tiers got when the user had no role. */
 const LEGACY_CONTENT = ['channels', 'fast', 'radio', 'events', 'epg', 'recordings', 'vod', 'media', 'sharing', 'analytics', 'monitoring', 'fleet'];
 
@@ -322,6 +341,10 @@ export async function requirementFor(method: string, rawPath: string, body?: any
   kindOf: (id: string) => Promise<string | null> = channelKind): Promise<Requirement | null> {
   const path = rawPath.split('?')[0].toLowerCase().replace(/\/+$/, '') || '/';
   const write = WRITE_METHODS.has(method.toUpperCase());
+
+  if (INGEST_LOOKUPS.some((l) => l.path === path && l.method === method.toUpperCase())) {
+    return { features: ['media', 'settings'], level: 'view', reason: 'ingest lookup' };
+  }
 
   for (const s of SHARED_PREFIXES) {
     if (path === s.prefix || path.startsWith(s.prefix + '/')) {

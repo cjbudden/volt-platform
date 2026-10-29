@@ -11,7 +11,7 @@
 // ============================================================================
 import { one, query } from '../../db';
 import {
-  capabilities, isImmediate, restoreWindowMs, storageDriver,
+  capabilities, isImmediate, restoreWindowMs, storageDriver, tierWords,
   type RestoreSpeed, type StorageTier,
 } from './storage';
 import { config } from '../../config';
@@ -382,7 +382,7 @@ export async function requestRestore(
   if (windowMs == null) {
     return {
       ok: false, code: 'speed_unavailable',
-      message: `${archived.tier} does not offer ${chosen} retrieval. Use standard or bulk.`,
+      message: `${tierWords(archived.tier)} does not offer ${chosen} retrieval. Use standard or bulk.`,
     };
   }
 

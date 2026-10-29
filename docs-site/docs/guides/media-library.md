@@ -53,7 +53,7 @@ In the grid, an asset with no image yet is shown in its kind's colour: the key b
 ### Upload files
 
 1. Drop files, or a whole folder, on the band at the top of the page (**Drop files or a folder here**). Or choose **This device** or **Folder** to pick them. On a phone, **Camera roll** and **Record now** take their place.
-2. To fetch a file from an address instead, choose **Link**, paste the address and choose **Import**. Volt's servers fetch it, so nothing passes through your computer. Cloud drive buttons beside it work when your account has them set up.
+2. To fetch a file from an address instead, choose **Link**, paste the address and choose **Import**. Volt's servers fetch it, so nothing passes through your computer. Cloud drive buttons beside it work when your Volt service has them set up; hover over a greyed one to see why.
 3. Each file is listed with its size and what your [ingest rules](ingest-rules.md) decided before anything moves: the name it will be filed under, **looks like a duplicate** with what the rule says to do, or **refused** with the reason.
 4. To give the files a content type and metadata, first turn off **Start as soon as added** (with it on, a file starts uploading the moment it is added, before you can set its type), then choose **Set type and metadata for all**, pick the **Content type** and fill in its fields, then **Done**. **Details** on one file sets them for that file only. Anything left empty is decided by the rules.
 5. With **Start as soon as added** on (the usual setting), uploading starts at once. With it off, choose **Ingest 1 file** (or the number of files) when you are ready. **Clear** empties the list without uploading.
@@ -102,7 +102,7 @@ When a file is added, Volt reads its name in the same way and applies only what 
 
 The **Encode** tab shows the **Workflow** and **Ladder profile**, the **Source / mezzanine** it was made from, every rendition with its resolution, bitrate, codec, profile and frame rate, the audio tracks and the captions. For audio it shows the audio encode instead.
 
-**Deliveries** lists each format (HLS, DASH, downloadable files) as **Ready**, **Being made**, **Requested, not made** or **Not requested**. **Download** lists the files you can take a copy of, with a **Download** button on each. Anything Volt has not recorded says **Not recorded**, and **What is not recorded** lists the gaps, so nothing is guessed.
+**Deliveries** lists each format (HLS, DASH, downloadable files) as **Ready**, **Being made**, **Requested, not made** or **Not requested**; it reports, it does not make files. **Download** lists the files you can take a copy of, with a **Download** button on each. A clip gets an MP4, MP3 or AAC file when it is cut in [Recordings](recordings.md) with an **Output** that includes one. An uploaded file gets an MP4 when it is already H.264 video with AAC sound in an MP4 or MOV file; any other upload plays as HLS and DASH only. Anything Volt has not recorded says **Not recorded**, and **What is not recorded** lists the gaps, so nothing is guessed.
 
 ### Mark the intro, recap and credits (Skip markers)
 
@@ -140,6 +140,14 @@ The **Formats** tab frames a 9:16, 1:1 and 4:5 version of the asset by following
 2. **Published to** lists the catalogue and app publications with their status, date and views. **As approved** shows the review and QC state at the time; **re-cut since** means the asset changed after it went out, so the published copy is older.
 3. **Where it came from: the recordings, files and segments it was made from** opens the chain of sources, and **Re-cuttable** says whether those sources are still kept.
 
+### Delete an asset
+
+1. Open the asset and its **Metadata** tab. At the bottom, **Delete this asset** says what deleting does; choose **Delete asset**.
+2. The window lists what goes with it (its metadata, markers, formats, reviews and publishing points) and says if it is playing to viewers now, which stops. If something prevents the delete (for example the asset is in a FAST channel's active run order), it says so and **Delete asset** stays unavailable.
+3. Type the asset's title to confirm, then choose **Delete asset**.
+
+The asset and its media go to **Storage > Recently removed** for a number of days, which the message names. **Undo** on that message, or **Restore** in [Storage](storage.md), puts it back with its metadata and media. Posts already on social platforms stay there. The delete is in the [audit log](audit-log.md) with your name. Uploaded and watch folder files are deleted the same way.
+
 ### Work on several assets at once
 
 1. Tick the boxes on the rows (or **Select all shown**). A bar shows how many are selected.
@@ -173,7 +181,8 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | Save metadata, fill from the guide, change the image, set skip markers, send for review, re-run QC, change the asset's publishing rule, work its formats | Media library & publishing: Manage |
 | See which files can be downloaded | Downloads: View |
 | Download a file | Downloads: Operate |
-| Upload files | Files, uploads & storage: Manage, and Account settings: Manage (see [Troubleshooting](#troubleshooting)) |
+| Delete an asset | Media library & publishing: Manage |
+| Upload files, import a link, and fill in or settle held files | Files, uploads & storage: Manage (the **Media Librarian** template has it) |
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).
 
@@ -195,8 +204,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | "The publishing rule requires review, and this asset is…" when publishing | Its **Publish gate** needs an approved review | Have it approved in [Review](review.md), or change the rule |
 | "The publishing rule blocks publishing while QC has failed." | Its **Publish gate** blocks on a failed QC | Re-cut or replace it, then **Re-run QC** |
 | A file shows **refused** when added | An ingest rule will not take it | Read the reason; change the file or the rule in [Ingest Rules](ingest-rules.md) |
-| "Your role does not allow manage on Account settings" when adding files | Adding a file checks your ingest rules, which today needs Account settings: Manage | Ask an administrator to upload it, or to give you that access |
-| **No downloadable file yet.** on **Encode** | No MP4, MP3 or AAC file was made | When cutting the clip in [Recordings](recordings.md), choose an **Output** that includes a downloadable file |
+| **No downloadable file.** on **Encode** | No MP4, MP3 or AAC file was made: the clip was cut without one, or the uploaded file is not H.264 with AAC sound in MP4 or MOV | For a clip, cut it again in [Recordings](recordings.md) with an **Output** that includes a downloadable file. For an upload, upload it again in that form |
+| A cloud drive button is greyed out when adding files | Your Volt service has not set that drive up | Upload from your device or a link, or ask your Volt provider |
 | A **Download** button is greyed out | Your role can see the files but not download them | Ask for Downloads: Operate |
 | **No social accounts are linked.** in **Publish to social** | No social account has been linked | Choose **Link one**, or ask an administrator |
 | **copy is old** in the Availability column | The asset changed after it was published | Publish it again so the published copy matches |

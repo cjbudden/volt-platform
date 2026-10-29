@@ -17342,7 +17342,7 @@
     "tags": [
      "Ingest"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media or settings: view",
     "security": [
      {
       "adminBearer": []
@@ -17759,7 +17759,7 @@
     "tags": [
      "Ingest"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media or settings: view",
     "security": [
      {
       "adminBearer": []
@@ -17785,7 +17785,7 @@
     "tags": [
      "Ingest"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media or settings: view",
     "security": [
      {
       "adminBearer": []
@@ -18089,7 +18089,7 @@
     "tags": [
      "Ingest"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media or settings: view",
     "security": [
      {
       "adminBearer": []

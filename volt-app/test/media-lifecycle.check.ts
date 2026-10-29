@@ -127,14 +127,17 @@ async function main() {
   falsy('and has no archive', localCaps.archiveEnabled);
   check('so it offers only keep and delete', localCaps.actions.join(','), 'keep,delete');
   check('and exactly one tier', localCaps.tiers.join(','), 'local');
-  contains('and says why archiving is unavailable', localCaps.archiveUnavailableReason ?? '', 'S3');
+  // The reason is in the customer's words; the S3 detail is the setup hint
+  // only whoever runs Volt is sent (build queue 1.14-G3a-2, modules/storage.ts).
+  contains('and says why archiving is unavailable', localCaps.archiveUnavailableReason ?? '', 'single tier');
+  contains('and tells whoever runs it what is missing', localCaps.archiveSetupHint ?? '', 'S3');
 
   const coldOnLocal = validateStages([{ afterDays: 7, action: 'to_cold' }]);
   check('a cold stage is refused on local storage', coldOnLocal.ok, false);
   check('with a reason the operator can act on',
     coldOnLocal.ok ? '' : coldOnLocal.code, 'action_unavailable');
   contains('that names the missing capability',
-    coldOnLocal.ok ? '' : coldOnLocal.message, 'S3');
+    coldOnLocal.ok ? '' : coldOnLocal.message, 'Cheaper storage and archive are not offered');
   check('an archive stage is refused too',
     validateStages([{ afterDays: 30, action: 'to_archive' }]).ok, false);
   check('but delete is allowed', validateStages([{ afterDays: 90, action: 'delete' }]).ok, true);

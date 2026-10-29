@@ -77,8 +77,12 @@ export interface StorageCapabilities {
   defaultColdTier: StorageTier | null;
   defaultArchiveTier: StorageTier | null;
   /** Why archiving is unavailable, when it is. Shown to the operator rather than
-   *  leaving them to guess why the option is missing. */
+   *  leaving them to guess why the option is missing. In the customer's words:
+   *  account users see it (build queue 1.14-G3a-2). */
   archiveUnavailableReason: string | null;
+  /** The server setting behind it, for whoever runs the deployment only
+   *  (modules/storage.ts strips it unless seesServerSetup). */
+  archiveSetupHint?: string | null;
 }
 
 export function capabilities(): StorageCapabilities {
@@ -93,7 +97,10 @@ export function capabilities(): StorageCapabilities {
       actions: ['keep', 'delete'],
       defaultColdTier: null,
       defaultArchiveTier: null,
-      archiveUnavailableReason: wanted
+      archiveUnavailableReason:
+        'This Volt service keeps media on a single tier of storage, so a rule can keep or delete. ' +
+        'Cheaper storage and archive are not offered here.',
+      archiveSetupHint: wanted
         ? 'Archiving is enabled but this deployment stores media on local disk. ' +
           'Cold and archive tiers exist only on S3 or an S3-compatible object service.'
         : 'This deployment stores media on local disk. Cold and archive tiers ' +
@@ -107,6 +114,9 @@ export function capabilities(): StorageCapabilities {
       actions: ['keep', 'delete'],
       defaultColdTier: null, defaultArchiveTier: null,
       archiveUnavailableReason:
+        'Cheaper storage and archive are not turned on for this Volt service, so a rule can keep or delete. ' +
+        'Your Volt provider can turn them on.',
+      archiveSetupHint:
         'Archiving is turned off for this deployment. Set MEDIA_ARCHIVE_ENABLED=true ' +
         'to offer cold and archive tiers, and the restore waiting they involve.',
     };
@@ -120,8 +130,27 @@ export function capabilities(): StorageCapabilities {
     defaultColdTier: config.mediaStore.coldTier,
     defaultArchiveTier: config.mediaStore.archiveTier,
     archiveUnavailableReason: null,
+    archiveSetupHint: null,
   };
 }
+
+// TIERS AND ACTIONS IN THE CUSTOMER'S WORDS (build queue 1.14-G3a-2). The
+// stored names are the cloud provider's storage classes and the API's action
+// keys; a message a person reads names what the storage does instead, the same
+// words the Storage page uses (volt-web/src/pages/Storage.tsx TIER_LABEL).
+export const TIER_WORDS: Record<StorageTier, string> = {
+  local: 'Server disk',
+  s3_standard: 'Standard',
+  s3_ia: 'Infrequent access',
+  s3_glacier_ir: 'Archive, instant read',
+  s3_glacier_flexible: 'Archive, restore in hours',
+  s3_deep_archive: 'Deep archive, restore within two days',
+};
+export const tierWords = (t: string | null | undefined): string => TIER_WORDS[t as StorageTier] ?? String(t ?? '');
+export const ACTION_WORDS: Record<string, string> = {
+  keep: 'Keep', to_cold: 'Move to cheaper storage', to_archive: 'Archive', delete: 'Delete',
+};
+export const actionWords = (a: string): string => ACTION_WORDS[a] ?? a;
 
 // ---------------------------------------------------------------------------
 //  The driver interface

@@ -47,7 +47,9 @@ workflowsRouter.get('/map', asyncHandler(async (req, res) => {
     `SELECT hook, count(*)::int AS n, max(created_at) AS last_at FROM workflow_events
       WHERE account_id = $1 AND created_at > now() - interval '24 hours' GROUP BY hook`, [acct]);
   res.json({
-    lanes: LANES, stages: STAGES, edges: EDGES,
+    // A stage's `impl` names the source files behind it, for engineers reading
+    // services/workflows/map.ts; it is not part of the API (build queue 1.14-G3a-2).
+    lanes: LANES, stages: STAGES.map(({ impl: _impl, ...s }) => s), edges: EDGES,
     hooks: HOOKS.map((h) => ({
       ...h,
       fired24h: hookCounts.find((c) => c.hook === h.id)?.n ?? 0,

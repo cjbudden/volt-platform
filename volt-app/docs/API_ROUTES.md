@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**820 routes.** Public API: 84 · Sign-in (no session yet): 7 · Admin API: 642 · Platform API: 36 · Machine-to-machine: 14 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**836 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 656 · Platform API: 36 · Machine-to-machine: 14 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -37,6 +37,7 @@ For apps and players. A publishable key (`pk_…`) names the client account. Vie
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | POST | `/api/cmcd` | publishable key | public (legacy alias of /api/public/cmcd) | ✓ |
+| POST | `/api/cmcd/_peer` | publishable key | public (legacy alias of /api/public/cmcd/_peer) | ✓ |
 
 ### `/api/downloads`
 
@@ -117,6 +118,7 @@ For apps and players. A publishable key (`pk_…`) names the client account. Vie
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | POST | `/api/public/cmcd` | publishable key | public API | ✓ |
+| POST | `/api/public/cmcd/_peer` | publishable key | public API | ✓ |
 
 ### `/api/public/epg`
 
@@ -670,11 +672,18 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 |---|---|---|---|---|
 | POST | `/api/ingest/assets/:id/duplicate` | admin session (Bearer) or account secret key | media: manage |  |
 | POST | `/api/ingest/assets/:id/metadata` | admin session (Bearer) or account secret key | media: manage |  |
-| GET | `/api/ingest/baseline` | admin session (Bearer) or account secret key | settings: view |  |
+| GET | `/api/ingest/baseline` | admin session (Bearer) or account secret key | media or settings: view |  |
+| GET | `/api/ingest/filename-rules` | admin session (Bearer) or account secret key | settings: view |  |
+| POST | `/api/ingest/filename-rules` | admin session (Bearer) or account secret key | settings: manage |  |
+| DELETE | `/api/ingest/filename-rules/:id` | admin session (Bearer) or account secret key | settings: manage |  |
+| PATCH | `/api/ingest/filename-rules/:id` | admin session (Bearer) or account secret key | settings: manage |  |
+| PUT | `/api/ingest/filename-rules/builtin/:id` | admin session (Bearer) or account secret key | settings: manage |  |
+| PUT | `/api/ingest/filename-rules/settings` | admin session (Bearer) or account secret key | settings: manage |  |
+| POST | `/api/ingest/filename-rules/test` | admin session (Bearer) or account secret key | settings: manage |  |
 | GET | `/api/ingest/held` | admin session (Bearer) or account secret key | media: view |  |
 | POST | `/api/ingest/locate` | admin session (Bearer) or account secret key | media: manage |  |
-| POST | `/api/ingest/preview` | admin session (Bearer) or account secret key | settings: manage |  |
-| GET | `/api/ingest/providers` | admin session (Bearer) or account secret key | settings: view |  |
+| POST | `/api/ingest/preview` | admin session (Bearer) or account secret key | media or settings: view |  |
+| GET | `/api/ingest/providers` | admin session (Bearer) or account secret key | media or settings: view |  |
 | POST | `/api/ingest/providers` | admin session (Bearer) or account secret key | settings: manage |  |
 | DELETE | `/api/ingest/providers/:id` | admin session (Bearer) or account secret key | settings: manage |  |
 | GET | `/api/ingest/providers/:provider/authorize` | admin session (Bearer) or account secret key | settings: view |  |
@@ -684,7 +693,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | POST | `/api/ingest/rules` | admin session (Bearer) or account secret key | settings: manage |  |
 | DELETE | `/api/ingest/rules/:id` | admin session (Bearer) or account secret key | settings: manage |  |
 | PATCH | `/api/ingest/rules/:id` | admin session (Bearer) or account secret key | settings: manage |  |
-| POST | `/api/ingest/sanitise` | admin session (Bearer) or account secret key | settings: manage |  |
+| POST | `/api/ingest/sanitise` | admin session (Bearer) or account secret key | media or settings: view |  |
 | GET | `/api/ingest/transfers` | admin session (Bearer) or account secret key | media: view |  |
 | POST | `/api/ingest/transfers` | admin session (Bearer) or account secret key | media: manage |  |
 | GET | `/api/ingest/webhooks` | admin session (Bearer) or account secret key | settings: view |  |
@@ -1093,6 +1102,8 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | POST | `/api/vod/:id/files/:fileId/apply` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/files/:fileId/content` | admin session (Bearer) or account secret key | vod: view |  |
 | GET | `/api/vod/:id/files/:fileId/proposal` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/vod/:id/from-filename` | admin session (Bearer) or account secret key | vod: view |  |
+| POST | `/api/vod/:id/from-filename` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/history` | admin session (Bearer) or account secret key | vod: view |  |
 | GET | `/api/vod/:id/image` | admin session (Bearer) or account secret key | vod: view |  |
 | PUT | `/api/vod/:id/image` | admin session (Bearer) or account secret key | vod: manage |  |
@@ -1102,6 +1113,9 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | PATCH | `/api/vod/:id/images/:type` | admin session (Bearer) or account secret key | vod: manage |  |
 | PUT | `/api/vod/:id/images/:type` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/images/related` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/vod/:id/links` | admin session (Bearer) or account secret key | vod: view |  |
+| DELETE | `/api/vod/:id/links/:field` | admin session (Bearer) or account secret key | vod: manage |  |
+| PUT | `/api/vod/:id/links/:field` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/markers` | admin session (Bearer) or account secret key | vod: view |  |
 | DELETE | `/api/vod/:id/markers/:kind` | admin session (Bearer) or account secret key | vod: manage |  |
 | PUT | `/api/vod/:id/markers/:kind` | admin session (Bearer) or account secret key | vod: manage |  |
@@ -1140,10 +1154,12 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/vod/changes` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/epg-fill` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/facets` | admin session (Bearer) or account secret key | vod: view |  |
+| POST | `/api/vod/from-filename` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/image-types` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/image-types` | admin session (Bearer) or account secret key | vod: manage |  |
 | DELETE | `/api/vod/image-types/:key` | admin session (Bearer) or account secret key | vod: manage |  |
 | PATCH | `/api/vod/image-types/:key` | admin session (Bearer) or account secret key | vod: manage |  |
+| GET | `/api/vod/link-candidates` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/music-lookup` | admin session (Bearer) or account secret key | vod: manage |  |
 | POST | `/api/vod/qc-unchecked` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/review/queue` | admin session (Bearer) or account secret key | vod: view |  |

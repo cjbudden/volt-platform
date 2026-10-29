@@ -1071,6 +1071,15 @@
   "group": "/api/cmcd"
  },
  {
+  "method": "POST",
+  "path": "/api/cmcd/_peer",
+  "api": "public",
+  "credential": "publishable key",
+  "access": "public (legacy alias of /api/public/cmcd/_peer)",
+  "viewerTier": true,
+  "group": "/api/cmcd"
+ },
+ {
   "method": "GET",
   "path": "/api/collections",
   "api": "admin",
@@ -3019,7 +3028,70 @@
   "path": "/api/ingest/baseline",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
+  "access": "media or settings: view",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "GET",
+  "path": "/api/ingest/filename-rules",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
   "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/filename-rules",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/ingest/filename-rules/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/ingest/filename-rules/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/ingest/filename-rules/builtin/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/ingest/filename-rules/settings",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/ingest"
+ },
+ {
+  "method": "POST",
+  "path": "/api/ingest/filename-rules/test",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
   "viewerTier": false,
   "group": "/api/ingest"
  },
@@ -3046,7 +3118,7 @@
   "path": "/api/ingest/preview",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "settings: manage",
+  "access": "media or settings: view",
   "viewerTier": false,
   "group": "/api/ingest"
  },
@@ -3055,7 +3127,7 @@
   "path": "/api/ingest/providers",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "settings: view",
+  "access": "media or settings: view",
   "viewerTier": false,
   "group": "/api/ingest"
  },
@@ -3145,7 +3217,7 @@
   "path": "/api/ingest/sanitise",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "settings: manage",
+  "access": "media or settings: view",
   "viewerTier": false,
   "group": "/api/ingest"
  },
@@ -4367,6 +4439,15 @@
  {
   "method": "POST",
   "path": "/api/public/cmcd",
+  "api": "public",
+  "credential": "publishable key",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/cmcd"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/cmcd/_peer",
   "api": "public",
   "credential": "publishable key",
   "access": "public API",
@@ -6418,6 +6499,24 @@
  },
  {
   "method": "GET",
+  "path": "/api/vod/:id/from-filename",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/from-filename",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
   "path": "/api/vod/:id/history",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -6494,6 +6593,33 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/:id/links",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/vod/:id/links/:field",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/vod/:id/links/:field",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
   "viewerTier": false,
   "group": "/api/vod"
  },
@@ -6840,6 +6966,15 @@
   "group": "/api/vod"
  },
  {
+  "method": "POST",
+  "path": "/api/vod/from-filename",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
   "method": "GET",
   "path": "/api/vod/image-types",
   "api": "admin",
@@ -6872,6 +7007,15 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/link-candidates",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
   "viewerTier": false,
   "group": "/api/vod"
  },

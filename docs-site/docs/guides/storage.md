@@ -71,6 +71,17 @@ Nothing is changed by a dry run.
 | deleting | deletion in flight |
 | deleted | the bytes are gone; this row is the record |
 
+**Where the bytes are**, in the details, lists each copy with its **Tier**, size and when it was last confirmed. The tiers your service can offer:
+
+| Tier | Means |
+|---|---|
+| Server disk | Volt's own disk: one tier, no archive |
+| Standard | Read immediately |
+| Infrequent access | Read immediately, cheaper to keep, a little dearer to read |
+| Archive, instant read | Read immediately, cheaper still for media rarely watched |
+| Archive, restore in hours | Needs a restore, which takes minutes to hours |
+| Deep archive, restore within two days | Needs a restore, which can take up to two days |
+
 ### Hold media so retention leaves it alone
 
 1. Open the media with **Details**.
@@ -86,6 +97,13 @@ A hold outranks every rung of the ladder, including **Delete**. Use it for a leg
 3. When the restore finishes, the media is **restored** and readable for a limited time, then it lapses back to the archive.
 
 **Request restore** only appears for archived media, and only where archiving is available.
+
+### Bring back something deleted
+
+1. Under **Recently removed**, find it in the list: **Removed** (when), **What** (a Media Library asset, an Image Library image or recorded media), **Why**, **Size** and **Gone for good** (when it will be purged).
+2. Choose **Restore** to put it back with its metadata and files, or **Delete now** to purge it at once.
+
+A Media Library asset deleted from its **Metadata** tab lands here ([Media Library](media-library.md#delete-an-asset)). Media a retention rule deleted does not come here and cannot be restored.
 
 ### Set how long viewer data is kept
 

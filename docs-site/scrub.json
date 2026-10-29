@@ -110,6 +110,26 @@
     {
       "pattern": "\\b(EC2|Fargate)\\b",
       "why": "cloud infrastructure name: customers see shared or dedicated servers"
+    },
+    {
+      "pattern": "\\bVITE_[A-Z0-9_]+\\b",
+      "why": "console build setting: for whoever runs the Volt deployment, not customers"
+    },
+    {
+      "pattern": "\\b(MEDIA_ARCHIVE_ENABLED|MEDIA_STORE_DRIVER)\\b",
+      "why": "server setting name: for whoever runs the Volt deployment, not customers"
+    },
+    {
+      "pattern": "\\bGlacier\\b|\\bS3 (Standard|Infrequent Access)\\b",
+      "why": "cloud storage class name: customers see what the tier does (Archive, restore in hours)"
+    },
+    {
+      "pattern": "\\bs3://",
+      "why": "raw storage address"
+    },
+    {
+      "pattern": "client id and secret for this provider on the server",
+      "why": "server setup instruction: for whoever runs the Volt deployment, not customers"
     }
   ],
   "scan": [

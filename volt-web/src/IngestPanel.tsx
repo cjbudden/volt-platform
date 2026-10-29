@@ -20,6 +20,7 @@ import { tusUpload } from './tusClient'
 import { TypePicker, MetadataForm } from './ContentTypeFields'
 import { openDropboxChooser, openOneDrivePicker, openGooglePicker, pickerConfigured } from './cloudPickers'
 import { FailedRetryDialog, type RetryAction, type RetryAsk } from './FailedRetryDialog'
+import { useAccess } from './access'
 import './ingest.css'
 
 const isPhone = () => /iPhone|iPad|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 900)
@@ -100,6 +101,11 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
   const depth = useRef(0)
   const phone = isPhone()
   const pickers = useMemo(() => pickerConfigured(), [])
+  // A cloud drive that is not set up names the console's build settings only
+  // for whoever runs Volt (access.seesServerSetup); an account user can do
+  // nothing with VITE_... and is told their provider sets it up (1.14-G3a-2).
+  const { seesServerSetup } = useAccess()
+  const notSetUp = (setting: string) => seesServerSetup ? `Set ${setting} to enable` : 'Not set up on this Volt service yet. Your Volt provider sets it up.'
 
   const loadHeld = () => api.ingestHeld().then(setHeld).catch(() => {})
   useEffect(() => { loadHeld() }, [])
@@ -267,9 +273,9 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
             {phone && srcBtn('camera', 'Record now', I.camera, () => { setSrc('camera'); camRef.current?.click() })}
             {srcBtn('link', 'Link', I.link, () => setSrc(src === 'link' ? 'device' : 'link'))}
             <span className="ig-sep" title="Files that are already in a cloud drive move provider to Volt and never touch this device" />
-            {srcBtn('dropbox', 'Dropbox', <Brand k="dropbox" />, () => { setSrc('dropbox'); fromPicker('dropbox') }, !pickers.dropbox, pickers.dropbox ? 'Pick in Dropbox; Volt fetches it cloud to cloud' : 'Set VITE_DROPBOX_APP_KEY to enable')}
-            {srcBtn('onedrive', 'OneDrive', <Brand k="onedrive" />, () => { setSrc('onedrive'); fromPicker('onedrive') }, !pickers.onedrive, pickers.onedrive ? '' : 'Set VITE_MS_CLIENT_ID to enable')}
-            {srcBtn('gdrive', 'Google Drive', <Brand k="gdrive" />, () => { setSrc('gdrive'); fromPicker('gdrive') }, !pickers.gdrive, pickers.gdrive ? '' : 'Set VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to enable')}
+            {srcBtn('dropbox', 'Dropbox', <Brand k="dropbox" />, () => { setSrc('dropbox'); fromPicker('dropbox') }, !pickers.dropbox, pickers.dropbox ? 'Pick in Dropbox; Volt fetches it cloud to cloud' : notSetUp('VITE_DROPBOX_APP_KEY'))}
+            {srcBtn('onedrive', 'OneDrive', <Brand k="onedrive" />, () => { setSrc('onedrive'); fromPicker('onedrive') }, !pickers.onedrive, pickers.onedrive ? '' : notSetUp('VITE_MS_CLIENT_ID'))}
+            {srcBtn('gdrive', 'Google Drive', <Brand k="gdrive" />, () => { setSrc('gdrive'); fromPicker('gdrive') }, !pickers.gdrive, pickers.gdrive ? '' : notSetUp('VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY'))}
           </div>
           <input ref={fileRef} type="file" accept="video/*,audio/*,image/*" multiple hidden onChange={e => { add([...(e.target.files ?? [])]); e.target.value = '' }} />
           <input ref={folderRef} type="file" multiple hidden {...({ webkitdirectory: '' } as any)} onChange={e => { add([...(e.target.files ?? [])]); e.target.value = '' }} />

@@ -307,8 +307,8 @@ async function encode(ctx: JobContext, log: JobLog): Promise<Record<string, unkn
   // AN MP4 BESIDE HLS AND DASH (27 Oct 2026). An uploaded file that browsers
   // already play (H.264 video, AAC or no audio, in MP4 / MOV) is repackaged as
   // the asset's MP4: a stream copy with the index at the front, so it costs
-  // seconds and loses nothing. Anything else keeps HLS / DASH only, and an MP4
-  // can still be made on demand (Downloads).
+  // seconds and loses nothing. Anything else keeps HLS / DASH only: nothing
+  // makes an MP4 of it later, so the Media Library's Download section says so.
   let mp4File: string | null = null;
   {
     const vc = String(probe.videoCodec ?? '').toLowerCase();
@@ -327,7 +327,7 @@ async function encode(ctx: JobContext, log: JobLog): Promise<Record<string, unkn
       if (r.code === 0 && existsSync(target)) { mp4File = 'file.mp4'; log.step('MP4: the source repackaged (stream copy, faststart)'); }
       else log.warn(`MP4 not made: ${r.err.slice(0, 300) || `ffmpeg exited ${r.code}`}`);
     } else {
-      log.step(`MP4: not made from the source (${okVideo ? '' : `video ${vc || 'unknown'}`}${!okVideo && !okAudio ? ', ' : ''}${okAudio ? '' : `audio ${ac || 'unknown'}`}); HLS and DASH only, an MP4 can be made on demand`);
+      log.step(`MP4: not made from the source (${okVideo ? '' : `video ${vc || 'unknown'}`}${!okVideo && !okAudio ? ', ' : ''}${okAudio ? '' : `audio ${ac || 'unknown'}`}); HLS and DASH only, no MP4 to download`);
     }
   }
   // THE SOURCE'S FACTS, read fresh for the asset page (resolution, bitrates,

@@ -5,6 +5,7 @@ import {
 } from '../api'
 import { Notice, PageError, useNotify, usePageNotice } from '../notices'
 import { RetentionList, RestoreBin } from './StorageRetention'
+import { useAccess } from '../access'
 
 /* ============================================================================
    STORAGE — what media exists, where it lives, and what will happen to it.
@@ -15,8 +16,8 @@ import { RetentionList, RestoreBin } from './StorageRetention'
      STATE  answers "can this be read right now, and if not, what is happening?"
      TIER   answers "where are the bytes, and what does reading them cost?"
 
-   An object on Glacier Instant Retrieval is still available: it reads
-   immediately, it is just cheaper to keep. An object on Deep Archive is not
+   An object on an instant-read archive tier is still available: it reads
+   immediately, it is just cheaper to keep. An object on deep archive is not
    available at any price until a restore has been asked for and waited out. A
    screen that shows one number for both cannot tell an operator which of those
    they are looking at.
@@ -52,13 +53,16 @@ const STATE_MEANING: Record<string, string> = {
   deleted: 'the bytes are gone; this row is the record',
 }
 
+// WHAT THE STORAGE DOES, NOT THE CLOUD PROVIDER'S CLASS NAMES (build queue
+// 1.14-G3a-2). The same words as the server's messages (services/media/storage.ts
+// TIER_WORDS), so a refused ladder names the tier the way this page does.
 const TIER_LABEL: Record<string, string> = {
-  local: 'Local disk',
-  s3_standard: 'S3 Standard',
-  s3_ia: 'S3 Infrequent Access',
-  s3_glacier_ir: 'Glacier Instant Retrieval',
-  s3_glacier_flexible: 'Glacier Flexible',
-  s3_deep_archive: 'Deep Archive',
+  local: 'Server disk',
+  s3_standard: 'Standard',
+  s3_ia: 'Infrequent access',
+  s3_glacier_ir: 'Archive, instant read',
+  s3_glacier_flexible: 'Archive, restore in hours',
+  s3_deep_archive: 'Deep archive, restore within two days',
 }
 
 const ACTION_LABEL: Record<string, string> = {
@@ -150,6 +154,7 @@ function LadderEditor({ caps, rule, onSaved }: {
           padding: '8px 10px', marginBottom: 12,
         }}>
           {caps.archiveUnavailableReason}
+          {caps.archiveSetupHint && <div style={{ color: 'var(--muted)', marginTop: 4 }}>For whoever runs this Volt server: {caps.archiveSetupHint}</div>}
         </div>
       )}
 
@@ -231,6 +236,7 @@ function ObjectDetail({ id, caps, onChanged }: { id: string; caps: StorageCapabi
   if (!d) return <div className="loading">Loading…</div>
 
   const r = d.readability
+  const showUri = (d.locations ?? []).some((l: any) => !!l.uri)
 
   async function act(fn: () => Promise<any>, label: string) {
     setBusy(label)
@@ -268,16 +274,18 @@ function ObjectDetail({ id, caps, onChanged }: { id: string; caps: StorageCapabi
         </div>
       )}
 
+      {/* The raw address (an s3:// key or a disk path) comes only to whoever
+          runs Volt (modules/storage.ts locationsFor); everyone else sees the tier. */}
       <div className="sec-label">Where the bytes are</div>
       <table style={{ marginBottom: 12 }}>
-        <thead><tr><th>Tier</th><th>Location</th><th>Size</th><th>Last confirmed</th></tr></thead>
+        <thead><tr><th>Tier</th>{showUri && <th>Location</th>}<th>Size</th><th>Last confirmed</th></tr></thead>
         <tbody>
           {d.locations.length === 0 ? (
-            <tr><td colSpan={4} style={{ color: 'var(--faint)' }}>No copy on any tier.</td></tr>
+            <tr><td colSpan={showUri ? 4 : 3} style={{ color: 'var(--faint)' }}>No copy on any tier.</td></tr>
           ) : d.locations.map((l: any) => (
             <tr key={l.id}>
               <td>{TIER_LABEL[l.tier] ?? l.tier}</td>
-              <td style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)', color: 'var(--muted)', wordBreak: 'break-all' }}>{l.uri}</td>
+              {showUri && <td style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-sm)', color: 'var(--muted)', wordBreak: 'break-all' }}>{l.uri ?? ''}</td>}
               <td style={{ color: 'var(--muted)' }}>{fmtBytes(l.bytes)}</td>
               <td style={{ color: 'var(--muted)' }}>{l.verified_at ? new Date(l.verified_at).toLocaleString() : '—'}</td>
             </tr>
@@ -391,6 +399,9 @@ function EventRetention() {
 
 // ---------------------------------------------------------------------------
 export default function StoragePage() {
+  // The storage driver is the deployment's business: whoever runs Volt sees it
+  // (and the setup hint); an account user sees the tiers it offers (1.14-G3a-2).
+  const { seesServerSetup } = useAccess()
   const [caps, setCaps] = useState<StorageCapabilities | null>(null)
   const [rules, setRules] = useState<RetentionRuleRow[]>([])
   const [objects, setObjects] = useState<MediaObjectRow[]>([])
@@ -444,9 +455,9 @@ export default function StoragePage() {
           shaped by it and an operator looking for an archive that is not there
           should find out here rather than from a rule that silently never fires. */}
       <div className="card p-4" style={{ marginBottom: 16 }}>
-        <div className="sec-label">This deployment</div>
+        <div className="sec-label">{seesServerSetup ? 'This deployment' : 'Your Volt service'}</div>
         <div className="flex flex-wrap items-center gap-4" style={{ fontSize: 'var(--fs-sm)' }}>
-          <span><span style={{ color: 'var(--faint)' }}>Driver </span>{caps.driver === 's3' ? 'S3 or compatible' : 'Local disk'}</span>
+          {seesServerSetup && <span><span style={{ color: 'var(--faint)' }}>Driver </span>{caps.driver === 's3' ? 'S3 or compatible' : 'Local disk'}</span>}
           <span><span style={{ color: 'var(--faint)' }}>Tiers </span>{caps.tiers.map(t => TIER_LABEL[t] ?? t).join(', ')}</span>
           <span>
             <span style={{ color: 'var(--faint)' }}>Archiving </span>

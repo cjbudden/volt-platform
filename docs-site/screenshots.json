@@ -160,6 +160,7 @@
       "name": "media-library",
       "guide": "guides/media-library.md",
       "path": "/vod",
+      "customerView": true,
       "waitFor": "h1",
       "alt": "The Media Library page: the upload band at the top, the search, sort and filter chips, then the list of assets with their review, QC and availability"
     },
@@ -218,6 +219,7 @@
       "name": "storage",
       "guide": "guides/storage.md",
       "path": "/storage",
+      "customerView": true,
       "waitFor": "h1",
       "alt": "The Storage page: what this service can do at the top, the retention ladder, event data retention, the dry run, and the list of media with its state, tier and size"
     },
@@ -247,6 +249,7 @@
       "name": "ingest-rules",
       "guide": "guides/ingest-rules.md",
       "path": "/ingest",
+      "customerView": true,
       "waitFor": "h1",
       "alt": "The Ingest Rules page: the platform baseline, the account default, content type and source or folder rungs with their rules, then linked cloud accounts and webhooks"
     },

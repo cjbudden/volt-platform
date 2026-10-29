@@ -436,7 +436,13 @@ const kbps = (k: number | null) => (k == null ? '' : k >= 1000 ? `${(k / 1000).t
  * click asks the server for a five-minute link (and is audited), so the file
  * never needs a public address of its own (modules/downloads.ts).
  */
-export function DownloadFiles({ id, compact = false }: { id: string; compact?: boolean }) {
+// WHERE A DOWNLOADABLE FILE COMES FROM (build queue 1.14-G3a-2). Nothing in
+// the console makes one later: a clip gets its MP4, MP3 or AAC when it is cut
+// with an Output that includes one, and an upload gets an MP4 only when its
+// file is already H.264 with AAC sound in MP4 or MOV (vodEncode.ts repackages
+// it). The empty state says which applies instead of pointing at Deliveries,
+// which only reports.
+export function DownloadFiles({ id, compact = false, uploaded }: { id: string; compact?: boolean; uploaded?: boolean }) {
   const { can } = useAccess()
   const notify = useNotify()
   const [files, setFiles] = useState<DownloadFile[] | null>(null)
@@ -474,7 +480,11 @@ export function DownloadFiles({ id, compact = false }: { id: string; compact?: b
     <>
       <div className="sec-label">Download</div>
       {files.length === 0
-        ? <div className="lib-faint lib-small">No downloadable file yet. Ask for MP4, MP3 or AAC under Deliveries, then download it here.</div>
+        ? <div className="lib-faint lib-small">{uploaded === true
+            ? 'No downloadable file. Volt makes an MP4 when the uploaded file is H.264 video with AAC sound in an MP4 or MOV file; this one is not, so it plays as HLS and DASH only. Upload it in that form to offer a download.'
+            : uploaded === false
+              ? 'No downloadable file. A clip gets an MP4, MP3 or AAC file when it is cut in Recordings with an Output that includes one; cut it again with that Output to make one.'
+              : 'No downloadable file for this asset.'}</div>
         : (
           <table className="lib-rend lib-deliv">
             <thead><tr><th scope="col">File</th><th scope="col">Name</th><th /></tr></thead>
@@ -495,6 +505,11 @@ export function DownloadFiles({ id, compact = false }: { id: string; compact?: b
     </>
   )
 }
+
+// An uploaded or watch folder file, as services/vodLibrary.ts words the source
+// (origin 'Uploaded file' or 'Watch folder file'); a file name alone is not
+// enough, an upload made before file names were kept has none.
+const fromFile = (e: EncodeDetails) => /^(Uploaded|Watch folder) file$/.test(e.source.origin)
 
 export function EncodePanel({ id }: { id: string }) {
   const [e, setE] = useState<EncodeDetails | null>(null)
@@ -561,7 +576,7 @@ export function EncodePanel({ id }: { id: string }) {
           </div>
         </div>
         <Deliveries />
-        <DownloadFiles id={id} />
+        <DownloadFiles id={id} uploaded={fromFile(e)} />
         {e.captions.value.length > 0 && (<>
           <div className="sec-label">Transcripts and subtitles</div>
           <ul className="lib-tracks">{e.captions.value.map((c, i) => <li key={i}>{c.kind === 'captions' ? 'Transcript' : 'Subtitles'} · <span className="mono">{c.language}</span> · {c.source}</li>)}</ul>
@@ -626,7 +641,7 @@ export function EncodePanel({ id }: { id: string }) {
       ) : <NR />}
       {e.dropped.length > 0 && <div className="lib-faint lib-small">Not encoded: {e.dropped.map((d) => `${d.height}p (${d.why})`).join(', ')}.</div>}
       <Deliveries />
-      <DownloadFiles id={id} />
+      <DownloadFiles id={id} uploaded={fromFile(e)} />
       <div className="lib-encode-grid">
         <div>
           <div className="sec-label">Audio tracks <Mark s={e.audio.source} /></div>

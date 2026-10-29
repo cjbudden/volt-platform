@@ -2600,11 +2600,14 @@ export interface StorageCapabilities {
   defaultArchiveTier: StorageTierId | null
   /** Why archiving is unavailable, when it is. Shown rather than left to guess. */
   archiveUnavailableReason: string | null
+  /** The server setting behind it: only for whoever runs Volt (seesServerSetup), else null. */
+  archiveSetupHint?: string | null
   defaultLadder: { afterDays: number; action: RetentionActionId; targetTier?: StorageTierId | null }[]
 }
 
 export interface MediaLocationRow {
-  id?: string; tier: StorageTierId; uri: string
+  /** uri: the raw storage address, only for whoever runs Volt (seesServerSetup). */
+  id?: string; tier: StorageTierId; uri?: string
   bytes: number | string | null; verified_at?: string | null
 }
 
@@ -3341,7 +3344,7 @@ export interface AssetAvailability {
 export type AddonRunState = 'queued' | 'dispatched' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'
 export type AddonCategory = 'ai_agent' | 'transcription' | 'qc' | 'metadata' | 'distribution' | 'other'
 export interface WorkflowLane { id: string; label: string; description: string }
-export interface WorkflowStage { id: string; label: string; lane: string; col: number; description: string; impl: string }
+export interface WorkflowStage { id: string; label: string; lane: string; col: number; description: string }
 export interface WorkflowHookTrigger { id: string; hook: string; enabled: boolean; filter: any; addon_id: string; addon_name: string; category: AddonCategory; addon_enabled: boolean }
 export interface WorkflowHook {
   id: string; label: string; stage: string; subject: string; live: boolean; description: string
