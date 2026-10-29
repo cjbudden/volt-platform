@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.21.1 (2026-10-29)
+
+### Product (in customer release notes)
+
+- fixed · API: An upload opened with POST /api/uploads is now titled with the name you give it, with or without a content type. A title or name sent in metadata is kept as the title too. When the name is only the file name, the title is still read from the file as before.
+- fixed · API: GET /api/channels/{id} now answers the channel's kind (tv or radio), the same as the channel list, in plain JSON and in JSON-LD. It used to answer channel.
+
+### Internal
+
+- added · Tests: New check suite g6a-fixes (15 assertions: upload titles from the name and metadata, a channel's kind the same in list and item); docs-samples now expects the upload sample's title from its name, with the old step 4 rename gone.
+
 ## 0.21.0 (2026-10-29)
 
 ### Product (in customer release notes)
