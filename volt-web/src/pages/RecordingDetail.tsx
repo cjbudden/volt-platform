@@ -7,6 +7,7 @@ import { ClipProvenancePanel } from '../ClipProvenance'
 import type { Waveform } from '../api'
 import { pressable } from '../a11y'
 import { Notice, PageError } from '../notices'
+import { useAccess } from '../access'
 import { SendToAddon } from './Workflows'
 import { removalText } from '../programmeMedia'
 import { MetadataForm } from '../ContentTypeFields'
@@ -479,6 +480,7 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     catch (e: any) { setActErr(e.message) } finally { setBusy('') }
   }
   const [altDownloads, setAltDownloads] = useState<{ format: string; label: string; url: string }[]>([])
+  const canDownload = useAccess().can('downloads', 'operate')
   async function download(acceptGapsMs?: number) {
     setActErr(''); setMsg(''); setGapOffer(null); setBusy('download')
     try {
@@ -723,10 +725,13 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
             </button>
             {/* An audio recording downloads as audio: MP3, with the AAC (.m4a)
                 offered beside it once the export exists. Video stays MP4. */}
-            <button className="btn ghost" disabled={busy === 'download'} onClick={() => download()}
-              title={tl?.audioOnly ? 'Export the whole recording as an MP3 (an AAC .m4a is produced alongside)' : 'Export the whole recording as an MP4'}>
-              {busy === 'download' ? '…' : tl?.audioOnly ? 'Download MP3' : 'Download MP4'}
-            </button>
+            {/* Downloads: operate, as the server asks (modules/recordings.ts). */}
+            {canDownload && (
+              <button className="btn ghost" disabled={busy === 'download'} onClick={() => download()}
+                title={tl?.audioOnly ? 'Export the whole recording as an MP3 (an AAC .m4a is produced alongside)' : 'Export the whole recording as an MP4'}>
+                {busy === 'download' ? '…' : tl?.audioOnly ? 'Download MP3' : 'Download MP4'}
+              </button>
+            )}
             {altDownloads.map(a => (
               <a key={a.format} className="btn ghost" href={a.url} download style={{ marginLeft: 6 }}>{a.label}</a>
             ))}

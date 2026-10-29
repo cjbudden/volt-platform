@@ -22,11 +22,18 @@ Editors, producers and whoever signs clips off before they go out use it.
 
 ## Before you start
 
-- Clips to review: they are cut in [Recordings](recordings.md) and appear in the [Media Library](media-library.md). A clip comes into this queue when it is sent for review. The console does not have a button for that yet: send it with the API (see [Through the API](#through-the-api)).
+- Clips to review: they are cut in [Recordings](recordings.md) and appear in the [Media Library](media-library.md). A clip comes into this queue when it is sent for review: open it in the Media Library and choose **Send for review** beside its **Review** state (see [Send a clip for review](#send-a-clip-for-review)).
 - If approval should be required before publishing, set **Require an approved review before publishing** under **Publish gate** in [Publishing Rules](publishing-rules.md).
 - The right access: see [Who can do it](#who-can-do-it).
 
 ## Step by step
+
+### Send a clip for review
+
+1. Open the clip in the [Media Library](media-library.md). Under **Facts**, its **Review** row shows where it stands.
+2. Choose **Send for review** beside a **Draft** or **Rejected** clip. It now reads **In review** and is in the queue.
+3. For a clip already waiting, the button reads **Open in Review** and opens this page with that clip open.
+4. An **Approved** clip offers **Send back for review**, for example after a re-cut, so it goes round again.
 
 ### Work through the queue
 
@@ -40,18 +47,21 @@ Editors, producers and whoever signs clips off before they go out use it.
 1. In the open clip, the line at the top shows its review state, its QC result (**QC pass**, **QC warnings** or **QC failed**) and what that means for publishing, for example **Ready to publish.** or **Publishing is allowed, but QC has outstanding findings on this clip.**
 2. **What was measured** lists each finding: **error**, **warning** or **info**, the check, the time in the clip, and what was measured against what was expected. **Every check ran and found nothing.** means a clean pass.
 3. **Not checked** names any check that did not run. That is different from a check that ran and found nothing.
-4. Choose **Re-run QC** after a re-cut, or when a check was added. The result appears after a few seconds.
+4. Choose **Re-run QC** after a re-cut, or when a check was added. **QC is running again. The findings below update in a few seconds.** confirms it started; if it could not start, the reason is shown instead.
 
 ### Decide
 
-1. Type a note in **A note for whoever reads this next…**. A note is required to request changes or reject.
-2. Choose one:
+1. Type a note in **A note for whoever reads this next…**. The line under it says when a note is needed: to request changes or reject. Choosing either without one says so before anything is sent.
+2. Choose one. The buttons offered follow the clip's state:
 
-   | Button | Does | Afterwards |
-   |---|---|---|
-   | **Approve** | Approves the clip. It reads **Approve anyway** when QC has findings, and a line warns that the approval is recorded against your name | The clip leaves the queue |
-   | **Request changes** | Sends it back for changes (shown only for a clip **In review**) | It stays in the queue as **Changes requested** |
-   | **Reject** | Rejects the clip | The clip leaves the queue |
+   | Button | Shown for | Does | Afterwards |
+   |---|---|---|---|
+   | **Approve** | **In review** | Approves the clip. It reads **Approve anyway** when QC has findings, and a line warns that the approval is recorded against your name | The clip leaves the queue |
+   | **Request changes** | **In review** | Sends it back for changes | It stays in the queue as **Changes requested** |
+   | **Send back for review** | **Changes requested** | Puts it back into review once the changes are made. A clip with changes requested is not approved directly | It reads **In review**, and can be approved |
+   | **Reject** | Any state but **Rejected** | Rejects the clip | The clip leaves the queue |
+
+   A role with View only sees the findings and the decisions, with **Your role can see this review but not decide it.** in place of the buttons.
 
 3. **Who decided what** lists every decision on the clip: **When**, **Who**, the **Decision** and the **Note**. A decision made over QC findings is marked **over QC** with the QC result at the time.
 
@@ -76,7 +86,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | Task | Access needed |
 |---|---|
 | See the queue, the findings and the decisions | Media library & publishing: View |
-| Approve, request changes, reject, re-run QC | Media library & publishing: Manage |
+| Send for review, approve, request changes, reject, re-run QC | Media library & publishing: Manage |
 | Open the source recording | Recordings & clips: View |
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).
@@ -85,10 +95,10 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 
 | You see | What it means | What to do |
 |---|---|---|
-| **Nothing waiting** | No clip is in review or has changes requested | Expected; clips appear once they are sent for review |
+| **Nothing waiting** | No clip is in review or has changes requested | Expected; send one from the [Media Library](media-library.md) with **Send for review** |
 | **Nothing measured yet. Run QC to see what is in this clip.** | QC has not run on this clip, or has not finished | Choose **Re-run QC**, wait a few seconds, then **Refresh** |
-| "Say why: a decision of "changes requested" needs a note." (or "rejected") | Requesting changes and rejecting need a note | Type a note, then choose the button again |
-| "A clip cannot go from changes_requested to approved." | A clip with changes requested has to go back into review before it can be approved | Send it for review again with the API, then approve it; or **Reject** it |
+| **Add a note saying what needs to change first.** or **Add a note saying why before rejecting.** | Requesting changes and rejecting need a note | Type a note, then choose the button again |
+| No **Approve** on a clip with **Changes requested** | It has to go back into review before it can be approved | Choose **Send back for review**, then **Approve** |
 | **This account requires review before publishing, and this clip is…** | Publishing waits for an approval | Approve the clip |
 | **This account blocks publishing when QC has failed.** | Publishing waits for a clean QC | Re-cut the clip, then **Re-run QC** |
 | **Couldn't load the review queue.** or **Couldn't load this review.** | The page could not be read | Choose **Retry** |
@@ -102,7 +112,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `POST /api/vod/{id}/review` | Moves it on: `{"to": "in_review"}`, `"approved"`, `"changes_requested"`, `"rejected"` or `"draft"`, with a `note` (required for anything but `in_review` and `approved`). An approval answers with `autoPublish`: `published` or `scheduled` when the rule published it, `skipped` when it waits for someone |
 | `POST /api/vod/{id}/qc` | Runs QC again |
 
-This sends a clip for review, which puts it in the queue:
+This sends a clip for review, as **Send for review** does, which puts it in the queue:
 
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

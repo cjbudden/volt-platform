@@ -183,6 +183,7 @@
       "guide": "guides/review.md",
       "path": "/review",
       "waitFor": "h1",
+      "click": ["button:has-text(\"Open\")"],
       "alt": "The Review page: the queue of clips with their source, length, QC result and review state, one clip opened to show what was measured and the decision buttons"
     },
     {

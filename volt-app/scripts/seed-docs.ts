@@ -392,6 +392,17 @@ async function seedAccountSections() {
         [ACCOUNT, id, HOST, name, kind, d, Math.round(hours * 3600)]);
     }
   }
+
+  // Review (build queue 1.14-G3a): one clip waiting, sent from the Media
+  // Library as the guide says, so the Review guide shows a queue with a clip
+  // in it. Only from draft, so a rerun does not stack decisions.
+  const { decide } = await import('../src/services/review');
+  const goal = await query<any>(
+    `SELECT v.id, v.review_state FROM vod_assets v JOIN channels c ON c.id = v.channel_id JOIN groups g ON g.id = c.group_id
+      WHERE g.account_id = $1 AND v.title = 'Goal of the Month' LIMIT 1`, [ACCOUNT]);
+  if (goal[0] && (goal[0].review_state ?? 'draft') === 'draft') {
+    await decide({ assetId: goal[0].id, to: 'in_review', actorId: ADMIN, actorLabel: DOCS_LOGIN.email });
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

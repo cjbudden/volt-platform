@@ -5,6 +5,7 @@ import { api, apiRequest, thumbUrl } from '../api'
 import DeleteAssetDialog, { type DeletedAsset } from '../DeleteAssetDialog'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import { navigate } from '../router'
+import { useAccess } from '../access'
 import { Notice, PageError, useNotify, usePageNotice } from '../notices'
 import MediaPreview from '../MediaPreview'
 import { AssetImage } from './vod/AssetImage'
@@ -131,6 +132,41 @@ function fmtDur(ms: number | string | null | undefined) {
 // ---------------------------------------------------------------------------
 //  One asset, expanded
 // ---------------------------------------------------------------------------
+/**
+ * THE WAY INTO REVIEW. The queue lists only clips that are waiting, so the
+ * place to send one is where the clip lives: here. A clip already waiting
+ * opens in the queue instead (Review.tsx reads ?open=). Sending is a write on
+ * the Media library feature (manage), the same level the server asks for.
+ */
+function ReviewAction({ d, onChanged }: { d: any; onChanged: () => void }) {
+  const { can } = useAccess()
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const state: string = d.review_state ?? 'draft'
+  const icon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" aria-hidden="true"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
+  if (state === 'in_review' || state === 'changes_requested') {
+    return (
+      <button className="btn ghost sm" style={{ marginLeft: 8 }} onClick={() => navigate(`/review?open=${encodeURIComponent(d.id)}`)}>
+        {icon} Open in Review
+      </button>
+    )
+  }
+  if (!can('vod', 'manage')) return null
+  async function send() {
+    setBusy(true); setErr('')
+    try { await api.decideReview(d.id, 'in_review'); onChanged() }
+    catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <>
+      <button className="btn ghost sm" style={{ marginLeft: 8 }} disabled={busy} onClick={send}>
+        {icon} {busy ? 'Sending…' : state === 'approved' ? 'Send back for review' : 'Send for review'}
+      </button>
+      {err && <div style={{ marginTop: 6 }}><Notice kind="error" variant="compact" message={err} /></div>}
+    </>
+  )
+}
+
 function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () => void; onDeleted?: (a: DeletedAsset) => void }) {
   const [d, setD] = useState<any>(null)
   const [err, setErr] = useState('')
@@ -267,8 +303,9 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
                     {d.source_coverage_pct != null ? `${d.source_coverage_pct}%` : '—'}
                   </td></tr>
                 <tr><td style={{ color: 'var(--faint)' }}>Review</td>
-                  <td style={{ color: REVIEW_TONE[d.review_state ?? 'draft'] }}>
-                    {REVIEW_LABEL[d.review_state ?? 'draft']}
+                  <td>
+                    <span style={{ color: REVIEW_TONE[d.review_state ?? 'draft'] }}>{REVIEW_LABEL[d.review_state ?? 'draft']}</span>
+                    <ReviewAction d={d} onChanged={() => { load(); onChanged() }} />
                   </td></tr>
                 <tr><td style={{ color: 'var(--faint)' }}>QC</td>
                   <td style={{ color: QC_TONE[d.qc_state] ?? 'var(--muted)' }}>{d.qc_state ?? 'not run'}{d.qc_at ? <span style={{ color: 'var(--faint)' }}> · {new Date(d.qc_at).toLocaleString()}</span> : null}</td></tr>

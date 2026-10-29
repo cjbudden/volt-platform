@@ -79,7 +79,7 @@ Files dropped in a watch folder arrive the same way, without the upload band ([W
 ### Watch it and choose its image (Preview)
 
 1. **Preview** plays the asset. Audio plays with an audio player.
-2. **Facts** lists its kind, length, how it was built, how much of the source it covers, and its **Review** and **QC** state. For an uploaded file it also shows the **Source file**, the **Ladder** it was encoded with and the **Formats** made.
+2. **Facts** lists its kind, length, how it was built, how much of the source it covers, and its **Review** and **QC** state. For an uploaded file it also shows the **Source file**, the **Ladder** it was encoded with and the **Formats** made. Beside **Review**, **Send for review** puts a draft or rejected clip into the [Review](review.md) queue (**Send back for review** for an approved one), and **Open in Review** opens a clip that is already waiting.
 3. **HLS manifest** opens the streaming address. The **Download** buttons (for example **Download MP4**) appear if your role includes downloads.
 4. Under **Image**, Volt picks a picture for the asset by itself: the best frame, a programme image, station artwork or an album cover, and says why. To change it, click one of the **Frames considered, best first**, or choose **Choose from library**. **Pick again** (or **Pick automatically**, after you chose one by hand) lets Volt choose again.
 5. For an uploaded file, **Rebuild from source** takes the stills and preview sprite sheets again from the original file.
@@ -152,7 +152,7 @@ The **Formats** tab frames a 9:16, 1:1 and 4:5 version of the asset by following
 |---|---|
 | [Recordings](recordings.md) | Clips cut from a recording become assets here; **Open the recording** goes back to the source |
 | [EPG](epg.md) | Programmes set to **Auto VOD** become assets, and **Fill from EPG** copies the programme's details |
-| [Review](review.md) | Clips sent for review are decided there; the decision shows in the **Review** column |
+| [Review](review.md) | Send a clip there with **Send for review** on its **Preview** tab; the decision shows in the **Review** column |
 | [Content Types](content-types.md) | Decide which metadata fields an asset has and which are required |
 | [Publishing Rules](publishing-rules.md) | Decide where a publish goes, for how long, and whether review or QC must pass first |
 | [Ingest Rules](ingest-rules.md), [Watchfolders](watchfolders.md) | Decide how uploaded and dropped files are named, typed and checked for duplicates |
@@ -170,7 +170,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 |---|---|
 | See the library, open assets and read every tab | Media library & publishing: View |
 | Publish, publish again, remove access, publish to social, retry a social post | Media library & publishing: Operate |
-| Save metadata, fill from the guide, change the image, set skip markers, re-run QC, change the asset's publishing rule, work its formats | Media library & publishing: Manage |
+| Save metadata, fill from the guide, change the image, set skip markers, send for review, re-run QC, change the asset's publishing rule, work its formats | Media library & publishing: Manage |
 | See which files can be downloaded | Downloads: View |
 | Download a file | Downloads: Operate |
 | Upload files | Files, uploads & storage: Manage, and Account settings: Manage (see [Troubleshooting](#troubleshooting)) |

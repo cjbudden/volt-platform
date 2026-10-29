@@ -71,7 +71,7 @@ When your marks cross a gap, **Missing media inside the marks.** explains how lo
 
 1. Open the recording.
 2. Choose **Publish full VOD** to make the whole recording one VOD asset. It is available once the recording has closed. **Recording published as a full VOD asset.** confirms it.
-3. Choose **Download MP4** (**Download MP3** for radio) to export the whole recording as a file. The first time, **MP4 export is being prepared. Check back shortly.** appears: choose the button again later and the file opens. A radio export also offers **AAC (.m4a)** beside it.
+3. Choose **Download MP4** (**Download MP3** for radio) to export the whole recording as a file. The button is there for roles with Downloads: Operate. The first time, **MP4 export is being prepared. Check back shortly.** appears: choose the button again later and the file opens. A radio export also offers **AAC (.m4a)** beside it.
 
 ### Check what a clip was made from
 
@@ -100,7 +100,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | Task | Access needed |
 |---|---|
 | See sources and recordings, play, scrub, search transcripts | Recordings & clips: View |
-| Download a recording as a file | Recordings & clips: View |
+| Download a recording as a file | Recordings & clips: View and Downloads: Operate |
 | Publish a whole recording as VOD (**Publish full VOD**) | Recordings & clips: Operate |
 | Cut a clip (**Create clip**) | Recordings & clips: Manage |
 | Send a recording to an add-on | Account settings: Operate |

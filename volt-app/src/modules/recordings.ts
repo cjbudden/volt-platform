@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { query, one } from '../db';
 import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
+import { requirePermission } from '../auth/roles';
 import { asyncHandler, notFound, badRequest } from '../util/http';
 import { createClipVod, formatsFor, enqueueClipBuild } from '../services/clips';
 import { inheritedMetadata } from '../services/contentTypes';
@@ -807,6 +808,11 @@ recordingsRouter.get(
  */
 recordingsRouter.get(
   '/:id/download',
+  // TAKING A COPY IS THE DOWNLOADS PERMISSION (auth/roles.ts, modules/downloads.ts),
+  // not Recordings: this route sits under /api/recordings, so the central gate
+  // only asked for Recordings: view and any role that could see a recording
+  // could export and fetch it whole.
+  requirePermission('downloads', 'operate'),
   asyncHandler(async (req, res) => {
     const rec = await fetchOwned(req.params.id, accountId(req));
     if (!rec) throw notFound('Recording not found');
