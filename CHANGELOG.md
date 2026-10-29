@@ -2,6 +2,21 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.15.0 (2026-10-29)
+
+### Product (in customer release notes)
+
+- fixed · Media Library: A role with Files, uploads & storage: Manage, such as the Media Librarian template, can now upload files, import a link and settle held files. Adding a file no longer needs Account settings: Manage.
+- improved · Ingest Rules: Each ingest rule's summary now reads in words, for example "when the extension is mov or mp4: metadata: Before upload". Greyed cloud drive buttons, here and in the upload panel, say your Volt provider sets them up instead of naming server settings.
+- changed · API: GET /api/workflows/map no longer returns each stage's impl field. The ingest lookups POST /api/ingest/preview, POST /api/ingest/sanitise, GET /api/ingest/baseline and GET /api/ingest/providers now need Files, uploads & storage: View or Account settings: View. Storage locations carry their uri only for whoever runs the Volt service.
+- improved · Storage: Storage names each tier by what it does (Server disk, Standard, Infrequent access, Archive, Deep archive) and explains a refused retention ladder in the page's own words. The storage driver, its server setting and each copy's storage address are shown only to whoever runs your Volt service.
+- added · Media Library: The Media Library guide now covers deleting an asset: what goes with it, typing the title to confirm, and getting it back from Storage > Recently removed.
+- improved · Media Library: When an asset has no file to download, its Encode tab now says why and how to get one: cut the clip again with an Output that includes a downloadable file, or upload the file as H.264 video with AAC sound in MP4 or MOV.
+
+### Internal
+
+- added: New check suite media-internals (31 assertions): the ingest lookups' access, the workflow map without source file names, and storage answers without setting names, raw addresses or action keys. The screenshot banned list now covers console build settings, storage setting names, storage class names, raw s3:// addresses and the provider setup instruction.
+
 ## 0.14.0 (2026-10-29)
 
 ### Product (in customer release notes)
