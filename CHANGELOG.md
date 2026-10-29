@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.17.0 (2026-10-29)
+
+### Product (in customer release notes)
+
+- fixed · Content Types: Choosing New type extending a second time for the same type now makes another copy (copy 2, copy 3) instead of failing because the name was taken.
+- improved · Publishing Rules: Event, Radio, TV and FAST managers can now see and set the publishing rule of the streams they run, on each stream's Access tab, without Account settings access.
+- added · Publishing Rules: Publishing Rules can now give a content type its own rule directly, and Add a social account opens Social accounts instead of API Keys.
+
+### Internal
+
+- added · Tests: publishing-stream-rules suite: stream rule access by stream kind, the rule editor's lookups and content type name conflicts.
+
 ## 0.16.0 (2026-10-29)
 
 ### Product (in customer release notes)

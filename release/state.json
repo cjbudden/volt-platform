@@ -1,76 +1,81 @@
 {
-  "version": "0.16.0",
+  "version": "0.17.0",
   "date": "2026-10-29",
-  "commit": "b7fa99df3a09a69d123ea2a53e626564cca2e93e",
+  "commit": "dbb3a688f2e71b1b044c2770a5e9851cd9f2c05a",
   "previous": {
-    "version": "0.15.0",
+    "version": "0.16.0",
     "date": "2026-10-29",
-    "commit": "e4f84a0d9df889e9f27c05a80892bd85463b8c61",
+    "commit": "b7fa99df3a09a69d123ea2a53e626564cca2e93e",
     "previous": {
-      "version": "0.14.0",
+      "version": "0.15.0",
       "date": "2026-10-29",
-      "commit": "d8bc11b8eb74b2d6923677db1779ea5a3ed7a14f",
+      "commit": "e4f84a0d9df889e9f27c05a80892bd85463b8c61",
       "previous": {
-        "version": "0.13.0",
+        "version": "0.14.0",
         "date": "2026-10-29",
-        "commit": "dc4517cebd62df097d0e80675f63950793620544",
+        "commit": "d8bc11b8eb74b2d6923677db1779ea5a3ed7a14f",
         "previous": {
-          "version": "0.12.0",
-          "date": "2026-10-23",
-          "commit": "7535b7682c0bfd6cdb6eae2c1d07228d2ae42491",
+          "version": "0.13.0",
+          "date": "2026-10-29",
+          "commit": "dc4517cebd62df097d0e80675f63950793620544",
           "previous": {
-            "version": "0.11.0",
+            "version": "0.12.0",
             "date": "2026-10-23",
-            "commit": "fdf90439b09c3218ca81ac7cf921a76dd1f7fc9f",
+            "commit": "7535b7682c0bfd6cdb6eae2c1d07228d2ae42491",
             "previous": {
-              "version": "0.10.0",
+              "version": "0.11.0",
               "date": "2026-10-23",
-              "commit": "644257b66aa22e4b407169ea6f69ad801839ed71",
+              "commit": "fdf90439b09c3218ca81ac7cf921a76dd1f7fc9f",
               "previous": {
-                "version": "0.9.0",
+                "version": "0.10.0",
                 "date": "2026-10-23",
-                "commit": "d3e82f93aa27d0be71fa7ae81c2c1b4485086648",
+                "commit": "644257b66aa22e4b407169ea6f69ad801839ed71",
                 "previous": {
-                  "version": "0.8.0",
+                  "version": "0.9.0",
                   "date": "2026-10-23",
-                  "commit": "6d6e957b86f2f85bb4cd6b618f49e4f2909b4909",
+                  "commit": "d3e82f93aa27d0be71fa7ae81c2c1b4485086648",
                   "previous": {
-                    "version": "0.7.0",
+                    "version": "0.8.0",
                     "date": "2026-10-23",
-                    "commit": "abbf59a8532cc6c85cc74746f78e41a8b8afa10d",
+                    "commit": "6d6e957b86f2f85bb4cd6b618f49e4f2909b4909",
                     "previous": {
-                      "version": "0.6.0",
-                      "date": "2026-10-22",
-                      "commit": "86923cdd6dfde0d1bff7c7c8f55486d3fde4d851",
+                      "version": "0.7.0",
+                      "date": "2026-10-23",
+                      "commit": "abbf59a8532cc6c85cc74746f78e41a8b8afa10d",
                       "previous": {
-                        "version": "0.5.1",
+                        "version": "0.6.0",
                         "date": "2026-10-22",
-                        "commit": "16041824ffb11d1736455d91c324692969a57409",
+                        "commit": "86923cdd6dfde0d1bff7c7c8f55486d3fde4d851",
                         "previous": {
-                          "version": "0.5.0",
+                          "version": "0.5.1",
                           "date": "2026-10-22",
-                          "commit": "d446d932d8c3aedbdc8ee0b5f87c0efbae010d2e",
+                          "commit": "16041824ffb11d1736455d91c324692969a57409",
                           "previous": {
-                            "version": "0.4.0",
+                            "version": "0.5.0",
                             "date": "2026-10-22",
-                            "commit": "f7e669d7d1027c3b5b6717687128262b6056dadc",
+                            "commit": "d446d932d8c3aedbdc8ee0b5f87c0efbae010d2e",
                             "previous": {
-                              "version": "0.3.0",
+                              "version": "0.4.0",
                               "date": "2026-10-22",
-                              "commit": "ff0d4163ada0f2ee6f122e4dc57f58987d369d6a",
+                              "commit": "f7e669d7d1027c3b5b6717687128262b6056dadc",
                               "previous": {
-                                "version": "0.2.1",
+                                "version": "0.3.0",
                                 "date": "2026-10-22",
-                                "commit": "c9c0ccf45e35d1954d27a63b1b77bf491aea89de",
+                                "commit": "ff0d4163ada0f2ee6f122e4dc57f58987d369d6a",
                                 "previous": {
-                                  "version": "0.2.0",
+                                  "version": "0.2.1",
                                   "date": "2026-10-22",
-                                  "commit": "fb282862daf7a87546c2bb604ed42020744c67eb",
+                                  "commit": "c9c0ccf45e35d1954d27a63b1b77bf491aea89de",
                                   "previous": {
-                                    "version": "0.1.0",
-                                    "date": "2026-10-18",
-                                    "commit": "7879905d5423d957dd6086e4205fb4e88a161527",
-                                    "note": "Baseline when release tooling was introduced. No release had been cut before this."
+                                    "version": "0.2.0",
+                                    "date": "2026-10-22",
+                                    "commit": "fb282862daf7a87546c2bb604ed42020744c67eb",
+                                    "previous": {
+                                      "version": "0.1.0",
+                                      "date": "2026-10-18",
+                                      "commit": "7879905d5423d957dd6086e4205fb4e88a161527",
+                                      "note": "Baseline when release tooling was introduced. No release had been cut before this."
+                                    }
                                   }
                                 }
                               }
