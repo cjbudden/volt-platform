@@ -15,7 +15,7 @@ import { computePipelineHealth, recoveryOf, type PipelineHealth } from './pipeli
 import { recommendInstance, buildBilling, type Billing } from './billing';
 import { serverStatusFor, type ServerStatus } from './fleet/serverStatus';
 import { splitStamp, foldRepeats, newestFirst, type EncoderLogRow } from './encoderLog';
-import { epgLane } from './epgLane';
+import { epgLane, type EpgLane } from './epgLane';
 
 const DVR_MAX_SEC = 14400; // 4h cap for 24x7 channels
 
@@ -116,7 +116,7 @@ export interface ChannelDetail {
   ladder: { height: number; bitrate_kbps: number }[];
   sources: any[];
   viewers: { current: number; peak: number; peakAt: string; trendPct: number; series: { t: number; v: number }[] };
-  epg: { now: any; next: any; lane: any[] };
+  epg: EpgLane;
   statusBoard: { output: string; activeSource: string; fallback: string; packager: string; inputs: any[] };
   log: { ts: string; at?: string | null; firstAt?: string | null; count?: number; level: string; title: string; detail: string }[];
   health: PipelineHealth;

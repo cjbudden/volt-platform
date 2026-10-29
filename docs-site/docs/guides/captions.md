@@ -55,7 +55,7 @@ Account administrators choose the engine; whoever looks after output settings se
 
 ### Change captions from a channel
 
-The same settings can be changed from one channel: stop the channel, open its **Settings**, and under **Subtitles** turn on **Live captions / subtitles**, choose the **Output languages** and, if subtitles appear too early or too late, the **Subtitle offset** (a positive number shows them later). These are the profile's settings, so the change applies to every stream on that profile.
+The same settings can be changed from one channel: stop the channel, open its **Settings**, and under **Subtitles** turn on **Live captions / subtitles**, choose the **Output languages** and, if subtitles appear too early or too late, the **Subtitle offset** (a positive number shows them later). These are the profile's settings, so the change applies to every stream on that profile. While any other stream on that profile is running the change is refused, naming those streams, the same as in **Admin > Captions**: stop them first.
 
 ## How it connects
 

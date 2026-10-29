@@ -67,7 +67,7 @@ You can also start and stop channels from the list: the **Start** or **Stop** bu
 ### Change a channel's settings
 
 1. Open the channel and choose **Settings** (the gear in the header).
-2. Change what you need and save. Sources, failover, filler, catch-up, the output ladder, subtitles and the watermark are read when the channel starts, so stop the channel first to change them.
+2. Change what you need and save. Sources, failover, filler, catch-up, the output ladder, subtitles and the watermark are read when the channel starts, so stop the channel first to change them. Subtitles belong to the channel's output profile, so they also wait until every other stream on that profile is stopped.
 
 ### Hand out the stream
 

@@ -1,4 +1,4 @@
-import { encoderRunning, lockedChanges } from '../services/settingsLock';
+import { encoderRunning, lockedChanges, othersRunningOnProfile } from '../services/settingsLock';
 import { Router } from 'express';
 import { z } from 'zod';
 import { query, one, tx } from '../db';
@@ -583,6 +583,21 @@ const editChannel = asyncHandler(async (req, res) => {
       { ...((has('metadata') ? body.metadata : current.metadata) ?? {}), name: has('name') ? body.name : current.name }, ['channel']);
     patch.schema_id = md.schemaId;
     patch.metadata = md.metadata;
+  }
+
+  // SUBTITLES ARE SHARED: they live on the group's output profile, so a change
+  // also lands on every other running stream on that profile. Refused like
+  // Admin > Captions does, naming them (settingsLock.ts othersRunningOnProfile).
+  if (has('captions') && body.captions) {
+    const capChanged = (await lockedChanges(req.params.id, current, {}, body as any, (k) => k === 'captions')).length > 0;
+    const others = capChanged ? await othersRunningOnProfile(req.params.id) : [];
+    if (others.length) {
+      const names = others.slice(0, 5).map((o) => o.name).join(', ') + (others.length > 5 ? ` and ${others.length - 5} more` : '');
+      return res.status(409).json({
+        error: `Subtitles are shared by every stream on this channel's output profile. Stop ${names} to change them: the encoder reads them when a stream starts.`,
+        code: 'locked_while_running', fields: ['Subtitles'], running: others,
+      });
+    }
   }
 
   // SETTINGS LOCK: what the encoder reads at start cannot change under it.

@@ -134,3 +134,28 @@ export async function lockedChanges(
   }
   return [...out];
 }
+
+/**
+ * THE SHARED PROFILE. A channel's Settings > Subtitles writes its group's
+ * output profile, which every other stream on that profile reads too (other
+ * channels of the group, and any group or event sharing the profile). The
+ * channel's own lock above only looked at the channel itself, so a change
+ * saved while a neighbour ran did nothing on that neighbour until its next
+ * start, which is the very case Admin > Captions refuses (modules/
+ * captionsSettings.ts). Build queue 1.14-G5b (k): the same test here.
+ *
+ * Streams other than `channelId` on the channel's output profile with an
+ * encoder running now.
+ */
+export async function othersRunningOnProfile(channelId: string): Promise<{ kind: 'channel' | 'event'; id: string; name: string }[]> {
+  return query<any>(
+    `WITH p AS (SELECT g.output_profile_id AS id, g.account_id FROM channels ch JOIN groups g ON g.id = ch.group_id WHERE ch.id = $1)
+     SELECT 'channel' AS kind, c.id, c.name FROM channels c JOIN groups g ON g.id = c.group_id, p
+      WHERE p.id IS NOT NULL AND g.output_profile_id = p.id AND g.account_id = p.account_id AND c.id <> $1
+        AND EXISTS (SELECT 1 FROM instances i WHERE i.channel_id = c.id AND i.terminated_at IS NULL)
+     UNION ALL
+     SELECT 'event' AS kind, e.id, e.name FROM events e JOIN groups g ON g.id = e.group_id, p
+      WHERE p.id IS NOT NULL AND g.output_profile_id = p.id AND g.account_id = p.account_id
+        AND EXISTS (SELECT 1 FROM instances i WHERE i.event_id = e.id AND i.terminated_at IS NULL)
+     ORDER BY 3`, [channelId]);
+}

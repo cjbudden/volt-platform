@@ -2294,6 +2294,29 @@ export function EpgStrip({ d, broadcast = 'off', ownerPath, onChanged, onAddEpg,
 
   // No programmes: don't show a dead "ON NOW —" strip. Offer a call to action to
   // add a guide, or to hide the panel for this channel.
+  // The strip covers two hours back to eight ahead. A guide whose programmes
+  // are all outside that (it starts tomorrow, or ended last week) is not "no
+  // guide": say what is nearest instead of asking for programmes that exist.
+  const outside = (d.epg as any).outside as { previous: any; upcoming: any } | undefined
+  if (!hasEpg && (outside?.upcoming || outside?.previous)) {
+    const when = (ms: number) => new Date(ms).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    return (
+      <div className="card" style={{ marginBottom: 18, display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px' }} data-testid="epg-outside">
+        <span className="tag idle"><span className="dot-s idle" />EPG</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600 }}>Nothing in the guide around now</div>
+          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
+            {outside?.upcoming
+              ? <>Next programme: <b>{outside.upcoming.name}</b>, {when(outside.upcoming.startMs)}.</>
+              : <>The last programme, <b>{outside!.previous.name}</b>, ended {when(outside!.previous.endMs)}.</>}
+            {' '}The strip shows two hours back to eight hours ahead.
+          </div>
+        </div>
+        <button className="btn primary" onClick={onAddEpg}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> Open EPG</button>
+        {onHideEpg && <button className="btn ghost" onClick={onHideEpg}>Hide</button>}
+      </div>
+    )
+  }
   if (!hasEpg) {
     return (
       <div className="card" style={{ marginBottom: 18, display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px' }}>

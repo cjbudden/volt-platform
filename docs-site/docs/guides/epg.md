@@ -36,6 +36,8 @@ Schedulers and presentation staff use it day to day.
 2. Choose **Open** on a guide that has programmes, or **Build** on one that has none yet. **New EPG** lists the streams without programmes and opens the one you pick.
 3. From a channel's page you can also choose **Add EPG** on the "No programme guide yet" panel.
 
+A channel or event page shows the guide from two hours back to eight hours ahead. When the guide has programmes but none in that window (it starts tomorrow, or ended last week), the page says **Nothing in the guide around now**, names the next programme (or the last one) and offers **Open EPG**. "No programme guide yet" appears only when the stream has no programmes at all.
+
 A guide exists as soon as it has a programme; there is nothing to create first. The list shows each guide's programmes, **Coverage** (how far ahead it is filled) and **Next up**.
 
 ### Add a programme

@@ -399,7 +399,9 @@ export interface ChannelDetail extends Channel {
   /** Packaging: the single fallback source is transcoded up to every rendition. */
   fallback_transcode?: boolean
   viewers: { current: number; peak: number; peakAt: string; trendPct: number; series: { t: number; v: number }[] }
-  epg: { now: any; next: { name: string; start: string; startMs?: number } | null; lane: any[] }
+  epg: { now: any; next: { name: string; start: string; startMs?: number } | null; lane: any[]
+    /** Only when the lane (2 h back to 8 h ahead) is empty: the nearest programme either side (services/epgLane.ts). */
+    outside?: { previous: EpgNeighbour | null; upcoming: EpgNeighbour | null } }
   statusBoard: { output: string; activeSource: string; fallback: string; packager: string; inputs: any[] }
   log: { ts: string; level: string; title: string; detail: string }[]
   health: PipelineHealth
@@ -2212,7 +2214,7 @@ export interface RadioStationDetail extends RadioStationRow {
   log: { ts: string; level: string; title: string; detail: string }[]
   publicAvailable: boolean
   /** The station's programme guide around now (not the now-playing log). */
-  epg?: { now: any; next: any; lane: any[] }
+  epg?: { now: any; next: any; lane: any[]; outside?: { previous: EpgNeighbour | null; upcoming: EpgNeighbour | null } }
   epgEnabled?: boolean
 }
 /** The resolved now-playing line. The server makes the four-way decision (see
@@ -3494,3 +3496,6 @@ export async function apiRequestWithHeaders(path: string, opts: RequestInit = {}
   }
   return { body: r.status === 204 ? null : await r.json(), headers: r.headers }
 }
+
+/** A programme outside the guide strip's window (services/epgLane.ts EpgNeighbour). */
+export interface EpgNeighbour { name: string; startMs: number; endMs: number }
