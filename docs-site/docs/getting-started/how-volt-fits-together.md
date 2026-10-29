@@ -42,9 +42,11 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 | Section | What it is for |
 |---|---|
 | [**Media Library**](../guides/media-library.md) | Every on-demand asset: what it is, how it was encoded and where it was published |
+| [**Collections**](../guides/collections.md) | Your own nested groupings of library media, in your own order: a collection per show, a sub-collection per week |
 | [**Recordings**](../guides/recordings.md) | Everything a stream has sent out, to search, scrub and clip across the retained range |
 | [**Image Library**](../guides/images-and-thumbnails.md) | Watermarks, slates, posters and channel brands, with an image service for any size |
 | [**Review**](../guides/review.md) | Clips waiting for a decision, with what quality checks already found |
+| [**Encoding Queue**](../guides/encoding-queue.md) | What is being encoded now, what is waiting and in which order, and why an encode failed |
 
 ### Admin: media setup
 
@@ -55,6 +57,7 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 | [**Storage**](../guides/storage.md) | What media exists, where it lives, and what retention will do to it next |
 | [**Workflows**](../guides/workflows.md) | The steps every stream, recording and file goes through, and where each piece of work is now |
 | [**Content Types**](../guides/content-types.md) | What metadata each kind of content carries, and which guide fields it fills |
+| [**Genres**](../guides/genres.md) | The account's own genre list that streams and titles are tagged from |
 | [**Publishing Rules**](../guides/publishing-rules.md) | Where on-demand content goes when it is published, and who can watch it, where and until when |
 | [**On-demand ads**](../guides/on-demand-ads.md) | Ad breaks in on-demand titles: where they go, filled by your ad server and your house spots, ad-free for viewers who paid |
 | [**Ingest Rules**](../guides/ingest-rules.md) | What happens to a file when it arrives: its name, where it is filed, duplicates, required metadata |
@@ -73,6 +76,7 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 | **Social accounts** | The social channels, Pages and accounts clips can be published to ([guide](../guides/social-accounts.md)) |
 | **Notifications** | The alerts Volt sends to the people who run the account ([guide](../guides/notifications.md)) |
 | **Users & Roles** | Who can sign in to the console and what they can do, and the viewers who watch ([guide](../guides/users-and-roles.md), [roles and access](roles-and-access.md)) |
+| **Single sign-on** | Your team signs in with your own identity provider, and its groups give them their Volt roles ([guide](../guides/single-sign-on.md)) |
 | **Permissions map** | What each kind of user can do, area by area, including your own roles ([guide](../guides/permissions-map.md)) |
 | **API Keys & Apps** | The apps that play your content and the keys your own servers use ([guide](../guides/api-keys-and-apps.md), [authentication](../api/authentication.md)) |
 | **Audit log** | Who changed what and when, including every delete ([guide](../guides/audit-log.md)) |

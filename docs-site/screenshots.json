@@ -336,6 +336,34 @@
       "path": "/apikeys",
       "waitFor": "h1",
       "alt": "The API Keys & Apps page: the registered apps with their platform, key prefix and requests, then the server-to-server secret keys"
+    },
+    {
+      "name": "collections",
+      "guide": "guides/collections.md",
+      "path": "/collections/7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a02",
+      "waitFor": ".colp-items .it",
+      "alt": "The Collections page: the tree of collections on the left, and a sub-collection open on the right with its name, description, colour and parent, then its media in order"
+    },
+    {
+      "name": "encoding-queue",
+      "guide": "guides/encoding-queue.md",
+      "path": "/encode-jobs",
+      "waitFor": ".ej-table",
+      "alt": "The Encoding Queue page: Encoding now, Waiting, and Finished recently with one encode done and one failed with its reason and a Retry button"
+    },
+    {
+      "name": "genres",
+      "guide": "guides/genres.md",
+      "path": "/genres",
+      "waitFor": "[role=list]",
+      "alt": "The Genres page: the genre list with the box to add genres, each genre with Retire and Remove, and beside it where the list is used and how changes land"
+    },
+    {
+      "name": "single-sign-on",
+      "guide": "guides/single-sign-on.md",
+      "path": "/sso",
+      "waitFor": ".sso-card",
+      "alt": "The Single sign-on page: an OpenID Connect provider with its on switch, Test, Edit and Remove, an email domain waiting for its DNS record, and the redirect URI to give the provider"
     }
   ]
 }

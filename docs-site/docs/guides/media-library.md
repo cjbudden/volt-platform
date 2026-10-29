@@ -165,6 +165,8 @@ The asset and its media go to **Storage > Recently removed** for a number of day
 | [Publishing Rules](publishing-rules.md) | Decide where a publish goes, for how long, and whether review or QC must pass first |
 | [Ingest Rules](ingest-rules.md), [Watchfolders](watchfolders.md) | Decide how uploaded and dropped files are named, typed and checked for duplicates |
 | [Encoding Profiles](encoding-profiles.md) | The ladders uploaded files are encoded with |
+| [Encoding Queue](encoding-queue.md) | Where each upload's encode waits and runs; **Encode job and log** on the **Encode** tab opens it |
+| [Collections](collections.md) | Tick assets and choose **Add to collection**; the **Collections** rail beside the list narrows the library to one collection |
 | [Formats & reframing](formats-and-reframing.md) | Account settings for the **Formats** tab |
 | [Images and thumbnails](images-and-thumbnails.md) | **Choose from library** picks from the Image Library |
 | [Share links](share-links.md) | Private previews for people outside your organisation |

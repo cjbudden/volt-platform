@@ -155,6 +155,24 @@ const baseCoverage = (over: any = {}) => ({
       ok(!page.includes('\u2014'), `${g} has no em dashes`);
     }
   }
+  // G8 (build queue 1.14-G8): the four console sections added 23 to 28 Oct
+  // (Collections, Encoding Queue, Genres, Single sign-on) each have their own
+  // guide in the section template with a screenshot, are on the map, and the
+  // batch is required so a later section cannot ship without a guide again.
+  ok(real.required.includes('G8'), 'G8 is a required batch');
+  const g8: Record<string, string> = {
+    collections: 'guides/collections.md', 'encode-jobs': 'guides/encoding-queue.md', genres: 'guides/genres.md', sso: 'guides/single-sign-on.md',
+  };
+  for (const [k, path] of Object.entries(g8)) {
+    const sec = coverage.sections.find((x: any) => x.key === k);
+    ok(sec && sec.batch === 'G8' && sec.guides.includes(path), `${k} is mapped to ${path}`);
+    const page = readFileSync(join(SITE, 'docs', path), 'utf8');
+    ok(/^guide: section$/m.test(page), `${path} is a section guide`);
+    ok(g2shots.some((s: any) => s.guide === path && page.includes(`/img/screens/${s.name}.png`)), `${path} shows its screenshot from the manifest`);
+    ok(map.includes(`../${path}`), `How Volt fits together links ${k} to ${path}`);
+    ok(!page.includes('\u2014'), `${path} has no em dashes`);
+  }
+  ok(coverage.sections.find((x: any) => x.key === 'collections')?.guides.includes('guides/media-library.md'), 'Collections keeps the Media Library guide beside its own (Add to collection, the rail)');
   ok(!coverage.sections.some((s: any) => s.key === 'system' && !s.internal), 'System Admin is marked internal, not a customer gap');
   ok(real.total === real.inTemplate + real.gaps.length, `every entry is either covered or a gap (${real.inTemplate} + ${real.gaps.length} = ${real.total})`);
 

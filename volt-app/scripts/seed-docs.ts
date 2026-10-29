@@ -157,6 +157,7 @@ async function main() {
 
   await seedAccountSections();
   await seedFast();
+  await seedG8Sections();
 
   console.log(`\ndocs demo ready. Sign in as ${DOCS_LOGIN.email} (password as in seed-demo.ts)`);
   await pool.end();
@@ -403,6 +404,83 @@ async function seedAccountSections() {
   if (goal[0] && (goal[0].review_state ?? 'draft') === 'draft') {
     await decide({ assetId: goal[0].id, to: 'in_review', actorId: ADMIN, actorLabel: DOCS_LOGIN.email });
   }
+}
+
+// The four sections guided by build queue 1.14-G8. After seedFast: the
+// collections hold the FAST titles, which seedFast makes on a fresh database.
+async function seedG8Sections() {
+  const PROMO = '6b1f0d2e-7a3c-4e5f-9a1b-2c3d4e5f6a01';
+  // Collections (build queue 1.14-G8): the four food and travel titles in a
+  // collection with a sub-collection for one week, and the promo on its own,
+  // so the Collections guide shows a tree, a breadcrumb and an ordered list.
+  // Fixed ids and ON CONFLICT so a rerun keeps one of each.
+  const FOOD = '7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a01', WEEK = '7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a02', PROMOS = '7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a03';
+  for (const [id, parent, name, description, color] of [
+    [FOOD, null, 'Food & Travel', 'Everything the Food & Travel channel can air', '#ffb703'],
+    [WEEK, FOOD, 'Week 44: Markets', 'This week\'s theme, in running order', '#2ec4b6'],
+    [PROMOS, null, 'Promos', 'Station promos for breaks and fillers', null],
+  ] as const) {
+    await query(
+      `INSERT INTO collections(id, account_id, parent_id, name, description, color, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (id) DO UPDATE SET parent_id=EXCLUDED.parent_id, name=EXCLUDED.name, description=EXCLUDED.description, color=EXCLUDED.color`,
+      [id, ACCOUNT, parent, name, description, color, ADMIN]);
+  }
+  const inCol: [string, string[]][] = [
+    [FOOD, ['5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e34', '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e35']],
+    [WEEK, ['5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e32', '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e33']],
+    [PROMOS, [PROMO]],
+  ];
+  for (const [col, ids] of inCol) {
+    for (const [i, asset] of ids.entries()) {
+      await query(
+        `INSERT INTO collection_items(collection_id, vod_asset_id, position, added_by)
+         SELECT $1, $2, $3, $4 WHERE EXISTS (SELECT 1 FROM vod_assets WHERE id=$2)
+         ON CONFLICT (collection_id, vod_asset_id) DO UPDATE SET position=EXCLUDED.position`, [col, asset, i, ADMIN]);
+    }
+  }
+
+  // Encoding Queue (build queue 1.14-G8): two finished encodes, one done and
+  // one failed, so the guide shows Finished recently with a result and an
+  // error to retry. Finished, never queued: a waiting job would be picked up
+  // by the API's own worker and fail on a source that is not there.
+  const ENC_OK = '7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a11', ENC_FAIL = '7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a12';
+  for (const [id, asset, file, state, ago, took, summary, error] of [
+    [ENC_OK, '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e32', 'harbour-market.mov', 'succeeded', 95, 312, '1080p, 720p, 480p and audio; HLS and DASH', null],
+    [ENC_FAIL, '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e33', 'smoke-and-salt.mov', 'failed', 40, 6, null, 'The source file has no video or audio stream that can be read. Upload the file again, or check it plays on your computer.'],
+  ] as const) {
+    await query(
+      `INSERT INTO jobs(id, type, state, payload, result, progress_pct, progress_note, attempts, max_attempts, last_error,
+                        started_at, finished_at, created_at, run_after, created_by)
+       VALUES ($1,'vod.encode',$2::job_state,$3::jsonb,$4::jsonb,$5,NULL,$6,3,$7,
+               now() - make_interval(mins => $8) - make_interval(secs => $9), now() - make_interval(mins => $8),
+               now() - make_interval(mins => $8) - make_interval(secs => $9 + 20), now() - make_interval(mins => $8) - make_interval(secs => $9 + 20), $10)
+       ON CONFLICT (id) DO UPDATE SET state=EXCLUDED.state, started_at=EXCLUDED.started_at, finished_at=EXCLUDED.finished_at, created_at=EXCLUDED.created_at`,
+      [id, state, JSON.stringify({ vodAssetId: asset, sourcePath: `uploads/${file}` }), summary ? JSON.stringify({ summary }) : null,
+       state === 'succeeded' ? 100 : 0, state === 'failed' ? 3 : 1, error, ago, took, ADMIN]);
+    // Its attempts, so the job page lists them (three for the failed one, as
+    // the queue retries an error twice before it gives up).
+    await query(`DELETE FROM job_attempts WHERE job_id=$1`, [id]);
+    const tries = state === 'failed' ? 3 : 1;
+    for (let n = 1; n <= tries; n++) {
+      await query(
+        `INSERT INTO job_attempts(job_id, attempt, started_at, finished_at, outcome, error)
+         VALUES ($1,$2, now() - make_interval(mins => $3) - make_interval(secs => $4), now() - make_interval(mins => $3) - make_interval(secs => $4) + make_interval(secs => 2), $5, $6)`,
+        [id, n, ago + (tries - n) * 2, took, state === 'failed' ? 'failed' : 'succeeded', error]);
+    }
+  }
+
+  // Single sign-on (build queue 1.14-G8): an OpenID Connect provider with the
+  // account's domain added but not yet verified, as it is just after Add a
+  // provider, so the guide shows the DNS record to add. Not verified, so the
+  // docs sign-in is never offered "Continue with" and keeps its password.
+  const SSO = '7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a21';
+  await query(
+    `INSERT INTO sso_connections(id, account_id, protocol, name, enabled, oidc_issuer, oidc_client_id, jit, default_tier, group_map)
+     VALUES ($1,$2,'oidc','Example Entra ID',true,'https://login.microsoftonline.com/example-tenant/v2.0','00000000-aaaa-bbbb-cccc-000000000001',true,'operator','[]'::jsonb)
+     ON CONFLICT (id) DO NOTHING`, [SSO, ACCOUNT]);
+  await query(
+    `INSERT INTO sso_domains(domain, connection_id, account_id, verify_token) VALUES ('example.com',$1,$2,'docs-example-token')
+     ON CONFLICT (domain) DO NOTHING`, [SSO, ACCOUNT]);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

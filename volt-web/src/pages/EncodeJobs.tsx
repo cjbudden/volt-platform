@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type EncodeJobRow, type EncodeOutputs, type EncodeQueue, type JobLogLine, type OutputState } from '../api'
 import { navigate, useRoute } from '../router'
 import { Notice, useNotify } from '../notices'
+import { useAccess } from '../access'
 import './encodeJobs.css'
 
 const fmtBytes = (n: number) => n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} kB` : `${n} B`
@@ -195,6 +196,8 @@ function EncodeJobDetail({ id }: { id: string }) {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
   const notify = useNotify()
+  // The worker's name is a machine name: only whoever runs Volt sees it (G4a's rule).
+  const seesServerSetup = useAccess().seesServerSetup
   const live = job?.state === 'running' || job?.state === 'queued'
   const now = useNow(!!live)
 
@@ -275,7 +278,7 @@ function EncodeJobDetail({ id }: { id: string }) {
             <div className="kv"><span className="k">{job.finished_at ? 'Finished' : 'Running for'}</span><span className="v">{job.finished_at ? when(job.finished_at) : job.started_at ? since(job.started_at, now) : '—'}</span></div>
             {job.started_at && job.finished_at && <div className="kv"><span className="k">Took</span><span className="v mono">{took(job)}</span></div>}
             <div className="kv"><span className="k">Attempts</span><span className="v">{tries.length} of {job.max_attempts}</span></div>
-            {job.claimed_by && live && <div className="kv"><span className="k">Worker</span><span className="v mono" style={{ fontSize: 'var(--fs-xs)' }}>{job.claimed_by}</span></div>}
+            {job.claimed_by && live && seesServerSetup && <div className="kv"><span className="k">Worker</span><span className="v mono" style={{ fontSize: 'var(--fs-xs)' }}>{job.claimed_by}</span></div>}
             {p.loudnorm && <div className="kv"><span className="k">Loudness</span><span className="v">EBU R128</span></div>}
             {p.segmentSeconds && <div className="kv"><span className="k">Segments</span><span className="v">{p.segmentSeconds} s</span></div>}
             <div className="kv"><span className="k">Job id</span><span className="v mono" style={{ fontSize: 'var(--fs-xs)' }}>{job.id}</span></div>
@@ -305,7 +308,7 @@ function Outputs({ o }: { o: EncodeOutputs }) {
             </tr>
           ))}
           {o.manifests.map(m => (
-            <tr key={m.name}><td className="nm">{m.name}</td><td style={{ color: 'var(--muted)' }}>{m.state === 'ok' ? (o.asset.store === 's3' ? 'on the origin bucket' : 'packaged') : '—'}</td><td /><td /><td><OutState s={m.state} /></td></tr>
+            <tr key={m.name}><td className="nm">{m.name}</td><td style={{ color: 'var(--muted)' }}>{m.state === 'ok' ? (o.asset.store === 's3' ? 'stored' : 'packaged') : '—'}</td><td /><td /><td><OutState s={m.state} /></td></tr>
           ))}
           <tr>
             <td className="nm">Thumbnails</td>
