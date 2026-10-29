@@ -161,11 +161,13 @@ const resolveSchema = z.object({
   pin: z.string().optional(),
   email: z.string().optional(),
   code: z.string().optional(),
+  /** The page's visit id: one view per visit, however often it reloads. */
+  visit: z.string().max(64).optional(),
 });
 publicShareRouter.post('/api/share/:token/resolve', asyncHandler(async (req, res) => {
-  const { pin, email, code: verifyCode } = resolveSchema.parse(req.body ?? {});
+  const { pin, email, code: verifyCode, visit } = resolveSchema.parse(req.body ?? {});
   const geo = (req.get('cloudfront-viewer-country') || req.query.geo || undefined) as string | undefined;
-  const out = await openShare(req.params.token, { pin, email, code: verifyCode, geo });
+  const out = await openShare(req.params.token, { pin, email, code: verifyCode, geo, visit });
   if (!out.ok) {
     const needsAuth = ['pin_required', 'pin_wrong', 'code_required', 'code_wrong', 'code_expired'].includes(out.reason);
     const code = needsAuth ? 401 : out.reason === 'not_found' ? 404 : out.reason === 'geo_blocked' ? 451 : 410;

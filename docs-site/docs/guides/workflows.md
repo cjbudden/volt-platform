@@ -36,7 +36,7 @@ Administrators set up add-ons and triggers; operators and producers follow runs 
 ## Before you start
 
 - For a real service: its address (it must start with https) and a person on its side who can store the signing secret Volt gives you. To try the flow first, use the built-in **Demo agent (simulated)**.
-- **Account settings: Manage** to create add-ons and attach them; **Account settings: Operate** to cancel a run, run it again or send a recording by hand (see [Who can do it](#who-can-do-it)).
+- **Account settings: Manage** to create add-ons and attach them; **Account settings: Operate** to cancel a run or run it again. Sending a recording by hand also works with **Recordings: Operate**, and a clip with **Media library & publishing: Operate** (see [Who can do it](#who-can-do-it)).
 
 ## Step by step
 
@@ -118,7 +118,9 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | Task | Access needed |
 |---|---|
 | See the map, runs, add-ons and triggers; trace a recording | Account settings: View |
-| Cancel a run, run it again, send a recording to an add-on | Account settings: Operate |
+| Cancel a run, run it again | Account settings: Operate |
+| Send a recording to an add-on by hand | Recordings: Operate, or Account settings: Operate |
+| Send a clip to an add-on by hand (through the API) | Media library & publishing: Operate, or Account settings: Operate |
 | Create, edit, test, turn off or delete add-ons; issue a new secret; attach and detach triggers | Account settings: Manage |
 
 Sending a recording by hand also needs **Recordings & clips: View** to open the recording.

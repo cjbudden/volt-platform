@@ -123,7 +123,11 @@ export function ShareDrawer({ target, onClose }: { target: ShareTarget; onClose:
   }
   function absUrl(u: string) { return /^https?:\/\//i.test(u) ? u : `${location.origin}${u}` }
   async function copy() { if (!created) return; try { await navigator.clipboard.writeText(created.url); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* ignore */ } }
-  async function revoke(id: string) { try { await api.revokeShareLink(id); await loadLinks() } catch (e: any) { setErr(e.message) } }
+  // REVOKE ASKS FIRST, on the row itself (this window is already a modal):
+  // a revoked link cannot be turned back on, so one stray click used to end a
+  // reviewer's access for good.
+  const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null)
+  async function revoke(id: string) { setConfirmRevoke(null); try { await api.revokeShareLink(id); await loadLinks() } catch (e: any) { setErr(e.message) } }
 
   return (
     <div {...pressable((e: any) => { ((onClose) as any)(e) })} data-a11y-click="" style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,14,.6)', zIndex: 60, display: 'grid', placeItems: 'center', padding: 20 }}>
@@ -267,7 +271,14 @@ export function ShareDrawer({ target, onClose }: { target: ShareTarget; onClose:
                   <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.label || l.token_prefix + '…'}</div>
                   <div style={{ color: 'var(--faint)' }}>{l.revoked ? 'revoked' : `expires ${new Date(l.expires_at).toLocaleDateString()}`} · {l.view_count} view{l.view_count === 1 ? '' : 's'}</div>
                 </div>
-                {!l.revoked && <button className="btn ghost" style={{ padding: '4px 10px', color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }} onClick={() => revoke(l.id)}>Revoke</button>}
+                {!l.revoked && confirmRevoke !== l.id && <button className="btn ghost" style={{ padding: '4px 10px', color: '#fca5a5', borderColor: 'rgba(248,113,113,.5)' }} onClick={() => setConfirmRevoke(l.id)}>Revoke</button>}
+                {!l.revoked && confirmRevoke === l.id && (
+                  <span className="flex items-center gap-2" role="group" aria-label="Confirm revoke">
+                    <span style={{ color: 'var(--faint)' }}>Stop this link for good?</span>
+                    <button className="btn ghost" style={{ padding: '4px 10px' }} onClick={() => setConfirmRevoke(null)}>Keep</button>
+                    <button className="btn primary danger" style={{ padding: '4px 10px' }} onClick={() => revoke(l.id)}>Revoke link</button>
+                  </span>
+                )}
               </div>
             ))}
           </div>

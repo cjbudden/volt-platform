@@ -314,14 +314,25 @@ export async function findShareByToken(raw: string): Promise<ShareRow | null> {
  * playback token, count the view, and fire the notify-on-first-open hook. Runs the
  * geo/rights gate. Returns a denial object if the policy rejects.
  */
-export async function openShare(raw: string, opts: { pin?: string; email?: string; code?: string; geo?: string; nowMs?: number }): Promise<
+/** A visit id the page sends: opaque, short, URL-safe. Anything else counts as no visit. */
+const VISIT_RE = /^[A-Za-z0-9_-]{8,64}$/;
+
+export async function openShare(raw: string, opts: { pin?: string; email?: string; code?: string; geo?: string; nowMs?: number; visit?: string }): Promise<
   | { ok: false; reason: ShareDenyReason }
   | { ok: true; view: any }
 > {
   const row = await findShareByToken(raw);
   if (!row) return { ok: false, reason: 'not_found' };
   const now = opts.nowMs ?? Date.now();
-  const policy = evaluateSharePolicy(row, now, opts.pin);
+  // A VISIT THAT HAS ALREADY COUNTED IS NOT A NEW VIEW (migration 0118). The
+  // page reloading, Check again and a token refresh are the same person
+  // watching, so they neither count again nor hit the view limit that their
+  // first open used. Revoked, expired, the PIN and the region still apply.
+  const visit = opts.visit && VISIT_RE.test(opts.visit) ? opts.visit : null;
+  const counted = visit
+    ? !!(await one<any>(`SELECT 1 FROM share_link_visits WHERE share_link_id=$1 AND visit_id=$2`, [row.id, visit]))
+    : false;
+  const policy = evaluateSharePolicy(counted ? { ...row, max_views: null } : row, now, opts.pin);
   if (!policy.ok) return policy;
   // second factor: emailed one-time PIN (email_pin auth mode)
   const codeCheck = evaluateEmailCode(row, now, opts.email, opts.code);
@@ -351,11 +362,20 @@ export async function openShare(raw: string, opts: { pin?: string; email?: strin
   const account = await accountBrand(row.account_id);
   const creator = row.created_by ? await one<any>(`SELECT display_name, email FROM users WHERE id=$1`, [row.created_by]) : null;
 
-  // view accounting + first-open stamp (atomic)
+  // view accounting + first-open stamp (atomic). A visit counts once: the
+  // insert decides it, so two loads racing in the same tab count one view.
   const firstOpen = !row.first_opened_at;
+  const isNewView = visit
+    ? !!(await one<any>(
+        `INSERT INTO share_link_visits(share_link_id, visit_id) VALUES ($1,$2)
+         ON CONFLICT (share_link_id, visit_id) DO UPDATE SET last_at = now()
+         RETURNING (xmax = 0) AS inserted`, [row.id, visit]))?.inserted
+    : true;
   await query(
-    `UPDATE share_links SET view_count=view_count+1, last_viewed_at=now(),
-        first_opened_at=COALESCE(first_opened_at, now()) WHERE id=$1`,
+    isNewView
+      ? `UPDATE share_links SET view_count=view_count+1, last_viewed_at=now(),
+            first_opened_at=COALESCE(first_opened_at, now()) WHERE id=$1`
+      : `UPDATE share_links SET last_viewed_at=now() WHERE id=$1`,
     [row.id]
   );
   if (firstOpen && row.notify_on_open && row.created_by) {

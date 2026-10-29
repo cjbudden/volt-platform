@@ -79,7 +79,7 @@ In the table of clips under the clip controls, choose **Sources** on a row to se
 
 ### Send a recording to an add-on
 
-Choose **Send to add-on** at the top of the recording and pick an add-on (for example transcription or quality checks). **Track it** opens the run in [Workflows](workflows.md), and its progress shows beside the button while it runs.
+Choose **Send to add-on** at the top of the recording and pick an add-on (for example transcription or quality checks). Its progress shows beside the button while it runs. **Track it** opens the run in [Workflows](workflows.md) for roles that can open Workflows (Account settings: View); others see the progress only.
 
 ## How it connects
 
@@ -103,7 +103,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | Download a recording as a file | Recordings & clips: View and Downloads: Operate |
 | Publish a whole recording as VOD (**Publish full VOD**) | Recordings & clips: Operate |
 | Cut a clip (**Create clip**) | Recordings & clips: Manage |
-| Send a recording to an add-on | Account settings: Operate |
+| Send a recording to an add-on | Recordings: Operate (or Account settings: Operate) |
 | Turn recording on and set the keep period | TV channels, Radio stations or Events: Manage |
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).

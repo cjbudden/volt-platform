@@ -46,12 +46,12 @@ A watchfolder can also be a folder in a storage bucket instead of a path (set up
    |---|---|
    | **Rule name** | A name people will recognise, such as "Slates" |
    | Pattern | The file names it matches, such as `slate_*.png`. `*` stands for any characters and `?` for one character; capitals do not matter. Only the file name is matched, not the folders it is in |
-   | Target kind | What the file is (see below). It starts as `slate` |
+   | Target kind | What the file is, picked from the list (see below). It starts as `slate`. The list holds only the kinds Volt takes in, grouped by the library each goes to |
    | Workflow | A label kept with the file, and added as a tag to images. It starts as `register` and does not change where the file goes |
 
 2. Choose **Add rule**. It is added to the bottom of the list, numbered.
 3. Put specific rules above general ones: **↑** and **↓** move a rule. `slate_*.png` must be above `*.png`, or every slate is filed by the general rule.
-4. **✕** deletes a rule straight away.
+4. **✕** deletes a rule. Volt asks first; choose **Delete rule** to confirm. Files already taken in are not affected.
 
 The target kind decides where an accepted file goes:
 
@@ -61,13 +61,15 @@ The target kind decides where an accepted file goes:
 | `vod`, `video`, `programme`, `program` or `episode` | The Media Library, encoded to the folder's ladder |
 | `loop` or `filler` | Loops & Fillers, as a loop |
 
-A file accepted with any other target kind is left as **Waiting** for another part of Volt to pick up.
+Those are the only kinds a rule that accepts files can use; Volt refuses any other. A rule saved before this check with another kind is marked **never taken in** in the list: the files it accepts would wait for ever, so delete it and add it again with a kind from the list.
 
 ### Try a filename
 
 1. Under **Try a filename**, type a file name, such as `slate_open.png`.
 2. Volt answers with the same check the scanner uses: **Accepted as** the target kind and the number of the rule that wins (that rule is highlighted), or **Sent to** the review folder with the reason.
 3. Change or reorder the rules until every name you expect is accepted the way you want.
+
+If your role cannot try file names, the box is greyed out and says so: it needs Files, uploads & storage: Operate.
 
 ### Choose how video is encoded
 
@@ -96,11 +98,18 @@ Video files go through your [Ingest Rules](ingest-rules.md), with this folder as
    | **Dismissed** | Closed by someone. The file was left where it was |
 
 3. For a file in **Needs review**: fix or add the rule, then choose **Reprocess**. The file goes back into the watchfolder and the next scan looks at it again.
-4. If the file was not wanted, choose **Dismiss**. The entry is closed and the file stays in the review folder; nothing on this page deletes a file.
+4. For a file that **Failed**: read the reason under it and fix the cause (for example, replace a damaged file under the same name), then choose **Retry**. The file never left the watchfolder; it goes back to **Waiting** and is taken in again on the next pass, within a minute. If it fails again, the new reason is shown.
+5. If the file was not wanted, choose **Dismiss**. The entry is closed and the file stays where it is: in the review folder for a file that needed review, in the watchfolder for one that failed. Nothing on this page deletes a file.
 
 Choose **← Watchfolders** to go back to the list. Each folder there shows its number of rules, how many files are **to review** (or **nothing waiting**) and when it was last scanned, or **scan failing**.
 
-Renaming a watchfolder, switching it off or deleting it is done through the API.
+### Rename, switch off or delete a watchfolder
+
+At the top of the folder's page:
+
+1. **✎ Rename**: type the new name and choose **Save** (or press Enter).
+2. **⏸ Switch off** stops Volt scanning the folder; its rules and queue are kept. The page and the list say **Switched off**, and **Scan now** is greyed out. **▶ Switch on** starts it again.
+3. **✕ Delete** removes the watchfolder with its rules and queue. Volt asks you to type the folder's name, then **Delete watchfolder**. No file is deleted: everything in the folder and its review folder stays where it is, and what was taken in stays in the libraries.
 
 ## How it connects
 
@@ -121,7 +130,9 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 |---|---|
 | See watchfolders, their rules and queues | Files, uploads & storage: View |
 | Try a filename | Files, uploads & storage: Operate |
-| Create a watchfolder, add, move and delete rules, choose the ladder, scan now, reprocess and dismiss | Files, uploads & storage: Manage |
+| Create, rename, switch off and delete a watchfolder, add, move and delete rules, choose the ladder, scan now, reprocess, retry and dismiss | Files, uploads & storage: Manage |
+
+Without Manage, the buttons for these are not shown.
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).
 
@@ -138,23 +149,25 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | "looks like a partial upload still being written" | The name ends like an unfinished copy (for example `.part` or `.tmp`) | Let the copy finish under its real name |
 | "is zero bytes, so the copy did not finish" | The file is empty | Copy it in again |
 | "is a filesystem artefact, not content" | A system file, not media | **Dismiss** it |
-| A file stays **Waiting** | Its target kind is not one this page adds to a library | Use one of the target kinds in the table above |
-| "this item is failed, not quarantined" after **Reprocess** or **Dismiss** | Those buttons only work on files in **Needs review** | Read the reason under the file; contact Volt support if it needs to be taken again |
+| A rule is marked **never taken in** | It was saved with a target kind Volt does not take in | Delete it and add it again with a kind from the list |
+| A message that the kind "is not a kind Volt takes in" | Through the API, a rule that accepts files named a kind outside the list | Use one of the kinds in the table above |
+| A file stays **Failed** after **Retry** | The cause is still there; the reason under it says what it is | Fix the file (copy it in again under the same name), then **Retry**, or **Dismiss** it |
 | "the file is no longer in the review folder; somebody has already moved or deleted it" | Someone moved the file by hand | Put it back in the watchfolder yourself, or **Dismiss** the entry |
-| **Try a filename** shows nothing | Your role cannot run a dry run | Ask for Files, uploads & storage: Operate |
+| **Try a filename** is greyed out with "Your role cannot try file names here" | Your role cannot run a dry run | Ask for Files, uploads & storage: Operate |
+| **Scan now** is greyed out | The watchfolder is switched off | Choose **▶ Switch on** |
 
 ## Through the API
 
 | Request | Does |
 |---|---|
 | `GET /api/watchfolders`, `POST /api/watchfolders` | Lists watchfolders, or creates one (`name`, `config.path`; or `"kind": "s3"` with `config.bucket` and `config.prefix` for a folder in a bucket) |
-| `GET /api/watchfolders/{id}`, `PATCH /api/watchfolders/{id}`, `DELETE /api/watchfolders/{id}` | One watchfolder with its rules; rename it, switch it off (`enabled`), set a default target kind or the ladder; delete it |
+| `GET /api/watchfolders/{id}`, `PATCH /api/watchfolders/{id}`, `DELETE /api/watchfolders/{id}` | One watchfolder with its rules and `targetKinds` (each kind a rule can take in and the library it goes to); rename it, switch it off (`enabled`), set a default target kind or the ladder; delete it |
 | `GET /api/watchfolders/{id}/rules`, `POST /api/watchfolders/{id}/rules` | Lists or adds rules. The API can also match by `regex`, `extension`, `prefix` or `suffix`, and add refusing rules (`"action": "reject"` with a `rejectReason`) |
 | `PATCH /api/watchfolders/{id}/rules/{ruleId}`, `DELETE /api/watchfolders/{id}/rules/{ruleId}` | Changes (including `ordinal` and `enabled`) or deletes a rule |
 | `POST /api/watchfolders/{id}/dry-run` | What would happen to a file name |
 | `POST /api/watchfolders/{id}/scan` | Scans now |
 | `GET /api/watchfolders/{id}/items` | The queue; filter with `?status=quarantined`, `failed`, `seen`, `ingested`, `reprocessed` or `removed` |
-| `POST /api/watchfolders/{id}/items/{itemId}/resolve` | `{"resolution": "reprocess"}` or `{"resolution": "remove"}` for a file in review |
+| `POST /api/watchfolders/{id}/items/{itemId}/resolve` | `{"resolution": "reprocess"}` or `{"resolution": "remove"}` for a file in review or one that failed (reprocess on a failed file retries it) |
 
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

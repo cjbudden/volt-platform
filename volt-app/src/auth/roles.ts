@@ -346,6 +346,22 @@ export async function requirementFor(method: string, rawPath: string, body?: any
     return { features: ['media', 'settings'], level: 'view', reason: 'ingest lookup' };
   }
 
+  // SENDING A RECORDING OR A CLIP TO AN ADD-ON (build queue 1.14-G3a-3).
+  // Workflows sits under Account settings, so Send to add-on on a recording
+  // needed Account settings: Operate and a Recordings manager could not use
+  // it. Starting a run by hand is working on that recording or asset, so it is
+  // Operate on the feature that owns the subject (or Account settings, as
+  // before). Reading the runs of one subject, which the button shows beside
+  // it, is View on that feature. The subject comes from the body for a start
+  // and from the query for the list; anything else stays Account settings.
+  if (path === '/api/workflows/runs') {
+    const subj = write ? body?.subjectType : new URLSearchParams(rawPath.split('?')[1] ?? '').get('subjecttype');
+    const owner = subj === 'recording' ? 'recordings' : subj === 'vod_asset' ? 'vod' : null;
+    if (owner && (write || new URLSearchParams(rawPath.split('?')[1] ?? '').get('subjectid'))) {
+      return { features: ['settings', owner], level: write ? 'operate' : 'view', reason: `add-on run on a ${subj}` };
+    }
+  }
+
   for (const s of SHARED_PREFIXES) {
     if (path === s.prefix || path.startsWith(s.prefix + '/')) {
       return { features: s.anyOf, level: write ? 'manage' : 'view', reason: s.prefix };
@@ -425,11 +441,15 @@ export async function enforceAccess(req: Request): Promise<void> {
   // LOWER-CASED, because Express routes case-insensitively by default while
   // startsWith does not: `/API/apps/secret-keys` must not slip past the map.
   const path = (req.originalUrl || req.url || '').split('?')[0].toLowerCase();
+  // The query goes along only for the one route that is decided by it (the
+  // add-on runs of one subject, in requirementFor); every other route is
+  // decided by its path alone, as before.
+  const query = (req.originalUrl || req.url || '').split('?')[1];
   const access = await resolveAccess(String(req.auth!.sub), String(req.auth!.role));
   (req.auth as any).role = access.role;   // keep downstream checks honest after role changes
   req.access = access;
 
-  const need = await requirementFor(req.method, path, req.body);
+  const need = await requirementFor(req.method, path === '/api/workflows/runs' && query ? `${path}?${query.toLowerCase()}` : path, req.body);
   if (!need) {
     if (WRITE_METHODS.has(req.method.toUpperCase()) && rankOf(access.role) < ROLE_RANK.operator) {
       throw forbidden('This action requires the operator role');

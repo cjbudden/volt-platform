@@ -68,12 +68,12 @@ The link opens a page branded with your account's logo and colours, marked **Pri
 - If the stream is not running, the page says **Preview not live right now** and offers **Check again**.
 - Once the link has ended, the page says **Link no longer available** and why.
 
-Every time the page opens the preview counts as one view, including a reload and **Check again**. For a link limited to one view, tell the viewer to open it only when the stream is running.
+Each visit counts as one view. Reloading the page, choosing **Check again** or leaving it open for a long time is the same visit, for as long as that browser tab stays open; opening the link in a new tab, another browser or another device is a new visit. A viewer whose one allowed view was their own visit can reload it.
 
 ### See and revoke links
 
 1. Open the **Share** window on the same stream. **Existing links for this** channel, station or event lists each link by its label (or the start of its address), with **expires** and the date, or **revoked**, and how many views it has had.
-2. Choose **Revoke** to stop a link at once. There is no confirmation step, and a revoked link cannot be turned back on: create a new one instead.
+2. Choose **Revoke**. Volt asks **Stop this link for good?** on the row: choose **Revoke link** to stop it at once, or **Keep**. A revoked link cannot be turned back on: create a new one instead.
 
 Lost the address? It cannot be shown again. Create another link and revoke the old one.
 
@@ -107,7 +107,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Set a PIN of at least 3 characters, or choose a different security option.** | The PIN is too short | Type a longer PIN |
 | **Link created** although you chose **Send by email** | The email could not be sent | Copy the link and send it yourself |
 | The viewer sees **Preview not live right now** | The stream is not being produced | Start it, then ask them to choose **Check again** |
-| The viewer sees **This link has reached its view limit.** | It has been opened as many times as allowed (reloads count) | Create a new link, with more views if needed |
+| The viewer sees **This link has reached its view limit.** | It has been opened in as many visits as allowed (a new tab, browser or device is a new visit; a reload is not) | Create a new link, with more views if needed |
 | The viewer sees **This link has expired.** or **This link has been revoked.** | Its time ran out, or someone revoked it | Create a new link |
 | The viewer sees **This link is not valid.** | The address is incomplete, or the stream no longer exists | Check the address was copied in full; create a new link |
 | The viewer sees **This preview is not available in your region.** | Your account limits where content can be watched | Adjust it in [Account settings](account-settings.md), or share with someone in an allowed region |

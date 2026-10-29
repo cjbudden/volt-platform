@@ -7,6 +7,7 @@ import {
 import { PageHead } from '../scaffold'
 import { navigate, useRoute } from '../router'
 import { pressable } from '../a11y'
+import { useAccess } from '../access'
 import { useNotify, usePageNotice, FormStatus } from '../notices'
 import '../workflows.css'
 
@@ -934,6 +935,16 @@ export function SendToAddon({ subjectType, subjectId }: { subjectType: 'recordin
   const [msg, setMsg] = useState<{ text: string; runId?: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [runs, setRuns] = useState<AddonRun[]>([])
+  // SENDING IS WORK ON THE RECORDING OR CLIP (build queue 1.14-G3a-3): the
+  // server takes Operate on Recordings (or the Media library for a clip), or
+  // Account settings: Operate as before. The button follows the same rule.
+  const { can } = useAccess()
+  const owner = subjectType === 'recording' ? 'recordings' : 'vod'
+  const canSend = can(owner, 'operate') || can('settings', 'operate')
+  // The run page and the map are Workflows, which is Account settings: only
+  // offered to roles that can open them, so a Recordings manager is not sent
+  // to a page that refuses them.
+  const canTrack = can('settings', 'view')
 
   usePoll(() => { api.workflowRuns({ subjectType, subjectId, limit: 5 }).then(r => setRuns(r.runs)).catch(() => {}) }, 5000, [subjectId])
   useEffect(() => { if (open && !addons) api.addons().then(r => setAddons(r.addons.filter(a => a.enabled && a.accepts.includes(subjectType)))).catch(() => setAddons([])) }, [open])
@@ -950,15 +961,21 @@ export function SendToAddon({ subjectType, subjectId }: { subjectType: 'recordin
 
   return (
     <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-      {live.length > 0 && (
+      {live.length > 0 && (canTrack ? (
         <span className="wf-link" style={{ fontSize: 'var(--fs-sm)' }} {...pressable(() => navigate(`/workflows/trace/${subjectType}/${subjectId}`))} data-a11y-click="">
           {live[0].addon_name}: {live[0].step ?? RUN_STATE[live[0].state].label} {live[0].progress_pct}%{live.length > 1 ? ` (+${live.length - 1})` : ''}
         </span>
-      )}
-      {msg && <span className="hintxt">{msg.text} {msg.runId && <span className="wf-link" {...pressable(() => navigate(`/workflows/run/${msg.runId}`))} data-a11y-click="">Track it</span>}</span>}
+      ) : (
+        <span className="hintxt" style={{ fontSize: 'var(--fs-sm)' }}>
+          {live[0].addon_name}: {live[0].step ?? RUN_STATE[live[0].state].label} {live[0].progress_pct}%{live.length > 1 ? ` (+${live.length - 1})` : ''}
+        </span>
+      ))}
+      {msg && <span className="hintxt">{msg.text} {msg.runId && canTrack && <span className="wf-link" {...pressable(() => navigate(`/workflows/run/${msg.runId}`))} data-a11y-click="">Track it</span>}</span>}
+      {canSend && (
       <button className="btn ghost" onClick={() => setOpen(o => !o)} disabled={busy}>
         <span className="wf-catic xs" style={{ background: 'none', border: 'none', width: 15, height: 15 }}>{CAT_ICON.ai_agent}</span>Send to add-on
       </button>
+      )}
       {open && (
         <div className="card wf-menu">
           {!addons ? <div className="loading" style={{ padding: 10 }}>Loading…</div>
@@ -969,9 +986,11 @@ export function SendToAddon({ subjectType, subjectId }: { subjectType: 'recordin
                 <div style={{ minWidth: 0 }}><div className="wf-ellip" style={{ fontWeight: 600 }}>{a.name}</div><div className="hintxt wf-ellip">{a.description ?? CAT_LABEL[a.category]}</div></div>
               </div>
             ))}
+          {canTrack && (
           <div className="wf-menuitem" style={{ borderTop: '1px solid var(--border)' }} {...pressable(() => navigate(`/workflows/trace/${subjectType}/${subjectId}`))} data-a11y-click="">
             <span className="hintxt">Show this {SUBJECT_LABEL[subjectType].toLowerCase()} on the workflow map</span>
           </div>
+          )}
         </div>
       )}
     </div>

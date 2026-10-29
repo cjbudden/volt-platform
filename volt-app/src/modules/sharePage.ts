@@ -122,6 +122,13 @@ function logoHtml(cls){return BRAND&&BRAND.logo?'<img class="'+cls+'" src="'+esc
 function daysLeft(iso){const d=Math.ceil((new Date(iso)-Date.now())/86400000);return d<=0?'today':d===1?'1 day':d+' days'}
 
 const CREDS={};   // pin / email+code entered by the viewer, reused on re-resolves
+// ONE VIEW PER VISIT: an id kept for as long as this tab is open (a reload
+// keeps it, a new tab or a new day in a closed browser does not), so a reload,
+// Check again and a token refresh are not counted as more views. Without
+// session storage it lasts for this page load, which is still one view.
+CREDS.visit=(function(){const k='volt-share-visit-'+TOKEN.slice(0,12);let v=null;try{v=sessionStorage.getItem(k)}catch(e){}
+  if(!v||!/^[A-Za-z0-9_-]{8,64}$/.test(v)){const a=new Uint8Array(16);(window.crypto||{getRandomValues:function(x){for(let i=0;i<x.length;i++)x[i]=Math.floor(Math.random()*256);return x}}).getRandomValues(a);v=Array.from(a,function(b){return('0'+b.toString(16)).slice(-2)}).join('');try{sessionStorage.setItem(k,v)}catch(e){}}
+  return v})();
 async function resolve(pin){
   if(pin)CREDS.pin=pin;
   const r=await fetch('/api/share/'+encodeURIComponent(TOKEN)+'/resolve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(CREDS)});

@@ -13,7 +13,8 @@
  *   POST   /:id/dry-run           "what would happen to this filename?"
  *   POST   /:id/scan              scan now
  *   GET    /:id/items             the log, filterable to the review queue
- *   POST   /:id/items/:itemId/resolve   reprocess or remove a refused file
+ *   POST   /:id/items/:itemId/resolve   reprocess or remove a refused file,
+ *                                  retry or remove one whose ingest failed
  *
  * THE DRY RUN IS THE MOST USEFUL ROUTE HERE and is deliberately not an
  * afterthought. Rule sets are ordered and first-match-wins, so `*.png` sitting
@@ -42,6 +43,34 @@ import { writeAudit, actor, patchEntity } from '../services/audit';
 import { classify, type WatchRule, type FolderPolicy } from '../services/watchfolder/rules';
 import { loadFolder, pgItemStore, ingestFolder, syncS3, mirrorQuarantines } from '../services/watchfolder/store';
 import { scanFolder } from '../services/watchfolder/scanner';
+import { ingestableTargetKinds, libraryKindFor } from '../services/watchfolder/ingest';
+import { videoTargetKinds, videoTargetFor } from '../services/watchfolder/videoIngest';
+
+/**
+ * THE TARGET KINDS A FILE CAN ACTUALLY BE TAKEN IN AS (build queue 1.14-G3a-3).
+ * The rule form used to take any text, so a rule saying `document` or `pdf`
+ * accepted files that then sat as Waiting for ever: no ingest pass asks for a
+ * kind it does not know. The list is read from the two ingest paths
+ * themselves, so a kind added there is offered here with no second list to
+ * keep in step. A refusing rule takes no kind into anything, so it is not
+ * checked.
+ */
+export function targetKinds(): { kind: string; goesTo: 'images' | 'media' | 'loops' }[] {
+  return [
+    ...ingestableTargetKinds().map((kind) => ({ kind, goesTo: 'images' as const })),
+    ...videoTargetKinds().map((kind) => ({ kind, goesTo: videoTargetFor(kind) === 'loop' ? 'loops' as const : 'media' as const })),
+  ];
+}
+
+function takesIn(kind: unknown): boolean {
+  return !!libraryKindFor(String(kind ?? '')) || !!videoTargetFor(String(kind ?? ''));
+}
+
+function assertTargetKind(kind: unknown, what: string) {
+  if (takesIn(kind)) return;
+  throw badRequest(`"${String(kind ?? '')}" is not a kind Volt takes in, so ${what} would wait for ever. ` +
+    `Use one of: ${targetKinds().map((k) => k.kind).join(', ')}.`);
+}
 
 export const watchfoldersRouter = Router();
 watchfoldersRouter.use(requireAuth);
@@ -87,6 +116,7 @@ watchfoldersRouter.get('/', asyncHandler(async (req, res) => {
 
 watchfoldersRouter.post('/', asyncHandler(async (req, res) => {
   const b = createSchema.parse(req.body);
+  if (b.defaultTargetKind) assertTargetKind(b.defaultTargetKind, 'files the rules do not catch');
   const who = actor(req);
   const row = await one<any>(
     `INSERT INTO watchfolders(account_id, name, kind, config, default_target_kind, quarantine_path, created_by, updated_by, ladder_group_id)
@@ -111,7 +141,9 @@ watchfoldersRouter.get('/:id', asyncHandler(async (req, res) => {
             count(*) FILTER (WHERE status = 'seen')::int       AS pending,
             count(*)::int                                       AS total
        FROM watchfolder_items WHERE watchfolder_id = $1`, [f.id]);
-  res.json({ ...f, rules, items, counts });
+  // The kinds the rule form offers come with the folder, so the console never
+  // has its own copy of the list to fall out of step with the server's.
+  res.json({ ...f, rules, items, counts, targetKinds: targetKinds() });
 }));
 
 watchfoldersRouter.patch('/:id', asyncHandler(async (req, res) => {
@@ -120,7 +152,11 @@ watchfoldersRouter.patch('/:id', asyncHandler(async (req, res) => {
   const patch: Record<string, any> = {};
   if ('name' in b) patch.name = b.name;
   if ('config' in b) patch.config = b.config;
-  if ('defaultTargetKind' in b) patch.default_target_kind = b.defaultTargetKind;
+  if ('defaultTargetKind' in b) {
+    if (b.defaultTargetKind) assertTargetKind(b.defaultTargetKind, 'files the rules do not catch');
+    patch.default_target_kind = b.defaultTargetKind;
+  }
+  if ('name' in b && !String(b.name ?? '').trim()) throw badRequest('A watchfolder needs a name.');
   if ('quarantinePath' in b) patch.quarantine_path = b.quarantinePath;
   if ('enabled' in b) patch.enabled = !!b.enabled;
   if ('ladderGroupId' in b) patch.ladder_group_id = b.ladderGroupId;
@@ -167,6 +203,7 @@ watchfoldersRouter.get('/:id/rules', asyncHandler(async (req, res) => {
 watchfoldersRouter.post('/:id/rules', asyncHandler(async (req, res) => {
   const f = await ownedFolder(req);
   const b = ruleSchema.parse(req.body);
+  if (b.action === 'accept') assertTargetKind(b.targetKind, 'every file this rule accepts');
   // APPENDED, in tens. A new rule must never silently outrank the existing ones,
   // and the gaps leave room to insert without renumbering the whole set.
   const last = await one<any>(
@@ -202,6 +239,15 @@ watchfoldersRouter.patch('/:id/rules/:ruleId', asyncHandler(async (req, res) => 
   if ('ordinal' in b) put('ordinal', b.ordinal);
   if ('enabled' in b) put('enabled', !!b.enabled);
   if (!sets.length) throw badRequest('nothing to change');
+  // The kind is checked against what the rule will be after the change: a rule
+  // switched from refusing to accepting needs a kind that is taken in too.
+  if ('targetKind' in b || b.action === 'accept') {
+    const cur = await one<any>(`SELECT target_kind, action FROM watchfolder_rules WHERE id=$1 AND watchfolder_id=$2`,
+      [req.params.ruleId, f.id]);
+    if (!cur) throw notFound('rule not found');
+    const action = 'action' in b ? b.action : cur.action;
+    if (action === 'accept') assertTargetKind('targetKind' in b ? b.targetKind : cur.target_kind, 'every file this rule accepts');
+  }
   params.push(req.params.ruleId, f.id);
   const row = await one<any>(
     `UPDATE watchfolder_rules SET ${sets.join(', ')}
@@ -340,11 +386,27 @@ watchfoldersRouter.post('/:id/items/:itemId/resolve', asyncHandler(async (req, r
     `SELECT * FROM watchfolder_items WHERE id=$1 AND watchfolder_id=$2`,
     [req.params.itemId, f.id]);
   if (!item) throw notFound('item not found');
-  if (item.status !== 'quarantined') throw badRequest(`this item is ${item.status}, not quarantined`);
+  // FAILED IS RESOLVABLE TOO (build queue 1.14-G3a-3). The console offered both
+  // buttons on Failed rows and this refused them, so a failed file could only
+  // be read about. A failed file matched a rule and was never moved: it is
+  // still in the drop folder, so it needs no move, only another ingest pass.
+  if (item.status !== 'quarantined' && item.status !== 'failed') {
+    throw badRequest(`this item is ${item.status}, so there is nothing to resolve`);
+  }
 
   const who = actor(req);
 
-  if (b.resolution === 'reprocess') {
+  if (item.status === 'failed' && b.resolution === 'reprocess') {
+    // RETRY: back to Waiting with the claim cleared, so the next ingest pass
+    // (every minute, or Scan now) takes it again. If it fails again the new
+    // reason is recorded and the row is Failed again; nothing loops.
+    await query(
+      `UPDATE watchfolder_items
+          SET status='seen', resolved_at=NULL, resolved_by=$2, resolution_note=$3,
+              reason=$4
+        WHERE id=$1 AND status='failed'`,
+      [item.id, who.userId, b.note ?? null, `retrying after: ${String(item.reason ?? 'the ingest failed')}`.slice(0, 500)]);
+  } else if (b.resolution === 'reprocess') {
     // PUT IT BACK WHERE IT CAME FROM, then mark the row. The file has to exist in
     // the drop folder again before the row says it will be reconsidered, or a
     // failed move leaves a queue entry claiming a scan will pick up a file that
@@ -375,9 +437,13 @@ watchfoldersRouter.post('/:id/items/:itemId/resolve', asyncHandler(async (req, r
         WHERE id=$1`, [item.id, who.userId, b.note ?? null]);
   }
 
+  // FILED AGAINST THE FOLDER. audit_log.entity_id is a UUID and an item's id
+  // is a number, so filing it under the item failed the insert AFTER the row
+  // had changed: every Reprocess and Dismiss from the console answered 400
+  // while the queue had in fact moved on (found by build queue 1.14-G3a-3).
   await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
-    action: 'update', entityType: 'watchfolder_item', entityId: String(item.id),
-    snapshot: { resolution: b.resolution, objectKey: item.object_key, note: b.note ?? null } });
+    action: 'update', entityType: 'watchfolder', entityId: f.id,
+    snapshot: { item: String(item.id), was: item.status, resolution: b.resolution, objectKey: item.object_key, note: b.note ?? null } });
 
   const updated = await one<any>(`SELECT * FROM watchfolder_items WHERE id=$1`, [item.id]);
   res.json(updated);

@@ -4,6 +4,8 @@ import {
   type WatchfolderDryRun, type WatchfolderScan, type LadderGroup,
 } from '../api'
 import { pressable } from '../a11y'
+import { useAccess } from '../access'
+import { ConfirmDialog } from '../listActions'
 
 /* ============================================================================
    WATCHFOLDERS — a drop folder, the rules that sort it, and what it refused.
@@ -37,6 +39,7 @@ const STATUS: Record<string, { label: string; tone: string; help: string }> = {
   quarantined: { label: 'Needs review',tone: 'var(--warn,#fbbf24)',  help: 'No rule matched, or a rule refused it. The file is in the review folder.' },
   failed:      { label: 'Failed',      tone: 'var(--danger,#f87171)',help: 'It matched a rule, but the ingest itself did not complete.' },
   reprocessed: { label: 'Sent back',   tone: 'var(--brand,#3f7bff)', help: 'Returned to the drop folder to be looked at again.' },
+  off:         { label: 'Switched off',tone: 'var(--faint,#8b93a7)', help: 'Not scanned until switched on again.' },
   removed:     { label: 'Dismissed',   tone: 'var(--faint,#8b93a7)', help: 'Closed by an operator. The file itself was left where it was.' },
 }
 
@@ -77,22 +80,37 @@ function Pill({ status }: { status: string }) {
 
 /* ---------------------------------------------------------------- rules ---- */
 
-function Rules({ folder, rules, reload }: {
-  folder: Watchfolder; rules: WatchfolderRule[]; reload: () => void
+function Rules({ folder, rules, kinds, reload }: {
+  folder: Watchfolder; rules: WatchfolderRule[]; kinds: TargetKind[]; reload: () => void
 }) {
+  const { can } = useAccess()
+  const canManage = can('media', 'manage')
+  const canTry = can('media', 'operate')
   const [draft, setDraft] = useState({ name: '', pattern: '', targetKind: 'slate', workflow: 'register' })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [deleting, setDeleting] = useState<WatchfolderRule | null>(null)
+  const known = new Set(kinds.map(k => k.kind))
 
   // WHICH RULE WOULD WIN, asked of the server so the answer comes from the same
   // classifier the scanner uses. A preview that reimplemented the matching would
   // be confidently wrong exactly when it mattered.
   const [probe, setProbe] = useState('')
   const [dry, setDry] = useState<WatchfolderDryRun | null>(null)
+  // SAID, NOT SWALLOWED: a role that cannot run the dry run used to type and
+  // see nothing at all. The reason is shown where the answer would be.
+  const [dryErr, setDryErr] = useState('')
   useEffect(() => {
-    if (!probe.trim()) { setDry(null); return }
+    if (!probe.trim()) { setDry(null); setDryErr(''); return }
     const t = setTimeout(() => {
-      api.watchfolderDryRun(folder.id, probe.trim()).then(setDry).catch(() => setDry(null))
+      api.watchfolderDryRun(folder.id, probe.trim())
+        .then(d => { setDry(d); setDryErr('') })
+        .catch((e: any) => {
+          setDry(null)
+          setDryErr(/403|not allow/i.test(String(e?.message ?? e))
+            ? 'Your role cannot try file names here. It needs Files, uploads & storage: Operate.'
+            : String(e?.message ?? e))
+        })
     }, 250)
     return () => clearTimeout(t)
   }, [probe, folder.id, rules])
@@ -129,6 +147,12 @@ function Rules({ folder, rules, reload }: {
 
   const winner = dry?.rules.find(r => r.winner)?.id ?? null
 
+  const removeRule = async (r: WatchfolderRule) => {
+    setDeleting(null); setBusy(true); setErr('')
+    try { await api.deleteWatchfolderRule(folder.id, r.id); reload() }
+    catch (e: any) { setErr(String(e?.message ?? e)) } finally { setBusy(false) }
+  }
+
   return (
     <div className="card" style={{ padding: 18, marginTop: 14 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4 }}>
@@ -160,9 +184,18 @@ function Rules({ folder, rules, reload }: {
               {r.action === 'reject'
                 ? <em style={{ color: 'var(--danger,#f87171)' }}>refuse</em>
                 : <>→ {r.target_kind}</>}
+              {/* A rule saved before the kinds were checked can still name one
+                  that nothing takes in. Said on the row, so it gets fixed. */}
+              {r.action !== 'reject' && kinds.length > 0 && !known.has(String(r.target_kind).toLowerCase()) && (
+                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--warn,#fbbf24)' }}
+                  title="Files this rule accepts wait for ever. Delete it and add it again with a kind from the list.">
+                  ⚠ never taken in
+                </div>
+              )}
             </span>
             <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>{r.workflow ?? '—'}</span>
             <span style={{ display: 'flex', gap: 4 }}>
+              {canManage && <>
               <button type="button" className="btn ghost" disabled={busy || i === 0}
                 onClick={() => move(i, -1)} aria-label={`Move ${r.name} up`}
                 style={{ padding: '3px 8px' }}>↑</button>
@@ -170,24 +203,42 @@ function Rules({ folder, rules, reload }: {
                 onClick={() => move(i, 1)} aria-label={`Move ${r.name} down`}
                 style={{ padding: '3px 8px' }}>↓</button>
               <button type="button" className="btn ghost" disabled={busy}
-                onClick={() => api.deleteWatchfolderRule(folder.id, r.id).then(reload)}
-                aria-label={`Delete ${r.name}`} style={{ padding: '3px 8px' }}>✕</button>
+                onClick={() => setDeleting(r)}
+                aria-label={`Delete ${r.name}`} title="Delete this rule" style={{ padding: '3px 8px' }}>✕</button>
+              </>}
             </span>
           </div>
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 130px 120px auto', gap: 8, marginTop: 12 }}>
+      {deleting && (
+        <ConfirmDialog danger title={`Delete the rule ${deleting.name}?`}
+          body={<>Files matching <code>{deleting.pattern}</code> are then sorted by the rules below it, or go to review if none matches. Files already taken in are not affected.</>}
+          confirmLabel="Delete rule" onCancel={() => setDeleting(null)} onConfirm={() => removeRule(deleting)} />
+      )}
+
+      {canManage && (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 170px 120px auto', gap: 8, marginTop: 12 }}>
         <input style={box} placeholder="Rule name" value={draft.name}
           onChange={e => setDraft({ ...draft, name: e.target.value })} />
         <input style={box} placeholder="slate_*.png" value={draft.pattern}
           onChange={e => setDraft({ ...draft, pattern: e.target.value })} />
-        <input style={box} placeholder="target kind" value={draft.targetKind}
-          onChange={e => setDraft({ ...draft, targetKind: e.target.value })} />
+        {/* ONLY THE KINDS VOLT TAKES IN, from the server (GET /watchfolders/:id
+            targetKinds). Free text accepted names like "document" that left
+            every matching file waiting for ever. */}
+        <select style={box} aria-label="Target kind" value={draft.targetKind}
+          onChange={e => setDraft({ ...draft, targetKind: e.target.value })}>
+          {(['images', 'media', 'loops'] as const).map(g => (
+            <optgroup key={g} label={GOES_TO[g]}>
+              {kinds.filter(k => k.goesTo === g).map(k => <option key={k.kind} value={k.kind}>{k.kind}</option>)}
+            </optgroup>
+          ))}
+        </select>
         <input style={box} placeholder="workflow" value={draft.workflow}
           onChange={e => setDraft({ ...draft, workflow: e.target.value })} />
         <button type="button" className="btn primary" onClick={add} disabled={busy}>Add rule</button>
       </div>
+      )}
       {err && <p style={{ color: 'var(--danger,#f87171)', fontSize: 'var(--fs-sm)' }}>{err}</p>}
 
       {/* ---- the dry run ---- */}
@@ -196,7 +247,14 @@ function Rules({ folder, rules, reload }: {
           Try a filename
         </label>
         <input style={{ ...box, width: '100%', maxWidth: 420 }} placeholder="slate_open.png"
-          value={probe} onChange={e => setProbe(e.target.value)} />
+          value={probe} onChange={e => setProbe(e.target.value)} disabled={!canTry}
+          title={canTry ? undefined : 'Needs Files, uploads & storage: Operate'} />
+        {!canTry && (
+          <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--warn,#fbbf24)', marginTop: 6 }}>
+            Your role cannot try file names here. It needs Files, uploads & storage: Operate.
+          </p>
+        )}
+        {dryErr && canTry && <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--danger,#f87171)', marginTop: 6 }}>{dryErr}</p>}
         <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)', marginTop: 6 }}>
           Answered by the same classifier the scanner runs, so this is what would actually happen.
         </p>
@@ -222,7 +280,8 @@ function Rules({ folder, rules, reload }: {
 
 /* ----------------------------------------------------------------- queue ---- */
 
-function Queue({ folder }: { folder: Watchfolder }) {
+function Queue({ folder, reload }: { folder: Watchfolder; reload: () => void }) {
+  const canManage = useAccess().can('media', 'manage')
   const [items, setItems] = useState<WatchfolderItem[]>([])
   const [filter, setFilter] = useState<string>('open')
   const [busy, setBusy] = useState<string | null>(null)
@@ -241,7 +300,7 @@ function Queue({ folder }: { folder: Watchfolder }) {
 
   const resolve = async (it: WatchfolderItem, how: 'reprocess' | 'remove') => {
     setBusy(it.id); setErr('')
-    try { await api.resolveWatchfolderItem(folder.id, it.id, how); load() }
+    try { await api.resolveWatchfolderItem(folder.id, it.id, how); load(); reload() }
     catch (e: any) { setErr(String(e?.message ?? e)) } finally { setBusy(null) }
   }
 
@@ -292,14 +351,28 @@ function Queue({ folder }: { folder: Watchfolder }) {
             <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>{fmtBytes(it.size_bytes)}</span>
             <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>{ago(it.seen_at)}</span>
             <span style={{ display: 'flex', gap: 6 }}>
-              {(it.status === 'quarantined' || it.status === 'failed') && (
+              {/* A REVIEW FILE IS REPROCESSED, A FAILED ONE RETRIED. They are
+                  different moves on the server: a review file is moved back
+                  into the drop folder, a failed one never left it and is only
+                  taken in again. Both close with Dismiss, which deletes
+                  nothing. */}
+              {canManage && it.status === 'quarantined' && (
                 <>
                   <button type="button" className="btn ghost" disabled={busy === it.id}
                     title="Put the file back in the drop folder and look at it again on the next scan."
                     onClick={() => resolve(it, 'reprocess')}>Reprocess</button>
-                  {/* SAYS WHAT IT DOES. Nothing on this page deletes anything. */}
                   <button type="button" className="btn ghost" disabled={busy === it.id}
                     title="Close this entry. The file itself stays in the review folder."
+                    onClick={() => resolve(it, 'remove')}>Dismiss</button>
+                </>
+              )}
+              {canManage && it.status === 'failed' && (
+                <>
+                  <button type="button" className="btn ghost" disabled={busy === it.id}
+                    title="Take the file in again on the next pass, within a minute. Fix the cause in the reason first."
+                    onClick={() => resolve(it, 'reprocess')}>Retry</button>
+                  <button type="button" className="btn ghost" disabled={busy === it.id}
+                    title="Close this entry. The file stays in the watchfolder and is not taken in."
                     onClick={() => resolve(it, 'remove')}>Dismiss</button>
                 </>
               )}
@@ -314,7 +387,10 @@ function Queue({ folder }: { folder: Watchfolder }) {
 /* ---------------------------------------------------------------- detail ---- */
 
 function Detail({ id, onBack }: { id: string; onBack: () => void }) {
-  const [folder, setFolder] = useState<(Watchfolder & { rules: WatchfolderRule[] }) | null>(null)
+  const canManage = useAccess().can('media', 'manage')
+  const [folder, setFolder] = useState<(Watchfolder & { rules: WatchfolderRule[]; targetKinds?: TargetKind[] }) | null>(null)
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [scan, setScan] = useState<WatchfolderScan | null>(null)
   const [ladders, setLadders] = useState<LadderGroup[]>([])
   const [busy, setBusy] = useState(false)
@@ -333,20 +409,75 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
     catch (e: any) { setErr(String(e?.message ?? e)) } finally { setBusy(false) }
   }
 
+  // RENAME, SWITCH OFF AND DELETE were API-only. All three go through the
+  // folder's PATCH and DELETE, which version and audit like every record.
+  const saveName = async () => {
+    if (!folder || renaming == null) return
+    const name = renaming.trim()
+    if (!name) { setErr('A watchfolder needs a name.'); return }
+    try { await api.patchWatchfolder(folder.id, { name, version: folder.version }); setRenaming(null); setErr(''); load() }
+    catch (e: any) { setErr(String(e?.message ?? e)) }
+  }
+  const toggle = async () => {
+    if (!folder) return
+    try { await api.patchWatchfolder(folder.id, { enabled: !folder.enabled, version: folder.version }); setErr(''); load() }
+    catch (e: any) { setErr(String(e?.message ?? e)) }
+  }
+  const remove = async () => {
+    if (!folder) return
+    setConfirmDelete(false)
+    try { await api.deleteWatchfolder(folder.id); onBack() }
+    catch (e: any) { setErr(String(e?.message ?? e)) }
+  }
+
   if (!folder) return <p style={{ color: 'var(--faint,#8b93a7)' }}>{err || 'Loading…'}</p>
 
   return (
     <div>
       <button type="button" className="btn ghost" onClick={onBack} style={{ marginBottom: 12 }}>← Watchfolders</button>
       <div className="card" style={{ padding: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <h2 style={{ margin: 0 }}>{folder.name}</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          {renaming == null ? (
+            <h2 style={{ margin: 0 }}>{folder.name}</h2>
+          ) : (
+            <span style={{ display: 'flex', gap: 6 }}>
+              <input style={box} aria-label="Watchfolder name" value={renaming} autoFocus
+                onChange={e => setRenaming(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setRenaming(null) }} />
+              <button type="button" className="btn primary" onClick={saveName}>Save</button>
+              <button type="button" className="btn ghost" onClick={() => setRenaming(null)}>Cancel</button>
+            </span>
+          )}
           <code style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>{folder.config?.path}</code>
-          <button type="button" className="btn primary" onClick={runScan} disabled={busy}
-            style={{ marginLeft: 'auto' }}>{busy ? 'Scanning…' : 'Scan now'}</button>
+          {!folder.enabled && <Pill status="off" />}
+          <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            {canManage && renaming == null && (
+              <button type="button" className="btn ghost" onClick={() => setRenaming(folder.name)}>✎ Rename</button>
+            )}
+            {canManage && (
+              <button type="button" className="btn ghost" onClick={toggle}
+                title={folder.enabled ? 'Stop scanning this folder. Rules and the queue are kept.' : 'Start scanning this folder again.'}>
+                {folder.enabled ? '⏸ Switch off' : '▶ Switch on'}
+              </button>
+            )}
+            {canManage && (
+              <button type="button" className="btn ghost" style={{ color: 'var(--danger,#f87171)' }}
+                onClick={() => setConfirmDelete(true)}>✕ Delete</button>
+            )}
+            {canManage && (
+              <button type="button" className="btn primary" onClick={runScan} disabled={busy || !folder.enabled}
+                title={folder.enabled ? undefined : 'Switched off. Switch it on to scan.'}>{busy ? 'Scanning…' : 'Scan now'}</button>
+            )}
+          </span>
         </div>
+        {confirmDelete && (
+          <ConfirmDialog danger title={`Delete the watchfolder ${folder.name}?`}
+            body={<>Volt stops watching the folder and its rules and queue are deleted. No file is deleted: everything in the folder and its review folder stays where it is, and what was taken in stays in the libraries.</>}
+            confirmLabel="Delete watchfolder" typeToConfirm={folder.name}
+            onCancel={() => setConfirmDelete(false)} onConfirm={remove} />
+        )}
         <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)', marginTop: 8 }}>
-          Scanned automatically every minute. Refused files go to <code>{folder.quarantine_path}</code> inside
+          {folder.enabled ? 'Scanned automatically every minute.' : 'Switched off: not scanned until it is switched on again.'} Refused files go to <code>{folder.quarantine_path}</code> inside
           this folder. Last scan {ago(folder.last_scan_at)}.
         </p>
         {/* THE LADDER. Video files this folder accepts are encoded to it; images
@@ -358,7 +489,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
             style={{ background: 'var(--panel-2,#151922)', border: '1px solid var(--border,#242a36)',
                      color: 'var(--text,#e7ebf3)', borderRadius: 8, padding: '6px 9px',
                      fontFamily: 'inherit', fontSize: 'var(--fs-sm)' }}
-            value={folder.ladder_group_id ?? ''}
+            value={folder.ladder_group_id ?? ''} disabled={!canManage}
             onChange={async (e) => {
               try { await api.patchWatchfolder(folder.id, { ladderGroupId: e.target.value || null }); load() }
               catch (err: any) { setErr(String(err?.message ?? err)) }
@@ -403,13 +534,18 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
           </p>
         )}
       </div>
-      <Rules folder={folder} rules={folder.rules ?? []} reload={load} />
-      <Queue folder={folder} />
+      <Rules folder={folder} rules={folder.rules ?? []} kinds={folder.targetKinds ?? []} reload={load} />
+      <Queue folder={folder} reload={load} />
     </div>
   )
 }
 
 /* ------------------------------------------------------------------ list ---- */
+
+/** Where an accepted file of each target kind goes, in the console's words. */
+const GOES_TO: Record<string, string> = { images: 'Image Library', media: 'Media Library', loops: 'Loops & Fillers' }
+
+type TargetKind = { kind: string; goesTo: 'images' | 'media' | 'loops' }
 
 export default function Watchfolders() {
   const [folders, setFolders] = useState<Watchfolder[]>([])
@@ -417,6 +553,7 @@ export default function Watchfolders() {
   const [err, setErr] = useState('')
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState({ name: '', path: '' })
+  const canManage = useAccess().can('media', 'manage')
 
   const load = useCallback(() => {
     api.watchfolders().then(setFolders).catch(e => setErr(String(e?.message ?? e)))
@@ -439,8 +576,10 @@ export default function Watchfolders() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
         <h2 style={{ margin: 0 }}>Watchfolders</h2>
-        <button type="button" className="btn primary" onClick={() => setCreating(v => !v)}
-          style={{ marginLeft: 'auto' }}>New watchfolder</button>
+        {canManage && (
+          <button type="button" className="btn primary" onClick={() => setCreating(v => !v)}
+            style={{ marginLeft: 'auto' }}>New watchfolder</button>
+        )}
       </div>
       <p style={{ color: 'var(--faint,#8b93a7)', fontSize: 'var(--fs-sm)', marginTop: -6 }}>
         A folder the system watches. Files are sorted by the folder's rules; anything that matches
@@ -478,8 +617,8 @@ export default function Watchfolders() {
                 ? <strong style={{ color: 'var(--warn,#fbbf24)' }}>{f.review_count} to review</strong>
                 : <span style={{ color: 'var(--faint,#8b93a7)' }}>nothing waiting</span>}
             </span>
-            <span style={{ fontSize: 'var(--fs-xs)', color: f.last_scan_error ? 'var(--danger,#f87171)' : 'var(--faint,#8b93a7)' }}>
-              {f.last_scan_error ? 'scan failing' : `scanned ${ago(f.last_scan_at)}`}
+            <span style={{ fontSize: 'var(--fs-xs)', color: f.last_scan_error && f.enabled ? 'var(--danger,#f87171)' : 'var(--faint,#8b93a7)' }}>
+              {!f.enabled ? 'switched off' : f.last_scan_error ? 'scan failing' : `scanned ${ago(f.last_scan_at)}`}
             </span>
           </div>
         ))}
