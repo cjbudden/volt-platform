@@ -2,6 +2,15 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.16.0 (2026-10-29)
+
+### Product (in customer release notes)
+
+- changed · Recordings: Send to add-on on a recording needs Recordings: Operate (Account settings: Operate still works), so Recordings managers can use it. Try a filename on a watchfolder says when your role cannot use it.
+- fixed · Account: Share links count one view per visit: a reload, Check again or a long session no longer counts as more views or uses up a one-view link. Revoking a link now asks first.
+- added · VOD: Watchfolders can be renamed, switched off and on, and deleted from their page. Deleting asks you to type the folder's name and never deletes a file; deleting a rule asks first too.
+- fixed · VOD: Watchfolders: Retry and Dismiss now work on files that failed, and Reprocess and Dismiss no longer show an error after they have done their job. A rule's target kind is picked from the kinds Volt takes in, and an older rule with any other kind is marked so it can be fixed.
+
 ## 0.15.0 (2026-10-29)
 
 ### Product (in customer release notes)
