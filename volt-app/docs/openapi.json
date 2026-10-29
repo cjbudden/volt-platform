@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "Volt API",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "The Volt API: the **Public API** for apps, players and their audience, and the **Admin API** for your own staff and servers.\n\nEvery route Volt serves to customers is listed here. Routes with a captured example show a real request and response from a test account.\n\nGuides: Using the API, Authentication and Errors in the docs sidebar."
  },
  "servers": [
@@ -8067,6 +8067,29 @@
      "Cmcd"
     ],
     "description": "The same as `POST /api/public/cmcd`.\n\n**Credential:** publishable key",
+    "security": [
+     {
+      "publishableKey": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   }
+  },
+  "/api/cmcd/_peer": {
+   "post": {
+    "operationId": "postCmcdPeer",
+    "summary": "Cmcd: peer",
+    "tags": [
+     "Cmcd"
+    ],
+    "description": "**Credential:** publishable key",
     "security": [
      {
       "publishableKey": []
@@ -17338,6 +17361,214 @@
     }
    }
   },
+  "/api/ingest/filename-rules": {
+   "get": {
+    "operationId": "getIngestFilenameRules",
+    "summary": "Get ingest filename rules",
+    "tags": [
+     "Ingest"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postIngestFilenameRules",
+    "summary": "Ingest: filename rules",
+    "tags": [
+     "Ingest"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/ingest/filename-rules/{id}": {
+   "delete": {
+    "operationId": "deleteIngestFilenameRulesByID",
+    "summary": "Delete a filename rule",
+    "tags": [
+     "Ingest"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "patch": {
+    "operationId": "patchIngestFilenameRulesByID",
+    "summary": "Update a filename rule",
+    "tags": [
+     "Ingest"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/ingest/filename-rules/builtin/{id}": {
+   "put": {
+    "operationId": "putIngestFilenameRulesBuiltinByID",
+    "summary": "Replace a builtin",
+    "tags": [
+     "Ingest"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/ingest/filename-rules/settings": {
+   "put": {
+    "operationId": "putIngestFilenameRulesSettings",
+    "summary": "Set filename rules settings",
+    "tags": [
+     "Ingest"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/ingest/filename-rules/test": {
+   "post": {
+    "operationId": "postIngestFilenameRulesTest",
+    "summary": "Filename rules: test",
+    "tags": [
+     "Ingest"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/ingest/held": {
    "get": {
     "operationId": "getIngestHeld",
@@ -22437,6 +22668,29 @@
      "Cmcd"
     ],
     "description": "Event mode of CMCD v2 (CTA-5004): one report per line, `Content-Type: application/cmcd` (`text/cmcd` also accepted), with the app's publishable key as `?appKey=`. Every report must carry `v=2`, `ts`, `e` and `sid`; the Volt player SDK also sends `sn` and does this for you. A play attempt is reported from the moment the viewer presses play, before the play gate answers, so a refused entitlement or a failed licence is still counted. Answers: 204 received; 400 nothing valid; 410 stop reporting (unknown key); 413 more than 200 reports; 415 wrong content type; 429 slow down (Retry-After). Reports are kept exactly as sent.\n\n**Credential:** publishable key",
+    "security": [
+     {
+      "publishableKey": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   }
+  },
+  "/api/public/cmcd/_peer": {
+   "post": {
+    "operationId": "postPublicCmcdPeer",
+    "summary": "Cmcd: peer",
+    "tags": [
+     "Cmcd"
+    ],
+    "description": "**Credential:** publishable key",
     "security": [
      {
       "publishableKey": []
@@ -35428,6 +35682,76 @@
     }
    }
   },
+  "/api/vod/{id}/from-filename": {
+   "get": {
+    "operationId": "getVODByIDFromFilename",
+    "summary": "Get a VOD asset's from filename",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postVODByIDFromFilename",
+    "summary": "From filename (VOD asset)",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/vod/{id}/history": {
    "get": {
     "operationId": "getVODByIDHistory",
@@ -35750,6 +36074,128 @@
     "parameters": [
      {
       "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/links": {
+   "get": {
+    "operationId": "getVODByIDLinks",
+    "summary": "Get a VOD asset's links",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/links/{field}": {
+   "delete": {
+    "operationId": "deleteVODByIDLinksByField",
+    "summary": "Delete a link",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "field",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putVODByIDLinksByField",
+    "summary": "Replace a link",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "field",
       "in": "path",
       "required": true,
       "schema": {
@@ -37184,6 +37630,32 @@
     }
    }
   },
+  "/api/vod/from-filename": {
+   "post": {
+    "operationId": "postVODFromFilename",
+    "summary": "VOD: from filename",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/vod/image-types": {
    "get": {
     "operationId": "getVODImageTypes",
@@ -37289,6 +37761,32 @@
       "schema": {
        "type": "string"
       }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/link-candidates": {
+   "get": {
+    "operationId": "getVODLinkCandidates",
+    "summary": "Get VOD link candidates",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
      }
     ],
     "responses": {

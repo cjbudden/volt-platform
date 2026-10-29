@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.14.0 (2026-10-29)
+
+### Product (in customer release notes)
+
+- security · Recordings: Downloading a whole recording now needs the Downloads permission (Operate), like every other download, instead of only being able to see the recording.
+- fixed · Review: Review only offers decisions that can be made: a clip with changes requested is sent back for review before it can be approved, the note needed to reject or request changes is asked for up front, and Re-run QC now says whether it started.
+- improved · Review: Send a clip for review from the Media Library: Send for review sits beside its Review state, an approved clip can be sent back, and a clip already waiting opens straight in the Review queue.
+
+### Internal
+
+- added · Tests: review-access suite: review moves and recording download access over real HTTP; the docs seed sends one clip for review for the Review guide.
+
 ## 0.13.0 (2026-10-29)
 
 ### Product (in customer release notes)
