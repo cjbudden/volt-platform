@@ -1819,7 +1819,7 @@ Screenshots: `npm run screenshots` style run (`scripts/screenshots.mjs media-lib
 
 Not yet: the class picker is not offered on the entry still playing. Search hits name the latest matching entry; the source page does not yet jump to it.
 
-## 2026-10-29 - API uploads keep their name, a channel's kind the same in list and item (build queue 1.14-G6a, vRELEASE)
+## 2026-10-29 - API uploads keep their name, a channel's kind the same in list and item (build queue 1.14-G6a, v0.21.1)
 
 What: the two fixes found writing the developer guides.
 
