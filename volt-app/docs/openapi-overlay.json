@@ -699,5 +699,15 @@
   "GET /api/fast/channels/:id/rundown": {
     "summary": "Going to air",
     "description": "What the playout plays next, to the second: programmes, ad breaks, idents and the brand loop. `hours` ahead (default 3), `back` hours behind."
+  },
+  "POST /api/channels/:id/group": {
+    "tag": "Channels",
+    "summary": "Move a channel to another group",
+    "description": "`groupId` of another of the account's groups with the same workflow (transcode or packaging). Works for TV channels, radio stations and FAST channels; needs Manage on that kind. Refused (409) when the target group's share of the plan is full or its workflow differs. A running channel keeps running; the target group's output profile applies from its next start (`profileChanges`, `running` in the answer)."
+  },
+  "POST /api/events/:id/group": {
+    "tag": "Events",
+    "summary": "Move an event to another group",
+    "description": "`groupId` of another of the account's groups with the same workflow. An event that has not ended needs room in the target group's running at once for its scheduled window (409 otherwise). Needs Events: Manage."
   }
 }

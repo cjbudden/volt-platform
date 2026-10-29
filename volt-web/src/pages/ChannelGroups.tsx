@@ -13,9 +13,11 @@
  *   settings:manage          rename, choose another output profile of the same type
  *   account admin, owner,    new group, change a share, make default, remove
  *   system administrator     (never the default, never while in use)
+ *   Manage on a stream's     move it to another group of the same workflow
+ *   own feature              (TV channels, Radio, FAST or Events)
  */
 import { useEffect, useMemo, useState } from 'react'
-import { api, type Group, type GroupUse, type PlanView } from '../api'
+import { api, type Group, type GroupUse, type PlanView, type LiveStreamListRow, type GroupMoveResult } from '../api'
 import { useAccess } from '../access'
 import { PageHead, NewButton, Preset } from '../scaffold'
 import { navigate } from '../router'
@@ -26,6 +28,10 @@ import { Meter } from './PlanLimits'
 
 interface Profile { id: string; name: string; workflow_type?: string }
 const typeLabel = (t: string | null | undefined) => t === 'package_only' ? 'Packaging' : t === 'transcode' ? 'Transcode' : '—'
+const ICON_MOVE = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+/** The feature that owns a stream row (the move route checks Manage on it). */
+const featureOf = (r: LiveStreamListRow) => r.kind === 'event' ? 'events' : r.kind === 'fast_channel' ? 'fast' : r.medium === 'radio' ? 'radio' : 'channels'
+const kindWord = (r: LiveStreamListRow) => r.kind === 'event' ? 'event' : r.kind === 'fast_channel' ? 'FAST channel' : r.medium === 'radio' ? 'radio station' : 'TV channel'
 const ICON_DEFAULT = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m12 3 2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6-4.5-4.2 6.1-.7z" /></svg>
 
 export default function ChannelGroups() {
@@ -37,7 +43,13 @@ export default function ChannelGroups() {
   const [err, setErr] = useState('')
   const [drawer, setDrawer] = useState<{ mode: 'new' } | { mode: 'edit'; group: Group } | null>(null)
   const [removing, setRemoving] = useState<Group | null>(null)
+  const [moving, setMoving] = useState<Group | null>(null)
   const notify = useNotify()
+  // MOVING A STREAM is work on that stream, not on the group: Manage on its own
+  // feature. Shown to anyone who manages some kind of stream; the dialog says
+  // which of the group's streams this role cannot move.
+  const canMoveSome = ['channels', 'radio', 'events', 'fast'].some(f => can(f, 'manage'))
+  const canList = can('monitoring', 'view')
 
   const load = () => Promise.all([api.groups(), api.plan()])
     .then(([g, p]) => { setGroups(g); setPlan(p); setErr('') })
@@ -64,7 +76,16 @@ export default function ChannelGroups() {
     const items: MenuItem[] = []
     if (manage) items.push({ key: 'default', label: 'Make default', icon: ICON_DEFAULT, onSelect: () => makeDefault(g),
       disabledReason: g.is_default ? 'Already the default group' : null })
-    items.push({ key: 'channels', label: 'View its channels', icon: Icons.view, onSelect: () => navigate('/channels') })
+    const held = g.channel_count + (g.event_count ?? 0)
+    const sameType = (groups ?? []).filter(o => o.id !== g.id && o.workflow_type === g.workflow_type)
+    // THE STREAMS OF THIS GROUP, not the whole Channels list: Live Streams'
+    // list view filtered to it (channels, stations, events and FAST together).
+    items.push({ key: 'channels', label: 'View its streams', icon: Icons.view, onSelect: () => navigate(`/live?view=list&group=${g.id}`),
+      disabledReason: !canList ? 'Needs Live & monitoring: View' : !held ? 'Nothing is in this group' : null })
+    if (canMoveSome) items.push({ key: 'move', label: 'Move streams', icon: ICON_MOVE, onSelect: () => setMoving(g),
+      disabledReason: !held ? 'Nothing is in this group'
+        : !canList ? 'Needs Live & monitoring: View to list the streams'
+        : !sameType.length ? `No other ${typeLabel(g.workflow_type)} group to move them to` : null })
     if (manage) items.push({ key: 'remove', label: 'Remove', icon: Icons.remove, danger: true, separator: true,
       disabledReason: g.is_default ? 'The default group cannot be removed' : null, onSelect: () => setRemoving(g) })
     return items
@@ -126,7 +147,10 @@ export default function ChannelGroups() {
           onClose={() => setDrawer(null)}
           onSaved={(g, created) => { setDrawer(null); notify({ kind: 'ok', message: created ? `${g.name} was created.` : `${g.name} was saved.` }); load() }} />
       )}
+      {moving && groups && <MoveStreamsDialog group={moving} groups={groups} can={can}
+        onClose={changed => { setMoving(null); if (changed) load() }} />}
       {removing && <RemoveGroupDialog group={removing} onClose={() => setRemoving(null)}
+        onMove={canMoveSome && canList ? () => { const g = removing; setRemoving(null); setMoving(g) } : undefined}
         onRemoved={name => { setRemoving(null); notify({ kind: 'ok', message: `${name} was removed. The removal is in the audit log.` }); load() }} />}
     </>
   )
@@ -232,7 +256,7 @@ function GroupDrawer({ plan, profiles, manage, group, onClose, onSaved }: {
  * REMOVE A GROUP: never the default, never while anything is in it. The
  * dialog says what is in it, so the person knows what to move first.
  */
-function RemoveGroupDialog({ group, onClose, onRemoved }: { group: Group; onClose: () => void; onRemoved: (name: string) => void }) {
+function RemoveGroupDialog({ group, onClose, onRemoved, onMove }: { group: Group; onClose: () => void; onRemoved: (name: string) => void; onMove?: () => void }) {
   const [use, setUse] = useState<GroupUse | null>(null)
   const [typed, setTyped] = useState('')
   const [err, setErr] = useState('')
@@ -265,6 +289,7 @@ function RemoveGroupDialog({ group, onClose, onRemoved }: { group: Group; onClos
           <Notice kind="warn" variant="compact" title="This group is in use." >
             <ul className="bulk-list" style={{ marginTop: 4 }}>{lines.map(l => <li key={l}>{l}</li>)}</ul>
             <div style={{ marginTop: 6 }}>Move them to another group or remove them first.</div>
+            {onMove && <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={onMove}>{ICON_MOVE_SM} Move streams</button>}
           </Notice>
         )}
         {use && !use.blocker && (
@@ -280,6 +305,119 @@ function RemoveGroupDialog({ group, onClose, onRemoved }: { group: Group; onClos
           <FormStatus error={err} blocked={use?.blocker ? 'Cannot be removed yet.' : null} />
           <button className="btn ghost" onClick={onClose} disabled={busy}>{use?.blocker ? 'Close' : 'Cancel'}</button>
           {!use?.blocker && <button className="btn primary danger" disabled={busy || !ok} onClick={go}>{busy ? 'Removing…' : 'Remove group'}</button>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const ICON_MOVE_SM = <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+
+/**
+ * MOVE STREAMS TO ANOTHER GROUP (build queue 1.14-G3a-5). Lists what is in
+ * the group (GET /api/live-streams?group_id=, so channels, stations, events
+ * and FAST channels in one list), lets the person pick some and a target of
+ * the same workflow, and moves them one at a time through each stream's own
+ * route, which checks the target's share and running at once. Every stream
+ * gets its own answer: one refused does not stop the rest.
+ */
+function MoveStreamsDialog({ group, groups, can, onClose }: {
+  group: Group; groups: Group[]; can: (feature: string, level: 'view' | 'operate' | 'manage') => boolean
+  onClose: (changed: boolean) => void
+}) {
+  const targets = groups.filter(o => o.id !== group.id && o.workflow_type === group.workflow_type)
+  const [rows, setRows] = useState<LiveStreamListRow[] | null>(null)
+  const [more, setMore] = useState(false)
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [target, setTarget] = useState(targets[0]?.id ?? '')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState<{ ok: GroupMoveResult[]; failed: { name: string; why: string }[] } | null>(null)
+
+  useEffect(() => {
+    api.liveStreams({ group_id: group.id, limit: '200' })
+      .then(r => { setRows(r.rows); setMore(!!r.next) })
+      .catch((e: any) => setErr(e?.message || 'Could not list the streams in this group'))
+  }, [group.id])
+
+  const movable = (r: LiveStreamListRow) => can(featureOf(r), 'manage')
+  const choosable = (rows ?? []).filter(movable)
+  const toggle = (id: string) => setPicked(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const allOn = choosable.length > 0 && choosable.every(r => picked.has(r.id))
+  const targetName = targets.find(t => t.id === target)?.name ?? ''
+
+  async function go() {
+    if (!target || !picked.size || !rows) return
+    setBusy(true); setErr('')
+    const ok: GroupMoveResult[] = [], failed: { name: string; why: string }[] = []
+    for (const r of rows.filter(x => picked.has(x.id))) {
+      try { ok.push(await api.moveToGroup(r.kind === 'event' ? 'event' : 'channel', r.id, target)) }
+      catch (e: any) { failed.push({ name: r.name, why: e?.message || 'Could not be moved' }) }
+    }
+    setBusy(false); setDone({ ok, failed })
+  }
+
+  const later = done?.ok.filter(m => m.running && m.profileChanges) ?? []
+  return (
+    <div className="drawer-scrim" onClick={e => { if (e.target === e.currentTarget && !busy) onClose(!!done?.ok.length) }} style={{ alignItems: 'center', justifyContent: 'center' }}>
+      <div className="card" role="dialog" aria-modal="true" aria-labelledby="mvg-t" onKeyDown={e => { if (e.key === 'Escape' && !busy) onClose(!!done?.ok.length) }}
+        style={{ width: 560, maxWidth: 'calc(100vw - 32px)', padding: 20 }}>
+        <h3 id="mvg-t" style={{ margin: '0 0 8px' }}>Move streams out of {group.name}</h3>
+        {done ? (
+          <>
+            {!!done.ok.length && <Notice kind="ok" variant="compact" title={`Moved ${done.ok.length} to ${done.ok[0].to.name}.`}
+              message="Each move is in the audit log." />}
+            {!!later.length && <div style={{ marginTop: 8 }}><Notice kind="info" variant="compact"
+              message={`${later.map(m => m.name).join(', ')} ${later.length === 1 ? 'is' : 'are'} running. The new group's output profile applies from the next start.`} /></div>}
+            {!!done.failed.length && <div style={{ marginTop: 8 }}><Notice kind="warn" variant="compact" title={`${done.failed.length} could not be moved.`}>
+              <ul className="bulk-list" style={{ marginTop: 4 }}>{done.failed.map(f => <li key={f.name}><b>{f.name}</b>: {f.why}</li>)}</ul>
+            </Notice></div>}
+          </>
+        ) : (
+          <>
+            <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-body)', margin: '0 0 10px' }}>
+              A stream keeps its workflow, so only {typeLabel(group.workflow_type)} groups are offered. The target group needs room in its share of the plan
+              (channels and stations) or in its running at once (events that have not ended).
+            </p>
+            <div className="field"><label htmlFor="mvg-to">Move to</label>
+              <select id="mvg-to" className="inp" value={target} onChange={e => setTarget(e.target.value)} disabled={busy}>
+                {targets.map(t => <option key={t.id} value={t.id}>{t.name} ({t.channel_count} of {t.max_channels} channels and stations, {t.max_concurrent ?? 1} at once)</option>)}
+              </select>
+            </div>
+            {rows === null && !err && <div className="loading">Listing what is in the group…</div>}
+            {rows && (
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="chk-row" style={{ fontWeight: 600 }}>
+                  <input type="checkbox" checked={allOn} disabled={busy || !choosable.length}
+                    onChange={() => setPicked(allOn ? new Set() : new Set(choosable.map(r => r.id)))} />
+                  <span>All that you can move ({choosable.length} of {rows.length})</span>
+                </label>
+                <div style={{ maxHeight: 260, overflow: 'auto', paddingLeft: 4 }}>
+                  {rows.map(r => {
+                    const ok = movable(r)
+                    return (
+                      <label key={r.id} className="chk-row" style={ok ? undefined : { cursor: 'default', color: 'var(--faint)' }}>
+                        <input type="checkbox" checked={picked.has(r.id)} disabled={busy || !ok} onChange={() => toggle(r.id)} />
+                        <span><b>{r.name}</b> <span className="hintxt">{kindWord(r)}{r.status && r.status !== 'idle' ? `, ${r.status}` : ''}
+                          {ok ? '' : `. Your role cannot change this ${kindWord(r)}.`}</span></span>
+                      </label>
+                    )
+                  })}
+                  {!rows.length && <div className="hintxt">Nothing in this group is visible to you.</div>}
+                </div>
+                {more && <div className="hintxt" style={{ marginTop: 6 }}>Showing the first 200. Move these, then open the dialog again for the rest.</div>}
+              </div>
+            )}
+          </>
+        )}
+        <div className="modal-f">
+          <FormStatus error={err} blocked={!done && !targets.length ? 'There is no other group of this workflow.' : null} />
+          {done ? <button className="btn primary" onClick={() => onClose(!!done.ok.length)}>Done</button> : <>
+            <button className="btn ghost" onClick={() => onClose(false)} disabled={busy}>Cancel</button>
+            <button className="btn primary" disabled={busy || !picked.size || !target} onClick={go}>
+              {busy ? 'Moving…' : picked.size ? `Move ${picked.size} to ${targetName}` : 'Move'}
+            </button>
+          </>}
         </div>
       </div>
     </div>

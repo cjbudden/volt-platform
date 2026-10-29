@@ -981,6 +981,15 @@
   "group": "/api/channels"
  },
  {
+  "method": "POST",
+  "path": "/api/channels/:id/group",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "channels: manage (radio: same level, when the channel is a station)",
+  "viewerTier": false,
+  "group": "/api/channels"
+ },
+ {
   "method": "GET",
   "path": "/api/channels/:id/history",
   "api": "admin",
@@ -1847,6 +1856,15 @@
  {
   "method": "POST",
   "path": "/api/events/:id/filler",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "events: manage",
+  "viewerTier": false,
+  "group": "/api/events"
+ },
+ {
+  "method": "POST",
+  "path": "/api/events/:id/group",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "events: manage",

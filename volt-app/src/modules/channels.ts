@@ -22,6 +22,7 @@ import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { scheduleFillerPrep, FILLER_FIELDS, runFillerPrep, fillerStatus } from '../services/fillerPrep';
 import { assertFillerAsset } from './fillerAssets';
+import { moveToGroup } from '../services/groupMove';
 
 export const channelsRouter = Router();
 channelsRouter.use(requireAuth);
@@ -659,6 +660,16 @@ const editChannel = asyncHandler(async (req, res) => {
 });
 channelsRouter.patch('/:id', editChannel);
 channelsRouter.put('/:id', editChannel);
+
+/**
+ * MOVE A CHANNEL, STATION OR FAST CHANNEL TO ANOTHER GROUP (build queue
+ * 1.14-G3a-5). Checked like creating it there: same workflow, room in the
+ * target group's share (services/groupMove.ts). Manage on the stream's own
+ * feature, by what the id is (auth/roles.ts requirementFor).
+ */
+channelsRouter.post('/:id/group', asyncHandler(async (req, res) => {
+  res.json(await moveToGroup(req, 'channel', req.params.id));
+}));
 
 /** Change history for one channel (who created / changed what, newest first). */
 channelsRouter.get(

@@ -33,7 +33,7 @@ import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest, conflict } from '../util/http';
-import { writeAudit, actor, patchEntity } from '../services/audit';
+import { writeAudit, actor, patchEntity, VersionConflict } from '../services/audit';
 import { fitToSource, describeFit } from '../services/encode/ladder';
 import { loadLadder, listLadderGroups, ensureTrackingGroup } from '../services/encode/store';
 
@@ -79,29 +79,73 @@ encodeProfilesRouter.post('/', asyncHandler(async (req, res) => {
 
 const PROFILE_EDITABLE = ['name', 'height', 'bitrate_kbps', 'fps', 'notes'];
 
+// THE EDIT IS CHECKED LIKE THE CREATE (build queue 1.14-G3a-5). The console
+// now edits renditions in place, so the same bounds apply as when adding one,
+// a name already taken answers 409 in words rather than a database error, and
+// a height that another rendition in one of its ladders already has is
+// refused: a ladder with two 720p rungs is not something the editor can make
+// either. A form opened on an older version is told so (409), not overwritten.
+const profilePatch = profileBody.partial().extend({ version: z.number().int().positive().optional() });
+
 encodeProfilesRouter.patch('/:id', asyncHandler(async (req, res) => {
   const cur = await one<any>(
     `SELECT * FROM encode_profiles WHERE id = $1 AND account_id = $2`,
     [req.params.id, accountId(req)]);
   if (!cur) throw notFound('rendition not found');
-  const b = req.body ?? {};
+  const parsed = profilePatch.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    throw badRequest('A rendition needs a name, a height between 90 and 4320 lines and a bitrate between 50 and 200000 kbps.');
+  }
+  const b = parsed.data;
   const patch: Record<string, any> = {};
-  if ('name' in b) patch.name = b.name;
-  if ('height' in b) patch.height = b.height;
-  if ('bitrateKbps' in b) patch.bitrate_kbps = b.bitrateKbps;
-  if ('fps' in b) patch.fps = b.fps;
-  if ('notes' in b) patch.notes = b.notes;
+  if (b.name !== undefined) patch.name = b.name.trim();
+  if (b.height !== undefined) patch.height = b.height;
+  if (b.bitrateKbps !== undefined) patch.bitrate_kbps = b.bitrateKbps;
+  if (b.fps !== undefined) patch.fps = b.fps;
+  if (b.notes !== undefined) patch.notes = b.notes;
+  if (patch.name !== undefined && patch.name !== cur.name) {
+    const taken = await one(`SELECT 1 FROM encode_profiles WHERE account_id = $1 AND name = $2 AND id <> $3`, [accountId(req), patch.name, cur.id]);
+    if (taken) throw conflict(`a rendition called "${patch.name}" already exists`);
+  }
+  if (patch.height !== undefined && patch.height !== cur.height) {
+    const clash = await query<any>(
+      `SELECT DISTINCT g.name FROM encode_ladder_members m
+         JOIN encode_ladder_groups g ON g.id = m.group_id
+         JOIN encode_ladder_members o ON o.group_id = m.group_id AND o.profile_id <> m.profile_id
+         JOIN encode_profiles op ON op.id = o.profile_id
+        WHERE m.profile_id = $1 AND op.height = $2`, [cur.id, patch.height]);
+    if (clash.length) {
+      throw conflict(`${clash.map((c) => c.name).join(', ')} already ${clash.length === 1 ? 'has' : 'have'} a ${patch.height}p rendition, ` +
+        'and a ladder has one rendition per height');
+    }
+  }
   const who = actor(req);
   // EDITING A RENDITION CHANGES EVERY LADDER CONTAINING IT, which is the whole
   // point of profiles being separate — and is exactly why it is versioned and
   // audited rather than a bare UPDATE.
-  const { row, changed } = await patchEntity({
-    table: 'encode_profiles', id: cur.id, accountId: accountId(req),
-    current: cur, patch, allowed: PROFILE_EDITABLE,
-    entityType: 'encode_profile', userId: who.userId, label: who.label,
-    expectedVersion: b.version ?? null,
-  });
-  res.json({ ...row, changed });
+  try {
+    const { row, changed } = await patchEntity({
+      table: 'encode_profiles', id: cur.id, accountId: accountId(req),
+      current: cur, patch, allowed: PROFILE_EDITABLE,
+      entityType: 'encode_profile', userId: who.userId, label: who.label,
+      expectedVersion: b.version ?? null,
+    });
+    // The ladders holding it now resolve to other rungs: a FAST channel on one
+    // re-packages what it airs, as when the ladder itself is edited.
+    if (changed.length && (patch.height !== undefined || patch.bitrate_kbps !== undefined || patch.fps !== undefined)) {
+      const { ladderChanged } = await import('../services/fast/ladder');
+      for (const g of await query<any>(`SELECT DISTINCT group_id FROM encode_ladder_members WHERE profile_id = $1`, [cur.id])) {
+        ladderChanged(accountId(req), g.group_id);
+      }
+    }
+    res.json({ ...row, changed });
+  } catch (e) {
+    if (e instanceof VersionConflict) {
+      res.status(409).json({ error: 'Someone else changed this rendition while you were editing. Reload to see their change.', currentVersion: e.currentVersion });
+      return;
+    }
+    throw e;
+  }
 }));
 
 encodeProfilesRouter.delete('/:id', asyncHandler(async (req, res) => {

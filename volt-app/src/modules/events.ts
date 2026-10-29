@@ -13,6 +13,7 @@ import { defaultTypeId } from '../services/contentTypes';
 import { actor, patchEntity, writeAudit, entityHistory, VersionConflict } from '../services/audit';
 import { scheduleFillerPrep, FILLER_FIELDS, runFillerPrep, fillerStatus } from '../services/fillerPrep';
 import { assertFillerAsset } from './fillerAssets';
+import { moveToGroup } from '../services/groupMove';
 
 export const eventsRouter = Router();
 eventsRouter.use(requireAuth);
@@ -321,6 +322,15 @@ const editEvent = asyncHandler(async (req, res) => {
 });
 eventsRouter.patch('/:id', editEvent);
 eventsRouter.put('/:id', editEvent);
+
+/**
+ * MOVE AN EVENT TO ANOTHER GROUP (build queue 1.14-G3a-5). Checked like
+ * creating it there: same workflow, and an event that has not ended needs
+ * room in the target group's running at once (services/groupMove.ts).
+ */
+eventsRouter.post('/:id/group', asyncHandler(async (req, res) => {
+  res.json(await moveToGroup(req, 'event', req.params.id));
+}));
 
 eventsRouter.get(
   '/:id/history',

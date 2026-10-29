@@ -57,12 +57,17 @@ export function usageText(g: LadderGroup): string | null {
   return parts.length ? parts.join(' · ') : null
 }
 
-export function LadderEditor({ g, profiles, onChanged, context }: {
+export function LadderEditor({ g, profiles, onChanged, context, readOnly = false }: {
   g: LadderGroup; profiles: EncodeProfile[]; onChanged: () => void
   /** Who is editing (e.g. "this channel"), so the shared-use line can say "and N others". */
   context?: string
+  /** Without Manage the ladder is shown, not offered for change (build queue 1.14-G3a-5). */
+  readOnly?: boolean
 }) {
-  const [busy, setBusy] = useState(false)
+  const [busyRaw, setBusy] = useState(false)
+  // Read-only shows every control as it stands, disabled, rather than hiding
+  // the settings: what a ladder encodes to is the point of the page.
+  const busy = busyRaw || readOnly
   const [err, setErr] = useState('')
   const [h, setH] = useState('')
   const [k, setK] = useState('')
@@ -111,14 +116,14 @@ export function LadderEditor({ g, profiles, onChanged, context }: {
               return (
                 <tr key={`${r.height}-${r.bitrate_kbps}`}>
                   <td><b>{r.height}p</b></td><td>{boxW(r.height)}×{r.height}</td><td>{kbps(r.bitrate_kbps)}</td>
-                  <td>{!tracking && p && <button className="btn ghost sm" disabled={busy} onClick={() => remove(p)} aria-label={`Remove ${r.height}p`}>Remove</button>}</td>
+                  <td>{!tracking && p && !readOnly && <button className="btn ghost sm" disabled={busy} onClick={() => remove(p)} aria-label={`Remove ${r.height}p`}>Remove</button>}</td>
                 </tr>
               )
             })}
             {!g.rungs.length && <tr><td colSpan={4} className="hintxt">No renditions yet. Add them below, or start from a standard set.</td></tr>}
           </tbody>
         </table>
-        {!tracking && <div className="led-add">
+        {!tracking && !readOnly && <div className="led-add">
           <input className="inp" inputMode="numeric" placeholder="Height, e.g. 1080" value={h} onChange={e => setH(e.target.value.replace(/\D/g, ''))} aria-label="Height in lines" />
           <input className="inp" inputMode="numeric" placeholder="Bitrate kb/s, e.g. 6000" value={k} onChange={e => setK(e.target.value.replace(/\D/g, ''))} aria-label="Bitrate in kb/s" />
           <button className="btn ghost" onClick={add} disabled={busy || !h || !k}>Add rendition</button>

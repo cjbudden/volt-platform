@@ -4,6 +4,8 @@ import {
   type LadderPreview, type LadderRung,
 } from '../api'
 import { LadderEditor } from '../encode/LadderEditor'
+import { useAccess } from '../access'
+import { Notice } from '../notices'
 
 /* ============================================================================
    ENCODING PROFILES — renditions, and the ladders made of them.
@@ -42,10 +44,30 @@ const rungLabel = (r: LadderRung) => `${r.height}p ${r.bitrate_kbps}k`
 
 /* -------------------------------------------------------------- renditions */
 
-function Renditions({ profiles, reload }: { profiles: EncodeProfile[]; reload: () => void }) {
+/* EDITING A RENDITION IN PLACE (build queue 1.14-G3a-5). The card said "edit it
+   once and every ladder containing it changes" and offered no way to edit it.
+   Edit opens the row as three fields; the server checks the same bounds as
+   adding one and refuses a height a ladder holding it already has. Delete is
+   offered only for a rendition no ladder uses, with the reason on it, rather
+   than letting the click fail. Without Manage the list is shown, not offered. */
+function Renditions({ profiles, reload, canManage }: { profiles: EncodeProfile[]; reload: () => void; canManage: boolean }) {
   const [draft, setDraft] = useState({ name: '', height: '720', bitrateKbps: '3000' })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [editing, setEditing] = useState<{ id: string; name: string; height: string; bitrateKbps: string; version: number } | null>(null)
+
+  const save = async () => {
+    if (!editing) return
+    const height = Number(editing.height), bitrateKbps = Number(editing.bitrateKbps)
+    if (!editing.name.trim()) { setErr('A rendition needs a name.'); return }
+    if (!(height >= 90 && height <= 4320)) { setErr('A height between 90 and 4320 lines.'); return }
+    if (!(bitrateKbps >= 50 && bitrateKbps <= 200000)) { setErr('A bitrate between 50 and 200000 kbps.'); return }
+    setBusy(true); setErr('')
+    try {
+      await api.patchEncodeProfile(editing.id, { name: editing.name.trim(), height, bitrateKbps, version: editing.version })
+      setEditing(null); reload()
+    } catch (e: any) { setErr(String(e?.message ?? e)) } finally { setBusy(false) }
+  }
 
   const add = async () => {
     const height = Number(draft.height), bitrateKbps = Number(draft.bitrateKbps)
@@ -76,9 +98,28 @@ function Renditions({ profiles, reload }: { profiles: EncodeProfile[]; reload: (
       </div>
 
       <div style={{ display: 'grid', gap: 6, margin: '12px 0' }}>
-        {profiles.map(p => (
+        {profiles.map(p => editing?.id === p.id ? (
           <div key={p.id} style={{
-            display: 'grid', gridTemplateColumns: '1fr 90px 110px 130px auto', gap: 10,
+            display: 'grid', gridTemplateColumns: '1fr 90px 110px auto auto', gap: 10,
+            alignItems: 'center', padding: '8px 10px', borderRadius: 8,
+            background: 'var(--panel-2,#151922)', border: '1px solid var(--border,#242a36)',
+          }}>
+            <input style={box} aria-label="Rendition name" value={editing.name} autoFocus
+              onChange={e => setEditing({ ...editing, name: e.target.value })} />
+            <input style={box} aria-label="Height in lines" inputMode="numeric" value={editing.height}
+              onChange={e => setEditing({ ...editing, height: e.target.value.replace(/\D/g, '') })} />
+            <input style={box} aria-label="Bitrate in kbps" inputMode="numeric" value={editing.bitrateKbps}
+              onChange={e => setEditing({ ...editing, bitrateKbps: e.target.value.replace(/\D/g, '') })}
+              onKeyDown={e => { if (e.key === 'Enter') save() }} />
+            <button type="button" className="btn primary" style={{ padding: '3px 9px' }} onClick={save} disabled={busy}>
+              {busy ? 'Saving…' : 'Save'}</button>
+            <button type="button" className="btn ghost" style={{ padding: '3px 9px' }} onClick={() => { setEditing(null); setErr('') }} disabled={busy}>Cancel</button>
+            {!!p.used_in && <span style={{ ...muted, gridColumn: '1 / -1' }}>
+              In {p.used_in} ladder{p.used_in === 1 ? '' : 's'}: a change applies to {p.used_in === 1 ? 'it' : 'all of them'}, and FAST channels on {p.used_in === 1 ? 'it' : 'them'} re-package what they air.</span>}
+          </div>
+        ) : (
+          <div key={p.id} style={{
+            display: 'grid', gridTemplateColumns: canManage ? '1fr 90px 110px 130px auto auto' : '1fr 90px 110px 130px', gap: 10,
             alignItems: 'center', padding: '8px 10px', borderRadius: 8,
             background: 'var(--panel-2,#151922)', border: '1px solid var(--border,#242a36)',
           }}>
@@ -88,17 +129,21 @@ function Renditions({ profiles, reload }: { profiles: EncodeProfile[]; reload: (
             <span style={muted}>
               {p.used_in ? `in ${p.used_in} ladder${p.used_in === 1 ? '' : 's'}` : 'not used'}
             </span>
-            <button type="button" className="btn ghost" style={{ padding: '3px 9px' }}
+            {canManage && <button type="button" className="btn ghost" style={{ padding: '3px 9px' }} disabled={busy}
+              onClick={() => { setErr(''); setEditing({ id: p.id, name: p.name, height: String(p.height), bitrateKbps: String(p.bitrate_kbps), version: p.version }) }}>Edit</button>}
+            {canManage && <button type="button" className="btn ghost" style={{ padding: '3px 9px' }}
+              disabled={busy || !!p.used_in}
               title={p.used_in
-                ? 'Used by a ladder. Remove it there first — deleting it here would silently shrink that ladder.'
+                ? 'Used by a ladder. Take it out of the ladder first: deleting it here would shrink that ladder.'
                 : 'Delete this rendition'}
-              onClick={() => remove(p)}>Delete</button>
+              aria-label={p.used_in ? `Delete ${p.name}: used by a ladder, take it out of the ladder first` : `Delete ${p.name}`}
+              onClick={() => remove(p)}>Delete</button>}
           </div>
         ))}
         {!profiles.length && <p style={muted}>No renditions yet.</p>}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px auto', gap: 8 }}>
+      {canManage && <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px auto', gap: 8 }}>
         <input style={box} placeholder="Name (optional)" value={draft.name}
           onChange={e => setDraft({ ...draft, name: e.target.value })} />
         <input style={box} placeholder="720" inputMode="numeric" value={draft.height}
@@ -106,7 +151,7 @@ function Renditions({ profiles, reload }: { profiles: EncodeProfile[]; reload: (
         <input style={box} placeholder="3000" inputMode="numeric" value={draft.bitrateKbps}
           onChange={e => setDraft({ ...draft, bitrateKbps: e.target.value })} />
         <button type="button" className="btn primary" onClick={add} disabled={busy}>Add rendition</button>
-      </div>
+      </div>}
       <p style={{ ...muted, marginTop: 8 }}>
         Rate control (preset, maxrate, buffer, GOP) is not set here. It is the same for live and
         for file encodes and lives in the encoder, in one place, so the two cannot drift apart.
@@ -181,8 +226,8 @@ function Preview({ ladder }: { ladder: LadderGroup }) {
 
 /* ------------------------------------------------------------------ ladders */
 
-function Ladder({ g, profiles, reload }: {
-  g: LadderGroup; profiles: EncodeProfile[]; reload: () => void
+function Ladder({ g, profiles, reload, canManage }: {
+  g: LadderGroup; profiles: EncodeProfile[]; reload: () => void; canManage: boolean
 }) {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -201,6 +246,7 @@ function Ladder({ g, profiles, reload }: {
         {g.is_default && (
           <span style={{ ...muted, color: 'var(--ok,#4ade80)', fontWeight: 600 }}>account default</span>
         )}
+        {canManage && <>
         <button type="button" className="btn ghost" style={{ marginLeft: 'auto', padding: '3px 9px' }}
           disabled={busy || g.is_default} onClick={() => patch({ isDefault: true })}>
           {g.is_default ? 'Default' : 'Make default'}
@@ -211,6 +257,7 @@ function Ladder({ g, profiles, reload }: {
             try { await api.deleteLadderGroup(g.id); reload() }
             catch (e: any) { setErr(String(e?.message ?? e)) }
           }}>Delete</button>
+        </>}
       </div>
 
       {/* WHERE THE NUMBERS COME FROM. The single most important line here. */}
@@ -230,7 +277,7 @@ function Ladder({ g, profiles, reload }: {
       {/* THE SHARED EDITOR (encode/LadderEditor.tsx): renditions, encode and
           packaging, the same one a FAST channel's Settings shows, so a ladder
           is set up one way wherever it is used. */}
-      <LadderEditor g={g} profiles={profiles} onChanged={reload} />
+      <LadderEditor g={g} profiles={profiles} onChanged={reload} readOnly={!canManage} />
 
       {err && <p style={{ color: 'var(--danger,#f87171)', fontSize: 'var(--fs-sm)' }}>{err}</p>}
       {!g.problem && <Preview ladder={g} />}
@@ -241,6 +288,12 @@ function Ladder({ g, profiles, reload }: {
 /* --------------------------------------------------------------------- page */
 
 export default function EncodingProfiles() {
+  // WRITE CONTROLS ONLY FOR MANAGE (build queue 1.14-G3a-5). Reading is open
+  // to every signed-in user (forms pick a ladder); changing anything here is
+  // Encoding profiles & ladders: Manage, so View users are shown the page,
+  // not buttons the server would refuse.
+  const { can } = useAccess()
+  const canManage = can('encoding', 'manage')
   const [profiles, setProfiles] = useState<EncodeProfile[]>([])
   const [ladders, setLadders] = useState<LadderGroup[]>([])
   const [live, setLive] = useState<LiveOutputProfile[]>([])
@@ -280,10 +333,12 @@ export default function EncodingProfiles() {
         profile instead of drifting from them.
       </p>
       {err && <p style={{ color: 'var(--danger,#f87171)', fontSize: 'var(--fs-sm)' }}>{err}</p>}
+      {!canManage && <div style={{ marginBottom: 12 }}><Notice kind="info" variant="compact"
+        message="You can see the renditions and ladders. Changes need Encoding profiles & ladders: Manage." /></div>}
 
-      <Renditions profiles={profiles} reload={load} />
+      <Renditions profiles={profiles} reload={load} canManage={canManage} />
 
-      <div className="card" style={{ padding: 18, marginTop: 14 }}>
+      {canManage && <div className="card" style={{ padding: 18, marginTop: 14 }}>
         <h3 style={{ margin: '0 0 10px', fontSize: 'var(--fs-body)' }}>New ladder</h3>
         <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1fr auto', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -311,10 +366,10 @@ export default function EncodingProfiles() {
           </div>
           <span style={muted}>For an archive or cut-down ladder</span>
         </div>
-      </div>
+      </div>}
 
       {ladders.map(g => (
-        <Ladder key={g.id} g={g} profiles={profiles} reload={load} />
+        <Ladder key={g.id} g={g} profiles={profiles} reload={load} canManage={canManage} />
       ))}
       {!ladders.length && (
         <p style={{ ...muted, marginTop: 14 }}>

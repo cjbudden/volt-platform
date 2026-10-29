@@ -26,7 +26,7 @@ Account owners and administrators use this page when the account is set up and w
 
 - To create a group, room in the plan: the strip at the top says how much is **not yet shared**. If it is 0, lower another group's share first, or raise the plan under **Admin > Plan & limits**.
 - To give a group an existing output profile, the profile must be of the same workflow type. Otherwise choose a new profile with the default ladder when you create the group.
-- New groups, shares of the plan, the default group and removing a group need an Owner or Administrator. Renaming a group and changing its output profile need **Account settings: Manage** (see [Who can do it](#who-can-do-it)).
+- New groups, shares of the plan, the default group and removing a group need an Owner or Administrator. Renaming a group and changing its output profile need **Account settings: Manage**. Moving a stream to another group needs Manage on that kind of stream (see [Who can do it](#who-can-do-it)).
 
 ## Step by step
 
@@ -62,6 +62,18 @@ Account owners and administrators use this page when the account is set up and w
 3. Owners and administrators can also change **Channels and stations** and **Running at once**. A share cannot go below what the group already holds, or above what the plan has left for it.
 4. Choose **Save changes**. The page confirms **was saved**.
 
+### Move streams to another group
+
+Move channels, radio stations, FAST channels or events out of a group, for example to empty it before removing it or to give them another output profile.
+
+1. Open the group's **More actions** menu and choose **Move streams**. (The **Remove** dialog of a group that is in use has the same **Move streams** button.)
+2. Under **Move to**, choose the group. Only groups of the same workflow are offered, because a stream keeps its workflow; each is listed with how full its share is and how many it runs at once.
+3. Tick the streams to move, or **All that you can move**. A stream your role cannot change is listed greyed out, with the reason.
+4. Choose **Move ... to ...**. Volt moves them one at a time and then says how many were **Moved**, and lists any that **could not be moved** with the reason (for example the target group is full).
+5. A stream that is running keeps running. If the new group has another output profile, the dialog says so: its ladder and captions apply from the stream's next start.
+
+Each move is recorded in the audit log.
+
 ### Make another group the default
 
 1. Open the row's **More actions** menu and choose **Make default**.
@@ -70,10 +82,10 @@ Account owners and administrators use this page when the account is set up and w
 ### Remove a group
 
 1. Open the row's **More actions** menu and choose **Remove**. The default group cannot be removed.
-2. The dialog checks what is in the group. If it holds TV channels, radio stations or events, it lists them and the group cannot be removed yet: remove them first.
+2. The dialog checks what is in the group. If it holds TV channels, radio stations or events, it lists them and the group cannot be removed yet: choose **Move streams** to move them to another group (see [Move streams to another group](#move-streams-to-another-group)), or remove them first.
 3. If the group is empty, type its name to confirm and choose **Remove group**. Its share of the plan becomes free to give to another group. This cannot be undone, and the removal is in the audit log.
 
-**View its channels** in the same menu opens the Channels list.
+**View its streams** in the same menu opens the List view of **Live Streams**, filtered to this group: its TV channels, radio stations, events and FAST channels together. The **All groups** picker there changes or clears the group.
 
 ## How it connects
 
@@ -93,6 +105,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | See the groups and the plan strip | Account settings: View |
 | Rename a group, change its output profile | Account settings: Manage |
 | Create a group, change a share of the plan, make a group the default, remove a group | Owner or Administrator |
+| Move a stream to another group | Manage on that kind: TV channels, Radio stations, FAST channels or Events. **Move streams** and **View its streams** also need Live & monitoring: View to list the group's streams |
 
 Users who can only see the page are told **You can see the groups. Changes are made by account administrators.** Users with Account settings: Manage who are not administrators see the share fields greyed out.
 
@@ -110,7 +123,12 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Check the highlighted fields.** | A field above has a problem | Fix the field marked in red |
 | **There is already a group called "..."** | Group names are unique in the account | Choose another name |
 | **This is the default group.** when removing | The default group cannot be removed | Make another group the default first |
-| **This group is in use.** when removing | Channels, stations or events are still in it | Remove the ones listed, then try again |
+| **This group is in use.** when removing | Channels, stations or events are still in it | Choose **Move streams**, or remove the ones listed, then try again |
+| **... is full: it is given ... channels and stations of the plan and has ...** when moving | The target group's share is used up (TV channels and radio stations count together) | Give the target group a bigger share with **Edit**, or choose another group |
+| **... is a Packaging group and ... is Transcode** (or the other way round) | A stream keeps its workflow | Choose a group of the same workflow, or create the stream again in the other group |
+| **... already has ... event at the same time as ..., and it may run ... at once.** | The target group's **Running at once** is used up for that event's time | Choose another group, or raise the target's **Running at once** |
+| **Move streams** is unavailable: **No other ... group to move them to** | There is no other group of this workflow | Create one with **New group** |
+| A stream in the **Move streams** list is greyed out | Your role cannot change that kind of stream | Ask someone with Manage on it |
 | **Couldn't load channel groups.** | The page could not reach Volt | Choose **Retry** |
 
 ## Through the API
@@ -122,6 +140,9 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `PATCH /api/groups/{id}` | Renames it, changes its profile or share, or makes it the default (`{"isDefault": true}`) |
 | `GET /api/groups/{id}/usage` | What is in a group and whether it can be removed |
 | `DELETE /api/groups/{id}` | Removes an empty group that is not the default |
+| `POST /api/channels/{id}/group` | Moves a TV channel, radio station or FAST channel to another group (`groupId`) |
+| `POST /api/events/{id}/group` | Moves an event to another group (`groupId`) |
+| `GET /api/live-streams?group_id={id}` | Lists what is in a group: channels, stations, events and FAST channels |
 | `GET /api/plan` | The plan, what is used and how it is shared out |
 
 ```bash
@@ -129,5 +150,13 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   -d '{"name": "Sport", "workflowType": "transcode", "maxChannels": 3, "maxConcurrent": 2}' \
   "https://your-volt-host/api/groups"
 ```
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"groupId": "GROUP_ID"}' \
+  "https://your-volt-host/api/channels/CHANNEL_ID/group"
+```
+
+The answer names the old and new group and says whether the stream is running (`running`) and whether the new group has another output profile (`profileChanges`), which then applies from the next start.
 
 Every route is in the [API reference](/api-reference).

@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**836 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 656 · Platform API: 36 · Machine-to-machine: 14 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**838 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 658 · Platform API: 36 · Machine-to-machine: 14 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -375,6 +375,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | POST | `/api/channels/:id/failover-test` | admin session (Bearer) or account secret key | channels: operate (radio: same level, when the channel is a station) |  |
 | GET | `/api/channels/:id/filler` | admin session (Bearer) or account secret key | channels: view (radio: same level, when the channel is a station) |  |
 | POST | `/api/channels/:id/filler` | admin session (Bearer) or account secret key | channels: manage (radio: same level, when the channel is a station) |  |
+| POST | `/api/channels/:id/group` | admin session (Bearer) or account secret key | channels: manage (radio: same level, when the channel is a station) |  |
 | GET | `/api/channels/:id/history` | admin session (Bearer) or account secret key | channels: view (radio: same level, when the channel is a station) |  |
 | GET | `/api/channels/:id/inputs/:inputId/preview` | admin session (Bearer) or account secret key | channels: view (radio: same level, when the channel is a station) |  |
 | POST | `/api/channels/:id/reset-health` | admin session (Bearer) or account secret key | channels: operate (radio: same level, when the channel is a station) |  |
@@ -506,6 +507,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/events/:id/detail` | admin session (Bearer) or account secret key | events: view |  |
 | GET | `/api/events/:id/filler` | admin session (Bearer) or account secret key | events: view |  |
 | POST | `/api/events/:id/filler` | admin session (Bearer) or account secret key | events: manage |  |
+| POST | `/api/events/:id/group` | admin session (Bearer) or account secret key | events: manage |  |
 | POST | `/api/events/:id/health/reset` | admin session (Bearer) or account secret key | events: operate |  |
 | GET | `/api/events/:id/history` | admin session (Bearer) or account secret key | events: view |  |
 | GET | `/api/events/:id/inputs/:inputId/preview` | admin session (Bearer) or account secret key | events: view |  |

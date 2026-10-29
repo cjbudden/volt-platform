@@ -7729,6 +7729,42 @@
     }
    }
   },
+  "/api/channels/{id}/group": {
+   "post": {
+    "operationId": "postChannelsByIDGroup",
+    "summary": "Move a channel to another group",
+    "tags": [
+     "Channels"
+    ],
+    "description": "`groupId` of another of the account's groups with the same workflow (transcode or packaging). Works for TV channels, radio stations and FAST channels; needs Manage on that kind. Refused (409) when the target group's share of the plan is full or its workflow differs. A running channel keeps running; the target group's output profile applies from its next start (`profileChanges`, `running` in the answer).\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** channels: manage (radio: same level, when the channel is a station)",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/channels/{id}/history": {
    "get": {
     "operationId": "getChannelsByIDHistory",
@@ -11741,6 +11777,42 @@
      "Events"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** events: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/events/{id}/group": {
+   "post": {
+    "operationId": "postEventsByIDGroup",
+    "summary": "Move an event to another group",
+    "tags": [
+     "Events"
+    ],
+    "description": "`groupId` of another of the account's groups with the same workflow. An event that has not ended needs room in the target group's running at once for its scheduled window (409 otherwise). Needs Events: Manage.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** events: manage",
     "security": [
      {
       "adminBearer": []

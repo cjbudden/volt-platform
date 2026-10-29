@@ -1200,6 +1200,10 @@ export const api = {
   createGroup: (b: { name: string; workflowType: 'transcode' | 'package_only'; outputProfileId?: string; maxChannels: number; maxConcurrent: number; makeDefault?: boolean }): Promise<Group> =>
     req('/groups', { method: 'POST', body: JSON.stringify(b) }),
   groupUsage: (id: string): Promise<GroupUse> => req(`/groups/${id}/usage`),
+  /** Move a stream to another group of the same workflow (build queue 1.14-G3a-5).
+   *  A channel, station or FAST channel goes through /channels, an event through /events. */
+  moveToGroup: (kind: 'channel' | 'event', id: string, groupId: string): Promise<GroupMoveResult> =>
+    req(`/${kind === 'event' ? 'events' : 'channels'}/${id}/group`, { method: 'POST', body: JSON.stringify({ groupId }) }),
   deleteGroup: (id: string): Promise<void> => req(`/groups/${id}`, { method: 'DELETE' }),
   patchGroup: (id: string, b: { name?: string; outputProfileId?: string; maxChannels?: number; maxConcurrent?: number; isDefault?: true }): Promise<Group> =>
     req(`/groups/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
@@ -2781,6 +2785,15 @@ export interface LiveStream {
 
 /** One row of GET /api/live-streams. `live` is there with health=true: the
  *  live board's reading of the same stream, computed by the same code. */
+/** What POST /channels/:id/group and /events/:id/group answer. */
+export interface GroupMoveResult {
+  id: string; kind: 'channel' | 'event'; name: string
+  from: { id: string; name: string }; to: { id: string; name: string }
+  /** the target group uses another output profile: it applies from the next start */
+  profileChanges: boolean
+  running: boolean
+}
+
 export interface LiveStreamListRow {
   id: string
   kind: 'channel' | 'event' | 'fast_channel'

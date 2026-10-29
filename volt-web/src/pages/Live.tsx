@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type LiveBoard, type LiveStream, type LiveStreamListRow } from '../api'
+import { api, type Group, type LiveBoard, type LiveStream, type LiveStreamListRow } from '../api'
 import { navigate } from '../router'
 import { PipelineStrip, StatusPill } from '../scaffold'
 import { pressable } from '../a11y'
@@ -209,9 +209,17 @@ const PAGE = 50
 const rowKindLabel = (r: LiveStreamListRow) =>
   r.kind === 'event' ? 'Event' : r.kind === 'fast_channel' ? 'FAST' : r.medium === 'radio' ? 'Radio' : 'TV'
 
+/** ?group=<id> in the address (Channel Groups' View its streams). */
+const groupFromUrl = () => { try { return new URLSearchParams(window.location.search).get('group') ?? '' } catch { return '' } }
+
 function StreamList({ refreshAt }: { refreshAt: number }) {
   const [q, setQ] = useState('')
   const [kind, setKind] = useState<ListKind>('all')
+  // THE GROUP FILTER (build queue 1.14-G3a-5): Channel Groups opens this list
+  // on one group's streams. The groups come from the read-open /api/groups.
+  const [group, setGroup] = useState(groupFromUrl)
+  const [groups, setGroups] = useState<Group[]>([])
+  useEffect(() => { api.groups().then(setGroups).catch(() => {}) }, [])
   const [rows, setRows] = useState<LiveStreamListRow[] | null>(null)
   const [next, setNext] = useState<string | null>(null)
   const [total, setTotal] = useState<number | null>(null)
@@ -221,7 +229,7 @@ function StreamList({ refreshAt }: { refreshAt: number }) {
   const seq = useRef(0)
 
   const params = (extra: Record<string, string> = {}) => ({
-    health: 'true', count: 'true', ...LIST_KIND_PARAMS[kind], ...(q.trim() ? { q: q.trim() } : {}), ...extra,
+    health: 'true', count: 'true', ...LIST_KIND_PARAMS[kind], ...(q.trim() ? { q: q.trim() } : {}), ...(group ? { group_id: group } : {}), ...extra,
   })
 
   // First page (or as many rows as are on screen, on a refresh, so the board's
@@ -254,10 +262,11 @@ function StreamList({ refreshAt }: { refreshAt: number }) {
     const h = setTimeout(() => { loadFirst(false) }, q ? 250 : 0)
     return () => clearTimeout(h)
     /* eslint-disable-next-line */
-  }, [q, kind])
+  }, [q, kind, group])
   useEffect(() => { if (refreshAt && rows) loadFirst(true) /* eslint-disable-next-line */ }, [refreshAt])
 
-  const filtered = kind !== 'all' || q.trim() !== ''
+  const filtered = kind !== 'all' || q.trim() !== '' || group !== ''
+  const clear = () => { setQ(''); setKind('all'); setGroup('') }
   return (
     <>
       <ListToolbar
@@ -268,7 +277,13 @@ function StreamList({ refreshAt }: { refreshAt: number }) {
             { value: 'all', label: 'All' }, { value: 'tv', label: 'TV' }, { value: 'radio', label: 'Radio' },
             { value: 'event', label: 'Events' }, { value: 'fast', label: 'FAST' },
           ]} />
-          <ClearFilters on={filtered} onClear={() => { setQ(''); setKind('all') }} />
+          {groups.length > 1 || group ? (
+            <select className="inp sel-sm" style={{ width: 'auto' }} value={group} onChange={e => setGroup(e.target.value)} aria-label="Group">
+              <option value="">All groups</option>
+              {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          ) : null}
+          <ClearFilters on={filtered} onClear={clear} />
         </>}
         right={total != null ? <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>{rows?.length ?? 0} of {total}</span> : undefined}
       />
@@ -276,7 +291,7 @@ function StreamList({ refreshAt }: { refreshAt: number }) {
       {rows == null ? (
         <div className="card p-4"><div className="loading">Loading streams…</div></div>
       ) : rows.length === 0 ? (
-        filtered ? <NoMatches what="streams" onClear={() => { setQ(''); setKind('all') }} />
+        filtered ? <NoMatches what="streams" onClear={clear} />
           : <div className="empty"><h3>No streams</h3><p>There are no channels, stations or events you can see.</p></div>
       ) : (
         <div className="card">
@@ -323,6 +338,8 @@ export default function LivePage() {
   // default; the choice is remembered per viewer (a user preference field is a
   // follow-up, see TIMELINE_MODE.md).
   const [view, setView] = useState<LiveView>(() => {
+    // ?view=list in the address wins (Channel Groups links here filtered to a group)
+    try { if (new URLSearchParams(window.location.search).get('view') === 'list') return 'list' } catch { /* no address */ }
     try { const v = localStorage.getItem(VIEW_KEY); return v === 'list' || v === 'timeline' ? v : 'board' } catch { return 'board' }
   })
   useEffect(() => { try { localStorage.setItem(VIEW_KEY, view) } catch { /* per-viewer nicety only */ } }, [view])
