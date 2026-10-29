@@ -152,7 +152,9 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
           )
         })}
       </div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
+      {/* Wraps: in a stream's narrow settings drawer the buttons and the
+          Saved line did not fit on one row. */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
         <button className="btn primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save publishing rule'}</button>
         {scopeKind !== 'account' && scopeKind !== 'asset' && overrides > 0 && (
           <button className="btn ghost" disabled={busy} onClick={async () => { setBusy(true); try { await api.deletePublishingRule(scopeKind, scopeId!); setOwn({}); await load(); onSaved?.() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } }}>
@@ -162,7 +164,8 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
         {msg && <span style={{ color: 'var(--ok,#4ade80)', fontSize: 'var(--fs-sm)' }}>{msg}</span>}
         {err && <span style={{ color: '#fca5a5', fontSize: 'var(--fs-sm)' }}>{err}</span>}
         <span style={{ flex: 1 }} />
-        <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)' }} onClick={() => navigate('/apikeys')} title="Publishing points are the apps registered here and the social accounts configured for this account">Manage apps</button>
+        <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)' }} onClick={() => navigate('/apikeys')} title="Apps are registered in API Keys & Apps">Manage apps</button>
+        <button className="btn ghost" style={{ fontSize: 'var(--fs-xs)' }} onClick={() => navigate('/social')} title="Social accounts are added in Social accounts">Social accounts</button>
       </div>
     </div>
   )

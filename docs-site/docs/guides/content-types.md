@@ -58,10 +58,10 @@ A type built on another shows the fields it inherits above the table (**Inherite
 ### Add your own type
 
 1. Choose the type you want to build on. The button under the list reads **New type extending** followed by that type's name.
-2. Choose it. A new type called the parent's name with **(copy)** after it appears and opens. It is offered for the same kinds as its parent and has no fields of its own yet: it inherits all of the parent's.
+2. Choose it. A new type called the parent's name with **(copy)** after it appears and opens (**(copy 2)**, **(copy 3)** and so on when that name is taken). It is offered for the same kinds as its parent and has no fields of its own yet: it inherits all of the parent's.
 3. Give it a proper name, add the fields that make it different, and choose **Save type**.
 
-Choose the button once per new type: a second click before you rename the first copy is refused, because the name is already taken.
+Each click makes another new type, so choose the button once per type you need.
 
 ### Use a type
 
@@ -115,7 +115,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | "duplicate field key" and a key, after **Save type** | Two fields in the type have the same key | Change one of the keys and save again |
 | "each field needs a non-empty key" | A field's key is empty (characters other than letters, numbers and underscores are removed as you type) | Give every field a key |
 | "enum field … needs options[]" | A field of type **enum** has no choices | Type the choices in **Options / ref**, separated by commas |
-| "Schema … already exists" after **New type extending** | A type with that name already exists, usually the copy made by an earlier click | Rename the existing copy, then make another if you need one |
+| **A content type named ... already exists. Choose another name.** after **New type extending** | Someone else made a type with that name a moment before (the console picks a free name from the list it last loaded) | Choose **New type extending** again: the list has been reloaded, so the next free name is used |
 | "This type is assigned to … item(s). Reassign them first." | Something still uses the type you are deleting | Give those channels, stations, events or assets another type, then delete |
 | A type is missing from a stream's **Content type** picker | It is not offered for that kind of stream | Tick the kind under **Offered for** and save |
 

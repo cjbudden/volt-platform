@@ -57,13 +57,20 @@ export default function ContentTypesPage() {
           <button className="btn ghost" style={{ marginTop: 8, width: '100%' }} onClick={async () => {
             try {
               const base = cur
+              // A NAME NOT YET TAKEN (build queue 1.14-G3a-4). Every click
+              // asked for "<name> (copy)", so the second click on the same
+              // type was refused as a duplicate name (409). Count up instead.
+              const stem = `${base?.name ?? 'Custom type'} (copy`
+              const taken = new Set((types ?? []).map(t => t.name.trim().toLowerCase()))
+              let name = `${stem})`
+              for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${stem} ${n})`
               const created = await api.createContentType({
-                name: `${base?.name ?? 'Custom type'} (copy)`, description: base?.description ?? undefined, fields: [],
+                name, description: base?.description ?? undefined, fields: [],
                 targetKind: base?.target_kind ?? 'any', domain: base?.domain ?? undefined, extendsId: base?.id,
                 appliesTo: base?.applies_to ?? ['event'], schemaOrgType: base?.schema_org_type ?? undefined,
               })
               await load(); setSel(created.id)
-            } catch (e: any) { notify({ kind: 'error', message: e.message }) }
+            } catch (e: any) { notify({ kind: 'error', message: e.message }); load() /* so the next click sees the name that was taken */ }
           }}>{cur ? `New type extending ${cur.name}` : 'New type'}</button>
         </div>
         <div>

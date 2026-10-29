@@ -25341,7 +25341,7 @@
     "tags": [
      "Publishing Rules"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings or vod or channels or radio or events or fast: view",
     "security": [
      {
       "adminBearer": []
@@ -25367,7 +25367,7 @@
     "tags": [
      "Publishing Rules"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings or vod or channels or radio or events or fast: view",
     "security": [
      {
       "adminBearer": []

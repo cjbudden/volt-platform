@@ -4918,7 +4918,7 @@
   "path": "/api/publishing-rules/points",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "settings: view",
+  "access": "settings or vod or channels or radio or events or fast: view",
   "viewerTier": false,
   "group": "/api/publishing-rules"
  },
@@ -4927,7 +4927,7 @@
   "path": "/api/publishing-rules/resolve",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
-  "access": "settings: view",
+  "access": "settings or vod or channels or radio or events or fast: view",
   "viewerTier": false,
   "group": "/api/publishing-rules"
  },

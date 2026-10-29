@@ -132,7 +132,7 @@ metadataSchemasRouter.post(
       accountId(req),
       body.name,
     ]);
-    if (exists) throw conflict(`Schema "${body.name}" already exists`);
+    if (exists) throw conflict(`A content type named "${body.name}" already exists. Choose another name.`);
     const who = actor(req);
     const row = await one<any>(
       `INSERT INTO metadata_schemas(account_id, name, description, fields, target_kind, domain, extends_id, applies_to, schema_org_type, created_by, updated_by)

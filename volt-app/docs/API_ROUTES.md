@@ -843,8 +843,8 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | DELETE | `/api/publishing-rules/:scopeKind/:scopeId?` | admin session (Bearer) or account secret key | settings: manage |  |
 | GET | `/api/publishing-rules/:scopeKind/:scopeId?` | admin session (Bearer) or account secret key | settings: view |  |
 | PUT | `/api/publishing-rules/:scopeKind/:scopeId?` | admin session (Bearer) or account secret key | settings: manage |  |
-| GET | `/api/publishing-rules/points` | admin session (Bearer) or account secret key | settings: view |  |
-| GET | `/api/publishing-rules/resolve` | admin session (Bearer) or account secret key | settings: view |  |
+| GET | `/api/publishing-rules/points` | admin session (Bearer) or account secret key | settings or vod or channels or radio or events or fast: view |  |
+| GET | `/api/publishing-rules/resolve` | admin session (Bearer) or account secret key | settings or vod or channels or radio or events or fast: view |  |
 
 ### `/api/radio`
 

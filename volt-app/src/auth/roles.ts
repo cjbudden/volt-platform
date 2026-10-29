@@ -362,6 +362,27 @@ export async function requirementFor(method: string, rawPath: string, body?: any
     }
   }
 
+  // A STREAM'S OWN PUBLISHING RULE (build queue 1.14-G3a-4). Publishing Rules
+  // sit under Account settings, so a stream's Access tab needed Account
+  // settings: Manage and an Event or Radio Manager could not set the rule of
+  // the events and stations they run. The owner rung of a stream is part of
+  // that stream: reading it is View and changing it is Manage on the stream's
+  // own feature (or Account settings, as before). The two lookups the rule
+  // editor makes beside it (the publishing points and what a rung inherits)
+  // change nothing, so they are View for whoever can open a rule editor
+  // anywhere. The account default and the content type rungs stay Account
+  // settings. A uuid that is not a channel is taken as an event: the handler
+  // refuses an owner the account does not have.
+  if (path === '/api/publishing-rules/points' || path === '/api/publishing-rules/resolve') {
+    return { features: ['settings', 'vod', 'channels', 'radio', 'events', 'fast'], level: 'view', reason: 'publishing rule lookup' };
+  }
+  const ownerRule = path.match(/^\/api\/publishing-rules\/owner\/([^/]+)$/);
+  if (ownerRule) {
+    const k = await kindOf(ownerRule[1]);
+    const feature = k === 'radio' ? 'radio' : k === 'fast' ? 'fast' : k ? 'channels' : 'events';
+    return { features: ['settings', feature], level: write ? 'manage' : 'view', reason: `${feature} publishing rule` };
+  }
+
   for (const s of SHARED_PREFIXES) {
     if (path === s.prefix || path.startsWith(s.prefix + '/')) {
       return { features: s.anyOf, level: write ? 'manage' : 'view', reason: s.prefix };

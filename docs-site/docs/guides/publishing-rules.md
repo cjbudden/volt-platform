@@ -19,7 +19,7 @@ Publishing Rules decides what a publish does: where on-demand content goes, when
   | Rung | Where you set it |
   |---|---|
   | Account default | Here, under **Account default** |
-  | Content type | [Content Types](content-types.md), under **Publishing rule for this type** |
+  | Content type | [Content Types](content-types.md), under **Publishing rule for this type**, or here under **By content type** |
   | Channel, event or station | The stream's settings, on the **Access** tab |
   | A single item | The asset in the [Media Library](media-library.md), under **What a publish does for this item** |
 
@@ -31,7 +31,7 @@ Administrators set the default; the people who run a channel, an event or the li
 ## Before you start
 
 - The places content can go. Only the catalogue, the apps registered to your account and the social accounts set up for it can be chosen. Apps are registered in API Keys & Apps; social accounts are added under Social accounts in the Admin area.
-- **Account settings: Manage** to change the account default, a content type's rule or a stream's rule (see [Who can do it](#who-can-do-it)).
+- **Account settings: Manage** to change the account default or a content type's rule. A stream's own rule needs Manage on that kind of stream (for example Events: Manage for an event), or Account settings: Manage (see [Who can do it](#who-can-do-it)).
 
 ## Step by step
 
@@ -41,7 +41,7 @@ Administrators set the default; the people who run a channel, an event or the li
 2. **Publishing points** lists where content can be published: **Catalogue** is always there, then each registered app (**App:**, its name and type) and each social account (the platform and its name). A faded one is switched off.
    An Instagram account is a publishing point like any other: a rule that ticks it sends the clip as a Reel (the 9:16 version when it has one). Instagram's limit of posts made through apps in any 24 hours still applies, so a rule that publishes often can reach it; a post past the limit fails, says so, and can be retried later.
    A Threads profile works the same way: the clip goes as a video post with the clip's title and its first tag (Threads allows one hashtag), within Threads' own 24 hour limit.
-3. To add one, choose **Register an app or add a social account**.
+3. To add one, choose **Register an app** (it opens [API Keys & Apps](api-keys-and-apps.md)) or **Add a social account** (it opens [Social accounts](social-accounts.md)).
 
 ### Set the account default
 
@@ -73,7 +73,7 @@ Administrators set the default; the people who run a channel, an event or the li
 
 1. On **Publishing Rules**, **By content type** lists the types that have their own rule and **By channel, event or station** lists the streams that do. Each row shows what it **sets** and its version.
 2. Choose a row to open its rule underneath (**Rule for** and the name). Change it as above, or choose **Close**.
-3. New content type rules are made in Content Types: choose **Open Content Types**. New stream rules are made in each stream's settings.
+3. To give a content type its own rule, choose the type under **Choose a content type...** below the list (only types without a rule are offered) and choose **Set a rule for this type**. Its rule opens underneath; tick the fields to set and choose **Save publishing rule**, and the type joins the list. You can do the same in Content Types: choose **Open Content Types**. New stream rules are made in each stream's settings.
 
 ### Add access rules
 
@@ -106,7 +106,9 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | Task | Access needed |
 |---|---|
 | See Publishing Rules and every override | Account settings: View |
-| Change the account default, a content type's rule or a channel, event or station's rule | Account settings: Manage |
+| Change the account default or a content type's rule | Account settings: Manage |
+| See a channel, event or station's rule (its **Access** tab) | View on that kind of stream (TV channels, Radio stations, Events or FAST channels), or Account settings: View |
+| Change a channel, event or station's rule | Manage on that kind of stream (an Event Manager sets their events' rules, a Radio Manager their stations'), or Account settings: Manage |
 | Change a single asset's rule | Media library & publishing: Manage |
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).
@@ -123,7 +125,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A post to Instagram failed with **... has used ... of its ... posts in the last 24 hours, Instagram's publishing limit.** | Instagram's 24 hour limit for the account was used up when the rule published | Retry the post from the clip once older posts fall out of the 24 hours |
 | An app shows **disabled** | The app is switched off in API Keys & Apps | Switch it on there if it should receive content |
 | A stream's **Access** tab says to create the event (or station) first | Rules belong to a stream that exists | Create it, then open its settings again |
-| A stream's **Access** tab shows a message about your role instead of the rule | Stream rules are part of Account settings | Ask an administrator for Account settings access, or to set the rule |
+| A stream's **Access** tab shows a message about your role instead of the rule | Your role cannot see that kind of stream's rule | Ask an administrator for View (to read) or Manage (to change) on that kind of stream |
 | A country you typed disappears from **Geo access** | Only two-letter codes are kept | Use codes such as `AU`, `NZ`, `GB` |
 | Viewers are told "Not available in your region." | Access rules cover the content, but none matches the viewer's country | Add a rule for that country, or a last rule for **WORLD** |
 | Publishing an asset is refused because of the publish gate | **Publish gate** requires an approved review, or QC has failed | See [Review](review.md), or change the gate |
