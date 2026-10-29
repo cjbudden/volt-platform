@@ -108,9 +108,9 @@ function video(path: string, seconds: number, colour: string): boolean {
     console.log('\n== the programme is in the Media Library ==');
     const lib = await call('GET', '/api/vod?limit=50');
     const rows = Array.isArray(lib.j) ? lib.j : (lib.j?.items ?? lib.j?.member ?? []);
-    // Titled by the ingest rules from the file's own name, exactly as an upload
-    // of the same file is.
-    const mine = rows.filter((r: any) => r.title === 'Morning Show 0412.mp4');
+    // Titled from the file's own name, read as an upload of the same file is
+    // (services/ingest/filenameParse.ts): the extension goes, the words stay.
+    const mine = rows.filter((r: any) => r.title === 'Morning Show 0412');
     check('listed once by title', mine.length, 1);
     const vid = mine[0]?.id;
     const v = await one<any>(`SELECT * FROM vod_assets WHERE id = $1`, [vid ?? '00000000-0000-0000-0000-000000000000']);

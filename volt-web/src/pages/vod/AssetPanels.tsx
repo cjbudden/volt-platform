@@ -16,7 +16,10 @@
 import { useEffect, useState } from 'react'
 import { Notice, useNotify } from '../../notices'
 import { LibIcon } from './icons'
-import { libraryApi, type DownloadFile, type EncodeDetails, type EpgPreview, type Prov, type TargetMetadata } from './libraryApi'
+import { libraryApi, type DownloadFile, type EncodeDetails, type EpgPreview, type Prov, type TargetMetadata, type FilenamePreview, type LinkedContent } from './libraryApi'
+import { navigate } from '../../router'
+import { confirmLeave } from './unsaved'
+import '../../contentLink.css'
 import { useAccess } from '../../access'
 
 const show = (v: any): string => {
@@ -33,6 +36,7 @@ export function TargetMetadataPanel({ asset, reloadKey, onChanged }: { asset: an
   const [t, setT] = useState<TargetMetadata | null>(null)
   const [err, setErr] = useState('')
   const [fillOpen, setFillOpen] = useState(false)
+  const [fnOpen, setFnOpen] = useState(false)
   useEffect(() => {
     let gone = false
     libraryApi.targetMetadata(asset.id).then((x) => { if (!gone) { setT(x); setErr('') } }).catch((e) => { if (!gone) setErr(e.message) })
@@ -59,6 +63,10 @@ export function TargetMetadataPanel({ asset, reloadKey, onChanged }: { asset: an
           </div>
         )}
         <div className="flex-1" />
+        <button type="button" className="btn ghost" disabled={!asset.original_filename && !asset.title} onClick={() => setFnOpen(true)}
+          title="Type, title, season and episode, and what a trailer promotes, read from the file name. Nothing is written until you apply.">
+          {LibIcon.fileName}Read from file name
+        </button>
         <button type="button" className="btn ghost" disabled={noGuide || !t.type} onClick={() => setFillOpen(true)}
           title={noGuide ? 'Uploaded files have no guide slot to fill from' : !t.type ? 'Choose a content type first' : 'Preview what the guide programme would fill'}>
           {LibIcon.epg}Fill from EPG
@@ -78,6 +86,12 @@ export function TargetMetadataPanel({ asset, reloadKey, onChanged }: { asset: an
                 <span className="lib-target-ic" aria-hidden="true">{isFilled ? LibIcon.check : f.required ? LibIcon.alert : LibIcon.empty}</span>
                 <span className="lib-target-l">{f.label}{f.required && <span className="lib-req">Required</span>}</span>
                 <span className="lib-target-v" title={show(v)}>{isFilled ? show(v) : <span className="lib-faint">Empty</span>}</span>
+                {p?.source === 'filename' && (
+                  <span className="lib-prov" title={`Read from the file name${p.token ? ` ("${p.token}")` : ''}${p.reason ? `: ${p.reason}` : ''}`}>{LibIcon.fileName}File name</span>
+                )}
+                {p?.source === 'link' && (
+                  <span className="lib-prov" title={p.linked ? 'Linked automatically to the one record that matched clearly' : 'A name read from the file name: not linked to a record yet'}>{LibIcon.link}{p.linked ? 'Auto link' : 'Not linked'}</span>
+                )}
                 {p?.source === 'epg' && (
                   <span className="lib-prov" title={`Filled from the guide programme "${p.programmeTitle ?? ''}"${p.at ? ` on ${new Date(p.at).toLocaleString()}` : ''}${p.by ? ` by ${p.by}` : ''}`}>
                     {LibIcon.epg}EPG
@@ -92,8 +106,201 @@ export function TargetMetadataPanel({ asset, reloadKey, onChanged }: { asset: an
       {c.notOnType.length > 0 && (
         <div className="lib-faint lib-small">This account's copy of the type has no {c.notOnType.join(', ')} field. Add it under Content Types to make it part of the record.</div>
       )}
+      <RelatedContent asset={asset} reloadKey={reloadKey} />
       {fillOpen && <EpgFillDialog asset={asset} onClose={() => setFillOpen(false)} onApplied={() => { setFillOpen(false); onChanged() }} />}
+      {fnOpen && <FilenameDialog asset={asset} onClose={() => setFnOpen(false)} onApplied={() => { setFnOpen(false); onChanged() }} />}
     </section>
+  )
+}
+
+/**
+ * RELATED CONTENT: what this record links to and what links to it, one level
+ * (GET /api/vod/:id/links). A film lists its trailers and promos; a trailer
+ * shows the film it promotes, or the name it is waiting to be linked to.
+ */
+function RelatedContent({ asset, reloadKey }: { asset: any; reloadKey: number }) {
+  const [l, setL] = useState<LinkedContent | null>(null)
+  useEffect(() => {
+    let gone = false
+    libraryApi.links(asset.id).then((x) => { if (!gone) setL(x) }).catch(() => { if (!gone) setL(null) })
+    return () => { gone = true }
+  }, [asset.id, reloadKey])
+  if (!l || (!l.links.length && !l.linkedFrom.length)) return null
+  const open = (id: string) => { if (confirmLeave()) navigate(`/vod?asset=${id}`) }
+  return (
+    <div className="lib-rel" aria-label="Related content">
+      <div className="sec-label" style={{ margin: '6px 0 0' }}>Related content</div>
+      {l.links.map((x) => (
+        <div key={x.field} className="lib-rel-row">
+          <span className="cl-ic" aria-hidden="true">{LibIcon.link}</span>
+          <span className="lib-rel-rel">{x.relationLabel}</span>
+          {x.asset ? <b title={x.reasons.join(' ')}>{x.asset.title}</b> : <span className="lib-faint" title={x.reasons.join(' ')}>{x.name} <span className="lib-hint warn" style={{ display: 'inline', margin: 0 }}>not linked{x.candidates.length ? `, ${x.candidates.length} suggested` : ''}</span></span>}
+          {x.asset && <button type="button" className="btn ghost lib-rel-open" onClick={() => open(x.asset!.id)}>{LibIcon.open}Open</button>}
+        </div>
+      ))}
+      {l.linkedFrom.map((x) => (
+        <div key={`${x.asset.id}-${x.field}`} className="lib-rel-row">
+          <span className="cl-ic" aria-hidden="true">{LibIcon.link}</span>
+          <span className="lib-rel-rel">{x.relationLabel}</span>
+          <b>{x.asset.title}</b>
+          {x.asset.contentType && <span className="tag type chan cl-type">{x.asset.contentType.name}</span>}
+          <button type="button" className="btn ghost lib-rel-open" onClick={() => open(x.asset.id)}>{LibIcon.open}Open</button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const KIND_LABEL: Record<string, string> = {
+  resolution: 'resolution', fps: 'frame rate', videoCodec: 'video codec', audio: 'audio', source: 'release tag', version: 'version',
+  language: 'language', year: 'year', date: 'date', season: 'season', episode: 'episode', part: 'part', promo: 'promo marker',
+  typeWord: 'kind of content', house: 'your rule',
+}
+
+/**
+ * READ FROM FILE NAME: what the name says, why, and what would change. Nothing
+ * is written until Apply; values somebody typed start unticked and need their
+ * own Replace, like Fill from EPG.
+ */
+function FilenameDialog({ asset, onClose, onApplied }: { asset: any; onClose: () => void; onApplied: () => void }) {
+  const [p, setP] = useState<FilenamePreview | null>(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [type, setType] = useState(false)
+  const [title, setTitle] = useState(false)
+  const [pick, setPick] = useState<Set<string>>(new Set())
+  const [replace, setReplace] = useState<Set<string>>(new Set())
+  const [link, setLink] = useState<string | 'auto' | null>(null)
+  const notify = useNotify()
+  useEffect(() => {
+    let gone = false
+    libraryApi.filenamePreview(asset.id).then((x) => {
+      if (gone) return
+      setP(x); setErr('')
+      setType(x.type.action === 'set')
+      setTitle(x.title?.action === 'fill')
+      setPick(new Set(x.fields.filter((f) => f.action === 'fill').map((f) => f.field)))
+      setReplace(new Set(x.fields.filter((f) => f.action === 'replace').map((f) => f.field)))
+      // A single clear match is offered ticked; a person's existing link is left alone.
+      const d = x.link?.decision
+      setLink(x.link?.byPerson ? null : d?.action === 'link' && d.candidates[0] ? d.candidates[0].id : null)
+    }).catch((e) => { if (!gone) setErr(e.message) })
+    return () => { gone = true }
+  }, [asset.id])
+  const toggle = (set: Set<string>, k: string, f: (s: Set<string>) => void) => { const n = new Set(set); n.has(k) ? n.delete(k) : n.add(k); f(n) }
+  async function apply() {
+    if (!p) return
+    setBusy(true)
+    try {
+      const r = await libraryApi.filenameApply(asset.id, { type, title, fields: [...pick], overwrite: [...replace, ...(title && p.title?.action !== 'fill' ? ['title'] : [])], link })
+      const n = r.applied.length + (r.titleChanged ? 1 : 0)
+      notify({ kind: n || r.typeChanged || r.link?.action === 'linked' ? 'ok' : 'info', message: [
+        r.typeChanged ? `Content type set to ${p.type.suggested?.name}.` : '',
+        n ? `Filled ${n} value${n === 1 ? '' : 's'} from the file name.` : '',
+        r.link ? (r.link.action === 'linked' ? 'Linked.' : r.link.reason) : '',
+      ].filter(Boolean).join(' ') || 'Nothing changed.' })
+      onApplied()
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  const nothing = p && !p.fields.length && !p.title && p.type.action === 'none' && !p.link
+  const cands = p?.link?.decision?.candidates ?? []
+  return (
+    <div className="drawer-scrim" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="drawer lib-drawer-wide" role="dialog" aria-modal="true" aria-labelledby="fn-t" onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}>
+        <div className="drawer-h">
+          <span className="t" id="fn-t">{LibIcon.fileName} Read from file name</span>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">{LibIcon.close}</button>
+        </div>
+        <div className="drawer-b">
+          {err && <Notice kind="error" variant="compact" message={err} />}
+          {!p && !err && <div className="loading">Reading the file name…</div>}
+          {p && (
+            <>
+              <div className="field" style={{ marginBottom: 4 }}><label>File name</label><code style={{ overflowWrap: 'anywhere' }}>{p.file}</code></div>
+              {p.signals.length > 0 && (
+                <div className="fn-tokens" aria-label="What each part of the name was read as">
+                  {p.signals.map((sg, i) => (
+                    <span key={i} className={`fn-tok${sg.inTitle ? ' kept' : ''}`} title={sg.reason}>
+                      <code>{sg.token}</code><span>{KIND_LABEL[sg.kind] ?? sg.kind}{sg.inTitle ? ', kept in the title' : ''}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {p.mismatches.map((m) => <div key={m} className="lib-hint warn">{LibIcon.alert}{m}</div>)}
+              {nothing && <Notice kind="info" variant="compact" title="Nothing to apply." message="The file name gives nothing for this asset's fields." />}
+              {p.type.suggested && p.type.action !== 'same' && (
+                <label className="lib-sugg-type">
+                  <input type="checkbox" checked={type} onChange={() => setType(!type)} />
+                  <span>Change the content type to <b>{p.type.suggested.name}</b>{p.classification.best ? ` (${Math.round(p.classification.best.confidence * 100)}% sure)` : ''}.
+                    <span className="fn-why">{p.classification.conflict ? p.classification.conflict.reason : p.classification.summary}</span>
+                    {p.type.reasons.length > 0 && <details className="cl-why"><summary>Why</summary><ul>{p.type.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul></details>}
+                    {p.type.byPerson && <span className="lib-hint warn">{LibIcon.alert}The current type ({p.type.current?.name}) was chosen by a person.</span>}
+                    {p.type.dropsFields.length > 0 && <span className="lib-hint warn">Values with no place on that type are not carried over: {p.type.dropsFields.join(', ')}.</span>}
+                  </span>
+                </label>
+              )}
+              {p.classification.conflict && !p.type.suggested && <div className="lib-hint warn">{LibIcon.alert}{p.classification.conflict.reason}</div>}
+              {(p.title || p.fields.length > 0) && (
+                <table className="lib-sugg">
+                  <thead><tr><th scope="col">Use</th><th scope="col">Field</th><th scope="col">From the file name</th><th scope="col">Now</th></tr></thead>
+                  <tbody>
+                    {p.title && p.title.action !== 'same' && (
+                      <tr>
+                        <td><input type="checkbox" checked={title} onChange={() => setTitle(!title)} aria-label="Use as the asset title" /></td>
+                        <td>Asset title</td>
+                        <td>{p.title.value}</td>
+                        <td className="lib-faint">{p.title.current || 'Empty'}{p.title.byPerson && <span className="lib-replace">Typed by a person</span>}{title && p.title.action !== 'fill' && <span className="lib-replace">Replaces it</span>}</td>
+                      </tr>
+                    )}
+                    {p.fields.map((f) => {
+                      const filledAlready = f.action === 'conflict' || f.action === 'replace'
+                      const on = filledAlready ? replace.has(f.field) : pick.has(f.field)
+                      return (
+                        <tr key={f.field} className={f.action === 'same' ? 'same' : ''}>
+                          <td>{f.action === 'same' ? <span className="lib-faint" title="Already this value">{LibIcon.check}</span>
+                            : <input type="checkbox" checked={on} onChange={() => filledAlready ? toggle(replace, f.field, setReplace) : toggle(pick, f.field, setPick)} aria-label={filledAlready ? `Replace ${f.label}` : `Fill ${f.label}`} />}</td>
+                          <td>{f.label}</td>
+                          <td title={f.reason}>{show(f.value)}{f.token && <span className="lib-faint"> · "{f.token}"</span>}</td>
+                          <td className="lib-faint">{f.action === 'fill' ? 'Empty' : show(f.current)}{f.byPerson && <span className="lib-replace">Typed by a person</span>}{filledAlready && on && <span className="lib-replace">Replaces it</span>}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+              {p.link && (
+                <div className="field" style={{ marginTop: 14 }}>
+                  <label>{p.link.label}</label>
+                  {p.link.byPerson ? <div className="lib-faint lib-small">Set by a person: {show(p.link.current)}. Change it on the metadata form.</div> : (
+                    <>
+                      <div className="fn-why">Looking for "{p.link.query.title}"{p.link.query.year ? ` (${p.link.query.year})` : ''}. {p.link.decision?.reason}</div>
+                      <div className="fn-cands" role="radiogroup" aria-label={`Link ${p.link.label} to`}>
+                        {cands.map((c) => (
+                          <label key={c.id} className="fn-cand">
+                            <input type="radio" name="fn-link" checked={link === c.id} onChange={() => setLink(c.id)} />
+                            <span><b>{c.asset?.title ?? c.title}</b> <span className="lib-faint">{Math.round(c.score * 100)}%</span>{c.asset?.contentType && <span className="tag type chan cl-type" style={{ marginLeft: 6 }}>{c.asset.contentType.name}</span>}
+                              <small>{c.reasons.join(' ')}</small></span>
+                          </label>
+                        ))}
+                        <label className="fn-cand"><input type="radio" name="fn-link" checked={link === 'auto'} onChange={() => setLink('auto')} />
+                          <span>Let Volt decide<small>Links only on a single clear match; otherwise keeps "{p.link.query.title}" as a name with the suggestions.</small></span></label>
+                        <label className="fn-cand"><input type="radio" name="fn-link" checked={link === null} onChange={() => setLink(null)} />
+                          <span>Leave the link as it is</span></label>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              <div className="lib-faint lib-small" style={{ marginTop: 10 }}>Each value applied records the file name it came from and appears in the audit log.</div>
+            </>
+          )}
+        </div>
+        <div className="drawer-f">
+          <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn primary" disabled={busy || !p || (!type && !title && !pick.size && !replace.size && link === null)} onClick={apply}>{busy ? 'Applying…' : 'Apply'}</button>
+        </div>
+      </div>
+    </div>
   )
 }
 

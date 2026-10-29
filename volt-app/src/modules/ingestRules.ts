@@ -64,6 +64,8 @@ const then = z.object({
   webhooks: z.array(z.string().uuid()).optional(),
   ladderGroupId: z.string().uuid().nullable().optional(),
   reject: z.string().max(300).nullable().optional(),
+  // Read the file name for type, fields and links (services/ingest/filenameApply.ts).
+  filenameMetadata: z.enum(['auto', 'suggest', 'off']).optional(),
 }).strict();
 
 const ruleBody = z.object({

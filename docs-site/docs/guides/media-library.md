@@ -89,9 +89,14 @@ Files dropped in a watch folder arrive the same way, without the upload band ([W
 
 1. Open the **Metadata** tab. **Target metadata** shows the asset's content type, how complete it is (a percentage, and how many fields are filled, such as 3 of 5), and each field as filled, **Empty**, or **Required** and still empty. A field marked **EPG** was filled from the guide.
 2. To fill fields from the programme the asset was cut from, choose **Fill from EPG**. Check the **Programme** (Volt picks the one that covers most of the clip), tick the fields to **Use**, and choose **Apply**. Empty fields are ticked for you; a value someone typed is only replaced if you tick it. If the guide describes the programme as a different content type, you can tick **Change the content type to** that type.
-3. Below, change the **Content type** if this asset should be described differently from its channel or event, fill in its fields, and choose **Save metadata**.
+3. To fill fields from the file's name, choose **Read from file name**. Each part of the name is shown with what it was read as (for example `S01E03` as season and episode, `1080p` as resolution, `Official Trailer` as a promo marker), followed by what would change: the **Content type** with how sure Volt is and why, the **Asset title**, and fields such as **Series**, **Season**, **Episode number**, **Year** and **Kind**. Empty fields are ticked for you; a value someone typed is marked **Typed by a person** and is only replaced if you tick it. For a trailer or promo you also choose what it promotes: the records Volt found, each with how alike it is and why, **Let Volt decide**, or **Leave the link as it is**. Choose **Apply**. A field marked **File name** was filled this way.
+4. Below, change the **Content type** if this asset should be described differently from its channel or event, fill in its fields, and choose **Save metadata**.
+5. A field that points at another record, such as a trailer's **Trailer for**, is a search box. Type part of the name and choose the record; it shows as **Linked**, with the record's type, and **Change** or the cross to remove it. If the record is not in the library yet, choose **Keep "…" as a name, not linked to a record**: it shows in a dashed box as **Not linked to a record**, with any records Volt suggests under **Is it one of these?**. A link Volt made itself says **Linked automatically** and how sure it was; open **Why this record** for the reasons.
+6. **Related content** lists what the asset links to and, for a film or episode, its **Trailers and promos**. **Open** goes to that record.
 
 **Fill from EPG** is not offered for uploaded files, which have no guide slot.
+
+When a file is added, Volt reads its name in the same way and applies only what is clear: the content type when nobody chose one and Volt is at least 80% sure with no conflicting signal, empty fields, and a trailer's link when exactly one record matches clearly. Anything less certain is left for you under **Read from file name**. What is applied automatically is set under **File names** in [Ingest Rules](ingest-rules.md).
 
 ### See how it was encoded (Encode)
 
@@ -138,7 +143,7 @@ The **Formats** tab frames a 9:16, 1:1 and 4:5 version of the asset by following
 ### Work on several assets at once
 
 1. Tick the boxes on the rows (or **Select all shown**). A bar shows how many are selected.
-2. Choose **Fill from EPG** to fill the empty fields of every selected clip from its guide programme, or **Publish** to publish the ones not yet published. A number in brackets shows when an action applies to only some of the selection; hover over it to see why.
+2. Choose **Fill from EPG** to fill the empty fields of every selected clip from its guide programme, **Read from file name** to apply what each file's name makes clear (nothing a person typed or chose is replaced; the message says how many need a look), or **Publish** to publish the ones not yet published. A number in brackets shows when an action applies to only some of the selection; hover over it to see why.
 3. **Clear** deselects them.
 
 ## How it connects
@@ -184,6 +189,9 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **This asset has no playlist yet, so there is nothing to mark.** on **Skip markers** | Markers need the built asset | Wait until it is built |
 | **Fill from EPG** is greyed out | It is an uploaded file (no guide slot), or it has no content type yet | Choose a **Content type** and save first; uploaded files are filled by hand |
 | **No programme to fill from.** | No guide programme covers the clip | Fill the fields by hand |
+| **Not linked to a record** on a trailer's **Trailer for** | The name did not match one record clearly: none was alike enough, or two were too close to tell apart | Choose one under **Is it one of these?**, or **Find the record**. When the film is added later, Volt links a name it filled in itself, and suggests the film for a name you typed |
+| The content type did not change after an upload whose name says trailer or S01E03 | A type was chosen when it was added, an ingest rule names the type, or the name points two ways (for example **Interview** and **Clip**) | Open **Read from file name** to see the reasons, and tick **Change the content type to** if it is right |
+| "a record cannot be linked to itself" or "linking back would make a loop" | The record chosen is this one, or it already links to this one the same way | Choose another record |
 | "The publishing rule requires review, and this asset is…" when publishing | Its **Publish gate** needs an approved review | Have it approved in [Review](review.md), or change the rule |
 | "The publishing rule blocks publishing while QC has failed." | Its **Publish gate** blocks on a failed QC | Re-cut or replace it, then **Re-run QC** |
 | A file shows **refused** when added | An ingest rule will not take it | Read the reason; change the file or the rule in [Ingest Rules](ingest-rules.md) |
@@ -203,6 +211,10 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/vod/{id}`, `PUT /api/vod/{id}` | One asset; change its title, content type (`schemaId`) and `metadata` |
 | `GET /api/vod/{id}/target-metadata`, `GET /api/vod/{id}/encode` | The **Metadata** and **Encode** tabs |
 | `GET /api/vod/{id}/epg-fill`, `POST /api/vod/{id}/epg-fill` | Preview and apply **Fill from EPG**; `POST /api/vod/epg-fill` does several at once |
+| `GET /api/vod/{id}/from-filename`, `POST /api/vod/{id}/from-filename` | Preview and apply **Read from file name**; `POST /api/vod/from-filename` applies only what is clear to several at once |
+| `GET /api/vod/{id}?include=linkedContent` | The asset with the records it links to and the ones linking to it, one level deep |
+| `GET /api/vod/{id}/links`, `PUT /api/vod/{id}/links/{field}`, `DELETE /api/vod/{id}/links/{field}` | Its links; link a record with `{"assetId"}`, keep a name with `{"name"}`, or remove it |
+| `GET /api/vod/link-candidates?q=` | Records a link field can point at, best match first |
 | `GET /api/vod/{id}/history`, `GET /api/vod/{id}/provenance` | Its history and where it came from |
 | `GET /api/vod/{id}/availability`, `PATCH /api/vod/{id}/availability` | Its publishing rule for this item |
 | `POST /api/vod/{id}/publish`, `POST /api/vod/{id}/withdraw` | Publish, and remove access |

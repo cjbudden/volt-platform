@@ -285,7 +285,7 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
                 onClick={() => chooseType('type', t.id)}>{t.name}</button>
             ))}
             <button type="button" className={`chip ig-type-chip${typeChoice === 'rules' ? ' active' : ''}`} aria-pressed={typeChoice === 'rules'}
-              title="The ingest rules (Admin > Ingest rules) set the type from the file's folder, name or kind" onClick={() => chooseType('rules', null)}>Let the rules decide</button>
+              title="The ingest rules (Admin > Ingest rules) set the type from the file's folder, name or kind, and the file name itself when it is clear (S01E03 makes an episode, Official Trailer a trailer)" onClick={() => chooseType('rules', null)}>Let the rules decide</button>
           </div>
         </div>
 

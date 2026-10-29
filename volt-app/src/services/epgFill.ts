@@ -221,6 +221,8 @@ function coerce(field: SchemaField, raw: unknown): unknown {
     case 'date': { const d = arr[0]; return /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : /^\d{4}$/.test(d) ? `${d}-01-01` : undefined; }
     case 'boolean': return undefined;
     case 'reference': return { id: arr[0], name: arr[0] };
+    // A guide gives a name, never a library record: it stays unresolved until linked.
+    case 'content': return arr[0] ? { name: arr[0] } : undefined;
     default: return Array.isArray(raw) ? arr.join(', ') : String(raw);
   }
 }

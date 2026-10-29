@@ -207,3 +207,32 @@ Every resource links to its parent, siblings and children, so a client starts at
 
 Rules for a new endpoint: a link is emitted only when a GET route answers it, a sub-resource that needs query parameters is added to `PARAMETERISED` (it is then offered as an IriTemplate), and a collection that only answers inside a scope is added to `SCOPED`. `test/hypermedia.check.sh` asserts the contract (55 checks).
 
+## 12. Related records: `?include=` (in place, 29 October 2026)
+
+A record that points at other records says so by id, and a client asks for the
+records themselves explicitly, so the default response never changes shape for
+an existing client.
+
+- **Ask by name.** `GET /api/vod/{id}?include=linkedContent`. Several values are
+  comma separated (`include=a,b`). An unknown value is a `400` naming the values
+  allowed, never silently ignored.
+- **One level.** Included records are summaries (`id`, `title`, `contentType`,
+  `durationMs`, `published`, `availabilityState`, `href`) with no links or
+  includes of their own, so following links can never loop or fan out. To go
+  further, follow `href`.
+- **Both directions, named.** `linkedContent.links` are this record's links
+  (`relation: trailer_for`, a trailer to the film it promotes);
+  `linkedContent.linkedFrom` are the records linking to it, under the inverse
+  name (`relation: trailers` on the film). Relations and their inverses are
+  defined once, in `services/contentLinks.ts` `RELATIONS`.
+- **Same access as the record.** Only records of the caller's account are
+  included; a link to anything else is not shown.
+- **Unresolved is not an error.** A link that names something not yet in the
+  library has `state: unresolved`, its `name`, `asset: null`, and the
+  `candidates` a person could choose.
+
+The same payload is `GET /api/vod/{id}/links`. Links change with
+`PUT /api/vod/{id}/links/{field}` (`{"assetId"}` links, `{"name"}` keeps a
+name) and `DELETE /api/vod/{id}/links/{field}`, or through the metadata form (a
+content field's value is `{"id", "name"}` or `{"name"}`). See
+`docs/DESIGN_filename_metadata.md`.

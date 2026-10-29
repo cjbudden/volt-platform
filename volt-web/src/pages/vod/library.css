@@ -153,6 +153,7 @@
 .lib-sugg { width: 100%; font-size: var(--fs-sm) }
 .lib-sugg td, .lib-sugg th { vertical-align: top }
 .lib-sugg tr.same td { opacity: .6 }
+.lib-sugg td svg { width: 16px; height: 16px; vertical-align: -3px }
 .lib-replace { display: block; color: var(--warn); font-size: var(--fs-xs) }
 
 /* ---- encode */

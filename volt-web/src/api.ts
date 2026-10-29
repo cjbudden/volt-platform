@@ -1034,6 +1034,8 @@ export interface IngestThen {
   duplicate?: 'skip' | 'replace' | 'version' | 'rename' | 'ask'; nameCheck?: boolean
   transfer?: 'auto' | 'local' | 'cloud'; metadataRequired?: 'none' | 'before_ingest' | 'before_upload'; autoUpload?: boolean
   sidecar?: 'none' | 'json' | 'xml'; webhooks?: string[]; ladderGroupId?: string | null; reject?: string | null
+  /** Read the file name for type, fields and links: auto applies what is confident, suggest only records it. */
+  filenameMetadata?: 'auto' | 'suggest' | 'off'
 }
 export interface IngestRule {
   id: string; rung: 'account' | 'type' | 'source'; scopeId: string | null; ordinal: number; name: string; enabled: boolean
@@ -3237,8 +3239,10 @@ export function ensureImageSigning(): Promise<void> {
 // ---- content types ---------------------------------------------------------
 export interface SchemaField {
   key: string; label?: string
-  type: 'string' | 'text' | 'number' | 'boolean' | 'date' | 'enum' | 'url' | 'tags' | 'reference' | 'image'
+  type: 'string' | 'text' | 'number' | 'boolean' | 'date' | 'enum' | 'url' | 'tags' | 'reference' | 'image' | 'content'
   required?: boolean; options?: string[]; multiple?: boolean; refDomain?: string
+  /** content: the relationship (trailer_for, related) and the standard types a linked record may have. */
+  relation?: string; targetTypes?: string[]
   /** enum: the account list its options come from ('genres'); options are filled by the server. */
   optionsList?: MetadataListKey
   /** enum linked to a list: retired values, still valid where already set, not offered. */

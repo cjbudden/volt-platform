@@ -59,11 +59,25 @@ Library and media operations staff use it, usually set up once by an administrat
    | **Metadata required** | **Not required**, **Before ingest (bytes move first)** (the file is uploaded and waits until its required fields are filled), or **Before upload** |
    | **Transfer** | **Auto (cloud to cloud when possible)**, **From this device** or **Cloud to cloud only** |
    | **Sidecar** | **None**, **JSON beside the object** or **XML beside the object** |
+   | **Read the file name** | **Apply what is clear**, **Only suggest** (the reading is kept on the asset for a person, nothing is applied), or **Off** |
    | **Auto upload** | **On** or **Off** |
    | **Webhooks** | The webhooks to call (hold Ctrl or Cmd to choose several) |
    | **Refuse with reason (instead of ingesting)** | A reason; matching files are refused instead of ingested |
 
 6. Choose **Save rule**, or **Cancel**. The rule appears on its rung with its order, name, what it applies to and a summary of what it does (**always:** when it has no conditions, or **inherits everything** when it sets nothing).
+
+### Teach Volt your file names
+
+The **File names: content type, title and links** card decides what a file's name may set when it arrives. A name is read as signals, not facts: a type a person or an ingest rule chose is never changed, values people typed are kept, and anything uncertain is left on the asset for a person to choose.
+
+1. **Title case**: **Every word capitalised (7th Voyage Of Sinbad)** or **Headline style (7th Voyage of Sinbad)**.
+2. **Episode title when the name has none**: the title an episode gets when its name has no episode title, such as `Episode {episode} (S{season})`.
+3. **Set the content type when the name is clear (80% or more, no conflict)** and **Link a trailer to its film when one record matches clearly**: untick either to have Volt only suggest.
+4. Under **Try a file name**, type a name and choose **Test** to see each part and what it was read as, the type it suggests and why, the fields it would fill, and what a trailer would look for.
+5. **Add rule** adds your own rule: give it a **Name**, then under **If the file name has**, any of **Any of these words (comma separated)**, **A signal** (such as **Season and episode (S01E03)** or **A promotional marker**) and **Pattern (regular expression on the lower-case name)**; under **Then suggest**, the **Content type** (and for **Trailer / promo**, its **Kind**). **How sure a match is** sets its weight. The words a rule recognises are also taken out of the title. Your rules outrank the built-in ones.
+6. **Built-in rules** lists the rules Volt starts with (promotional markers, season and episode markers, interview, highlights, music videos, full movies, sponsor bugs). **Switch off** stops one for your account.
+
+When two signals point at different types (for example "interview" and "highlights"), nothing is set and both are shown on the asset. A promotional marker at the end of a name outranks season and episode markers: `Show_S01E03_Promo` is a promo, linked to that episode when it is in the library.
 
 ### Change, switch off or delete a rule
 
@@ -119,6 +133,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Add provider** shows an error | The connection details are not valid JSON | Keep the quotes and braces from the example and fill in the values |
 | A webhook row shows an error after **last** | Your system did not accept the last call | Check the address and that your system answers; the error text says what came back |
 | Files added in the Media Library show **refused** | A rule with **Refuse with reason** matched | Read the reason; change the file or the rule |
+| "The pattern is not a valid regular expression" | The **Pattern** of a file-name rule cannot be read | Correct it, and check it with **Try a file name** |
+| A word in your titles keeps disappearing | A file-name rule lists it under **Any of these words** | Take the word out of the rule, or switch the rule off |
 
 ## Through the API
 
@@ -132,6 +148,10 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/ingest/held` | Files held for metadata or as duplicates |
 | `GET /api/ingest/webhooks`, `POST /api/ingest/webhooks` | Lists webhooks, or adds one (the signing secret is in the reply, once) |
 | `PATCH /api/ingest/webhooks/{id}`, `DELETE /api/ingest/webhooks/{id}` | Changes or deletes a webhook |
+| `GET /api/ingest/filename-rules` | The built-in file-name rules, yours, and the settings |
+| `POST /api/ingest/filename-rules`, `PATCH /api/ingest/filename-rules/{id}`, `DELETE /api/ingest/filename-rules/{id}` | Adds, changes or deletes a file-name rule (`name`, `when`: `words`, `signal`, `pattern`; `then`: `typeKey` or `typeId`, `kind`; `confidence`) |
+| `PUT /api/ingest/filename-rules/builtin/{id}`, `PUT /api/ingest/filename-rules/settings` | Switches a built-in rule off or on; sets title case, the episode template and what is applied automatically |
+| `POST /api/ingest/filename-rules/test` | What the rules make of a file name (`{"filename"}`) |
 
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

@@ -50,7 +50,7 @@ export interface TargetMetadata {
   type: { id: string; name: string; key: string | null; schemaOrgType: string | null } | null
   fields: { key: string; label: string; type: string; required: boolean; options?: string[]; multiple?: boolean; schemaOrg: string | null; epg: string | null }[]
   completeness: { pct: number | null; filled: number; total: number; missingRequired: string[]; missingRecommended: string[]; notOnType: string[] }
-  provenance: Record<string, { source: string; programmeId?: string; programmeTitle?: string; at?: string; by?: string }>
+  provenance: Record<string, { source: string; programmeId?: string; programmeTitle?: string; at?: string; by?: string; token?: string | null; reason?: string | null; linked?: boolean }>
 }
 
 export type Prov = 'stored' | 'derived' | 'unknown'
@@ -103,6 +103,23 @@ export const libraryApi = {
     apiRequest(`/vod/${id}/epg-fill`, { method: 'POST', body: JSON.stringify(b) }),
   epgBulk: (ids: string[], o: { title?: boolean } = {}): Promise<{ results: EpgApplyResult[]; filled: number; unchanged: number }> =>
     apiRequest('/vod/epg-fill', { method: 'POST', body: JSON.stringify({ ids, title: !!o.title }) }),
+  // ---- content links (services/contentLinks.ts) ----
+  links: (id: string): Promise<LinkedContent> => apiRequest(`/vod/${id}/links`),
+  setLink: (id: string, field: string, b: { assetId: string } | { name: string }): Promise<LinkedContent> =>
+    apiRequest(`/vod/${id}/links/${encodeURIComponent(field)}`, { method: 'PUT', body: JSON.stringify(b) }),
+  removeLink: (id: string, field: string): Promise<LinkedContent> => apiRequest(`/vod/${id}/links/${encodeURIComponent(field)}`, { method: 'DELETE' }),
+  linkCandidates: (q: string, o: { forId?: string | null; field?: string | null } = {}): Promise<{ items: LinkCandidate[] }> => {
+    const p = new URLSearchParams({ q })
+    if (o.forId) p.set('for', o.forId)
+    if (o.forId && o.field) p.set('field', o.field)
+    return apiRequest(`/vod/link-candidates?${p}`)
+  },
+  // ---- read from file name (services/ingest/filenameApply.ts) ----
+  filenamePreview: (id: string): Promise<FilenamePreview> => apiRequest(`/vod/${id}/from-filename`),
+  filenameApply: (id: string, b: { type?: boolean; title?: boolean; fields?: string[]; overwrite?: string[]; link?: string | 'auto' | null }): Promise<FilenameApplyResult> =>
+    apiRequest(`/vod/${id}/from-filename`, { method: 'POST', body: JSON.stringify(b) }),
+  filenameBulk: (ids: string[]): Promise<{ results: (FilenameApplyResult & { error?: string })[]; changed: number; unchanged: number }> =>
+    apiRequest('/vod/from-filename', { method: 'POST', body: JSON.stringify({ ids }) }),
   /** The asset's downloadable files (Downloads: view). */
   downloads: (id: string): Promise<{ files: DownloadFile[] }> => apiRequest(`/downloads/vod/${id}`),
   /** A five-minute link for one file (Downloads: operate). */
@@ -110,3 +127,58 @@ export const libraryApi = {
     apiRequest(`/downloads/vod/${id}/link`, { method: 'POST', body: JSON.stringify({ format }) }),
 }
 export interface DownloadFile { format: 'mp4' | 'mp3' | 'm4a'; label: string; filename: string; bytes: number | null }
+
+// ---- content links ----------------------------------------------------------
+export interface AssetSummary {
+  id: string; title: string
+  contentType: { id: string; name: string; key: string | null } | null
+  durationMs: number | null; published: boolean; availabilityState: string | null; href: string
+}
+export interface LinkCandidate { id: string; title: string; score: number; reasons: string[]; asset: AssetSummary | null }
+export interface OutgoingLink {
+  field: string; fieldLabel: string; relation: string; relationLabel: string
+  state: 'linked' | 'unresolved'; name: string; asset: AssetSummary | null
+  source: 'person' | 'auto' | 'migration'; confidence: number | null; reasons: string[]
+  candidates: { assetId: string; title: string; score: number; reasons: string[]; asset: AssetSummary | null }[]
+  decidedBy: string | null; updatedAt: string | null
+}
+export interface IncomingLink { field: string; relation: string; relationLabel: string; asset: AssetSummary; source: string; confidence: number | null }
+export interface LinkedContent { links: OutgoingLink[]; linkedFrom: IncomingLink[] }
+
+// ---- read from file name ----------------------------------------------------
+export interface FnSignal { kind: string; token: string; value: any; confidence: number; reason: string; inTitle?: boolean }
+export interface FnVote { typeKey: string | null; typeId: string | null; kind: string | null; confidence: number; origin: 'builtin' | 'account'; reasons: string[] }
+export interface FnClassification { best: FnVote | null; votes: FnVote[]; conflict: { between: FnVote[]; reason: string } | null; confident: boolean; summary: string }
+export interface FnFieldPlan { field: string; label: string; value: any; token: string | null; reason: string; current: any; action: 'fill' | 'same' | 'conflict' | 'replace'; byPerson: boolean }
+export interface FilenamePreview {
+  file: string
+  signals: FnSignal[]
+  parsed: { title: string | null; series: string | null; episodeTitle: string | null; season: number | null; episode: number | null; year: number | null; date: string | null; resolution: string | null; fps: number | null; language: string | null; promo: { kind: string; token: string; confidence: number } | null }
+  classification: FnClassification
+  type: { current: { id: string; name: string } | null; suggested: { id: string; name: string; key: string | null } | null; action: 'set' | 'same' | 'conflict' | 'none'; byPerson: boolean; reasons: string[]; dropsFields: string[] }
+  title: { current: string | null; value: string | null; action: FnFieldPlan['action']; byPerson: boolean } | null
+  fields: FnFieldPlan[]
+  link: null | { field: string; label: string; current: any; byPerson: boolean; query: { title: string; year?: number | null }
+    decision?: { action: 'link' | 'suggest' | 'none'; reason: string; candidates: LinkCandidate[] } }
+  mismatches: string[]
+}
+export interface FilenameApplyResult { assetId: string; typeChanged: boolean; titleChanged: boolean; applied: string[]; skipped: { field: string; reason: string }[]; link: { action: string; reason: string } | null }
+
+// ---- file-name rules (modules/filenameRules.ts) ------------------------------
+export interface FnRule {
+  id: string; name: string; enabled: boolean; ordinal: number; origin: 'builtin' | 'account'; confidence: number
+  when: { words?: string[]; signal?: string; pattern?: string }
+  then: { typeKey?: string; typeId?: string; kind?: string }
+  typeName?: string | null
+}
+export interface FnSettings { titleCase: 'every' | 'headline'; episodeTemplate: string; autoType: boolean; autoLink: boolean }
+export const filenameRulesApi = {
+  list: (): Promise<{ builtin: FnRule[]; rules: FnRule[]; settings: FnSettings; types: { id: string; name: string; key: string | null }[] }> => apiRequest('/ingest/filename-rules'),
+  create: (b: Partial<FnRule>): Promise<FnRule> => apiRequest('/ingest/filename-rules', { method: 'POST', body: JSON.stringify(b) }),
+  update: (id: string, b: Partial<FnRule>): Promise<FnRule> => apiRequest(`/ingest/filename-rules/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  remove: (id: string): Promise<void> => apiRequest(`/ingest/filename-rules/${id}`, { method: 'DELETE' }),
+  builtin: (id: string, enabled: boolean): Promise<{ id: string; enabled: boolean }> => apiRequest(`/ingest/filename-rules/builtin/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  settings: (b: Partial<FnSettings>): Promise<FnSettings> => apiRequest('/ingest/filename-rules/settings', { method: 'PUT', body: JSON.stringify(b) }),
+  test: (filename: string): Promise<{ signals: FnSignal[]; parsed: FilenamePreview['parsed']; classification: FnClassification; suggestedType: { id: string; name: string; key: string | null } | null; fields: { field: string; label: string; value: any; reason: string }[]; lookFor: { title: string; year?: number | null } | null }> =>
+    apiRequest('/ingest/filename-rules/test', { method: 'POST', body: JSON.stringify({ filename }) }),
+}

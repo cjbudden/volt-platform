@@ -94,13 +94,15 @@ metadataSchemasRouter.get(
 const fieldSchema = z.object({
   key: z.string().min(1),
   label: z.string().optional(),
-  type: z.enum(['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'tags', 'reference', 'image']),
+  type: z.enum(['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'tags', 'reference', 'image', 'content']),
   required: z.boolean().optional(),
   options: z.array(z.string()).optional(),
   // An account list ('genres') the options come from; they are filled in here.
   optionsList: z.string().optional(),
   multiple: z.boolean().optional(),
   refDomain: z.string().optional(),
+  relation: z.string().optional(),   // content: the relationship (services/contentLinks.ts)
+  targetTypes: z.array(z.string()).optional(),
   epg: z.string().optional(),        // EPG slot, validated in validateSchemaFields
   schemaOrg: z.string().optional(),  // schema.org property
 });

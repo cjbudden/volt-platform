@@ -15,6 +15,7 @@ import { resolveIngest, kindOf, type IngestRule, type FileFacts, type IngestSett
 import { applyNaming, type NamingResult } from './naming';
 import { findMatch, decideDuplicate, type Decision } from './duplicates';
 import { extract, candidates, mergeMetadata, missingRequired, type Extracted } from './metadata';
+import { typeForIngest, ingestFill, afterIngest, loadSettings, type Reading } from './filenameApply';
 import { buildPayload, sidecarKey, toXml, signWebhook, type IngestPayload } from './payload';
 import { config } from '../../config';
 import { S3Destination, type Destination } from './destinations';
@@ -143,9 +144,25 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
     durationSec: extracted.probe?.durationSec ?? null, height: extracted.probe?.video?.height ?? null, hasTags: !!(extracted.id3 && Object.keys(extracted.id3).length > 1),
   };
   const item: IngestSettings = { ...(f.item ?? {}), ...(f.contentTypeId ? { contentTypeId: f.contentTypeId } : {}) };
-  const first = resolveIngest(applicable(all, f.contentTypeId ?? null, f.source), facts, item);
+  let first = resolveIngest(applicable(all, f.contentTypeId ?? null, f.source), facts, item);
+  // THE FILE NAME (filenameApply.ts) may choose the type, but only when the
+  // operator chose none and no rule named one, and only when it is confident and
+  // uncontested. Its reading is kept either way, for the fields, title and links.
+  // Only library media: a slate, a loop or a plain file keeps its name as it is.
+  const fnMode = (first.settings.targetKind ?? 'vod') === 'vod' ? first.settings.filenameMetadata ?? 'auto' : 'off';
+  let reading: Reading | null = null;
+  let typeChosenBy: 'filename' | 'rule' | 'operator' | 'baseline' = f.contentTypeId ? 'operator' : first.sources.contentTypeId !== 'baseline' ? 'rule' : 'baseline';
+  try {
+    const t = await typeForIngest(f.accountId, f.originalName, fnMode);
+    reading = t.reading;
+    if (t.typeId && typeChosenBy === 'baseline') {
+      item.contentTypeId = t.typeId;
+      first = resolveIngest(applicable(all, t.typeId, f.source), facts, item);
+      typeChosenBy = 'filename';
+    }
+  } catch (e) { console.warn('[ingest] reading the file name failed', e); }
   // A type rule may have picked the type, which may bring its own type-rung rules.
-  const resolved = first.settings.contentTypeId && first.settings.contentTypeId !== f.contentTypeId
+  const resolved = first.settings.contentTypeId && first.settings.contentTypeId !== item.contentTypeId
     ? resolveIngest(applicable(all, first.settings.contentTypeId, f.source), facts, item) : first;
   const s = resolved.settings;
 
@@ -164,6 +181,20 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
   }
   const ruleDefaults = Object.assign({}, ...resolved.matched.map((m) => (all.find((r) => r.id === m.ruleId) as any)?.metadataDefaults ?? {}));
   const merged = mergeMetadata(fields, candidates(extracted), ruleDefaults, f.operatorMetadata);
+  // The file name fills what embedded tags, the operator and the rules left empty.
+  let fnProvenance: Record<string, any> = {};
+  let fnTitle: string | null = null;
+  if (reading && fnMode !== 'off') {
+    const settings = await loadSettings(f.accountId).catch(() => null);
+    if (settings) {
+      const typeKey = s.contentTypeId ? (await one<any>(`SELECT COALESCE(ms.standard_key, p.standard_key) AS k FROM metadata_schemas ms LEFT JOIN metadata_schemas p ON p.id = ms.extends_id WHERE ms.id = $1`, [s.contentTypeId]).catch(() => null))?.k ?? null : null;
+      const fill = ingestFill(reading, typeKey, fields, merged as any, settings);
+      Object.assign(merged.metadata, fill.values);
+      fnProvenance = fill.provenance;
+      const { titleFor } = await import('./filenameApply');
+      fnTitle = titleFor(reading.parse, typeKey, settings.episodeTemplate);
+    }
+  }
   const missing = s.metadataRequired === 'none' ? [] : missingRequired(fields, merged.metadata);
 
   // Final resting place: keep the file where a re-encode finds it, under the
@@ -198,7 +229,8 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
 
   const payload = buildPayload({
     event: status === 'ingested' ? 'ingested' : status === 'awaiting_metadata' ? 'awaiting_metadata' : status === 'duplicate' ? 'duplicate' : 'quarantined',
-    account: f.accountId, assetId: f.assetId, kind: extracted.type.kind, contentTypeId: s.contentTypeId, title: merged.metadata.name ?? merged.metadata.title ?? f.originalName,
+    account: f.accountId, assetId: f.assetId, kind: extracted.type.kind, contentTypeId: s.contentTypeId,
+    title: merged.metadata.name ?? merged.metadata.title ?? candidates(extracted).name ?? fnTitle ?? f.originalName,
     naming, store, bytes: f.bytes, sha256: f.sha256, source: f.source, sessionId: f.sessionId ?? null, uploadedBy: f.uploadedBy ?? null,
     resolved, duplicate, metadata: merged.metadata, metadataSources: merged.sources, extracted, unmapped: merged.unmapped,
   });
@@ -222,6 +254,15 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
     } catch (e) { console.warn('[ingest] sidecar not written', e); }
   }
   void deliverWebhooks(f.accountId, payload, s.webhooks);
+
+  // What the file name said, why, and the record a trailer promotes. Best effort:
+  // a failure here leaves the asset ingested, with what was already written.
+  if (status !== 'rejected' && duplicate.outcome !== 'skip') {
+    const usedTitle = payload.asset.title === fnTitle && fnTitle && !merged.metadata.name && !merged.metadata.title;
+    if (usedTitle) fnProvenance.title = { source: 'filename', file: f.originalName, at: new Date().toISOString() };
+    try { await afterIngest(f.accountId, f.assetId, fnMode === 'off' ? null : reading, fnProvenance, typeChosenBy); }
+    catch (e) { console.warn('[ingest] file-name follow-up failed', e); }
+  }
 
   return { resolved, naming, duplicate, extracted, metadata: merged.metadata, missing, path: finalPath, payload, status };
 }

@@ -24,6 +24,6 @@ ASSET=$(curl -s -X POST "$VOLT/api/uploads/$ID/finish" -H "authorization: Bearer
   | tee finish.json | jq -r .assetId)
 jq '{assetId, bytes, sha256, ingest: .ingest.status, title: .ingest.title}' finish.json
 
-# 4. The asset is named after the file: give it its real title
+# 4. The title was read from the file name ("Evening News"): give it its real one
 curl -s -X PUT "$VOLT/api/vod/$ASSET" -H "authorization: Bearer $SECRET_KEY" -H 'content-type: application/json' \
   -d '{"title":"Evening news, 24 October"}' | jq -c '{id, title}'

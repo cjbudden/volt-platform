@@ -17,7 +17,7 @@ import { navigate } from '../router'
 const APPLIES: { key: 'radio' | 'tv' | 'event' | 'vod'; label: string }[] = [
   { key: 'radio', label: 'Radio stations' }, { key: 'tv', label: 'TV channels' }, { key: 'event', label: 'Events' }, { key: 'vod', label: 'On-demand assets' },
 ]
-const FIELD_TYPES: SchemaField['type'][] = ['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'image', 'tags', 'reference']
+const FIELD_TYPES: SchemaField['type'][] = ['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'image', 'tags', 'reference', 'content']
 const EPG_SLOTS = ['', 'title', 'sub-title', 'description', 'category', 'episode', 'language', 'icon', 'credits.presenter', 'credits.actor', 'credits.commentator', 'credits.producer', 'credits.director', 'credits.guest']
 
 export default function ContentTypesPage() {
@@ -153,6 +153,13 @@ function TypeEditor({ type, all, onChanged, onDeleted }: { type: ContentType; al
                   {f.type === 'enum' && !f.optionsList && <input {...inp} placeholder="a, b, c" value={(f.options ?? []).join(', ')} onChange={e => setField(i, { options: e.target.value.split(',').map(x => x.trim()).filter(Boolean) })} style={{ ...inp.style, width: 160 }} />}
                   {f.type === 'enum' && <label style={{ fontSize: 'var(--fs-micro)', marginLeft: 6 }}><input type="checkbox" checked={!!f.multiple} onChange={e => setField(i, { multiple: e.target.checked })} /> multi</label>}
                   {f.type === 'reference' && <input {...inp} placeholder="sports-team" value={f.refDomain ?? ''} onChange={e => setField(i, { refDomain: e.target.value })} style={{ ...inp.style, width: 120 }} />}
+                  {/* content: a link to another library record (services/contentLinks.ts); the relation says which way it points. */}
+                  {f.type === 'content' && (
+                    <select className="inp sel-sm" aria-label="Relationship" value={f.relation ?? 'related'} onChange={e => setField(i, { relation: e.target.value })}>
+                      <option value="trailer_for">Trailer or promo for</option>
+                      <option value="related">Related to</option>
+                    </select>
+                  )}
                 </td>
                 <td><input type="checkbox" checked={!!f.required} onChange={e => setField(i, { required: e.target.checked })} /></td>
                 <td><select className="inp sel-sm" value={f.epg ?? ''} onChange={e => setField(i, { epg: e.target.value || undefined })}>{EPG_SLOTS.map(sl => <option key={sl} value={sl}>{sl || '—'}</option>)}</select></td>

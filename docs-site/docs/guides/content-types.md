@@ -44,8 +44,8 @@ The people who look after metadata, the guide and the library use it, usually wi
    |---|---|
    | **Key** | The field's name in the data: letters, numbers and underscores only |
    | **Label** | What people see on the form |
-   | **Type** | **string** (one line), **text** (several lines), **number**, **boolean** (yes or no), **date**, **enum** (a list of choices), **url**, **image**, **tags** or **reference** |
-   | **Options / ref** | For **enum**, the choices separated by commas, and tick **multi** to allow more than one. For **reference**, the kind of thing it points at, such as `sports-team` |
+   | **Type** | **string** (one line), **text** (several lines), **number**, **boolean** (yes or no), **date**, **enum** (a list of choices), **url**, **image**, **tags**, **reference** or **content** (a link to another record in the library, such as the film a trailer promotes) |
+   | **Options / ref** | For **enum**, the choices separated by commas, and tick **multi** to allow more than one. For **reference**, the kind of thing it points at, such as `sports-team`. For **content**, which way it points: **Trailer or promo for** or **Related to** |
    | **Req.** | Tick to make the field required |
    | **EPG field** | The guide field this value fills: **title**, **sub-title**, **description**, **category**, **episode**, **language**, **icon** or a credit (**credits.presenter**, **credits.actor**, **credits.commentator**, **credits.producer**, **credits.director**, **credits.guest**). Leave it empty if it fills none |
    | **schema.org** | The schema.org property it corresponds to, if any |

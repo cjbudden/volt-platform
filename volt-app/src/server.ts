@@ -30,6 +30,8 @@ import { timelineRouter, daypartPresetsRouter } from './modules/timeline';
 import { timelineGridRouter } from './modules/timelineGrid';
 import { storageRouter } from './modules/storage';
 import { vodRouter } from './modules/vod';
+import { contentLinksRouter } from './modules/contentLinks';
+import { filenameRulesRouter } from './modules/filenameRules';
 import { vodImageRouter } from './modules/vodImage';
 import { metadataSchemasRouter } from './modules/metadataSchemas';
 import { metadataListsRouter } from './modules/metadataLists';
@@ -462,6 +464,7 @@ export function createServer() {
   app.use('/api/vod/ads', vodAdsRouter);                // on-demand ad rules, plans, report (before vodRouter's /:id)
   app.use('/api/vod', reframeRouter);                    // social formats per asset: /:id/reframe... (modules/reframe.ts)
   app.use('/api/vod', vodImageRouter);                   // the image that represents an asset (before vodRouter's /:id)
+  app.use('/api/vod', contentLinksRouter);               // content links, Read from file name (before vodRouter's /:id; modules/contentLinks.ts)
   app.use('/api/vod', vodRouter);                        // derived VOD assets + metadata
   app.use('/api/collections', collectionsRouter);       // nested collections of library assets (modules/collections.ts)
   app.use('/api/metadata-schemas', metadataSchemasRouter); // named metadata schemas
@@ -543,6 +546,7 @@ export function createServer() {
   app.use('/api/social', socialRouter);                   // linked accounts, publish to social, progress, views
   app.use('/api/publishing-rules', publishingRulesRouter); // the ladder + publishing points
   app.use('/api/ingest', ingestCallbacksRouter);             // provider callbacks, no Volt session
+  app.use('/api/ingest/filename-rules', filenameRulesRouter); // file-name classification rules (modules/filenameRules.ts)
   app.use('/api/ingest', ingestRulesRouter);                 // ingest rules ladder, preview, webhooks
   app.use('/api/payments', paymentsAppRouter);           // the app verifies a receipt (publishable key)
   app.use('/api/payments', paymentsRouter);              // providers, products, viewers, grants (admin)

@@ -207,6 +207,8 @@ function coerce(field: SchemaField, v: any): any {
     return Number.isFinite(n) ? (t === 'integer' ? Math.round(n) : n) : undefined;
   }
   if (t === 'boolean') return typeof v === 'boolean' ? v : undefined;
+  // A content link from a tag or sidecar is only ever a name: a person or the matcher links it.
+  if (t === 'content') { const n = typeof v === 'object' && v ? String(v.name ?? '') : String(v ?? ''); return n.trim() ? { name: n.trim() } : undefined; }
   if (t === 'list' || t === 'array' || t === 'multiselect') return Array.isArray(v) ? v : String(v).split(/[;,/]/).map((s) => s.trim()).filter(Boolean);
   if (t === 'select' || t === 'enum') {
     const opts: any[] = (field as any).options ?? [];

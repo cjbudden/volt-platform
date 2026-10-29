@@ -1,0 +1,58 @@
+/* CONTENT-LINK FIELD (ContentLinkField.tsx). A linked record reads as solid,
+   a name with no record reads as dashed: the state is in the outline itself,
+   not in a coloured edge, so it survives a glance and greyscale. */
+.cl-field { min-width: 0 }
+.cl-box { display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px; border: 1px solid var(--border-2); border-radius: var(--radius-ctl); background: var(--panel-2); min-width: 0 }
+.cl-box.cl-name { border-style: dashed; background: transparent }
+.cl-ic { display: inline-flex; flex: none; color: var(--muted); margin-top: 1px }
+.cl-ic svg { width: 16px; height: 16px }
+.cl-linked .cl-ic { color: var(--sched) }
+.cl-main { flex: 1; min-width: 0; display: grid; gap: 3px }
+.cl-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-body); font-weight: 600; color: var(--text); overflow-wrap: anywhere }
+.cl-type { font-size: var(--fs-micro) }
+.cl-sub { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: var(--fs-xs); color: var(--muted) }
+.cl-state { font-weight: 600 }
+.cl-state.warn { color: var(--warn) }
+.cl-how { display: inline-flex; align-items: center; gap: 4px }
+.cl-how svg { width: 12px; height: 12px }
+.cl-reason { font-size: var(--fs-xs); color: var(--faint) }
+.cl-why { font-size: var(--fs-xs); color: var(--muted) }
+.cl-why summary { cursor: pointer; color: var(--faint) }
+.cl-why ul { margin: 4px 0 0; padding-left: 18px }
+.cl-acts { display: flex; gap: 4px; align-items: center; flex: none }
+.cl-acts .btn svg { width: 14px; height: 14px }
+.cl-sugg { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px }
+.cl-sugg-l { font-size: var(--fs-xs); color: var(--muted) }
+.cl-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; font-size: var(--fs-xs) }
+.cl-chip svg { width: 12px; height: 12px }
+.cl-score { font-size: var(--fs-micro); color: var(--faint); font-variant-numeric: tabular-nums; margin-left: auto }
+.cl-search { position: relative; min-width: 0 }
+.cl-input { display: flex; gap: 6px; align-items: center }
+.cl-input .cl-ic { position: absolute; left: 10px; top: 10px; pointer-events: none }
+.cl-input input { flex: 1; min-width: 0; padding-left: 32px }
+.cl-list { list-style: none; margin: 4px 0 0; padding: 4px; border: 1px solid var(--border-2); border-radius: var(--radius-ctl); background: var(--panel); box-shadow: var(--shadow); max-height: 280px; overflow: auto; position: absolute; left: 0; right: 0; z-index: 30 }
+.cl-list li { display: flex; gap: 8px; align-items: center; padding: 7px 8px; border-radius: var(--radius-sm); font-size: var(--fs-sm); cursor: pointer; min-width: 0 }
+.cl-list li.on { background: var(--panel-3) }
+.cl-list li.cl-note { cursor: default; color: var(--muted); font-size: var(--fs-xs) }
+.cl-list li.cl-note.warn { color: var(--warn) }
+.cl-list li.cl-keep { color: var(--muted); border-top: 1px solid var(--border); margin-top: 2px }
+.cl-opt-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+
+/* The related-content list on the asset panel (AssetPanels.tsx RelatedContent). */
+.lib-rel { display: grid; gap: 6px; margin-top: 10px }
+.lib-rel-row { display: flex; gap: 8px; align-items: center; font-size: var(--fs-sm); min-width: 0 }
+.lib-rel-row .cl-ic svg { width: 14px; height: 14px }
+.lib-rel-row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0 }
+.lib-rel-rel { color: var(--muted); font-size: var(--fs-xs); flex: none }
+.lib-rel-open { margin-left: auto; flex: none }
+
+/* Read from file name: the tokens of the name, each with what it was read as. */
+.fn-tokens { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 12px }
+.fn-tok { display: inline-flex; flex-direction: column; gap: 1px; padding: 4px 8px; border: 1px solid var(--border-2); border-radius: var(--radius-sm); font-size: var(--fs-xs); max-width: 100% }
+.fn-tok code { font-size: var(--fs-xs); color: var(--text) }
+.fn-tok span { color: var(--muted); font-size: var(--fs-micro) }
+.fn-tok.kept { border-style: dashed }
+.fn-why { font-size: var(--fs-xs); color: var(--muted); margin: 2px 0 10px }
+.fn-cands { display: grid; gap: 6px; margin-top: 6px }
+.fn-cand { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-sm); cursor: pointer }
+.fn-cand small { display: block; color: var(--muted); font-size: var(--fs-xs) }

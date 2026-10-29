@@ -27,7 +27,7 @@ import { LibraryGrid } from './vod/LibraryGrid'
 import { AvailabilityPill, Completeness, Keyscreen, KindLegend, TypeLabel } from './vod/LibraryCells'
 import { DownloadFiles, EncodePanel, TargetMetadataPanel } from './vod/AssetPanels'
 import FormatsPanel from './vod/FormatsPanel'
-import { libraryApi, type LibraryFacets, type LibraryRow } from './vod/libraryApi'
+import { libraryApi, type LibraryFacets, type LibraryRow, type LinkedContent } from './vod/libraryApi'
 import { VIEWS, codecLabel, filtersToApi, filtersToSearch, isFiltered, parseColumns, parseFilters, resLabel, type LibraryFilters, type LibraryView } from './vod/libraryQuery'
 import { LibIcon } from './vod/icons'
 import { AssetStatusPanel, QcChecks, UsageBadge, USAGE_LABEL, hasNoMedia } from './vod/AssetStatus'
@@ -412,6 +412,9 @@ function AssetMetadata({ d, onSaved }: { d: any; onSaved: () => void }) {
   // Images added in this form go in the asset's own library folder (docs/ASSET_IMAGES.md section 7).
   const [imgFolder, setImgFolder] = useState<string | null>(null)
   useEffect(() => { apiRequest(`/vod/${d.id}/image`).then((r: any) => setImgFolder(r?.folder ?? null)).catch(() => { /* default folder */ }) }, [d.id])
+  // What the server knows about this asset's links (who linked it, why, suggestions), for the link fields.
+  const [links, setLinks] = useState<LinkedContent | null>(null)
+  useEffect(() => { libraryApi.links(d.id).then(setLinks).catch(() => setLinks(null)) }, [d.id, d.updated_at])
   // UNSAVED CHANGES ARE VISIBLE. The form differs from what is saved: the save
   // bar says so, Save stands out, and leaving (tab, another asset, closing the
   // drawer or the page) asks first. An image chosen here only takes effect on Save.
@@ -446,7 +449,7 @@ function AssetMetadata({ d, onSaved }: { d: any; onSaved: () => void }) {
     <div style={{ maxWidth: 820 }}>
       <TypePicker appliesTo="vod" value={typeId} onChange={(id) => setTypeId(id)}
         hint="Inherited from the channel, station or event it was cut from. Change it to describe this item differently." />
-      <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact imageFolder={imgFolder ?? undefined} />
+      <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact imageFolder={imgFolder ?? undefined} assetId={d.id} links={links} />
       <div role="status" aria-live="polite" style={{ position: 'sticky', bottom: 0, zIndex: 2, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
         padding: '10px 12px', margin: '8px -12px 0', background: dirty ? 'color-mix(in srgb, var(--warn, #d97706) 14%, var(--panel))' : 'var(--panel)',
         borderTop: `1px solid ${dirty ? 'var(--warn, #d97706)' : 'var(--border)'}` }}>
@@ -683,6 +686,20 @@ export default function VodPage() {
       sel.clear(); load()
     } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBulkBusy(null) }
   }
+  async function bulkFilename() {
+    setBulkBusy(`Reading ${chosen.length} file name${chosen.length === 1 ? '' : 's'}…`)
+    try {
+      const r = await libraryApi.filenameBulk(chosen.map((x) => x.id))
+      const linked = r.results.filter((x) => x.link?.action === 'linked').length
+      const toCheck = r.results.filter((x) => x.link?.action === 'suggested' || x.skipped?.length).length
+      notify({ kind: r.changed ? 'ok' : 'info', message: [
+        `Read ${r.results.length} file name${r.results.length === 1 ? '' : 's'}: ${r.changed} changed${linked ? `, ${linked} linked to the record ${linked === 1 ? 'it promotes' : 'they promote'}` : ''}.`,
+        'Only what was clear was applied; nothing a person typed or chose was replaced.',
+        toCheck ? `${toCheck} need a look: open them and use Read from file name to choose.` : '',
+      ].filter(Boolean).join(' ') })
+      sel.clear(); load()
+    } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBulkBusy(null) }
+  }
   async function bulkRemoveFromCollection() {
     if (!filters.col) return
     setBulkBusy(`Taking ${chosen.length} out…`)
@@ -800,6 +817,8 @@ export default function VodPage() {
         actions={[
           { key: 'epg', label: 'Fill from EPG', icon: LibIcon.epg, count: fromGuide.length, onRun: bulkEpg,
             hint: fromGuide.length < sel.sel.size ? 'Uploaded files have no guide slot. Only empty fields are filled, and only from a clear programme match.' : 'Only empty fields are filled, and only from a clear programme match.' },
+          { key: 'filename', label: 'Read from file name', icon: LibIcon.fileName, count: chosen.length, onRun: bulkFilename,
+            hint: 'Type, title, season and episode, and the record a trailer promotes, from each file name. Only clear readings are applied; values people entered are kept.' },
           { key: 'publish', label: 'Publish', icon: LibIcon.publish, count: unpublished.length, onRun: bulkPublish,
             hint: unpublished.length < sel.sel.size ? 'Assets that are already available or scheduled are left out' : undefined },
           { key: 'collect', label: 'Add to collection', icon: ColIcon.addTo, count: chosen.length, onRun: () => setAdding(chosen.map((x) => x.id)),

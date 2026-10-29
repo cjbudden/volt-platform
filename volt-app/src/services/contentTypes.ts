@@ -226,7 +226,8 @@ export const STANDARD_TYPES: StandardType[] = [
     schemaOrgType: 'VideoObject', targetKind: 'vod', appliesTo: ['vod'], domain: 'ondemand',
     fields: [
       f('title', 'Title', 'string', { required: true, epg: 'title', schemaOrg: 'name' }),
-      f('trailerFor', 'Trailer for', 'string', { required: true, epg: 'sub-title', schemaOrg: 'about' }),
+      // A link to the record it promotes (services/contentLinks.ts), or a name until that record exists.
+      f('trailerFor', 'Trailer for', 'content', { required: true, relation: 'trailer_for', epg: 'sub-title', schemaOrg: 'about' }),
       f('trailerType', 'Kind', 'enum', { options: ['Trailer', 'Teaser', 'Promo', 'Featurette', 'Clip'] }),
       f('description', 'Description', 'text', { epg: 'description', schemaOrg: 'description' }),
       f('releaseDate', 'Release date of the title', 'date', { schemaOrg: 'datePublished' }),

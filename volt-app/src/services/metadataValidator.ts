@@ -5,7 +5,13 @@ import { ApiError } from '../util/http';
  *
  * A schema is a list of typed fields (stored in metadata_schemas.fields):
  *   { key, label?, type, required?, options?, multiple? }
- * Supported types: string | text | number | boolean | date | enum | url | tags | image.
+ * Supported types: string | text | number | boolean | date | enum | url | tags | image | reference | content.
+ *
+ * CONTENT is a link to another library record (services/contentLinks.ts): a
+ * confirmed link is {id, name} with the record's stable id; a name nobody has
+ * matched to a record yet is {name}. A plain string from an older client is
+ * read as {name}. Whether the id is a record in the same account is checked by
+ * contentLinks.checkContentValues, which needs the database.
  *
  * Validation is strict about what IS there: values must match their declared type,
  * enums must be within options, and unknown keys are rejected — so "custom schema"
@@ -23,7 +29,7 @@ export interface SchemaField {
   key: string;
   label?: string;
   /** image: an Image Library reference (/library/<account>/<path>) or a web address, downloaded into the library on save. */
-  type: 'string' | 'text' | 'number' | 'boolean' | 'date' | 'enum' | 'url' | 'tags' | 'reference' | 'image';
+  type: 'string' | 'text' | 'number' | 'boolean' | 'date' | 'enum' | 'url' | 'tags' | 'reference' | 'image' | 'content';
   required?: boolean;
   options?: string[];
   /** enum: the account list the options come from ('genres'). The options are
@@ -34,6 +40,10 @@ export interface SchemaField {
   retiredOptions?: string[];
   multiple?: boolean;
   refDomain?: string; // for type 'reference': the entity domain (e.g. 'sports-team')
+  /** For type 'content': the relationship (services/contentLinks.ts RELATIONS), default 'related'. */
+  relation?: string;
+  /** For type 'content': standard type keys the linked record may have (default: the relation's). */
+  targetTypes?: string[];
   /** The EPG slot this value lands in when a programme is made from the owner:
    *  title | sub-title | description | category | episode | language | icon |
    *  credits.<role> | custom:<name>. See services/contentTypes.ts. */
@@ -59,7 +69,7 @@ export function mergeFields(parent: SchemaField[], child: SchemaField[]): Schema
 export function validateSchemaFields(fields: unknown): SchemaField[] {
   if (!Array.isArray(fields)) throw new ApiError(422, 'schema fields must be an array');
   const seen = new Set<string>();
-  const okTypes = ['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'image', 'tags', 'reference'];
+  const okTypes = ['string', 'text', 'number', 'boolean', 'date', 'enum', 'url', 'image', 'tags', 'reference', 'content'];
   for (const f of fields as SchemaField[]) {
     if (!f || typeof f.key !== 'string' || !f.key)
       throw new ApiError(422, 'each field needs a non-empty key');
@@ -70,6 +80,8 @@ export function validateSchemaFields(fields: unknown): SchemaField[] {
       throw new ApiError(422, `enum field ${f.key} needs options[]`);
     if (f.optionsList != null && (f.type !== 'enum' || !/^[a-z][a-z0-9-]{0,39}$/.test(String(f.optionsList))))
       throw new ApiError(422, `${f.key}: a list can only feed an enum field`);
+    if (f.relation != null && (f.type !== 'content' || !/^[a-z][a-z0-9_]{1,39}$/.test(String(f.relation))))
+      throw new ApiError(422, `${f.key}: only a content field has a relation`);
     if (f.epg != null && !/^(title|sub-title|description|category|episode|language|icon|credits\.[a-z-]+|custom:[a-zA-Z0-9_-]+)$/.test(String(f.epg)))
       throw new ApiError(422, `bad epg slot on ${f.key}: ${f.epg}`);
   }
@@ -125,6 +137,25 @@ function checkOne(field: SchemaField, value: any): any {
       };
       if (field.multiple) {
         if (!Array.isArray(value)) throw new ApiError(422, `${field.key} must be an array of references`);
+        return value.map(one);
+      }
+      return one(value);
+    }
+    case 'content': {
+      const UUIDRX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const one = (v: any) => {
+        if (typeof v === 'string') { const n = v.trim(); if (!n) throw new ApiError(422, `${field.key} needs a name or a record`); return { name: n.slice(0, 300) }; }
+        if (!v || typeof v !== 'object') throw new ApiError(422, `${field.key} must be a linked record {id, name} or a name {name}`);
+        const name = typeof v.name === 'string' ? v.name.trim().slice(0, 300) : '';
+        if (v.id != null) {
+          if (typeof v.id !== 'string' || !UUIDRX.test(v.id)) throw new ApiError(422, `${field.key}: id must be a record id`);
+          return { id: v.id.toLowerCase(), name };
+        }
+        if (!name) throw new ApiError(422, `${field.key} needs a name or a record`);
+        return { name };
+      };
+      if (field.multiple) {
+        if (!Array.isArray(value)) throw new ApiError(422, `${field.key} must be an array of linked records`);
         return value.map(one);
       }
       return one(value);

@@ -31,6 +31,8 @@ import { usageStatusSql, USAGE_STATUSES } from '../services/assetReadiness';
  * Carries publishing state, keyscreen/storyboard, and custom metadata validated
  * against an assigned named schema (modules/metadataSchemas.ts).
  */
+import { checkContentValues, syncAfterSave, readLinks, parseInclude } from '../services/contentLinks';
+import { resolveEffectiveFields } from './metadataSchemas';
 export const vodRouter = Router();
 vodRouter.use(requireAuth);
 
@@ -459,7 +461,16 @@ vodRouter.get(
     const audioOnly = streamId
       ? isAudioOnly(streamId)
       : !!(row.export_mp3_key || row.export_m4a_key) && !row.progressive_key;
-    res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any) });
+    // ?include=linkedContent: the records this one links to and the ones linking
+    // to it, one level deep, as summaries (services/contentLinks.ts). Absent, the
+    // response is exactly what it was.
+    const include = parseInclude(req.query.include);
+    const extra: Record<string, any> = {};
+    if (include.has('linkedContent')) {
+      const eff = row.schema_id ? await resolveEffectiveFields(row.schema_id, accountId(req)) : null;
+      extra.linkedContent = await readLinks(accountId(req), row.id, eff?.fields ?? []);
+    }
+    res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any), ...extra });
   })
 );
 
@@ -731,6 +742,7 @@ vodRouter.put(
     // Resolve the schema in effect (new one if provided, else the current one).
     const schemaId = body.schemaId !== undefined ? body.schemaId : asset.schema_id;
     let cleanMeta: Record<string, any> | undefined;
+    let typeFields: SchemaField[] = [];
     if (body.metadata !== undefined || body.schemaId !== undefined) {
       const values = body.metadata ?? asset.metadata ?? {};
       if (schemaId) {
@@ -759,6 +771,10 @@ vodRouter.put(
           else checked[k] = v;
         }
         cleanMeta = { ...carried, ...validateMetadata(schema.fields, await internaliseImages(accountId(req), schema.fields, checked, folder)) };
+        // CONTENT LINKS: an id must be a record of this account, not this asset,
+        // and not one that links back (services/contentLinks.ts).
+        cleanMeta = await checkContentValues(accountId(req), asset.id, schema.fields, cleanMeta);
+        typeFields = schema.fields;
       } else {
         // no schema assigned -> metadata must be empty (strict)
         if (Object.keys(values).length > 0)
@@ -825,6 +841,12 @@ vodRouter.put(
     if (cleanMeta !== undefined || body.title != null) {
       await pruneProvenance(row.id, asset.metadata, cleanMeta ?? asset.metadata, asset.title, body.title ?? asset.title);
     }
+    // A link a person saved is theirs: the content_links row follows the form.
+    if (cleanMeta !== undefined && typeFields.length)
+      await syncAfterSave(accountId(req), row.id, typeFields, asset.metadata, cleanMeta, await actorLabel(req));
+    // A type a person chose is no longer the file name's to change.
+    if (body.schemaId !== undefined && body.schemaId !== asset.schema_id)
+      await query(`UPDATE vod_assets SET metadata_provenance = COALESCE(metadata_provenance, '{}'::jsonb) - '@type' WHERE id = $1`, [row.id]);
     // AN IMAGE FIELD A PERSON CHANGED IS THEIR CHOICE, applied now, during the
     // save, even over an image chosen earlier: the main image, or the type it is
     // named after (poster, hero...). It used to be only queued, and skipped when

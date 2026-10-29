@@ -36,7 +36,7 @@ Large files do not travel well in one request. Volt takes uploads in chunks: you
   "bytes": 8688608,
   "sha256": "5d0c4f...",
   "ingest": "ingested",
-  "title": "evening-news.mp4"
+  "title": "Evening News"
 }
 {"id":"a8a7a279-5773-4027-a60f-bb5a9721f90b","title":"Evening news, 24 October"}
 ```
@@ -54,7 +54,7 @@ Large files do not travel well in one request. Volt takes uploads in chunks: you
 | `metadata` | Values for the content type's fields. Values for fields the content type does not have are left out, and with no content type nothing is kept |
 | `ladderGroupId` | The encoding profile for `vod`. Leave it out for the account's default at the time the file is encoded |
 
-The asset starts with the file's name as its title (or the content type's title field, when it has one and you filled it). Set the real title afterwards with `PUT /api/vod/{id}`, as step 4 does.
+The asset starts with a title read from the file name: `evening-news.mp4` becomes "Evening News", and tags such as `1080p`, `v2` or `Official Trailer` are taken off (see Read from file name in the Media Library guide). A title inside the file, or the content type's title field when you filled it, comes first. To keep the file name as it is, set **Read the file name** to **Off** on an ingest rule (`"filenameMetadata": "off"`). Set the real title afterwards with `PUT /api/vod/{id}`, as step 4 does.
 
 The answer to opening has the session `id`, its `token`, `chunkSize`, `chunkCount`, what has been received and what is `missing`, and `expiresAt`. The session's `assetId` is already reserved, so you can store it straight away.
 
@@ -87,5 +87,5 @@ Volt also accepts resumable uploads in the open tus protocol at `/api/tus`, for 
 | `403 That token does not belong to this upload.` | The token is another upload's | Use the token that came with this session |
 | `400` on a chunk | The chunk is empty, or not the size it should be | Send exactly `chunkSize` bytes (the last chunk is the rest) |
 | `409` on finish, with `missing` | Some chunks never arrived | Send the chunks listed, then finish again |
-| The asset is named after the file | That is where every upload starts | Set the title with `PUT /api/vod/{id}`, or in the Media Library |
+| The asset's title is not the one you want | It was read from the file name | Set the title with `PUT /api/vod/{id}`, or in the Media Library |
 | `ingest` is `awaiting_metadata` | Your content type requires fields that were not sent | Send them in `metadata`, or fill them in the Media Library |

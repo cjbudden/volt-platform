@@ -53,12 +53,18 @@ export interface IngestSettings {
   ladderGroupId?: string | null;
   /** Reject the file with this reason instead of ingesting. */
   reject?: string | null;
+  /**
+   * Read the file name for metadata (services/ingest/filenameApply.ts): 'auto'
+   * applies what is confident, 'suggest' only records the reading for a person,
+   * 'off' leaves the name alone.
+   */
+  filenameMetadata?: 'auto' | 'suggest' | 'off';
 }
 export type IngestKey = keyof IngestSettings;
 export const INGEST_KEYS: IngestKey[] = [
   'contentTypeId', 'targetKind', 'naming', 'structure', 'nameTemplate', 'pathTemplate', 'lowercase',
   'duplicate', 'nameCheck', 'transfer', 'metadataRequired', 'autoUpload', 'sidecar', 'webhooks',
-  'ladderGroupId', 'reject',
+  'ladderGroupId', 'reject', 'filenameMetadata',
 ];
 
 /** The platform baseline. Decisions of 17 Sep: guid, flat, ask, auto, acceleration on. */
@@ -67,7 +73,7 @@ export const BASELINE: Required<IngestSettings> = {
   naming: 'guid', structure: 'flat', nameTemplate: null, pathTemplate: null, lowercase: false,
   duplicate: 'ask', nameCheck: true, transfer: 'auto',
   metadataRequired: 'before_ingest', autoUpload: true,
-  sidecar: 'json', webhooks: [], ladderGroupId: null, reject: null,
+  sidecar: 'json', webhooks: [], ladderGroupId: null, reject: null, filenameMetadata: 'auto',
 };
 
 /** What a rule can test. All present conditions must hold. */

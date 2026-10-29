@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { api, type IngestRule, type IngestThen, type IngestWhen, type IngestWebhook, type ContentType, type Watchfolder } from '../api'
 import { PageHead } from '../scaffold'
 import { Notice, useNotify, usePageNotice } from '../notices'
+import { FilenameRulesCard } from './FilenameRules'
 
 const RUNG_LABEL = { account: 'Account default', type: 'Content type', source: 'Source or folder' } as const
 const NAMING = { honour: 'Keep the name (sanitised)', guid: 'GUID', guid_prefixed: 'GUID + name', template: 'Template' }
@@ -91,6 +92,7 @@ function RuleForm({ rule, types, folders, hooks, baseline, onSaved, onCancel }: 
         <Sel label="Metadata required" value={then.metadataRequired} options={GATE} onChange={v => setThen({ metadataRequired: v })} inherit={inh('metadataRequired')} />
         <Sel label="Transfer" value={then.transfer} options={TRANSFER} onChange={v => setThen({ transfer: v })} inherit={inh('transfer')} />
         <Sel label="Sidecar" value={then.sidecar} options={{ none: 'None', json: 'JSON beside the object', xml: 'XML beside the object' }} onChange={v => setThen({ sidecar: v })} inherit={inh('sidecar')} />
+        <Sel label="Read the file name" value={then.filenameMetadata} options={{ auto: 'Apply what is clear', suggest: 'Only suggest', off: 'Off' }} onChange={v => setThen({ filenameMetadata: v })} inherit={baseline?.filenameMetadata ? ({ auto: 'apply what is clear', suggest: 'only suggest', off: 'off' } as any)[baseline.filenameMetadata] : 'apply what is clear'} />
         <Sel label="Auto upload" value={then.autoUpload === undefined ? undefined : String(then.autoUpload)} options={{ true: 'On', false: 'Off' }} onChange={v => setThen({ autoUpload: v === undefined ? undefined : v === 'true' })} inherit={inh('autoUpload')} />
         <label style={{ display: 'grid', gap: 3, fontSize: 'var(--fs-xs)' }}><span style={{ color: 'var(--muted)' }}>Webhooks</span>
           <select multiple value={then.webhooks ?? []} onChange={e => setThen({ webhooks: [...e.target.selectedOptions].map(o => o.value) })} style={{ minHeight: 60 }}>{hooks.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}</select></label>
@@ -165,6 +167,8 @@ export default function IngestRulesPage() {
           ))}
         </div>
       ))}
+
+      <FilenameRulesCard />
 
       <div className="card" style={{ padding: 14, marginBottom: 14 }}>
         <div className="sec-label">Linked cloud accounts (cloud to cloud transfer, and "this file is already in Dropbox")</div>
