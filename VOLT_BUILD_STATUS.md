@@ -1788,7 +1788,7 @@ What: the four console sections added 23 to 28 Oct had no guide, so `check-cover
 - **Checked**: device typechecks clean (volt-app `tsc --noEmit`, volt-web `tsc -b`). `test/docs-coverage.check.ts` **311/311** with the new G8 assertions (**307/311** before the four screenshots existed); `check-coverage` 60 of 60, 0 errors (was 4). On Postgres 16: collections 33/33, jobs 43/43, job-log 10/10, metadata-lists 38/38, docs-session green; docs-seed-fast 14/20, identical with the seed at HEAD (its packager steps cannot run in the container). Docs build passes (one broken anchor warning on the on-demand ads guide, already there), scrub clean on docs and build. `npm run screenshots` 4/4 from a fresh seed, each looked at; the four guide pages served 8/8 light and dark. Worker name checked in saas mode: visible at HEAD, hidden after; still visible to whoever runs Volt.
 - **Not done**: a sign-in through a real identity provider (needs one); merging genres in use (the seed tags nothing with a genre); a running encode's live log (no encoder in the container). Noticed, not changed: Single sign-on's **Remove** and the encode **Cancel** use the browser's own confirm box rather than the console's dialog; the new collection box suggests a real channel name as its example.
 
-## 2026-10-29 - Guide strip outside its window, shared subtitles lock, watch folder delete (build queue 1.14-G5b, vNEXT)
+## 2026-10-29 - Guide strip outside its window, shared subtitles lock, watch folder delete (build queue 1.14-G5b, v0.20.0)
 
 What: three of the seven 1.14-G5b fixes; (f), (j), (l) and (o) are now 1.14-G5b-2.
 
