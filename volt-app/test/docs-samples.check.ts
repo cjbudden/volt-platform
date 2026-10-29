@@ -348,10 +348,8 @@ const LEFTOVER = /your-volt-host|\b(pk|sk)_live_\.\.\.|whsec_\.\.\.|<[a-z][^<>="
   const chunks = r.out.filter((o: any) => 'index' in o);
   const fin = r.out.find((o: any) => 'assetId' in o) ?? {};
   ok(chunks.length === 2 && chunks[1].complete === true && chunks[0].chunkCount === 2, 'upload: two chunks sent, the second completes it', chunks);
-  ok(UUID.test(fin.assetId ?? '') && fin.bytes === fileBytes.length && fin.sha256 === createHash('sha256').update(fileBytes).digest('hex') && fin.ingest === 'ingested' && fin.title === 'Evening News',
-    'finish: the asset, every byte, the right SHA-256, ingested, titled from the file name', fin);
-  const titled = r.out.find((o: any) => 'title' in o && 'id' in o && !('assetId' in o));
-  ok(titled?.id === fin.assetId && titled?.title === 'Evening news, 24 October', 'and the title is set afterwards', titled);
+  ok(UUID.test(fin.assetId ?? '') && fin.bytes === fileBytes.length && fin.sha256 === createHash('sha256').update(fileBytes).digest('hex') && fin.ingest === 'ingested' && fin.title === 'Evening news',
+    'finish: the asset, every byte, the right SHA-256, ingested, titled with the name it was opened with (1.14-G6a)', fin);
   const delivered = await until(() => recvOut.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((e) => e?.assetId === fin.assetId), 15_000);
   ok(delivered?.event === 'ingested' && delivered?.file === 'evening-news.mp4' && delivered?.sha256 === fin.sha256,
     'the webhook reached receiver.mjs, its signature checked, for this upload', delivered ?? recvOut.slice(0, 400));

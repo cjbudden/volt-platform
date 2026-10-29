@@ -274,7 +274,10 @@ channelsRouter.get(
     const instances = await query('SELECT * FROM instances WHERE channel_id = $1 AND terminated_at IS NULL', [req.params.id]);
     const detail = await buildChannelDetail(row, Date.now());
     const testStream = { available: isTestStreamAvailable(), ...testStreamStatus(req.params.id) };
-    res.json({ ...row, instances, ...detail, testStream });
+    // The detail's `kind` is the stream kind the detail builder shares with events
+    // ('channel'); the channel's own kind (tv, radio) is what the list answers, so the
+    // row's wins and a client sees the same value in the list and the item (1.14-G6a).
+    res.json({ ...row, instances, ...detail, kind: row.kind, testStream });
   })
 );
 

@@ -452,6 +452,11 @@ export async function completeLanded(session: UploadSession, dest: string, writt
   // failed record goes once these bytes are safe. 'new': both stay.
   const retry = session.vod_asset_id ? session.retry_of ?? null : null;
   let operatorMetadata = session.metadata ?? null;
+  // The name the upload was opened with is the placeholder asset's title (openSession);
+  // read it before a reattach swaps the record, so the ingest can keep it as the title.
+  const openedName = session.vod_asset_id
+    ? (await one<{ title: string | null }>(`SELECT title FROM vod_assets WHERE id = $1`, [session.vod_asset_id]))?.title ?? null
+    : null;
   let kept: { metadata: any; title: string | null } | null = null;
   if (retry?.action === 'reattach') {
     const old = await one<any>(`SELECT id, source_key, metadata, title FROM vod_assets WHERE id = $1 AND account_id = $2 AND master_key IS NULL`, [retry.assetId, session.account_id]);
@@ -487,7 +492,7 @@ export async function completeLanded(session: UploadSession, dest: string, writt
         originalName: session.filename, relativePath: session.relative_path ?? null,
         bytes: written, sha256: sha, declaredMime: session.content_type,
         source: session.source ?? 'panel', sessionId: session.id, uploadedBy: session.opened_by,
-        contentTypeId: session.schema_id ?? null, operatorMetadata,
+        contentTypeId: session.schema_id ?? null, operatorMetadata, givenName: openedName,
       });
       ingestStatus = out.status; encodeSource = out.path;
       // The ingest merge keeps only the fields of the record's content type; a reattached

@@ -36,9 +36,8 @@ Large files do not travel well in one request. Volt takes uploads in chunks: you
   "bytes": 8688608,
   "sha256": "5d0c4f...",
   "ingest": "ingested",
-  "title": "Evening News"
+  "title": "Evening news"
 }
-{"id":"a8a7a279-5773-4027-a60f-bb5a9721f90b","title":"Evening news, 24 October"}
 ```
 
 **Opening** (`POST /api/uploads`) takes:
@@ -47,14 +46,14 @@ Large files do not travel well in one request. Volt takes uploads in chunks: you
 |---|---|
 | `purpose` | `vod` for the Media Library, `filler` for Loops & Fillers |
 | `fillerKind` | For `filler`: `loop` (the default) or `slate` |
-| `name`, `filename` | The upload's label, and the file's own name |
+| `name`, `filename` | The asset's title, and the file's own name |
 | `totalBytes` | The exact size. Up to the limit `GET /api/uploads` reports as `maxBytes` |
 | `contentType` | The media type, such as `video/mp4` |
 | `schemaId` | The content type, when you know it up front |
-| `metadata` | Values for the content type's fields. Values for fields the content type does not have are left out, and with no content type nothing is kept |
+| `metadata` | Values for the content type's fields. Values for fields the content type does not have are left out, and with no content type nothing is kept except `title` or `name`, which title the asset |
 | `ladderGroupId` | The encoding profile for `vod`. Leave it out for the account's default at the time the file is encoded |
 
-The asset starts with a title read from the file name: `evening-news.mp4` becomes "Evening News", and tags such as `1080p`, `v2` or `Official Trailer` are taken off (see Read from file name in the Media Library guide). A title inside the file, or the content type's title field when you filled it, comes first. To keep the file name as it is, set **Read the file name** to **Off** on an ingest rule (`"filenameMetadata": "off"`). Set the real title afterwards with `PUT /api/vod/{id}`, as step 4 does.
+The asset is titled with the `name` you open the upload with, as "Evening news" above. Only the content type's title field, or a `title` or `name` in `metadata`, comes before it. When `name` is just the file name (with or without its extension), Volt reads a title from the file instead: a title inside the file first, then the file name, so `evening-news.mp4` becomes "Evening News" with tags such as `1080p`, `v2` or `Official Trailer` taken off (see Read from file name in the Media Library guide). To keep the file name as it is, set **Read the file name** to **Off** on an ingest rule (`"filenameMetadata": "off"`). You can change the title later with `PUT /api/vod/{id}`.
 
 The answer to opening has the session `id`, its `token`, `chunkSize`, `chunkCount`, what has been received and what is `missing`, and `expiresAt`. The session's `assetId` is already reserved, so you can store it straight away.
 
@@ -87,5 +86,5 @@ Volt also accepts resumable uploads in the open tus protocol at `/api/tus`, for 
 | `403 That token does not belong to this upload.` | The token is another upload's | Use the token that came with this session |
 | `400` on a chunk | The chunk is empty, or not the size it should be | Send exactly `chunkSize` bytes (the last chunk is the rest) |
 | `409` on finish, with `missing` | Some chunks never arrived | Send the chunks listed, then finish again |
-| The asset's title is not the one you want | It was read from the file name | Set the title with `PUT /api/vod/{id}`, or in the Media Library |
+| The asset's title is not the one you want | `name` was the file name, so the title was read from the file, or `metadata` carried a `title` | Open the upload with the title as `name`, or set it with `PUT /api/vod/{id}` or in the Media Library |
 | `ingest` is `awaiting_metadata` | Your content type requires fields that were not sent | Send them in `metadata`, or fill them in the Media Library |

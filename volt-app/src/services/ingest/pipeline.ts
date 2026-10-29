@@ -116,8 +116,30 @@ export interface LandedFile {
   uploadedBy?: string | null;
   contentTypeId?: string | null;
   operatorMetadata?: Record<string, any> | null;
+  /** The name the upload was opened with (`POST /api/uploads` name). It titles the
+   *  asset when it is a real title, see givenTitle(). */
+  givenName?: string | null;
   item?: IngestSettings | null;
 }
+
+/**
+ * The upload's own name, when it is a title someone chose. The console opens an
+ * upload with the file's name minus its extension, which says nothing the file
+ * name does not, so that one is ignored and the title read from the file name
+ * still applies. A name that differs from the file name was typed on purpose
+ * (an API caller naming "Evening news" for evening-news.mp4) and must not be
+ * replaced by a guess from the file name (build queue 1.14-G6a).
+ */
+export function givenTitle(given: string | null | undefined, originalName: string): string | null {
+  const g = typeof given === 'string' ? given.trim() : '';
+  if (!g) return null;
+  const file = (originalName ?? '').trim();
+  const stem = file.replace(/\.[^./]+$/, '');
+  return g === file || g === stem ? null : g;
+}
+
+/** A non-empty string, trimmed, or null. */
+const textOf = (v: unknown): string | null => typeof v === 'string' && v.trim() ? v.trim() : null;
 
 export interface IngestOutcome {
   resolved: Resolved;
@@ -230,7 +252,14 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
   const payload = buildPayload({
     event: status === 'ingested' ? 'ingested' : status === 'awaiting_metadata' ? 'awaiting_metadata' : status === 'duplicate' ? 'duplicate' : 'quarantined',
     account: f.accountId, assetId: f.assetId, kind: extracted.type.kind, contentTypeId: s.contentTypeId,
-    title: merged.metadata.name ?? merged.metadata.title ?? candidates(extracted).name ?? fnTitle ?? f.originalName,
+    // Title, best first: the content type's title field; a name or title sent with the
+    // upload even when no content type keeps it as a field (the merge drops fields a
+    // type does not have, which used to drop these too); the upload's own name when it
+    // is a chosen one; a title inside the file; the file name read as a title.
+    title: merged.metadata.name ?? merged.metadata.title
+      ?? textOf(f.operatorMetadata?.name) ?? textOf(f.operatorMetadata?.title)
+      ?? givenTitle(f.givenName, f.originalName)
+      ?? candidates(extracted).name ?? fnTitle ?? f.originalName,
     naming, store, bytes: f.bytes, sha256: f.sha256, source: f.source, sessionId: f.sessionId ?? null, uploadedBy: f.uploadedBy ?? null,
     resolved, duplicate, metadata: merged.metadata, metadataSources: merged.sources, extracted, unmapped: merged.unmapped,
   });
