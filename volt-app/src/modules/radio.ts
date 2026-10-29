@@ -9,6 +9,9 @@
  *   POST /:id/stop    stop it (closes the recording like any channel)
  *   GET  /:id/nowplaying   live ICY state + the log entry currently open
  *   GET  /:id/log     the timed metadata log (programmes rows): ?from&to&q&class
+ *   PATCH /:id/log/:entryId   correct one entry's class (song / ad / content)
+ *   GET  /:id/delete-impact    what deleting the station takes with it
+ *   DELETE /:id       delete the station (administrators; the channels route's code)
  *
  * The public MP3 listener endpoint (/radio/:id/stream.mp3) is mounted unauthed
  * in server.ts, mirroring /origin for HLS/DASH.
@@ -27,6 +30,8 @@ import { epgLane } from '../services/epgLane';
 import { radioLevels } from '../services/radio/monitor';
 import { loadRadioHealth, radioEventLog, radioQc, radioStatusBoard, radioHasValidContent } from '../services/radio/detail';
 import { writeAudit, actor } from '../services/audit';
+import { requireMinRole } from '../auth/roles';
+import { deleteChannel, deleteImpact } from './channels';
 import {
   resolveNowPlaying, sourceCarriesTitles, scheduledNowTitle,
   listenerCounts, listenerCountsMany,
@@ -501,7 +506,8 @@ radioRouter.get('/:id/log', asyncHandler(async (req, res) => {
   const order = p.sort === 'oldest' ? 'starts_at ASC' : p.sort === 'longest' ? '(ends_at - starts_at) DESC, starts_at DESC' : p.sort === 'title' ? 'title ASC, starts_at DESC' : 'starts_at DESC';
   const rows = await query<any>(
     `SELECT id, channel_id, title, starts_at, ends_at, actual_start, actual_end, status, clip_asset_id, auto_vod, clip_status, clip_error,
-            metadata->>'class' AS class, metadata->>'stream_url' AS stream_url
+            metadata->>'class' AS class, metadata->>'stream_url' AS stream_url,
+            metadata->>'class_by' AS class_by, metadata->>'class_auto' AS class_auto
        FROM programmes WHERE ${where}
       ORDER BY ${order} LIMIT $7 OFFSET $8`,
     [...args, p.limit, p.offset]
@@ -527,4 +533,59 @@ radioRouter.get('/:id/log', asyncHandler(async (req, res) => {
     total: total?.n ?? rows.length, offset: p.offset, limit: p.limit,
     entries: rows.map(({ channel_id, actual_start, actual_end, clip_asset_id, auto_vod, clip_status, clip_error, ...e }: any) => ({ ...e, media: media.get(e.id) ?? null })),
   });
+}));
+
+/**
+ * CORRECT A LOG ENTRY'S CLASS. The classifier (icyMeta.ts classifyIcyTitle) is
+ * a heuristic, and a station's own idents or a sponsor read can land in the
+ * wrong class. The class decides what the log's tabs count, what is
+ * transcribed (content only) and what gets a cover lookup (songs only), so an
+ * operator puts it right here. Only `class` changes: the raw ICY block and the
+ * stream URL stay as received, and the answer keeps who changed it and what
+ * the classifier had said, so a correction is never mistaken for the
+ * classifier's own reading. Operator level (roles.ts), like clearing QC.
+ */
+const classBody = z.object({ class: z.enum(['song', 'ad', 'content']) });
+radioRouter.patch('/:id/log/:entryId', asyncHandler(async (req, res) => {
+  const c = await ownedStation(req);
+  const { class: cls } = classBody.parse(req.body ?? {});
+  const cur = await one<any>(
+    `SELECT id, title, metadata->>'class' AS class, metadata->>'class_auto' AS class_auto
+       FROM programmes WHERE id = $1 AND channel_id = $2 AND metadata->>'source' = 'icy'`,
+    [req.params.entryId, c.id]).catch(() => null);
+  if (!cur) throw notFound('Log entry not found');
+  const who = actor(req);
+  const row = await one<any>(
+    `UPDATE programmes
+        SET metadata = metadata || jsonb_build_object('class', $2::text, 'class_by', $3::text,
+              'class_auto', COALESCE(metadata->>'class_auto', metadata->>'class', 'content')),
+            updated_at = now()
+      WHERE id = $1
+      RETURNING id, title, metadata->>'class' AS class, metadata->>'class_auto' AS class_auto, metadata->>'class_by' AS class_by`,
+    [cur.id, cls, who.label]);
+  if ((cur.class ?? 'content') !== cls) {
+    await writeAudit(null, {
+      accountId: accountId(req), userId: who.userId, label: who.label,
+      action: 'update', entityType: 'radio_log_entry', entityId: cur.id,
+      changes: { class: { from: cur.class ?? 'content', to: cls } },
+      snapshot: { station: c.name, title: cur.title },
+    }).catch(() => {});
+  }
+  res.json({ id: row.id, title: row.title, class: row.class, classAuto: row.class_auto, classBy: row.class_by });
+}));
+
+/**
+ * DELETE A STATION through the radio API. Stations are channels, and the
+ * console has always removed them through `DELETE /api/channels/:id`; a client
+ * written against `/api/radio` found no delete at all. Same code, same rules:
+ * administrators only, refused while the station runs, everything it holds
+ * (recordings, clips, log) goes with it, and the attempt is audited.
+ */
+radioRouter.get('/:id/delete-impact', asyncHandler(async (req, res) => {
+  const c = await ownedStation(req);
+  res.json(await deleteImpact(c.id, accountId(req)));
+}));
+radioRouter.delete('/:id', requireMinRole('admin'), asyncHandler(async (req, res, next) => {
+  await ownedStation(req);            // a TV channel id is not a station: 404 here
+  return deleteChannel(req, res, next);
 }));

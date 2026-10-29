@@ -118,7 +118,11 @@ from `StreamTitle`, and the raw ICY fields kept in `metadata` jsonb
 reusing EPG:
 
 - The recordings search box matches these entries, so "find when X was played"
-  works the same way as EPG matches on TV recordings.
+  works the same way as EPG matches on TV recordings. Both searches do: the
+  Recordings page's box (`GET /api/recordings/sources?q=`, a source matches
+  when a log or guide title aired inside one of its recordings, and the row
+  names it) and `GET /api/recordings?q=` for single recordings. Until
+  1.14-G5b-2 the page's box matched source names only.
 - The recording detail page can highlight the log entry covering the playhead
   and jump the clipping bar to an entry's time range.
 - Post-airing automation (the EPG auto-clip path) can cut a song or segment out
@@ -159,7 +163,9 @@ independent of the local volume/mute. Around it:
 - the raw ICY fields when the source is Icecast (station name, genre,
   `StreamUrl` artwork/link when the station provides one),
 - the timed metadata log with class chips (song / ad / content), a search box
-  and click-to-time behaviour,
+  and click-to-time behaviour; an operator corrects a wrong class in place
+  (`PATCH /api/radio/:id/log/:entryId`, the classifier's reading kept as
+  `class_auto`),
 - the MP3 / HLS / DASH output URLs with copy buttons.
 
 The same visualiser component stands in for the video player on radio

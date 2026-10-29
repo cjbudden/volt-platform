@@ -7,7 +7,7 @@ guide: section
 
 # Notifications
 
-**Notifications** shows how Volt can reach the people who run your account, every alert it has sent and what happened to each copy, and the templates for messages you send through the API. Volt alerts when auto connect gives up, an EPG import fails or a post cannot be published. Every message goes to the console inbox (the bell at the top of the console), and by email and device push where those are set up. Most people come here to check that alerts are reaching them, or to find out why one did not.
+**Notifications** shows how Volt can reach the people who run your account, every alert it has sent and what happened to each copy, and the templates for messages you send through the API. Volt alerts when a live channel or event needs someone (see [Stream alerts](#stream-alerts)), when auto connect gives up, when an EPG import fails and when a post cannot be published. Every message goes to the console inbox (the bell at the top of the console), and by email and device push where those are set up. Most people come here to check that alerts are reaching them, or to find out why one did not.
 
 ![The Notifications page: the three delivery channels with a test button each, the sent list with one alert, the templates and your devices](/img/screens/notifications.png)
 
@@ -62,11 +62,25 @@ The bell at the top of every page is your own inbox: it shows a count of unread 
 1. Under **Your devices**, each phone or tablet shows its platform and when it was last seen.
 2. **Remove** stops push alerts going to it.
 
+### Stream alerts
+
+These go to the account's owners and administrators while a channel or event is meant to be live:
+
+| Topic | Subject | Sent when |
+|---|---|---|
+| `stream.encoder_died` | **the encoder stopped** | The encoder stopped without anyone asking. Auto connect tries to start it again if it is on |
+| `stream.input_error` | **the source cannot be read** | Volt could not open or read the source; the message gives the reason |
+| `stream.on_filler` | **on the slate, every source lost** | Every source has been lost for over a minute and viewers see the slate or loop. A shorter loss that failover rides out sends nothing |
+| `stream.output_timing` | **the output's timing is wrong** | The delivered output went back in time or sound and picture drifted apart, so viewers may see the picture jump or hear it out of sync |
+
+Each subject starts with the stream's name, and the message links to its page. One alert per stream per topic is sent at most every 30 minutes, so a flapping source does not fill your inbox. Stopping a stream yourself sends nothing. Everything else that is wrong (a stream on its backup source, a stalled output) is listed in [Monitoring](monitoring.md) without an alert.
+
 ## How it connects
 
 | Section | How it relates |
 |---|---|
-| [Channels](channels.md), [Radio](radio.md), [Events](events.md) | Auto connect giving up sends an alert |
+| [Channels](channels.md), [Events](events.md) | A stopped encoder, an unreadable source, a minute on the slate or a timing fault sends a [stream alert](#stream-alerts); auto connect giving up sends an alert |
+| [Radio](radio.md) | Auto connect giving up sends an alert |
 | [EPG](epg.md) | A failed import sends an alert |
 | [Social accounts](social-accounts.md), [Publishing Rules](publishing-rules.md) | A post that cannot be published sends an alert |
 | [Users & Roles](users-and-roles.md) | Who the alerts go to: the people who run the account |

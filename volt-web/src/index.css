@@ -1640,3 +1640,10 @@ svg.spin{animation:vspin 1s linear infinite}
   .pipe-arrow{display:none!important}
 }
 @media (prefers-reduced-motion:reduce){.sidebar{transition:none!important}}
+
+/* Radio log: the class column becomes a compact picker for operators (RadioDetail.tsx). */
+select.log-class{padding:3px 8px;font-size:var(--fs-xs);border-radius:var(--radius-ctl,10px);text-transform:uppercase;letter-spacing:.04em;font-weight:700;width:auto}
+/* Recordings: why a source matched the search when it was not its name (Recordings.tsx). */
+.rec-match{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:var(--fs-xs);color:var(--muted)}
+.rec-match svg{width:12px;height:12px;flex:none;color:var(--brand)}
+.rec-match span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px}

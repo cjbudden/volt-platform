@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**838 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 658 · Platform API: 36 · Machine-to-machine: 14 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**841 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 661 · Platform API: 36 · Machine-to-machine: 14 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -853,14 +853,17 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | GET | `/api/radio` | admin session (Bearer) or account secret key | radio: view |  |
+| DELETE | `/api/radio/:id` | admin session (Bearer) or account secret key | radio: manage |  |
 | GET | `/api/radio/:id` | admin session (Bearer) or account secret key | radio: view |  |
 | POST | `/api/radio/:id/air` | admin session (Bearer) or account secret key | radio: operate |  |
 | POST | `/api/radio/:id/auto-connect` | admin session (Bearer) or account secret key | radio: operate |  |
 | POST | `/api/radio/:id/clear-recovery` | admin session (Bearer) or account secret key | radio: operate |  |
+| GET | `/api/radio/:id/delete-impact` | admin session (Bearer) or account secret key | radio: view |  |
 | DELETE | `/api/radio/:id/events` | admin session (Bearer) or account secret key | radio: manage |  |
 | GET | `/api/radio/:id/events` | admin session (Bearer) or account secret key | radio: view |  |
 | GET | `/api/radio/:id/levels` | admin session (Bearer) or account secret key | radio: view |  |
 | GET | `/api/radio/:id/log` | admin session (Bearer) or account secret key | radio: view |  |
+| PATCH | `/api/radio/:id/log/:entryId` | admin session (Bearer) or account secret key | radio: operate |  |
 | GET | `/api/radio/:id/nowplaying` | admin session (Bearer) or account secret key | radio: view |  |
 | GET | `/api/radio/:id/qc` | admin session (Bearer) or account secret key | radio: view |  |
 | POST | `/api/radio/:id/start` | admin session (Bearer) or account secret key | radio: operate |  |

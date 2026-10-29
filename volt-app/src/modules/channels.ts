@@ -711,7 +711,7 @@ channelsRouter.get(
   })
 );
 
-async function deleteImpact(id: string, acc: string) {
+export async function deleteImpact(id: string, acc: string) {
   const ch = await one<any>(
     `SELECT c.id, c.name, c.kind, c.status, g.name AS group_name,
             EXISTS (SELECT 1 FROM instances i WHERE i.channel_id = c.id AND i.terminated_at IS NULL) AS running
@@ -729,11 +729,12 @@ async function deleteImpact(id: string, acc: string) {
   return { id: ch.id, name: ch.name, kind: ch.kind, group: ch.group_name, status: ch.status, blocker, counts: n };
 }
 
-/** Delete a channel or station. ADMINISTRATORS ONLY; every attempt is in the audit log. */
-channelsRouter.delete(
-  '/:id',
-  requireMinRole('admin'),
-  asyncHandler(async (req, res) => {
+/**
+ * Delete a channel or station. ADMINISTRATORS ONLY; every attempt is in the audit log.
+ * Shared with `DELETE /api/radio/:id` (radio.ts), so a station deleted through
+ * the radio API is refused, removed and audited exactly as here.
+ */
+export const deleteChannel = asyncHandler(async (req: any, res: any) => {
     // STOP IT FIRST. The comment here used to say "in production: terminate any
     // running encoder first" and then delete anyway.
     //
@@ -773,8 +774,8 @@ channelsRouter.delete(
       action: 'delete', entityType: 'channel', entityId: row.id,
       snapshot: { name: row.name, kind: impact.kind, group: impact.group, removed: impact.counts } });
     res.status(204).end();
-  })
-);
+});
+channelsRouter.delete('/:id', requireMinRole('admin'), deleteChannel);
 
 /**
  * TEST BUILD — spin up a real local test stream (FFmpeg test card + live WebVTT)

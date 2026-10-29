@@ -133,5 +133,7 @@
 .ig-type.need{background:color-mix(in srgb,var(--warn) 8%,transparent)}
 .ig-type.need .ig-type-l{color:var(--warn);font-weight:600}
 .ig-type-chips{display:flex;flex-wrap:wrap;gap:6px}
+.ig-type-meta{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-sm)}
+.ig-type-meta svg{width:14px;height:14px;flex:none}
 .ig-type-chip{font:inherit;font-size:var(--fs-sm);padding:4px 10px;border:1px solid var(--border);color:var(--muted);background:none;cursor:pointer}
 .ig-type-chip.active{color:var(--text,#e9ecf4);border-color:var(--brand);background:var(--brand-dim)}

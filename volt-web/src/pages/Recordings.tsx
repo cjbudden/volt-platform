@@ -125,8 +125,9 @@ export default function Recordings() {
           style={datesSet ? { borderColor: 'rgba(63,123,255,.6)', color: 'var(--brand)' } : undefined}>
           Dates{datesSet ? ' ·' : ''}
         </button>
-        <input className="inp rec-search" style={{ width: 260, marginLeft: 'auto' }} value={q}
-          onChange={e => setQ(e.target.value)} placeholder="Search source names…" />
+        <input className="inp rec-search" style={{ width: 320, marginLeft: 'auto' }} value={q}
+          onChange={e => setQ(e.target.value)} placeholder="Search names, programmes and songs…"
+          title="Matches a source's name, or a programme or song title that aired inside its recordings" aria-label="Search recordings" />
       </div>
 
       {datesOpen && (
@@ -168,7 +169,17 @@ export default function Recordings() {
             <tbody>
               {rows.map((s, i) => (
                 <tr key={s.id} onClick={() => navigate(`/recordings/source/${s.id}`)} style={{ cursor: 'pointer' }}>
-                  <td><EntityCell name={s.name} sub={`created ${fmtDate(new Date(s.createdAt).getTime())}`} index={i} /></td>
+                  <td>
+                    <EntityCell name={s.name} sub={`created ${fmtDate(new Date(s.createdAt).getTime())}`} index={i} />
+                    {/* WHY IT MATCHED when the search found what aired, not the name:
+                        otherwise a station found by a song looks like a wrong answer. */}
+                    {s.match?.by === 'aired' && (
+                      <div className="rec-match" title={`${s.match.count} matching ${s.type === 'radio' ? 'log entr' + (s.match.count === 1 ? 'y' : 'ies') : 'programme' + (s.match.count === 1 ? '' : 's')} inside its recordings`}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+                        <span>{s.type === 'radio' ? 'Played' : 'Aired'}: “{s.match.title}”, {new Date(s.match.atMs).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}{s.match.count > 1 ? ` (and ${s.match.count - 1} more)` : ''}</span>
+                      </div>
+                    )}
+                  </td>
                   <td><span className={`tag type ${TYPE_CLS[s.type]}`}>{TYPE_LABEL[s.type]}</span></td>
                   <td style={{ color: 'var(--muted)' }}>
                     {s.recordings}

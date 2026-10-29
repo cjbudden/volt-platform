@@ -93,7 +93,7 @@ See [the EPG guide](../guides/epg.md#add-a-programme) for adding and repeating p
 
 ### 6. Find a song in the recording and clip it
 
-1. Open **Recordings** and choose **Radio**, then open the station.
+1. Open **Recordings** and choose **Radio**. To find when a song was played, type part of its title in **Search names, programmes and songs…**: the station is listed with **Played:** and the latest time it aired. Open the station.
 2. The **Timeline** shows the waveform with an **On air** lane of the logged titles. Drag across it, or use **Jump to a date and time**, and open the range in the clipper.
 3. In the recording, click a song in the metadata lane: the in and out marks snap to it and its title fills **Clip title**.
 4. Choose an **Output** (**Streaming (HLS/DASH)**, **Downloadable MP3** or **Streaming + MP3**) and choose **Create clip**.
@@ -123,7 +123,7 @@ The **Radio Manager** role covers the station, its guide and its clips; an Owner
 | The station page says the source **carries no track metadata** | The same: there is no now-playing title to receive | Use an Icecast mount, or add programmes to the station's guide to say what is on |
 | **ICY headers appear here once the source connects and announces itself.** | The station has not received the source's headers yet | Start the station; if it stays, check the address with **Validate source** |
 | **Received metadata log** stays empty on an Icecast station | The station is stopped, the log is off, or the source sends no titles | Start the station and turn on **Capture now-playing log** in **Settings** |
-| A song is classed as **Ad** or **Content** | Its title did not look like "Artist - Title" | Expected for titles in another shape; use **All** in the log, or search by title |
+| A song is classed as **Ad** or **Content** | Its title did not look like "Artist - Title" | Choose **Song** in its **Class** column on the station's page (Radio stations: Operate) |
 | Listeners see no title | Their player does not read now-playing data, or the station is off air | Check with the Volt player; MP3 receivers need the MP3 output on |
 | The station is not under **Radio** in Recordings | It has not run with recording on | Turn on **Recording and clipping** in **Settings**; it applies from the next start |
 

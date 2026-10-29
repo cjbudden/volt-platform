@@ -438,7 +438,21 @@ recordingsRouter.get(
                 ON (s.owner_kind = 'channel' AND r.channel_id = s.id)
                 OR (s.owner_kind = 'event'   AND r.event_id   = s.id)
         WHERE g.account_id = $1
-          AND ($2::text IS NULL OR s.name ILIKE '%'||$2||'%')
+          -- THE SEARCH BOX MATCHES WHAT AIRED, not only the source's name: a
+          -- programme in the guide or a title in a station's now-playing log
+          -- (both are programmes rows) that falls inside one of the source's
+          -- recordings. "When was X played" is the question RADIO.md promised
+          -- this box answers; it used to match names only. A guide entry with
+          -- no recording under it is not a hit: there is nothing to open.
+          AND ($2::text IS NULL OR s.name ILIKE '%'||$2||'%' OR EXISTS (
+                SELECT 1 FROM programmes p JOIN recordings r2
+                    ON (s.owner_kind = 'channel' AND r2.channel_id = s.id)
+                    OR (s.owner_kind = 'event'   AND r2.event_id   = s.id)
+                 WHERE ((s.owner_kind = 'channel' AND p.channel_id = s.id)
+                     OR (s.owner_kind = 'event'   AND p.event_id   = s.id))
+                   AND p.title ILIKE '%'||$2||'%'
+                   AND p.span && tstzrange(to_timestamp(r2.start_epoch_ms/1000.0),
+                         to_timestamp(COALESCE(r2.end_epoch_ms, (extract(epoch from now())*1000)::bigint)/1000.0), '[)')))
           AND ($3::bigint IS NULL OR s.created_at >= to_timestamp($3::bigint/1000.0))
           AND ($4::bigint IS NULL OR s.created_at <= to_timestamp($4::bigint/1000.0))
         GROUP BY s.id, s.name, s.type, s.owner_kind, s.brand_ref, s.created_at,
@@ -476,6 +490,30 @@ recordingsRouter.get(
     //
     // The text search and the date ranges stay INSIDE the count, because those
     // narrow the library itself. The chips only partition what the search left.
+    // WHY EACH ROW MATCHED, so the list can say it. A source found by a song
+    // or a programme rather than its own name would otherwise look like a
+    // wrong answer. The latest matching entry is named, with how many more.
+    const needle = q.q?.trim() || null;
+    const byAired = new Map<string, { title: string; atMs: number; count: number }>();
+    if (needle) {
+      const lower = needle.toLowerCase();
+      const ids = rows.filter((r) => !String(r.name).toLowerCase().includes(lower)).map((r) => r.id);
+      if (ids.length) {
+        const hits = await query<any>(
+          `SELECT COALESCE(p.channel_id, p.event_id) AS src, count(*)::int AS n,
+                  (array_agg(p.title ORDER BY p.starts_at DESC))[1] AS title,
+                  (array_agg((extract(epoch from p.starts_at) * 1000)::bigint ORDER BY p.starts_at DESC))[1] AS at_ms
+             FROM programmes p
+            WHERE COALESCE(p.channel_id, p.event_id) = ANY($1::uuid[])
+              AND p.title ILIKE '%'||$2||'%'
+              AND EXISTS (SELECT 1 FROM recordings r2
+                           WHERE (r2.channel_id = p.channel_id OR r2.event_id = p.event_id)
+                             AND p.span && tstzrange(to_timestamp(r2.start_epoch_ms/1000.0),
+                                   to_timestamp(COALESCE(r2.end_epoch_ms, (extract(epoch from now())*1000)::bigint)/1000.0), '[)'))
+            GROUP BY 1`, [ids, needle]);
+        for (const h of hits) byAired.set(h.src, { title: h.title, atMs: Number(h.at_ms), count: h.n });
+      }
+    }
     const mapped = rows
       .map((r) => {
         const capturing = liveInstances.has(r.id);
@@ -497,6 +535,8 @@ recordingsRouter.get(
           state: capturing ? 'recording' : (r.recording_enabled === false ? 'off' : 'idle'),
           retentionDays: r.retention_days ?? null,
           nextExpiry: r.next_expiry ?? null,
+          // null without a search; `aired` names the programme or song that matched
+          match: !needle ? null : byAired.has(r.id) ? { by: 'aired' as const, ...byAired.get(r.id)! } : { by: 'name' as const },
         };
       });
 

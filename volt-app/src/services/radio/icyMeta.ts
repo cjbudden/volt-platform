@@ -15,8 +15,9 @@
 //  on the guide, and usable by the post-airing clip automation for trimming.
 //
 //  Each entry is CLASSIFIED as song / ad / content (news, DJ talk…) with a
-//  transparent heuristic (below). The class is stored data, correctable via
-//  the normal programme PATCH, and replaceable by smarter (audio-analysis)
+//  transparent heuristic (below). The class is stored data, correctable by an
+//  operator (PATCH /api/radio/:id/log/:entryId keeps the classifier's reading
+//  as class_auto), and replaceable by smarter (audio-analysis)
 //  classifiers later without changing the model.
 // ============================================================================
 import * as http from 'node:http';

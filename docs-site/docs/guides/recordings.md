@@ -31,7 +31,7 @@ Producers, clip editors and the people who look after a channel's catch-up conte
 
 1. Open **Recordings** in the sidebar.
 2. Narrow the list with **All**, **Channels**, **Radio** or **Events**. Each chip shows how many sources it holds. **Recording now** shows only sources that are capturing at this moment.
-3. Type in **Search source names…** to find a source by name.
+3. Type in **Search names, programmes and songs…** to find a source by its name, or by a programme or song that aired inside its recordings. A source found that way says what matched under its name, for example **Played: “Artist - Title”, 29 Oct, 14:05**, with how many more entries matched.
 4. To filter by date, choose **Dates**, then set **Recorded between** (when the content was recorded) or **Source created between** (when the channel, station or event was made). **Clear** removes the dates.
 5. Click a column heading (**Source**, **Recordings**, **Available range** or **Content held**) to sort by it; click again to reverse the order.
 6. Choose **Open** on a row, or click the row, to open the source.
@@ -114,6 +114,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 |---|---|---|
 | **No recordings yet** | No channel, station or event has run with recording on | Turn on **Recording and clipping** in its settings and start it |
 | **Nothing matches those filters** | The chips, search or dates leave nothing | Choose **All**, clear the search, or **Clear** the dates |
+| A programme or song you searched for is not found | It aired while nothing was recording, or the recording holding it has been removed | Check the source's guide or log for when it aired |
 | **Off** in the Status column | Recording is turned off for that source | Turn it on in the source's settings; it applies from the next start |
 | **Couldn't load recordings.** | The list could not be read | Choose **Retry** |
 | **Nothing was recorded at** a date and time | Nothing the source holds covers that moment | Pick a time inside the **held:** range shown beside the buttons |
@@ -133,7 +134,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 
 | Request | Does |
 |---|---|
-| `GET /api/recordings/sources` | Lists sources with counts; filter with `type`, `q`, `recordingNow=1`, `recordedFrom`, `recordedTo`, sort with `sort` and `dir` |
+| `GET /api/recordings/sources` | Lists sources with counts; filter with `type`, `q` (names, and programme or song titles inside the recordings; each row's `match` says which), `recordingNow=1`, `recordedFrom`, `recordedTo`, sort with `sort` and `dir` |
 | `GET /api/recordings?sourceId={id}` | One source's recordings |
 | `GET /api/recordings/{id}` | One recording, with the VOD assets made from it |
 | `GET /api/recordings/{id}/timeline` | What is on disk, with its gaps |

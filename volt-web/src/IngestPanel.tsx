@@ -293,7 +293,25 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
             <button type="button" className={`chip ig-type-chip${typeChoice === 'rules' ? ' active' : ''}`} aria-pressed={typeChoice === 'rules'}
               title="The ingest rules (Admin > Ingest rules) set the type from the file's folder, name or kind, and the file name itself when it is clear (S01E03 makes an episode, Official Trailer a trailer)" onClick={() => chooseType('rules', null)}>Let the rules decide</button>
           </div>
+          {/* METADATA FOR EVERY FILE, BEFORE THE FIRST ONE. This link used to sit on
+              the file list, so it appeared only once files were added; with Start
+              as soon as added on, those files had already started without it. */}
+          <button type="button" className="ig-lnk ig-type-meta" aria-expanded={sheet === 'all'} onClick={() => setSheet(sheet === 'all' ? null : 'all')}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M4 6h16M4 12h10M4 18h7" /></svg>
+            {sheet === 'all' ? 'Close metadata for all' : typeId ? 'Type and metadata for all' : 'Set type and metadata for all'}
+          </button>
         </div>
+
+        {sheet === 'all' && (
+          <div className="ig-sheet">
+            <div className="ig-sheet-h"><b>Every file added from now</b><span>{picked.length ? 'Leave the type empty and the rules decide it. Required fields can be filled while the upload runs.' : 'Set this before you add files: with Start as soon as added on, each file starts the moment it is added.'}</span></div>
+            <div style={{ display: 'grid', gridTemplateColumns: phone ? '1fr' : '240px 1fr', gap: 12 }}>
+              <TypePicker appliesTo="vod" value={typeId} onChange={id => { setTypeId(id); setMeta({}); if (typeChoice === 'unset') chooseType('type', id) }} />
+              {typeId ? <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact /> : <div />}
+            </div>
+            <div><button type="button" className="ig-lnk" onClick={() => setSheet(null)}>Done</button></div>
+          </div>
+        )}
 
         {src === 'link' && (
           <form className="ig-link" onSubmit={e => { e.preventDefault(); fetchLink() }}>
@@ -313,20 +331,8 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
                 {routeCounts.refused > 0 && <span className="rt none">{routeCounts.refused} refused</span>}
               </span>
               <span className="sp" />
-              <button type="button" className="ig-lnk" onClick={() => setSheet(sheet === 'all' ? null : 'all')}>{typeId ? 'Type and metadata for all' : 'Set type and metadata for all'}</button>
               <button type="button" className="ig-lnk" onClick={() => setPicked([])}>Clear</button>
             </div>
-
-            {sheet === 'all' && (
-              <div className="ig-sheet">
-                <div className="ig-sheet-h"><b>Every file added from now</b><span>Leave the type empty and the rules decide it. Required fields can be filled while the upload runs.</span></div>
-                <div style={{ display: 'grid', gridTemplateColumns: phone ? '1fr' : '240px 1fr', gap: 12 }}>
-                  <TypePicker appliesTo="vod" value={typeId} onChange={id => { setTypeId(id); setMeta({}); if (typeChoice === 'unset') chooseType('type', id) }} />
-                  {typeId ? <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact /> : <div />}
-                </div>
-                <div><button type="button" className="ig-lnk" onClick={() => setSheet(null)}>Done</button></div>
-              </div>
-            )}
 
             <div className="ig-rows">
               {picked.map(p => {

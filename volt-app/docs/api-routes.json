@@ -4959,6 +4959,15 @@
   "group": "/api/radio"
  },
  {
+  "method": "DELETE",
+  "path": "/api/radio/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: manage",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
   "method": "GET",
   "path": "/api/radio/:id",
   "api": "admin",
@@ -4995,6 +5004,15 @@
   "group": "/api/radio"
  },
  {
+  "method": "GET",
+  "path": "/api/radio/:id/delete-impact",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: view",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
   "method": "DELETE",
   "path": "/api/radio/:id/events",
   "api": "admin",
@@ -5027,6 +5045,15 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "radio: view",
+  "viewerTier": false,
+  "group": "/api/radio"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/radio/:id/log/:entryId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "radio: operate",
   "viewerTier": false,
   "group": "/api/radio"
  },

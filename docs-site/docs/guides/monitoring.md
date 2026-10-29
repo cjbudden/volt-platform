@@ -17,7 +17,7 @@ Monitoring lists problems and nothing else. A healthy account leaves this page n
 - **Ranking it.** Alerts are **Critical** (viewers are affected now), **Serious** (broken, but nobody is watching yet) or **Warning** (working, but not right). Each is labelled in words as well as colour.
 - **Looking back.** **Fleet activity** lists start, stop, failover and fault events across every stream, newest first.
 
-Operators keep it open on a second screen; on-call staff check it when alerted.
+Operators keep it open on a second screen; on-call staff check it when alerted. The faults that need a person straight away (a stopped encoder, a source that cannot be read, a minute on the slate, a timing fault viewers can see) are also sent as [stream alerts](notifications.md#stream-alerts) to the account's owners and administrators.
 
 ## Before you start
 
@@ -49,7 +49,7 @@ Operators keep it open on a second screen; on-call staff check it when alerted.
 | [Dashboard](dashboard.md) | Its **Attention** panel is the top of this list |
 | [Live Streams](live-streams.md) | Shows every running stream, healthy or not; Monitoring shows only the problems |
 | [Channels](channels.md), [Radio](radio.md), [Events](events.md) | **Open** goes to the stream's page, where **Diagnose** and **Clear QC** are |
-| [Notifications](notifications.md) | Sends alerts to the console inbox, and by email and device push where those are set up |
+| [Notifications](notifications.md) | Sends [stream alerts](notifications.md#stream-alerts) and other alerts to the console inbox, and by email and device push where those are set up |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 

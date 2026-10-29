@@ -296,7 +296,7 @@
     },
     "Radio": {
       "displayName": "Radio stations",
-      "description": "Radio covers audio-only stations: their pipeline, on-air state, levels, now-playing metadata and timed content log.\n\n**Use it to:**\n- List stations and open one with `GET /api/radio` and `GET /api/radio/{id}`\n- Start, stop and put a station on air with `POST /api/radio/{id}/start`, `.../stop` and `.../air`\n- Read now playing, levels, QC and the log with `GET /api/radio/{id}/nowplaying`, `.../levels`, `.../qc` and `.../log`\n- Check a source before using it with `POST /api/radio/probe`\n\n**Credential:** admin session (Bearer) or account secret key, with `radio: view` to read, `radio: operate` to start, stop or air and `radio: manage` to change.\n\n**Good to know:** stations are channels too, so groups, recording, EPG and access rules apply to them unchanged."
+      "description": "Radio covers audio-only stations: their pipeline, on-air state, levels, now-playing metadata and timed content log.\n\n**Use it to:**\n- List stations and open one with `GET /api/radio` and `GET /api/radio/{id}`\n- Start, stop and put a station on air with `POST /api/radio/{id}/start`, `.../stop` and `.../air`\n- Read now playing, levels, QC and the log with `GET /api/radio/{id}/nowplaying`, `.../levels`, `.../qc` and `.../log`\n- Check a source before using it with `POST /api/radio/probe`\n- Correct a log entry's class (song, ad or content) with `PATCH /api/radio/{id}/log/{entryId}`\n- Delete a station with `DELETE /api/radio/{id}`, after checking `GET /api/radio/{id}/delete-impact`\n\n**Credential:** admin session (Bearer) or account secret key, with `radio: view` to read, `radio: operate` to start, stop, air or correct a log entry's class and `radio: manage` to change. Deleting a station needs an owner or administrator.\n\n**Good to know:** stations are channels too, so groups, recording, EPG and access rules apply to them unchanged."
     },
     "Recordings": {
       "displayName": "Recordings",
@@ -709,5 +709,25 @@
     "tag": "Events",
     "summary": "Move an event to another group",
     "description": "`groupId` of another of the account's groups with the same workflow. An event that has not ended needs room in the target group's running at once for its scheduled window (409 otherwise). Needs Events: Manage."
+  },
+  "PATCH /api/radio/:id/log/:entryId": {
+    "tag": "Radio",
+    "summary": "Correct a log entry's class",
+    "description": "Body `{ \"class\": \"song\" | \"ad\" | \"content\" }`. Only the class changes: the received ICY block and stream URL stay as they were. The answer has the new `class`, `classAuto` (what the classifier said, kept through later corrections) and `classBy` (who corrected it), and the log (`GET /api/radio/{id}/log`) returns `class_by` and `class_auto` on corrected entries. The class decides the log's counts, what is transcribed (content) and what gets a cover lookup (songs). Needs `radio: operate`. 404 for an entry that is not in this station's now-playing log; every change is in the audit log."
+  },
+  "GET /api/radio/:id/delete-impact": {
+    "tag": "Radio",
+    "summary": "What deleting a station removes",
+    "description": "The counts of what goes with the station (recordings, clips and how many are published, log and guide entries, scheduled clips, sources) and a `blocker` naming why it cannot be deleted yet (it is live, or its encoder is still running), else null."
+  },
+  "DELETE /api/radio/:id": {
+    "tag": "Radio",
+    "summary": "Delete a station",
+    "description": "Removes the station with its recordings, clips, log and guide (the same as `DELETE /api/channels/{id}` for a station). Owners and administrators only (403 otherwise). Refused (400) while the station is live or its encoder still runs: stop it first. 404 for an id that is not one of your stations, a TV channel included. Answers 204; the deletion is in the audit log."
+  },
+  "GET /api/recordings/sources": {
+    "tag": "Recordings",
+    "summary": "Recorded sources",
+    "description": "One row per channel, radio station or event with recorded content, with its counts, available range and live state. `q` matches the source's name, or a programme or song title that aired inside one of its recordings (guide entries and a station's now-playing log); a guide entry with no recording under it is not a match. With `q`, each row's `match` says why: `{ \"by\": \"name\" }`, or `{ \"by\": \"aired\", \"title\", \"atMs\", \"count\" }` naming the latest matching entry and how many matched. Also `type` (csv of channel, radio, event), `sort`, `dir`, `recordedFrom`/`recordedTo`, `createdFrom`/`createdTo` (epoch ms) and `recordingNow=1`."
   }
 }

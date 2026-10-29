@@ -52,6 +52,9 @@ Radio managers and station operators use it day to day.
 1. On the station's page, scroll to **Received metadata log**.
 2. Filter by **Songs**, **Ads** or **Content**, by **Period**, and hide entries shorter than a length you choose.
 3. Search titles, and sort by newest, oldest, longest or title.
+4. If an entry is in the wrong class (a station ident read as a song, a sponsor read as content), choose the right one in its **Class** column: **Song**, **Ad** or **Content**. Hover over it to see who corrected it and what Volt had said. The entry still playing can be corrected once the next title arrives.
+
+The class decides what the **Songs**, **Ads** and **Content** tabs count, which entries are transcribed (content only) and which get a cover (songs only).
 
 ### Change or remove a station
 
@@ -63,7 +66,7 @@ Radio managers and station operators use it day to day.
 | Section | How it relates |
 |---|---|
 | [EPG](epg.md) | The station's programme guide; the now-playing log is kept on it |
-| Recordings | A recorded station is clipped there, and the log finds the moment |
+| [Recordings](recordings.md) | A recorded station is clipped there; its search finds a station by a song in its log |
 | Channel Groups | Stations count towards a group's channel limit |
 | [Live Streams](live-streams.md), [Monitoring](monitoring.md), [Multiview](multiview.md) | Where a running station is watched with everything else; Multiview shows a level meter for it |
 
@@ -74,7 +77,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | Task | Access needed |
 |---|---|
 | See stations and their pages | Radio stations: View |
-| Start, stop, go on air, clear recovery | Radio stations: Operate |
+| Start, stop, go on air, clear recovery, correct a log entry's class | Radio stations: Operate |
 | Create a station, change settings, clear its log | Radio stations: Manage |
 | Remove a station | Owner or Administrator |
 
@@ -102,6 +105,8 @@ Stations are channels of the radio kind: they are created and changed with the c
 | `POST /api/radio/{id}/air` | Takes it on or off air |
 | `GET /api/radio/{id}/nowplaying` | What is playing now |
 | `GET /api/radio/{id}/log` | The now-playing log |
+| `PATCH /api/radio/{id}/log/{entryId}` | Corrects one entry's class (`{"class": "song"}`, `"ad"` or `"content"`) |
+| `GET /api/radio/{id}/delete-impact` and `DELETE /api/radio/{id}` | What removing the station takes with it, and removes it (owners and administrators; stop it first) |
 | `POST /api/radio/probe` | Checks a source address, as **Validate source** does |
 
 ```bash

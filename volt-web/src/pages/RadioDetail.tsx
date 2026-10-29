@@ -849,7 +849,24 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
                       </div>
                     </td>
                     <td>{liveRow && e.media?.flag?.kind !== 'autovod' ? null : <ProgrammeFlagIcon flag={e.media?.flag} />}</td>
-                    <td><ClassChip cls={e.class} /></td>
+                    {/* CORRECT THE CLASS IN PLACE (operator level). The classifier is a
+                        heuristic; a wrong class miscounts the tabs and decides what
+                        is transcribed. The cell keeps the row's click, double click
+                        and Enter gestures to itself. The entry still playing is left
+                        alone: the now-playing card reads the reader's own class
+                        until the title changes, and the two would disagree. */}
+                    <td onClick={ev => ev.stopPropagation()} onDoubleClick={ev => ev.stopPropagation()} onKeyDown={ev => ev.stopPropagation()}>
+                      {canRun && !liveRow ? (
+                        <select className="log-class" value={e.class ?? 'content'} aria-label={`Class of ${e.title || 'this entry'}`}
+                          title={e.class_by ? `Corrected by ${e.class_by}; the classifier said ${e.class_auto ?? 'content'}` : 'Classified automatically. Choose to correct it.'}
+                          onChange={async ev => {
+                            const v = ev.target.value as RadioClass
+                            try { await api.radioLogClass(id, e.id, v); loadLog() } catch (er: any) { setErr(String(er?.message ?? er)) }
+                          }}>
+                          <option value="song">Song</option><option value="ad">Ad</option><option value="content">Content</option>
+                        </select>
+                      ) : <ClassChip cls={e.class} />}
+                    </td>
                   </tr>
                 )
               })}

@@ -580,6 +580,8 @@ export interface RecordingSource {
   state: 'recording' | 'idle' | 'off'
   retentionDays: number | null
   nextExpiry: string | null
+  /** With a search only: matched by its name, or by a programme or song that aired inside its recordings (the latest named). */
+  match?: { by: 'name' } | { by: 'aired'; title: string; atMs: number; count: number } | null
 }
 export interface RecordingSourcesFeed {
   sources: RecordingSource[]
@@ -2012,6 +2014,9 @@ export const api = {
     if (p.sort) qs.set('sort', p.sort)
     return req(`/radio/${id}/log` + (qs.toString() ? '?' + qs : ''))
   },
+  /** Correct one log entry's class (operator level); the classifier's reading is kept as classAuto. */
+  radioLogClass: (id: string, entryId: string, cls: RadioClass): Promise<{ id: string; class: RadioClass; classAuto: RadioClass | null; classBy: string | null }> =>
+    req(`/radio/${id}/log/${entryId}`, { method: 'PATCH', body: JSON.stringify({ class: cls }) }),
 
   // ---- admin: who am I + access model (drives nav/button gating) ----
   me: (): Promise<Me> => req('/auth/me'),
@@ -2200,6 +2205,8 @@ export interface ProgrammeFlag {
 export interface RadioLogEntry {
   id: string; title: string; starts_at: string; ends_at: string; status: string
   class: RadioClass | null; stream_url: string | null
+  /** Set once an operator corrected the class: who, and what the classifier had said. */
+  class_by?: string | null; class_auto?: RadioClass | null
   /** Null before it aired, or when nothing holds it any more. */
   media?: ProgrammeMedia | null
 }

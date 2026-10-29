@@ -82,12 +82,11 @@ How the rungs combine is explained in [Ingest Rules](../guides/ingest-rules.md#r
 
 From your computer:
 
-1. Open **Media Library**. To choose the type and metadata in the console before the upload starts, first turn off **Start as soon as added** under the band: with it on, a file starts uploading the moment it is added.
+1. Open **Media Library**. Choose **Set type and metadata for all** beside **What are you adding?**, pick the **Content type** (your own types are marked **(custom)**), fill in its fields, at least the required ones marked **\***, and choose **Done**. Anything left empty is decided by the rules. Do this before adding the file: with **Start as soon as added** on, a file starts uploading the moment it is added.
 2. Drop the file on **Drop files or a folder here**, or choose **This device** (or **Folder**, or **Link** to have Volt fetch it from an address).
 3. Before anything moves, each file shows what the rules decided: how it will be named, **looks like a duplicate** with what the rule says to do, or **refused** with the reason.
-4. Choose **Set type and metadata for all**, pick the **Content type** (your own types are marked **(custom)**), fill in its fields, at least the required ones marked **\***, and choose **Done**. Anything left empty is decided by the rules.
-5. Choose **Ingest 1 file** (or the number of files).
-6. A button at the bottom of the screen follows the upload. Choose it to open the **Ingest Queue**: files held for metadata or as duplicates are listed under **Needs you**, with **Fill in** for the missing fields.
+4. With **Start as soon as added** on, the upload has started. With it off, choose **Ingest 1 file** (or the number of files).
+5. A button in the top bar follows the upload. Choose it to open the **Ingest Queue**: files held for metadata or as duplicates are listed under **Needs you**, with **Fill in** for the missing fields.
 
 From a watchfolder:
 
@@ -132,7 +131,7 @@ Usually an administrator sets up stages 1 to 4 once. After that a **Media Librar
 |---|---|---|
 | "Your role does not allow manage on Account settings" when adding files | Adding a file checks your ingest rules, which needs Account settings: Manage | Ask an administrator to upload it or to give you that access, or use a watchfolder |
 | A file shows **refused** when added | An ingest rule with **Refuse with reason** matched | Read the reason; change the file or the rule |
-| **1 waiting on you** at the bottom of the screen | A rule held the file for metadata or as a duplicate | Open the **Ingest Queue** and deal with it under **Needs you** |
+| **1 waiting** in the top bar | A rule held the file for metadata or as a duplicate | Open the **Ingest Queue** and deal with it under **Needs you** |
 | A dropped file is in the watchfolder's **Queue** as **Needs review** | No watchfolder rule matched its name | Add a rule, then **Reprocess** |
 | A file fails to encode, saying the account has no default ladder | No ladder is the account default | Choose **Make default** on a ladder in Encoding Profiles |
 | The row stays on **Queued to encode** | The encoders have not picked the file up yet | Wait and choose **Refresh**; if it does not move, contact Volt support |
