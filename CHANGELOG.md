@@ -2,6 +2,20 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.18.0 (2026-10-29)
+
+### Product (in customer release notes)
+
+- fixed · Encoding Profiles: Delete is no longer offered on a rendition a ladder uses, and users who can only view the page no longer see buttons that would be refused.
+- added · Encoding Profiles: Edit a rendition's name, height and bitrate in place; every ladder containing it follows, and FAST channels on those ladders re-package on their own.
+- added · Channel Groups: Move channels, radio stations, FAST channels and events to another group of the same workflow with Move streams on Channel Groups (also offered when a group in use cannot be removed). Volt checks the target group's share and running at once, and says when a running stream picks up the new group's output profile at its next start.
+- added · API: POST /api/channels/{id}/group and POST /api/events/{id}/group move a stream to another group; PATCH /api/encode-profiles/{id} now checks its values and answers a taken name, a duplicate height in a ladder or an out-of-date version with a clear 409.
+- improved · Channel Groups: View its streams on a group opens the Live Streams list filtered to that group, and the list has a group picker.
+
+### Internal
+
+- added · Tests: group-move-renditions check suite (43 assertions) for moving streams between groups and editing renditions.
+
 ## 0.17.0 (2026-10-29)
 
 ### Product (in customer release notes)
