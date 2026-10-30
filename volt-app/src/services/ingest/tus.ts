@@ -14,8 +14,9 @@
 //  Upload-Offset) cannot give it. Both land in completeLanded().
 //
 //  THE STORE IS AN INTERFACE so the protocol is tested over real HTTP with a
-//  memory store and no database. The data file is always on disk, appended in
-//  offset order, which is the one thing tus guarantees a server may rely on.
+//  memory store and no database. The data file is on disk, appended in
+//  offset order, which is the one thing tus guarantees a server may rely on;
+//  unless the store keeps remote parts (TusStore.parts), for several servers.
 // ============================================================================
 import { Router, type Request, type Response } from 'express';
 import { createHash } from 'node:crypto';
@@ -46,6 +47,26 @@ export interface TusStore {
   remove(id: string): Promise<void>;
   /** Filesystem path the bytes are appended to. */
   dataPath(info: TusInfo): string;
+  /**
+   * Optional: keep each PATCH body as its own part where every server reaches
+   * it, instead of appending to dataPath on this server's disk. For servers
+   * behind a load balancer with no stickiness (Volt on AWS, build queue
+   * 2.1a-2), where consecutive PATCHes reach different servers. The store's
+   * offset is then the truth, and dataPath is only where the finished file is
+   * joined before onComplete.
+   */
+  parts?(info: TusInfo): TusParts | null;
+}
+
+export interface TusParts {
+  /** Keep the bytes in `path` as the range [start, start + bytes). */
+  put(start: number, path: string, bytes: number): Promise<void>;
+  /** Move the offset from `from` to `to` only if it is still `from`; false if another request got there first. */
+  advance(from: number, to: number): Promise<boolean>;
+  /** Join every part into dataPath; returns its sha256 (hex). */
+  join(): Promise<string>;
+  /** Drop every part (termination). */
+  remove(): Promise<void>;
 }
 
 export interface TusOptions {
@@ -108,8 +129,11 @@ export function createTusRouter(o: TusOptions): Router {
     let info: TusInfo;
     try { info = await o.store.create(who, len, md); } catch (e: any) { return bad(res, e?.status ?? 500, e?.message ?? 'could not create'); }
     const path = o.store.dataPath(info);
-    mkdirSync(require('node:path').dirname(path), { recursive: true });
-    createWriteStream(path, { flags: 'a' }).end();
+    // With remote parts nothing is kept on this server until the file is joined.
+    if (!o.store.parts?.(info)) {
+      mkdirSync(require('node:path').dirname(path), { recursive: true });
+      createWriteStream(path, { flags: 'a' }).end();
+    }
     res.set('Location', `${o.basePath.replace(/\/$/, '')}/${info.id}`);
     if (info.expiresAt) res.set('Upload-Expires', new Date(info.expiresAt).toUTCString());
     // creation-with-upload: a body on POST is the first PATCH.
@@ -146,10 +170,11 @@ export function createTusRouter(o: TusOptions): Router {
     if (expired(info)) return bad(res, 410, 'expired');
     const off = Number(req.get('Upload-Offset'));
     if (!Number.isFinite(off)) return bad(res, 400, 'Upload-Offset is required');
-    // The file on disk is the truth for the offset; the store follows it.
+    // The file on disk is the truth for the offset and the store follows it;
+    // with remote parts the store's offset is the truth (every server sees it).
     const path = o.store.dataPath(info);
-    const onDisk = existsSync(path) ? statSync(path).size : 0;
-    if (off !== onDisk) { res.set('Upload-Offset', String(onDisk)); return bad(res, 409, `Upload-Offset ${off} does not match ${onDisk}`); }
+    const have = o.store.parts?.(info) ? info.offset : existsSync(path) ? statSync(path).size : 0;
+    if (off !== have) { res.set('Upload-Offset', String(have)); return bad(res, 409, `Upload-Offset ${off} does not match ${have}`); }
     const out = await receive(req, res, info, who, off);
     if (out === null) return;
     res.set('Upload-Offset', String(out));
@@ -164,12 +189,15 @@ export function createTusRouter(o: TusOptions): Router {
     const info = await o.store.get(who, req.params.id);
     if (!info) return bad(res, 404, 'not found');
     try { rmSync(o.store.dataPath(info), { force: true }); } catch { /* */ }
+    await o.store.parts?.(info)?.remove().catch(() => {});
     await o.store.remove(info.id);
     res.status(204).end();
   });
 
   /** Append the body. Returns the new offset, or null after having answered with an error. */
   async function receive(req: Request, res: Response, info: TusInfo, who: any, off: number): Promise<number | null> {
+    const parts = o.store.parts?.(info) ?? null;
+    if (parts) return receivePart(req, res, info, who, off, parts);
     const path = o.store.dataPath(info);
     const declared = Number(req.get('Content-Length'));
     if (Number.isFinite(declared) && off + declared > info.length) { bad(res, 413, 'body would exceed Upload-Length'); return null; }
@@ -208,6 +236,58 @@ export function createTusRouter(o: TusOptions): Router {
       await o.onComplete({ ...info, offset: newOff }, who, sha);
     }
     return newOff;
+  }
+
+  /**
+   * The same with remote parts: the body lands in a scratch file of its own,
+   * is checked, kept as the part [off, off + n), and only then counted. A body
+   * cut short is dropped whole (the client asks HEAD and sends it again), so a
+   * half-written part is never counted.
+   */
+  async function receivePart(req: Request, res: Response, info: TusInfo, who: any, off: number, parts: TusParts): Promise<number | null> {
+    const declared = Number(req.get('Content-Length'));
+    if (Number.isFinite(declared) && off + declared > info.length) { bad(res, 413, 'body would exceed Upload-Length'); return null; }
+    const ck = req.get('Upload-Checksum');
+    let algo: string | null = null, want: string | null = null;
+    if (ck) {
+      const [a, d] = ck.trim().split(/\s+/, 2);
+      if (!TUS_CHECKSUMS.split(',').includes(a)) { bad(res, 400, `unsupported checksum algorithm ${a}`); return null; }
+      algo = a; want = d ?? '';
+    }
+    // In-flight scratch, outside the session's folder so a server that only
+    // passed a part on keeps no folder for the upload.
+    const scratch = require('node:path').join(require('node:os').tmpdir(), `volt-tus-${info.id}-${off}-${process.pid}-${Date.now()}.in`);
+    const h = algo ? createHash(algo) : null;
+    let n = 0;
+    const counter = new Transform({ transform(chunk, _e, cb) { n += chunk.length; h?.update(chunk); cb(null, chunk); } });
+    try {
+      try {
+        await pipeline(req, counter, createWriteStream(scratch));
+      } catch {
+        if (!res.headersSent) bad(res, 400, 'body ended early');
+        return null;
+      }
+      if (h && want !== null && h.digest('base64') !== want) { bad(res, 460, 'Checksum Mismatch'); return null; }
+      const newOff = off + n;
+      if (newOff > info.length) { bad(res, 413, 'body exceeded Upload-Length'); return null; }
+      if (n > 0) {
+        await parts.put(off, scratch, n);
+        if (!(await parts.advance(off, newOff))) {
+          // Another server took a request at this offset first.
+          const now = await o.store.get(who, info.id);
+          res.set('Upload-Offset', String(now?.offset ?? off));
+          bad(res, 409, `Upload-Offset ${off} was already written`);
+          return null;
+        }
+      }
+      if (newOff === info.length) {
+        const sha = await parts.join();
+        await o.onComplete({ ...info, offset: newOff }, who, sha);
+      }
+      return newOff;
+    } finally {
+      try { rmSync(scratch, { force: true }); } catch { /* */ }
+    }
   }
 
   return r;

@@ -17,11 +17,14 @@
 //  in the middle of an assembly is a corrupt file that looks complete.
 // ============================================================================
 import { createHash, randomBytes } from 'node:crypto';
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { createWriteStream, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { pipeline } from 'node:stream/promises';
 import { one, query } from '../db';
 import { config } from '../config';
+import { sessionDir, putChunk, openChunk, removeStaged, dirBytes, stagingDriver } from './uploadStaging';
+
+// Callers (tus, transfers, tests) keep importing the session folder from here.
+export { sessionDir };
 
 export type UploadState = 'open' | 'assembling' | 'complete' | 'aborted' | 'expired';
 
@@ -65,13 +68,8 @@ export const CHUNK_SIZE = 8 * 1024 * 1024;
 /** Nothing larger than this is accepted, so a typo cannot fill the disk. */
 export const MAX_UPLOAD_BYTES = 16 * 1024 * 1024 * 1024;   // 16 GB
 
-/** Where partial chunks live while a session is open. */
-export function sessionDir(id: string): string {
-  return join(config.uploads.dir, id);
-}
-function chunkPath(id: string, index: number): string {
-  return join(sessionDir(id), `${String(index).padStart(6, '0')}.part`);
-}
+// Where partial chunks live while a session is open: services/uploadStaging.ts
+// (this server's disk on the Mac, the bucket on AWS, build queue 2.1a-2).
 
 /**
  * Where a finished filler asset's bytes live.
@@ -206,7 +204,9 @@ export async function openSession(req: OpenRequest): Promise<{ session: UploadSe
   );
   if (!session) throw new Error('failed to open an upload session');
 
-  mkdirSync(sessionDir(session.id), { recursive: true });
+  // On the Mac the parts wait in this folder. On AWS they wait in the bucket and
+  // the task that opened the upload may never see it again, so it keeps none.
+  if (stagingDriver() === 'local') mkdirSync(sessionDir(session.id), { recursive: true });
   return { session, assetId: assetId ?? vodAssetId };
 }
 
@@ -274,11 +274,9 @@ export async function receiveChunk(
   }
 
   const already = (session.received ?? []).includes(index);
-  mkdirSync(sessionDir(session.id), { recursive: true });
-  await pipeline(
-    (async function* () { yield body; })(),
-    createWriteStream(chunkPath(session.id, index))
-  );
+  // Kept where every control-plane task can reach it before it is counted, so
+  // a chunk the client was told arrived is never on one task only.
+  await putChunk(session.id, index, body);
 
   // The array is the authority and is kept sorted and unique in SQL, so two
   // concurrent chunks cannot race each other into a duplicate entry or a lost
@@ -352,8 +350,24 @@ export async function finishSession(session: UploadSession): Promise<FinishResul
     );
   }
 
-  await query(`UPDATE upload_sessions SET state = 'assembling', updated_at = now() WHERE id = $1`,
-    [session.id]);
+  // ONE ASSEMBLER. A service worker can call finish twice, and on AWS the two
+  // calls can reach two tasks; both writing the destination made one file from
+  // two writers. The first claims the session; a later call waits for it and
+  // answers the same result. A claim older than 15 minutes is a task that died
+  // mid-assembly and is taken over.
+  const claimed = await one<{ id: string }>(
+    `UPDATE upload_sessions SET state = 'assembling', updated_at = now()
+      WHERE id = $1 AND (state = 'open' OR (state = 'assembling' AND updated_at < now() - interval '15 minutes'))
+      RETURNING id`, [session.id]);
+  if (!claimed) {
+    for (let i = 0; i < 120; i++) {
+      const now = await one<UploadSession>(`SELECT * FROM upload_sessions WHERE id = $1`, [session.id]);
+      if (!now || now.state === 'complete') return finishSession(now ?? { ...session, state: 'complete' });
+      if (now.state !== 'assembling') break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    throw Object.assign(new Error('This upload is being assembled. Ask again in a moment.'), { status: 409 });
+  }
 
   // A VOD upload's bytes go where a re-encode will still find them, keyed by the
   // asset — the same place the watchfolder preserves its sources, and NOT the
@@ -366,10 +380,8 @@ export async function finishSession(session: UploadSession): Promise<FinishResul
   try {
     const out = createWriteStream(dest);
     for (let i = 0; i < session.chunk_count; i++) {
-      const p = chunkPath(session.id, i);
-      if (!existsSync(p)) throw new Error(`chunk ${i} is missing from disk`);
+      const rs = await openChunk(session.id, i);
       await new Promise<void>((resolve, reject) => {
-        const rs = createReadStream(p);
         rs.on('data', (b) => { hash.update(b as Buffer); written += (b as Buffer).length; });
         rs.on('error', reject);
         rs.on('end', () => resolve());
@@ -558,8 +570,8 @@ export async function completeLanded(session: UploadSession, dest: string, writt
   );
 
   // The parts have served their purpose; keeping them doubles the disk cost of
-  // every upload.
-  try { rmSync(sessionDir(session.id), { recursive: true, force: true }); } catch { /* */ }
+  // every upload (and on AWS the bucket's).
+  await removeStaged(session.id).catch((e) => console.warn('[uploads] could not remove the parts of', session.id, e?.message ?? e));
 
   return { session: done ?? session, assetId: session.filler_asset_id ?? session.vod_asset_id,
            bytes: written, sha256: sha, path: sourceKey };
@@ -570,7 +582,7 @@ export async function abortSession(session: UploadSession, reason = 'abandoned b
     `UPDATE upload_sessions SET state = 'aborted', error = $2, updated_at = now() WHERE id = $1`,
     [session.id, reason]
   );
-  try { rmSync(sessionDir(session.id), { recursive: true, force: true }); } catch { /* */ }
+  await removeStaged(session.id).catch(() => 0);
   // The asset row was created optimistically at the start of the upload. An
   // abandoned upload must not leave a permanently 'uploading' row in the list.
   if (session.filler_asset_id) {
@@ -613,13 +625,12 @@ export async function sweepUploads(): Promise<SweepResult> {
       LIMIT 200`
   );
   for (const s of stale) {
-    res.bytesFreed += dirBytes(sessionDir(s.id));
     await query(
       `UPDATE upload_sessions SET state = 'expired',
               error = 'no chunk arrived before the session expired', updated_at = now()
         WHERE id = $1`, [s.id]
     );
-    try { rmSync(sessionDir(s.id), { recursive: true, force: true }); } catch { /* */ }
+    res.bytesFreed += await removeStaged(s.id).catch(() => 0);
     if (s.filler_asset_id) {
       await query(`DELETE FROM filler_assets WHERE id = $1 AND status = 'uploading'`,
         [s.filler_asset_id]);
@@ -658,17 +669,6 @@ export async function sweepUploads(): Promise<SweepResult> {
     );
   }
   return res;
-}
-
-function dirBytes(dir: string): number {
-  let total = 0;
-  try {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
-      const p = join(dir, e.name);
-      try { total += e.isDirectory() ? dirBytes(p) : statSync(p).size; } catch { /* */ }
-    }
-  } catch { /* */ }
-  return total;
 }
 
 /** Sessions an account could still resume, newest first. */

@@ -43,6 +43,22 @@ resource "aws_s3_bucket_lifecycle_configuration" "origin" {
       days_after_initiation = 3
     }
   }
+
+  # Upload parts left behind (build queue 2.1a-2). A resumable upload's chunks
+  # wait under upload-staging/<session>/ until the upload is assembled, aborted
+  # or swept 7 days after its last chunk, and the control plane removes them
+  # then. This catches what a task that died mid-way never removed, so no part
+  # is paid for forever.
+  rule {
+    id     = "upload-staging"
+    status = "Enabled"
+    filter {
+      prefix = "upload-staging/"
+    }
+    expiration {
+      days = 8
+    }
+  }
 }
 
 # ---- CloudFront -------------------------------------------------------------

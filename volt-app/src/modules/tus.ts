@@ -13,8 +13,11 @@ import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { actorId } from '../util/actor';
 import { config } from '../config';
-import { createTusRouter, type TusStore, type TusInfo } from '../services/ingest/tus';
+import { createHash } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
+import { createTusRouter, type TusStore, type TusInfo, type TusParts } from '../services/ingest/tus';
 import { openSession, sessionDir, destinationFor, completeLanded, MAX_UPLOAD_BYTES, type UploadSession } from '../services/uploads';
+import { stagingDriver, putTusPart, tusChain, openKey, removeStaged } from '../services/uploadStaging';
 
 interface Who { accountId: string; userId: string | null }
 
@@ -57,6 +60,40 @@ class PgTusStore implements TusStore {
     await query(`DELETE FROM vod_assets WHERE id = (SELECT vod_asset_id FROM upload_sessions WHERE id = $1) AND source_key IS NULL`, [id]).catch(() => {});
   }
   dataPath(info: TusInfo) { return join(sessionDir(info.id), 'upload.tus'); }
+  /**
+   * On AWS (UPLOAD_STAGING_DRIVER=s3) each PATCH is a part in the bucket and
+   * received_bytes is the offset every task reads, so consecutive PATCHes may
+   * reach different tasks (build queue 2.1a-2). On the Mac: null, the file on
+   * disk as before.
+   */
+  parts(info: TusInfo): TusParts | null {
+    if (stagingDriver() !== 's3') return null;
+    const id = info.id, length = info.length, dataPath = this.dataPath(info);
+    return {
+      put: (start, path, bytes) => putTusPart(id, start, path, bytes),
+      advance: async (from, to) => !!(await one(
+        `UPDATE upload_sessions SET received_bytes = $3, expires_at = now() + interval '7 days', updated_at = now()
+          WHERE id = $1 AND received_bytes = $2 AND state = 'open' RETURNING id`, [id, from, to])),
+      join: async () => {
+        const chain = await tusChain(id, length);
+        if (!chain) throw new Error('a part of this upload is missing from the bucket');
+        mkdirSync(sessionDir(id), { recursive: true });
+        const h = createHash('sha256');
+        const out = createWriteStream(dataPath);
+        for (const key of chain) {
+          const rs = await openKey(key);
+          await new Promise<void>((resolve, reject) => {
+            rs.on('data', (b: Buffer) => h.update(b));
+            rs.on('error', reject); rs.on('end', () => resolve());
+            rs.pipe(out, { end: false });
+          });
+        }
+        await new Promise<void>((resolve, reject) => { out.on('error', reject); out.on('finish', () => resolve()); out.end(); });
+        return h.digest('hex');
+      },
+      remove: async () => { await removeStaged(id); },
+    };
+  }
 }
 
 function toInfo(s: UploadSession, md: Record<string, string>): TusInfo {
@@ -80,6 +117,7 @@ export const tusRouter = createTusRouter({
     const dest = destinationFor(s);
     mkdirSync(join(dest, '..'), { recursive: true });
     renameSync(join(sessionDir(s.id), 'upload.tus'), dest);
+    // completeLanded removes the session's parts (this disk, and the bucket's on AWS).
     await completeLanded(s, dest, info.length, sha);
   },
 });

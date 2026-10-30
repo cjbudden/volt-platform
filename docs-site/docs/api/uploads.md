@@ -59,7 +59,7 @@ The answer to opening has the session `id`, its `token`, `chunkSize`, `chunkCoun
 
 **The token** belongs to this upload only: it can send chunks and finish, nothing else, and it ends with the session. Hand it to whatever sends the bytes (a worker, a browser) without sharing your secret key.
 
-**Chunks** are `PUT /api/uploads/{id}/chunks/{index}`, numbered from 0, each exactly `chunkSize` bytes except the last. Sending a chunk again is harmless.
+**Chunks** are `PUT /api/uploads/{id}/chunks/{index}`, numbered from 0, each exactly `chunkSize` bytes except the last. Sending a chunk again is harmless. Chunks can be sent in any order and several at once: a chunk that was answered `200` is kept, whichever Volt server took it.
 
 **Finish** checks every chunk arrived, puts the file together and answers with its SHA-256 (compare it with your own) and what the ingest rules decided: `ingested`, or held as a `duplicate`, `awaiting_metadata` or `quarantined`. Finishing twice is harmless. A [webhook](webhooks.md) can tell your system the same thing.
 
@@ -76,7 +76,7 @@ An ingested file is then encoded as a job. The asset's `encode_job_id` (on `GET 
 
 Send just the chunks in `missing`, then finish. `GET /api/uploads` lists your own sessions you can still resume, with their tokens, and `DELETE /api/uploads/{id}` abandons one.
 
-Volt also accepts resumable uploads in the open tus protocol at `/api/tus`, for tools that already speak it.
+Volt also accepts resumable uploads in the open tus protocol at `/api/tus`, for tools that already speak it (creation, creation-with-upload, expiration, termination and checksum). Authenticate each request as you do for the rest of the API. If two requests are sent at the same `Upload-Offset`, one is kept and the other answers `409` with the current `Upload-Offset`: ask `HEAD` and carry on from there.
 
 ## Troubleshooting
 
@@ -86,5 +86,6 @@ Volt also accepts resumable uploads in the open tus protocol at `/api/tus`, for 
 | `403 That token does not belong to this upload.` | The token is another upload's | Use the token that came with this session |
 | `400` on a chunk | The chunk is empty, or not the size it should be | Send exactly `chunkSize` bytes (the last chunk is the rest) |
 | `409` on finish, with `missing` | Some chunks never arrived | Send the chunks listed, then finish again |
+| `409 This upload is being assembled.` on finish | Another finish for the same upload is still putting the file together | Finish again in a few seconds; you get the same answer |
 | The asset's title is not the one you want | `name` was the file name, so the title was read from the file, or `metadata` carried a `title` | Open the upload with the title as `name`, or set it with `PUT /api/vod/{id}` or in the Media Library |
 | `ingest` is `awaiting_metadata` | Your content type requires fields that were not sent | Send them in `metadata`, or fill them in the Media Library |

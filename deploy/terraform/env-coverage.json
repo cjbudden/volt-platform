@@ -106,7 +106,7 @@
     "CLIPS_DIR": {
       "class": "not-on-aws-yet",
       "why": "Clip, VOD encode and ad conditioning work is done here and downloads are served from here; the bucket copy exists for clips, but the local copy is still what is served.",
-      "item": "2.1a-2"
+      "item": "2.1a-2b"
     },
     "CLIPS_S3_UPLOAD": {
       "class": "default",
@@ -782,7 +782,15 @@
     },
     "UPLOAD_STAGING_DIR": {
       "class": "default",
-      "why": "Scratch space for a file in transit; nothing is kept there once it reaches the bucket."
+      "why": "Scratch space on the task for a file being assembled; the chunks themselves wait in the bucket (UPLOAD_STAGING_DRIVER=s3), so an upload spread over several tasks assembles on any of them (build queue 2.1a-2)."
+    },
+    "UPLOAD_STAGING_S3_BUCKET": {
+      "class": "default",
+      "why": "Upload parts wait in the origin bucket (S3_BUCKET) under upload-staging/, where the bucket's lifecycle rule removes forgotten ones; set only to keep them in another bucket."
+    },
+    "UPLOAD_STAGING_S3_PREFIX": {
+      "class": "default",
+      "why": "upload-staging, the prefix the origin bucket's lifecycle rule expires after 8 days."
     },
     "VARIANT_SOURCE_CACHE_MS": {
       "class": "default",
@@ -807,7 +815,7 @@
     "VOLT_TRASH_DIR": {
       "class": "not-on-aws-yet",
       "why": "Deleted media waits here to be restored, on the task's disk.",
-      "item": "2.1a-2"
+      "item": "2.1a-2c"
     },
     "WATCH_S3_BACKSTOP_MIN": {
       "class": "default",

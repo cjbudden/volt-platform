@@ -26,6 +26,7 @@ const ROOT = join(__dirname, '../..');
 const REQUIRED = [
   ['ORCH_LAUNCHER', 'ecs'], ['MEDIA_STORE_DRIVER', 's3'], ['INGEST_DESTINATION', 's3'],
   ['IMAGE_STORE_DRIVER', 's3'], ['FAST_OUTPUT', 's3'], ['VOD_STORE', 's3'], ['FILLER_STORE_DRIVER', 's3'],
+  ['UPLOAD_STAGING_DRIVER', 's3'],
 ];
 
 /** A throwaway tree: one source file and a minimal control-plane task definition. */
@@ -92,7 +93,10 @@ function fakeRepo(o: { code?: string; env?: string[]; values?: Record<string, st
   // 2.1a: slates and loops live in the bucket on AWS; FILLER_DIR is only where one lands.
   ok(cov.settings.FILLER_DIR?.class === 'default' && real.wired.has('FILLER_STORE_DRIVER'), 'slates and loops are in the bucket on AWS, FILLER_DIR only scratch (2.1a)');
   ok(Object.values(cov.settings as Record<string, any>).every((v) => v.item !== '2.1a'), 'nothing is left waiting on 2.1a itself (the rest is 2.1a-2 to 2.1a-4)');
-  for (const [n, item] of [['CLIPS_DIR', '2.1a-2'], ['VOLT_TRASH_DIR', '2.1a-2'], ['ORIGIN_DIR', '2.1a-3'], ['FFMPEG_BIN', '2.1a-4']]) ok(cov.settings[n]?.class === 'not-on-aws-yet' && cov.settings[n]?.item === item, `${n} is named as not on AWS yet (${item})`);
+  // 2.1a-2: upload chunks wait in the bucket, so an upload spread over tasks assembles.
+  ok(real.wired.has('UPLOAD_STAGING_DRIVER') && cov.settings.UPLOAD_STAGING_DIR?.class === 'default', 'upload chunks wait in the bucket on AWS, UPLOAD_STAGING_DIR only scratch (2.1a-2)');
+  ok(/resource "aws_s3_bucket_lifecycle_configuration" "origin"[\s\S]*?prefix = "upload-staging\/"/.test(readFileSync(join(ROOT, 'deploy/terraform/s3_cloudfront.tf'), 'utf8')), 'the origin bucket expires forgotten upload parts (2.1a-2)');
+  for (const [n, item] of [['CLIPS_DIR', '2.1a-2b'], ['VOLT_TRASH_DIR', '2.1a-2c'], ['ORIGIN_DIR', '2.1a-3'], ['FFMPEG_BIN', '2.1a-4']]) ok(cov.settings[n]?.class === 'not-on-aws-yet' && cov.settings[n]?.item === item, `${n} is named as not on AWS yet (${item})`);
   // 2.1b wired radio, captions and the GPU pool; only the Icecast relay waits (2.1c).
   for (const n of ['RADIO_TASK_DEF', 'CAPTIONS_TASK_DEF', 'ECS_GPU_PROVIDER', 'FLEET_GPU_TYPES']) ok(real.wired.has(n) && !cov.settings[n], `${n} is set by Terraform (2.1b)`);
   ok(cov.settings.ICECAST_HOST?.class === 'not-on-aws-yet' && cov.settings.ICECAST_HOST?.item === '2.1c', 'the Icecast relay is named as not on AWS yet (2.1c)');
