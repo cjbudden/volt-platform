@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.22.0 (2026-10-30)
+
+### SaaS platform
+
+- improved · Deployment: On AWS, uploaded slates and loops are kept in the origin bucket, so every control-plane task serves them and none is lost when a task is replaced.
+
 ## 0.21.1 (2026-10-29)
 
 ### Product (in customer release notes)
