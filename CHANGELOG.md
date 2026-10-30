@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.23.0 (2026-10-30)
+
+### Product (in customer release notes)
+
+- improved · Uploads: On a cloud deployment with several servers, a large upload's chunks or tus requests can reach any server and the upload still completes; two requests to finish the same upload give one file and the same answer.
+- fixed · Uploads: Resumable uploads through the tus protocol at /api/tus work again: creating an upload no longer fails with a server error.
+
+### Internal
+
+- added · Deployment: Upload chunks and tus parts wait in the origin bucket on AWS (UPLOAD_STAGING_DRIVER=s3) with a lifecycle rule for forgotten parts; new upload-staging check suite with two API processes.
+
 ## 0.22.0 (2026-10-30)
 
 ### SaaS platform
