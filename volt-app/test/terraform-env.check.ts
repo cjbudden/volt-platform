@@ -25,7 +25,7 @@ const ROOT = join(__dirname, '../..');
 
 const REQUIRED = [
   ['ORCH_LAUNCHER', 'ecs'], ['MEDIA_STORE_DRIVER', 's3'], ['INGEST_DESTINATION', 's3'],
-  ['IMAGE_STORE_DRIVER', 's3'], ['FAST_OUTPUT', 's3'], ['VOD_STORE', 's3'],
+  ['IMAGE_STORE_DRIVER', 's3'], ['FAST_OUTPUT', 's3'], ['VOD_STORE', 's3'], ['FILLER_STORE_DRIVER', 's3'],
 ];
 
 /** A throwaway tree: one source file and a minimal control-plane task definition. */
@@ -89,7 +89,10 @@ function fakeRepo(o: { code?: string; env?: string[]; values?: Record<string, st
   }
   const cov = JSON.parse(readFileSync(join(ROOT, 'deploy/terraform/env-coverage.json'), 'utf8'));
   ok(cov.settings.SMTP_URL?.class === 'operator' && cov.settings.SMTP_URL?.how === 'app_secret_keys', 'SMTP_URL is the operator\'s, as a secret');
-  ok(cov.settings.FILLER_DIR?.class === 'not-on-aws-yet' && cov.settings.FILLER_DIR?.item === '2.1a', 'loops on a task\'s disk are named as not on AWS yet (2.1a)');
+  // 2.1a: slates and loops live in the bucket on AWS; FILLER_DIR is only where one lands.
+  ok(cov.settings.FILLER_DIR?.class === 'default' && real.wired.has('FILLER_STORE_DRIVER'), 'slates and loops are in the bucket on AWS, FILLER_DIR only scratch (2.1a)');
+  ok(Object.values(cov.settings as Record<string, any>).every((v) => v.item !== '2.1a'), 'nothing is left waiting on 2.1a itself (the rest is 2.1a-2 to 2.1a-4)');
+  for (const [n, item] of [['CLIPS_DIR', '2.1a-2'], ['VOLT_TRASH_DIR', '2.1a-2'], ['ORIGIN_DIR', '2.1a-3'], ['FFMPEG_BIN', '2.1a-4']]) ok(cov.settings[n]?.class === 'not-on-aws-yet' && cov.settings[n]?.item === item, `${n} is named as not on AWS yet (${item})`);
   // 2.1b wired radio, captions and the GPU pool; only the Icecast relay waits (2.1c).
   for (const n of ['RADIO_TASK_DEF', 'CAPTIONS_TASK_DEF', 'ECS_GPU_PROVIDER', 'FLEET_GPU_TYPES']) ok(real.wired.has(n) && !cov.settings[n], `${n} is set by Terraform (2.1b)`);
   ok(cov.settings.ICECAST_HOST?.class === 'not-on-aws-yet' && cov.settings.ICECAST_HOST?.item === '2.1c', 'the Icecast relay is named as not on AWS yet (2.1c)');

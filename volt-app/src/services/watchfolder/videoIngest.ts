@@ -56,6 +56,7 @@ import { join, extname, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from '../../config';
 import { fillerPath, safeExt as uploadExt } from '../uploads';
+import { deleteFiller, landFile } from '../media/fillerStore';
 import { one, query } from '../../db';
 import { enqueue } from '../jobs/queue';
 import { VOD_ENCODE } from '../jobs/handlers/vodEncode';
@@ -198,15 +199,20 @@ export async function ingestVideoItem(
       const ext = uploadExt(name);
       const dest = fillerPath(f.accountId, id, name);
       await preserveSource(abs, dest);
+      const loopKey = `filler/${f.accountId}/${id}${ext}`;
       let asset: { id: string };
       try {
+        // Into the filler store first (the bucket on AWS, build queue 2.1a), so
+        // the asset never says ready with bytes only this task has.
+        await landFile(dest, loopKey);
         asset = await store.createFillerAsset({
           id, accountId: f.accountId, name: title, bytes,
-          sourceKey: `filler/${f.accountId}/${id}${ext}`,
+          sourceKey: loopKey,
           filename: name, contentType: videoTypeOf(name),
         });
       } catch (e: any) {
         await unlink(dest).catch(() => { /* an orphan copy is the cheap failure */ });
+        await deleteFiller(loopKey).catch(() => { /* likewise */ });
         const why = `could not create the loop: ${String(e?.message ?? e)}`;
         await store.markFailed(item.id, why);
         return { result: 'failed', itemId: item.id, why };

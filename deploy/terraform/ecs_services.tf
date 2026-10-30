@@ -347,6 +347,9 @@ locals {
     { name = "FAST_TASK_DEF", value = "${local.name}-fast" },
     { name = "FAST_OUTPUT", value = "s3" },
     { name = "VOD_STORE", value = "s3" },
+    # Loops & Fillers (services/media/fillerStore.ts): slates and loops in the
+    # bucket under filler/, served by whichever task is asked (build queue 2.1a).
+    { name = "FILLER_STORE_DRIVER", value = "s3" },
     { name = "PUBLIC_BASE_URL", value = local.public_base_url },
     { name = "ECS_SPOT_PROVIDER", value = aws_ecs_capacity_provider.spot.name },
     { name = "ECS_ONDEMAND_PROVIDER", value = aws_ecs_capacity_provider.ondemand.name },

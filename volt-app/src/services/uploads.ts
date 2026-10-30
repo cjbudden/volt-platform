@@ -436,6 +436,10 @@ export async function completeLanded(session: UploadSession, dest: string, writt
       : `uploads/${session.account_id}/${session.id}${ext}`;
 
   if (session.filler_asset_id) {
+    // The bytes go to the filler store before the asset says ready: on AWS that
+    // is the bucket, so every control-plane task can serve them (build queue 2.1a).
+    const { landFile } = await import('./media/fillerStore');
+    await landFile(dest, sourceKey);
     await query(
       `UPDATE filler_assets
           SET status = 'ready', source_key = $2, bytes = $3,

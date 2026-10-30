@@ -1,14 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import { query, one } from '../db';
 import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, conflict } from '../util/http';
 import { actor, writeAudit } from '../services/audit';
 import { imageStore } from '../services/imageStore';
-import { fillerPath, safeExt } from '../services/uploads';
+import { safeExt } from '../services/uploads';
+import { putFiller } from '../services/media/fillerStore';
 import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage, onlyIdParam } from '../util/listQuery';
 
 /**
@@ -178,10 +177,9 @@ fillerAssetsRouter.post(
        VALUES ($1,$2,$3,'processing',$4,$5,$6,$7) RETURNING *`,
       [acc, kind, b.name?.trim() || file.name, file.width ?? null, file.height ?? null, ct, filename]
     );
-    const dest = fillerPath(acc, row.id, filename);
-    await mkdir(dirname(dest), { recursive: true });
-    await writeFile(dest, bytes);
     const sourceKey = `filler/${acc}/${row.id}${safeExt(filename)}`;
+    // Into the filler store: FILLER_DIR on the Mac, the bucket on AWS (2.1a).
+    await putFiller(sourceKey, bytes);
     const ready = await one<any>(
       `UPDATE filler_assets SET status='ready', source_key=$2, bytes=$3, uploaded_at=now(), updated_at=now()
         WHERE id=$1 RETURNING *`,

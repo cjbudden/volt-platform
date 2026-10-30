@@ -4,6 +4,7 @@ import { CAPTION_LANGUAGES } from './services/captionLanguages';
 import { accountSettingsRouter } from './modules/accountSettings';
 import { sourcePreviewRouter } from './modules/sourcePreview';
 import express from 'express';
+import { serveFiller } from './services/media/fillerStore';
 import cors from 'cors';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -473,12 +474,12 @@ export function createServer() {
   // Resumable uploads. Chunk bodies are raw octets carrying their own capability
   // token, so they mount BEFORE the JSON parser's reach and without requireAuth;
   // session management is an ordinary tenant operation and sits behind both.
-  // Finished filler bytes, served so a loop can be previewed in the browser.
-  // Immutable once written: the asset id IS the filename, so a new upload is a
-  // new id rather than a new version of the same URL.
-  app.use('/filler', express.static(config.uploads.fillerDir, {
-    setHeaders: (res) => { res.setHeader('Cache-Control', 'public, max-age=31536000, immutable') },
-  }));
+  // Finished filler bytes, served so a loop can be previewed in the browser and
+  // so the encoder can fetch its failover slate and loop. Immutable once
+  // written: the asset id IS the filename, so a new upload is a new id rather
+  // than a new version of the same URL. From FILLER_DIR on the Mac, from the
+  // bucket on AWS, so every control-plane task answers (build queue 2.1a).
+  app.use('/filler', serveFiller());
   app.use('/api/uploads', uploadChunksRouter);
   app.use('/api/uploads', uploadsRouter);
   app.use('/api/scheduled-clips', scheduledClipsRouter); // timeline clip scheduling

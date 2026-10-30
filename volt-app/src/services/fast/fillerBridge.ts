@@ -21,6 +21,7 @@ import { spawn } from 'node:child_process';
 import { one } from '../../db';
 import { config } from '../../config';
 import { fillerPath } from '../uploads';
+import { fillerDriver, localCopy } from '../media/fillerStore';
 
 const SLATE_SEC = 10;
 const LOOP_MAX_SEC = 120;
@@ -42,8 +43,13 @@ async function hasAudio(src: string): Promise<boolean> {
   return /Stream #\d+:\d+.*Audio:/.test(r.err);
 }
 
-/** The original file of a filler asset on this server, or null. */
-export function fillerSource(fa: { id: string; account_id: string; filename?: string | null; source_key?: string | null }): string | null {
+/**
+ * The original file of a filler asset as a file ffmpeg can open, or null. With
+ * the bucket as the filler store (AWS, build queue 2.1a) that is a scratch copy
+ * fetched from it; on the Mac the file itself, including the older layouts.
+ */
+export async function fillerSource(fa: { id: string; account_id: string; filename?: string | null; source_key?: string | null }): Promise<string | null> {
+  if (fillerDriver() === 's3') return fa.source_key ? localCopy(fa.source_key) : null;
   const cands = [fillerPath(fa.account_id, fa.id, fa.filename ?? undefined), fillerPath(fa.account_id, fa.id, fa.source_key ?? undefined)];
   if (fa.source_key) cands.push(join(dirname(config.uploads.fillerDir), fa.source_key), join(config.uploads.fillerDir, fa.source_key.replace(/^filler\//, '')));
   return cands.find((p) => existsSync(p)) ?? null;
@@ -62,7 +68,7 @@ export async function vodForFiller(accountId: string, fillerId: string): Promise
   const existing = await one<any>(`SELECT id FROM vod_assets WHERE account_id = $1 AND metadata->>'fillerAssetId' = $2 ORDER BY created_at DESC LIMIT 1`, [accountId, fillerId]);
   if (existing) return { assetId: String(existing.id), created: false, name: fa.name, kind: fa.kind };
 
-  const src = fillerSource(fa);
+  const src = await fillerSource(fa);
   if (!src) throw new FillerError(`The file behind "${fa.name}" is not on this server. Upload it again under Loops & Fillers.`);
   const out = join(config.uploads.fillerDir, accountId, `${fa.id}.fast.mp4`);
   await mkdir(dirname(out), { recursive: true });

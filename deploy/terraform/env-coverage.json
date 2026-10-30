@@ -106,7 +106,7 @@
     "CLIPS_DIR": {
       "class": "not-on-aws-yet",
       "why": "Clip, VOD encode and ad conditioning work is done here and downloads are served from here; the bucket copy exists for clips, but the local copy is still what is served.",
-      "item": "2.1a"
+      "item": "2.1a-2"
     },
     "CLIPS_S3_UPLOAD": {
       "class": "default",
@@ -156,6 +156,10 @@
       "why": "The secrets of those app registrations.",
       "how": "app_secret_keys"
     },
+    "ECS_CONTAINER_METADATA_URI_V4": {
+      "class": "default",
+      "why": "Set by ECS itself in every task; Volt reads its own address from it."
+    },
     "EDGE_AVAILABILITY_MAX_AGE": {
       "class": "default",
       "why": "Edge cache lifetimes and the CloudFront viewer-country header names; the defaults match the distributions Terraform builds."
@@ -184,6 +188,10 @@
       "class": "local",
       "why": "Read by the clip extractor tool (src/tools/extract-clip.ts) when it runs as its own process, not by the control plane."
     },
+    "FAST_LAUNCHER": {
+      "class": "default",
+      "why": "Follows ORCH_LAUNCHER, which Terraform sets to ecs, so FAST playouts start as ECS tasks; only set to override (local, ecs, off)."
+    },
     "FAST_SEGMENT_SEC": {
       "class": "default",
       "why": "FAST playout timing; the same on the Mac and on AWS."
@@ -208,22 +216,33 @@
     "FFMPEG_BIN": {
       "class": "not-on-aws-yet",
       "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
-      "item": "2.1a"
+      "item": "2.1a-4"
     },
     "FFMPEG_PATH": {
       "class": "not-on-aws-yet",
       "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
-      "item": "2.1a"
+      "item": "2.1a-4"
     },
     "FFPROBE_BIN": {
       "class": "not-on-aws-yet",
       "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
-      "item": "2.1a"
+      "item": "2.1a-4"
+    },
+    "FILLER_CACHE_DIR": {
+      "class": "default",
+      "why": "Scratch copies of slates and loops a FAST render opens with ffmpeg; the task's temp folder is right, losing it costs one fetch."
     },
     "FILLER_DIR": {
-      "class": "not-on-aws-yet",
-      "why": "Uploaded slates and loops are kept on the control-plane task's disk and served from it, so they would be lost when the task is replaced and missing on every other task.",
-      "item": "2.1a"
+      "class": "default",
+      "why": "On AWS only an upload or watch folder loop is assembled here while it lands; the finished slate or loop goes to the bucket (FILLER_STORE_DRIVER=s3), and every task serves it from there (build queue 2.1a)."
+    },
+    "FILLER_S3_BUCKET": {
+      "class": "default",
+      "why": "Slates and loops go to the origin bucket (S3_BUCKET) under filler/, the key Loops & Fillers already records; set only to keep them in another bucket."
+    },
+    "FILLER_S3_PREFIX": {
+      "class": "default",
+      "why": "Empty: the object key is the asset's source key, filler/<account>/<file>."
     },
     "FLEET_CEILING": {
       "class": "default",
@@ -500,12 +519,12 @@
     "ORIGIN_DIR": {
       "class": "not-on-aws-yet",
       "why": "Prebuilt loop segments and the failover control file are written here, on the task's disk.",
-      "item": "2.1a"
+      "item": "2.1a-3"
     },
     "PACKAGER_BIN": {
       "class": "not-on-aws-yet",
       "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
-      "item": "2.1a"
+      "item": "2.1a-4"
     },
     "PLATFORM_REQUIRE_MFA": {
       "class": "default",
@@ -559,7 +578,7 @@
     "PYTHON_BIN": {
       "class": "not-on-aws-yet",
       "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
-      "item": "2.1a"
+      "item": "2.1a-4"
     },
     "QOE_ANON_SALT": {
       "class": "default",
@@ -576,6 +595,26 @@
     "QOE_GATE_LOG": {
       "class": "default",
       "why": "On by default, as on the Mac."
+    },
+    "QOE_NIGHTLY_REPLAY": {
+      "class": "default",
+      "why": "On by default: each night one task replays yesterday so late reports land in the minute aggregates (services/qoe/nightly.ts)."
+    },
+    "QOE_NIGHTLY_REPLAY_AT": {
+      "class": "default",
+      "why": "02:30 UTC, after late reports and sessions over midnight are in."
+    },
+    "QOE_PEER_HEARTBEAT_MS": {
+      "class": "default",
+      "why": "5000: how often a control-plane task renews its collector membership; three missed beats and it is no longer a member (build queue 2.11b)."
+    },
+    "QOE_PEER_SECRET": {
+      "class": "default",
+      "why": "Derived from JWT_ACCESS_SECRET, which every task already has from the app secret, so tasks sign their forwards to each other with no extra secret."
+    },
+    "QOE_PEER_URL": {
+      "class": "default",
+      "why": "Read from the ECS task metadata endpoint on AWS (the task's own address); set only where there is no such endpoint."
     },
     "QOE_RAW_DIR": {
       "class": "default",
@@ -768,7 +807,7 @@
     "VOLT_TRASH_DIR": {
       "class": "not-on-aws-yet",
       "why": "Deleted media waits here to be restored, on the task's disk.",
-      "item": "2.1a"
+      "item": "2.1a-2"
     },
     "WATCH_S3_BACKSTOP_MIN": {
       "class": "default",

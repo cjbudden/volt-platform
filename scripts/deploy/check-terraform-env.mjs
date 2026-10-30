@@ -36,6 +36,7 @@ export const REQUIRED_ON_AWS = {
   IMAGE_STORE_DRIVER: { value: 's3', why: 'the image library must survive a task replacement' },
   FAST_OUTPUT: { value: 's3', why: 'FAST playouts write to the bucket the CDN serves' },
   VOD_STORE: { value: 's3', why: 'packaged library media must be readable by any task' },
+  FILLER_STORE_DRIVER: { value: 's3', why: 'slates and loops on a Fargate disk are lost with the task and missing on the others' },
 };
 
 // ---------------------------------------------------------------- the code

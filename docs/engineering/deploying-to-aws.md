@@ -105,7 +105,7 @@ What makes Volt cheap to run is mostly in phase 2 of the queue:
 
 | Function | Where | Queue |
 |---|---|---|
-| Control-plane work off the task's own disk, and the tools its jobs need | `deploy/terraform/env-coverage.json` (not-on-aws-yet, 2.1a) | 2.1a |
+| Control-plane work off the task's own disk, and the tools its jobs need | `volt-app/src/services/media/fillerStore.ts` for slates and loops; the rest in `deploy/terraform/env-coverage.json` (not-on-aws-yet) | slates and loops built (2.1a); clip, encode and download files and the trash 2.1a-2, prebuilt loop segments 2.1a-3, jobs as their own tasks 2.1a-4 |
 | Encoders on Spot with an on-demand base, launched per channel by RunTask | `volt-app/src/services/orchestrator/launcher.ts`, `deploy/terraform/ecs_cluster.tf` | built |
 | Per-run S3 prefixes, so a recording is a time range over segments that move as a unit | encoder and origin pointer | 2.2 |
 | Retention, cooling and archive of recordings on S3 | `volt-app/src/services/clips` for clips and extracts | 2.3 |
